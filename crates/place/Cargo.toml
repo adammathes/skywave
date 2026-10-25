@@ -1,0 +1,11 @@
+[package]
+name = "place"
+description = "Plain-data description of a Skywave place: header, terrain, road graph, buildings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+skywave-core.workspace = true

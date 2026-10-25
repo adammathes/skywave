@@ -1,0 +1,11 @@
+[package]
+name = "skywave-core"
+description = "Deterministic primitives shared by every Skywave crate: seeds, hashing, RNG, fixed timestep."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "skywave_core"

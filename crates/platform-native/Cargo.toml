@@ -1,0 +1,22 @@
+[package]
+name = "platform-native"
+description = "Desktop shell for Skywave: winit window, wgpu surface, keyboard input."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "skywave"
+path = "src/main.rs"
+
+[dependencies]
+app.workspace = true
+render.workspace = true
+skywave-core.workspace = true
+wgpu = { workspace = true, features = ["vulkan", "metal", "dx12", "gles", "parking_lot"] }
+winit.workspace = true
+pollster.workspace = true
+log.workspace = true
+env_logger.workspace = true

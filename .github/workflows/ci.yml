@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_DENY_VERSION: "0.20.2"
+  PLAYWRIGHT_VERSION: "1.63.0"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --component rustfmt,clippy --target wasm32-unknown-unknown
+          rustup default stable
+
+      # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy (native)
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Clippy (web)
+        run: cargo clippy --locked --target wasm32-unknown-unknown -p platform-web --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace
+
+      - name: cargo deny
+        run: |
+          cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
+          cargo deny check
+
+      - name: Build web
+        run: tools/web-build.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --global "playwright@$PLAYWRIGHT_VERSION"
+          npx "playwright@$PLAYWRIGHT_VERSION" install --with-deps chromium
+
+      - name: Screenshot smoke test (WebGL2 on SwiftShader)
+        run: NODE_PATH="$(npm root --global)" node tools/screenshot/shoot.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-dist
+          path: dist/
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot
+          path: tools/screenshot/out/skeleton.png
+          if-no-files-found: warn

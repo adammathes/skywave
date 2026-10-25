@@ -27,7 +27,7 @@ A thin custom engine. Not a general engine: it renders exactly one kind of scene
 
 | Crate | std? | Owns | Must never |
 |---|---|---|---|
-| `core` | no_std+alloc | `Seed`, `hash64`, `Rng`, `FixedStep`, fixed-capacity containers, color/palette math | allocate per frame in hot paths |
+| `core` (crate `skywave-core`; a crate named `core` would shadow Rust's) | no_std+alloc | `Seed`, `hash64`, `Rng`, `FixedStep`, fixed-capacity containers, color/palette math | allocate per frame in hot paths |
 | `place` | no_std+alloc | the Place format (`docs/PLACES.md`): types, validation, chunk index, (de)serialization | know how a Place was produced |
 | `world` | no_std+alloc | procedural producer and the detailing pass (`docs/WORLD_GENERATION.md`); produces chunk meshes as plain vertex arrays | touch the GPU, read files |
 | `vehicle` | no_std+alloc | vehicle specs, raycast-car sim, parametric meshes (`docs/VEHICLES.md`) | depend on `world` |

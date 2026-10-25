@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skywave</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #error {
+    display: none; position: fixed; left: 0; right: 0; top: 0; padding: 10px 16px;
+    font: 14px/1.4 system-ui, sans-serif; color: #f3d9d9; background: #5a1f1f;
+  }
+</style>
+</head>
+<body>
+<canvas id="skywave" tabindex="0"></canvas>
+<div id="error" role="alert"></div>
+<script type="module">
+  import init, { run } from "./platform_web.js";
+
+  const showError = (msg) => {
+    const el = document.getElementById("error");
+    el.textContent = msg;
+    el.style.display = "block";
+    window.skywaveError = msg;
+  };
+
+  // Probe on a throwaway canvas: getContext on the real one would lock it to WebGL.
+  const hasWebGPU = "gpu" in navigator;
+  const hasWebGL2 = !!document.createElement("canvas").getContext("webgl2");
+  if (!hasWebGPU && !hasWebGL2) {
+    showError("Skywave needs WebGPU or WebGL2, and this browser offers neither.");
+  } else {
+    try {
+      await init();
+      const canvas = document.getElementById("skywave");
+      canvas.focus();
+      await run(canvas, (backend) => {
+        window.skywaveBackend = backend;
+        window.skywaveReady = true;
+      });
+    } catch (e) {
+      showError("Skywave failed to start: " + (e && e.message ? e.message : e));
+    }
+  }
+</script>
+</body>
+</html>

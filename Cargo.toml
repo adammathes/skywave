@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/place",
+    "crates/render",
+    "crates/app",
+    "crates/platform-native",
+    "crates/platform-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+publish = false
+rust-version = "1.87"
+
+[workspace.dependencies]
+# Internal crates.
+skywave-core = { path = "crates/core" }
+place = { path = "crates/place" }
+render = { path = "crates/render" }
+app = { path = "crates/app" }
+
+# Engine-level dependencies (the only ones allowed; see CLAUDE.md).
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl"] }
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+naga = { version = "=30.0.0", default-features = false }
+glam = { version = "=0.34.1", default-features = false, features = ["std"] }
+
+# Small support crates.
+bytemuck = { version = "=1.25.2", features = ["derive"] }
+log = "=0.4.34"
+env_logger = { version = "=0.11.11", default-features = false }
+pollster = "=1.0.1"
+
+# Web.
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "=0.4.79"
+js-sys = "=0.3.106"
+web-sys = "=0.3.106"
+console_error_panic_hook = "=0.1.7"
+console_log = "=1.1.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# wasm32-unknown-unknown always aborts on panic; we make native release builds match so
+# the shipped game behaves the same everywhere. Tests ignore this setting.
+panic = "abort"
