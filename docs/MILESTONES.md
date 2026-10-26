@@ -53,6 +53,17 @@ Scenarios `chicago_1977` and `north_shore_suburb_1986` (templates `great_lakes_c
 ## Gate notes
 (appended after each gate)
 
+### M1 status (2026-10-26, autonomous run)
+Everything in the M1 scope is merged on `claude/intelligent-hypatia-vnrj1a`: raycast-car sim with two
+cars, parametric car meshes (exterior + cockpit), detailed test town with atlas patterns, cascaded
+shadows, Preetham sky, bloom, Daylight model, world collision, cockpit/hood/chase cameras, HUD,
+gamepad + mouse on web and native, remappable bindings with invert Y, gamepad-navigable settings
+menu, five golden screenshot scenes with a diff tool, and a wasm-vs-native self-test. 356 tests.
+**Waiting on the human feel gate**: play the web build (keyboard and controller, invert Y on),
+judge steering at speed, assist strength, chase lag, cockpit sway, FOV, night brightness, and
+whether the two cars feel different. Known gaps carried to M2: chase camera clips into buildings;
+parked cars are placeholder boxes; `strip-dusk-near` headlight pool blends with the sodium lamps.
+
 ### M1 tuning pass (agent)
 Before the M1 feel gate. Tuned from numbers, tests and screenshots only; nobody has driven it.
 Every constant below lives next to its rationale in the code.
