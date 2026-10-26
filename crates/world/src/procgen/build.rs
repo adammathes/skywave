@@ -1,10 +1,10 @@
 //! The procedural pipeline end to end: a skeleton [`Place`] from a seed and a template.
 //!
-//! [`build_place`] runs the macro map (stages 1–2), the arterial network (stage 3) and the
-//! local streets of every chunk (stage 4, merged with the arterials), then fills the Place
-//! skeleton: terrain from the macro heights (which already carry the highway corridor) at
-//! [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and one `PlayerStart` in
-//! the outer lane of the strip's spine. Parcels and buildings come later.
+//! [`build_place`] runs the macro map (stages 1–2) and the arterial network (stage 3), then
+//! fills the Place skeleton: terrain from the macro heights (which already carry the
+//! highway corridor) at [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and
+//! one `PlayerStart` in the outer lane of the strip's spine; then the chunk stages over
+//! the whole place: local streets (stage 4), parcels (stage 5) and buildings (stage 6).
 
 use alloc::vec::Vec;
 
@@ -16,7 +16,9 @@ use place::{
 use skywave_core::Seed;
 
 use super::arterials::arterials;
+use super::buildings::buildings_all;
 use super::macro_map::{MacroMap, WaterKind};
+use super::parcels::parcels_all;
 use super::streets::streets_all;
 use super::{RES_PER_CHUNK, ZONE_SAMPLES};
 use crate::math::{atan2, segment_distance, V2};
@@ -54,8 +56,14 @@ pub fn build_place(seed: Seed, template: &RegionTemplate) -> Place {
     let arterials = arterials(seed, template, &m);
     // The start is found on the arterials as they are, before the streets split them.
     let start = player_start(&m, &arterials);
+    // Stages 4-6: local streets merged into the graph, then parcels and buildings on it
+    // (against the graph as the Place stores it, sorted by chunk).
     let roads = streets_all(seed, template, &m, &arterials);
-    assemble(&m, template, roads, start)
+    let mut place = assemble(&m, template, roads, start);
+    place.parcels = parcels_all(seed, template, &m, &place.roads);
+    place.buildings = buildings_all(seed, template, &m, &place.parcels, &place.roads);
+    place.sort_by_chunk();
+    place
 }
 
 /// The Place skeleton for a macro map and its road graph, the start on its arterials.

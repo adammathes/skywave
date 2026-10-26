@@ -879,8 +879,21 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
 /// One outward-facing wall per footprint edge, from below the ground to the wall top.
 fn building_walls(place: &Place) -> Vec<Wall> {
     let mut walls = Vec::new();
+    let terrain = crate::is_terrain_place(place);
     for b in &place.buildings {
         let fp = ground::to_v2(&b.footprint);
+        // On a terrain place the walls stand on the ground under them.
+        let (y0, y1) = if terrain {
+            let (base, drop) = buildings::footing(&b.footprint, |x, z| {
+                place
+                    .terrain
+                    .height_at(&place.header, [x, z])
+                    .unwrap_or(0.0)
+            });
+            (base - drop - 1.0, base + LOT_Y + b.height_m)
+        } else {
+            (-1.0, LOT_Y + b.height_m)
+        };
         let ccw = signed_area(&fp) > 0.0;
         let n = fp.len();
         for i in 0..n {
@@ -894,8 +907,8 @@ fn building_walls(place: &Place) -> Vec<Wall> {
                 a: arr(a),
                 b: arr(c),
                 n: arr(normal),
-                y0: -1.0,
-                y1: LOT_Y + b.height_m,
+                y0,
+                y1,
             });
         }
     }

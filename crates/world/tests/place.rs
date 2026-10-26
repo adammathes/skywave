@@ -25,14 +25,14 @@ fn template() -> RegionTemplate {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0x9F48_13AB_DBC8_FDB9,
-    0xBDB9_8E1E_5FAB_AF91,
-    0xD9ED_3524_89D7_7662,
-    0xC71B_041C_DDD2_0736,
-    0x292E_1E03_6946_0FDF,
-    0xFA12_20D7_F143_F3E7,
-    0x10CC_380F_4757_6534,
-    0xFDAE_434D_079B_7F19,
+    0x5CA8_73F5_DFB8_1CFC,
+    0x5085_386B_8F3A_5085,
+    0x68C8_4A98_E3CC_C90B,
+    0x4017_7AAA_DF4A_8EEE,
+    0xBCF4_04D6_D12E_02C1,
+    0xAB84_B4CC_2F8A_B1EA,
+    0x00E4_2930_D0E5_B6DC,
+    0x27EA_D4D9_65BD_E0D1,
 ];
 
 #[test]
@@ -45,7 +45,7 @@ fn places_validate_and_are_deterministic() {
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(p.validate(), Ok(()), "seed {seed}");
         assert_eq!(p.header.region, RegionId::CaliforniaCoast);
-        assert!(p.buildings.is_empty() && p.parcels.is_empty());
+        assert!(!p.buildings.is_empty() && !p.parcels.is_empty());
         let s = p.player_start().expect("a PlayerStart");
         assert_eq!(s.kind, SpawnKind::PlayerStart);
         let ground = p

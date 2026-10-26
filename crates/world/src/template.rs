@@ -333,6 +333,30 @@ pub struct ZoneRule {
     pub trees: Vec<(Tree, f32)>,
     pub props: Props,
     pub lots: Lots,
+    /// How the zone's lots are built on (stage 6); `None` (the default): no buildings.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub massing: Option<Massing>,
+}
+
+/// How a zone's lots are built on (`docs/WORLD_GENERATION.md` stage 6): how much of each
+/// lot the footprints cover, how tall buildings are and which of the zone's `styles` are
+/// likely. Styles with a fixed height of their own (strip malls, motels, bungalows,
+/// ranches, dingbats, warehouses, barns) ignore the floor distribution.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Massing {
+    /// Target share in `(0, 1]` of a lot's area under footprints. Lots that cannot reach
+    /// it build what fits; larger footprints are shrunk to it.
+    pub coverage: f32,
+    /// Storeys `(min, max)`, at least 1.
+    pub floors: CountRange,
+    /// Mean storeys of a log-normal draw, clamped to `floors`.
+    pub floors_mean: f32,
+    /// Log-normal sigma of the storey draw, in `[0, 2]` (0: always the mean, rounded).
+    pub floors_spread: f32,
+    /// Relative weight of each entry of `styles`, parallel to it; empty: equal weights.
+    pub style_weights: Vec<f32>,
 }
 
 /// How a zone's blocks are cut into parcels (`docs/WORLD_GENERATION.md` stage 5) and where
@@ -474,6 +498,10 @@ pub enum TemplateError {
         zone: ZoneId,
         field: &'static str,
     },
+    BadMassing {
+        zone: ZoneId,
+        field: &'static str,
+    },
 }
 
 impl fmt::Display for TemplateError {
@@ -509,6 +537,9 @@ impl fmt::Display for TemplateError {
             }
             TemplateError::BadLots { zone, field } => {
                 write!(f, "zones.{zone:?}.lots.{field} is invalid")
+            }
+            TemplateError::BadMassing { zone, field } => {
+                write!(f, "zones.{zone:?}.massing.{field} is invalid")
             }
         }
     }
@@ -797,6 +828,33 @@ fn validate_zone(zone: ZoneId, rule: &ZoneRule) -> Result<(), TemplateError> {
             zone,
             field: "setback_m",
         });
+    }
+    if let Some(m) = &rule.massing {
+        validate_massing(zone, m, rule.styles.len())?;
+    }
+    Ok(())
+}
+
+fn validate_massing(zone: ZoneId, m: &Massing, styles: usize) -> Result<(), TemplateError> {
+    let bad = |field| Err(TemplateError::BadMassing { zone, field });
+    if !(m.coverage.is_finite() && m.coverage > 0.0 && m.coverage <= 1.0) {
+        return bad("coverage");
+    }
+    let (lo, hi) = m.floors;
+    if lo < 1 || lo > hi || hi > 60 {
+        return bad("floors");
+    }
+    let mean = m.floors_mean;
+    if !(mean.is_finite() && f32::from(lo) <= mean && mean <= f32::from(hi)) {
+        return bad("floors_mean");
+    }
+    if !(m.floors_spread.is_finite() && (0.0..=2.0).contains(&m.floors_spread)) {
+        return bad("floors_spread");
+    }
+    let w = &m.style_weights;
+    let finite = w.iter().all(|x| x.is_finite() && *x >= 0.0);
+    if !w.is_empty() && (w.len() != styles || !finite || !w.iter().any(|&x| x > 0.0)) {
+        return bad("style_weights");
     }
     Ok(())
 }

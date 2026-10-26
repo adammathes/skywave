@@ -1408,7 +1408,8 @@ mod tests {
         let resident = App::from_setup(&setup).unwrap();
         let world = resident.world_instances;
         eprintln!("coast at load: {world} world meshes");
-        assert!((256..=768).contains(&world), "{world} world meshes");
+        // Ground, roads, paint and buildings per chunk: at most five meshes a chunk.
+        assert!((256..=1280).contains(&world), "{world} world meshes");
         assert!(resident.meshes[..world]
             .iter()
             .all(|m| m.vertices.len() <= 1 << 20));

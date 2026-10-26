@@ -433,18 +433,20 @@ pub struct StreamBudget {
 }
 
 impl StreamBudget {
-    /// 9×9 chunks, 2 ms a step; a pool for 3M vertices (the whole test town is 2.1M), 126
-    /// MB of buffers.
+    /// 9×9 chunks, 2 ms a step; a pool for 4.5M vertices, 189 MB of buffers. With its
+    /// buildings the coast's densest 11×11 chunks (the ring and the chunks waiting to be
+    /// evicted) take 941 pages of 4096 vertices; this is 1099.
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         step_budget_s: 0.002,
-        pool_vertices: 3_000_000,
+        pool_vertices: 4_500_000,
     };
-    /// 13×13 chunks, 4 ms a step; 4M vertices, 168 MB.
+    /// 13×13 chunks, 4 ms a step; 6M vertices, 252 MB: room for the whole coast (1283
+    /// pages).
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         step_budget_s: 0.004,
-        pool_vertices: 4_000_000,
+        pool_vertices: 6_000_000,
     };
 
     /// Chunks resident at most: the ring, and the ring one chunk out where chunks wait to
