@@ -9,6 +9,7 @@
 mod bindings;
 mod json;
 mod mapper;
+pub mod pad_table;
 mod raw;
 
 pub use bindings::{AxisOptions, Binding, Bindings, Conflict, Sign};

@@ -1,6 +1,6 @@
 [package]
 name = "platform-native"
-description = "Desktop shell for Skywave: winit window, wgpu surface, keyboard input."
+description = "Desktop shell for Skywave: winit window, wgpu surface, keyboard, mouse and gamepad input."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,3 +20,4 @@ winit.workspace = true
 pollster.workspace = true
 log.workspace = true
 env_logger.workspace = true
+gilrs.workspace = true

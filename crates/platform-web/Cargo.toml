@@ -1,6 +1,6 @@
 [package]
 name = "platform-web"
-description = "Browser shell for Skywave: canvas, WebGPU with WebGL2 fallback, keyboard input."
+description = "Browser shell for Skywave: canvas, WebGPU with WebGL2 fallback, keyboard, mouse and gamepad input."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,11 +20,20 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
 web-sys = { workspace = true, features = [
+    "AddEventListenerOptions",
+    "console",
     "Document",
     "Element",
+    "Gamepad",
+    "GamepadButton",
+    "GamepadEvent",
+    "GamepadMappingType",
     "HtmlCanvasElement",
     "KeyboardEvent",
     "Location",
+    "MouseEvent",
+    "Navigator",
+    "WheelEvent",
     "Window",
 ] }
 console_error_panic_hook.workspace = true

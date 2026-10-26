@@ -43,6 +43,10 @@ serde_json = "=1.0.151"
 # Data files. serde without `std` keeps `vehicle` no_std; ron parses the specs in `app`.
 ron = { version = "=0.12.2", default-features = false }
 
+# Native gamepads (platform-native only). Default features: evdev + udev on Linux (the
+# Steam Deck's controller is a standard evdev pad), IOKit on macOS, Windows.Gaming.Input.
+gilrs = "=0.11.2"
+
 # Web.
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"

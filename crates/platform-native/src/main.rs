@@ -1,22 +1,38 @@
-//! `skywave`: the desktop shell. Opens a window, sets up wgpu, feeds key events to the
-//! input mapper and drives the platform-independent `App` once per redraw.
+//! `skywave`: the desktop shell. Opens a window, sets up wgpu, feeds keyboard, mouse and
+//! gamepad input to the input mapper and drives the platform-independent `App` once per
+//! redraw.
 //!
-//! Usage: `skywave [--seed N] [--stats]`
+//! Mouse look: while the right button is held the cursor is hidden and locked (or confined
+//! to the window where the platform cannot lock it, e.g. X11 and Windows); it is released
+//! with the button or when the window loses focus. Platforms that refuse both just keep a
+//! free cursor; the raw motion still drives the look.
+//!
+//! Usage: `skywave [--seed N] [--stats]`. `--stats` also prints the detected gamepads at
+//! startup and as they connect; otherwise that goes to the info log (`RUST_LOG=info`).
+
+mod pad;
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use app::{Action, App, InputMapper, Key, RawInput};
+use app::{Action, App, InputMapper, Key, RawInput, MOUSE_RIGHT};
+use pad::Pads;
 use render::Renderer;
 use skywave_core::Seed;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
+
+/// Pixel-precise scrolling (touchpads) counts this many pixels as one wheel notch, the
+/// same figure the web build uses.
+const PIXELS_PER_NOTCH: f64 = 100.0;
 
 #[derive(Debug, PartialEq)]
 struct Options {
@@ -68,6 +84,44 @@ fn map_key(code: KeyCode) -> Option<Key> {
     };
     write!(name, "{code:?}").ok()?;
     Key::from_code(std::str::from_utf8(&name.buf[..name.len]).ok()?)
+}
+
+/// A winit mouse button as a DOM `MouseEvent.button` number (0 left, 1 middle, 2 right,
+/// 3 back, 4 forward). Platform-specific extra buttons are ignored.
+fn mouse_button(b: MouseButton) -> Option<u8> {
+    match b {
+        MouseButton::Left => Some(0),
+        MouseButton::Middle => Some(1),
+        MouseButton::Right => Some(2),
+        MouseButton::Back => Some(3),
+        MouseButton::Forward => Some(4),
+        MouseButton::Other(_) => None,
+    }
+}
+
+/// Vertical scroll in wheel notches, + away from the user. winit's line deltas are notches
+/// with + meaning "scroll up", which is the same direction.
+fn wheel_notches(delta: MouseScrollDelta) -> f32 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, y) => y,
+        MouseScrollDelta::PixelDelta(p) => (p.y / PIXELS_PER_NOTCH) as f32,
+    }
+}
+
+/// Hides and captures the cursor for mouse look, or gives it back. Locked where the
+/// platform can, else confined to the window; refusals are ignored.
+fn grab_cursor(window: &Window, on: bool) {
+    if on {
+        if let Err(e) = window
+            .set_cursor_grab(CursorGrabMode::Locked)
+            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+        {
+            log::debug!("cursor grab refused: {e}");
+        }
+    } else if let Err(e) = window.set_cursor_grab(CursorGrabMode::None) {
+        log::debug!("cursor release refused: {e}");
+    }
+    window.set_cursor_visible(!on);
 }
 
 /// Frame-time statistics, printed to stderr once per second with `--stats`.
@@ -207,10 +261,27 @@ struct Shell {
     opts: Options,
     app: App,
     input: InputMapper,
+    pads: Pads,
+    /// Window focus: pads and mouse motion only count while focused.
+    focused: bool,
+    /// The cursor is grabbed for mouse look.
+    grabbed: bool,
     gpu: Option<Gpu>,
     last_frame: Option<Instant>,
     stats: Stats,
     error: Option<String>,
+}
+
+impl Shell {
+    fn set_grab(&mut self, on: bool) {
+        if self.grabbed == on {
+            return;
+        }
+        self.grabbed = on;
+        if let Some(gpu) = &self.gpu {
+            grab_cursor(&gpu.window, on);
+        }
+    }
 }
 
 impl ApplicationHandler for Shell {
@@ -235,7 +306,31 @@ impl ApplicationHandler for Shell {
                     gpu.resize(size.width, size.height);
                 }
             }
-            WindowEvent::Focused(false) => self.input.release_all(),
+            WindowEvent::Focused(false) => {
+                self.focused = false;
+                self.input.release_all();
+                self.set_grab(false);
+            }
+            WindowEvent::Focused(true) => {
+                self.focused = true;
+                self.pads.resync(&mut self.input);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(b) = mouse_button(button) {
+                    let down = state == ElementState::Pressed;
+                    if down {
+                        self.input.press(RawInput::MouseButton(b));
+                    } else {
+                        self.input.release(RawInput::MouseButton(b));
+                    }
+                    if b == MOUSE_RIGHT {
+                        self.set_grab(down);
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.input.axis(RawInput::MouseWheel, wheel_notches(delta));
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(key) = match event.physical_key {
                     PhysicalKey::Code(code) => map_key(code),
@@ -251,6 +346,7 @@ impl ApplicationHandler for Shell {
                 let now = Instant::now();
                 let dt = self.last_frame.map_or(Duration::ZERO, |t| now - t);
                 self.last_frame = Some(now);
+                self.pads.poll(&mut self.input, self.focused);
                 let input = self.input.sample(dt.as_secs_f32());
                 // No pause menu yet: Pause (Esc) quits, as before.
                 if input.just_pressed(Action::Pause) {
@@ -268,6 +364,15 @@ impl ApplicationHandler for Shell {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
+        // Raw, unaccelerated motion: keeps coming while the cursor is locked.
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            if self.focused {
+                self.input.mouse_delta(dx as f32, dy as f32);
+            }
         }
     }
 
@@ -301,10 +406,19 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let pads = Pads::new(opts.stats);
+    if opts.stats {
+        eprintln!("{}", pads.summary());
+    } else {
+        log::info!("{}", pads.summary());
+    }
     let mut shell = Shell {
         app: App::new(Seed(opts.seed)),
         opts,
         input: InputMapper::default(),
+        pads,
+        focused: true,
+        grabbed: false,
         gpu: None,
         last_frame: None,
         stats: Stats::default(),
@@ -437,6 +551,25 @@ mod tests {
         }
         assert_eq!(map_key(KeyCode::NumpadEnter), None);
         assert_eq!(map_key(KeyCode::MediaPlayPause), None);
+    }
+
+    #[test]
+    fn mouse_buttons_and_wheel_follow_the_dom_numbering() {
+        let table = [
+            (MouseButton::Left, Some(0)),
+            (MouseButton::Middle, Some(1)),
+            (MouseButton::Right, Some(MOUSE_RIGHT)),
+            (MouseButton::Back, Some(3)),
+            (MouseButton::Forward, Some(4)),
+            (MouseButton::Other(9), None),
+        ];
+        for (b, want) in table {
+            assert_eq!(mouse_button(b), want, "{b:?}");
+        }
+        assert_eq!(wheel_notches(MouseScrollDelta::LineDelta(0.0, 1.0)), 1.0);
+        assert_eq!(wheel_notches(MouseScrollDelta::LineDelta(3.0, -2.0)), -2.0);
+        let px = winit::dpi::PhysicalPosition::new(0.0, -250.0);
+        assert_eq!(wheel_notches(MouseScrollDelta::PixelDelta(px)), -2.5);
     }
 
     #[test]

@@ -10,9 +10,9 @@ mod input;
 pub mod vehicles;
 
 pub use input::{
-    Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context, DeviceKind,
-    InputMapper, InputState, Key, MouseAxis, PadAxis, PadButton, RawInput, Sign, BINDINGS_VERSION,
-    MOUSE_BUTTONS, MOUSE_LOOK_PER_PIXEL, MOUSE_RIGHT,
+    pad_table, Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context,
+    DeviceKind, InputMapper, InputState, Key, MouseAxis, PadAxis, PadButton, RawInput, Sign,
+    BINDINGS_VERSION, MOUSE_BUTTONS, MOUSE_LOOK_PER_PIXEL, MOUSE_RIGHT,
 };
 
 use glam::camera::rh::{proj::directx, view};
