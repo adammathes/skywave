@@ -96,6 +96,17 @@ const DOWNSHIFT_MARGIN: f32 = 0.8;
 const DIRECTION_SWITCH_SPEED: f32 = 0.8;
 /// Steering lock reaches `max_deg * (1 - speed_sens)` at this speed, m/s.
 const STEER_SENS_SPEED: f32 = 60.0;
+/// Grip-limited steering (the `steering` assist) aims the front wheels this many times the
+/// tires' peak slip angle off the front axle's direction of travel at full stick: the
+/// fronts work at their peak whatever the speed, never the 20°+ that only scrubs them...
+const STEER_LIMIT_MARGIN: f32 = 1.0;
+/// ...fading in between these forward speeds, m/s, so full lock is always there for
+/// parking and tight junctions.
+const STEER_LIMIT_SPEED: [f32; 2] = [8.0, 11.0];
+/// Reverse tops out at this speed, m/s; drive torque fades out over the last
+/// `REVERSE_FADE_MPS` below it (reverse used to run up to first gear's ~20 m/s).
+pub const REVERSE_MAX_MPS: f32 = 8.0;
+const REVERSE_FADE_MPS: f32 = 1.5;
 /// Traction control: proportional cut per unit of excess normalized slip, and its smoothing.
 const TRACTION_GAIN: f32 = 2.0;
 const TRACTION_RATE: f32 = 30.0;
@@ -146,6 +157,14 @@ pub struct Assists {
     pub traction: f32,
     /// Anti-lock brakes on every car, whatever its spec says.
     pub abs: bool,
+    /// Grip-limited steering, `[0, 1]`: blends the road-wheel target from the spec's
+    /// speed-sensitive lock toward the front axle's direction of travel plus the stick's
+    /// share of the tires' peak slip angle. In a steady corner that is the kinematic angle
+    /// of the turn plus the peak slip (`atan(a · wheelbase / v²) + α_peak`, with the yaw the
+    /// car actually has), so full stick at speed turns as hard as the fronts can and no
+    /// harder; in a slide the travel direction swings out and the wheels follow it, a
+    /// counter-steer. Fades in above 8 m/s.
+    pub steering: f32,
 }
 
 impl Assists {
@@ -153,12 +172,50 @@ impl Assists {
         stability: 0.0,
         traction: 0.0,
         abs: false,
+        steering: 0.0,
     };
     pub const LIGHT: Assists = Assists {
         stability: 0.3,
         traction: 0.5,
         abs: true,
+        steering: 1.0,
     };
+}
+
+/// The road-wheel angle, rad (positive right), that steering input `steer` (`[-1, 1]`)
+/// asks for in `state`: the spec's lock less its speed sensitivity, times the input; then,
+/// by `assists.steering` and above 8 m/s forward, the front axle's direction of travel plus
+/// `steer` times the tires' peak slip angle, within that lock.
+pub fn steer_target(
+    spec: &VehicleSpec,
+    assists: &Assists,
+    state: &VehicleState,
+    steer: f32,
+) -> f32 {
+    let q = state.rot;
+    let fwd = rotate(q, [0.0, 0.0, -1.0]);
+    let fwd_speed = dot(state.vel, fwd);
+    let speed_frac = unit(abs(fwd_speed) / STEER_SENS_SPEED);
+    let lock = spec.steering.max_deg * DEG_TO_RAD * (1.0 - spec.steering.speed_sens * speed_frac);
+    let plain = lock * steer;
+    let [lo, hi] = STEER_LIMIT_SPEED;
+    // Forward only: rolling backward the travel direction is behind the car.
+    let ramp = unit((fwd_speed - lo) / (hi - lo));
+    let k = unit(assists.steering) * ramp * ramp * (3.0 - 2.0 * ramp);
+    if k <= 0.0 {
+        return plain;
+    }
+    let right = rotate(q, [1.0, 0.0, 0.0]);
+    let axle = rotate(q, [0.0, 0.0, -spec.cg_fore_aft * spec.wheelbase_m]);
+    let v = add(state.vel, cross(state.ang_vel, axle));
+    let travel = atan2(dot(v, right), dot(v, fwd));
+    let mut aimed = travel + steer * STEER_LIMIT_MARGIN * spec.tires.slip_peak_deg * DEG_TO_RAD;
+    if aimed > lock {
+        aimed = lock;
+    } else if aimed < -lock {
+        aimed = -lock;
+    }
+    plain + (aimed - plain) * k
 }
 
 impl Default for Assists {
@@ -545,10 +602,9 @@ pub fn step(
         -unit(-input.steer)
     };
     state.handbrake = input.handbrake;
-    let speed_frac = unit(abs(fwd_speed) / STEER_SENS_SPEED);
-    let lock = spec.steering.max_deg * DEG_TO_RAD * (1.0 - spec.steering.speed_sens * speed_frac);
+    let target = steer_target(spec, assists, state, state.steer);
     let chase = unit(spec.steering.return_rate * DT);
-    state.steer_angle_rad += (lock * state.steer - state.steer_angle_rad) * chase;
+    state.steer_angle_rad += (target - state.steer_angle_rad) * chase;
 
     // 2. Gearbox and engine (automatic; `spec.auto == false` shifts the same until manual
     // mode exists). Stopped + brake selects reverse; stopped + throttle selects drive.
@@ -636,6 +692,10 @@ pub fn step(
     let mut engine_torque = 0.0;
     if state.engine_rpm < redline {
         engine_torque = spec.engine.torque_at(state.engine_rpm) * drive_pedal * state.traction_cut;
+    }
+    if state.gear < 0 {
+        // Reverse is for parking: the drive fades out toward the reverse speed cap.
+        engine_torque *= unit((REVERSE_MAX_MPS + fwd_speed) / REVERSE_FADE_MPS);
     }
     if coupled {
         let rev = unit((state.engine_rpm - idle) / rpm_span);
