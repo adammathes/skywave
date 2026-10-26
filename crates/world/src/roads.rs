@@ -293,6 +293,10 @@ pub fn build(
         let d = (b - a).normalize();
         let rf = RoadFrame { a, d, l: d.left() };
         let mid = (a + b) * 0.5;
+        // An edge's meshes are filed under its midpoint's chunk.
+        if !out.wants(mid) {
+            continue;
+        }
         let deg = [
             net.degree(net.edge_ends[i][0].0),
             net.degree(net.edge_ends[i][1].0),
@@ -336,7 +340,9 @@ pub fn build(
         );
     }
     for j in &net.junctions {
-        junction(out.at(j.pos, MeshKind::Road), j, &paints, seed);
+        if out.wants(j.pos) {
+            junction(out.at(j.pos, MeshKind::Road), j, &paints, seed);
+        }
     }
 }
 

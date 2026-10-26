@@ -15,13 +15,18 @@
 //!
 //! Settings and bindings are kept in `localStorage` (key `skywave.settings`). `?menu=1`
 //! opens the settings menu at startup.
+//!
+//! The town streams round the camera within `app::stream::StreamBudget::WEB`, timed with
+//! `performance.now()`; `window.skywaveStreamIdle` turns true when nothing is left to
+//! stream (at once with `?stream=0`), and `window.skywaveStreamStats` then holds the
+//! streamer's counters.
 
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 /// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
 /// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`, `map`,
-/// `ui`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and
+/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and
 /// `selftest=1` runs the determinism self-test instead of the game.
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query

@@ -17,6 +17,7 @@ pub mod map;
 pub mod scene;
 pub mod selftest;
 mod settings;
+pub mod stream;
 pub mod ui;
 pub mod vehicles;
 mod worldmesh;
@@ -41,7 +42,9 @@ use glam::{Mat4, Vec3};
 use lighting::{Bounds, FrameLights, TimeOfDay};
 use place::Place;
 use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
+use render::{ChunkPoolConfig, ChunkStore, MAX_CHUNK_PARTS};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
+use stream::{ChunkSource, PartRole, PlaceSource, StreamBudget, StreamStats, Streamer};
 use world::{ChunkMesh, Glow, Palette, WorldMesh};
 
 /// Free-fly speed, m/s.
@@ -140,10 +143,12 @@ pub struct App {
     /// The world's instances, then this frame's car instances (refilled by `scene_view`).
     instances: Vec<MeshInstance>,
     world_instances: usize,
-    /// Instance of the street lamp heads' mesh, switched with the photocell.
-    lamp_instance: Option<usize>,
+    /// What each world instance is (street lamp lenses are switched with the photocell).
+    roles: Vec<PartRole>,
     /// What each world instance covers, for light culling (`None`: lit by no lamp).
     bounds: Vec<Option<Bounds>>,
+    /// The streamed town, or `None` when it was all built at load.
+    stream: Option<Box<Streaming>>,
     /// This frame's lights, and the place's static ones they are picked from.
     lights: FrameLights,
     /// Interpolation alpha of the last frame, held while paused.
@@ -160,8 +165,19 @@ impl App {
         App::new_with(seed, DEFAULT_VEHICLE).expect("the default car is built in")
     }
 
-    /// The built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) at the start of the strip.
+    /// The built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) at the start of the strip,
+    /// the whole town built at load.
     pub fn new_with(seed: Seed, vehicle_id: &str) -> Result<App, String> {
+        App::build(seed, vehicle_id, None)
+    }
+
+    /// [`App::new_with`], the town streamed within `budget` round the camera instead
+    /// (nothing is built until [`App::frame`] runs).
+    pub fn new_streamed(seed: Seed, vehicle_id: &str, budget: StreamBudget) -> Result<App, String> {
+        App::build(seed, vehicle_id, Some(budget))
+    }
+
+    fn build(seed: Seed, vehicle_id: &str, stream: Option<StreamBudget>) -> Result<App, String> {
         let spec = vehicles::builtin_spec(vehicle_id)?;
         let shape = vehicles::builtin_shape(&spec)?;
         let model = CarModel::build(&spec, &shape)?;
@@ -170,42 +186,24 @@ impl App {
         place.header.seed = seed.0;
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let drive = Drive::with_layout(spec, model.layout, start.pos, start.heading);
-        let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
-        let place_lights: Vec<PointLight> = place
-            .lights
-            .items
-            .iter()
-            .filter_map(lighting::place_light)
-            .collect();
-        // Until the place lists its street lamps, they hang where the lamp heads are.
-        let has_lamps = place
-            .lights
-            .items
-            .iter()
-            .any(|l| l.kind == place::LightKind::Street);
-        let town = render_meshes(&chunks, place.header.chunk_size_m, place_lights, !has_lamps);
+        let map = map::MapImage::rasterize(&place);
+        let mut ui = ui::Ui::new();
+        ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
+        let ground = drive::ground_for(&place);
+        let town = match stream {
+            None => resident_town(&place),
+            Some(budget) => streamed_town(place, budget),
+        };
         let mut meshes = town.meshes;
-        let mut instances: Vec<MeshInstance> = (0..meshes.len())
-            .map(|i| MeshInstance {
-                color: if Some(i) == town.glow {
-                    [GLOW_BOOST, GLOW_BOOST, GLOW_BOOST, 1.0]
-                } else {
-                    [1.0; 4]
-                },
-                ..MeshInstance::new(MeshId(i as u32), Mat4::IDENTITY.to_cols_array_2d())
-            })
-            .collect();
+        let mut instances = town.instances;
         let world_instances = instances.len();
         let car_meshes = model.register(|m| {
             meshes.push(m.clone());
             MeshId(meshes.len() as u32 - 1)
         });
-        instances.reserve_exact(drive::MAX_CAR_INSTANCES);
+        instances.reserve_exact(town.world_capacity - world_instances + drive::MAX_CAR_INSTANCES);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
-        let map = map::MapImage::rasterize(&place);
-        let mut ui = ui::Ui::new();
-        ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         Ok(App {
             clock: FixedStep::new(),
             ticks: 0,
@@ -214,7 +212,7 @@ impl App {
             clock_frozen: false,
             prev: fly,
             curr: fly,
-            ground: drive::ground_for(&place),
+            ground,
             drive,
             camera,
             time: TimeOfDay::default(),
@@ -222,9 +220,10 @@ impl App {
             car_meshes,
             instances,
             world_instances,
-            lamp_instance: town.lamps,
+            roles: town.roles,
             bounds: town.bounds,
-            lights: FrameLights::new(town.statics),
+            stream: town.stream,
+            lights: town.lights,
             alpha: 0.0,
             ui,
             map,
@@ -233,8 +232,11 @@ impl App {
 
     /// The scene `setup` describes: its seed and car, the car on the ground at its point
     /// and heading, its camera, its headlights, and its clock (frozen when it gives a time).
+    /// A streamed scene ([`SceneSetup::stream`]) streams within [`StreamBudget::WEB`];
+    /// [`App::set_stream_budget`] changes that.
     pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
-        let mut app = App::new_with(Seed(setup.seed), &setup.car)?;
+        let stream = setup.stream.then_some(StreamBudget::WEB);
+        let mut app = App::build(Seed(setup.seed), &setup.car, stream)?;
         let (y, _) = app.ground.level_at(setup.pos);
         let ground = [setup.pos[0], y, setup.pos[1]];
         app.drive = Drive::with_layout(
@@ -380,8 +382,11 @@ impl App {
         };
         let daylight = self.time.daylight();
         self.instances.truncate(self.world_instances);
-        if let Some(k) = self.lamp_instance {
-            self.instances[k].glow = lighting::streetlamp_glow(&daylight);
+        let lamp_glow = lighting::streetlamp_glow(&daylight);
+        for (inst, role) in self.instances.iter_mut().zip(&self.roles) {
+            if *role == PartRole::Lamps {
+                inst.glow = lamp_glow;
+            }
         }
         let cabin = !self.fly && self.camera.mode().first_person();
         self.drive.push_instances(
@@ -429,6 +434,208 @@ fn fly_from(pose: &camera::CameraPose) -> FlyCamera {
         pos: pose.eye,
         yaw: (-f.x).atan2(-f.z),
         pitch: f.y.clamp(-1.0, 1.0).asin().clamp(-MAX_PITCH, MAX_PITCH),
+    }
+}
+
+/// The streamed town: what builds its chunks, what keeps them resident, and the chunk of
+/// each of `FrameLights`' statics (a static light shines while its chunk is drawn).
+struct Streaming {
+    source: PlaceSource,
+    streamer: Streamer,
+    light_chunks: Vec<[i32; 2]>,
+}
+
+/// The town an [`App`] starts with.
+struct Town {
+    /// Static meshes (the whole town when it is built at load; none when it streams).
+    meshes: Vec<Mesh>,
+    instances: Vec<MeshInstance>,
+    roles: Vec<PartRole>,
+    bounds: Vec<Option<Bounds>>,
+    /// World instances there may ever be.
+    world_capacity: usize,
+    lights: FrameLights,
+    stream: Option<Box<Streaming>>,
+}
+
+/// The whole town of `place` built at load ([`render_meshes`]): static meshes, one
+/// instance each.
+fn resident_town(place: &Place) -> Town {
+    let chunks = world::build_chunk_meshes(place, &Palette::socal_1985());
+    let place_lights: Vec<PointLight> = place
+        .lights
+        .items
+        .iter()
+        .filter_map(lighting::place_light)
+        .collect();
+    // Until the place lists its street lamps, they hang where the lamp heads are.
+    let has_lamps = place
+        .lights
+        .items
+        .iter()
+        .any(|l| l.kind == place::LightKind::Street);
+    let town = render_meshes(&chunks, place.header.chunk_size_m, place_lights, !has_lamps);
+    let role = |i| {
+        if Some(i) == town.glow {
+            PartRole::Glow
+        } else if Some(i) == town.lamps {
+            PartRole::Lamps
+        } else {
+            PartRole::Tile
+        }
+    };
+    let roles: Vec<PartRole> = (0..town.meshes.len()).map(role).collect();
+    let instances: Vec<MeshInstance> = roles
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| world_instance(MeshId(i as u32), r))
+        .collect();
+    Town {
+        world_capacity: instances.len(),
+        meshes: town.meshes,
+        instances,
+        roles,
+        bounds: town.bounds,
+        lights: FrameLights::new(town.statics),
+        stream: None,
+    }
+}
+
+/// The instance drawing a world mesh or chunk part of role `role`.
+fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
+    MeshInstance {
+        color: if role == PartRole::Glow {
+            [GLOW_BOOST, GLOW_BOOST, GLOW_BOOST, 1.0]
+        } else {
+            [1.0; 4]
+        },
+        ..MeshInstance::new(mesh, Mat4::IDENTITY.to_cols_array_2d())
+    }
+}
+
+/// `place` to be streamed within `budget`: nothing built yet, every static light known
+/// (and off until its chunk is drawn), room for every part the resident chunks can have.
+fn streamed_town(place: Place, budget: StreamBudget) -> Town {
+    let source = PlaceSource::new(place, Palette::socal_1985());
+    let streamer = Streamer::new(&source, budget);
+    let statics = source.static_lights();
+    let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());
+    lights.set_active(|_| false);
+    let light_chunks = statics.iter().map(|s| s.chunk).collect();
+    let parts = streamer.capacity() * MAX_CHUNK_PARTS;
+    Town {
+        meshes: Vec::new(),
+        instances: Vec::with_capacity(parts),
+        roles: Vec::with_capacity(parts),
+        bounds: Vec::with_capacity(parts),
+        world_capacity: parts,
+        lights,
+        stream: Some(Box::new(Streaming {
+            source,
+            streamer,
+            light_chunks,
+        })),
+    }
+}
+
+impl App {
+    /// Streams within `budget` from now on (a platform with more room than
+    /// [`StreamBudget::WEB`] calls this before its first frame and before sizing the
+    /// renderer's chunk pool). Does nothing when the town is built at load.
+    pub fn set_stream_budget(&mut self, budget: StreamBudget) {
+        let Some(s) = &mut self.stream else {
+            return;
+        };
+        debug_assert_eq!(
+            s.streamer.stats().built,
+            0,
+            "set the budget before streaming"
+        );
+        s.streamer = Streamer::new(&s.source, budget);
+        // Nothing is drawn yet, so these are empty: room for every part and the car.
+        let parts = s.streamer.capacity() * MAX_CHUNK_PARTS;
+        self.instances
+            .reserve_exact(parts + drive::MAX_CAR_INSTANCES);
+        self.roles.reserve_exact(parts);
+        self.bounds.reserve_exact(parts);
+    }
+
+    /// The renderer's chunk pool this app needs (`RendererOptions::chunk_pool`); empty
+    /// when the town is built at load.
+    pub fn chunk_pool_config(&self) -> ChunkPoolConfig {
+        self.stream
+            .as_ref()
+            .map_or(ChunkPoolConfig::NONE, |s| s.streamer.budget().pool_config())
+    }
+
+    /// Most instances a frame can draw: reserve them in the renderer at load.
+    pub fn max_instances(&self) -> usize {
+        self.instances
+            .capacity()
+            .max(self.world_instances + drive::MAX_CAR_INSTANCES)
+    }
+
+    /// Whether the town is streamed.
+    pub fn is_streamed(&self) -> bool {
+        self.stream.is_some()
+    }
+
+    /// Nothing left to stream: every chunk round the camera is drawn. Always true for a
+    /// town built at load.
+    pub fn stream_idle(&self) -> bool {
+        self.stream.as_ref().is_none_or(|s| s.streamer.is_idle())
+    }
+
+    /// Streaming counters, when the town is streamed.
+    pub fn stream_stats(&self) -> Option<StreamStats> {
+        self.stream.as_ref().map(|s| s.streamer.stats())
+    }
+
+    /// Runs `steps` streaming steps round the current view; `now` is the platform's clock
+    /// in seconds.
+    fn stream_steps(&mut self, steps: u32, alpha: f32, now: &dyn Fn() -> f64) {
+        let (eye, forward) = if self.fly {
+            let c = self.prev.lerp(&self.curr, alpha);
+            let (s, co) = c.yaw.sin_cos();
+            (c.pos, Vec3::new(-s, 0.0, -co))
+        } else {
+            let pose = self.camera.pose(&self.drive, alpha);
+            (pose.eye, pose.forward())
+        };
+        let Some(s) = &mut self.stream else {
+            return;
+        };
+        for _ in 0..steps {
+            s.streamer
+                .step(&s.source, [eye.x, eye.z], [forward.x, forward.z], now);
+        }
+    }
+
+    /// Writes the chunks built since the last call into `gpu` (the renderer's chunk pool)
+    /// and frees the evicted ones', then refreshes the world's instances and which static
+    /// lights shine. Call once a frame, after [`App::frame`] and before
+    /// [`App::scene_view`]. Allocates nothing.
+    pub fn sync_chunks(&mut self, gpu: &mut impl ChunkStore) {
+        let Some(s) = &mut self.stream else {
+            return;
+        };
+        if !s.streamer.sync(gpu) {
+            return;
+        }
+        self.instances.clear();
+        self.roles.clear();
+        self.bounds.clear();
+        for (slot, parts) in s.streamer.drawn() {
+            for (k, p) in parts.iter().enumerate() {
+                self.instances
+                    .push(world_instance(MeshId::chunk_part(slot, k), p.role));
+                self.roles.push(p.role);
+                self.bounds.push(p.bounds);
+            }
+        }
+        self.world_instances = self.instances.len();
+        let (streamer, chunks) = (&s.streamer, &s.light_chunks);
+        self.lights.set_active(|i| streamer.is_live(chunks[i]));
     }
 }
 
@@ -618,6 +825,15 @@ fn lamp_heads(lenses: &Mesh) -> Vec<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Seconds since the first call: the platform clock tests pass to [`App::frame`].
+    pub(crate) fn wall_clock() -> f64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_secs_f64()
+    }
 
     /// The scripted drive ([`selftest::run_drive`]), checking every frame. Returns the
     /// peak speed.
@@ -895,7 +1111,7 @@ mod tests {
         );
 
         let setup = SceneSetup::from_query(
-            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1",
+            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0",
         )
         .unwrap();
         let mut app = App::from_setup(&setup).unwrap();
@@ -966,7 +1182,8 @@ mod tests {
     #[test]
     fn street_lamps_have_their_own_mesh_and_switch_at_dusk() {
         let mut app = App::new(Seed(1));
-        let k = app.lamp_instance.expect("the test town has street lamps");
+        let k = app.roles.iter().position(|r| *r == PartRole::Lamps);
+        let k = k.expect("the test town has street lamps");
         // One light per lamp head, up on the poles, all inside the town.
         let heads: Vec<Vec3> = app
             .lights
@@ -1022,8 +1239,70 @@ mod tests {
     /// set. The culling allocates nothing per frame.
     #[test]
     fn every_lamp_round_the_camera_pools_on_the_tiles_under_it() {
-        let setup = SceneSetup::from_query("t=22:30&cam=cockpit&lights=1&still=1").unwrap();
+        let setup =
+            SceneSetup::from_query("t=22:30&cam=cockpit&lights=1&still=1&stream=0").unwrap();
         let mut app = App::from_setup(&setup).unwrap();
+        lamps_pool_under_themselves(&mut app);
+        // Tiles that fit their lights, and still fewer draws than the 372 meshes the town
+        // was as one per chunk and kind.
+        assert!(app.world_instances < 372, "{}", app.world_instances);
+    }
+
+    /// The scene streamed: once its ring is filled, the same holds, the static lights are
+    /// the same ones, and filling it allocated nothing in the app's own lists.
+    #[test]
+    fn a_streamed_town_fills_its_ring_and_its_lamps_pool_the_same() {
+        let query = "t=22:30&cam=cockpit&lights=1&still=1";
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        assert!(app.is_streamed() && app.world_instances == 0 && app.meshes().len() < 40);
+        assert!(app.lights.lights().is_empty());
+        let mut pool = render::ChunkPool::new(app.chunk_pool_config());
+        let mut input = InputMapper::default();
+        let caps = (
+            app.instances.capacity(),
+            app.bounds.capacity(),
+            app.roles.capacity(),
+        );
+        assert!(app.max_instances() >= caps.0);
+        let mut frames = 0;
+        while !app.stream_idle() {
+            app.frame(&mut input, 1.0 / 60.0, &wall_clock);
+            app.sync_chunks(&mut pool);
+            frames += 1;
+            assert!(frames < 20_000, "{:?}", app.stream_stats());
+        }
+        let stats = app.stream_stats().unwrap();
+        eprintln!(
+            "streamed in {frames} frames: {stats:?}; {} world instances; pool {:?}",
+            app.world_instances,
+            pool.stats()
+        );
+        assert_eq!(
+            (
+                app.instances.capacity(),
+                app.bounds.capacity(),
+                app.roles.capacity()
+            ),
+            caps
+        );
+        assert_eq!(stats.upload_errors, 0);
+        // The 9×9 ring round the start holds the whole town but the apron's far edges.
+        assert!(stats.built >= 81 - 9, "{stats:?}");
+        let resident =
+            App::from_setup(&SceneSetup::from_query(&format!("{query}&stream=0")).unwrap())
+                .unwrap();
+        let key = |l: &PointLight| l.position.map(f32::to_bits);
+        let mut a: Vec<_> = app.lights.statics().iter().map(key).collect();
+        let mut b: Vec<_> = resident.lights.statics().iter().map(key).collect();
+        a.sort_unstable();
+        b.sort_unstable();
+        assert_eq!(a, b, "the same lamps, bit for bit");
+        lamps_pool_under_themselves(&mut app);
+        // Glow and lamp parts are drawn as in the resident town.
+        assert!(app.roles.contains(&PartRole::Glow) && app.roles.contains(&PartRole::Lamps));
+    }
+
+    fn lamps_pool_under_themselves(app: &mut App) {
         let world = app.world_instances;
         let caps = (app.instances.capacity(), app.lights.order_capacity());
         let started = std::time::Instant::now();
@@ -1082,9 +1361,6 @@ mod tests {
             (app.instances.capacity(), app.lights.order_capacity()),
             caps
         );
-        // Tiles that fit their lights, and still fewer draws than the 372 meshes the town
-        // was as one per chunk and kind.
-        assert!(world < 372, "{world}");
     }
 
     #[test]

@@ -93,6 +93,10 @@ pub fn build(
     let mut cars = Vec::new();
     apron(place, pal, seed, out);
     for b in blocks {
+        // A block's lot and paths are filed under its centroid's chunk.
+        if !out.wants(centroid(&b.poly)) {
+            continue;
+        }
         let surface = block_surface(place, b);
         lot_pad(b, surface, pal, seed, out);
         if surface == Surface::ParkLawn {
@@ -181,10 +185,20 @@ fn paved_color(pal: &Palette, seed: u64, p: V2) -> Rgb {
     shade(c, 230 + (fine * 40.0) as u32)
 }
 
-fn apron(place: &Place, pal: &Palette, seed: u64, out: &mut MeshSet) {
+/// Centers `(first, last)` of the terrain apron's corner cells (each in its cell's chunk);
+/// `None` without roads.
+pub fn apron_bounds(place: &Place) -> Option<(V2, V2)> {
+    let ([x0, z0], [x1, z1]) = apron_cells(place)?;
+    let center =
+        |x: i32, z: i32| V2::new((x as f32 + 0.5) * APRON_CELL, (z as f32 + 0.5) * APRON_CELL);
+    Some((center(x0, z0), center(x1 - 1, z1 - 1)))
+}
+
+/// The apron's cells: `[x0, z0]` up to (not including) `[x1, z1]`.
+fn apron_cells(place: &Place) -> Option<([i32; 2], [i32; 2])> {
     let nodes = &place.roads.nodes;
     if nodes.is_empty() {
-        return;
+        return None;
     }
     let (mut lo, mut hi) = (V2::new(f32::MAX, f32::MAX), V2::new(f32::MIN, f32::MIN));
     for n in nodes {
@@ -195,6 +209,13 @@ fn apron(place: &Place, pal: &Palette, seed: u64, out: &mut MeshSet) {
     let x1 = floor((hi.x + APRON_MARGIN) / APRON_CELL) as i32 + 1;
     let z0 = floor((lo.y - APRON_MARGIN) / APRON_CELL) as i32;
     let z1 = floor((hi.y + APRON_MARGIN) / APRON_CELL) as i32 + 1;
+    Some(([x0, z0], [x1, z1]))
+}
+
+fn apron(place: &Place, pal: &Palette, seed: u64, out: &mut MeshSet) {
+    let Some(([x0, z0], [x1, z1])) = apron_cells(place) else {
+        return;
+    };
     let paint = Paint::new(pal.lawn, Pattern::Lawn);
     for iz in z0..z1 {
         for ix in x0..x1 {
@@ -202,6 +223,9 @@ fn apron(place: &Place, pal: &Palette, seed: u64, out: &mut MeshSet) {
                 V2::new((ix + dx) as f32 * APRON_CELL, (iz + dz) as f32 * APRON_CELL)
             };
             let q = [c(0, 0), c(1, 0), c(1, 1), c(0, 1)];
+            if !out.wants((q[0] + q[2]) * 0.5) {
+                continue;
+            }
             let colors = q.map(|p| lawn_color(pal, seed, p, false));
             let m = out.at((q[0] + q[2]) * 0.5, MeshKind::Ground);
             quad_vc(m, q.map(|p| p.at(TERRAIN_Y)), V3::Y, paint, colors);

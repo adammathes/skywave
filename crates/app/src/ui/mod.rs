@@ -30,7 +30,7 @@ use crate::map::MapPoi;
 use crate::settings::{Settings, SettingsStore};
 use crate::App;
 use render::{Hud, HudBuilder, HudLayout, RenderStats, Sky};
-use skywave_core::Steps;
+use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 
 /// Seconds a remap capture waits for an input before giving up.
 pub const CAPTURE_TIMEOUT: f32 = 8.0;
@@ -662,10 +662,18 @@ pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) ->
 
 impl App {
     /// One frame: samples `input`, runs the UI (menus, remapping, overlay toggle), steps
-    /// the simulation unless a menu has it paused, and lays out the HUD for
-    /// [`App::scene_view`]. This is the entry point for platforms; [`App::update`] is the
-    /// bare simulation step.
-    pub fn frame(&mut self, input: &mut InputMapper, dt_real: f64) -> Steps {
+    /// the simulation unless a menu has it paused, streams the town round the view (one
+    /// streaming step per sim step, at least one a frame even when the sim does not run,
+    /// each spending up to the budget as `now_seconds` measures it: the platform's clock,
+    /// any origin), and lays out the HUD for [`App::scene_view`]. This is the entry point
+    /// for platforms; [`App::update`] is the bare simulation step. Then call
+    /// [`App::sync_chunks`].
+    pub fn frame(
+        &mut self,
+        input: &mut InputMapper,
+        dt_real: f64,
+        now_seconds: &dyn Fn() -> f64,
+    ) -> Steps {
         let dt = if dt_real.is_finite() {
             dt_real.max(0.0)
         } else {
@@ -695,6 +703,14 @@ impl App {
             self.update(&state, dt)
         };
         self.alpha = steps.alpha;
+        let stream_steps = if steps.count > 0 {
+            steps.count
+        } else {
+            (dt / SIM_DT)
+                .round()
+                .clamp(1.0, f64::from(MAX_STEPS_PER_FRAME)) as u32
+        };
+        self.stream_steps(stream_steps, steps.alpha, now_seconds);
         self.ui.note_frame(dt as f32, steps.count);
         self.ui.speed_mph = if self.fly {
             None

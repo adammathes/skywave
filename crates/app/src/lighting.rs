@@ -327,6 +327,8 @@ pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
 pub struct FrameLights {
     /// The place's static lights: street lamps, neon, storefront fill.
     statics: Vec<PointLight>,
+    /// Which statics shine (a streamed chunk's lights only while it is drawn).
+    active: Vec<bool>,
     /// Scratch for picking the nearest statics: squared distance to the camera and index.
     order: Vec<(f32, u32)>,
     lights: [PointLight; MAX_LIGHTS],
@@ -337,6 +339,7 @@ impl FrameLights {
     pub fn new(statics: Vec<PointLight>) -> FrameLights {
         FrameLights {
             order: Vec::with_capacity(statics.len()),
+            active: vec![true; statics.len()],
             statics,
             lights: [PointLight::omni([0.0; 3], [0.0; 3], 0.0); MAX_LIGHTS],
             len: 0,
@@ -346,6 +349,13 @@ impl FrameLights {
     /// The place's static lights.
     pub fn statics(&self) -> &[PointLight] {
         &self.statics
+    }
+
+    /// Switches each static light `i` on or off as `on(i)` says (all start on).
+    pub fn set_active(&mut self, on: impl Fn(usize) -> bool) {
+        for (i, a) in self.active.iter_mut().enumerate() {
+            *a = on(i);
+        }
     }
 
     /// Capacity of the scratch buffer, which must not grow after load.
@@ -369,9 +379,19 @@ impl FrameLights {
             return;
         }
         let room = MAX_LIGHTS - n;
-        if self.statics.len() <= room {
-            self.lights[n..n + self.statics.len()].copy_from_slice(&self.statics);
-            self.len += self.statics.len();
+        let active = &self.active;
+        let on = || {
+            self.statics
+                .iter()
+                .zip(active)
+                .filter(|(_, &a)| a)
+                .map(|(l, _)| l)
+        };
+        if on().count() <= room {
+            for l in on() {
+                self.lights[self.len] = *l;
+                self.len += 1;
+            }
             return;
         }
         self.order.clear();
@@ -379,6 +399,7 @@ impl FrameLights {
             self.statics
                 .iter()
                 .enumerate()
+                .filter(|&(i, _)| active[i])
                 .map(|(i, l)| (Vec3::from(l.position).distance_squared(eye), i as u32)),
         );
         // Ties keep the earlier light, so the choice is deterministic.

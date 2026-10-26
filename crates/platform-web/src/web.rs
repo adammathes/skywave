@@ -5,7 +5,7 @@ use app::{
     pad_table, App, InputMapper, Key, RawInput, SceneSetup, SettingsStore, MOUSE_BUTTONS,
     MOUSE_RIGHT,
 };
-use render::Renderer;
+use render::{Renderer, RendererOptions};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -28,6 +28,10 @@ struct State {
     /// permissions policy): polling stops.
     pads_ok: bool,
     last_ms: Option<f64>,
+    /// The streaming clock (`performance.now()`), when the page has one.
+    performance: Option<web_sys::Performance>,
+    /// What `window.skywaveStreamIdle` was last set to.
+    stream_idle: Option<bool>,
     backend: &'static str,
     on_first_frame: Option<js_sys::Function>,
 }
@@ -147,10 +151,16 @@ pub async fn run(
     if crate::menu_from_query(&query) {
         app.open_settings();
     }
-    let mut renderer = Renderer::new(&device, &queue, config.format, (width, height));
+    let options = RendererOptions {
+        chunk_pool: app.chunk_pool_config(),
+        ..RendererOptions::default()
+    };
+    let mut renderer =
+        Renderer::with_options(&device, &queue, config.format, (width, height), options);
     for mesh in app.meshes() {
         renderer.add_mesh(mesh);
     }
+    renderer.reserve_instances(app.max_instances());
     let map = app.map_image();
     renderer.upload_map(map.w, map.h, &map.rgba);
     log::info!("skywave: {backend}, {:?}, {setup:?}", config.format);
@@ -167,6 +177,8 @@ pub async fn run(
         pad: None,
         pads_ok: true,
         last_ms: None,
+        performance: window.performance(),
+        stream_idle: None,
         backend,
         on_first_frame: Some(on_first_frame),
     }));
@@ -456,7 +468,27 @@ impl State {
             self.poll_gamepads(&window);
         }
 
-        let steps = self.app.frame(&mut self.input, dt);
+        let performance = &self.performance;
+        let now = || performance.as_ref().map_or(0.0, |p| p.now() / 1000.0);
+        let steps = self.app.frame(&mut self.input, dt, &now);
+        self.app.sync_chunks(&mut self.renderer);
+        let idle = self.app.stream_idle();
+        if self.stream_idle != Some(idle) {
+            // For screenshot tools: nothing left to stream (always true with `stream=0`).
+            if let Some(window) = web_sys::window() {
+                let key = JsValue::from_str("skywaveStreamIdle");
+                let _ = js_sys::Reflect::set(&window, &key, &JsValue::from_bool(idle));
+                if idle {
+                    if let Some(s) = self.app.stream_stats() {
+                        log::info!("skywave: streaming idle: {s:?}");
+                        let stats = JsValue::from_str(&format!("{s:?}"));
+                        let key = JsValue::from_str("skywaveStreamStats");
+                        let _ = js_sys::Reflect::set(&window, &key, &stats);
+                    }
+                }
+            }
+            self.stream_idle = Some(idle);
+        }
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,

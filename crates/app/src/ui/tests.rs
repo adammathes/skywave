@@ -49,7 +49,8 @@ impl Harness {
     }
 
     fn frame(&mut self) {
-        self.app.frame(&mut self.input, DT);
+        self.app
+            .frame(&mut self.input, DT, &crate::tests::wall_clock);
     }
 
     /// A press and release of `raw` on consecutive frames.
@@ -547,13 +548,13 @@ fn open_settings_starts_on_the_settings_page() {
 
 #[test]
 fn a_scene_time_stays_frozen_under_the_clock_speed_setting() {
-    let setup = crate::SceneSetup::from_query("?t=22:30").unwrap();
+    let setup = crate::SceneSetup::from_query("?t=22:30&stream=0").unwrap();
     let mut app = App::from_setup(&setup).unwrap();
     app.set_settings_store(Box::new(SharedStore::default()));
     let mut input = InputMapper::default();
     let t = app.time.clock.seconds_of_day;
     for _ in 0..120 {
-        app.frame(&mut input, DT);
+        app.frame(&mut input, DT, &crate::tests::wall_clock);
     }
     assert_eq!(app.time.clock.seconds_of_day, t);
     assert_eq!(app.time.clock.speed, 0.0);
@@ -726,7 +727,7 @@ fn scene_keys_open_the_map_and_scale_the_ui() {
     assert!(app.ui().full_map_open());
     assert_eq!(app.settings().ui_scale, 1.5);
     let mut input = InputMapper::default();
-    app.frame(&mut input, DT);
+    app.frame(&mut input, DT, &crate::tests::wall_clock);
     assert_eq!(app.scene_view(1.0, 1.0).hud.ui_scale, 1.5);
 }
 
