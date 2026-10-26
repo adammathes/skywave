@@ -1,0 +1,12 @@
+[package]
+name = "audio"
+description = "Skywave's radio: station model, presets, the switching state machine and the playback commands a platform carries out."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ron.workspace = true
+serde = { workspace = true, features = ["std"] }

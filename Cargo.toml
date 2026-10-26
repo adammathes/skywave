@@ -6,6 +6,7 @@ members = [
     "crates/vehicle",
     "crates/world",
     "crates/render",
+    "crates/audio",
     "crates/app",
     "crates/platform-native",
     "crates/platform-web",
@@ -27,6 +28,7 @@ place = { path = "crates/place" }
 vehicle = { path = "crates/vehicle" }
 world = { path = "crates/world" }
 render = { path = "crates/render" }
+audio = { path = "crates/audio" }
 app = { path = "crates/app" }
 
 # Engine-level dependencies (the only ones allowed; see CLAUDE.md).
