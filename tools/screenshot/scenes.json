@@ -16,7 +16,7 @@
     "params": { "seed": "1", "car": "palisade_wagon", "cam": "chase-far", "t": "12:00", "pos": "-197.5,-150", "yaw": "0", "still": "1" }
   },
   "strip-dusk-near": {
-    "about": "Dusk on the strip with the headlights on, from the near chase camera.",
-    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-near", "t": "19:10", "lights": "1", "pos": "60,-4.9", "yaw": "270", "still": "1" }
+    "about": "Dusk on the strip just after the street lamps come on (sun 7° down), headlights on, from the near chase camera.",
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-near", "t": "18:35", "lights": "1", "pos": "60,-4.9", "yaw": "270", "still": "1" }
   }
 }
