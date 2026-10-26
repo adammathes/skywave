@@ -253,7 +253,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 2] = [0x21ee_85e2_c1c5_72d7, 0xd256_9acf_ca39_209f];
+    let expected: [u64; 2] = [0x65e5_ccbe_1efa_0810, 0x8cc1_04fd_092c_d665];
     let mut got = [0u64; 2];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();

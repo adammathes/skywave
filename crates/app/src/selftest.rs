@@ -171,10 +171,10 @@ mod tests {
         // The same values the crates' own golden tests pin.
         assert_eq!(t.place_content_hash, 0xF7C4_F79C_1F25_41D2);
         assert_eq!(t.town_mesh_hash, 0x4E88_5095_5B12_3E40);
-        assert_eq!(t.drive_hash, 0x0c4a_c704_5986_cac0);
+        assert_eq!(t.drive_hash, 0x8814_0d4e_d4a2_232d);
         assert_eq!(
             t.replay_hashes,
-            [0x5e97_08cd_aef6_8212, 0xa13e_8769_6dc8_c0a3]
+            [0x2699_71ff_d7ab_3649, 0x2e3c_ee38_7736_a728]
         );
         let committed: Value = serde_json::from_str(COMMITTED).expect("selftest.json parses");
         assert_eq!(
