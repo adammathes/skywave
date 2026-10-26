@@ -10,6 +10,10 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[dependencies]
+# The radio's commands and player reports (plain data; the glue in web/index.html plays).
+audio.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 app.workspace = true
 render.workspace = true

@@ -20,6 +20,14 @@
 //! `performance.now()`; `window.skywaveStreamIdle` turns true when nothing is left to
 //! stream (at once with `?stream=0`), and `window.skywaveStreamStats` then holds the
 //! streamer's counters.
+//!
+//! The car radio: every frame the app's `audio::RadioCommand`s go to the page's player
+//! glue, `window.skywaveRadio` (the radio block of `web/index.html`, an `<audio>` element):
+//! `command(kind, url, token, value, name)` with kind `play`, `stop`, `volume` or `noise`;
+//! its reports come back from `takeEvent()` as `"<started|failed|blocked> <token>"`
+//! ([`parse_player_event`]), and the radio's state goes to `report(text)` whenever it
+//! changes ([`radio_state_text`]). Without the glue the radio stays silent. The page may
+//! ask for a stream URL with `window.prompt` (Settings, Audio, "Add stream URL").
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -68,6 +76,34 @@ pub fn choose_pad(
         (Some(false), None) => current,
         (None, None) => first_any,
     }
+}
+
+/// A report from the page's radio glue: `"started 3"`, `"failed 3"` or `"blocked 3"`.
+pub fn parse_player_event(text: &str) -> Option<audio::PlayerEvent> {
+    let (kind, token) = text.split_once(' ')?;
+    let token = token.parse().ok()?;
+    Some(match kind {
+        "started" => audio::PlayerEvent::Started { token },
+        "failed" => audio::PlayerEvent::Failed { token },
+        "blocked" => audio::PlayerEvent::Blocked { token },
+        _ => return None,
+    })
+}
+
+/// What the page's radio glue is told about the radio (for debugging and the browser
+/// tests): `off`, `tuning <id>`, `playing <id>` (asked to play), `live <id>` (sound is
+/// coming out) or `error <id>`, then ` blocked` while the browser waits for a gesture.
+pub fn radio_state_text(radio: &audio::Radio) -> String {
+    let id = radio.channel().map_or("", |c| c.id.as_str());
+    let state = match radio.state() {
+        audio::RadioState::Off => return "off".to_string(),
+        audio::RadioState::Tuning { .. } => "tuning",
+        audio::RadioState::Playing { .. } if radio.is_live() => "live",
+        audio::RadioState::Playing { .. } => "playing",
+        audio::RadioState::Error { .. } => "error",
+    };
+    let blocked = if radio.is_blocked() { " blocked" } else { "" };
+    format!("{state} {id}{blocked}")
 }
 
 /// `WheelEvent.deltaMode` values.
@@ -144,6 +180,35 @@ mod tests {
                 "{current:?} {pads:?}"
             );
         }
+    }
+
+    #[test]
+    fn radio_reports_and_states_read_and_print() {
+        use audio::PlayerEvent::{Blocked, Failed, Started};
+        assert_eq!(parse_player_event("started 3"), Some(Started { token: 3 }));
+        assert_eq!(parse_player_event("failed 12"), Some(Failed { token: 12 }));
+        assert_eq!(parse_player_event("blocked 1"), Some(Blocked { token: 1 }));
+        for bad in ["", "started", "started x", "paused 3", "failed -1"] {
+            assert_eq!(parse_player_event(bad), None, "{bad}");
+        }
+        let channel = audio::Channel {
+            id: "a".into(),
+            name: "A".into(),
+            format: "f".into(),
+            urls: vec!["https://a/1".into()],
+        };
+        let mut r = audio::Radio::new(vec![channel]);
+        assert_eq!(radio_state_text(&r), "off");
+        r.next();
+        assert_eq!(radio_state_text(&r), "tuning a");
+        r.tick(1.0);
+        assert_eq!(radio_state_text(&r), "playing a");
+        r.on_event(Blocked { token: r.token() });
+        assert_eq!(radio_state_text(&r), "playing a blocked");
+        r.on_event(Started { token: r.token() });
+        assert_eq!(radio_state_text(&r), "live a");
+        r.on_event(Failed { token: r.token() });
+        assert_eq!(radio_state_text(&r), "error a");
     }
 
     #[test]
