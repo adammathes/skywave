@@ -193,23 +193,63 @@ fn stopping_distance(spec: &VehicleSpec, assists: &Assists) -> f32 {
     panic!("{} did not stop", spec.id);
 }
 
+/// 60–0 mph. Before the feel pass after the first play (light assists the default, the
+/// specs' old brakes): corsair 47.6 m, palisade 56.4 m with ABS. Now the arcade assists
+/// (the default) stop within ~38 m and ~45 m, and the light ones no longer than before.
+const ARCADE_STOP_M: [f32; 2] = [38.5, 45.5];
+const LIGHT_STOP_M: [f32; 2] = [47.6, 56.4];
+
 #[test]
-fn braking_from_sixty_stops_within_sixty_metres() {
-    for spec in cars() {
+fn braking_from_sixty_stops_short() {
+    for (k, spec) in cars().iter().enumerate() {
+        let arcade = stopping_distance(spec, &Assists::ARCADE);
+        let light = stopping_distance(spec, &Assists::LIGHT);
         let with_abs = stopping_distance(
-            &spec,
+            spec,
             &Assists {
                 abs: true,
                 ..Assists::OFF
             },
         );
-        let without = stopping_distance(&spec, &Assists::OFF);
+        let without = stopping_distance(spec, &Assists::OFF);
         println!(
-            "{:15} 60-0 mph: {with_abs:.1} m with ABS, {without:.1} m without",
+            "{:15} 60-0 mph: {arcade:.1} m arcade, {light:.1} m light, {with_abs:.1} m with ABS \
+             alone, {without:.1} m without",
             spec.id
         );
+        assert!(
+            arcade <= ARCADE_STOP_M[k],
+            "{} arcade stop {arcade} m",
+            spec.id
+        );
+        assert!(light <= LIGHT_STOP_M[k], "{} light stop {light} m", spec.id);
         assert!(with_abs < 60.0, "{} ABS stop {with_abs} m", spec.id);
         assert!(without < 60.0, "{} non-ABS stop {without} m", spec.id);
+    }
+}
+
+/// Lifting off at 25 m/s in gear: the mean deceleration over the next 2 s, in g. Engine
+/// braking, aero and rolling resistance together; was ~0.05 g.
+fn coast_down(spec: &VehicleSpec) -> f32 {
+    let mut s = spawn(spec);
+    up_to_speed(spec, &mut s, 25.0);
+    let v0 = s.speed_mps;
+    hold(
+        spec,
+        &mut s,
+        input(0.0, 0.0, 0.0),
+        &Assists::default(),
+        2 * STEPS_PER_S,
+    );
+    (v0 - s.speed_mps) / 2.0 / 9.81
+}
+
+#[test]
+fn lifting_off_slows_the_car() {
+    for spec in cars() {
+        let g = coast_down(&spec);
+        println!("{:15} coast-down from 25 m/s: {g:.3} g", spec.id);
+        assert!(g > 0.12 && g < 0.19, "{} coasts down at {g} g", spec.id);
     }
 }
 
@@ -287,7 +327,11 @@ fn skidpad_lateral_grip_is_ordered() {
 #[test]
 fn full_lock_at_thirty_does_not_flip() {
     for spec in cars() {
-        for (name, assists) in [("light", Assists::LIGHT), ("off", Assists::OFF)] {
+        for (name, assists) in [
+            ("arcade", Assists::ARCADE),
+            ("light", Assists::LIGHT),
+            ("off", Assists::OFF),
+        ] {
             let mut s = spawn(&spec);
             while s.speed_mps < 30.0 * MPH {
                 step(&spec, &mut s, &input(1.0, 0.0, 0.0), &assists, &GROUND);
@@ -399,6 +443,47 @@ fn handbrake_locks_the_rear() {
     }
 }
 
+/// Heading change, degrees (positive left), over 1 s of handbrake with the stick half left
+/// from 15 m/s.
+fn handbrake_turn(spec: &VehicleSpec, assists: &Assists) -> f32 {
+    let mut s = spawn(spec);
+    up_to_speed(spec, &mut s, 15.0);
+    let f0 = s.forward();
+    let pull = VehicleInput {
+        steer: -0.5,
+        handbrake: true,
+        ..VehicleInput::default()
+    };
+    hold(spec, &mut s, pull, assists, STEPS_PER_S);
+    let f = s.forward();
+    // Heading 0 faces -z and grows counter-clockwise seen from above.
+    let h = |v: [f32; 3]| (-v[0]).atan2(-v[2]);
+    let d = h(f) - h(f0);
+    let d = (d + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    d.to_degrees()
+}
+
+/// The handbrake pivots the car (the steering assist's yaw help) instead of only slowing it.
+#[test]
+fn handbrake_with_steer_pivots_the_car() {
+    for spec in cars() {
+        let off = handbrake_turn(&spec, &Assists::OFF);
+        let light = handbrake_turn(&spec, &Assists::LIGHT);
+        let arcade = handbrake_turn(&spec, &Assists::ARCADE);
+        println!(
+            "{:15} handbrake + half left stick, 1 s from 15 m/s: {arcade:.0}° arcade, \
+             {light:.0}° light, {off:.0}° off",
+            spec.id
+        );
+        assert!(arcade > 35.0, "{} pivots only {arcade}°", spec.id);
+        assert!(
+            arcade > off && light > off,
+            "{} {arcade}° {light}° vs {off}°",
+            spec.id
+        );
+    }
+}
+
 #[test]
 fn braking_at_a_standstill_selects_reverse() {
     for spec in cars() {
@@ -500,7 +585,7 @@ fn traction_control_caps_wheelspin() {
             }
         }
         println!(
-            "{:15} launch rear slip ratio: {:.3} off, {:.3} light",
+            "{:15} launch rear slip ratio: {:.3} off, {:.3} default",
             spec.id, worst[0], worst[1]
         );
         assert!(worst[1] <= worst[0], "{} {worst:?}", spec.id);
@@ -575,15 +660,18 @@ fn upside_down_car_rights_itself() {
     }
 }
 
-/// Full stick from `mps` for 4 s on a light throttle (more would spin the rear-drive cars
-/// and measure a drift, not the steering): the road-wheel angle at the end, the mean
-/// lateral g and the front tires' mean slip relative to their peak over the last 2 s.
+/// Full stick from `mps` for 4 s on a light throttle, opened a little as the speed drops
+/// so the stronger engine braking does not slow the car out of the grip-limited range
+/// (more would spin the rear-drive cars and measure a drift, not the steering): the
+/// road-wheel angle at the end, the mean lateral g and the front tires' mean slip relative
+/// to their peak over the last 2 s.
 fn full_stick_at(spec: &VehicleSpec, assists: &Assists, mps: f32) -> (f32, f32, f32) {
     let mut s = spawn(spec);
     up_to_speed(spec, &mut s, mps);
     let (mut g, mut slip, mut n) = (0.0, 0.0, 0.0);
     for i in 0..4 * STEPS_PER_S {
-        step(spec, &mut s, &input(0.15, 0.0, 1.0), assists, &GROUND);
+        let throttle = (0.15 + 0.3 * (mps - s.speed_mps)).clamp(0.0, 0.35);
+        step(spec, &mut s, &input(throttle, 0.0, 1.0), assists, &GROUND);
         if i >= 2 * STEPS_PER_S {
             g += s.lat_g;
             slip += 0.5 * (s.wheels[0].slip + s.wheels[1].slip);

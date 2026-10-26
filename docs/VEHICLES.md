@@ -35,9 +35,17 @@ One rigid body per car (position, orientation quaternion, linear/angular velocit
 4. **Aero** drag and small downforce. Rolling resistance.
 5. **Integration**: semi-implicit Euler; sub-steps not needed at 120 Hz.
 6. **Collision**: body OBB vs. static world: building footprints extruded (2D polygon vs. OBB on the ground plane with height check), curbs as a height step (wheel ray hits terrain+curb; body may clip over), props as cylinders/boxes with soft push, water as a slow drag region with a reset. Response: impulse with restitution 0.2, friction 0.6, plus a strong damping pulse — bump and stop, never bounce. No damage, no deformation. Flips are possible; an auto-right occurs after 3 s upside down.
-7. **Assists** (settings): stability (yaw damping toward intended heading), traction (cap slip ratio), ABS. Default on at "light" for the arcade-sim feel; off gives the "driver" feel.
+7. **Assists** (settings → Drive → Handling): stability (yaw damping toward the intended heading, plus damping of a sideways slide past the tires' peak slip angle; it lets go while the handbrake is held), traction (cap slip ratio), ABS, grip-limited steering (the road-wheel target follows the front axle's travel plus the stick's share of the peak slip angle above 8–11 m/s; it also pivots the car on the handbrake, helping yaw toward `steer × 1.6 rad/s`), and two multipliers, `grip_boost` (tire grip, lateral and longitudinal) and `brake_boost` (service-brake torque). Presets:
 
-Steering input is filtered: target angle = `max_deg × (1 − speed_sens × v/60 m/s)` × input; angle moves toward target at a rate so a flick does not snap. Controller sticks map linearly with a small deadzone; keyboard uses a 150 ms ramp.
+| Preset | stability | traction | ABS | steering | grip_boost | brake_boost |
+|---|---|---|---|---|---|---|
+| `ARCADE` (default) | 0.8 | 0.8 | on | 1 | 1.2 | 1.4 |
+| `LIGHT` | 0.3 | 0.5 | on | 1 | 1 | 1 |
+| `OFF` ("driver") | 0 | 0 | spec | 0 | 1 | 1 |
+
+Engine braking is a drag at the driven wheels through whatever gear is in, 0.13 g of the car's weight at idle rpm to 0.22 g at the redline: with aero and rolling resistance every car coasts down at ~0.15 g in gear.
+
+Steering input is filtered: target angle = `max_deg × (1 − speed_sens × v/60 m/s)` × input (or the grip-limited target above); the road-wheel angle chases it at `return_rate` per second so a flick does not snap. Controller sticks map linearly with a small deadzone; keyboard uses a 120 ms ramp out and 300 ms back.
 
 Outputs for feel: speed, RPM, gear, wheel slip (audio + tire marks later), g-forces (camera), suspension compression (cockpit shake).
 
