@@ -452,7 +452,7 @@ mod tests {
         // order. Update it deliberately.
         assert_eq!(
             a.state_hash(),
-            0x863e_2110_3da3_c4c7,
+            0x66f1_ac8c_b081_a3ba,
             "{:#x}",
             a.state_hash()
         );

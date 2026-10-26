@@ -14,7 +14,7 @@ use glam::{Mat4, Quat, Vec3};
 use place::Place;
 use render::{Mesh, MeshId, MeshInstance, PointLight, Vertex};
 use vehicle::sim::{DT, FRONT_LEFT, FRONT_RIGHT, WHEEL_RADIUS_M};
-use vehicle::{Assists, FlatGround, Ground, VehicleClass, VehicleInput, VehicleSpec, VehicleState};
+use vehicle::{Assists, VehicleClass, VehicleInput, VehicleSpec, VehicleState};
 
 use crate::input::{Action, InputState};
 use crate::vehicles;
@@ -22,16 +22,12 @@ use crate::vehicles;
 /// The car you get without asking for one.
 pub const DEFAULT_VEHICLE: &str = "corsair_gtx";
 
-/// What the car drives on. When the world collider lands this becomes
-/// `world::WorldCollider` and [`ground_for`] builds it from the Place.
-pub type DriveGround = FlatGround;
+/// What the car drives on: the town's collider (ground heights, curbs, walls, props).
+pub type DriveGround = world::WorldCollider;
 
-/// The ground for `place`. The test town is flat with its asphalt at `y = 0`.
-pub fn ground_for(_place: &Place) -> DriveGround {
-    FlatGround {
-        y: 0.0,
-        friction: 1.0,
-    }
+/// The collider for `place`, built once.
+pub fn ground_for(place: &Place) -> DriveGround {
+    world::WorldCollider::build(place)
 }
 
 /// Where the car starts until Places carry spawn points (`docs/PLACES.md`, "Spawns"): on
@@ -208,11 +204,12 @@ impl Drive {
     }
 
     /// One fixed step with the driver asking for `input`.
-    pub fn step(&mut self, input: VehicleInput, ground: &impl Ground) {
+    pub fn step(&mut self, input: VehicleInput, ground: &DriveGround) {
         self.prev = self.state;
         self.prev_roll = self.roll;
         self.input = input;
         vehicle::step(&self.spec, &mut self.state, &input, &self.assists, ground);
+        world::resolve(&mut self.state, &self.spec, ground);
         for i in 0..4 {
             let r = self.roll[i] + self.state.wheels[i].spin * DT;
             let wrap = if r >= TAU {
@@ -484,11 +481,8 @@ pub fn wheel_mesh() -> Mesh {
 mod tests {
     use super::*;
 
-    fn flat() -> FlatGround {
-        FlatGround {
-            y: 0.0,
-            friction: 1.0,
-        }
+    fn flat() -> DriveGround {
+        ground_for(&place::Place::test_grid())
     }
 
     fn throttle(t: f32) -> VehicleInput {

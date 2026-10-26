@@ -576,16 +576,21 @@ impl CameraRig {
 mod tests {
     use super::*;
     use crate::drive::DEFAULT_VEHICLE;
+    use crate::drive::{ground_for, DriveGround};
     use skywave_core::SIM_DT;
-    use vehicle::{FlatGround, VehicleInput};
+    use vehicle::VehicleInput;
 
     const DT: f32 = SIM_DT as f32;
 
-    fn flat() -> FlatGround {
-        FlatGround {
-            y: 0.0,
-            friction: 1.0,
-        }
+    /// An open lot: the test town with its streets and buildings removed, so the lap
+    /// test turns hard without hitting anything (the apron is flat).
+    fn flat() -> DriveGround {
+        let mut p = place::Place::test_grid();
+        p.roads.nodes.clear();
+        p.roads.edges.clear();
+        p.parcels.clear();
+        p.buildings.clear();
+        ground_for(&p)
     }
 
     fn setup(mode: CameraMode) -> (Drive, CameraRig) {
@@ -741,7 +746,8 @@ mod tests {
                     );
                 }
             }
-            assert!(d.odometer_m() > 100.0);
+            // The lot is grass (friction 0.6), so the lap covers less than it would on asphalt.
+            assert!(d.odometer_m() > 60.0, "{}", d.odometer_m());
         }
     }
 
