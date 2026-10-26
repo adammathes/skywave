@@ -197,6 +197,45 @@ fn other_bad_fields_are_rejected() {
     let mut t = parse(CALIFORNIA);
     t.era.year = 1850;
     assert_eq!(t.validate(), Err(TemplateError::EraYear));
+
+    let bad_massing =
+        |zone: ZoneId, field: &'static str| Err::<(), _>(TemplateError::BadMassing { zone, field });
+    let mut t = parse(CALIFORNIA);
+    t.zones.downtown.massing.as_mut().unwrap().coverage = 1.2;
+    assert_eq!(t.validate(), bad_massing(ZoneId::Downtown, "coverage"));
+    let mut t = parse(CALIFORNIA);
+    t.zones.strip.massing.as_mut().unwrap().floors = (3, 1);
+    assert_eq!(t.validate(), bad_massing(ZoneId::Strip, "floors"));
+    let mut t = parse(CALIFORNIA);
+    t.zones.suburb.massing.as_mut().unwrap().floors_mean = 9.0;
+    assert_eq!(t.validate(), bad_massing(ZoneId::Suburb, "floors_mean"));
+    let mut t = parse(CALIFORNIA);
+    t.zones.residential.massing.as_mut().unwrap().style_weights = vec![1.0];
+    assert_eq!(
+        t.validate(),
+        bad_massing(ZoneId::Residential, "style_weights")
+    );
+}
+
+/// Zones that build have massing; the coverage targets of `docs/WORLD_GENERATION.md`.
+#[test]
+fn california_masses_its_zones() {
+    let t = parse(CALIFORNIA);
+    for (zone, coverage) in [
+        (ZoneId::Downtown, 0.85),
+        (ZoneId::Strip, 0.8),
+        (ZoneId::Residential, 0.35),
+        (ZoneId::Suburb, 0.3),
+        (ZoneId::Industrial, 0.5),
+    ] {
+        let m = t.zones.get(zone).unwrap().massing.as_ref().unwrap();
+        assert_eq!(m.coverage, coverage, "{zone:?}");
+    }
+    let d = t.zones.downtown.massing.as_ref().unwrap();
+    assert_eq!((d.floors, d.floors_mean), ((2, 30), 8.0));
+    assert!(t.zones.park.massing.is_none() && t.zones.highway.massing.is_none());
+    // Stubs build nothing yet.
+    assert!(parse(GREAT_LAKES).zones.downtown.massing.is_none());
 }
 
 #[test]
