@@ -37,7 +37,7 @@ ShapeSpec(
     interior: InteriorShape(
         dash_height: 0.96,
         dash_x: 1.78,
-        wheel_pos: (2.20, 0.80),
+        wheel_pos: (2.20, 0.74),   // rim top under the sight line to the dial (was 0.80)
         wheel_radius: 0.195,
         column_angle_deg: 28,
         mirror_pos: (1.92, 1.33),
