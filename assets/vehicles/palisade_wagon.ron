@@ -1,0 +1,51 @@
+// Palisade Wagon: 1980s full-size family wagon with wood-grain side panels.
+//
+// Intent: slow, heavy, soft and happy about it. A lazy big-displacement engine with lots
+// of low-end torque but little power, a three-speed automatic with tall, widely spaced
+// ratios and soft shifts. The body is tall and nose-heavy, springs are soft and
+// under-damped, and the anti-roll bar is thin, so it leans and floats. Steering is slow
+// to answer. It understeers by design: front lateral grip ends up lower than the rear
+// (oversteer_bias < 0, a forward weight split and more load-sensitive tires), so pushing
+// it into a corner just makes it plow wide. Cruising at 45 mph with the windows down is
+// the point.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "palisade_wagon",
+    name: "Palisade Wagon",
+    era: Eighties,
+    class: Wagon,
+
+    mass_kg: 1750,
+    dims_m: (5.25, 1.9, 1.45),     // length, width, height
+    wheelbase_m: 2.95,
+    track_m: 1.56,
+    cg_height_m: 0.62,             // tall: roof rack, high seating, soft springs
+    cg_fore_aft: 0.45,             // 55% front, nose-heavy
+
+    // Torque arrives early and leaves early; ~110 kW peak.
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 4600,
+        torque_nm: [(800, 230), (1600, 290), (2400, 310), (3200, 300), (4200, 250), (4600, 225)],
+    ),
+    gears: [2.45, 1.45, 1.0],      // wide-ratio three-speed automatic
+    final_drive: 2.73,
+    reverse: 2.2,
+    shift_ms: 450,                 // slow, slurred shifts
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.88, grip_long: 0.85, load_sens: 0.12, slip_peak_deg: 9.5),
+    suspension: Susp(spring_n_m: 24000, damper: 1800, travel_m: 0.22, antiroll: 0.1),
+    steering: Steer(max_deg: 30, speed_sens: 0.5, return_rate: 3.5),   // slow, lots of wheel
+    brakes: Brakes(max_nm: 3000, bias_front: 0.68, abs: false, handbrake_nm: 1200),
+    aero: Aero(cd: 0.44, frontal_m2: 2.45, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.3, body_roll: 0.9, engine_sound: "v8_lazy", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "woodgrain_80s",
+        gauges: [Speedo(0, 85, mph)],   // era-correct 85 mph speedometer, no tach
+        radio: "amber_seek",
+    ),
+    shape: "palisade_wagon.shape.ron",
+)

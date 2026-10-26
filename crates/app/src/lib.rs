@@ -6,6 +6,7 @@
 
 pub mod daylight;
 mod input;
+pub mod vehicles;
 
 pub use input::{Action, InputState, Key, Keyboard};
 

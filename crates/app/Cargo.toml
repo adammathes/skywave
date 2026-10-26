@@ -11,4 +11,6 @@ rust-version.workspace = true
 skywave-core.workspace = true
 place.workspace = true
 render.workspace = true
+vehicle.workspace = true
 glam.workspace = true
+ron.workspace = true

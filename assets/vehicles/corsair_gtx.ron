@@ -1,0 +1,48 @@
+// Corsair GTX: 1980s sports car evoking a low stainless-steel wedge with gull-wing doors.
+//
+// Intent: light, low and eager. Quick off the line but never brutal; the fun is in the
+// tight steering and a light rear that steps out a little when you lift mid-corner
+// (oversteer_bias > 0, slightly rear-light weight split). Stiff, well-damped springs and
+// a firm anti-roll bar keep the body flat, so the cabin reads "sports car" within seconds.
+// Compare palisade_wagon.ron, which is tuned to be the opposite on every axis.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "corsair_gtx",
+    name: "Corsair GTX",
+    era: Eighties,
+    class: Sports,
+
+    mass_kg: 1250,
+    dims_m: (4.3, 1.75, 1.15),     // length, width, height
+    wheelbase_m: 2.45,
+    track_m: 1.5,
+    cg_height_m: 0.45,             // low: the car sits on the road
+    cg_fore_aft: 0.48,             // 52% front, light rear
+
+    // ~170 kW peak near the top: wants to be revved.
+    engine: Engine(
+        idle_rpm: 900,
+        redline_rpm: 7200,
+        torque_nm: [(1000, 180), (3000, 260), (5500, 290), (7000, 230)],
+    ),
+    gears: [3.1, 2.0, 1.4, 1.05, 0.85],   // close-ratio five-speed
+    final_drive: 3.7,
+    reverse: 3.0,
+    shift_ms: 250,
+    auto: true,                            // manual mode comes later
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.25, grip_long: 1.15, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 32000, damper: 3200, travel_m: 0.16, antiroll: 0.45),
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 9.0),   // quick and direct
+    brakes: Brakes(max_nm: 3200, bias_front: 0.62, abs: false, handbrake_nm: 1800),
+    aero: Aero(cd: 0.34, frontal_m2: 1.9, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: 0.2, body_roll: 0.3, engine_sound: "v8_flatplane", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "digital_green",
+    ),
+    shape: "corsair_gtx.shape.ron",
+)

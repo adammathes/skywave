@@ -1,0 +1,16 @@
+[package]
+name = "vehicle"
+description = "Skywave vehicle data: VehicleSpec, its validator and the derived quantities the sim reads."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[features]
+# serde is used without its `std` feature, so the crate stays no_std with this on.
+default = ["serde"]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, optional = true }

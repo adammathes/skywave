@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/place",
+    "crates/vehicle",
     "crates/render",
     "crates/app",
     "crates/platform-native",
@@ -20,6 +21,7 @@ rust-version = "1.87"
 # Internal crates.
 skywave-core = { path = "crates/core" }
 place = { path = "crates/place" }
+vehicle = { path = "crates/vehicle" }
 render = { path = "crates/render" }
 app = { path = "crates/app" }
 
@@ -34,6 +36,10 @@ bytemuck = { version = "=1.25.2", features = ["derive"] }
 log = "=0.4.34"
 env_logger = { version = "=0.11.11", default-features = false }
 pollster = "=1.0.1"
+
+# Data files. serde without `std` keeps `vehicle` no_std; ron parses the specs in `app`.
+serde = { version = "=1.0.229", default-features = false, features = ["derive", "alloc"] }
+ron = { version = "=0.12.2", default-features = false }
 
 # Web.
 wasm-bindgen = "=0.2.129"
