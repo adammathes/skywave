@@ -13,6 +13,8 @@ doc for the area you are touching. `docs/MILESTONES.md` says what is in scope no
   model; no real brand or model names anywhere in code, data or docs. No real-world station call
   signs, neighborhood or street names in procedural content either, not even as placeholders:
   placeholders stick. Invented names only (compiled real places may use real place names).
+- **No named games, studios or consoles** in docs, code, comments or commits. Describe influences
+  generically ("open-world games of the early polygon eras"), never by title.
 - **Zero violence.** Nothing can be hurt. Pedestrians are non-collidable and step aside.
 - **Offline.** The game makes no network requests except to music sources the user chose.
   No LLM/inference at runtime. Ever.
