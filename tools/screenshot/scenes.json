@@ -1,26 +1,26 @@
 {
   "strip-golden-chase": {
     "about": "The default start at golden hour from the mid chase camera.",
-    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-mid", "t": "17:40", "still": "1" }
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-mid", "t": "17:40", "still": "1", "stream": "0" }
   },
   "strip-golden-cockpit": {
     "about": "The default start at golden hour from the driver's seat.",
-    "params": { "seed": "1", "car": "corsair_gtx", "cam": "cockpit", "t": "17:40", "still": "1" }
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "cockpit", "t": "17:40", "still": "1", "stream": "0" }
   },
   "strip-night-cockpit": {
     "about": "The default start at night with the headlights on, from the driver's seat.",
-    "params": { "seed": "1", "car": "corsair_gtx", "cam": "cockpit", "t": "22:30", "lights": "1", "still": "1" }
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "cockpit", "t": "22:30", "lights": "1", "still": "1", "stream": "0" }
   },
   "town-noon-wagon": {
     "about": "The wagon on a residential street at noon from the far chase camera.",
-    "params": { "seed": "1", "car": "palisade_wagon", "cam": "chase-far", "t": "12:00", "pos": "-197.5,-150", "yaw": "0", "still": "1" }
+    "params": { "seed": "1", "car": "palisade_wagon", "cam": "chase-far", "t": "12:00", "pos": "-197.5,-150", "yaw": "0", "still": "1", "stream": "0" }
   },
   "strip-dusk-near": {
     "about": "Dusk on the strip just after the street lamps come on (sun 7° down), headlights on, from the near chase camera.",
-    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-near", "t": "18:35", "lights": "1", "pos": "60,-4.9", "yaw": "270", "still": "1" }
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-near", "t": "18:35", "lights": "1", "pos": "60,-4.9", "yaw": "270", "still": "1", "stream": "0" }
   },
   "town-map-full": {
     "about": "The full-screen map at the default start: the whole town north-up with the player arrow.",
-    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-mid", "t": "17:40", "map": "1", "still": "1" }
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-mid", "t": "17:40", "map": "1", "still": "1", "stream": "0" }
   }
 }

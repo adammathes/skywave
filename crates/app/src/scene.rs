@@ -17,6 +17,8 @@
 //!   scene at rest (for screenshot goldens; input is ignored).
 //! - `map=1`: start with the full-screen map open.
 //! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
+//! - `stream=0`: build the whole town at load instead of streaming it round the camera
+//!   (`stream=1`, the default; see `app::stream`). The screenshot goldens use it.
 
 use crate::camera::CameraMode;
 use crate::drive::{DEFAULT_VEHICLE, START_GROUND, START_HEADING_RAD};
@@ -41,6 +43,8 @@ pub struct SceneSetup {
     pub map: bool,
     /// UI scale for this session, overriding the setting.
     pub ui_scale: Option<f32>,
+    /// Stream the town round the camera (else build it all at load).
+    pub stream: bool,
 }
 
 impl Default for SceneSetup {
@@ -57,6 +61,7 @@ impl Default for SceneSetup {
             still: false,
             map: false,
             ui_scale: None,
+            stream: true,
         }
     }
 }
@@ -76,8 +81,8 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 11] = [
-        "seed", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map", "ui",
+    pub const KEYS: [&'static str; 12] = [
+        "seed", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map", "ui", "stream",
     ];
 
     /// Sets one key (see the module docs).
@@ -108,6 +113,7 @@ impl SceneSetup {
             "fly" => self.fly = parse_switch(value).ok_or_else(bad)?,
             "still" => self.still = parse_switch(value).ok_or_else(bad)?,
             "map" => self.map = parse_switch(value).ok_or_else(bad)?,
+            "stream" => self.stream = parse_switch(value).ok_or_else(bad)?,
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;
                 if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {
@@ -153,10 +159,11 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5",
+            "?seed=7&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0",
         )
         .unwrap();
-        assert!(s.map);
+        assert!(s.map && !s.stream);
+        assert!(SceneSetup::default().stream, "streamed by default");
         assert_eq!(s.ui_scale, Some(1.5));
         assert_eq!(s.seed, 7);
         assert_eq!(s.car, "palisade_wagon");
@@ -188,6 +195,7 @@ mod tests {
             "map=yes",
             "ui=3",
             "ui=big",
+            "stream=2",
         ] {
             assert!(SceneSetup::from_query(q).is_err(), "{q}");
         }

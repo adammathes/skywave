@@ -236,6 +236,67 @@ fn cut(a: &Vertex, b: &Vertex, axis: usize, at: f32) -> Vertex {
     }
 }
 
+/// The light tiles of one streamed chunk's geometry `base` (all its kinds as one mesh),
+/// built without its neighbours: whole when none of `lights` reaches it (the terrain
+/// apron), else cut along the chunk grid and each piece split for `lights` as
+/// [`split_for_lights`] does. Pieces past the chunk's own cell (lane paint running on into
+/// the next one) become tiles of their own instead of joining the neighbour's, so the
+/// chunk can come and go alone. At most `max_tiles` (at least 1): the last ones are
+/// merged when there would be more.
+pub fn chunk_tiles(
+    base: Mesh,
+    own: [i32; 2],
+    cell: f32,
+    lights: &[PointLight],
+    max_tiles: usize,
+) -> Vec<Tile> {
+    let mut tiles = Vec::new();
+    let Some(bounds) = mesh_bounds(&base).filter(|_| !base.indices.is_empty()) else {
+        return tiles;
+    };
+    if !lights.iter().any(|l| bounds.reached_by(l)) {
+        tiles.push(Tile { mesh: base, bounds });
+        return tiles;
+    }
+    let mut cells = BTreeMap::new();
+    bin_by_cells(base, cell, &mut cells);
+    let mut over = Vec::new();
+    for ([z, x], mesh) in cells {
+        let origin = [x as f32 * cell, z as f32 * cell];
+        let into = if [x, z] == own { &mut tiles } else { &mut over };
+        split_for_lights(mesh, origin, cell, lights, into);
+    }
+    // A piece past the cell joins the first tile it can share a light set with: the two
+    // together are still reached by no more lights than one draw takes.
+    for piece in over {
+        let union = |b: &Bounds| Bounds {
+            min: b.min.min(piece.bounds.min),
+            max: b.max.max(piece.bounds.max),
+        };
+        let fits = |t: &Tile| {
+            let u = union(&t.bounds);
+            lights.iter().filter(|l| u.reached_by(l)).count() <= STATIC_LIGHTS_PER_TILE
+        };
+        match tiles.iter_mut().find(|t| fits(t)) {
+            Some(t) => {
+                append(&mut t.mesh, &piece.mesh);
+                t.bounds = union(&t.bounds);
+            }
+            None => tiles.push(piece),
+        }
+    }
+    while tiles.len() > max_tiles.max(1) {
+        let last = tiles.pop().expect("more than one tile");
+        let into = tiles.last_mut().expect("at least one tile");
+        append(&mut into.mesh, &last.mesh);
+        into.bounds = Bounds {
+            min: into.bounds.min.min(last.bounds.min),
+            max: into.bounds.max.max(last.bounds.max),
+        };
+    }
+    tiles
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

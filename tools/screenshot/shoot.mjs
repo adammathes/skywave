@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Headless captures of the web build: serves dist/, opens it in Chromium on SwiftShader (so
-// the WebGL2 path is exercised), waits for the first frame and a few more, saves a 1280×720
+// the WebGL2 path is exercised), waits for the first frame, for streaming to finish
+// (`window.skywaveStreamIdle`) and a few more frames, saves a 1280×720
 // screenshot and fails if the page errored or the image is blank.
 //
 //   node tools/screenshot/shoot.mjs --scene strip-golden-chase   # -> out/<name>.png
@@ -45,6 +46,8 @@ if (!(WIDTH > 0 && HEIGHT > 0)) {
 const READY_TIMEOUT_MS = 60_000;
 // SwiftShader renders the town at seconds per frame on a loaded machine.
 const CAPTURE_TIMEOUT_MS = 180_000;
+// Streaming the ring takes a few hundred frames of SwiftShader.
+const STREAM_TIMEOUT_MS = 900_000;
 
 const scenes = JSON.parse(await readFile(join(here, "scenes.json"), "utf8"));
 // Written out as is: the game does not percent-decode, and `t=17:40`/`pos=x,z` need none.
@@ -143,6 +146,16 @@ async function open(tag, query) {
   }));
   if (error) throw new Error(`page reported: ${error}`);
   console.log(`shoot: ${tag}: ready after ${Date.now() - started} ms on ${backend}`);
+  if (backend !== "selftest") {
+    // A streamed scene draws its whole ring once nothing is left to stream; with
+    // `stream=0` that is at once.
+    await page.waitForFunction(() => window.skywaveStreamIdle === true, null, {
+      timeout: STREAM_TIMEOUT_MS,
+      polling: 250,
+    });
+    const stats = await page.evaluate(() => window.skywaveStreamStats);
+    console.log(`shoot: ${tag}: streaming idle after ${Date.now() - started} ms${stats ? `: ${stats}` : ""}`);
+  }
   return { page, problems, logs };
 }
 

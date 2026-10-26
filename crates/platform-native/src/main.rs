@@ -13,6 +13,9 @@
 //! `--scene car=ID`. `--stats` also prints the detected gamepads at startup and as they
 //! connect; otherwise that goes to the info log (`RUST_LOG=info`).
 //!
+//! The town streams round the camera within `app::stream::StreamBudget::NATIVE` (13×13
+//! chunks, 4 ms a sim step); `--scene stream=0` builds it all at load instead.
+//!
 //! Esc / Start opens the pause menu; settings and bindings are saved to
 //! `$XDG_CONFIG_HOME/skywave/settings.json` (see `settings`).
 
@@ -26,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use app::{App, InputMapper, Key, RawInput, SceneSetup, MOUSE_RIGHT};
 use pad::Pads;
-use render::Renderer;
+use render::{Renderer, RendererOptions};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -224,15 +227,21 @@ impl Gpu {
         config.present_mode = wgpu::PresentMode::AutoVsync;
         surface.configure(&device, &config);
 
-        let mut renderer = Renderer::new(
+        let options = RendererOptions {
+            chunk_pool: app.chunk_pool_config(),
+            ..RendererOptions::default()
+        };
+        let mut renderer = Renderer::with_options(
             &device,
             &queue,
             config.format,
             (config.width, config.height),
+            options,
         );
         for mesh in app.meshes() {
             renderer.add_mesh(mesh);
         }
+        renderer.reserve_instances(app.max_instances());
         let map = app.map_image();
         renderer.upload_map(map.w, map.h, &map.rgba);
         Ok(Gpu {
@@ -256,6 +265,7 @@ impl Gpu {
     }
 
     fn draw(&mut self, app: &mut App, alpha: f32) {
+        app.sync_chunks(&mut self.renderer);
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -291,6 +301,8 @@ struct Shell {
     grabbed: bool,
     gpu: Option<Gpu>,
     last_frame: Option<Instant>,
+    /// Origin of the streaming clock.
+    started: Instant,
     stats: Stats,
     error: Option<String>,
 }
@@ -370,7 +382,8 @@ impl ApplicationHandler for Shell {
                 let dt = self.last_frame.map_or(Duration::ZERO, |t| now - t);
                 self.last_frame = Some(now);
                 self.pads.poll(&mut self.input, self.focused);
-                let steps = self.app.frame(&mut self.input, dt.as_secs_f64());
+                let clock = || self.started.elapsed().as_secs_f64();
+                let steps = self.app.frame(&mut self.input, dt.as_secs_f64(), &clock);
                 if self.app.quit_requested() {
                     event_loop.exit();
                     return;
@@ -442,6 +455,7 @@ fn main() -> ExitCode {
         }
     };
     app.set_can_quit(true);
+    app.set_stream_budget(app::stream::StreamBudget::NATIVE);
     app.set_settings_store(Box::new(settings::FileStore::from_env()));
     let mut shell = Shell {
         app,
@@ -452,6 +466,7 @@ fn main() -> ExitCode {
         grabbed: false,
         gpu: None,
         last_frame: None,
+        started: Instant::now(),
         stats: Stats::default(),
         error: None,
     };
