@@ -1,6 +1,6 @@
 name: Release
 
-# A `v*` tag builds the web and Linux packages and publishes them as a GitHub Release with
+# A `v*` tag builds the web, Linux and macOS packages and publishes them as a GitHub Release with
 # generated notes. Running it by hand (workflow_dispatch) is a dry run: the same packages,
 # named with the `tag` input, are only uploaded as workflow artifacts.
 
@@ -116,8 +116,42 @@ jobs:
           path: out/skywave-linux-x86_64-*.tar.gz
           if-no-files-found: error
 
+  macos:
+    runs-on: macos-14 # Apple Silicon
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: '[[ "$TAG" =~ ^[A-Za-z0-9._+-]+$ ]] || { echo "unusable tag: $TAG" >&2; exit 1; }'
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos
+
+      - name: Build
+        run: cargo build --release -p platform-native --locked
+
+      - name: Package
+        run: |
+          crates/platform-native/package/package-mac.sh target/release/skywave "$TAG" out arm64
+          tar -xzf "out/skywave-macos-arm64-$TAG.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/skywave-macos-arm64-$TAG/Skywave.app/Contents/MacOS/skywave" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skywave-macos-arm64
+          path: out/skywave-macos-arm64-*.tar.gz
+          if-no-files-found: error
+
   release:
-    needs: [web, linux]
+    needs: [web, linux, macos]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -136,6 +170,7 @@ jobs:
           files: |
             out/skywave-web-*.zip
             out/skywave-linux-x86_64-*.tar.gz
+            out/skywave-macos-arm64-*.tar.gz
             out/SHA256SUMS.txt
           generate_release_notes: true
           fail_on_unmatched_files: true
