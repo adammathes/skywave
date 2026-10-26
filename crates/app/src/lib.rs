@@ -145,15 +145,11 @@ impl App {
         let spec = vehicles::builtin_spec(vehicle_id)?;
         let shape = vehicles::builtin_shape(&spec)?;
         let model = CarModel::build(&spec, &shape)?;
-        let drive = Drive::with_layout(
-            spec,
-            model.layout,
-            drive::START_GROUND,
-            drive::START_HEADING_RAD,
-        );
         // The test town's layout is fixed; the session seed drives its detailing.
         let mut place = Place::test_grid();
         place.header.seed = seed.0;
+        let start = place.player_start().ok_or("the place has no PlayerStart")?;
+        let drive = Drive::with_layout(spec, model.layout, start.pos, start.heading);
         let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
         let mut meshes = render_meshes(&chunks);
         let mut instances: Vec<MeshInstance> = (0..meshes.len())

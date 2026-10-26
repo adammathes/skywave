@@ -330,7 +330,7 @@ pub fn build(
             len,
             deg,
             e.class,
-            e.lanes,
+            e.lanes(),
             &paints,
             seed ^ i as u64,
         );
@@ -591,7 +591,11 @@ fn markings(
         }
     };
     match class {
-        RoadClass::Local | RoadClass::Collector => {
+        RoadClass::Local
+        | RoadClass::Collector
+        | RoadClass::Alley
+        | RoadClass::Beachfront
+        | RoadClass::Rural => {
             dashed(m, 0.0, 0.12, 3.0, 6.0, p.yellow);
         }
         RoadClass::Arterial | RoadClass::Highway => {
@@ -792,8 +796,11 @@ mod tests {
         let mut place = Place::test_grid();
         place.roads.nodes.clear();
         place.roads.edges.clear();
-        place.roads.nodes.push(place::Node { pos: [0.0, 0.0] });
-        let template = Place::test_grid().roads.edges[0];
+        place.roads.nodes.push(place::Node {
+            pos: [0.0, 0.0],
+            elevation: 0.0,
+        });
+        let template = Place::test_grid().roads.edges[0].clone();
         for (k, (x, z)) in [
             (80.0, 0.0),
             (30.0, -70.0),
@@ -804,11 +811,14 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            place.roads.nodes.push(place::Node { pos: [x, z] });
+            place.roads.nodes.push(place::Node {
+                pos: [x, z],
+                elevation: 0.0,
+            });
             place.roads.edges.push(place::Edge {
                 a: 0,
                 b: k as u32 + 1,
-                ..template
+                ..template.clone()
             });
         }
         let net = Network::new(&place);

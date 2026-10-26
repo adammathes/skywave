@@ -1,11 +1,21 @@
 [package]
 name = "place"
-description = "Plain-data description of a Skywave place: header, terrain, road graph, buildings."
+description = "Plain-data description of a Skywave place: skeleton, detail tables, chunk index, binary codec and validation."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# serde is used without its `std` feature, so the crate stays no_std with this on. The
+# JSON encoding (tests, tools) is serde_json over these derives.
+default = ["serde"]
+serde = ["dep:serde"]
+
 [dependencies]
+serde = { workspace = true, optional = true }
 skywave-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

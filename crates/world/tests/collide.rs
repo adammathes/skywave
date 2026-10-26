@@ -745,7 +745,19 @@ fn parked_on_the_strip_stays_put() {
 /// From the middle of a street, square toward a house front: over the curb, across the
 /// yard, into the wall. Returns the start and the direction.
 fn yard_run(c: &WorldCollider) -> ([f32; 2], [f32; 2]) {
-    for (i, w) in c.walls.iter().enumerate() {
+    // Walls nearest the first block's east street first, so the pick does not depend on
+    // the order of the Place's tables.
+    const NEAR: [f32; 2] = [-300.0, -380.0];
+    let mut order: Vec<usize> = (0..c.walls.len()).collect();
+    let d2 = |i: usize| {
+        let w = &c.walls[i];
+        let m = add(w.a, sub(w.b, w.a), 0.5);
+        let v = sub(m, NEAR);
+        dot(v, v)
+    };
+    order.sort_by(|&a, &b| d2(a).total_cmp(&d2(b)));
+    for i in order {
+        let w = &c.walls[i];
         let len = dot(sub(w.b, w.a), sub(w.b, w.a)).sqrt();
         if len < 6.0 {
             continue;
@@ -802,7 +814,7 @@ fn scripted_drive_is_deterministic_and_pinned() {
     // sim, the collider, a spec or the town moves them: run
     // `cargo test -p world --test collide scripted -- --nocapture`, copy the printed hashes
     // here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0x677d_614c_1e95_6df7, 0x1b36_6eba_f5e3_36a0];
+    const PINNED: [u64; 2] = [0x32e3_ad68_433e_d16b, 0x8f60_30ca_ad8d_42b2];
     let (_, c) = town();
     let (start, d) = yard_run(&c);
     let mut hashes = [0u64; 2];
