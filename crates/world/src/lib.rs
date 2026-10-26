@@ -67,26 +67,60 @@ pub struct ChunkMesh {
     pub mesh: WorldMesh,
 }
 
-/// Collects meshes by chunk and kind while building.
+/// Which chunks a [`MeshSet`] keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Keep {
+    All,
+    Chunk([i32; 2]),
+    Nothing,
+}
+
+/// Collects meshes by chunk and kind while building. A set may keep only one chunk's
+/// meshes ([`build_chunk`]); writes to the others go to a scratch mesh that is cleared on
+/// each use, and builders may skip work [`MeshSet::wants`] says nobody keeps. Either way a
+/// kept mesh receives the same writes in the same order, so it comes out bit-identical.
 pub struct MeshSet {
     chunk_size: f32,
+    keep: Keep,
     meshes: Vec<ChunkMesh>,
+    sink: WorldMesh,
 }
 
 impl MeshSet {
-    fn new(chunk_size: f32) -> MeshSet {
+    fn new(chunk_size: f32, keep: Keep) -> MeshSet {
         MeshSet {
             chunk_size: if chunk_size > 0.0 { chunk_size } else { 128.0 },
+            keep,
             meshes: Vec::new(),
+            sink: WorldMesh::default(),
+        }
+    }
+
+    /// Chunk coordinates of the ground point `p`.
+    pub fn chunk_of(&self, p: V2) -> [i32; 2] {
+        [
+            floor(p.x / self.chunk_size) as i32,
+            floor(p.y / self.chunk_size) as i32,
+        ]
+    }
+
+    /// Whether writes for the chunk containing `p` are kept.
+    pub fn wants(&self, p: V2) -> bool {
+        match self.keep {
+            Keep::All => true,
+            Keep::Chunk(c) => self.chunk_of(p) == c,
+            Keep::Nothing => false,
         }
     }
 
     /// The mesh of `kind` in the chunk containing `p`.
     pub fn at(&mut self, p: V2, kind: MeshKind) -> &mut WorldMesh {
-        let chunk = [
-            floor(p.x / self.chunk_size) as i32,
-            floor(p.y / self.chunk_size) as i32,
-        ];
+        if !self.wants(p) {
+            self.sink.vertices.clear();
+            self.sink.indices.clear();
+            return &mut self.sink;
+        }
+        let chunk = self.chunk_of(p);
         let found = self
             .meshes
             .iter()
@@ -104,6 +138,14 @@ impl MeshSet {
         };
         &mut self.meshes[i].mesh
     }
+
+    /// The non-empty meshes, sorted by kind then chunk.
+    fn finish(self) -> Vec<ChunkMesh> {
+        let mut meshes = self.meshes;
+        meshes.retain(|c| !c.mesh.indices.is_empty());
+        meshes.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.chunk.cmp(&b.chunk)));
+        meshes
+    }
 }
 
 /// Totals from a build, for budgets and tests.
@@ -120,67 +162,233 @@ pub struct BuildStats {
     pub props: usize,
 }
 
+/// A step of building a chunk, in the order a whole build runs them; each writes only its
+/// own kinds of mesh, so a streamer can stop between them.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Stage {
+    /// Terrain apron, lots, parks and parking lots ([`MeshKind::Ground`]).
+    Ground = 0,
+    /// Roads, junctions and lane paint ([`MeshKind::Road`], [`MeshKind::Marking`]).
+    Roads = 1,
+    /// Buildings with their walks and drives ([`MeshKind::Building`]).
+    Buildings = 2,
+    /// Street furniture, trees and parked cars ([`MeshKind::Prop`]).
+    Props = 3,
+}
+
+impl Stage {
+    pub const ALL: [Stage; 4] = [Stage::Ground, Stage::Roads, Stage::Buildings, Stage::Props];
+}
+
+/// What every chunk of a place shares, worked out once per place: the road network, the
+/// blocks, every building's plan and every prop's placement. Building a chunk from it
+/// ([`ChunkPlan::build_stage`]) only meshes what lies in that chunk.
+pub struct ChunkPlan {
+    seed: u64,
+    chunk_size: f32,
+    net: roads::Network,
+    side_zone: Vec<[Option<ZoneId>; 2]>,
+    blocks: Vec<ground::Block>,
+    plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)>,
+    fronts: Vec<usize>,
+    /// Every prop in build order: the lots' parked cars, the house sites', the streets'.
+    props: Vec<props::Prop>,
+    kit: props::PropKit,
+    /// Chunks that may hold a mesh, `[min, max]` inclusive.
+    chunk_range: [[i32; 2]; 2],
+}
+
+impl ChunkPlan {
+    pub fn new(place: &Place, palette: &Palette) -> ChunkPlan {
+        let seed = place.header.seed;
+        let net = roads::Network::new(place);
+        let side_zone = side_zones(place, &net);
+        let blocks = ground::blocks(&net);
+
+        // Plan every building first: the ground needs to know where strip malls face.
+        let lookup = Lookup::new(place, &net);
+        let plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)> = place
+            .buildings
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let env = lookup.facade_envs(i);
+                let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
+                let plan = buildings::plan_building(b, &env, door_pick);
+                (env, plan)
+            })
+            .collect();
+        let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
+
+        // The props, meshing nothing: the lots' parked cars, the house sites' props (their
+        // walks go to a scratch mesh), then the streets' and the parks'.
+        let mut none = MeshSet::new(place.header.chunk_size_m, Keep::Nothing);
+        let mut props = ground::build(place, &blocks, &fronts, palette, seed, &mut none);
+        let mut scratch = WorldMesh::default();
+        for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
+            scratch.vertices.clear();
+            scratch.indices.clear();
+            props.extend(buildings::house_site(
+                &mut scratch,
+                b,
+                plan,
+                env,
+                palette,
+                seed,
+                i as u32,
+            ));
+        }
+        let parks: Vec<Vec<V2>> = blocks
+            .iter()
+            .filter(|b| ground::is_park(place, b))
+            .map(|b| b.poly.clone())
+            .collect();
+        props.extend(props::place(place, &net, &side_zone, &parks, seed));
+
+        // The place's chunks and the terrain apron's.
+        let o = place.header.chunk_origin;
+        let n = place.header.size_chunks;
+        let mut lo = [i32::from(o[0]), i32::from(o[1])];
+        let mut hi = [
+            lo[0] + i32::from(n[0].max(1)) - 1,
+            lo[1] + i32::from(n[1].max(1)) - 1,
+        ];
+        if let Some((a, b)) = ground::apron_bounds(place) {
+            let (a, b) = (none.chunk_of(a), none.chunk_of(b));
+            for i in 0..2 {
+                lo[i] = lo[i].min(a[i]);
+                hi[i] = hi[i].max(b[i]);
+            }
+        }
+        ChunkPlan {
+            seed,
+            chunk_size: none.chunk_size,
+            net,
+            side_zone,
+            blocks,
+            plans,
+            fronts,
+            props,
+            kit: props::PropKit::new(),
+            chunk_range: [lo, hi],
+        }
+    }
+
+    /// Every prop of the place, in build order.
+    pub fn props(&self) -> &[props::Prop] {
+        &self.props
+    }
+
+    /// Chunks that may hold a mesh, `[min, max]` inclusive; every other chunk is empty.
+    pub fn chunk_range(&self) -> [[i32; 2]; 2] {
+        self.chunk_range
+    }
+
+    /// Chunk edge, meters.
+    pub fn chunk_size(&self) -> f32 {
+        self.chunk_size
+    }
+
+    /// The chunk holding ground point `p` (`[x, z]`), as the builders file meshes.
+    pub fn chunk_of(&self, p: [f32; 2]) -> [i32; 2] {
+        [
+            floor(p[0] / self.chunk_size) as i32,
+            floor(p[1] / self.chunk_size) as i32,
+        ]
+    }
+
+    /// The meshes `stage` writes in `chunk`, sorted by kind (empty ones left out): the
+    /// same as [`build_chunk_meshes`] gives for that chunk and those kinds.
+    pub fn build_stage(
+        &self,
+        place: &Place,
+        palette: &Palette,
+        chunk: [i32; 2],
+        stage: Stage,
+    ) -> Vec<ChunkMesh> {
+        let mut out = MeshSet::new(self.chunk_size, Keep::Chunk(chunk));
+        self.run(place, palette, stage, &mut out, None);
+        out.finish()
+    }
+
+    fn run(
+        &self,
+        place: &Place,
+        palette: &Palette,
+        stage: Stage,
+        out: &mut MeshSet,
+        mut stats: Option<&mut BuildStats>,
+    ) {
+        let seed = self.seed;
+        match stage {
+            Stage::Ground => {
+                // Its parked cars are in `props` already.
+                ground::build(place, &self.blocks, &self.fronts, palette, seed, out);
+            }
+            Stage::Roads => roads::build(place, &self.net, &self.side_zone, palette, seed, out),
+            Stage::Buildings => {
+                let all = place.buildings.iter().zip(&self.plans).enumerate();
+                for (i, (b, (env, plan))) in all {
+                    let fp = ground::to_v2(&b.footprint);
+                    let c = ground::centroid(&fp);
+                    if !out.wants(c) {
+                        continue;
+                    }
+                    let m = out.at(c, MeshKind::Building);
+                    let s = buildings::build(m, b, plan, palette, seed, i as u32);
+                    // Its props are in `props` already.
+                    buildings::house_site(m, b, plan, env, palette, seed, i as u32);
+                    if let Some(stats) = stats.as_deref_mut() {
+                        stats.buildings += 1;
+                        stats.windows += s.windows;
+                        stats.lit_windows += s.lit_windows;
+                        stats.max_building_triangles =
+                            stats.max_building_triangles.max(s.triangles);
+                    }
+                }
+            }
+            Stage::Props => {
+                for p in &self.props {
+                    if out.wants(p.pos) {
+                        props::build(out.at(p.pos, MeshKind::Prop), p, palette, &self.kit);
+                    }
+                }
+                if let Some(stats) = stats {
+                    stats.props = self.props.len();
+                }
+            }
+        }
+    }
+}
+
 /// Builds all meshes of `place`, grouped by chunk and [`MeshKind`], sorted by kind then
 /// chunk.
 pub fn build_chunk_meshes(place: &Place, palette: &Palette) -> Vec<ChunkMesh> {
     build_with_stats(place, palette).0
 }
 
+/// The meshes of one chunk, sorted by kind: exactly the ones [`build_chunk_meshes`] gives
+/// for it. To build many chunks, make one [`ChunkPlan`] and use
+/// [`ChunkPlan::build_stage`].
+pub fn build_chunk(place: &Place, palette: &Palette, chunk: [i32; 2]) -> Vec<ChunkMesh> {
+    let plan = ChunkPlan::new(place, palette);
+    let mut out = MeshSet::new(plan.chunk_size, Keep::Chunk(chunk));
+    for stage in Stage::ALL {
+        plan.run(place, palette, stage, &mut out, None);
+    }
+    out.finish()
+}
+
 /// [`build_chunk_meshes`] plus totals.
 pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, BuildStats) {
-    let seed = place.header.seed;
-    let mut out = MeshSet::new(place.header.chunk_size_m);
+    let plan = ChunkPlan::new(place, palette);
+    let mut out = MeshSet::new(plan.chunk_size, Keep::All);
     let mut stats = BuildStats::default();
-    let net = roads::Network::new(place);
-    let side_zone = side_zones(place, &net);
-    let blocks = ground::blocks(&net);
-
-    // Plan every building first: the ground needs to know where strip malls face.
-    let lookup = Lookup::new(place, &net);
-    let plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)> = place
-        .buildings
-        .iter()
-        .enumerate()
-        .map(|(i, b)| {
-            let env = lookup.facade_envs(i);
-            let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-            let plan = buildings::plan_building(b, &env, door_pick);
-            (env, plan)
-        })
-        .collect();
-    let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
-
-    let mut props = ground::build(place, &blocks, &fronts, palette, seed, &mut out);
-    roads::build(place, &net, &side_zone, palette, seed, &mut out);
-
-    for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
-        let fp = ground::to_v2(&b.footprint);
-        let m = out.at(ground::centroid(&fp), MeshKind::Building);
-        let s = buildings::build(m, b, plan, palette, seed, i as u32);
-        props.extend(buildings::house_site(
-            m, b, plan, env, palette, seed, i as u32,
-        ));
-        stats.buildings += 1;
-        stats.windows += s.windows;
-        stats.lit_windows += s.lit_windows;
-        stats.max_building_triangles = stats.max_building_triangles.max(s.triangles);
+    for stage in Stage::ALL {
+        plan.run(place, palette, stage, &mut out, Some(&mut stats));
     }
-
-    let parks: Vec<Vec<V2>> = blocks
-        .iter()
-        .filter(|b| ground::is_park(place, b))
-        .map(|b| b.poly.clone())
-        .collect();
-    props.extend(props::place(place, &net, &side_zone, &parks, seed));
-    let kit = props::PropKit::new();
-    for p in &props {
-        props::build(out.at(p.pos, MeshKind::Prop), p, palette, &kit);
-    }
-    stats.props = props.len();
-
-    let mut meshes = out.meshes;
-    meshes.retain(|c| !c.mesh.indices.is_empty());
-    meshes.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.chunk.cmp(&b.chunk)));
+    let meshes = out.finish();
     for c in &meshes {
         let t = c.mesh.triangle_count();
         stats.triangles += t;
@@ -442,6 +650,58 @@ mod tests {
             mesh_hash(&meshes),
             mesh_hash(&build_chunk_meshes(&other, &pal))
         );
+    }
+
+    /// Building chunk by chunk (and stage by stage) gives each chunk exactly its slice of the
+    /// whole build, hash for hash, and nothing outside the plan's chunk range.
+    #[test]
+    fn a_chunk_build_is_the_slice_of_the_whole_build() {
+        let place = Place::test_grid();
+        let pal = Palette::socal_1985();
+        let all = build_chunk_meshes(&place, &pal);
+        let plan = ChunkPlan::new(&place, &pal);
+        let [lo, hi] = plan.chunk_range();
+        let mut chunks: Vec<[i32; 2]> = all.iter().map(|c| c.chunk).collect();
+        chunks.sort_unstable();
+        chunks.dedup();
+        for c in &chunks {
+            assert!((lo[0]..=hi[0]).contains(&c[0]) && (lo[1]..=hi[1]).contains(&c[1]));
+        }
+        let t0 = Instant::now();
+        let mut total = 0;
+        let (mut per_stage, mut worst) = ([0.0f64; 4], [0.0f64; 4]);
+        for z in lo[1]..=hi[1] {
+            for x in lo[0]..=hi[0] {
+                let mut staged: Vec<ChunkMesh> = Vec::new();
+                for (k, &s) in Stage::ALL.iter().enumerate() {
+                    let t = Instant::now();
+                    staged.extend(plan.build_stage(&place, &pal, [x, z], s));
+                    let dt = t.elapsed().as_secs_f64() * 1000.0;
+                    per_stage[k] += dt;
+                    worst[k] = worst[k].max(dt);
+                }
+                staged.sort_by_key(|c| c.kind);
+                let slice: Vec<ChunkMesh> =
+                    all.iter().filter(|c| c.chunk == [x, z]).cloned().collect();
+                assert_eq!(mesh_hash(&staged), mesh_hash(&slice), "chunk {x}, {z}");
+                assert_eq!(staged.len(), slice.len());
+                total += staged.len();
+            }
+        }
+        std::println!(
+            "{} chunks with meshes in {:?}..={:?}, staged one by one in {:.1} ms; ms per stage total {:.1?}, worst chunk {:.2?}",
+            chunks.len(),
+            lo,
+            hi,
+            t0.elapsed().as_secs_f64() * 1000.0,
+            per_stage,
+            worst
+        );
+        assert_eq!(total, all.len());
+        let c = chunks[chunks.len() / 2];
+        let one = build_chunk(&place, &pal, c);
+        let slice: Vec<ChunkMesh> = all.iter().filter(|m| m.chunk == c).cloned().collect();
+        assert_eq!(one, slice);
     }
 
     #[test]

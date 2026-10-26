@@ -696,7 +696,7 @@ fn props_of(place: &Place, net: &Network, blocks: &[ground::Block]) -> Vec<Prop>
     let seed = place.header.seed;
     let pal = Palette::socal_1985();
     let lookup = crate::Lookup::new(place, net);
-    let mut scratch = MeshSet::new(place.header.chunk_size_m);
+    let mut scratch = MeshSet::new(place.header.chunk_size_m, crate::Keep::Nothing);
     let mut mesh = WorldMesh::default();
     let mut out = Vec::new();
     let mut house = Vec::new();
