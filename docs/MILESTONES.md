@@ -136,3 +136,60 @@ Pinned hashes moved deliberately in their own commit: vehicle replay, world curb
 - Night: is the dash bright enough to read but dark enough to feel like night (cabin night
   0.9)? Do the headlights reach far enough? Do the sodium pools and neon sit right against the
   deep blue sky, or should the night exposure (EV 3) come down?
+
+### Feel pass 2 (after first play)
+The owner's first play of the web build on real hardware: "a little bit too slippy/sloppy ...
+a little challenging. Braking also seems too slow/sloppy, maybe we want it to feel tighter";
+"hard to see out of the cockpits ... maybe an option to change FOV or move it a bit?"; and the
+camera mode was not remembered between sessions.
+
+**Handling** (`vehicle::sim`, specs, `app::input`). New `Assists::ARCADE`, the default:
+stability 0.8 (was 0.3), traction 0.8 (0.5), ABS, grip-limited steering, `grip_boost` 1.2
+(tire grip, both directions) and `brake_boost` 1.4 (service brakes). `LIGHT` and `OFF` are
+kept and offered on the new Drive page (Handling: Arcade / Light / Off, saved). The stability
+assist now also damps a sideways slide past the tires' peak slip angle (`SLIDE_GAIN` 4/s) and
+lets go while the handbrake is held; the steering assist then helps yaw toward
+`steer × 1.6 rad/s` (`HANDBRAKE_YAW_*`), so the handbrake pivots the car. Engine braking is a
+drag at the driven wheels through any gear, 0.13 g of the car's weight at idle rpm to 0.22 g
+at the redline (was 0.3 × peak torque at the redline, at the crank). Steering `return_rate`
+corsair 9 → 12, palisade 3.5 → 5; keyboard steer ramp 150 → 120 ms out (300 ms back as
+before). `brakes.max_nm` is unchanged: the brake boost and engine braking already put the
+arcade stops under the ~38 m / ~45 m targets, and 3500 / 4200 N·m was tried and gave 34.7 m /
+41.7 m.
+
+| Test number (default assists unless named) | Before (light default) | After (arcade default) |
+|---|---|---|
+| 60–0 mph, corsair / palisade | 47.6 / 56.4 m | 36.2 / 43.3 m (asserted ≤ 38.5 / 45.5) |
+| 60–0 mph with light assists | 47.6 / 56.4 m | 45.3 / 55.2 m (asserted ≤ before) |
+| 60–0 mph assists off, ABS / none | 47.6 / 56.4, 47.6 / 58.2 m | 45.3 / 55.2, 48.9 / 58.1 m |
+| Lift-off at 25 m/s, mean decel over 2 s | 0.065 / 0.043 g | 0.160 / 0.141 g |
+| Handbrake + half stick, 1 s from 15 m/s | 42° / 21° | 92° / 59° (off: 82° / 42°) |
+| Launch rear slip ratio (wheelspin) | 0.433 / 0.072 | 0.062 / 0.058 |
+| Full lock at 30 mph, peak lateral g | 1.16 / 0.83 g | 1.36 / 0.97 g, no roll |
+| 0–60 mph (bands 5–8, 10–16 s) | 5.83 / 12.67 s | 5.60 / 12.60 s |
+| Top speed | 69.6 / 49.3 m/s | 69.6 / 49.4 m/s |
+| Skidpad (assists off) | 1.075 / 0.764 g | 1.075 / 0.763 g |
+| Road-wheel chase time constant | 0.11 / 0.29 s | 0.08 / 0.20 s |
+
+**Cockpit** (`app::camera`, `app::settings`, `app::ui`). Cockpit FOV 58° → 62°; hood (55°) and
+chase (50°) FOVs are separate and unchanged. The eye sits 5 cm higher and 3 cm further forward
+than the shape's seat (`cockpit_eye_up_m`, `cockpit_eye_forward_m`). A ray test against the
+cabin meshes (`the_road_shows_from_six_metres_ahead_in_the_cockpit`) measures where the road
+first shows across the lane ahead of the eye: corsair more than 22 m → 6.45 m (3 cm up and
+forward gave only 9.5 m, so the eye went up 5); palisade 20.9 m → 10.9 m, held there by its long
+flat hood (hood only: 10.0 m). New Camera page, all saved: Camera (the selected camera, also
+updated and saved whenever the camera is cycled; the game starts in it, a scene's `cam=` still
+wins), Cockpit FOV 50–80°, Seat height −5…+10 cm, Seat forward −10…+10 cm, Dashboard (full
+cockpit, or hood only: the cabin walls and windshield frame without the dash, wheel and
+gauges), Camera shake (the cockpit head sway).
+
+Pinned hashes moved deliberately in their own commits: vehicle replay, world curb drive, app
+scripted drive, `selftest.json`; the cockpit screenshot goldens were regenerated after review.
+
+**For the human at the next play**
+- Is Arcade now tight enough, or too grippy ("on rails")? Light is the old default for
+  comparison. Knobs: `Assists::ARCADE`, `SLIDE_GAIN`.
+- Brakes: do ~36 m stops (corsair) feel firm without being abrupt? Lifting off now slows at
+  ~0.15 g: does coasting feel natural or draggy? Knob: `ENGINE_BRAKE_G`.
+- Handbrake: does a flick with the stick pivot the car the way you expect?
+- Cockpit: is the default 62° / +5 cm right on your screen, and does the hood-only view help?
