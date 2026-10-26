@@ -20,11 +20,15 @@ use crate::input::{Action, InputState};
 /// Every camera number in one place.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraTuning {
-    /// Hood camera: height above the belt line, m, and how far ahead of the cockpit eye, m.
+    /// Hood camera: height above the belt line, m, and how far ahead of the shape's eye, m.
     pub hood_above_belt_m: f32,
     pub hood_ahead_m: f32,
-    /// Vertical fields of view, degrees (at 16:9 the horizontal one is wider: 58° vertical
-    /// is ≈ 92° horizontal).
+    /// Cockpit eye: raised and moved forward from the shape's driver's eye by this much, m,
+    /// before the player's seat adjustment ([`CameraPrefs`]).
+    pub cockpit_eye_up_m: f32,
+    pub cockpit_eye_forward_m: f32,
+    /// Vertical fields of view, degrees (at 16:9 the horizontal one is wider: 62° vertical
+    /// is ≈ 94° horizontal). The cockpit's is the default of [`CameraPrefs::cockpit_fov_deg`].
     pub cockpit_fov_deg: f32,
     pub hood_fov_deg: f32,
     pub chase_fov_deg: f32,
@@ -93,10 +97,18 @@ pub struct CameraTuning {
 /// chase FOV so the car fills about the same share of the frame (≈ 20% of its width from
 /// the mid camera). The yaw spring was 4 rad/s, which lagged ~11° behind the car through a
 /// 0.8 g corner at 20 m/s; 6.5 halves that and the lead takes up the rest.
+///
+/// Feel pass 2 (after the first play, "hard to see out of the cockpits"): cockpit FOV
+/// 58° → 62° (and a setting, 50–80°), and the eye 5 cm higher and 3 cm further forward
+/// than the shape puts it. From the shape's eye the corsair's instrument hood and cowl hid
+/// the road for more than 22 m ahead; 3 cm up and forward brought that to 9.5 m, 5 cm up to
+/// 6.5 m (the palisade's long flat hood: 21 m → 11 m).
 pub const TUNING: CameraTuning = CameraTuning {
     hood_above_belt_m: 0.30,
     hood_ahead_m: 1.0,
-    cockpit_fov_deg: 58.0,
+    cockpit_eye_up_m: 0.05,
+    cockpit_eye_forward_m: 0.03,
+    cockpit_fov_deg: 62.0,
     hood_fov_deg: 55.0,
     chase_fov_deg: 50.0,
     cockpit_near_m: 0.1,
@@ -135,6 +147,29 @@ pub const TUNING: CameraTuning = CameraTuning {
     orbit_height_m: 2.2,
     orbit_rate: 0.12,
 };
+
+/// The player's camera settings (`crate::settings`), as the rig uses them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraPrefs {
+    /// Vertical field of view in the cockpit, degrees. The hood and chase cameras keep theirs.
+    pub cockpit_fov_deg: f32,
+    /// Seat adjustment of the cockpit eye, m: up and forward.
+    pub seat_up_m: f32,
+    pub seat_forward_m: f32,
+    /// Cockpit head sway; off holds the eye still in the car.
+    pub shake: bool,
+}
+
+impl Default for CameraPrefs {
+    fn default() -> CameraPrefs {
+        CameraPrefs {
+            cockpit_fov_deg: TUNING.cockpit_fov_deg,
+            seat_up_m: 0.0,
+            seat_forward_m: 0.0,
+            shake: true,
+        }
+    }
+}
 
 /// Which camera is in use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,14 +242,21 @@ impl CameraMode {
     }
 }
 
-/// The cockpit eye in body space, before sway: the driver's eye of the car's shape.
-pub fn cockpit_eye(drive: &Drive) -> Vec3 {
+/// The cockpit eye in body space, before sway: the driver's eye of the car's shape, moved
+/// by the tuning's offset and the player's seat adjustment (`-z` is forward).
+pub fn cockpit_eye(drive: &Drive, t: &CameraTuning, prefs: &CameraPrefs) -> Vec3 {
     drive.layout.eye
+        + Vec3::new(
+            0.0,
+            t.cockpit_eye_up_m + prefs.seat_up_m,
+            -(t.cockpit_eye_forward_m + prefs.seat_forward_m),
+        )
 }
 
-/// The hood camera in body space: on the centerline over the belt, ahead of the eye.
+/// The hood camera in body space: on the centerline over the belt, ahead of the shape's
+/// eye (the seat does not move it).
 fn hood_eye(drive: &Drive, t: &CameraTuning) -> Vec3 {
-    let eye = cockpit_eye(drive);
+    let eye = drive.layout.eye;
     Vec3::new(
         0.0,
         drive.layout.belt_y + t.hood_above_belt_m,
@@ -318,6 +360,7 @@ struct RigState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CameraRig {
     pub tuning: CameraTuning,
+    pub prefs: CameraPrefs,
     /// The selected camera; [`CameraRig::mode`] may show Orbit instead while idle.
     selected: CameraMode,
     look_back: bool,
@@ -346,6 +389,7 @@ impl CameraRig {
         };
         let mut rig = CameraRig {
             tuning: TUNING,
+            prefs: CameraPrefs::default(),
             selected: CameraMode::ChaseMid,
             look_back: false,
             idle_s: 0.0,
@@ -385,6 +429,11 @@ impl CameraRig {
         self.prev.look_yaw = 0.0;
         self.prev.look_pitch = 0.0;
         self.idle_s = 0.0;
+    }
+
+    /// The camera the player selected (never Orbit), whatever [`CameraRig::mode`] shows.
+    pub fn selected(&self) -> CameraMode {
+        self.selected
     }
 
     /// `CameraCycle`: the next camera in [`CameraMode::CYCLE`].
@@ -553,10 +602,14 @@ impl CameraRig {
         };
         match mode {
             CameraMode::Cockpit => {
-                let sway = mix3(a.sway, b.sway, alpha);
+                let sway = if self.prefs.shake {
+                    mix3(a.sway, b.sway, alpha)
+                } else {
+                    Vec3::ZERO
+                };
                 first_person(
-                    cockpit_eye(drive) + sway,
-                    t.cockpit_fov_deg,
+                    cockpit_eye(drive, t, &self.prefs) + sway,
+                    self.prefs.cockpit_fov_deg,
                     t.cockpit_near_m,
                 )
             }
@@ -647,11 +700,129 @@ mod tests {
     fn fov_is_wide_in_the_cockpit_and_narrower_in_chase() {
         let (d, mut rig) = setup(CameraMode::Cockpit);
         let fov = |rig: &CameraRig| rig.pose(&d, 1.0).fov_y_rad.to_degrees();
-        assert!((fov(&rig) - 58.0).abs() < 1e-3);
+        assert!((fov(&rig) - 62.0).abs() < 1e-3);
         rig.set_mode(CameraMode::Hood);
         assert!((fov(&rig) - 55.0).abs() < 1e-3);
         rig.set_mode(CameraMode::ChaseMid);
         assert!((fov(&rig) - 50.0).abs() < 1e-3);
+        // The cockpit FOV setting changes the cockpit alone.
+        rig.prefs.cockpit_fov_deg = 75.0;
+        assert!((fov(&rig) - 50.0).abs() < 1e-3);
+        rig.set_mode(CameraMode::Hood);
+        assert!((fov(&rig) - 55.0).abs() < 1e-3);
+        rig.set_mode(CameraMode::Cockpit);
+        assert!((fov(&rig) - 75.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn seat_moves_the_cockpit_eye_and_shake_can_be_turned_off() {
+        let (mut d, mut rig) = setup(CameraMode::Cockpit);
+        let local = |d: &Drive, rig: &CameraRig| {
+            let car = d.pose(1.0);
+            car.rot.inverse() * (rig.pose(d, 1.0).eye - car.pos)
+        };
+        let base = local(&d, &rig);
+        let t = TUNING;
+        let shaped = d.layout.eye + Vec3::new(0.0, t.cockpit_eye_up_m, -t.cockpit_eye_forward_m);
+        assert!((base - shaped).length() < 1e-5, "{base}");
+        rig.prefs.seat_up_m = 0.05;
+        rig.prefs.seat_forward_m = -0.08;
+        let moved = local(&d, &rig) - base;
+        assert!(
+            (moved - Vec3::new(0.0, 0.05, 0.08)).length() < 1e-5,
+            "{moved}"
+        );
+        // Hard acceleration sways the head back; with shake off the eye stays put.
+        let g = flat();
+        let input = InputState::default();
+        for _ in 0..120 {
+            d.step(
+                VehicleInput {
+                    throttle: 1.0,
+                    ..VehicleInput::default()
+                },
+                &g,
+            );
+            rig.step(&d, &input, DT, &g);
+        }
+        let swayed = local(&d, &rig);
+        rig.prefs.shake = false;
+        let still = local(&d, &rig);
+        assert!((swayed - still).length() > 0.005, "{swayed} {still}");
+        assert!((still - base - moved).length() < 1e-4, "{still}");
+    }
+
+    /// Whether the segment `a`–`b` passes through triangle `t` (Möller–Trumbore).
+    fn segment_hits(a: Vec3, b: Vec3, t: [Vec3; 3]) -> bool {
+        let d = b - a;
+        let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
+        let p = d.cross(e2);
+        let det = e1.dot(p);
+        if det.abs() < 1e-12 {
+            return false;
+        }
+        let s = a - t[0];
+        let u = s.dot(p) / det;
+        let q = s.cross(e1);
+        let v = d.dot(q) / det;
+        let w = e2.dot(q) / det;
+        u >= 0.0 && v >= 0.0 && u + v <= 1.0 && w > 1e-4 && w < 1.0
+    }
+
+    /// How far ahead of the cockpit eye (m, the car at rest) the road first shows past the
+    /// car's cabin anywhere across a 4 m lane centered on the car: the shell drawn inside
+    /// out (roof, pillars, cowl, hood) always, and with `dashboard` the interior and the
+    /// steering wheel. Glass is not drawn from inside.
+    fn road_visible_from(id: &str, eye: Vec3, dashboard: bool) -> f32 {
+        let spec = crate::vehicles::builtin_spec(id).unwrap();
+        let shape = crate::vehicles::builtin_shape(&spec).unwrap();
+        let model = crate::car::CarModel::build(&spec, &shape).unwrap();
+        let lod = &model.lods[0];
+        let mut tris: Vec<[Vec3; 3]> = Vec::new();
+        let mut add = |m: &render::Mesh, offset: Vec3| {
+            for t in m.indices.chunks_exact(3) {
+                tris.push(core::array::from_fn(|k| {
+                    Vec3::from(m.vertices[t[k] as usize].pos) + offset
+                }));
+            }
+        };
+        add(&lod.shell_inside, Vec3::ZERO);
+        if dashboard {
+            add(&lod.interior, Vec3::ZERO);
+            add(&lod.steering_wheel, model.layout.wheel_pivot);
+        }
+        let ground = -spec.cg_height_m;
+        (0..400)
+            .map(|k| 2.0 + 0.05 * k as f32)
+            .find(|&ahead| {
+                (-20..=20).any(|j| {
+                    let road = Vec3::new(0.1 * j as f32, ground, eye.z - ahead);
+                    !tris.iter().any(|&t| segment_hits(eye, road, t))
+                })
+            })
+            .unwrap_or(f32::INFINITY)
+    }
+
+    /// "Hard to see out of the cockpits" (the first play): from the default eye the road
+    /// shows from ~6 m ahead of the corsair's driver, and the eye offset is what gets it
+    /// there. The palisade's long flat hood keeps it ~11 m out (from 21 m). Hood only (no
+    /// dashboard) never shows less.
+    #[test]
+    fn the_road_shows_from_six_metres_ahead_in_the_cockpit() {
+        for (id, limit) in [("corsair_gtx", 6.5), ("palisade_wagon", 11.5)] {
+            let d = Drive::new(id).unwrap();
+            let eye = cockpit_eye(&d, &TUNING, &CameraPrefs::default());
+            let seen = road_visible_from(id, eye, true);
+            let shaped = road_visible_from(id, d.layout.eye, true);
+            let hood = road_visible_from(id, eye, false);
+            println!(
+                "{id:15} road visible from {seen:.2} m ahead (shape's eye: {shaped:.2} m, \
+                 hood only: {hood:.2} m)"
+            );
+            assert!(seen <= limit, "{id}: {seen} m");
+            assert!(seen < shaped, "{id}: {seen} vs {shaped} m");
+            assert!(hood <= seen, "{id}: {hood} vs {seen} m");
+        }
     }
 
     #[test]
@@ -661,7 +832,8 @@ mod tests {
             let rig = CameraRig::new(CameraMode::Cockpit, &d);
             let pose = rig.pose(&d, 1.0);
             let local = d.pose(1.0).rot.inverse() * (pose.eye - d.pose(1.0).pos);
-            assert!((local - d.layout.eye).length() < 1e-5, "{id} {local}");
+            let eye = cockpit_eye(&d, &TUNING, &CameraPrefs::default());
+            assert!((local - eye).length() < 1e-5, "{id} {local}");
             let [len, wid, h] = d.spec.dims_m;
             let ground = -d.spec.cg_height_m;
             assert!(local.x.abs() < 0.5 * wid, "{id} {local}");
