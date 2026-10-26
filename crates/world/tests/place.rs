@@ -283,3 +283,95 @@ fn coast_meshes_sit_roads_on_the_terrain() {
         }
     }
 }
+
+/// The collider of a procedural place stands on the same ground the meshes draw: sloped
+/// roads at their profile, the graded terrain on its triangles, and decks above the roads
+/// under them.
+#[test]
+fn collider_follows_slopes_and_decks() {
+    use vehicle::Ground;
+    use world::mesh::terrain::TerrainGrid;
+    use world::roads::{Network, DECK_CLEARANCE_M};
+    use world::WorldCollider;
+    let t = template();
+    let p = build_place(Seed(1), &t);
+    let net = Network::new(&p);
+    let grid = TerrainGrid::new(&p, &net);
+    let c = WorldCollider::build(&p);
+    let down = [0.0, -1.0, 0.0];
+    let probe = |x: f32, y: f32, z: f32| {
+        let hit = c
+            .probe([x, y, z], down, 50.0)
+            .expect("ground under the probe");
+        y - hit.t
+    };
+    // Road centerlines on grades of 3% and more.
+    let (mut roads, mut worst_road, mut decks) = (0usize, 0.0f32, 0usize);
+    for (i, path) in net.paths.iter().enumerate() {
+        let (ea, eb) = net.ends(i);
+        let mut s = ea.trim + 2.0;
+        while s < path.len() - eb.trim - 2.0 {
+            let q = path.p(s, 0.0, 0.0);
+            let ahead = path.p(s + 1.0, 0.0, 0.0);
+            s += 7.0;
+            if (ahead.y - q.y).abs() < 0.03 {
+                continue;
+            }
+            if q.y - grid.height_at(q.x, q.z) > DECK_CLEARANCE_M {
+                decks += 1;
+            }
+            let y = probe(q.x, q.y + 1.5, q.z);
+            roads += 1;
+            worst_road = worst_road.max((y - q.y).abs());
+            assert!(
+                (y - q.y).abs() <= 0.1,
+                "road edge {i} at {q:?}: collider {y}"
+            );
+        }
+    }
+    // Terrain away from roads, on slopes of 20% and more.
+    let (mut slopes, mut worst_ground) = (0usize, 0.0f32);
+    for iz in (2..grid.h - 2).step_by(5) {
+        for ix in (2..grid.w - 2).step_by(5) {
+            let q = grid.pos(ix, iz) + world::math::V2::new(1.3, 2.1);
+            let g = grid.height_at(q.x, q.y);
+            let gx = grid.height_at(q.x + 2.0, q.y) - grid.height_at(q.x - 2.0, q.y);
+            if gx.abs() < 0.8 || g < p.terrain.water_level {
+                continue;
+            }
+            let y = probe(q.x, g + 20.0, q.y);
+            if (y - g).abs() > 0.3 {
+                continue; // a road or a deck above the terrain here
+            }
+            slopes += 1;
+            worst_ground = worst_ground.max((y - g).abs());
+            assert!((y - g).abs() <= 0.1, "terrain at {q:?}: {g}, collider {y}");
+        }
+    }
+    println!(
+        "{roads} sloped road points (worst {worst_road:.3} m, {decks} on decks), {slopes} hillside points (worst {worst_ground:.3} m)"
+    );
+    assert!(roads > 200 && slopes > 200);
+    // A deck: the probe from above stands on it, from under it on what is below.
+    let mut deck_points = 0;
+    for (i, path) in net.paths.iter().enumerate() {
+        let (ea, eb) = net.ends(i);
+        let mut s = ea.trim;
+        while s < path.len() - eb.trim {
+            let q = path.p(s, 0.0, 0.0);
+            s += 4.0;
+            let g = grid.height_at(q.x, q.z);
+            if q.y - g > DECK_CLEARANCE_M + 2.0 {
+                deck_points += 1;
+                assert!((probe(q.x, q.y + 1.0, q.z) - q.y).abs() <= 0.1);
+                let below = probe(q.x, g + 1.0, q.z);
+                assert!(
+                    below < q.y - DECK_CLEARANCE_M,
+                    "edge {i}: under the deck at {q:?}: {below}"
+                );
+            }
+        }
+    }
+    println!("{deck_points} deck points");
+    assert!(deck_points >= 3, "seed 1 has an overpass");
+}

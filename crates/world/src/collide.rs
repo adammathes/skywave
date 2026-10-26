@@ -2,9 +2,14 @@
 //!
 //! [`WorldCollider::build`] turns a [`Place`] into static plain-data shapes binned on a
 //! uniform [`CELL_M`] grid, once:
-//! - **Ground patches**: flat polygons at the heights the meshes put them: asphalt (road
-//!   ribbons and junctions) at `y = 0`, sidewalks and lot pads at [`CURB_M`], the apron
-//!   around the town at [`TERRAIN_Y`]. Earlier patches win where they overlap.
+//! - **Ground patches**: polygons at the heights the meshes put them: asphalt (road
+//!   ribbons and junctions) on the road profiles, sidewalks [`CURB_M`] above them, lot pads
+//!   at [`LOT_Y`]. Ribbons and strips follow their edge's profile ([`Patch::edge`]),
+//!   junction fans and corners are planar triangles; the flat test town's are flat (asphalt
+//!   at `y = 0`). Earlier patches win where they overlap, unless they lie a deck's height
+//!   apart (a road over another): then the probe takes the layer the wheel is on.
+//! - **Open ground** wherever no patch is: the apron around the town at [`TERRAIN_Y`], or
+//!   on a terrain place the graded terrain ([`TerrainGrid`], on the mesh's triangles).
 //! - **Steps**: every place two patches of different height meet (curbs, sidewalk backs),
 //!   as segments with the height of their upper side.
 //! - **Walls**: one vertical segment per building footprint edge, facing out. Exact for
@@ -15,13 +20,14 @@
 //! The collider is a [`vehicle::Ground`]: a wheel ray reads the patch height under it, and
 //! near a step it reads the height at which a wheel of [`WHEEL_RADIUS_M`] would touch the
 //! step's edge, so a tire rolls up a 15 cm curb over ~27 cm instead of hitting a wall.
+//! Sloped ground reports its own normal, and a slope is no curb to the curb kick.
 //! [`resolve`], called after each `vehicle::step`, pushes the car's body box out of walls,
 //! posts and boxes with an impulse and a damping pulse (bump and stop, never bounce), and
 //! kicks the body when a wheel hits a curb fast.
 //!
-//! Water: v1 places have none. A water body would be a patch with its own [`Surface`]
-//! kind (a slow drag region with a reset); the probe and the patch table already carry the
-//! surface kind for it.
+//! Water: for now the car rolls on the sea floor under it. A water body would be a patch
+//! with its own [`Surface`] kind (a slow drag region with a reset); the probe and the patch
+//! table already carry the surface kind for it.
 //!
 //! Queries allocate nothing and use only IEEE arithmetic in a fixed order, so the same
 //! inputs give bit-identical results everywhere.
@@ -35,9 +41,10 @@ use vehicle::{Ground, Hit, VehicleSpec, VehicleState};
 use crate::buildings;
 use crate::ground::{self, Surface as LotSurface};
 use crate::math::{floor, signed_area, sqrt, V2};
+use crate::mesh::terrain::TerrainGrid;
 use crate::mesh::WorldMesh;
 use crate::props::{self, Prop, PropKind};
-use crate::roads::{self, Corner, Network};
+use crate::roads::Network;
 use crate::{MeshSet, Palette, CURB_M, LOT_Y, TERRAIN_Y};
 
 /// Grid cell edge, m.
@@ -93,7 +100,10 @@ impl Surface {
     }
 }
 
-/// A flat polygon of ground: `WorldCollider::points[start..start + len]`, any winding.
+/// A polygon of ground: `WorldCollider::points[start..start + len]`, any winding. Its
+/// height at a point is `y` plus, when `edge` names a road edge, that edge's profile
+/// height there ([`crate::roads::profile_height`], as the meshes lay the road), else plus
+/// the plane `grad · (p - at)` (zero for the flat patches of the test town).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct Patch {
@@ -104,6 +114,24 @@ pub struct Patch {
     /// Bounds on the ground plane, `[x, z]`.
     pub lo: [f32; 2],
     pub hi: [f32; 2],
+    /// Road edge whose profile the height follows, or [`NO_EDGE`].
+    pub edge: u32,
+    /// Height change per meter along x and z, and the point it is measured from.
+    pub grad: [f32; 2],
+    pub at: [f32; 2],
+}
+
+/// [`Patch::edge`] of a patch that does not follow a road profile.
+pub const NO_EDGE: u32 = u32::MAX;
+
+/// How a patch's height varies, while building.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Height {
+    Flat(f32),
+    /// Offset above edge `.0`'s profile.
+    Edge(u32, f32),
+    /// The plane through three points.
+    Plane([f32; 3], [f32; 3], [f32; 3]),
 }
 
 /// Where two patches of different height meet: the segment `a..b`, the unit normal `up`
@@ -179,6 +207,14 @@ pub struct WorldCollider {
     pub cells: [u32; 2],
     /// Height and surface wherever no patch is (the apron around the town).
     pub apron_y: f32,
+    /// The graded terrain of a terrain place: the ground wherever no patch is (instead of
+    /// the apron).
+    pub terrain: Option<TerrainGrid>,
+    /// Road edge profiles patches follow: edge `e`'s polyline is
+    /// `profile_xz[r[0]..r[1]]` (heights `profile_y`) for `r = profile_range[e]`.
+    pub profile_xz: Vec<V2>,
+    pub profile_y: Vec<f32>,
+    pub profile_range: Vec<[u32; 2]>,
     pub points: Vec<[f32; 2]>,
     pub patches: Vec<Patch>,
     pub steps: Vec<Step>,
@@ -260,9 +296,28 @@ struct Shapes {
 
 impl Shapes {
     fn patch(&mut self, poly: &[V2], y: f32, surface: Surface) {
+        self.patch_with(poly, Height::Flat(y), surface);
+    }
+
+    fn patch_with(&mut self, poly: &[V2], height: Height, surface: Surface) {
         if poly.len() < 3 || abs(signed_area(poly)) < 1e-4 {
             return;
         }
+        let (y, edge, grad, at) = match height {
+            Height::Flat(y) => (y, NO_EDGE, [0.0; 2], [0.0; 2]),
+            Height::Edge(e, y) => (y, e, [0.0; 2], [0.0; 2]),
+            Height::Plane(a, b, c) => {
+                let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let det = e1[0] * e2[2] - e2[0] * e1[2];
+                if abs(det) < 1e-6 {
+                    return;
+                }
+                let gx = (e1[1] * e2[2] - e2[1] * e1[2]) / det;
+                let gz = (e1[0] * e2[1] - e2[0] * e1[1]) / det;
+                (a[1], NO_EDGE, [gx, gz], [a[0], a[2]])
+            }
+        };
         let start = self.points.len() as u32;
         self.points.extend(poly.iter().map(|&p| arr(p)));
         let (lo, hi) = bounds_of(&self.points[start as usize..]);
@@ -273,9 +328,27 @@ impl Shapes {
             surface,
             lo,
             hi,
+            edge,
+            grad,
+            at,
         });
     }
 }
+
+/// Which ground a height came from: a patch (by index) or the terrain/apron.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Under {
+    Patch(u32),
+    Open,
+}
+
+/// Patches more than this far apart in height under one point are layered (a road over
+/// another): the probe then picks by height instead of taking the first.
+const LAYER_M: f32 = crate::roads::DECK_CLEARANCE_M;
+/// A wheel takes the highest layer at most this far above it.
+const LAYER_STEP_M: f32 = 1.0;
+/// Steps higher than this above the ground under a wheel are another layer, not a curb.
+const MAX_STEP_UP_M: f32 = 0.5;
 
 impl WorldCollider {
     /// Collision shapes of `place`, consistent with what [`crate::build_chunk_meshes`] draws.
@@ -287,7 +360,12 @@ impl WorldCollider {
         };
         // Patches in priority order: asphalt, then sidewalks, then lot pads.
         road_patches(place, &net, &mut shapes);
-        let blocks = ground::blocks(&net);
+        let terrain_place = crate::is_terrain_place(place);
+        let blocks = if terrain_place {
+            Vec::new()
+        } else {
+            ground::blocks(&net)
+        };
         for b in &blocks {
             let surface = match ground::block_surface(place, b) {
                 LotSurface::Paved => Surface::Concrete,
@@ -297,7 +375,12 @@ impl WorldCollider {
         }
 
         let walls = building_walls(place);
-        let (posts, boxes) = prop_solids(&props_of(place, &net, &blocks));
+        let props = if terrain_place {
+            Vec::new()
+        } else {
+            props_of(place, &net, &blocks)
+        };
+        let (posts, boxes) = prop_solids(&props);
 
         // Grid over everything, with a cell of margin.
         let mut lo = [f32::MAX, f32::MAX];
@@ -321,6 +404,11 @@ impl WorldCollider {
         for b in &boxes {
             grow(b.c, b.c);
         }
+        if terrain_place {
+            // The terrain covers the whole place.
+            let (o, e) = (place.header.origin_m(), place.header.extent_m());
+            grow(o, [o[0] + e[0], o[1] + e[1]]);
+        }
         if lo[0] > hi[0] {
             lo = [0.0, 0.0];
             hi = [0.0, 0.0];
@@ -335,6 +423,10 @@ impl WorldCollider {
             origin,
             cells,
             apron_y: TERRAIN_Y,
+            terrain: terrain_place.then(|| TerrainGrid::new(place, &net)),
+            profile_xz: Vec::new(),
+            profile_y: Vec::new(),
+            profile_range: Vec::new(),
             points: shapes.points,
             patches: shapes.patches,
             steps: Vec::new(),
@@ -347,6 +439,12 @@ impl WorldCollider {
             post_bins: Bins::default(),
             box_bins: Bins::default(),
         };
+        for path in &net.paths {
+            let start = c.profile_xz.len() as u32;
+            c.profile_xz.extend_from_slice(&path.raw);
+            c.profile_y.extend_from_slice(&path.raw_y);
+            c.profile_range.push([start, c.profile_xz.len() as u32]);
+        }
         let patch_boxes: Vec<_> = c.patches.iter().map(|p| (p.lo, p.hi)).collect();
         c.patch_bins = c.bin(&patch_boxes, 0.0);
         c.steps = c.find_steps();
@@ -442,8 +540,43 @@ impl WorldCollider {
         }
     }
 
-    /// The first patch containing `p`, if any.
-    fn patch_at(&self, p: [f32; 2]) -> Option<&Patch> {
+    /// Height of `patch` at `p` (also outside its polygon: the same surface extended).
+    fn patch_height(&self, patch: &Patch, p: [f32; 2]) -> f32 {
+        if patch.edge != NO_EDGE {
+            let [a, b] = self.profile_range[patch.edge as usize];
+            let (a, b) = (a as usize, b as usize);
+            let h =
+                crate::roads::profile_height(&self.profile_xz[a..b], &self.profile_y[a..b], v2(p));
+            return h + patch.y;
+        }
+        if patch.grad == [0.0, 0.0] {
+            return patch.y;
+        }
+        patch.y + patch.grad[0] * (p[0] - patch.at[0]) + patch.grad[1] * (p[1] - patch.at[1])
+    }
+
+    /// Height of the ground where no patch is.
+    fn open_height(&self, p: [f32; 2]) -> f32 {
+        match &self.terrain {
+            Some(t) => t.height_at(p[0], p[1]),
+            None => self.apron_y,
+        }
+    }
+
+    fn under_height(&self, u: Under, p: [f32; 2]) -> f32 {
+        match u {
+            Under::Patch(i) => self.patch_height(&self.patches[i as usize], p),
+            Under::Open => self.open_height(p),
+        }
+    }
+
+    /// The ground under `p` seen from height `y_from`: the first patch containing it; where
+    /// patches (or a deck and the open ground) lie a deck's height apart, the highest at
+    /// most [`LAYER_STEP_M`] above `y_from`, else the lowest.
+    fn under(&self, p: [f32; 2], y_from: f32) -> (Under, f32) {
+        let mut first: Option<(u32, f32)> = None;
+        let mut layered = false;
+        let (mut reach, mut low) = (None::<(u32, f32)>, None::<(u32, f32)>);
         for &i in self.cell_items(&self.patch_bins, p) {
             let patch = &self.patches[i as usize];
             if p[0] < patch.lo[0] || p[0] > patch.hi[0] || p[1] < patch.lo[1] || p[1] > patch.hi[1]
@@ -451,30 +584,100 @@ impl WorldCollider {
                 continue;
             }
             let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
-            if point_in(p, poly) {
-                return Some(patch);
+            if !point_in(p, poly) {
+                continue;
+            }
+            let h = self.patch_height(patch, p);
+            match first {
+                None => first = Some((i, h)),
+                Some((_, h0)) => layered |= abs(h - h0) > LAYER_M,
+            }
+            if h <= y_from + LAYER_STEP_M && reach.is_none_or(|r| h > r.1) {
+                reach = Some((i, h));
+            }
+            if low.is_none_or(|l| h < l.1) {
+                low = Some((i, h));
             }
         }
-        None
-    }
-
-    /// Height and surface of the flat ground at `[x, z]`, steps ignored.
-    pub fn level_at(&self, p: [f32; 2]) -> (f32, Surface) {
-        match self.patch_at(p) {
-            Some(patch) => (patch.y, patch.surface),
-            None => (self.apron_y, Surface::Grass),
+        let Some((i0, h0)) = first else {
+            return (Under::Open, self.open_height(p));
+        };
+        if self.terrain.is_some() && h0 > y_from + LAYER_STEP_M {
+            // Under a deck: the open ground, if that is below.
+            let g = self.open_height(p);
+            if g <= y_from + LAYER_STEP_M && h0 - g > LAYER_M {
+                return match reach {
+                    Some((i, h)) if h > g => (Under::Patch(i), h),
+                    _ => (Under::Open, g),
+                };
+            }
+        }
+        if !layered {
+            return (Under::Patch(i0), h0);
+        }
+        match reach.or(low) {
+            Some((i, h)) => (Under::Patch(i), h),
+            None => (Under::Patch(i0), h0),
         }
     }
 
-    /// The ground a wheel of [`WHEEL_RADIUS_M`] centered over `[x, z]` rests on.
+    fn surface_of(&self, u: Under) -> Surface {
+        match u {
+            Under::Patch(i) => self.patches[i as usize].surface,
+            Under::Open => Surface::Grass,
+        }
+    }
+
+    /// Height and surface of the ground at `[x, z]` seen from above everything, steps
+    /// ignored.
+    pub fn level_at(&self, p: [f32; 2]) -> (f32, Surface) {
+        self.level_from(p, f32::INFINITY)
+    }
+
+    /// Height and surface of the ground at `[x, z]` seen from height `y_from` (which layer
+    /// of a bridge), steps ignored.
+    pub fn level_from(&self, p: [f32; 2], y_from: f32) -> (f32, Surface) {
+        let (u, y) = self.under(p, y_from);
+        (y, self.surface_of(u))
+    }
+
+    /// Unit normal of the ground `u` at `p`.
+    fn normal_of(&self, u: Under, p: [f32; 2]) -> [f32; 3] {
+        let flat = match u {
+            Under::Patch(i) => {
+                let patch = &self.patches[i as usize];
+                patch.edge == NO_EDGE && patch.grad == [0.0, 0.0]
+            }
+            Under::Open => self.terrain.is_none(),
+        };
+        if flat {
+            return [0.0, 1.0, 0.0];
+        }
+        let e = 0.25;
+        let h = |dx: f32, dz: f32| self.under_height(u, [p[0] + dx, p[1] + dz]);
+        let gx = (h(e, 0.0) - h(-e, 0.0)) / (2.0 * e);
+        let gz = (h(0.0, e) - h(0.0, -e)) / (2.0 * e);
+        let inv = 1.0 / sqrt(gx * gx + 1.0 + gz * gz);
+        [-gx * inv, inv, -gz * inv]
+    }
+
+    /// The ground a wheel of [`WHEEL_RADIUS_M`] centered over `[x, z]` rests on, seen from
+    /// above everything.
     pub fn ground_at(&self, p: [f32; 2]) -> GroundSample {
-        let (y0, surface) = self.level_at(p);
+        self.ground_from(p, f32::INFINITY)
+    }
+
+    /// The ground a wheel of [`WHEEL_RADIUS_M`] centered over `[x, z]` rests on, seen from
+    /// height `y_from`.
+    pub fn ground_from(&self, p: [f32; 2], y_from: f32) -> GroundSample {
+        let (u, y0) = self.under(p, y_from);
+        let surface = self.surface_of(u);
         let mut y = y0;
-        let mut normal = [0.0, 1.0, 0.0];
+        let mut normal = self.normal_of(u, p);
         let r = WHEEL_RADIUS_M;
         for &i in self.cell_items(&self.step_bins, p) {
             let s = &self.steps[i as usize];
-            if s.y_high <= y0 + STEP_MIN_M * 0.5 {
+            if s.y_high <= y0 + STEP_MIN_M * 0.5 || s.y_high > y0 + MAX_STEP_UP_M {
                 continue;
             }
             // Only from the low side: on top, the wheel sits on the upper patch.
@@ -497,12 +700,22 @@ impl WorldCollider {
         GroundSample { y, normal, surface }
     }
 
+    /// The rise from `before` to `now` across whatever step lies between them: the ground
+    /// at `now` minus the ground under `before` carried on to `now` (so a slope is no
+    /// rise), both seen from `y_from`.
+    fn rise(&self, before: [f32; 2], now: [f32; 2], y_from: f32) -> f32 {
+        let (u, _) = self.under(before, y_from);
+        let (_, y_now) = self.under(now, y_from);
+        y_now - self.under_height(u, now)
+    }
+
     /// Every patch edge piece across which the level changes, emitted once: from its lower
     /// patch, or from the upper one where the lower side is the apron.
     fn find_steps(&self) -> Vec<Step> {
         let mut out = Vec::new();
         for patch in &self.patches {
             let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
+            let own = |p: [f32; 2]| self.patch_height(patch, p) + LAYER_STEP_M * 0.5;
             let v2s: Vec<V2> = poly.iter().map(|&p| v2(p)).collect();
             let ccw = signed_area(&v2s) > 0.0;
             let n = poly.len();
@@ -519,10 +732,11 @@ impl WorldCollider {
                     let p0 = a.lerp(b, k as f32 / pieces as f32);
                     let p1 = a.lerp(b, (k + 1) as f32 / pieces as f32);
                     let mid = (p0 + p1) * 0.5;
-                    let (y_in, _) = self.level_at(arr(mid - out_n * STEP_SAMPLE_M));
+                    let inside = arr(mid - out_n * STEP_SAMPLE_M);
+                    let (_, y_in) = self.under(inside, own(inside));
                     let outside = arr(mid + out_n * STEP_SAMPLE_M);
-                    let y_out = self.level_at(outside).0;
-                    let apron = self.patch_at(outside).is_none();
+                    let (u_out, y_out) = self.under(outside, own(outside));
+                    let apron = u_out == Under::Open;
                     let up = if y_out > y_in + STEP_MIN_M {
                         out_n
                     } else if apron && y_in > y_out + STEP_MIN_M {
@@ -550,9 +764,10 @@ impl Ground for WorldCollider {
         }
         // The ground is flat between steps: intersect at the height under the origin, then
         // once more at the height under that first hit (for tilted rays).
-        let g0 = self.ground_at([origin[0], origin[2]]);
+        let g0 = self.ground_from([origin[0], origin[2]], origin[1]);
         let t0 = (origin[1] - g0.y) / -dir[1];
-        let g = self.ground_at([origin[0] + dir[0] * t0, origin[2] + dir[2] * t0]);
+        let at = [origin[0] + dir[0] * t0, origin[2] + dir[2] * t0];
+        let g = self.ground_from(at, origin[1]);
         let t = (origin[1] - g.y) / -dir[1];
         if t > max_len {
             return None;
@@ -566,52 +781,63 @@ impl Ground for WorldCollider {
 }
 
 /// Asphalt ribbons and junctions, then sidewalk strips and corners, as the road meshes lay
-/// them out (`roads::build`).
+/// them out (`roads::build`): flat where a road's profile is, else following it (ribbons
+/// and strips) or as planar triangles (junction fans and corners).
 fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
-    let nodes = &place.roads.nodes;
-    let frame = |i: usize| {
-        let e = &place.roads.edges[i];
-        let a = V2::from_array(nodes[e.a as usize].pos);
-        let b = V2::from_array(nodes[e.b as usize].pos);
-        let d = (b - a).normalize();
-        (a, d, d.left(), (b - a).length())
+    let height = |i: usize, lift: f32| match net.paths[i].flat {
+        Some(y) => Height::Flat(y + lift),
+        None => Height::Edge(i as u32, lift),
     };
-    for i in 0..place.roads.edges.len() {
-        let (a, d, l, len) = frame(i);
-        let (ea, eb) = net.ends(i);
-        let p = |s: f32, t: f32| a + d * s + l * t;
-        let (s0, s1, hw) = (ea.trim, len - eb.trim, ea.hw);
-        if s1 > s0 {
-            let q = [p(s0, -hw), p(s1, -hw), p(s1, hw), p(s0, hw)];
-            out.patch(&q, 0.0, Surface::Asphalt);
-        }
-    }
-    let mut ring: Vec<V2> = Vec::new();
-    for j in &net.junctions {
-        let n = j.ends.len();
-        if n < 2 {
-            continue;
-        }
-        ring.clear();
-        for i in 0..n {
-            let e = &j.ends[i];
-            ring.push(j.pos + e.dir * e.trim + e.dir.right() * e.hw);
-            ring.push(j.pos + e.dir * e.trim + e.dir.left() * e.hw);
-            match j.corners[i] {
-                Corner::Fillet { q, r, ta, tb, .. } => ring.extend(roads::arc(q, r, ta, tb)),
-                Corner::Reflex { c, .. } => ring.push(c),
-                Corner::Straight { ta, tb, .. } => {
-                    ring.push(ta);
-                    ring.push(tb);
-                }
+    let xz = |p: &crate::math::V3| V2::new(p.x, p.z);
+    // A polygon of 3D points: one flat patch when level, else a fan of planar triangles.
+    let fan = |out: &mut Shapes, pts: &[crate::math::V3], surface: Surface| {
+        if pts.iter().all(|p| p.y == pts[0].y) {
+            let poly: Vec<V2> = pts.iter().map(xz).collect();
+            out.patch(&poly, pts[0].y, surface);
+        } else {
+            for k in 1..pts.len() - 1 {
+                let (a, b, c) = (pts[0], pts[k], pts[k + 1]);
+                let h = Height::Plane(a.to_array(), b.to_array(), c.to_array());
+                out.patch_with(&[xz(&a), xz(&b), xz(&c)], h, surface);
             }
         }
-        out.patch(&ring, 0.0, Surface::Asphalt);
+    };
+    for i in 0..place.roads.edges.len() {
+        let path = &net.paths[i];
+        let (ea, eb) = net.ends(i);
+        let (s0, s1, hw) = (ea.trim, path.len() - eb.trim, ea.hw);
+        if s1 > s0 {
+            path.pieces(s0, s1, |a, b| {
+                let q = [
+                    path.xz(a, -hw),
+                    path.xz(b, -hw),
+                    path.xz(b, hw),
+                    path.xz(a, hw),
+                ];
+                out.patch_with(&q, height(i, 0.0), Surface::Asphalt);
+            });
+        }
+    }
+    for j in &net.junctions {
+        let ring = net.junction_ring(j);
+        if ring.is_empty() {
+            continue;
+        }
+        if ring.iter().all(|p| p.y == j.y) {
+            let poly: Vec<V2> = ring.iter().map(xz).collect();
+            out.patch(&poly, j.y, Surface::Asphalt);
+        } else {
+            let c = j.pos.at(j.y);
+            for k in 0..ring.len() {
+                let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+                fan(out, &[c, a, b], Surface::Asphalt);
+            }
+        }
     }
     for i in 0..place.roads.edges.len() {
-        let (a, d, l, len) = frame(i);
+        let path = &net.paths[i];
         let (ea, eb) = net.ends(i);
-        let p = |s: f32, t: f32| a + d * s + l * t;
+        let len = path.len();
         // Without a sidewalk the curb top is still a 0.2 m strip.
         let sw = if ea.sw > 0.0 { ea.sw } else { 0.2 };
         let hw = ea.hw;
@@ -621,44 +847,21 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
         ] {
             if s1 > s0 {
                 let (t0, t1) = (sigma * hw, sigma * (hw + sw));
-                let q = [p(s0, t0), p(s1, t0), p(s1, t1), p(s0, t1)];
-                out.patch(&q, CURB_M, Surface::Concrete);
+                path.pieces(s0, s1, |a, b| {
+                    let q = [
+                        path.xz(a, t0),
+                        path.xz(b, t0),
+                        path.xz(b, t1),
+                        path.xz(a, t1),
+                    ];
+                    out.patch_with(&q, height(i, CURB_M), Surface::Concrete);
+                });
             }
         }
     }
-    let mut fan: Vec<V2> = Vec::new();
     for j in &net.junctions {
-        for corner in &j.corners {
-            fan.clear();
-            match *corner {
-                Corner::Fillet {
-                    q,
-                    r,
-                    ta,
-                    tb,
-                    back_a,
-                    back_b,
-                    prop,
-                } => {
-                    fan.push(prop);
-                    fan.push(back_a);
-                    fan.extend(roads::arc(q, r, ta, tb));
-                    fan.push(back_b);
-                }
-                Corner::Reflex {
-                    c,
-                    back_a,
-                    back_b,
-                    prop,
-                } => fan.extend_from_slice(&[c, back_a, prop, back_b]),
-                Corner::Straight {
-                    ta,
-                    tb,
-                    back_a,
-                    back_b,
-                } => fan.extend_from_slice(&[ta, back_a, back_b, tb]),
-            }
-            out.patch(&fan, CURB_M, Surface::Concrete);
+        for i in 0..j.corners.len() {
+            fan(out, &net.corner_walk(j, i), Surface::Concrete);
         }
     }
 }
@@ -1334,9 +1537,8 @@ fn curb_kick(
         if speed <= CURB_CLIMB_MPS {
             continue;
         }
-        let now = collider.level_at([at[0], at[2]]).0;
-        let before = collider.level_at([at[0] - v[0] * DT, at[2] - v[2] * DT]).0;
-        let rise = now - before;
+        let before = [at[0] - v[0] * DT, at[2] - v[2] * DT];
+        let rise = collider.rise(before, [at[0], at[2]], at[1]);
         if rise < STEP_MIN_M {
             continue;
         }

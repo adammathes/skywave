@@ -195,7 +195,7 @@ impl EdgePath {
     }
 
     /// Calls `f(a, b)` for the pieces of `s0..s1` between the centerline's bends.
-    fn pieces(&self, s0: f32, s1: f32, mut f: impl FnMut(f32, f32)) {
+    pub fn pieces(&self, s0: f32, s1: f32, mut f: impl FnMut(f32, f32)) {
         let mut a = s0;
         for &b in &self.s[1..self.s.len() - 1] {
             if b > a && b < s1 {
@@ -507,6 +507,69 @@ impl Network {
             }
         }
         ring
+    }
+}
+
+impl Network {
+    /// The sidewalk of corner `i` of junction `j` at curb height, as a fan polygon: for a
+    /// curb return the property corner, then the back of `a`'s walk, the curb arc and the
+    /// back of `b`'s walk; otherwise the corner's quad. Heights follow the two roads.
+    pub fn corner_walk(&self, j: &Junction, i: usize) -> Vec<V3> {
+        let n = j.ends.len();
+        let (ea, eb) = (&j.ends[i], &j.ends[(i + 1) % n]);
+        let y_on = |e: &RoadEnd, q: V2| self.paths[e.edge].y_at(q);
+        let y = CURB_M;
+        match j.corners[i] {
+            Corner::Fillet {
+                q,
+                r,
+                ta,
+                tb,
+                back_a,
+                back_b,
+                prop,
+            } => {
+                let pts = arc(q, r, ta, tb);
+                let (ya, yb) = (y_on(ea, ta), y_on(eb, tb));
+                let (yba, ybb) = (y_on(ea, back_a), y_on(eb, back_b));
+                let last = (pts.len() - 1) as f32;
+                let mut fan: Vec<V3> = Vec::with_capacity(pts.len() + 3);
+                fan.push(prop.at(0.5 * (yba + ybb) + y));
+                fan.push(back_a.at(yba + y));
+                for (k, pt) in pts.iter().enumerate() {
+                    fan.push(pt.at(lerp(ya, yb, k as f32 / last) + y));
+                }
+                fan.push(back_b.at(ybb + y));
+                fan
+            }
+            Corner::Reflex {
+                c: pc,
+                back_a,
+                back_b,
+                prop,
+            } => {
+                let yc = 0.5 * (y_on(ea, pc) + y_on(eb, pc));
+                let (yba, ybb) = (y_on(ea, back_a), y_on(eb, back_b));
+                let yp = 0.5 * (yba + ybb);
+                alloc::vec![
+                    pc.at(yc + y),
+                    back_a.at(yba + y),
+                    prop.at(yp + y),
+                    back_b.at(ybb + y),
+                ]
+            }
+            Corner::Straight {
+                ta,
+                tb,
+                back_a,
+                back_b,
+            } => alloc::vec![
+                ta.at(y_on(ea, ta) + y),
+                back_a.at(y_on(ea, back_a) + y),
+                back_b.at(y_on(eb, back_b) + y),
+                tb.at(y_on(eb, tb) + y),
+            ],
+        }
     }
 }
 
@@ -1214,62 +1277,31 @@ fn junction(m: &mut WorldMesh, net: &Network, j: &Junction, p: &RoadPaints, skir
                     );
                 }
                 // Corner sidewalk: fan from the property corner over the curb arc.
+                let fan = net.corner_walk(j, i);
+                for w in fan[1..].windows(2) {
+                    tri(m, fan[0], w[0], w[1], V3::Y, p.walk);
+                }
                 let (yba, ybb) = (y_on(ea, back_a), y_on(eb, back_b));
                 let yp = 0.5 * (yba + ybb);
-                let mut fan: Vec<V3> = Vec::with_capacity(pts.len() + 2);
-                fan.push(back_a.at(yba + CURB_M));
-                for (pt, &y) in pts.iter().zip(&ys) {
-                    fan.push(pt.at(y + CURB_M));
-                }
-                fan.push(back_b.at(ybb + CURB_M));
-                for w in fan.windows(2) {
-                    tri(m, prop.at(yp + CURB_M), w[0], w[1], V3::Y, p.walk);
-                }
                 skirt(m, (back_a, yba), (prop, yp), ea.dir.left(), p, skirt_y);
                 skirt(m, (prop, yp), (back_b, ybb), eb.dir.right(), p, skirt_y);
             }
             Corner::Reflex {
-                c: pc,
                 back_a,
                 back_b,
                 prop,
+                ..
             } => {
-                let yc = 0.5 * (y_on(ea, pc) + y_on(eb, pc));
+                let w = net.corner_walk(j, i);
+                quad(m, [w[0], w[1], w[2], w[3]], V3::Y, p.walk);
                 let (yba, ybb) = (y_on(ea, back_a), y_on(eb, back_b));
                 let yp = 0.5 * (yba + ybb);
-                let y = CURB_M;
-                quad(
-                    m,
-                    [
-                        pc.at(yc + y),
-                        back_a.at(yba + y),
-                        prop.at(yp + y),
-                        back_b.at(ybb + y),
-                    ],
-                    V3::Y,
-                    p.walk,
-                );
                 skirt(m, (back_a, yba), (prop, yp), ea.dir.left(), p, skirt_y);
                 skirt(m, (prop, yp), (back_b, ybb), eb.dir.right(), p, skirt_y);
             }
-            Corner::Straight {
-                ta,
-                tb,
-                back_a,
-                back_b,
-            } => {
-                let y = CURB_M;
-                quad(
-                    m,
-                    [
-                        ta.at(y_on(ea, ta) + y),
-                        back_a.at(y_on(ea, back_a) + y),
-                        back_b.at(y_on(eb, back_b) + y),
-                        tb.at(y_on(eb, tb) + y),
-                    ],
-                    V3::Y,
-                    p.walk,
-                );
+            Corner::Straight { .. } => {
+                let w = net.corner_walk(j, i);
+                quad(m, [w[0], w[1], w[2], w[3]], V3::Y, p.walk);
             }
         }
     }
