@@ -18,21 +18,28 @@ cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 cargo deny check
-tools/web-build.sh && node tools/screenshot/shoot.mjs           # writes tools/screenshot/out/*.png
+tools/web-build.sh && node tools/screenshot/shoot.mjs --all     # writes tools/screenshot/out/<scene>.png
+node tools/screenshot/diff.mjs --all                             # out/ vs golden/, 2% beyond ΔE 6
+node tools/screenshot/shoot.mjs --selftest                       # wasm hashes vs native
 cargo bench -p world -- chunk                                    # budgets (release)
 ```
 
 ## Visual loop for agents
-1. Build the web bundle and run the screenshot tool with a scene name and camera (`--scene strip_dusk --seed 1`).
+1. Build the web bundle and capture a scene: `tools/web-build.sh && node tools/screenshot/shoot.mjs --scene strip-golden-chase` writes `tools/screenshot/out/strip-golden-chase.png` (`--all` captures every scene; `--scene` may repeat).
 2. Open the PNG with the Read tool and look at it. Describe what is wrong before changing code.
-3. Compare against `tools/screenshot/golden/<scene>.png` with the diff tool (`--diff`, prints a per-scene score; threshold 2% of pixels beyond ΔE 6). Goldens update only in a dedicated commit that explains the visual change and includes before/after in the PR.
-WebGL2 under SwiftShader is slow (seconds per frame); the tool waits for `window.skywaveReady` and a settled frame, and uses a 1280×720 canvas. CI runs the smoke scene only; the full golden set runs on a label.
+3. Compare against `tools/screenshot/golden/<scene>.png`: `node tools/screenshot/diff.mjs --scene <name>` (or `--all`) prints the share of pixels beyond ΔE 6 (CIE76 in CIELAB) and fails above 2%, writing `out/<name>.diff.png` (differing pixels red to yellow over the dimmed golden). Goldens update only in a dedicated commit that explains the visual change and includes before/after in the PR.
+
+Scenes live in `tools/screenshot/scenes.json`, each a set of URL parameters that fully specify the frame (`crates/app/src/scene.rs`, `SceneSetup`): `seed`, `car`, `cam`, `t=HH:MM` (time of day, clock frozen), `pos=x,z` and `yaw=deg` (car placement; compass heading, 90 = east), `lights=1`, and `still=1`, which stops the simulation so every frame is the same picture (a parked car still jitters in the last float bits, enough to flip distant depth ties between captures). The desktop build takes the same keys as `--scene key=value`.
+
+Regenerating every golden (after a deliberate visual change) is one line: `tools/web-build.sh && node tools/screenshot/shoot.mjs --all --golden`. Goldens are 1280×720 PNGs and are committed; `out/` is not.
+
+WebGL2 under SwiftShader is slow (seconds per frame); the tool waits for `window.skywaveReady` and ten more frames, allows the capture 180 s, and uses a 1280×720 viewport. A blank capture fails and never becomes a golden. CI captures `strip-golden-chase` only, diffs it and runs the self-test, and uploads `out/` as an artifact; run the full set locally.
 
 ## Determinism
 - `core::hash64` has fixed test vectors. `Rng` sequences are pinned.
 - World: `crates/world/tests/golden.rs` holds a hash per chunk for seeds 1..=8 (whole 16×16 place). A mismatch fails with the chunk coordinates and the stage that diverged (each stage hashes its output).
 - Vehicle: a 10 s scripted drive per spec produces a pinned state hash.
-- Cross-platform: the WASM build runs the same hash tests in headless Chromium via a `?selftest=1` page mode that prints JSON to the console; the screenshot tool asserts it matches native. This is how we catch float divergence between targets.
+- Cross-platform: the web build opened with `?selftest=1` draws nothing; it runs `app::selftest` (the test town's content and mesh hashes, the app's scripted drive, the vehicle replay for both cars) and prints one console line `{"skywave_selftest": {...}}`. `node tools/screenshot/shoot.mjs --selftest` compares that line with `tools/screenshot/selftest.json`, and a native test (`selftest_matches_the_pins_and_the_committed_json`) keeps that file equal to the native values and to the crates' own pins. After a deliberate hash change, rewrite it with `cargo test -p app -- --ignored write_selftest`. This is how we catch float divergence between targets.
 
 ## Performance
 - Budgets in `docs/ARCHITECTURE.md` are constants; tests assert the CI machine stays under generous multiples (3×) and print actuals so trends are visible in logs.

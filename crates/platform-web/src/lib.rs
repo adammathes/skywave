@@ -20,16 +20,14 @@
 mod web;
 
 /// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
+/// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`) are
+/// read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and `selftest=1`
+/// runs the determinism self-test instead of the game.
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
         .trim_start_matches('?')
         .split('&')
         .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
-}
-
-/// Reads `seed=<u64>` from a URL query string such as `?seed=123&x=1`.
-pub fn seed_from_query(query: &str) -> Option<u64> {
-    query_param(query, "seed").and_then(|v| v.parse().ok())
 }
 
 /// True when the URL query asks to open the settings menu at startup (`menu=1`), for
@@ -95,19 +93,6 @@ pub fn wheel_notches(delta_y: f64, delta_mode: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_seed_parameter() {
-        assert_eq!(seed_from_query("?seed=123"), Some(123));
-        assert_eq!(
-            seed_from_query("?a=1&seed=18446744073709551615"),
-            Some(u64::MAX)
-        );
-        assert_eq!(seed_from_query("seed=7&seed=8"), Some(7));
-        assert_eq!(seed_from_query(""), None);
-        assert_eq!(seed_from_query("?seed=abc"), None);
-        assert_eq!(seed_from_query("?myseed=4"), None);
-    }
 
     #[test]
     fn reads_other_parameters() {

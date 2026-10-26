@@ -571,7 +571,7 @@ impl App {
         if self.ui.take_bindings_changed() {
             input.set_bindings(self.ui.bindings.clone());
         }
-        self.time.clock.speed = self.ui.settings.clock_speed;
+        self.apply_clock_speed();
         let steps = if self.ui.is_open() {
             Steps {
                 count: 0,
@@ -610,7 +610,16 @@ impl App {
     /// [`App::frame`]) and saves there from now on.
     pub fn set_settings_store(&mut self, store: Box<dyn SettingsStore>) {
         self.ui.set_store(store);
-        self.time.clock.speed = self.ui.settings.clock_speed;
+        self.apply_clock_speed();
+    }
+
+    /// The clock runs at the clock-speed setting, unless the scene froze it at its time.
+    fn apply_clock_speed(&mut self) {
+        self.time.clock.speed = if self.clock_frozen {
+            0.0
+        } else {
+            self.ui.settings.clock_speed
+        };
     }
 
     /// The renderer's counters for the last frame, for the performance overlay.

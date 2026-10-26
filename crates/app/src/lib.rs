@@ -12,6 +12,8 @@ pub mod daylight;
 pub mod drive;
 mod input;
 pub mod lighting;
+pub mod scene;
+pub mod selftest;
 mod settings;
 pub mod ui;
 pub mod vehicles;
@@ -21,6 +23,7 @@ pub use settings::{MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
+pub use scene::SceneSetup;
 
 pub use input::{
     pad_table, Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context,
@@ -108,6 +111,11 @@ pub struct App {
     ticks: u64,
     /// The free-fly camera drives the view instead of the car's cameras.
     fly: bool,
+    /// The simulation does not run (a still scene for screenshots).
+    still: bool,
+    /// The scene fixed the time of day: the clock stays stopped whatever the clock-speed
+    /// setting says.
+    clock_frozen: bool,
     prev: FlyCamera,
     curr: FlyCamera,
     drive: Drive,
@@ -171,6 +179,8 @@ impl App {
             clock: FixedStep::new(),
             ticks: 0,
             fly: false,
+            still: false,
+            clock_frozen: false,
             prev: fly,
             curr: fly,
             ground: drive::ground_for(&place),
@@ -189,6 +199,32 @@ impl App {
             alpha: 0.0,
             ui: ui::Ui::new(),
         })
+    }
+
+    /// The scene `setup` describes: its seed and car, the car on the ground at its point
+    /// and heading, its camera, its headlights, and its clock (frozen when it gives a time).
+    pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
+        let mut app = App::new_with(Seed(setup.seed), &setup.car)?;
+        let (y, _) = app.ground.level_at(setup.pos);
+        let ground = [setup.pos[0], y, setup.pos[1]];
+        app.drive = Drive::with_layout(
+            app.drive.spec.clone(),
+            app.drive.layout,
+            ground,
+            setup.heading_rad,
+        );
+        app.drive.headlights = setup.headlights;
+        app.camera = CameraRig::new(setup.camera, &app.drive);
+        app.curr = fly_from(&app.camera.pose(&app.drive, 1.0));
+        app.prev = app.curr;
+        app.set_fly(setup.fly);
+        if let Some(t) = setup.time_s {
+            app.time.clock = daylight::Clock::new(lighting::DEFAULT_DAY_OF_YEAR, t);
+            app.time.clock.speed = 0.0;
+            app.clock_frozen = true;
+        }
+        app.still = setup.still;
+        Ok(app)
     }
 
     /// Selects a car camera.
@@ -231,6 +267,12 @@ impl App {
     /// Advances real time by `dt_real` seconds, running as many fixed steps as are due.
     /// Pass the returned `alpha` to [`App::scene_view`].
     pub fn update(&mut self, input: &InputState, dt_real: f64) -> Steps {
+        if self.still {
+            return Steps {
+                count: 0,
+                alpha: 1.0,
+            };
+        }
         let steps = self.clock.advance(dt_real);
         // Presses act once per frame, however many steps it holds.
         if input.just_pressed(Action::CameraCycle) {
@@ -403,28 +445,16 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
 mod tests {
     use super::*;
 
-    /// Jittery frame times around 60 Hz.
-    fn frame_dt(frame: u32) -> f64 {
-        1.0 / 60.0 + f64::from(frame % 7) * 0.0013 - 0.003
-    }
-
-    /// The scripted drive: 5 s full throttle, 2 s steering right, 2 s braking. Returns the
+    /// The scripted drive ([`selftest::run_drive`]), checking every frame. Returns the
     /// peak speed.
     fn run_script(app: &mut App) -> f32 {
         let mut input = InputState::default();
         let mut t = 0.0;
         let mut peak = 0.0f32;
         let mut frame = 0;
-        while t < 9.0 {
-            input.clear();
-            if t < 5.0 {
-                input.set(Action::Throttle, 1.0);
-            } else if t < 7.0 {
-                input.set(Action::Steer, 0.6);
-            } else {
-                input.set(Action::Brake, 1.0);
-            }
-            let dt = frame_dt(frame);
+        while t < selftest::DRIVE_S {
+            selftest::drive_input(t, &mut input);
+            let dt = selftest::drive_frame_dt(frame);
             app.update(&input, dt);
             t += dt;
             frame += 1;
@@ -672,6 +702,78 @@ mod tests {
             .instances
             .iter()
             .all(|i| i.mesh != ids.lods[0].interior));
+    }
+
+    #[test]
+    fn a_scene_setup_places_the_car_and_freezes_the_clock() {
+        // The default setup is the normal start.
+        let mut normal = App::new(Seed(1));
+        let mut same = App::from_setup(&SceneSetup::default()).unwrap();
+        assert_eq!(same.state_hash(), normal.state_hash());
+        assert_eq!(
+            same.scene_view(1.0, 1.5).camera.view,
+            normal.scene_view(1.0, 1.5).camera.view
+        );
+
+        let setup = SceneSetup::from_query(
+            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1",
+        )
+        .unwrap();
+        let mut app = App::from_setup(&setup).unwrap();
+        assert_eq!(app.drive.spec.id, "palisade_wagon");
+        assert_eq!(app.hud_state().camera_mode, CameraMode::Cockpit);
+        assert!(app.hud_state().headlights);
+        let pose = app.drive.pose(1.0);
+        assert!((pose.pos.x + 200.0).abs() < 1e-4 && (pose.pos.z + 197.5).abs() < 1e-4);
+        assert!((pose.forward() - Vec3::NEG_Z).length() < 1e-5, "north");
+        let world = app.world_instances;
+        assert!(
+            app.meshes[..world] == App::new(Seed(3)).meshes[..world],
+            "seed 3"
+        );
+        // The clock stays put while the sim runs; the night needs no sun.
+        let input = InputState::default();
+        for _ in 0..60 {
+            app.update(&input, 1.0 / 30.0);
+        }
+        assert_eq!(app.hud_state().time_of_day, 22.5 * 3600.0);
+        assert!(app.scene_view(0.5, 1.5).sun.direction[1] < 0.0);
+        assert_eq!(app.scene_view(0.5, 1.5).lights.len(), 2);
+        // Parked on the street it stays parked.
+        let moved = (app.drive.pose(1.0).pos - pose.pos).length();
+        assert!(moved < 0.05, "{moved}");
+
+        let bad = SceneSetup {
+            car: "hovercar".into(),
+            ..SceneSetup::default()
+        };
+        assert!(App::from_setup(&bad).is_err());
+    }
+
+    #[test]
+    fn a_still_scene_renders_the_same_every_frame() {
+        // Screenshot goldens rely on this: however many frames a capture takes, a still
+        // scene draws bit for bit the same. (A parked car's sim jitters in the last bits,
+        // enough to flip distant depth ties.)
+        for query in [
+            "t=17:40&cam=chase-mid&still=1",
+            "t=22:30&cam=cockpit&lights=1&still=1",
+        ] {
+            let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+            fn view(app: &mut App, alpha: f32) -> ([[f32; 4]; 4], [f32; 3], usize) {
+                let v = app.scene_view(alpha, 16.0 / 9.0);
+                (v.camera.view, v.sun.direction, v.lights.len())
+            }
+            let first = view(&mut app, 1.0);
+            let mut input = InputState::default();
+            input.set(Action::Throttle, 1.0);
+            for frame in 0..90 {
+                let steps = app.update(&input, 1.0 / 15.0);
+                assert_eq!(steps.count, 0);
+                assert_eq!(view(&mut app, steps.alpha), first, "{query} frame {frame}");
+            }
+            assert_eq!(app.ticks(), 0);
+        }
     }
 
     #[test]

@@ -544,3 +544,25 @@ fn open_settings_starts_on_the_settings_page() {
     h.pad(PadButton::East);
     assert_eq!(h.page(), Page::Pause);
 }
+
+#[test]
+fn a_scene_time_stays_frozen_under_the_clock_speed_setting() {
+    let setup = crate::SceneSetup::from_query("?t=22:30").unwrap();
+    let mut app = App::from_setup(&setup).unwrap();
+    app.set_settings_store(Box::new(SharedStore::default()));
+    let mut input = InputMapper::default();
+    let t = app.time.clock.seconds_of_day;
+    for _ in 0..120 {
+        app.frame(&mut input, DT);
+    }
+    assert_eq!(app.time.clock.seconds_of_day, t);
+    assert_eq!(app.time.clock.speed, 0.0);
+
+    // Without a scene time the setting drives the clock.
+    let mut h = Harness::with_store(&SharedStore::default());
+    let t = h.app.time.clock.seconds_of_day;
+    for _ in 0..120 {
+        h.frame();
+    }
+    assert!(h.app.time.clock.seconds_of_day > t);
+}
