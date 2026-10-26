@@ -12,7 +12,7 @@
 
 use core::f32::consts::{PI, TAU};
 use glam::{Mat3, Mat4, Quat, Vec3};
-use vehicle::{Ground, VehicleSpec};
+use vehicle::Ground;
 
 use crate::drive::{mix, mix3, Drive};
 use crate::input::{Action, InputState};
@@ -20,9 +20,6 @@ use crate::input::{Action, InputState};
 /// Every camera number in one place.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraTuning {
-    /// Cockpit eye relative to the center of mass for a left-hand-drive car, body space, m:
-    /// 0.35 left of center, 0.55 up, a little behind (used until `Interior` carries an eye).
-    pub cockpit_eye: [f32; 3],
     /// Hood camera: height above the belt line, m, and how far ahead of the cockpit eye, m.
     pub hood_above_belt_m: f32,
     pub hood_ahead_m: f32,
@@ -85,7 +82,6 @@ pub struct CameraTuning {
 }
 
 pub const TUNING: CameraTuning = CameraTuning {
-    cockpit_eye: [-0.35, 0.55, 0.15],
     hood_above_belt_m: 0.30,
     hood_ahead_m: 1.0,
     cockpit_fov_deg: 75.0,
@@ -191,21 +187,25 @@ impl CameraMode {
         }
     }
 
-    fn first_person(self) -> bool {
+    /// Cockpit and hood: the cameras that draw the car's cabin.
+    pub fn first_person(self) -> bool {
         matches!(self, CameraMode::Cockpit | CameraMode::Hood)
     }
 }
 
-/// The cockpit eye in body space for `spec`, before sway.
-pub fn cockpit_eye(_spec: &VehicleSpec, t: &CameraTuning) -> Vec3 {
-    Vec3::from(t.cockpit_eye)
+/// The cockpit eye in body space, before sway: the driver's eye of the car's shape.
+pub fn cockpit_eye(drive: &Drive) -> Vec3 {
+    drive.layout.eye
 }
 
-/// The hood camera in body space.
-fn hood_eye(spec: &VehicleSpec, t: &CameraTuning) -> Vec3 {
-    let (_, belt, _) = crate::drive::body_heights(spec);
-    let eye = cockpit_eye(spec, t);
-    Vec3::new(0.0, belt + t.hood_above_belt_m, eye.z - t.hood_ahead_m)
+/// The hood camera in body space: on the centerline over the belt, ahead of the eye.
+fn hood_eye(drive: &Drive, t: &CameraTuning) -> Vec3 {
+    let eye = cockpit_eye(drive);
+    Vec3::new(
+        0.0,
+        drive.layout.belt_y + t.hood_above_belt_m,
+        eye.z - t.hood_ahead_m,
+    )
 }
 
 /// A camera for one frame.
@@ -532,12 +532,12 @@ impl CameraRig {
             CameraMode::Cockpit => {
                 let sway = mix3(a.sway, b.sway, alpha);
                 first_person(
-                    cockpit_eye(&drive.spec, t) + sway,
+                    cockpit_eye(drive) + sway,
                     t.cockpit_fov_deg,
                     t.cockpit_near_m,
                 )
             }
-            CameraMode::Hood => first_person(hood_eye(&drive.spec, t), t.hood_fov_deg, t.near_m),
+            CameraMode::Hood => first_person(hood_eye(drive, t), t.hood_fov_deg, t.near_m),
             CameraMode::ChaseNear | CameraMode::ChaseMid | CameraMode::ChaseFar => {
                 let eye = mix3(a.chase_pos, b.chase_pos, alpha);
                 let speed = drive.state.speed_mps.abs();
@@ -636,12 +636,18 @@ mod tests {
             let rig = CameraRig::new(CameraMode::Cockpit, &d);
             let pose = rig.pose(&d, 1.0);
             let local = d.pose(1.0).rot.inverse() * (pose.eye - d.pose(1.0).pos);
+            assert!((local - d.layout.eye).length() < 1e-5, "{id} {local}");
             let [len, wid, h] = d.spec.dims_m;
-            let low = -d.spec.cg_height_m + crate::drive::BODY_CLEARANCE_M;
+            let ground = -d.spec.cg_height_m;
             assert!(local.x.abs() < 0.5 * wid, "{id} {local}");
             assert!(local.x < 0.0, "left-hand drive");
-            assert!(local.y > low && local.y < low + h, "{id} {local}");
-            assert!(local.z.abs() < 0.5 * len, "{id} {local}");
+            assert!(local.y > ground && local.y < ground + h, "{id} {local}");
+            // The body's length, centered over its own middle (not the center of mass).
+            let mid = 0.5 * (d.layout.wheel_centers[0].z + d.layout.wheel_centers[2].z);
+            assert!((local.z - mid).abs() < 0.5 * len, "{id} {local}");
+            // Above the dash, below the roof, behind the steering wheel.
+            assert!(local.y > d.layout.dash_y + 0.1, "{id} {local}");
+            assert!(local.z > d.layout.wheel_pivot.z + 0.3, "{id} {local}");
             // Looking down the road.
             assert!((pose.forward() - d.pose(1.0).forward()).length() < 1e-5);
         }
@@ -757,8 +763,15 @@ mod tests {
         let pose = rig.pose(&d, 1.0);
         let car = d.pose(1.0);
         let rel = pose.eye - car.pos;
-        assert!((rel.dot(-car.forward()) - 7.0).abs() < 0.05, "{rel}");
-        assert!((pose.eye.y - 2.4).abs() < 0.05, "{}", pose.eye);
+        assert!(
+            (rel.dot(-car.forward()) - TUNING.chase_distance_m[1]).abs() < 0.05,
+            "{rel}"
+        );
+        assert!(
+            (pose.eye.y - TUNING.chase_height_m[1]).abs() < 0.05,
+            "{}",
+            pose.eye
+        );
         assert!(pose.forward().y < -0.1, "pitched down");
         assert!(pose.forward().dot(car.forward()) > 0.9);
     }

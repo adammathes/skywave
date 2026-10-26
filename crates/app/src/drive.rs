@@ -4,18 +4,16 @@
 //! Each fixed step maps the frame's [`InputState`] (already ramped and curved by the input
 //! mapper) onto a [`VehicleInput`] and runs [`vehicle::step`] against [`DriveGround`].
 //! Rendering asks for the body and wheel transforms `alpha` of the way from the previous to
-//! the current step.
-//!
-//! Until `vehicle::shape` builds the real body, the car is drawn as a two-box silhouette made
-//! from `spec.dims_m` ([`body_mesh`], [`wheel_mesh`], [`lamp_mesh`]).
+//! the current step. The car's meshes and their layout come from [`crate::car`].
 
-use core::f32::consts::{FRAC_PI_2, TAU};
+use core::f32::consts::{FRAC_PI_2, PI, TAU};
 use glam::{Mat4, Quat, Vec3};
 use place::Place;
-use render::{Mesh, MeshId, MeshInstance, PointLight, Vertex};
-use vehicle::sim::{DT, FRONT_LEFT, FRONT_RIGHT, WHEEL_RADIUS_M};
-use vehicle::{Assists, VehicleClass, VehicleInput, VehicleSpec, VehicleState};
+use render::{MeshId, MeshInstance, PointLight};
+use vehicle::sim::{DT, FRONT_LEFT, FRONT_RIGHT, REAR_LEFT};
+use vehicle::{Assists, VehicleInput, VehicleSpec, VehicleState};
 
+use crate::car::{CarLayout, CarMeshes, CarModel};
 use crate::input::{Action, InputState};
 use crate::vehicles;
 
@@ -37,17 +35,15 @@ pub const START_GROUND: [f32; 3] = [-92.0, 0.0, 4.9];
 /// `-z` (north), positive turns left.
 pub const START_HEADING_RAD: f32 = -FRAC_PI_2;
 
-/// The sim's body box starts this far above the ground at rest (`vehicle::sim`'s
-/// `BODY_LOW_CORNER_M`) and is `dims_m[2]` tall.
-pub const BODY_CLEARANCE_M: f32 = 0.25;
-/// Placeholder tire width, m (the `ShapeSpec` will own it).
-pub const WHEEL_WIDTH_M: f32 = 0.22;
+/// Most instances one car adds per frame: body, glass, lamps, four wheels, then in the
+/// cockpit the cabin walls, the cabin, the steering wheel, the dial ticks and up to three
+/// needles.
+pub const MAX_CAR_INSTANCES: usize = 14;
 
 /// Headlights as two warm point lights pooled on the road ahead (the renderer has no spot
-/// lights yet): distance ahead of the center of mass, half spacing, height above the ground,
-/// all m; intensity per lamp, kcd (≈ 35 lux on the road below each); falloff radius, m.
-const HEADLIGHT_AHEAD_M: f32 = 10.0;
-const HEADLIGHT_SPREAD_M: f32 = 0.7;
+/// lights yet), one per headlamp: this far ahead of its lamp and this high above the
+/// ground, m; intensity per lamp, kcd (≈ 35 lux on the road below each); falloff radius, m.
+pub const HEADLIGHT_AHEAD_M: f32 = 10.0;
 const HEADLIGHT_HEIGHT_M: f32 = 1.5;
 const HEADLIGHT_KCD: f32 = 0.08;
 const HEADLIGHT_RADIUS_M: f32 = 20.0;
@@ -141,6 +137,8 @@ pub struct HudState {
 #[derive(Clone, Debug)]
 pub struct Drive {
     pub spec: VehicleSpec,
+    /// Where the eye, wheels, lamps and dials are on this car's body.
+    pub layout: CarLayout,
     /// The state after the last step...
     pub state: VehicleState,
     /// ...and before it, for interpolation.
@@ -162,18 +160,33 @@ pub struct Drive {
 }
 
 impl Drive {
-    /// The built-in car `vehicle_id` at the start of the strip.
+    /// The built-in car `vehicle_id` at the start of the strip (building its meshes for
+    /// the layout; [`Drive::with_layout`] takes one already built).
     pub fn new(vehicle_id: &str) -> Result<Drive, String> {
         let spec = vehicles::builtin_spec(vehicle_id)?;
-        Ok(Drive::with_spec(spec, START_GROUND, START_HEADING_RAD))
+        let shape = vehicles::builtin_shape(&spec)?;
+        let layout = CarModel::build(&spec, &shape)?.layout;
+        Ok(Drive::with_layout(
+            spec,
+            layout,
+            START_GROUND,
+            START_HEADING_RAD,
+        ))
     }
 
-    /// `spec` at rest on the ground point `ground`, facing `heading_rad`.
-    pub fn with_spec(spec: VehicleSpec, ground: [f32; 3], heading_rad: f32) -> Drive {
+    /// `spec` with its body `layout` at rest on the ground point `ground`, facing
+    /// `heading_rad`.
+    pub fn with_layout(
+        spec: VehicleSpec,
+        layout: CarLayout,
+        ground: [f32; 3],
+        heading_rad: f32,
+    ) -> Drive {
         let state = VehicleState::spawn(&spec, ground, heading_rad);
         Drive {
             rest_compression: state.wheels[0].compression,
             spec,
+            layout,
             state,
             prev: state,
             assists: Assists::default(),
@@ -255,10 +268,10 @@ impl Drive {
     }
 
     /// Wheel-to-body transforms, front-left, front-right, rear-left, rear-right: each wheel
-    /// at its hub (raised by spring compression, hanging at full droop off the ground),
-    /// steered at the front and rolled about its axle. The wheel mesh's axle is body `x`.
+    /// at its hub (the shape's wheel center, raised by spring compression past rest),
+    /// steered at the front and rolled about its axle. The wheel mesh is a right-side wheel
+    /// with its axle along `x`; the left ones are turned 180° about `y` first.
     pub fn wheel_locals(&self, alpha: f32) -> [Mat4; 4] {
-        let contacts = self.spec.wheel_positions();
         let steer = mix(self.prev.steer_angle_rad, self.state.steer_angle_rad, alpha);
         core::array::from_fn(|i| {
             let c = mix(
@@ -266,8 +279,7 @@ impl Drive {
                 self.state.wheels[i].compression,
                 alpha,
             );
-            let [x, y, z] = contacts[i];
-            let hub = Vec3::new(x, y + WHEEL_RADIUS_M + (c - self.rest_compression), z);
+            let hub = self.layout.wheel_centers[i] + Vec3::Y * (c - self.rest_compression);
             // Positive steer turns right, a negative turn about +y; rolling forward
             // turns the top of the wheel toward -z, a negative turn about +x.
             let yaw = if i == FRONT_LEFT || i == FRONT_RIGHT {
@@ -276,7 +288,15 @@ impl Drive {
                 0.0
             };
             let roll = mix(self.prev_roll[i], self.roll[i], alpha);
-            Mat4::from_translation(hub) * Mat4::from_rotation_y(yaw) * Mat4::from_rotation_x(-roll)
+            let side = if i == FRONT_LEFT || i == REAR_LEFT {
+                Mat4::from_rotation_y(PI)
+            } else {
+                Mat4::IDENTITY
+            };
+            Mat4::from_translation(hub)
+                * Mat4::from_rotation_y(yaw)
+                * Mat4::from_rotation_x(-roll)
+                * side
         })
     }
 
@@ -286,200 +306,88 @@ impl Drive {
         self.wheel_locals(alpha).map(|w| body * w)
     }
 
-    /// Appends the car's instances: body, four wheels, and the lit lamps when the
-    /// headlights are on.
-    pub fn push_instances(&self, alpha: f32, ids: &CarMeshes, out: &mut Vec<MeshInstance>) {
+    /// Whether the brake lamps are lit: the driver asked for brake in the last step.
+    pub fn braking(&self) -> bool {
+        self.input.brake > 0.0
+    }
+
+    /// Steering-wheel-to-body transform `alpha` of the way through the step.
+    pub fn steering_wheel(&self, alpha: f32) -> Mat4 {
+        let steer = mix(self.prev.steer_angle_rad, self.state.steer_angle_rad, alpha);
+        self.layout.steering_wheel(steer)
+    }
+
+    /// Needle-to-body transforms of the dials (the first `layout.dial_count` are real).
+    pub fn needles(&self, alpha: f32) -> [Mat4; 3] {
+        let speed = mix(self.prev.speed_mps, self.state.speed_mps, alpha);
+        let rpm = mix(self.prev.engine_rpm, self.state.engine_rpm, alpha);
+        self.layout
+            .dials
+            .map(|d| d.needle(d.reading.fraction(speed, rpm)))
+    }
+
+    /// Appends the car's instances at level of detail 0: body (pop-ups up while the
+    /// headlights are on), glass, the lamps in their state, four wheels and, when `cabin`
+    /// (the first-person cameras), the cabin walls (the shell inside out), the interior,
+    /// steering wheel and gauge needles. At most
+    /// [`MAX_CAR_INSTANCES`].
+    pub fn push_instances(
+        &self,
+        alpha: f32,
+        ids: &CarMeshes,
+        cabin: bool,
+        out: &mut Vec<MeshInstance>,
+    ) {
         let instance = |mesh: MeshId, m: Mat4| MeshInstance {
             mesh,
             transform: m.to_cols_array_2d(),
             color: [1.0; 4],
         };
+        let lod = &ids.lods[0];
+        let on = usize::from(self.headlights);
         let body = self.pose(alpha).matrix();
-        out.push(instance(ids.body, body));
-        if self.headlights {
-            out.push(instance(ids.lamps, body));
-        }
+        out.push(instance(lod.body[on], body));
+        out.push(instance(lod.glass, body));
+        out.push(instance(lod.lights[on][usize::from(self.braking())], body));
         for w in self.wheels(alpha) {
-            out.push(instance(ids.wheel, w));
+            out.push(instance(lod.wheel, w));
+        }
+        if cabin {
+            out.push(instance(lod.shell_inside, body));
+            out.push(instance(lod.interior, body));
+            out.push(instance(
+                lod.steering_wheel,
+                body * self.steering_wheel(alpha),
+            ));
+            out.push(instance(ids.dial_ticks, body));
+            let needles = self.needles(alpha);
+            for (k, n) in needles.iter().enumerate().take(self.layout.dial_count) {
+                out.push(instance(ids.needles[k], body * *n));
+            }
         }
     }
 
-    /// The headlight pools (two lights) when the headlights are on, else none.
+    /// The headlight pools (two lights, ahead of the left and right headlamps) when the
+    /// headlights are on, else none.
     pub fn lights(&self, alpha: f32) -> ([PointLight; 2], usize) {
         let pose = self.pose(alpha);
         let y = HEADLIGHT_HEIGHT_M - self.spec.cg_height_m;
-        let at = |x: f32| PointLight {
-            position: pose.point(Vec3::new(x, y, -HEADLIGHT_AHEAD_M)).to_array(),
+        let at = |lamp: Vec3| PointLight {
+            position: pose
+                .point(Vec3::new(lamp.x, y, lamp.z - HEADLIGHT_AHEAD_M))
+                .to_array(),
             color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
             radius: HEADLIGHT_RADIUS_M,
         };
-        let lights = [at(-HEADLIGHT_SPREAD_M), at(HEADLIGHT_SPREAD_M)];
-        (lights, if self.headlights { 2 } else { 0 })
+        let [l, r] = self.layout.headlamps;
+        ([at(l), at(r)], if self.headlights { 2 } else { 0 })
     }
-}
-
-/// Mesh ids of the placeholder car, as registered with the renderer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CarMeshes {
-    pub body: MeshId,
-    pub wheel: MeshId,
-    pub lamps: MeshId,
-}
-
-/// Paint for the placeholder body: brushed steel for the wedge, brown for the wagon.
-fn body_color(spec: &VehicleSpec) -> [u8; 4] {
-    match spec.id.as_str() {
-        "corsair_gtx" => [176, 178, 182, 255],
-        "palisade_wagon" => [118, 78, 48, 255],
-        _ => [160, 36, 32, 255],
-    }
-}
-
-/// Heights of the placeholder silhouette in body space: underside, belt line, roof, m.
-pub fn body_heights(spec: &VehicleSpec) -> (f32, f32, f32) {
-    let ground = -spec.cg_height_m;
-    let h = spec.dims_m[2];
-    (
-        ground + BODY_CLEARANCE_M + 0.05,
-        ground + BODY_CLEARANCE_M + 0.45 * h,
-        ground + BODY_CLEARANCE_M + h,
-    )
-}
-
-/// The placeholder body in body space: a lower box to the belt line (a little narrower
-/// than the wheels so they read from the side), a glass house over the cabin (to the tail
-/// on a wagon) and, inside, a dark dash ahead of the driver's `eye`.
-pub fn body_mesh(spec: &VehicleSpec, eye: Vec3) -> Mesh {
-    let [len, wid, _] = spec.dims_m;
-    let (under, belt, roof) = body_heights(spec);
-    let half_l = 0.5 * len;
-    let half_w = (0.5 * wid).min(0.5 * spec.track_m + 0.5 * WHEEL_WIDTH_M - 0.05);
-    let mut m = Mesh::cuboid(
-        [-half_w, under, -half_l],
-        [half_w, belt, half_l],
-        body_color(spec),
-    );
-    let glass_front = (eye.z - 0.95).max(-half_l + 0.4);
-    let glass_back = if spec.class == VehicleClass::Wagon {
-        half_l - 0.15
-    } else {
-        (eye.z + 0.85).min(half_l - 0.3)
-    };
-    let glass = Mesh::cuboid(
-        [-0.42 * wid, belt, glass_front],
-        [0.42 * wid, roof, glass_back],
-        [46, 54, 62, 255],
-    );
-    let dash = Mesh::cuboid(
-        [-half_w + 0.12, belt - 0.12, eye.z - 0.80],
-        [half_w - 0.12, belt + 0.04, eye.z - 0.55],
-        [40, 38, 36, 255],
-    );
-    for part in [glass, dash] {
-        let base = m.vertices.len() as u32;
-        m.vertices.extend_from_slice(&part.vertices);
-        m.indices.extend(part.indices.iter().map(|i| i + base));
-    }
-    m
-}
-
-/// Head and tail lamps on the front and rear faces, glowing: drawn over the body while the
-/// headlights are on.
-pub fn lamp_mesh(spec: &VehicleSpec) -> Mesh {
-    let [len, wid, _] = spec.dims_m;
-    let (_, belt, _) = body_heights(spec);
-    let half_l = 0.5 * len;
-    let x0 = 0.5 * wid - 0.45;
-    let (y0, y1) = (belt - 0.20, belt - 0.07);
-    let mut m = Mesh::default();
-    for (z0, z1, color, glow) in [
-        (
-            -half_l - 0.02,
-            -half_l + 0.02,
-            [250, 244, 226, 255],
-            render::emissive([255, 236, 200], 6.0),
-        ),
-        (
-            half_l - 0.02,
-            half_l + 0.02,
-            [200, 30, 24, 255],
-            render::emissive([255, 32, 20], 3.0),
-        ),
-    ] {
-        for sx in [-1.0f32, 1.0] {
-            let (a, b) = (sx * x0, sx * (x0 + 0.3));
-            let lamp =
-                Mesh::cuboid([a.min(b), y0, z0], [a.max(b), y1, z1], color).with_emissive(glow);
-            let base = m.vertices.len() as u32;
-            m.vertices.extend_from_slice(&lamp.vertices);
-            m.indices.extend(lamp.indices.iter().map(|i| i + base));
-        }
-    }
-    m
-}
-
-/// Sides of the placeholder wheel's prism.
-const WHEEL_SIDES: usize = 12;
-
-/// A wheel centered on its hub with its axle along `x`: a 12-sided tire with two-tone
-/// tread and a spoked face on each side, so its roll reads.
-pub fn wheel_mesh() -> Mesh {
-    let r = WHEEL_RADIUS_M;
-    let hw = 0.5 * WHEEL_WIDTH_M;
-    let tread = [[30, 30, 32, 255], [46, 46, 48, 255]];
-    let face = [[150, 152, 156, 255], [70, 70, 74, 255]];
-    let ring = |k: usize| {
-        let a = k as f32 * TAU / WHEEL_SIDES as f32;
-        (a.cos(), a.sin())
-    };
-    let mut m = Mesh::default();
-    let tri = |m: &mut Mesh, p: [[f32; 3]; 3], n: [f32; 3], c: [u8; 4]| {
-        let base = m.vertices.len() as u32;
-        for v in p {
-            m.vertices.push(Vertex::new(v, n, c));
-        }
-        m.indices.extend_from_slice(&[base, base + 1, base + 2]);
-    };
-    for k in 0..WHEEL_SIDES {
-        let (c0, s0) = ring(k);
-        let (c1, s1) = ring(k + 1);
-        // Tread: corners at angles k and k+1, outward normal at the middle.
-        let mid = (k as f32 + 0.5) * TAU / WHEEL_SIDES as f32;
-        m.push_quad(
-            [
-                [-hw, r * c0, r * s0],
-                [-hw, r * c1, r * s1],
-                [hw, r * c1, r * s1],
-                [hw, r * c0, r * s0],
-            ],
-            [0.0, mid.cos(), mid.sin()],
-            tread[k % 2],
-        );
-        // Faces: increasing angle is counter-clockwise seen from +x.
-        let color = face[k % 2];
-        tri(
-            &mut m,
-            [[hw, 0.0, 0.0], [hw, r * c0, r * s0], [hw, r * c1, r * s1]],
-            [1.0, 0.0, 0.0],
-            color,
-        );
-        tri(
-            &mut m,
-            [
-                [-hw, 0.0, 0.0],
-                [-hw, r * c1, r * s1],
-                [-hw, r * c0, r * s0],
-            ],
-            [-1.0, 0.0, 0.0],
-            color,
-        );
-    }
-    m
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::car::CarLodIds;
 
     fn flat() -> DriveGround {
         ground_for(&place::Place::test_grid())
@@ -489,6 +397,27 @@ mod tests {
         VehicleInput {
             throttle: t,
             ..VehicleInput::default()
+        }
+    }
+
+    /// Distinct ids for every mesh of a car.
+    fn ids() -> CarMeshes {
+        let lod = |k: u32| CarLodIds {
+            body: [MeshId(k), MeshId(k + 1)],
+            shell_inside: MeshId(k + 10),
+            glass: MeshId(k + 2),
+            interior: MeshId(k + 3),
+            steering_wheel: MeshId(k + 4),
+            wheel: MeshId(k + 5),
+            lights: [
+                [MeshId(k + 6), MeshId(k + 7)],
+                [MeshId(k + 8), MeshId(k + 9)],
+            ],
+        };
+        CarMeshes {
+            lods: [lod(10), lod(30)],
+            needles: [MeshId(50), MeshId(51), MeshId(52)],
+            dial_ticks: MeshId(53),
         }
     }
 
@@ -543,49 +472,105 @@ mod tests {
     }
 
     #[test]
-    fn wheels_sit_on_the_ground_steer_and_roll() {
-        let mut d = Drive::new(DEFAULT_VEHICLE).unwrap();
-        let g = flat();
-        // At rest every hub is one radius above the asphalt.
-        for w in d.wheels(1.0) {
-            let hub = w.transform_point3(Vec3::ZERO);
-            assert!((hub.y - WHEEL_RADIUS_M).abs() < 1e-5, "{hub}");
-        }
-        for _ in 0..360 {
-            d.step(throttle(0.6), &g);
-        }
-        for _ in 0..60 {
-            d.step(
-                VehicleInput {
-                    steer: 1.0,
-                    ..throttle(0.3)
-                },
-                &g,
-            );
-        }
-        let locals = d.wheel_locals(1.0);
-        // Steering right turns the fronts' forward (-z) toward +x; the rears stay straight.
-        let axle = |m: Mat4| m.transform_vector3(Vec3::X);
-        let fl = axle(locals[FRONT_LEFT]);
-        assert!(fl.z > 0.05, "{fl}");
-        let rl = axle(locals[2]);
-        assert!(rl.z.abs() < 1e-5 && rl.y.abs() < 1e-5, "{rl}");
-        // Rolling: the rear wheel's spoke has turned off its rest position.
-        let spoke = locals[2].transform_vector3(Vec3::Y);
-        assert!(spoke.z.abs() > 1e-3, "{spoke}");
-        assert!(d.roll.iter().all(|r| (0.0..TAU).contains(r)));
-        // Driving, the hubs stay near ground plus radius.
-        for w in d.wheels(1.0) {
-            let hub = w.transform_point3(Vec3::ZERO);
-            assert!((hub.y - WHEEL_RADIUS_M).abs() < 0.12, "{hub}");
+    fn wheels_sit_at_the_shape_hubs_steer_and_roll() {
+        for id in ["corsair_gtx", "palisade_wagon"] {
+            let mut d = Drive::new(id).unwrap();
+            let g = flat();
+            let r = d.layout.wheel_radius;
+            // At rest every hub is at the shape's wheel center, one radius over the asphalt.
+            for (k, w) in d.wheel_locals(1.0).iter().enumerate() {
+                let hub = w.transform_point3(Vec3::ZERO);
+                assert!(
+                    (hub - d.layout.wheel_centers[k]).length() < 1e-6,
+                    "{id} {hub}"
+                );
+            }
+            for w in d.wheels(1.0) {
+                let hub = w.transform_point3(Vec3::ZERO);
+                assert!((hub.y - r).abs() < 1e-5, "{id} {hub}");
+            }
+            // Left wheels face out to the left, right ones to the right.
+            let axle = |m: Mat4| m.transform_vector3(Vec3::X);
+            let locals = d.wheel_locals(1.0);
+            assert!(axle(locals[FRONT_LEFT]).x < -0.999);
+            assert!(axle(locals[REAR_LEFT]).x < -0.999);
+            assert!(axle(locals[FRONT_RIGHT]).x > 0.999);
+            for _ in 0..360 {
+                d.step(throttle(0.6), &g);
+            }
+            for _ in 0..60 {
+                d.step(
+                    VehicleInput {
+                        steer: 1.0,
+                        ..throttle(0.3)
+                    },
+                    &g,
+                );
+            }
+            let steer = d.state.steer_angle_rad;
+            assert!(steer > 0.1, "{id} {steer}");
+            let locals = d.wheel_locals(1.0);
+            // Steering right turns the fronts about y by the steer angle (forward, -z, toward
+            // +x, so the outward axle toward +z); the rears stay straight.
+            for i in [FRONT_LEFT, FRONT_RIGHT] {
+                let out = axle(locals[i]) * if i == FRONT_LEFT { -1.0 } else { 1.0 };
+                let yaw = out.z.atan2(out.x);
+                assert!((yaw - steer).abs() < 1e-5, "{id} {yaw} vs {steer}");
+                assert!(out.y.abs() < 1e-5);
+            }
+            let rl = axle(locals[REAR_LEFT]);
+            assert!(rl.z.abs() < 1e-5 && rl.y.abs() < 1e-5, "{rl}");
+            // Rolling: the rear wheel's spoke has turned off its rest position.
+            let spoke = locals[2].transform_vector3(Vec3::Y);
+            assert!(spoke.z.abs() > 1e-3, "{spoke}");
+            assert!(d.roll.iter().all(|r| (0.0..TAU).contains(r)));
+            // Driving, the hubs follow the springs near ground plus radius.
+            for w in d.wheels(1.0) {
+                let hub = w.transform_point3(Vec3::ZERO);
+                assert!((hub.y - r).abs() < 0.12, "{hub}");
+            }
         }
     }
 
     #[test]
-    fn switches_and_lights() {
+    fn the_steering_wheel_follows_the_road_wheels() {
         let mut d = Drive::new(DEFAULT_VEHICLE).unwrap();
+        let l = d.layout;
+        assert_eq!(d.steering_wheel(1.0), l.steering_wheel(0.0));
+        d.state.steer_angle_rad = -0.05;
+        let up = (Vec3::Y - l.wheel_axis * l.wheel_axis.y).normalize();
+        // Steering left: the rim's top swings left (counter-clockwise from the seat).
+        let top = d.steering_wheel(1.0).transform_vector3(up);
+        assert!(top.x < -0.5, "{top}");
+        // Half way through the step it has turned half as far.
+        let half = d.steering_wheel(0.5).transform_vector3(up);
+        assert!(half.x > top.x && half.x < 0.0);
+    }
+
+    #[test]
+    fn switches_lamps_and_pop_ups() {
+        let mut d = Drive::new(DEFAULT_VEHICLE).unwrap();
+        let ids = ids();
+        let lod = ids.lods[0];
         let mut input = InputState::default();
         assert_eq!(d.lights(1.0).1, 0);
+        let mut out = Vec::new();
+        d.push_instances(0.5, &ids, false, &mut out);
+        // Body (pop-ups down), glass, unlit lamps, four wheels.
+        let meshes: Vec<MeshId> = out.iter().map(|i| i.mesh).collect();
+        assert_eq!(
+            meshes,
+            [
+                lod.body[0],
+                lod.glass,
+                lod.lights[0][0],
+                lod.wheel,
+                lod.wheel,
+                lod.wheel,
+                lod.wheel
+            ]
+        );
+
         input.set(Action::Headlights, 1.0);
         input.set_just_pressed(Action::Headlights, true);
         input.set(Action::Horn, 1.0);
@@ -593,28 +578,67 @@ mod tests {
         assert!(d.headlights && d.horn);
         let (lights, n) = d.lights(1.0);
         assert_eq!(n, 2);
-        for l in lights {
-            let ahead = Vec3::from(l.position) - d.pose(1.0).pos;
-            assert!((ahead.x - HEADLIGHT_AHEAD_M).abs() < 1e-4, "{ahead}");
+        let pose = d.pose(1.0);
+        for (l, lamp) in lights.iter().zip(d.layout.headlamps) {
+            // Ahead of its lamp, on the lamp's side, pooled on the road.
+            let local = pose.rot.inverse() * (Vec3::from(l.position) - pose.pos);
+            assert!(
+                (lamp.z - local.z - HEADLIGHT_AHEAD_M).abs() < 1e-4,
+                "{local}"
+            );
+            assert!((local.x - lamp.x).abs() < 1e-4);
             assert!(l.color[0] > l.color[2], "warm");
         }
         input.set_just_pressed(Action::Headlights, false);
         d.frame(&input);
         assert!(d.headlights, "holding the button does not toggle again");
 
-        let ids = CarMeshes {
-            body: MeshId(7),
-            wheel: MeshId(8),
-            lamps: MeshId(9),
-        };
-        let mut out = Vec::new();
-        d.push_instances(0.5, &ids, &mut out);
-        assert_eq!(out.len(), 6);
+        out.clear();
+        d.push_instances(0.5, &ids, false, &mut out);
+        assert_eq!(out[0].mesh, lod.body[1], "pop-ups up");
+        assert_eq!(out[2].mesh, lod.lights[1][0], "lamps lit");
+        // Braking lights the brake lamps.
+        d.step(
+            VehicleInput {
+                brake: 1.0,
+                ..VehicleInput::default()
+            },
+            &flat(),
+        );
+        assert!(d.braking());
+        out.clear();
+        d.push_instances(0.5, &ids, false, &mut out);
+        assert_eq!(out[2].mesh, lod.lights[1][1]);
         d.headlights = false;
         out.clear();
-        d.push_instances(0.5, &ids, &mut out);
-        assert_eq!(out.len(), 5);
-        assert!(out.iter().all(|i| i.mesh != ids.lamps));
+        d.push_instances(0.5, &ids, false, &mut out);
+        assert_eq!(out[0].mesh, lod.body[0]);
+        assert_eq!(out[2].mesh, lod.lights[0][1]);
+    }
+
+    #[test]
+    fn the_cabin_draws_interior_wheel_and_needles() {
+        for id in ["corsair_gtx", "palisade_wagon"] {
+            let d = Drive::new(id).unwrap();
+            let ids = ids();
+            let lod = ids.lods[0];
+            let mut out = Vec::new();
+            d.push_instances(0.5, &ids, true, &mut out);
+            let dials = d.layout.dial_count;
+            assert_eq!(out.len(), 11 + dials, "{id}");
+            assert!(out.len() <= MAX_CAR_INSTANCES);
+            assert_eq!(out[7].mesh, lod.shell_inside);
+            assert_eq!(out[8].mesh, lod.interior);
+            assert_eq!(out[9].mesh, lod.steering_wheel);
+            assert_eq!(out[10].mesh, ids.dial_ticks);
+            for (k, n) in out[11..].iter().enumerate() {
+                assert_eq!(n.mesh, ids.needles[k]);
+            }
+            // Idling: the speedometer reads zero.
+            let n = d.needles(1.0)[0];
+            let dial = d.layout.dials[0];
+            assert_eq!(n, dial.needle(0.0));
+        }
     }
 
     #[test]
@@ -624,51 +648,5 @@ mod tests {
         d.step(VehicleInput::default(), &flat());
         assert_eq!(d.state, d.prev);
         assert_eq!(d.pose(1.0).pos, Vec3::new(-92.0, d.spec.cg_height_m, 4.9));
-    }
-
-    /// Every triangle's winding agrees with its normal, so back-face culling keeps it.
-    fn assert_outward(m: &Mesh) {
-        assert!(!m.indices.is_empty());
-        for t in m.indices.chunks_exact(3) {
-            let [a, b, c] = [t[0], t[1], t[2]].map(|i| Vec3::from(m.vertices[i as usize].pos));
-            let face = (b - a).cross(c - a).normalize();
-            for &i in t {
-                let n = Vec3::from(m.vertices[i as usize].normal);
-                assert!(face.dot(n) > 0.95, "{face} vs {n}");
-            }
-        }
-    }
-
-    #[test]
-    fn placeholder_meshes_fit_the_spec() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
-            let spec = vehicles::builtin_spec(id).unwrap();
-            let eye = Vec3::new(-0.35, 0.55, 0.15);
-            let body = body_mesh(&spec, eye);
-            let lamps = lamp_mesh(&spec);
-            for m in [&body, &lamps, &wheel_mesh()] {
-                assert_outward(m);
-            }
-            let [len, wid, h] = spec.dims_m;
-            for v in body.vertices.iter().chain(&lamps.vertices) {
-                let [x, y, z] = v.pos;
-                assert!(x.abs() <= 0.5 * wid + 1e-4);
-                assert!(z.abs() <= 0.5 * len + 0.03);
-                assert!(
-                    y >= -spec.cg_height_m && y <= -spec.cg_height_m + 0.25 + h + 1e-4,
-                    "{id} {y}"
-                );
-            }
-            assert!(lamps
-                .vertices
-                .iter()
-                .all(|v| render::emissive_scale(v.emissive).0 > 1.0));
-        }
-        let wheel = wheel_mesh();
-        for v in &wheel.vertices {
-            let [x, y, z] = v.pos;
-            assert!(x.abs() <= 0.5 * WHEEL_WIDTH_M + 1e-6);
-            assert!((y * y + z * z).sqrt() <= WHEEL_RADIUS_M + 1e-5);
-        }
     }
 }

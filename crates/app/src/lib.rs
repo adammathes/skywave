@@ -7,6 +7,7 @@
 //! its cameras ([`camera`]), then the clock ([`lighting`]).
 
 pub mod camera;
+pub mod car;
 pub mod daylight;
 pub mod drive;
 mod input;
@@ -23,7 +24,8 @@ pub use input::{
 };
 
 use camera::CameraRig;
-use drive::{CarMeshes, Drive, DriveGround};
+use car::{CarMeshes, CarModel};
+use drive::{Drive, DriveGround};
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
 use lighting::TimeOfDay;
@@ -123,7 +125,15 @@ impl App {
 
     /// The built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) at the start of the strip.
     pub fn new_with(seed: Seed, vehicle_id: &str) -> Result<App, String> {
-        let drive = Drive::new(vehicle_id)?;
+        let spec = vehicles::builtin_spec(vehicle_id)?;
+        let shape = vehicles::builtin_shape(&spec)?;
+        let model = CarModel::build(&spec, &shape)?;
+        let drive = Drive::with_layout(
+            spec,
+            model.layout,
+            drive::START_GROUND,
+            drive::START_HEADING_RAD,
+        );
         // The test town's layout is fixed; the session seed drives its detailing.
         let mut place = Place::test_grid();
         place.header.seed = seed.0;
@@ -141,18 +151,11 @@ impl App {
             })
             .collect();
         let world_instances = instances.len();
-        let mut add = |m: Mesh| {
-            meshes.push(m);
+        let car_meshes = model.register(|m| {
+            meshes.push(m.clone());
             MeshId(meshes.len() as u32 - 1)
-        };
-        let eye = camera::cockpit_eye(&drive.spec, &camera::TUNING);
-        let car_meshes = CarMeshes {
-            body: add(drive::body_mesh(&drive.spec, eye)),
-            wheel: add(drive::wheel_mesh()),
-            lamps: add(drive::lamp_mesh(&drive.spec)),
-        };
-        // Body, lamps and four wheels.
-        instances.reserve_exact(6);
+        });
+        instances.reserve_exact(drive::MAX_CAR_INSTANCES);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
         Ok(App {
@@ -282,8 +285,9 @@ impl App {
             (pose.view(), proj)
         };
         self.instances.truncate(self.world_instances);
+        let cabin = !self.fly && self.camera.mode().first_person();
         self.drive
-            .push_instances(alpha, &self.car_meshes, &mut self.instances);
+            .push_instances(alpha, &self.car_meshes, cabin, &mut self.instances);
         let (lights, n) = self.drive.lights(alpha);
         self.lights = lights;
         let daylight = self.time.daylight();
@@ -517,11 +521,11 @@ mod tests {
         assert!(hud.headlights);
         assert!(hud.speed_mps > 2.0, "{}", hud.speed_mps);
         assert!(hud.time_of_day > app.hud_state().time_of_day - 1.0);
-        // Headlights on: two pools of light ahead and the lamp mesh drawn.
-        let lamps = app.car_meshes.lamps;
+        // Headlights on: two pools of light ahead and the lit lamps drawn.
+        let lamps = app.car_meshes.lods[0].lights[1];
         let view = app.scene_view(0.5, 1.5);
         assert_eq!(view.lights.len(), 2);
-        assert!(view.instances.iter().any(|i| i.mesh == lamps));
+        assert!(view.instances.iter().any(|i| lamps.contains(&i.mesh)));
     }
 
     #[test]
@@ -581,16 +585,21 @@ mod tests {
         let meshes = app.meshes().len();
         let ids = app.car_meshes;
         let view = app.scene_view(steps.alpha, 16.0 / 9.0);
-        // The world, then the car: body and four wheels (lamps off).
-        assert_eq!(world, meshes - 3);
-        assert_eq!(view.instances.len(), world + 5);
+        // The world, then the car: body, glass, unlit lamps and four wheels (no cabin in
+        // the chase view).
+        assert_eq!(MeshId(world as u32), ids.lods[0].body[0]);
+        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 1));
+        assert_eq!(view.instances.len(), world + 7);
         for (i, inst) in view.instances[..world].iter().enumerate() {
             assert_eq!(inst.mesh, MeshId(i as u32));
         }
-        assert_eq!(view.instances[world].mesh, ids.body);
-        assert!(view.instances[world + 1..]
+        let lod = ids.lods[0];
+        assert_eq!(view.instances[world].mesh, lod.body[0]);
+        assert_eq!(view.instances[world + 1].mesh, lod.glass);
+        assert_eq!(view.instances[world + 2].mesh, lod.lights[0][0]);
+        assert!(view.instances[world + 3..]
             .iter()
-            .all(|i| i.mesh == ids.wheel));
+            .all(|i| i.mesh == lod.wheel));
         for inst in view.instances {
             assert!(Mat4::from_cols_array_2d(&inst.transform).is_finite());
         }
@@ -626,6 +635,30 @@ mod tests {
             clip.w > 0.0 && ndc.x.abs() < 0.2 && ndc.y.abs() < 0.6,
             "{ndc}"
         );
+    }
+
+    #[test]
+    fn the_cockpit_draws_the_cabin_without_growing_the_list() {
+        let mut app = App::new(Seed(1));
+        let cap = app.instances.capacity();
+        app.set_camera_mode(CameraMode::Cockpit);
+        let world = app.world_instances;
+        let ids = app.car_meshes;
+        let view = app.scene_view(1.0, 16.0 / 9.0);
+        let car: Vec<MeshId> = view.instances[world..].iter().map(|i| i.mesh).collect();
+        assert!(car.contains(&ids.lods[0].body[0]), "the hood shows");
+        assert!(car.contains(&ids.lods[0].interior));
+        assert!(car.contains(&ids.lods[0].steering_wheel));
+        assert!(car.contains(&ids.lods[0].shell_inside));
+        assert_eq!(car.len(), 11 + app.drive.layout.dial_count);
+        assert_eq!(app.instances.capacity(), cap);
+        // Back in the chase view the cabin is not drawn.
+        app.set_camera_mode(CameraMode::ChaseNear);
+        let view = app.scene_view(1.0, 16.0 / 9.0);
+        assert!(view
+            .instances
+            .iter()
+            .all(|i| i.mesh != ids.lods[0].interior));
     }
 
     #[test]
