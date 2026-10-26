@@ -7,11 +7,12 @@
 //! with the button or when the window loses focus. Platforms that refuse both just keep a
 //! free cursor; the raw motion still drives the look.
 //!
-//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats]`. `--scene` sets
-//! one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`, `pos=-92,4.9`,
-//! `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are `--scene seed=N` and
-//! `--scene car=ID`. `--stats` also prints the detected gamepads at startup and as they
-//! connect; otherwise that goes to the info log (`RUST_LOG=info`).
+//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--version]`.
+//! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
+//! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are
+//! `--scene seed=N` and `--scene car=ID`. `--stats` also prints the detected gamepads at
+//! startup and as they connect; otherwise that goes to the info log (`RUST_LOG=info`).
+//! `--version` prints the build's `git describe` (see `build.rs`) and exits.
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::NATIVE` (13×13
 //! chunks, 4 ms a sim step); `--scene stream=0` builds it all at load instead.
@@ -47,17 +48,20 @@ const PIXELS_PER_NOTCH: f64 = 100.0;
 struct Options {
     scene: SceneSetup,
     stats: bool,
+    version: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut opts = Options {
         scene: SceneSetup::default(),
         stats: false,
+        version: false,
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--stats" => opts.stats = true,
+            "-V" | "--version" => opts.version = true,
             "--seed" => {
                 let v = args.next().ok_or("--seed needs a value")?;
                 opts.scene.set("seed", &v)?;
@@ -426,7 +430,9 @@ fn main() -> ExitCode {
             if !e.is_empty() {
                 eprintln!("skywave: {e}");
             }
-            eprintln!("usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats]");
+            eprintln!(
+                "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--version]"
+            );
             return if e.is_empty() {
                 ExitCode::SUCCESS
             } else {
@@ -434,6 +440,10 @@ fn main() -> ExitCode {
             };
         }
     };
+    if opts.version {
+        println!("skywave {}", env!("SKYWAVE_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
@@ -497,7 +507,8 @@ mod tests {
             args(&[]),
             Ok(Options {
                 scene: SceneSetup::default(),
-                stats: false
+                stats: false,
+                version: false
             })
         );
         let mut scene = SceneSetup::from_query("seed=42&car=palisade_wagon").unwrap();
@@ -505,7 +516,8 @@ mod tests {
             args(&["--stats", "--seed", "42", "--car", "palisade_wagon"]),
             Ok(Options {
                 scene: scene.clone(),
-                stats: true
+                stats: true,
+                version: false
             })
         );
         scene.set("t", "22:30").unwrap();
@@ -523,9 +535,12 @@ mod tests {
             ]),
             Ok(Options {
                 scene,
-                stats: false
+                stats: false,
+                version: false
             })
         );
+        assert_eq!(args(&["--version"]).map(|o| o.version), Ok(true));
+        assert_eq!(args(&["-V"]).map(|o| o.version), Ok(true));
         assert!(args(&["--scene"]).is_err());
         assert!(args(&["--scene", "t"]).is_err());
         assert!(args(&["--scene", "t=25:00"]).is_err());
