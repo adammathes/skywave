@@ -2,6 +2,7 @@
 # Builds the browser version into dist/: release wasm, wasm-bindgen JS glue, index.html.
 # wasm-bindgen-cli must match the wasm-bindgen crate in Cargo.lock exactly; it is installed
 # with `cargo install` when missing or mismatched (GitHub release downloads are not used).
+# Honors CARGO_TARGET_DIR (default `target/`).
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,7 +24,7 @@ cargo build --release --locked --target wasm32-unknown-unknown -p platform-web
 rm -rf "$dist"
 mkdir -p "$dist"
 wasm-bindgen --target web --no-typescript --out-dir "$dist" \
-    target/wasm32-unknown-unknown/release/platform_web.wasm
+    "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/platform_web.wasm"
 if command -v wasm-opt >/dev/null 2>&1; then
     wasm-opt -O3 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
         --enable-mutable-globals --enable-reference-types \

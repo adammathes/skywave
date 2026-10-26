@@ -1,5 +1,7 @@
-//! Loading [`VehicleSpec`]s from the RON files in `assets/vehicles/`.
+//! Loading [`VehicleSpec`]s and their [`ShapeSpec`]s from the RON files in
+//! `assets/vehicles/`.
 
+use vehicle::shape::ShapeSpec;
 use vehicle::VehicleSpec;
 
 /// Parses a RON `VehicleSpec` and validates it. The error names the spec and, for a parse
@@ -30,6 +32,37 @@ pub fn builtin_spec(id: &str) -> Result<VehicleSpec, String> {
         .find(|(name, _)| *name == id)
         .ok_or_else(|| format!("no vehicle `{id}`"))?;
     load_spec(text)
+}
+
+/// Parses a RON `ShapeSpec` and validates it.
+pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
+    let shape: ShapeSpec = ron::from_str(text).map_err(|e| format!("shape spec: {e}"))?;
+    shape
+        .validate()
+        .map_err(|e| format!("shape spec `{}`: {e:?}", shape.id))?;
+    Ok(shape)
+}
+
+/// The car body shapes compiled into the game, as `(file name, RON text)`; a
+/// `VehicleSpec::shape` names one.
+pub const BUILTIN_SHAPES: [(&str, &str); 2] = [
+    (
+        "corsair_gtx.shape.ron",
+        include_str!("../../../assets/vehicles/corsair_gtx.shape.ron"),
+    ),
+    (
+        "palisade_wagon.shape.ron",
+        include_str!("../../../assets/vehicles/palisade_wagon.shape.ron"),
+    ),
+];
+
+/// Loads the built-in shape `spec.shape` names.
+pub fn builtin_shape(spec: &VehicleSpec) -> Result<ShapeSpec, String> {
+    let (_, text) = BUILTIN_SHAPES
+        .iter()
+        .find(|(name, _)| *name == spec.shape)
+        .ok_or_else(|| format!("no shape `{}` for `{}`", spec.shape, spec.id))?;
+    load_shape(text)
 }
 
 #[cfg(test)]
@@ -128,6 +161,18 @@ mod tests {
             builtin_spec("hovercar").unwrap_err(),
             "no vehicle `hovercar`"
         );
+    }
+
+    #[test]
+    fn every_builtin_has_its_shape() {
+        for (id, _) in BUILTIN {
+            let spec = builtin_spec(id).unwrap();
+            assert_eq!(builtin_shape(&spec).unwrap().id, id);
+        }
+        let mut spec = builtin_spec("corsair_gtx").unwrap();
+        spec.shape = "hovercar.shape.ron".into();
+        assert!(builtin_shape(&spec).is_err());
+        assert!(load_shape("ShapeSpec(id: ").is_err());
     }
 
     #[test]

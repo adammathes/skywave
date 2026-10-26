@@ -42,23 +42,36 @@ Steering input is filtered: target angle = `max_deg × (1 − speed_sens × v/60
 Outputs for feel: speed, RPM, gear, wheel slip (audio + tire marks later), g-forces (camera), suspension compression (cockpit shake).
 
 ## Parametric mesh (`vehicle::shape`)
-A `ShapeSpec` is a few curves lofted into an early-2000s-console-density body (target **3,000–6,000 triangles** for the body and wheels, plus **1,500–3,000** for the interior). Not a toy: panel seams, mirrors, rims, lights and trim must read from 30 m.
+A `ShapeSpec` (`assets/vehicles/<id>.shape.ron`, Rust type names as RON struct names, `deny_unknown_fields`) is a few curves lofted into an early-2000s-console-density body. Shape space: `x` m from the nose growing rearward, `y` m above the ground, widths are half-widths; the loft is symmetric. Not a toy: panel seams, mirrors, rims, lights and trim must read from 30 m.
 ```
 ShapeSpec(
-  side: [(x, y)...],         // side silhouette polyline (front→back along the top, then underside), 14–24 points
-  plan: [(x, halfwidth)...], // top-down half outline
-  section: Section(shoulder: 0.9, tumblehome_deg: 8, greenhouse_frac: 0.55),  // body cross-section shape
-  wheels: Wheels(radius: 0.32, width: 0.22, arch_clearance: 0.05, front_x, rear_x),
-  front: Face(lights: PopUp|Rect|Quad|Round|Hidden, grille: Slot|Egg|Wide|None, bumper: Chrome|Body|Rubber),
-  rear: Face(lights: FullWidth|Dual|Triple|Round, spoiler: None|Lip|Wing),
-  seams: Seams(hood: true, trunk: true, doors: 2|4, creases: [(x0,y0,x1,y1)...]),   // inset lines cut into the loft (0.6 cm deep)
-  parts: Parts(mirrors: Door|Fender, handles: Flush|Pull, wipers: 2, exhaust: Single|Dual, antenna: Mast|None, rims: Steel|Alloy5|Mesh|Turbine, hubcaps: bool),
-  details: [Louvers, HoodScoop, SideStripe, WoodPanel, ChromeTrim, VinylRoof, RallyStripes, MudFlaps, RoofRack, Badge(shape) ...],
-  palette: ["#c8102e", "#f2f0e6", ...],   // era-appropriate body colors, one chosen per instance
-  interior: InteriorShape(dash_height, wheel_pos, wheel_radius, mirror_pos, column_angle),
+  id: "corsair_gtx",                          // matches the VehicleSpec id
+  side: [(x, y)...],         // silhouette: top nose→tail (x increasing), then underside back to x = 0; 6–48 points
+  plan: [(x, halfwidth)...], // top-down half outline, x from 0 to the length; 2–32 points
+  belt: [(x, y)...],         // beltline where the glass starts, held flat beyond its ends
+  section: Section(shoulder: 0.93, tumblehome_deg: 24, greenhouse_frac: 0.70,
+                   crown: 0.04,   // centerline rise of hood, roof and deck over their edges, m
+                   tuck: 0.05),   // rocker tuck under the side, m
+  glass: Glass(windshield: (x0, x1), backlight: (x0, x1), side: [(x0, x1)...]),  // gaps between side windows are the B/C pillars
+  wheels: Wheels(radius, width, arch_clearance, front_x, rear_x, track),         // rear_x − front_x and track equal the VehicleSpec's
+  front: Front(lights: PopUp|Rect|Quad|Round|Hidden, grille: Slot|Egg|Wide|None, bumper: Chrome|Body|Rubber, bumper_y: (lo, hi)),
+  rear: Rear(lights: FullWidth|Dual|Triple|Round, spoiler: None|Lip|Wing, bumper: Chrome|Body|Rubber, bumper_y: (lo, hi)),
+  seams: Seams(hood: bool, trunk: bool, doors: 2|4, hood_width: 0.6, creases: [(x0, y0, x1, y1)...]),  // 6 mm insets; ≤ 2 creases
+  parts: Parts(mirrors: Door|Fender, handles: Flush|Pull, wipers: 0–3, exhaust: Single|Dual, antenna: Mast|None,
+               rims: Steel|Alloy5|Mesh|Turbine, hubcaps: bool),
+  details: [Louvers, HoodScoop, SideStripe, WoodPanel, ChromeTrim, VinylRoof, RallyStripes, MudFlaps, RoofRack, BlackTrim, Badge(Diamond|Circle|Bar|Chevron)],
+  palette: ["#b9bcc0", ...], // era body colors (sRGB), one chosen per instance
+  accent: "#1c1c1e",         // stripes, vinyl, badge fields
+  interior: InteriorShape(dash_height, dash_x, wheel_pos: (x, y), wheel_radius, column_angle_deg, mirror_pos: (x, y),
+                          seat: (x, y), driver_offset, rear_seat: bool, dials: 1–3,
+                          colors: [dash, seats, carpet, headliner, trim, accent], display: "#3cff7a"),
 )
 ```
-Loft: sample `side` and `plan` at 24–40 x stations, build a 12–16 point ring per station from `section` (smooth-shaded across rounded panels, hard at creases and seams), connect rings; cut wheel arches with a lip; inset seams and creases; add lights, grille slats, bumpers, mirrors, handles, wipers, exhaust and badges as small meshes with their own colors and emissive (headlights, tail lights, dash glow); rims are real spoke geometry (not a texture) with a tire sidewall ring. Tiny pattern textures from the shared atlas for grille mesh and glass. Interior: dash with a hooded cluster and a center stack, instrument faces drawn procedurally at runtime with live needles, steering wheel torus with spokes and a hub rotating with input, column stalks, A/B pillars and headliner edge, door cards with armrests, rear-view and side mirror housings, seats with bolsters, a radio head unit with a display quad showing station text, era-specific details (80s: square vents, digital green/orange displays, velour tones). Flat-colored with a 4–6 color palette per car plus the atlas.
+`build` / `build_lod` / `build_with(BuildOptions { color_index, lod, popups_up })` return a `CarMesh` of plain arrays (`MeshData`: positions, normals, uvs in meters for atlas-patterned panels, linear colors, emissive in the renderer's encoding, CCW triangles) in model space (`-z` forward, origin on the ground under the front axle; `body_offset(&VehicleSpec)` moves it to the sim's center-of-mass origin): `body` (shell and every opaque part), `wheels` (hub-local, right-side; left wheels turn 180° about `y`), `glass` (single-sided, facing out), `lights` (every lens with its emissive set as if lit), `interior`, `steering_wheel`, `wheel_centers`, `wheel_radius` and a `Cockpit` (eye, steering pivot and axis, radio display quad, up to 3 dials). Loft: 24–40 stations, a ring per station from `section`, smooth across rounded panels and hard at creases and seams; arches cut with a lip; lights, grille, bumpers, mirrors, handles, wipers, exhaust and badges as small meshes; rims with real spokes. LOD1 drops seams, small parts and interior detail and turns rims into discs.
+
+As built (LOD0): Corsair 5,402 exterior triangles (body+parts 3,466, glass 356, lights 84, wheels 4 × 374) and 1,554 interior (cabin 1,194, steering wheel 360); Palisade 5,856 (4,264, 184, 144, 4 × 316) and 1,726 (1,378, 348). Budgets: exterior 3,000–6,000, interior 1,500–3,000, LOD1 ≤ 40% (≈ 35% and 37% exterior).
+
+In the game (`app::car`): LOD0 and LOD1 are built once at startup, with pop-ups down and up. Lamp states are four baked copies of `lights` (headlights off/on × brake off/on), lenses grouped by emissive hue; the headlight switch also swaps the pop-up body. Glass maps onto a pane of the window atlas tile and the `Wide`/`Egg` grille onto the egg-crate tile; with no blended pass yet, glass is opaque from outside and culled from inside. The cockpit cameras add the interior, the steering wheel (450° at full lock), the body turned inside out as the cabin walls, and procedural glowing needles and scale ticks on the dials.
 
 Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so agents can look at it. glTF import (`gltf` crate, MIT) is the escape hatch for a hand-made model; the same `VehicleSpec` applies.
 
