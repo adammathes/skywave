@@ -1,6 +1,6 @@
 [package]
 name = "mapdump"
-description = "Renders a generated macro map (heightfield, water, zones, markers) to a PNG for inspection."
+description = "Renders a generated macro map (heightfield, water, zones, markers) and optionally its arterial road graph to a PNG for inspection."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

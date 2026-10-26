@@ -2,16 +2,19 @@
 //! 20 m contours, and markers for the downtown seed, strip centerline, highway, pass and
 //! points of interest. One pixel per 4 m height sample, times `--scale`.
 //!
+//! With `--roads`, also generates the arterial network and highway (stage 3) and draws its
+//! edges by class on top, nodes as dots.
+//!
 //! Usage: `cargo run -p mapdump -- --seed 1 --template assets/regions/california_coast.ron
-//! --out map.png [--size 16x16] [--scale 1]`
+//! --out map.png [--size 16x16] [--scale 1] [--roads]`
 
 mod png;
 
 use std::time::Instant;
 
-use place::ZoneId;
+use place::{RoadClass, RoadGraph, ZoneId};
 use skywave_core::Seed;
-use world::procgen::{MacroMap, MacroPoiKind};
+use world::procgen::{arterials, hash_graph, MacroMap, MacroPoiKind};
 use world::template::RegionTemplate;
 
 /// Zone colors by `ZoneId` discriminant (Water is shaded separately).
@@ -199,9 +202,64 @@ pub fn render(map: &MacroMap, scale: usize) -> (usize, usize, Vec<u8>) {
     (img.w, img.h, img.rgb)
 }
 
+/// Road color and line width in meters by class; ramps (one-way collectors) are drawn
+/// in their own color.
+fn road_style(class: RoadClass, oneway: bool) -> ([u8; 3], f32) {
+    if oneway {
+        return ([255, 140, 0], 8.0);
+    }
+    match class {
+        RoadClass::Highway => ([200, 30, 30], 22.0),
+        RoadClass::Arterial => ([255, 255, 255], 14.0),
+        RoadClass::Collector => ([255, 225, 90], 10.0),
+        RoadClass::Beachfront => ([0, 210, 255], 12.0),
+        RoadClass::Rural => ([110, 60, 20], 8.0),
+        RoadClass::Local | RoadClass::Alley => ([200, 200, 200], 6.0),
+    }
+}
+
+/// Draws the road graph over a rendered map: a dark casing, the class color, nodes.
+pub fn draw_roads(rgb: &mut [u8], w: usize, h: usize, scale: usize, g: &RoadGraph) {
+    let mut img = Image {
+        w,
+        h,
+        rgb: rgb.to_vec(),
+    };
+    let s = scale as f32 / 4.0;
+    let px = |p: [f32; 3]| [p[0] * s, p[2] * s];
+    let mut order: Vec<usize> = (0..g.edges.len()).collect();
+    // Minor roads first, the highway on top.
+    let rank = |c: RoadClass| match c {
+        RoadClass::Rural | RoadClass::Local | RoadClass::Alley => 0,
+        RoadClass::Collector | RoadClass::Beachfront => 1,
+        RoadClass::Arterial => 2,
+        RoadClass::Highway => 3,
+    };
+    order.sort_by_key(|&i| rank(g.edges[i].class));
+    for pass in 0..2 {
+        for &i in &order {
+            let e = &g.edges[i];
+            let (c, width) = road_style(e.class, e.oneway);
+            let wpx = (width * s).max(1.5);
+            for seg in e.profile.windows(2) {
+                if pass == 0 {
+                    img.line(px(seg[0]), px(seg[1]), wpx + 2.0, [20, 20, 20]);
+                } else {
+                    img.line(px(seg[0]), px(seg[1]), wpx, c);
+                }
+            }
+        }
+    }
+    for n in &g.nodes {
+        let p = [n.pos[0] * s, n.pos[1] * s];
+        img.disc(p[0], p[1], 1.2 * scale as f32, [0, 0, 0]);
+    }
+    rgb.copy_from_slice(&img.rgb);
+}
+
 fn usage() -> ! {
     eprintln!(
-        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S]"
+        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S] [--roads]"
     );
     std::process::exit(2);
 }
@@ -213,10 +271,16 @@ fn main() {
     let mut out: Option<String> = None;
     let mut size = [16u16, 16];
     let mut scale = 1usize;
+    let mut roads = false;
     let mut k = 1;
     while k < args.len() {
         let val = args.get(k + 1).cloned();
         match args[k].as_str() {
+            "--roads" => {
+                roads = true;
+                k += 1;
+                continue;
+            }
             "--seed" => seed = val.and_then(|v| v.parse().ok()).unwrap_or_else(|| usage()),
             "--template" => template = val,
             "--out" => out = val,
@@ -291,7 +355,32 @@ fn main() {
         map.pass.map(|p| [p[0].round(), p[1].round()]),
         map.water.len()
     );
-    let (w, h, rgb) = render(&map, scale.max(1));
+    let (w, h, mut rgb) = render(&map, scale.max(1));
+    if roads {
+        let start = Instant::now();
+        let g = arterials(Seed(seed), &t, &map);
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        let mut count = [0usize; 7];
+        for e in &g.edges {
+            count[e.class as usize] += 1;
+        }
+        let ramps = g.edges.iter().filter(|e| e.oneway).count();
+        println!(
+            "roads: {} nodes, {} edges in {ms:.1} ms, hash {:016x}",
+            g.nodes.len(),
+            g.edges.len(),
+            hash_graph(&g)
+        );
+        println!(
+            "  highway {} (red), arterial {} (white), collector {} (yellow), ramps {ramps} (orange), beachfront {} (cyan), rural {} (brown)",
+            count[RoadClass::Highway as usize],
+            count[RoadClass::Arterial as usize],
+            count[RoadClass::Collector as usize] - ramps,
+            count[RoadClass::Beachfront as usize],
+            count[RoadClass::Rural as usize],
+        );
+        draw_roads(&mut rgb, w, h, scale.max(1), &g);
+    }
     std::fs::write(&out, png::encode(w as u32, h as u32, &rgb)).unwrap_or_else(|e| {
         eprintln!("{out}: {e}");
         std::process::exit(1);
@@ -307,8 +396,10 @@ mod tests {
         let text = include_str!("../../../assets/regions/california_coast.ron");
         let t = load(text).expect("template");
         let map = MacroMap::generate(Seed(1), &t, [4, 4]);
-        let (w, h, rgb) = render(&map, 1);
+        let (w, h, mut rgb) = render(&map, 1);
         assert_eq!((w, h), (128, 128));
         assert_eq!(rgb.len(), w * h * 3);
+        let g = arterials(Seed(1), &t, &map);
+        draw_roads(&mut rgb, w, h, 1, &g);
     }
 }

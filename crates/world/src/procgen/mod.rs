@@ -1,14 +1,17 @@
 //! The procedural place producer (`docs/WORLD_GENERATION.md`). So far the macro stages:
-//! coast and terrain (stage 1) and the zone map (stage 2), as a [`MacroMap`].
+//! coast and terrain (stage 1) and the zone map (stage 2), as a [`MacroMap`], and the
+//! arterial network with the highway (stage 3), as a `place::RoadGraph` ([`arterials()`]).
 //!
 //! Everything is a pure function of `(seed, template, size)`. Each stage draws from its own
 //! `Rng::new(seed, &[stage, ..])` and its own noise keyed by `hash64(seed, [stage, ..])`, so
 //! changing one stage's draws never shifts another's.
 
+pub mod arterials;
 pub mod macro_map;
 pub mod terrain;
 pub mod zones;
 
+pub use arterials::{arterials, graded_heights, hash_graph};
 pub use macro_map::{Frame, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind};
 
 /// Stage ids, the first word of every stage's hash key.
@@ -23,6 +26,8 @@ pub mod stage {
     pub const ZONES: u64 = 4;
     /// Overlooks and other points of interest.
     pub const POIS: u64 = 5;
+    /// Arterial network and highway interchanges.
+    pub const ARTERIALS: u64 = 6;
 }
 
 /// Edge length of a streaming chunk.
