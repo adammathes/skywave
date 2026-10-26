@@ -2,7 +2,7 @@
 
 A chill, single-player driving game. Period-correct cars, a coherent seed-generated American place, low-poly geometry lit like it is 2026, and real era-appropriate music on the car radio. Nothing to do but drive and look.
 
-Inspired by the best part of the GTA III-era sandboxes: cruising at dusk with the radio on. First-person dashboard view, modern controls, zero violence, runs in a browser tab.
+Inspired by the best part of the open-world games of the early polygon eras: cruising at dusk with the radio on. First-person dashboard view, modern controls, zero violence, runs in a browser tab.
 
 *Screenshot coming with the first milestone.*
 

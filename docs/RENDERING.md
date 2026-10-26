@@ -1,6 +1,6 @@
 # Rendering
 
-The look: **2002 geometry, 2026 light.** Early-2000s console density (the GTA III/Vice City, Burnout 3, Midnight Club 2 generation), flat-shaded with tiny pattern textures, rendered through a modern HDR pipeline with a real sky, real shadows, haze, bloom and a moving sun. If a frame could be mistaken for a great PS2/Xbox screenshot that someone lit beautifully, it is right.
+The look: **2002 geometry, 2026 light.** Early-2000s open-world and arcade-racer density, flat-shaded with tiny pattern textures, rendered through a modern HDR pipeline with a real sky, real shadows, haze, bloom and a moving sun. If a frame could be mistaken for a great early-2000s console screenshot that someone lit beautifully, it is right. The look can shift per scenario (a 70s city wants grain and sodium, a 2000s valley wants bloom and chrome); the pipeline is one, the palettes and post styles are data.
 
 ## The fidelity bar (read this twice)
 Not a DOS game, not flat boxes on a plane. A street must have: curbs with a gutter, sidewalks with seams, crosswalks and lane paint, lamp posts with arms and heads, signs on poles, trees with volume (3–5 lobed canopies, a trunk), hydrants, parked cars. A building must have: a plinth, window insets with sills, a storefront bay with a door and awning where it faces the street, a cornice or parapet, roof clutter (vents, a water tank downtown), a sign band, drainpipes on brick. A car must read as a specific shape from 30 m with seams, mirrors, rims and lights. Then lighting makes it sing.

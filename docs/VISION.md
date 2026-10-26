@@ -4,7 +4,7 @@
 Drive a period-correct car through a coherent American place that looks like 2002 and is lit like 2026, with real era-appropriate music on the radio, and nothing to do but enjoy it.
 
 ## Why
-The best part of the GTA III-era games was never the missions. It was cruising a city at dusk with the radio on: the lights, the skyline, the song that happened to come on. Twenty-five years later that experience is still rare, and the originals have aged badly (third person only, dated controls, violence everywhere, no first-person dashboard). Skywave is that feeling, extracted, modernized, and made open.
+The best part of the open-world games of the early polygon eras was never the missions. It was cruising a city at dusk with the radio on: the lights, the skyline, the song that happened to come on. Twenty-five years later that experience is still rare, and the originals have aged badly (third person only, dated controls, violence everywhere, no first-person dashboard). Skywave is that feeling, extracted, modernized, and made open. The influences are wide: open-world sandboxes, arcade and simulation driving games, adventure games with a strong sense of place, and the look of early 3D across many styles. The project names none of them, and copies none of them.
 
 ## Pillars (in priority order; when two conflict, the higher wins)
 1. **The drive is the game.** Everything serves the moment-to-moment feel of driving and looking. Instant input response, no hitches, no loading screens, cars that feel distinct.

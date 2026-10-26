@@ -373,7 +373,7 @@ impl PointLight {
     }
 }
 
-/// A soft additive glow over a light, drawn after the forward pass (the Vice City corona).
+/// A soft additive glow over a light, drawn after the forward pass (the era's night-driving corona).
 /// Its color is the light's; its brightness follows the light's intensity against the
 /// exposure, up to a cap, times `strength` and [`Sky::corona_strength`]. Hidden by whatever
 /// the scene draws in front of the light, and faded as the light turns away from the view.

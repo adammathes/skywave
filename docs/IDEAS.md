@@ -2,14 +2,14 @@
 
 A ledger of suggestions (from the owner, from other agents, from play) with a verdict, so nothing is re-debated and placeholders never stick. Verdicts: **now** (in the current milestone), **later** (milestone named), **already** (in the docs), **no** (with the reason).
 
-## From a conversation about GTA-era techniques (2026-10-26)
+## From a conversation about early-3D open-world rendering techniques (2026-10-26)
 
 ### Rendering and look
 | Idea | Verdict | Notes |
 |---|---|---|
 | Ban modern techniques (no shadow maps, SSAO, TAA, physical bloom) to force the era look | **no** | The pillar is "2002 geometry, 2026 light": modern lighting on period geometry is the point. The era look comes from the geometry, textures, palette and post, not from crippling the lighting. Agents are told the opposite: keep fidelity in light, not in polygons. |
-| Coronas: additive glow sprites on streetlights, headlights, tail lights, the sun, scaled by distance and faded when occluded | **later: M2** | The most Vice City element. Cheap: a depth-tested billboard pass after bloom. Added to the M2 backlog (night lighting). |
-| PS2 "trails" filter: blurred previous frame blended back, tinted by time of day | **later: M7 style options** | As an optional post style next to cel/dither/CRT. Off by default. |
+| Coronas: additive glow sprites on streetlights, headlights, tail lights, the sun, scaled by distance and faded when occluded | **later: M2** | The most evocative element of the era's night-driving look. Cheap: a depth-tested billboard pass after bloom. Added to the M2 backlog (night lighting). |
+| Early-console "trails" filter: blurred previous frame blended back, tinted by time of day | **later: M7 style options** | As an optional post style next to cel/dither/CRT. Off by default. |
 | Blob shadows under cars, baked prelit vertex colors | **no** | We have cascaded shadow maps; blob shadows would fight them. |
 | Spherical environment map on car paint for cheap chrome and gloss | **later: M4 (roster)** | Yes. A tiny procedural sky/horizon env map, Fresnel-weighted, applied to paint and chrome. Big win for little cost. |
 | Fog color matches the sky at the horizon so LOD pops dissolve into haze | **already** | `docs/RENDERING.md`: fog tinted by the sky toward the sun; the Daylight model sets fog color = horizon color. |
@@ -23,7 +23,7 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 | Ambient traffic on a path-node graph, density by zone and hour, spawn out of view | **already: M4** | `docs/NPCS.md`. Hour-dependent density is added there. |
 | Zone names popping up on entry; per-zone traffic density, ambience, radio reception | **later: M2 (names + ambience), M3 (reception)** | Named neighborhoods are part of what makes a place a place. Invented names from the region template; radio static when far from a station's transmitter is a nice M3 touch. |
 | Separate low-poly collision meshes, never the render mesh | **already** | `world::WorldCollider` is built from Place data, not from meshes. |
-| Game clock at one game minute per real second (a day in 24 min) | **setting; default stays 10×** | GTA pacing is 60×. Ours defaults to 10× (a day in 2.4 h) because the drive is the game and golden hour should last. 60× is in the clock-speed options; the owner can flip the default at the feel gate. |
+| Game clock at one game minute per real second (a day in 24 min) | **setting; default stays 10×** | The classic open-world pacing is 60×. Ours defaults to 10× (a day in 2.4 h) because the drive is the game and golden hour should last. 60× is in the clock-speed options; the owner can flip the default at the feel gate. |
 
 ### Audio
 | Idea | Verdict | Notes |
