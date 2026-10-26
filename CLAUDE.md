@@ -39,7 +39,7 @@ doc for the area you are touching. `docs/MILESTONES.md` says what is in scope no
   `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo deny check`, wasm build,
   headless screenshot smoke test.
 - Visual changes attach a screenshot from `tools/screenshot` to the PR.
-- Commit messages: imperative, one line, body explains *why*. No model names in commits.
+- Commit messages: imperative, one line, body explains *why*. No model names in titles or bodies (attribution trailers are fine).
 - Keep PRs small and finished. No TODO-driven stubs on `main`. No drive-by refactors.
 - Tests live beside code. World-gen changes update determinism hashes deliberately, in their own
   commit, with the reason.
