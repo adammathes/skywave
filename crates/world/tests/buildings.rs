@@ -211,7 +211,12 @@ fn check_footprint(b: &Building, p: &Parcel) {
 /// world --test buildings -- --nocapture` (it prints the table), look at the
 /// `tools/screenshot` captures of the coast before and after, and commit the new values in
 /// their own commit whose message says why they moved.
-const GOLDEN: [u64; 4] = [0, 0, 0, 0];
+const GOLDEN: [u64; 4] = [
+    0x2E83_B9B5_70BB_5441,
+    0xE66A_69F5_2635_0426,
+    0xDA8A_45AA_5CF5_C88F,
+    0xD2C9_C277_0797_2473,
+];
 
 #[test]
 fn places_with_buildings_validate_and_are_pinned() {
