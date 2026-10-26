@@ -18,5 +18,9 @@
   "strip-dusk-near": {
     "about": "Dusk on the strip just after the street lamps come on (sun 7° down), headlights on, from the near chase camera.",
     "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-near", "t": "18:35", "lights": "1", "pos": "60,-4.9", "yaw": "270", "still": "1" }
+  },
+  "town-map-full": {
+    "about": "The full-screen map at the default start: the whole town north-up with the player arrow.",
+    "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-mid", "t": "17:40", "map": "1", "still": "1" }
   }
 }

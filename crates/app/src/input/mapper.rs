@@ -305,6 +305,9 @@ impl InputMapper {
             self.was_pressed[action as usize] = pressed;
         }
 
+        if let Some(i) = RawInput::MouseWheel.slot() {
+            self.state.set_wheel(self.value[i]);
+        }
         self.pressed_edge = [false; RawInput::COUNT];
         self.tap = [false; RawInput::COUNT];
         for raw in [
@@ -735,6 +738,28 @@ mod tests {
         m.release(btn(PadButton::Select));
         assert!(m.sample(0.01).just_pressed(Action::MapToggle));
         assert!(!m.sample(0.01).just_pressed(Action::MapToggle));
+    }
+
+    #[test]
+    fn wheel_notches_and_map_zoom() {
+        let mut m = InputMapper::default();
+        // Notches accumulate until the next sample, then reset.
+        m.axis(RawInput::MouseWheel, 1.0);
+        m.axis(RawInput::MouseWheel, 2.0);
+        assert_eq!(m.sample(0.01).wheel(), 3.0);
+        assert_eq!(m.sample(0.01).wheel(), 0.0);
+        // The shoulders zoom the full map; = and - on the keyboard.
+        m.press(btn(PadButton::R1));
+        assert_eq!(m.sample(0.01).axis(Action::MapZoom), 1.0);
+        m.release(btn(PadButton::R1));
+        m.press(btn(PadButton::L1));
+        assert_eq!(m.sample(0.01).axis(Action::MapZoom), -1.0);
+        m.release(btn(PadButton::L1));
+        m.press(key(Key::Minus));
+        assert_eq!(m.sample(0.01).axis(Action::MapZoom), -1.0);
+        m.release(key(Key::Minus));
+        m.press(key(Key::Equal));
+        assert_eq!(m.sample(0.01).axis(Action::MapZoom), 1.0);
     }
 
     #[test]

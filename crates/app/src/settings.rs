@@ -4,6 +4,7 @@
 //! ```json
 //! { "version": 1,
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false },
+//!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
 //!   "world": { "clock_speed": 10.0 },
 //!   "input": { …the bindings document, see `Bindings::to_json`… } }
 //! ```
@@ -16,6 +17,7 @@ use serde_json::Value;
 
 use crate::daylight::CLOCK_SPEEDS;
 use crate::input::Bindings;
+use crate::map::view::{DEFAULT_MINIMAP_RANGE, MINIMAP_RANGES_M};
 
 /// The settings format version written by [`Settings::to_json`].
 pub const SETTINGS_VERSION: u32 = 1;
@@ -62,6 +64,12 @@ pub struct Settings {
     pub debug_overlay: bool,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
     pub clock_speed: f32,
+    /// The minimap at the bottom left.
+    pub minimap: bool,
+    /// The minimap turns with the car (its forward up); off is north-up.
+    pub minimap_rotate: bool,
+    /// Meters across the minimap; one of [`MINIMAP_RANGES_M`].
+    pub minimap_range_m: f32,
 }
 
 impl Default for Settings {
@@ -72,6 +80,9 @@ impl Default for Settings {
             bloom: true,
             debug_overlay: false,
             clock_speed: 10.0,
+            minimap: true,
+            minimap_rotate: true,
+            minimap_range_m: MINIMAP_RANGES_M[DEFAULT_MINIMAP_RANGE],
         }
     }
 }
@@ -103,6 +114,25 @@ impl Default for Video {
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
+struct HudSection {
+    minimap: bool,
+    minimap_rotate: bool,
+    minimap_range_m: f32,
+}
+
+impl Default for HudSection {
+    fn default() -> HudSection {
+        let s = Settings::default();
+        HudSection {
+            minimap: s.minimap,
+            minimap_rotate: s.minimap_rotate,
+            minimap_range_m: s.minimap_range_m,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
 struct World {
     clock_speed: f32,
 }
@@ -117,24 +147,24 @@ impl Default for World {
 
 impl Settings {
     /// Every value inside its range: scales clamped (non-finite ones take the default),
-    /// the clock speed snapped to the nearest offered speed.
+    /// the clock speed and minimap range snapped to the nearest offered value.
     pub fn sanitized(self) -> Settings {
         let d = Settings::default();
         let fix =
             |v: f32, lo: f32, hi: f32, def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
-        let speed = if self.clock_speed.is_finite() {
-            CLOCK_SPEEDS
-                .iter()
-                .copied()
-                .min_by(|a, b| {
-                    (a - self.clock_speed)
-                        .abs()
-                        .total_cmp(&(b - self.clock_speed).abs())
-                })
-                .unwrap_or(d.clock_speed)
-        } else {
-            d.clock_speed
+        let nearest = |v: f32, offered: &[f32], def: f32| {
+            if v.is_finite() {
+                offered
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
+                    .unwrap_or(def)
+            } else {
+                def
+            }
         };
+        let speed = nearest(self.clock_speed, &CLOCK_SPEEDS, d.clock_speed);
+        let range = nearest(self.minimap_range_m, &MINIMAP_RANGES_M, d.minimap_range_m);
         Settings {
             ui_scale: fix(
                 self.ui_scale,
@@ -144,6 +174,7 @@ impl Settings {
             ),
             resolution_scale: fix(self.resolution_scale, RESOLUTION_SCALE_MIN, 1.0, 1.0),
             clock_speed: speed,
+            minimap_range_m: range,
             ..self
         }
     }
@@ -158,6 +189,11 @@ impl Settings {
                 resolution_scale: self.resolution_scale,
                 bloom: self.bloom,
                 debug_overlay: self.debug_overlay,
+            },
+            "hud": HudSection {
+                minimap: self.minimap,
+                minimap_rotate: self.minimap_rotate,
+                minimap_range_m: self.minimap_range_m,
             },
             "world": World { clock_speed: self.clock_speed },
             "input": input,
@@ -175,6 +211,7 @@ impl Settings {
             root.remove(key).unwrap_or(Value::Null)
         };
         let video: Video = serde_json::from_value(section(&mut root, "video")).unwrap_or_default();
+        let hud: HudSection = serde_json::from_value(section(&mut root, "hud")).unwrap_or_default();
         let world: World = serde_json::from_value(section(&mut root, "world")).unwrap_or_default();
         let bindings = match section(&mut root, "input") {
             v @ Value::Object(_) => Bindings::from_json(&v.to_string()).ok(),
@@ -186,6 +223,9 @@ impl Settings {
             bloom: video.bloom,
             debug_overlay: video.debug_overlay,
             clock_speed: world.clock_speed,
+            minimap: hud.minimap,
+            minimap_rotate: hud.minimap_rotate,
+            minimap_range_m: hud.minimap_range_m,
         }
         .sanitized();
         (settings, bindings)
@@ -205,6 +245,9 @@ mod tests {
             bloom: false,
             debug_overlay: true,
             clock_speed: 60.0,
+            minimap: false,
+            minimap_rotate: false,
+            minimap_range_m: 250.0,
         };
         let mut b = Bindings::default();
         let mut o = b.axis_options(DeviceKind::Gamepad, Action::LookY);
@@ -226,7 +269,8 @@ mod tests {
         // Partial sections, wrong types, out-of-range values, unknown keys.
         let (s, b) = Settings::from_json(
             r#"{ "video": { "ui_scale": 7, "bloom": false, "extra": 1 },
-                 "world": { "clock_speed": 12 }, "input": 5, "radio": {} }"#,
+                 "world": { "clock_speed": 12 }, "input": 5, "radio": {},
+                 "hud": { "minimap_rotate": false, "minimap_range_m": 120 } }"#,
         );
         assert_eq!(
             s,
@@ -234,6 +278,8 @@ mod tests {
                 ui_scale: 2.0,
                 bloom: false,
                 clock_speed: 10.0,
+                minimap_rotate: false,
+                minimap_range_m: 100.0,
                 ..Settings::default()
             }
         );

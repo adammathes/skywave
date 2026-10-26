@@ -15,9 +15,12 @@
 //!    (Jimenez 2014). Skipped when [`Sky::bloom_strength`] is 0.
 //! 4. **Tonemap**: exposure, bloom, AgX, a light vignette and an 8-bit dither from the HDR
 //!    target to the swapchain.
-//! 5. **HUD**: text and rectangles from [`SceneView::hud`] as alpha-blended quads straight
-//!    onto the swapchain, in one instanced draw (see [`HudLayout`] for the layout rules
-//!    and [`font`] for the bitmap face). Skipped when there is nothing to draw.
+//! 5. **HUD**: text, rectangles and images (the map uploaded once with
+//!    [`Renderer::upload_map`], discs, the player arrow) from [`SceneView::hud`] as
+//!    alpha-blended quads straight onto the swapchain, in one instanced draw: the HUD bind
+//!    group holds the font atlas and the map, and each quad picks one (see [`HudLayout`]
+//!    for the layout rules and [`font`] for the bitmap face). Skipped when there is
+//!    nothing to draw.
 //!
 //! Where the device cannot render to `Rgba16Float` (WebGL2 without
 //! `EXT_color_buffer_float`) the forward pass tonemaps in its fragment shaders (AgX,
@@ -39,8 +42,8 @@ pub use atlas::{
     TILE_SIZE,
 };
 pub use hud::{
-    clamp_ui_scale, Hud, HudBuilder, HudItem, HudLayout, TextRange, HUD_HEIGHT, HUD_SAFE_MARGIN,
-    HUD_WIDTH, MAX_HUD_QUADS, UI_SCALE_MAX, UI_SCALE_MIN,
+    clamp_ui_scale, Hud, HudBuilder, HudImage, HudItem, HudLayout, HudMask, HudTexture, TextRange,
+    HUD_HEIGHT, HUD_SAFE_MARGIN, HUD_WIDTH, MAX_HUD_QUADS, UI_SCALE_MAX, UI_SCALE_MIN,
 };
 pub use light::{
     camera_depth_range, fit_cascades, slice_corners, sun_view_proj, CascadeFit, CASCADES,
@@ -88,6 +91,10 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const FONT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// The HUD map: sRGB-encoded texels read as plain unorm, like the HUD's colors.
+const MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Widest map [`Renderer::upload_map`] takes: WebGL2's guaranteed texture size.
+pub const MAX_MAP_SIZE: u32 = 2048;
 /// Stride of the per-cascade uniform slots; the largest offset alignment WebGPU allows.
 const CASCADE_UNIFORM_STRIDE: u64 = 256;
 
@@ -452,8 +459,8 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array!
     9 => Float32x4, 10 => Float32x4, 11 => Float32x4, 12 => Float32x4,
     13 => Float32x4,
 ];
-const HUD_ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
-    0 => Float32x4, 1 => Float32x4, 2 => Unorm8x4,
+const HUD_ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+    0 => Float32x4, 1 => Float32x4, 2 => Unorm8x4, 3 => Float32x4,
 ];
 
 fn mesh_buffer_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
@@ -556,7 +563,13 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
+    hud_layout: wgpu::BindGroupLayout,
     hud_group: wgpu::BindGroup,
+    font_view: wgpu::TextureView,
+    font_sampler: wgpu::Sampler,
+    map_sampler: wgpu::Sampler,
+    /// Texels of the uploaded map (1×1 transparent until [`Renderer::upload_map`]).
+    map_size: [u32; 2],
     /// Room for [`MAX_HUD_QUADS`] quads, allocated once.
     hud_buffer: wgpu::Buffer,
     hud_staging: Vec<HudQuad>,
@@ -963,27 +976,30 @@ impl Renderer {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        // Trilinear, at the mip level the quad asks for (see `hud::build_quads`).
+        let map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("hud map"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
         let hud_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hud"),
             entries: &[
                 texture_entry(0, wgpu::TextureSampleType::Float { filterable: true }),
                 sampler_entry(1, wgpu::SamplerBindingType::Filtering),
+                texture_entry(2, wgpu::TextureSampleType::Float { filterable: true }),
+                sampler_entry(3, wgpu::SamplerBindingType::Filtering),
             ],
         });
-        let hud_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hud"),
-            layout: &hud_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&font_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&font_sampler),
-                },
-            ],
-        });
+        let no_map = upload_map_texture(&device, &queue, 1, 1, &[0; 4]);
+        let hud_group = hud_group(
+            &device,
+            &hud_layout,
+            [&font_view, &no_map],
+            [&font_sampler, &map_sampler],
+        );
         let hud_module = module("hud", shaders::HUD);
         let hud_pl = layout("hud", &[Some(&frame_layout), Some(&hud_layout)]);
         let hud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1049,7 +1065,12 @@ impl Renderer {
             sky_pipeline,
             mesh_pipeline,
             hud_pipeline,
+            hud_layout,
             hud_group,
+            font_view,
+            font_sampler,
+            map_sampler,
+            map_size: [1, 1],
             hud_buffer,
             hud_staging: Vec::with_capacity(MAX_HUD_QUADS),
             meshes: Vec::new(),
@@ -1106,6 +1127,34 @@ impl Renderer {
             self.size = size;
             self.targets = create_targets(&self.device, self.post.as_ref(), size);
         }
+    }
+
+    /// Uploads the map that [`HudTexture::Map`] quads show: `width × height` RGBA8 texels,
+    /// sRGB-encoded, row-major from the top-left, with straight alpha. Mipmaps are built
+    /// here. Call it once while loading (it creates a texture); a later call replaces the
+    /// map. Sizes are clamped to 1..=[`MAX_MAP_SIZE`]; data of the wrong length uploads a
+    /// transparent map.
+    pub fn upload_map(&mut self, width: u32, height: u32, rgba: &[u8]) {
+        let (w, h) = (width.clamp(1, MAX_MAP_SIZE), height.clamp(1, MAX_MAP_SIZE));
+        let empty = [0; 4];
+        let (w, h, rgba) = if (w, h) == (width, height) && rgba.len() == (w * h * 4) as usize {
+            (w, h, rgba)
+        } else {
+            (1, 1, &empty[..])
+        };
+        let view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
+        self.hud_group = hud_group(
+            &self.device,
+            &self.hud_layout,
+            [&self.font_view, &view],
+            [&self.font_sampler, &self.map_sampler],
+        );
+        self.map_size = [w, h];
+    }
+
+    /// Size in texels of the map [`Renderer::upload_map`] last uploaded (1×1 before).
+    pub fn map_size(&self) -> [u32; 2] {
+        self.map_size
     }
 
     /// Uploads a mesh. Ids are assigned in upload order starting at 0.
@@ -1263,8 +1312,13 @@ impl Renderer {
             forward_draws += 1;
         }
         self.hud_staging.clear();
-        let hud_dropped =
-            hud::build_quads(&scene.hud, self.size, &mut self.hud_staging, MAX_HUD_QUADS);
+        let hud_dropped = hud::build_quads(
+            &scene.hud,
+            self.size,
+            self.map_size,
+            &mut self.hud_staging,
+            MAX_HUD_QUADS,
+        );
         let hud_quads = self.hud_staging.len() as u32;
         if hud_quads > 0 {
             self.queue
@@ -1535,6 +1589,86 @@ fn upload_font(
         },
         size,
     );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// The HUD bind group: font atlas and sampler, map and sampler.
+fn hud_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    views: [&wgpu::TextureView; 2],
+    samplers: [&wgpu::Sampler; 2],
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("hud"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(views[0]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(samplers[0]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(views[1]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(samplers[1]),
+            },
+        ],
+    })
+}
+
+/// Uploads a map image with its whole mip chain (see [`hud::mip_chain`]).
+fn upload_map_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> wgpu::TextureView {
+    let levels = hud::mip_chain(width, height, rgba);
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("hud map"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: levels.len() as u32 + 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: MAP_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let base = [(width, height, rgba)];
+    let rest = levels.iter().map(|(w, h, px)| (*w, *h, px.as_slice()));
+    for (level, (w, h, px)) in base.into_iter().chain(rest).enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: level as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            px,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
@@ -2068,13 +2202,83 @@ mod tests {
 
     #[test]
     fn hud_quad_layout_matches_the_shader() {
-        assert_eq!(size_of::<HudQuad>(), 36);
+        assert_eq!(size_of::<HudQuad>(), 52);
         assert_eq!(HUD_ATTRIBUTES[1].offset, 16);
         assert_eq!(HUD_ATTRIBUTES[2].offset, 32);
+        assert_eq!(HUD_ATTRIBUTES[3].offset, 36);
         let wgsl = include_str!("../shaders/hud.wgsl");
-        for (i, name) in ["rect", "uv", "color"].iter().enumerate() {
+        for (i, name) in ["rect", "uv", "color", "params"].iter().enumerate() {
             assert!(wgsl.contains(&format!("@location({i}) {name}: vec4<f32>")));
         }
+        // The quad kinds and masks agree with the shader's.
+        for (name, value) in [
+            ("QUAD_FONT", hud::QUAD_FONT),
+            ("QUAD_MAP", hud::QUAD_MAP),
+            ("QUAD_SOLID", hud::QUAD_SOLID),
+            ("QUAD_ARROW", hud::QUAD_ARROW),
+            ("MASK_CIRCLE", hud::MASK_CIRCLE),
+            ("MASK_ROUNDED", hud::MASK_ROUNDED),
+        ] {
+            assert!(
+                wgsl.contains(&format!("const {name}: u32 = {value}u;")),
+                "{name}"
+            );
+        }
+        // Two textures and two samplers: far under WebGL2's 16 per stage.
+        assert!(wgsl.contains("@group(1) @binding(3) var map_sampler: sampler;"));
+    }
+
+    /// Map images draw in the same single HUD draw as text (the shader switches textures
+    /// per quad), before and after a map is uploaded, and uploading allocates nothing per
+    /// frame afterwards.
+    #[test]
+    fn hud_draws_map_images_in_the_same_call() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
+        let mut r = Renderer::new(&device, &queue, format, (128, 72));
+        assert_eq!(r.map_size(), [1, 1]);
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let instances = [MeshInstance::new(block, Mat4::IDENTITY.to_cols_array_2d())];
+        let mut scene = test_scene(&instances);
+        render_frames(&device, &mut r, format, &scene, &[(128, 72)]);
+        let base = r.stats().draw_calls;
+
+        let mut hud = HudBuilder::new();
+        hud.begin(1.0);
+        hud.image(HudImage {
+            x: 20.0,
+            y: 400.0,
+            w: 200.0,
+            h: 200.0,
+            uv: [0.4, 0.4, 0.6, 0.6],
+            rotation: 1.0,
+            texture: HudTexture::Map,
+            mask: HudMask::Circle,
+            color: [255; 4],
+        });
+        hud.image(HudImage::arrow(120.0, 500.0, 24.0, 0.0, [255; 4]));
+        hud.image(HudImage::disc(120.0, 400.0, 4.0, [255; 4]));
+        hud.text(116.0, 380.0, 2.0, [255; 4], "N");
+        scene.hud = hud.view();
+        render_frames(&device, &mut r, format, &scene, &[(128, 72)]);
+        assert_eq!(r.stats().draw_calls, base + 1);
+        assert_eq!(r.stats().hud_quads, 4);
+
+        // A 64×32 map with its mip chain; a wrong-sized buffer falls back to 1×1.
+        let rgba: Vec<u8> = (0..64 * 32 * 4).map(|i| (i % 251) as u8).collect();
+        r.upload_map(64, 32, &rgba);
+        assert_eq!(r.map_size(), [64, 32]);
+        let sizes = [(128, 72); WARMUP_FRAMES as usize + 2];
+        render_frames(&device, &mut r, format, &scene, &sizes);
+        let stats = r.stats();
+        assert_eq!(stats.draw_calls, base + 1);
+        assert_eq!(stats.hud_quads, 4);
+        assert_eq!(stats.resources_created, 0);
+        r.upload_map(64, 32, &rgba[..10]);
+        assert_eq!(r.map_size(), [1, 1]);
+        r.upload_map(MAX_MAP_SIZE + 1, 1, &[]);
+        assert_eq!(r.map_size(), [1, 1]);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
     /// The noop device renders Rgba16Float, so detection picks the float path; with full

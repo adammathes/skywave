@@ -372,6 +372,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Headlights => vec![key(Key::KeyL, Pos)],
             Action::Horn => vec![key(Key::KeyH, Pos)],
             Action::MapToggle => vec![key(Key::KeyM, Pos)],
+            Action::MapZoom => vec![key(Key::Minus, Neg), key(Key::Equal, Pos)],
             Action::TimeScrub => vec![key(Key::Comma, Neg), key(Key::Period, Pos)],
             Action::Pause => vec![key(Key::Escape, Pos)],
             Action::Screenshot => vec![key(Key::F12, Pos)],
@@ -406,6 +407,10 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Headlights => vec![btn(PadButton::DpadUp)],
             Action::Horn => vec![btn(PadButton::L3)],
             Action::MapToggle => vec![btn(PadButton::Select)],
+            Action::MapZoom => vec![
+                Binding::new(RawInput::PadButton(PadButton::L1), Neg),
+                btn(PadButton::R1),
+            ],
             Action::TimeScrub => {
                 vec![axis(PadAxis::RightX, Full).while_held(RawInput::PadButton(PadButton::Select))]
             }

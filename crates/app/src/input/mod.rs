@@ -43,6 +43,8 @@ pub enum Action {
     Headlights,
     Horn,
     MapToggle,
+    /// Full map zoom out (-) / in (+), `[-1, 1]`.
+    MapZoom,
     /// Time of day backwards (-) / forwards (+), `[-1, 1]`.
     TimeScrub,
     Pause,
@@ -78,7 +80,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 32;
+    pub const COUNT: usize = 33;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -94,6 +96,7 @@ impl Action {
         Action::Headlights,
         Action::Horn,
         Action::MapToggle,
+        Action::MapZoom,
         Action::TimeScrub,
         Action::Pause,
         Action::Screenshot,
@@ -116,13 +119,14 @@ impl Action {
 
     /// Analog actions: these sum their inputs, run the per-device [`AxisOptions`] pipeline
     /// and may ramp. Every other action is a button whose value is its strongest input.
-    pub const ANALOG: [Action; 8] = [
+    pub const ANALOG: [Action; 9] = [
         Action::Throttle,
         Action::Brake,
         Action::Steer,
         Action::LookX,
         Action::LookY,
         Action::TimeScrub,
+        Action::MapZoom,
         Action::FlyLookX,
         Action::FlyLookY,
     ];
@@ -144,6 +148,7 @@ impl Action {
                 | Action::LookX
                 | Action::LookY
                 | Action::TimeScrub
+                | Action::MapZoom
                 | Action::FlyLookX
                 | Action::FlyLookY
         )
@@ -156,7 +161,8 @@ impl Action {
             | Action::MenuLeft
             | Action::MenuRight
             | Action::MenuConfirm
-            | Action::MenuBack => Context::Menu,
+            | Action::MenuBack
+            | Action::MapZoom => Context::Menu,
             Action::FlyForward
             | Action::FlyBack
             | Action::FlyLeft
@@ -196,6 +202,7 @@ impl Action {
             Action::Headlights => "Headlights",
             Action::Horn => "Horn",
             Action::MapToggle => "MapToggle",
+            Action::MapZoom => "MapZoom",
             Action::TimeScrub => "TimeScrub",
             Action::Pause => "Pause",
             Action::Screenshot => "Screenshot",
@@ -231,10 +238,22 @@ impl Action {
 
 /// The value of every action this frame: buttons in `[0, 1]` (pressed above 0.5), analog
 /// actions in their range. Values outside the range are clamped on write.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InputState {
     values: [f32; Action::COUNT],
     just_pressed: [bool; Action::COUNT],
+    /// Mouse wheel notches this frame, + away from the user.
+    wheel: f32,
+}
+
+impl Default for InputState {
+    fn default() -> InputState {
+        InputState {
+            values: [0.0; Action::COUNT],
+            just_pressed: [false; Action::COUNT],
+            wheel: 0.0,
+        }
+    }
 }
 
 impl InputState {
@@ -262,6 +281,16 @@ impl InputState {
         self.just_pressed[action as usize]
     }
 
+    /// Mouse wheel notches since the last frame, + away from the user (zooms in). Not an
+    /// action: one notch is one step, whatever the frame time.
+    pub fn wheel(&self) -> f32 {
+        self.wheel
+    }
+
+    pub fn set_wheel(&mut self, notches: f32) {
+        self.wheel = if notches.is_finite() { notches } else { 0.0 };
+    }
+
     pub fn clear(&mut self) {
         *self = InputState::default();
     }
@@ -285,6 +314,8 @@ mod tests {
         assert!(!Action::Horn.is_analog() && !Action::Horn.is_bipolar());
         assert!(Action::Throttle.is_analog() && !Action::Throttle.is_bipolar());
         assert_eq!(Action::MenuBack.context(), Context::Menu);
+        assert_eq!(Action::MapZoom.context(), Context::Menu);
+        assert!(Action::MapZoom.is_analog() && Action::MapZoom.is_bipolar());
         assert_eq!(Action::FlyLookY.context(), Context::Fly);
         assert_eq!(Action::Pause.context(), Context::Drive);
     }

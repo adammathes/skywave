@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! Pause:     Resume · Settings › · Quit (native only)
-//! Settings:  Controls › · Video › · World › · About ›
+//! Settings:  Controls › · Video › · HUD › · World › · About ›
 //! Controls:  Gamepad › · Keyboard & mouse ›
 //! Device:    Invert look Y · Invert look X · Look sensitivity · Bindings › · Analog axes ›
 //!            · [pad: Swap sticks · Throttle on right stick] · Reset to defaults
@@ -12,6 +12,7 @@
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
 //! Video:     UI scale · Resolution scale · Bloom · Performance overlay
+//! HUD:       Minimap · Rotate with car · Minimap zoom
 //! World:     Time of day · Clock speed
 //! About:     (license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
@@ -19,6 +20,7 @@
 
 use crate::daylight::{Clock, CLOCK_SPEEDS};
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
+use crate::map::view::MINIMAP_RANGES_M;
 use crate::settings::{Settings, RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, UI_SCALE_STEP};
 
 use super::menu::{Item, Unit, Widget};
@@ -33,6 +35,7 @@ pub enum Page {
     Axes(DeviceKind),
     Axis(DeviceKind, Action),
     Video,
+    Hud,
     World,
     About,
     /// A remap hit an input another action uses; see `Ui::conflict`.
@@ -63,6 +66,9 @@ pub enum ItemId {
     ResolutionScale,
     Bloom,
     DebugOverlay,
+    Minimap,
+    MinimapRotate,
+    MinimapZoom,
     TimeOfDay,
     ClockSpeed,
     KeepExisting,
@@ -79,6 +85,8 @@ pub struct PageCtx<'a> {
 }
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
+/// Names of [`MINIMAP_RANGES_M`].
+pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] = ["100 m", "150 m", "250 m"];
 
 /// The look axes "Invert look" and "Look sensitivity" set together: the driving look and
 /// the free-fly camera's look.
@@ -108,6 +116,7 @@ pub fn title(page: Page) -> &'static str {
         Page::Axes(_) => "Analog axes",
         Page::Axis(_, a) => super::names::action_label(a, Sign::Full),
         Page::Video => "Video",
+        Page::Hud => "HUD",
         Page::World => "World",
         Page::About => "About",
         Page::Conflict => "Input already in use",
@@ -157,6 +166,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             for (p, label) in [
                 (Page::Controls, "Controls"),
                 (Page::Video, "Video"),
+                (Page::Hud, "HUD"),
                 (Page::World, "World"),
                 (Page::About, "About"),
             ] {
@@ -298,6 +308,27 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 Widget::Toggle(s.debug_overlay),
             );
         }
+        Page::Hud => {
+            let s = ctx.settings;
+            add(ItemId::Minimap, "Minimap", Widget::Toggle(s.minimap));
+            add(
+                ItemId::MinimapRotate,
+                "Rotate with car",
+                Widget::Toggle(s.minimap_rotate),
+            );
+            let index = MINIMAP_RANGES_M
+                .iter()
+                .position(|&r| r == s.minimap_range_m)
+                .unwrap_or(crate::map::view::DEFAULT_MINIMAP_RANGE);
+            add(
+                ItemId::MinimapZoom,
+                "Minimap zoom",
+                Widget::Choice {
+                    options: &MINIMAP_RANGE_NAMES,
+                    index,
+                },
+            );
+        }
         Page::World => {
             let hours = (ctx.clock.seconds_of_day / 3600.0) as f32;
             add(
@@ -366,6 +397,10 @@ mod tests {
         build(Page::Device(DeviceKind::KeyboardMouse), &ctx, &mut items);
         assert_eq!(items[0].widget, Widget::Toggle(false));
         assert!(items.iter().all(|i| i.id != ItemId::Southpaw));
+        build(Page::Hud, &ctx, &mut items);
+        assert_eq!(items[0].widget, Widget::Toggle(true));
+        assert_eq!(items[1].widget, Widget::Toggle(true));
+        assert!(matches!(items[2].widget, Widget::Choice { index: 1, .. }));
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));

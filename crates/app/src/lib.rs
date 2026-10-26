@@ -12,6 +12,7 @@ pub mod daylight;
 pub mod drive;
 mod input;
 pub mod lighting;
+pub mod map;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -148,6 +149,8 @@ pub struct App {
     alpha: f32,
     /// Menus, HUD, overlay and the user's settings and bindings.
     ui: ui::Ui,
+    /// The place rasterized for the minimap and the full map.
+    map: map::MapImage,
 }
 
 impl App {
@@ -187,6 +190,9 @@ impl App {
         instances.reserve_exact(drive::MAX_CAR_INSTANCES);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
+        let map = map::MapImage::rasterize(&place);
+        let mut ui = ui::Ui::new();
+        ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         Ok(App {
             clock: FixedStep::new(),
             ticks: 0,
@@ -207,7 +213,8 @@ impl App {
             lamp_heads: town.lamp_heads,
             lights: [PointLight::omni([0.0; 3], [0.0; 3], 1.0); MAX_POINT_LIGHTS],
             alpha: 0.0,
-            ui: ui::Ui::new(),
+            ui,
+            map,
         })
     }
 
@@ -234,6 +241,12 @@ impl App {
             app.clock_frozen = true;
         }
         app.still = setup.still;
+        if setup.map {
+            app.ui.open_full_map();
+        }
+        if let Some(s) = setup.ui_scale {
+            app.ui.force_ui_scale(s);
+        }
         Ok(app)
     }
 
@@ -262,6 +275,11 @@ impl App {
             camera_mode: self.camera.mode(),
             headlights: self.drive.headlights,
         }
+    }
+
+    /// The map image for `render::Renderer::upload_map`, made once at load.
+    pub fn map_image(&self) -> &map::MapImage {
+        &self.map
     }
 
     /// Meshes the scene refers to: upload them in order, so `meshes()[i]` gets `MeshId(i)`.
