@@ -16,12 +16,15 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  BINARYEN_VERSION: "132.0.0"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # `git describe` needs the tags for the version in the footer.
 
       - name: Rust toolchain
         run: |
@@ -29,6 +32,14 @@ jobs:
           rustup default stable
 
       - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # web-build.sh runs wasm-opt when it is on PATH.
+      - name: Install wasm-opt (binaryen)
+        run: npm install --global "binaryen@$BINARYEN_VERSION"
 
       - name: Build web
         run: tools/web-build.sh

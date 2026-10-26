@@ -1,0 +1,142 @@
+name: Release
+
+# A `v*` tag builds the web and Linux packages and publishes them as a GitHub Release with
+# generated notes. Running it by hand (workflow_dispatch) is a dry run: the same packages,
+# named with the `tag` input, are only uploaded as workflow artifacts.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Name for the packages (dry run: nothing is published)"
+        required: true
+        default: "v0.0.0-dryrun"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARYEN_VERSION: "132.0.0"
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # `git describe` needs the tags for the version in the footer.
+
+      - name: Check the tag
+        run: '[[ "$TAG" =~ ^[A-Za-z0-9._+-]+$ ]] || { echo "unusable tag: $TAG" >&2; exit 1; }'
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      # Also caches the wasm-bindgen-cli that web-build.sh installs with `cargo install`.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-web
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install wasm-opt (binaryen)
+        run: npm install --global "binaryen@$BINARYEN_VERSION"
+
+      - name: Build web
+        run: tools/web-build.sh
+
+      - name: Package
+        run: |
+          name="skywave-web-$TAG"
+          mkdir -p "out/$name"
+          cp -r dist/. "out/$name/"
+          cp LICENSE "out/$name/"
+          printf '%s\n' \
+            "Skywave for the web. Serve this folder with any static web server and open it," \
+            "for example: python3 -m http.server -d . 8000, then http://localhost:8000/" \
+            "(opening index.html straight from disk does not work: browsers block module" \
+            "scripts and wasm on file:// pages). Needs WebGPU or WebGL2." \
+            > "out/$name/README-web.txt"
+          (cd out && zip -r -9 "$name.zip" "$name")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skywave-web
+          path: out/skywave-web-*.zip
+          if-no-files-found: error
+
+  linux:
+    # The oldest supported runner: binaries built against its glibc (2.35) run on SteamOS
+    # and on most distributions in use.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # build.rs runs `git describe` for `skywave --version`.
+
+      - name: Check the tag
+        run: '[[ "$TAG" =~ ^[A-Za-z0-9._+-]+$ ]] || { echo "unusable tag: $TAG" >&2; exit 1; }'
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-linux
+
+      - name: Linux build deps (libudev for gilrs)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Build
+        run: cargo build --release -p platform-native --locked
+
+      - name: Package
+        run: |
+          crates/platform-native/package/package-linux.sh target/release/skywave "$TAG" out
+          tar -xzf "out/skywave-linux-x86_64-$TAG.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/skywave-linux-x86_64-$TAG/skywave.sh" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skywave-linux-x86_64
+          path: out/skywave-linux-x86_64-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [web, linux]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd out && sha256sum skywave-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: |
+            out/skywave-web-*.zip
+            out/skywave-linux-x86_64-*.tar.gz
+            out/SHA256SUMS.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Skywave
+Comment=A chill, single-player driving game
+# Point both at the folder this archive was unpacked into.
+Exec=/opt/skywave/skywave.sh
+Path=/opt/skywave
+Terminal=false
+Categories=Game;Simulation;
