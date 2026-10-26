@@ -9,17 +9,24 @@ Inspired by the best part of the open-world games of the early polygon eras: cru
 ## Status
 Pre-alpha. The first slice is a 1980s California beach town with a sports car, a station wagon and yacht rock. See [`docs/MILESTONES.md`](docs/MILESTONES.md).
 
+## Download
+Tagged versions are on the [Releases](https://github.com/adammathes/skywave/releases) page:
+`skywave-web-<version>.zip` (serve the folder with any static web server) and
+`skywave-linux-x86_64-<version>.tar.gz` (desktop Linux and Steam Deck; see the `README-linux.txt` inside).
+The latest `main` plays in the browser at `https://<owner>.github.io/skywave/` (GitHub Pages; placeholder until Pages is enabled).
+
 ## Run
 Web (primary):
 ```
 rustup target add wasm32-unknown-unknown
-tools/web-build.sh            # builds to dist/
+tools/web-build.sh            # builds to dist/ (runs wasm-opt if on PATH: npm install -g binaryen)
 python3 -m http.server -d dist 8000   # or any static server; open http://localhost:8000/?seed=1
 ```
 Native (Linux/Mac):
 ```
-cargo run --release -p platform-native
+cargo run --release -p platform-native     # --version, --seed N, --help
 ```
+Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed (or as a dry run from the Actions tab).
 
 ## Your music
 The radio plays your own files (point it at folders, one per station) or real internet radio stations. No audio ships with the game. See [`docs/AUDIO_RADIO.md`](docs/AUDIO_RADIO.md).
