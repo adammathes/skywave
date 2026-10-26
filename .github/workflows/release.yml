@@ -1,12 +1,15 @@
 name: Release
 
-# A `v*` tag builds the web, Linux and macOS packages and publishes them as a GitHub Release with
-# generated notes. Running it by hand (workflow_dispatch) is a dry run: the same packages,
-# named with the `tag` input, are only uploaded as workflow artifacts.
+# A `v*` tag builds the web, Linux (tarball and AppImage) and macOS packages and publishes them
+# as a GitHub Release with generated notes. A push to `main` or the working branch builds the
+# same packages, named `nightly`, and replaces the assets of the rolling `nightly` pre-release,
+# moving its tag to the pushed commit. Running it by hand (workflow_dispatch) is a dry run: the
+# same packages, named with the `tag` input, are only uploaded as workflow artifacts.
 
 on:
   push:
     tags: ["v*"]
+    branches: [main, claude/intelligent-hypatia-vnrj1a]
   workflow_dispatch:
     inputs:
       tag:
@@ -17,14 +20,16 @@ on:
 permissions:
   contents: read
 
+# Every branch push feeds the one nightly release, so a newer push cancels the run in flight.
+# Tag releases and dry runs never cancel each other.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'push' && github.ref_type == 'branch' && 'nightly' || format('release-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
 
 env:
   CARGO_TERM_COLOR: always
   BINARYEN_VERSION: "132.0.0"
-  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || (github.ref_type == 'tag' && github.ref_name || 'nightly') }}
 
 jobs:
   web:
@@ -110,10 +115,37 @@ jobs:
           tar -xzf "out/skywave-linux-x86_64-$TAG.tar.gz" -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/skywave-linux-x86_64-$TAG/skywave.sh" --version
 
+      # One file that runs on SteamOS and most desktops (see tools/install-deck.sh). The tool and
+      # the runtime it embeds are pinned by checksum. The runtime only has a moving `continuous`
+      # release: when it is rebuilt upstream this step fails, and the new checksum goes here once
+      # the new runtime has been looked at.
+      - name: AppImage
+        env:
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          RUNTIME_SHA256: 617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46
+        run: |
+          tools="$RUNNER_TEMP/appimage-tools"
+          mkdir -p "$tools"
+          curl -fsSL --retry 3 -o "$tools/appimagetool" "$APPIMAGETOOL_URL"
+          curl -fsSL --retry 3 -o "$tools/runtime-x86_64" "$RUNTIME_URL"
+          echo "$APPIMAGETOOL_SHA256  $tools/appimagetool" | sha256sum -c -
+          echo "$RUNTIME_SHA256  $tools/runtime-x86_64" | sha256sum -c - || {
+            echo "::error::type2-runtime changed upstream (now $(sha256sum "$tools/runtime-x86_64" | cut -d' ' -f1)); review it and update RUNTIME_SHA256"
+            exit 1
+          }
+          chmod +x "$tools/appimagetool"
+          crates/platform-native/package/package-appimage.sh target/release/skywave out \
+            "$tools/appimagetool" "$tools/runtime-x86_64"
+          APPIMAGE_EXTRACT_AND_RUN=1 out/Skywave-x86_64.AppImage --version
+
       - uses: actions/upload-artifact@v4
         with:
           name: skywave-linux-x86_64
-          path: out/skywave-linux-x86_64-*.tar.gz
+          path: |
+            out/skywave-linux-x86_64-*.tar.gz
+            out/Skywave-x86_64.AppImage
           if-no-files-found: error
 
   macos:
@@ -163,7 +195,7 @@ jobs:
           merge-multiple: true
 
       - name: Checksums
-        run: cd out && sha256sum skywave-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: cd out && sha256sum skywave-* Skywave-* > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
@@ -171,7 +203,51 @@ jobs:
             out/skywave-web-*.zip
             out/skywave-linux-x86_64-*.tar.gz
             out/skywave-macos-arm64-*.tar.gz
+            out/Skywave-x86_64.AppImage
             out/SHA256SUMS.txt
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # The rolling pre-release: the same tag and asset names on every push, so its download links
+  # (tools/install-deck.sh, the README) always fetch the latest build.
+  nightly:
+    needs: [web, linux, macos]
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # A release follows its tag, so point `nightly` at the commit these packages came from.
+      - name: Move the nightly tag
+        run: |
+          git tag -f nightly "$GITHUB_SHA"
+          git push -f origin refs/tags/nightly
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd out && sha256sum skywave-* Skywave-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: nightly
+          name: Nightly build
+          body: |
+            Rolling build of `${{ github.ref_name }}` at ${{ github.sha }}, replaced on every push.
+            Steam Deck and Linux: `Skywave-x86_64.AppImage`, or run `tools/install-deck.sh` (see the README).
+          files: |
+            out/skywave-web-nightly.zip
+            out/skywave-linux-x86_64-nightly.tar.gz
+            out/skywave-macos-arm64-nightly.tar.gz
+            out/Skywave-x86_64.AppImage
+            out/SHA256SUMS.txt
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          prerelease: true
+          make_latest: false

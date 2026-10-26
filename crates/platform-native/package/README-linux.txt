@@ -26,13 +26,33 @@ A gamepad works too and is picked up when plugged in: right/left trigger to
 drive and brake, left stick to steer, Start for the menu. Every control can be
 rebound in the menu.
 
+AppImage
+--------
+Each release also has Skywave-x86_64.AppImage: the same game as one file.
+Make it executable and run it:
+    chmod +x Skywave-x86_64.AppImage
+    ./Skywave-x86_64.AppImage --version
+It needs FUSE to mount itself (SteamOS and most desktops have it); without it,
+run it with APPIMAGE_EXTRACT_AND_RUN=1 set. The rolling nightly build is at
+    https://github.com/adammathes/skywave/releases/download/nightly/Skywave-x86_64.AppImage
+
 Steam Deck
 ----------
-1. Switch to Desktop Mode and unpack this archive, e.g. into ~/Games/skywave.
+Easiest: in Desktop Mode open Konsole and run tools/install-deck.sh from the
+Skywave repository (the README has the one-line command). It installs the
+AppImage into ~/Applications/Skywave/, adds a menu entry and prints these steps.
+Re-run it to update. By hand:
+1. Switch to Desktop Mode. Put Skywave-x86_64.AppImage somewhere in your home
+   folder (e.g. ~/Applications/Skywave/) and make it executable (above, or
+   Properties > Permissions > Is executable in the file manager).
+   With this archive instead: unpack it, e.g. into ~/Games/skywave, and use
+   skywave.sh in the next step.
 2. In Steam (desktop), choose Games > Add a Non-Steam Game to My Library,
-   browse to skywave.sh and add it (show all file types to see it).
+   click Browse, pick the AppImage (or skywave.sh; set the file type filter
+   to All Files to see it) and add it. Leave Launch Options empty.
 3. Back in Gaming Mode, start Skywave from your library. The built-in controls
-   act as a standard gamepad; no extra controller layout is needed.
+   act as a standard gamepad and the game is gamepad-first; no extra
+   controller layout is needed. It runs at the Deck's native 1280x800.
 
 Settings
 --------
