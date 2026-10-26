@@ -12,6 +12,7 @@ members = [
     "crates/platform-web",
     "tools/shape-preview",
     "tools/mapdump",
+    "tools/audio-preview",
 ]
 
 [workspace.package]

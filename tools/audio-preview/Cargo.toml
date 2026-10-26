@@ -1,0 +1,11 @@
+[package]
+name = "audio-preview"
+description = "Renders the synthesized engine and tire sounds to WAV files and prints their spectra."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+audio.workspace = true
