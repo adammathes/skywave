@@ -18,8 +18,9 @@ pub use input::{
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
 use place::Place;
-use render::{Camera, Mesh, MeshId, MeshInstance, SceneView, Sky, Sun};
-use skywave_core::{hash64, FixedStep, Rng, Seed, Steps, SIM_DT};
+use render::{Camera, Mesh, MeshId, MeshInstance, SceneView, Sky, Sun, Vertex};
+use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
+use world::{ChunkMesh, Glow, Palette, WorldMesh};
 
 /// Free-fly speed, m/s.
 const FLY_SPEED: f32 = 24.0;
@@ -30,20 +31,12 @@ const MAX_PITCH: f32 = 1.45;
 /// Lowest camera height, m.
 const MIN_HEIGHT: f32 = 1.2;
 
-const MESH_GROUND: MeshId = MeshId(0);
-const MESH_BLOCK: MeshId = MeshId(1);
-/// Rng key for building tints.
-const KEY_TINTS: u64 = 0x5449_4e54;
-
-/// Linear-light building tints: plaster, brick, concrete, sand, sage, slate.
-const BUILDING_TINTS: [[f32; 3]; 6] = [
-    [0.78, 0.74, 0.66],
-    [0.55, 0.26, 0.18],
-    [0.60, 0.60, 0.58],
-    [0.72, 0.58, 0.40],
-    [0.44, 0.52, 0.42],
-    [0.36, 0.40, 0.46],
-];
+/// Instance color multiplier for glowing surfaces (neon, lamps, signals) until the
+/// renderer has an emissive channel: bright enough to read as lit in daylight.
+const GLOW_BOOST: f32 = 1.8;
+/// Share of a lit window's glow mixed into its glass color (out of 256), so lit windows
+/// read as warmer panes in daylight.
+const WINDOW_TINT_256: u32 = 24;
 
 /// The free-fly camera, the entire simulation state for now.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,22 +97,36 @@ pub struct App {
 
 impl App {
     pub fn new(seed: Seed) -> App {
-        let place = Place::test_grid();
+        // The test town's layout is fixed; the session seed drives its detailing.
+        let mut place = Place::test_grid();
+        place.header.seed = seed.0;
+        let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
+        let meshes = render_meshes(&chunks);
+        let instances = (0..meshes.len())
+            .map(|i| MeshInstance {
+                mesh: MeshId(i as u32),
+                transform: Mat4::IDENTITY.to_cols_array_2d(),
+                color: if i < chunks.len() {
+                    [1.0; 4]
+                } else {
+                    [GLOW_BOOST, GLOW_BOOST, GLOW_BOOST, 1.0]
+                },
+            })
+            .collect();
+        // Eye height above the arterial, in the westbound lane at the east end of the
+        // strip, looking west down it with the afternoon sun behind.
         let camera = FlyCamera {
-            pos: Vec3::new(-75.0, 24.0, 165.0),
-            yaw: -0.42,
-            pitch: -0.17,
+            pos: Vec3::new(92.0, 3.0, -3.6),
+            yaw: std::f32::consts::FRAC_PI_2 - 0.06,
+            pitch: -0.05,
         };
         App {
             clock: FixedStep::new(),
             ticks: 0,
             prev: camera,
             curr: camera,
-            meshes: vec![
-                Mesh::ground_quad(1500.0, 1500.0, [255; 4]),
-                Mesh::unit_block([255; 4]),
-            ],
-            instances: build_instances(&place, seed),
+            meshes,
+            instances,
         }
     }
 
@@ -181,51 +188,70 @@ impl App {
     }
 }
 
-/// Ground, then roads and buildings as scaled unit blocks (all sharing one mesh, so they
-/// draw in a single instanced call).
-fn build_instances(place: &Place, seed: Seed) -> Vec<MeshInstance> {
-    let mut out = vec![MeshInstance {
-        mesh: MESH_GROUND,
-        transform: Mat4::IDENTITY.to_cols_array_2d(),
-        color: [0.16, 0.24, 0.09, 1.0],
-    }];
-
-    let nodes = &place.roads.nodes;
-    for e in &place.roads.edges {
-        let a = nodes[e.a as usize].pos;
-        let b = nodes[e.b as usize].pos;
-        let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
-        let len = (dx * dx + dz * dz).sqrt();
-        let width = f32::from(e.lanes) * 3.5 + 2.0;
-        let transform =
-            Mat4::from_translation(Vec3::new((a[0] + b[0]) * 0.5, 0.0, (a[1] + b[1]) * 0.5))
-                * Mat4::from_rotation_y(dx.atan2(dz))
-                * Mat4::from_scale(Vec3::new(width, 0.08, len + width));
-        out.push(MeshInstance {
-            mesh: MESH_BLOCK,
-            transform: transform.to_cols_array_2d(),
-            color: [0.07, 0.07, 0.075, 1.0],
-        });
+/// Converts world meshes to the renderer's vertex format, which has no UV or emissive
+/// channel yet: every chunk mesh as is (lit windows slightly tinted), followed by one mesh
+/// holding all neon, lamp and signal triangles colored by their glow, drawn with a boosted
+/// instance color.
+fn render_meshes(chunks: &[ChunkMesh]) -> Vec<Mesh> {
+    let mut out = Vec::with_capacity(chunks.len() + 1);
+    let mut glow = Mesh::default();
+    for c in chunks {
+        out.push(convert(&c.mesh, false));
+        let g = convert(&c.mesh, true);
+        let base = glow.vertices.len() as u32;
+        glow.vertices.extend_from_slice(&g.vertices);
+        glow.indices.extend(g.indices.iter().map(|i| i + base));
     }
+    if !glow.indices.is_empty() {
+        out.push(glow);
+    }
+    out
+}
 
-    let mut rng = Rng::new(seed, &[KEY_TINTS]);
-    for b in &place.buildings {
-        // The skeleton draws each footprint's bounding box; the test grid only has rectangles.
-        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
-        for p in &b.footprint {
-            for k in 0..2 {
-                lo[k] = lo[k].min(p[k]);
-                hi[k] = hi[k].max(p[k]);
-            }
+fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
+    let glows = |e: [u8; 4]| e[3] != Glow::None as u8 && e[3] != Glow::Window as u8;
+    let vertex = |v: &world::WorldVertex| {
+        let (c, e) = (v.color, v.emissive);
+        let color = if glow_only {
+            [e[0], e[1], e[2], 255]
+        } else if e[3] == Glow::Window as u8 {
+            let t = WINDOW_TINT_256;
+            let mix = |a: u8, b: u8| ((u32::from(a) * (256 - t) + u32::from(b) * t) >> 8) as u8;
+            [mix(c[0], e[0]), mix(c[1], e[1]), mix(c[2], e[2]), 255]
+        } else {
+            [c[0], c[1], c[2], 255]
+        };
+        // Emissive: the renderer encodes window-flagged glow (scaled by time of day) and plain
+        // glow with an intensity; the town's Glow classes map onto that. The atlas uv stays in
+        // the white tile until the pattern ids are mapped onto atlas tiles.
+        let emissive = match e[3] {
+            x if x == Glow::Window as u8 => render::emissive_window([e[0], e[1], e[2]], 1.0),
+            x if x == Glow::None as u8 => [0, 0, 0, 0],
+            _ => render::emissive([e[0], e[1], e[2]], 2.0),
+        };
+        Vertex {
+            pos: v.pos,
+            normal: v.normal,
+            uv: [0, 0],
+            color,
+            emissive,
         }
-        let center = Vec3::new((lo[0] + hi[0]) * 0.5, 0.0, (lo[1] + hi[1]) * 0.5);
-        let size = Vec3::new(hi[0] - lo[0], b.height, hi[1] - lo[1]);
-        let tint = BUILDING_TINTS[rng.range(0, BUILDING_TINTS.len() as u32) as usize];
-        out.push(MeshInstance {
-            mesh: MESH_BLOCK,
-            transform: (Mat4::from_translation(center) * Mat4::from_scale(size)).to_cols_array_2d(),
-            color: [tint[0], tint[1], tint[2], 1.0],
-        });
+    };
+    if !glow_only {
+        return Mesh {
+            vertices: m.vertices.iter().map(vertex).collect(),
+            indices: m.indices.clone(),
+        };
+    }
+    let mut out = Mesh::default();
+    for tri in m.indices.chunks_exact(3) {
+        if tri.iter().all(|&i| glows(m.vertices[i as usize].emissive)) {
+            let base = out.vertices.len() as u32;
+            for &i in tri {
+                out.vertices.push(vertex(&m.vertices[i as usize]));
+            }
+            out.indices.extend_from_slice(&[base, base + 1, base + 2]);
+        }
     }
     out
 }
@@ -311,27 +337,26 @@ mod tests {
         assert_ne!(at(0.5), at(0.0));
 
         let view = app.scene_view(steps.alpha, 16.0 / 9.0);
-        let place = Place::test_grid();
-        assert_eq!(
-            view.instances.len(),
-            1 + place.roads.edges.len() + place.buildings.len()
-        );
-        assert_eq!(view.instances[0].mesh, MESH_GROUND);
-        assert!(view.instances[1..].iter().all(|i| i.mesh == MESH_BLOCK));
-        assert!(view
-            .instances
-            .iter()
-            .all(|i| Mat4::from_cols_array_2d(&i.transform).is_finite()));
-        assert!((app.meshes().len() as u32) > MESH_BLOCK.0);
+        assert_eq!(view.instances.len(), app.meshes().len());
+        for (i, inst) in view.instances.iter().enumerate() {
+            assert_eq!(inst.mesh, MeshId(i as u32));
+            assert!(Mat4::from_cols_array_2d(&inst.transform).is_finite());
+        }
+        // Some meshes carry glowing signs and lamps, drawn boosted.
+        assert!(view.instances.iter().any(|i| i.color[0] == GLOW_BOOST));
+        let tris: usize = app.meshes().iter().map(|m| m.indices.len() / 3).sum();
+        assert!(tris > 100_000, "{tris}");
+        for m in app.meshes() {
+            assert!(m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
+        }
     }
 
     #[test]
-    fn seed_changes_building_tints_only() {
+    fn seed_changes_detail_only() {
         let a = App::new(Seed(1));
         let b = App::new(Seed(2));
-        assert_eq!(a.instances.len(), b.instances.len());
-        assert_ne!(a.instances, b.instances);
+        assert_ne!(a.meshes, b.meshes);
         assert_eq!(a.state_hash(), b.state_hash());
-        assert_eq!(App::new(Seed(1)).instances, a.instances);
+        assert_eq!(App::new(Seed(1)).meshes, a.meshes);
     }
 }

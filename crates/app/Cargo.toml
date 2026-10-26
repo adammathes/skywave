@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 skywave-core.workspace = true
 place.workspace = true
+world.workspace = true
 render.workspace = true
 vehicle.workspace = true
 glam.workspace = true
