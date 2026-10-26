@@ -4,6 +4,7 @@
 //! [`App::update`] with the real frame time, and draws [`App::scene_view`]. The
 //! simulation itself only ever advances in fixed `SIM_DT` steps.
 
+pub mod daylight;
 mod input;
 
 pub use input::{Action, InputState, Key, Keyboard};
