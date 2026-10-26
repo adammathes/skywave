@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/place",
+    "crates/world",
     "crates/render",
     "crates/app",
     "crates/platform-native",
@@ -20,6 +21,7 @@ rust-version = "1.87"
 # Internal crates.
 skywave-core = { path = "crates/core" }
 place = { path = "crates/place" }
+world = { path = "crates/world" }
 render = { path = "crates/render" }
 app = { path = "crates/app" }
 
@@ -42,6 +44,11 @@ js-sys = "=0.3.106"
 web-sys = "=0.3.106"
 console_error_panic_hook = "=0.1.7"
 console_log = "=1.1.0"
+
+# Generation runs at start-up and in most tests; unoptimized it is ~5x slower. Debug
+# assertions and debug info stay on.
+[profile.dev.package.world]
+opt-level = 1
 
 [profile.release]
 opt-level = 3
