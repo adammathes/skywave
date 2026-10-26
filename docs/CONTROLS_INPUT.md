@@ -17,10 +17,16 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Headlights | button | L | D-pad up |
 | Horn | button | H | Left stick click |
 | Map toggle | button | M | Back / Share |
+| Map zoom (full map) | axis −1..1 | − / = (and the mouse wheel) | L1 / R1 |
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
 | Pause/menu | button | Esc | Start / Options |
 | Screenshot | button | F12 | — |
 | Debug overlay | button | F3 | — |
+
+While the full map is open the sim keeps running, but the car gets no driving input (it coasts): the menu
+directions (arrows, d-pad, left stick) pan the map, Map zoom and the wheel zoom it, and Map toggle, Back or
+Pause close it (Pause does not open the menu over it). The wheel is read raw as notches per frame
+(`InputState::wheel`), one notch a fixed zoom step whatever the frame time.
 
 ## Per-axis options (mandatory, every analog action)
 `invert` (Y invert on look is the canonical case and must work on gamepad and mouse), `sensitivity` (0.25–4×), `deadzone` (0–0.3), `curve` (1.0 linear to 2.5), `swap` presets (triggers↔stick for throttle/brake, left↔right sticks, southpaw). Stored per device kind (keyboard/mouse vs gamepad). A reset-to-default per action and per device.

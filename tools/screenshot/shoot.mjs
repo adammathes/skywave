@@ -8,6 +8,7 @@
 //   node tools/screenshot/shoot.mjs --all --golden                # -> golden/<name>.png
 //   node tools/screenshot/shoot.mjs --selftest                    # wasm vs native hashes
 //   node tools/screenshot/shoot.mjs [--url-query "?seed=1"] [--out path.png]   # ad hoc
+//   node tools/screenshot/shoot.mjs ... --size 1280x800          # another viewport (16:10)
 //
 // `--scene` may repeat and combines with `--selftest`. Scenes are named URL queries in
 // `scenes.json` (keys: crates/app/src/scene.rs). `--selftest` opens `?selftest=1`, reads
@@ -36,8 +37,11 @@ const opt = (name, fallback) => {
 const opts = (name) => args.flatMap((a, i) => (a === name && i + 1 < args.length ? [args[i + 1]] : []));
 const flag = (name) => args.includes(name);
 
-const WIDTH = 1280;
-const HEIGHT = 720;
+const [WIDTH, HEIGHT] = opt("--size", "1280x720").split("x").map(Number);
+if (!(WIDTH > 0 && HEIGHT > 0)) {
+  console.error("shoot: --size wants WIDTHxHEIGHT, e.g. 1280x800");
+  process.exit(2);
+}
 const READY_TIMEOUT_MS = 60_000;
 // SwiftShader renders the town at seconds per frame on a loaded machine.
 const CAPTURE_TIMEOUT_MS = 180_000;

@@ -151,6 +151,8 @@ pub async fn run(
     for mesh in app.meshes() {
         renderer.add_mesh(mesh);
     }
+    let map = app.map_image();
+    renderer.upload_map(map.w, map.h, &map.rgba);
     log::info!("skywave: {backend}, {:?}, {setup:?}", config.format);
 
     let state = Rc::new(RefCell::new(State {

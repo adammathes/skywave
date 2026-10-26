@@ -24,14 +24,27 @@ transparents   water (planar reflection, phase 2), windows glow quads
 bloom          threshold on emissive/bright, 5-level downsample/upsample (Rgba16Float, half-res)
 tonemap        AgX or ACES-fitted, exposure from time-of-day curve (no auto-exposure in v1), then sRGB; optional
                style post (cel/dither/CRT) here
-HUD            2D pass: minimap texture, speed, station, menu text (bitmap font, one texture)
+HUD            2D pass: minimap and full map, speed, station, menu text (bitmap font + map texture)
 ```
 HUD layout: a virtual 1280×720 space letterboxed into the largest centered 16:9 box (16:10 Deck and 4:3
 get bars, so nothing stretches), shrunk to `1280/ui_scale × 720/ui_scale` for the UI scale (1–2×), with a
-3% safe-area inset for TVs. Items are text runs and rectangles, drawn in order as alpha-blended instanced
-quads in one draw from a fixed 4096-quad buffer (extra quads are dropped and counted). The font is our own
-bold 7×9 pixel face for ASCII 32–126 (`render::font`, `const` bit rows rasterized at startup); text is
-drawn at a whole number of pixels per font pixel with nearest sampling, so it is crisp at any resolution.
+3% safe-area inset for TVs. Items are text runs, rectangles and images, drawn in order as alpha-blended
+instanced quads in one draw from a fixed 4096-quad buffer (extra quads are dropped and counted). The font is
+our own bold 7×9 pixel face for ASCII 32–126 (`render::font`, `const` bit rows rasterized at startup); text
+is drawn at a whole number of pixels per font pixel with nearest sampling, so it is crisp at any resolution.
+Image quads (`HudImage`) show the map texture (`Renderer::upload_map`, once at load: RGBA8 with a CPU-built
+mip chain, sampled trilinearly at a per-quad mip level), a flat fill or the player arrow (a dart evaluated
+in the shader), with the content rotated by any angle and an optional circle or rounded-rectangle mask, all
+edges anti-aliased in the fragment shader. The HUD bind group holds the font atlas and the map (two textures,
+two samplers); each quad's flags pick one, so images cost no extra draw call or texture switch.
+
+Map (`app::map`): the Place rasterized once at load into a 1024 px (longer side) image, north up: muted zone
+tints, parks, water with a darker shoreline, faint building footprints, roads by class with a 1 px darker
+outline (highways thick and light, arterials pale yellow, locals thin, alleys faint), POI dots; deterministic
+(pinned hash). The minimap is a 200-unit circle at the bottom left of the safe area, centered on the car,
+turned with the heading (or north-up), 100/150/250 m across, with the player arrow and a north badge; hidden
+under menus. The full map (MapToggle) fits the whole place into the safe area north-up, with the player
+arrow, POI labels (invented names), the time and the controls; it pans and zooms (1–8×) and is not a pause.
 WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky

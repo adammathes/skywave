@@ -20,9 +20,9 @@
 mod web;
 
 /// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
-/// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`) are
-/// read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and `selftest=1`
-/// runs the determinism self-test instead of the game.
+/// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`, `map`,
+/// `ui`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and
+/// `selftest=1` runs the determinism self-test instead of the game.
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
         .trim_start_matches('?')

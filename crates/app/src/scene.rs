@@ -15,6 +15,8 @@
 //! - `fly=1`: the free-fly debug camera.
 //! - `still=1`: the simulation does not run, so every frame is the same picture of the
 //!   scene at rest (for screenshot goldens; input is ignored).
+//! - `map=1`: start with the full-screen map open.
+//! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
 
 use crate::camera::CameraMode;
 use crate::drive::{DEFAULT_VEHICLE, START_GROUND, START_HEADING_RAD};
@@ -35,6 +37,10 @@ pub struct SceneSetup {
     pub fly: bool,
     /// Draw the scene without running the simulation.
     pub still: bool,
+    /// Open the full map at the start.
+    pub map: bool,
+    /// UI scale for this session, overriding the setting.
+    pub ui_scale: Option<f32>,
 }
 
 impl Default for SceneSetup {
@@ -49,6 +55,8 @@ impl Default for SceneSetup {
             headlights: false,
             fly: false,
             still: false,
+            map: false,
+            ui_scale: None,
         }
     }
 }
@@ -68,8 +76,8 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 9] = [
-        "seed", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still",
+    pub const KEYS: [&'static str; 11] = [
+        "seed", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map", "ui",
     ];
 
     /// Sets one key (see the module docs).
@@ -99,6 +107,14 @@ impl SceneSetup {
             "lights" => self.headlights = parse_switch(value).ok_or_else(bad)?,
             "fly" => self.fly = parse_switch(value).ok_or_else(bad)?,
             "still" => self.still = parse_switch(value).ok_or_else(bad)?,
+            "map" => self.map = parse_switch(value).ok_or_else(bad)?,
+            "ui" => {
+                let s: f32 = value.parse().map_err(|_| bad())?;
+                if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {
+                    return Err(bad());
+                }
+                self.ui_scale = Some(s);
+            }
             _ => return Err(format!("unknown scene key `{key}`")),
         }
         Ok(())
@@ -137,9 +153,11 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1",
+            "?seed=7&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5",
         )
         .unwrap();
+        assert!(s.map);
+        assert_eq!(s.ui_scale, Some(1.5));
         assert_eq!(s.seed, 7);
         assert_eq!(s.car, "palisade_wagon");
         assert_eq!(s.camera, CameraMode::Cockpit);
@@ -167,6 +185,9 @@ mod tests {
             "pos=nan,0",
             "yaw=inf",
             "lights=2",
+            "map=yes",
+            "ui=3",
+            "ui=big",
         ] {
             assert!(SceneSetup::from_query(q).is_err(), "{q}");
         }

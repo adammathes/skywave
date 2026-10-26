@@ -566,3 +566,192 @@ fn a_scene_time_stays_frozen_under_the_clock_speed_setting() {
     }
     assert!(h.app.time.clock.seconds_of_day > t);
 }
+
+/// The HUD's map quads this frame: (minimap circles, full-map rounded rects).
+fn map_quads(h: &mut Harness) -> (usize, usize) {
+    let mut out = (0, 0);
+    for item in h.app.scene_view(0.0, 16.0 / 9.0).hud.items {
+        if let render::HudItem::Image(i) = item {
+            match (i.texture, i.mask) {
+                (render::HudTexture::Map, render::HudMask::Circle) => out.0 += 1,
+                (render::HudTexture::Map, render::HudMask::Rounded(_)) => out.1 += 1,
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// The first image item showing `texture`.
+fn first_image(h: &mut Harness, texture: render::HudTexture) -> render::HudImage {
+    h.app
+        .scene_view(0.0, 1.0)
+        .hud
+        .items
+        .iter()
+        .find_map(|i| match i {
+            render::HudItem::Image(m) if m.texture == texture => Some(*m),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no {texture:?} image"))
+}
+
+#[test]
+fn minimap_shows_while_driving_and_hides_under_the_menu() {
+    let mut h = Harness::new();
+    assert_eq!(map_quads(&mut h), (1, 0));
+    // The car arrow sits at the circle's center, pointing up while the map turns with it.
+    let circle = first_image(&mut h, render::HudTexture::Map);
+    let arrow = first_image(&mut h, render::HudTexture::Arrow);
+    let mid = |x: f32, w: f32| x + w * 0.5;
+    assert!((mid(arrow.x, arrow.w) - mid(circle.x, circle.w)).abs() < 1e-3);
+    assert!((mid(arrow.y, arrow.h) - mid(circle.y, circle.h)).abs() < 1e-3);
+    assert_eq!(arrow.rotation, 0.0);
+    // The car faces east: the map turns a quarter left so east is up.
+    assert!((circle.rotation + core::f32::consts::FRAC_PI_2).abs() < 1e-3);
+    assert_eq!(circle.w, crate::map::view::MINIMAP_DIAMETER);
+    // Bottom-left, inside the safe area.
+    let [sx, sy, _, sh] = HudLayout::safe_rect(1.0);
+    assert!(circle.x > sx && circle.y + circle.h < sy + sh);
+    assert!(circle.x < sx + 10.0 && circle.y + circle.h > sy + sh - 10.0);
+    assert!(h.hud_text().contains('N'));
+
+    h.pad(PadButton::Start);
+    assert_eq!(map_quads(&mut h), (0, 0));
+    h.pad(PadButton::Start);
+    assert_eq!(map_quads(&mut h), (1, 0));
+}
+
+#[test]
+fn hud_page_switches_the_minimap_and_its_zoom() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    assert_eq!(h.page(), Page::Hud);
+    // Rotate off: north-up; zoom 150 -> 250 m.
+    h.focus_on(ItemId::MinimapRotate);
+    h.pad(PadButton::DpadRight);
+    h.focus_on(ItemId::MinimapZoom);
+    h.pad(PadButton::DpadRight);
+    assert!(!h.app.settings().minimap_rotate);
+    assert_eq!(h.app.settings().minimap_range_m, 250.0);
+    h.pad(PadButton::Start);
+    let saved = store.0.borrow().clone().expect("saved on close");
+    let (s, _) = Settings::from_json(&saved);
+    assert!(!s.minimap_rotate && s.minimap_range_m == 250.0);
+    // North-up: the map does not turn; the arrow does (the car faces east).
+    assert_eq!(first_image(&mut h, render::HudTexture::Map).rotation, 0.0);
+    let arrow = first_image(&mut h, render::HudTexture::Arrow);
+    assert!((arrow.rotation - core::f32::consts::FRAC_PI_2).abs() < 1e-3);
+    // Minimap off.
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    h.focus_on(ItemId::Minimap);
+    h.pad(PadButton::South);
+    assert!(!h.app.settings().minimap);
+    h.pad(PadButton::Start);
+    assert_eq!(map_quads(&mut h), (0, 0));
+}
+
+#[test]
+fn map_toggle_opens_the_full_map_without_pausing() {
+    let mut h = Harness::new();
+    // A Select (Back) tap opens it; the sim keeps running under it.
+    h.pad(PadButton::Select);
+    assert!(h.app.ui().full_map_open());
+    assert!(!h.app.menu_open());
+    assert_eq!(map_quads(&mut h), (0, 1));
+    assert!(h.hud_text().contains("Map") && h.hud_text().contains("17:40"));
+    let ticks = h.app.ticks();
+    h.frame();
+    assert!(h.app.ticks() > ticks);
+    // The throttle does not reach the car while the map is up.
+    h.input.axis(RawInput::PadAxis(PadAxis::R2), 1.0);
+    for _ in 0..30 {
+        h.frame();
+    }
+    h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
+    assert!(h.app.hud_state().speed_mps.abs() < 0.5);
+    // R1 zooms in, the stick pans, L1 zooms back out.
+    let full = |h: &Harness| h.app.ui().map().full;
+    let start = full(&h);
+    assert_eq!(start.zoom, 1.0);
+    h.input.press(RawInput::PadButton(PadButton::R1));
+    for _ in 0..60 {
+        h.frame();
+    }
+    h.input.release(RawInput::PadButton(PadButton::R1));
+    assert!(full(&h).zoom > 2.0, "{}", full(&h).zoom);
+    h.input.axis(RawInput::PadAxis(PadAxis::LeftX), 1.0);
+    for _ in 0..20 {
+        h.frame();
+    }
+    h.input.axis(RawInput::PadAxis(PadAxis::LeftX), 0.0);
+    h.frame();
+    assert!(full(&h).center[0] > start.center[0] + 10.0);
+    h.input.press(RawInput::PadButton(PadButton::L1));
+    for _ in 0..120 {
+        h.frame();
+    }
+    h.input.release(RawInput::PadButton(PadButton::L1));
+    h.frame();
+    assert_eq!(full(&h).zoom, 1.0);
+    // Back (B) closes it: no menu opens.
+    h.pad(PadButton::East);
+    assert!(!h.app.ui().full_map_open() && !h.app.menu_open());
+    assert_eq!(map_quads(&mut h), (1, 0));
+    // M toggles it on the keyboard and the wheel zooms; Esc closes it without the menu.
+    h.key(Key::KeyM);
+    assert!(h.app.ui().full_map_open());
+    h.input.axis(RawInput::MouseWheel, 4.0);
+    h.frame();
+    assert_eq!(full(&h).zoom, 2.0);
+    h.key(Key::Escape);
+    assert!(!h.app.ui().full_map_open() && !h.app.menu_open());
+    h.key(Key::KeyM);
+    h.key(Key::KeyM);
+    assert!(!h.app.ui().full_map_open());
+    // With the menu open the map stays shut.
+    h.pad(PadButton::Start);
+    h.pad(PadButton::Select);
+    assert!(h.app.menu_open() && !h.app.ui().full_map_open());
+}
+
+#[test]
+fn scene_keys_open_the_map_and_scale_the_ui() {
+    let setup = crate::SceneSetup::from_query("?map=1&ui=1.5&still=1").unwrap();
+    let mut app = App::from_setup(&setup).unwrap();
+    let store = SharedStore::default();
+    *store.0.borrow_mut() = Some(Settings::default().to_json(&Bindings::default()));
+    app.set_settings_store(Box::new(store));
+    assert!(app.ui().full_map_open());
+    assert_eq!(app.settings().ui_scale, 1.5);
+    let mut input = InputMapper::default();
+    app.frame(&mut input, DT);
+    assert_eq!(app.scene_view(1.0, 1.0).hud.ui_scale, 1.5);
+}
+
+#[test]
+fn full_map_labels_points_of_interest_in_view() {
+    let mut h = Harness::new();
+    let mut place = place::Place::test_grid();
+    place.pois.push(place::Poi {
+        pos: [-300.0, -300.0],
+        kind: place::PoiKind::Diner,
+        name_seed: 1,
+    });
+    let image = crate::map::MapImage::rasterize(&place);
+    let labels = crate::map::labels(&place);
+    let name = labels[0].name.clone();
+    assert_eq!(name, crate::map::names::poi_name(place::PoiKind::Diner, 1));
+    h.app
+        .ui
+        .set_map(crate::map::view::MapGeom::of(&image), labels);
+    h.frame();
+    assert!(!h.hud_text().contains(&name), "no labels on the minimap");
+    h.key(Key::KeyM);
+    assert!(h.hud_text().contains(&name));
+    // Zoomed in on the middle of town, the corner diner is out of view.
+    h.input.axis(RawInput::MouseWheel, 8.0);
+    h.frame();
+    assert!(!h.hud_text().contains(&name));
+}

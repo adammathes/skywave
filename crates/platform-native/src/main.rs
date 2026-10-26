@@ -233,6 +233,8 @@ impl Gpu {
         for mesh in app.meshes() {
             renderer.add_mesh(mesh);
         }
+        let map = app.map_image();
+        renderer.upload_map(map.w, map.h, &map.rgba);
         Ok(Gpu {
             window,
             surface,

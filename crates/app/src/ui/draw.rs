@@ -1,13 +1,16 @@
 //! Lays the UI out into the frame's HUD: the menu panel (or the capture prompt over it),
-//! the driving HUD, and the performance overlay. Everything sits inside the HUD's safe
-//! area at the user's UI scale; text is formatted straight into the HUD's text buffer.
+//! the driving HUD with the minimap, the full-screen map, and the performance overlay.
+//! Everything sits inside the HUD's safe area at the user's UI scale; text is formatted
+//! straight into the HUD's text buffer.
 
 use core::fmt::{self, Display};
 
-use render::{font, HudBuilder};
+use render::{font, HudBuilder, HudImage};
 
 use crate::daylight::{Clock, Daylight};
 use crate::input::{Action, Binding, DeviceKind, Sign};
+use crate::map;
+use crate::map::view::{MapGeom, Minimap, MINIMAP_DIAMETER};
 
 use super::menu::{Unit, Widget};
 use super::names::{self, action_label, device_label, device_noun};
@@ -20,6 +23,10 @@ pub struct DrawCtx<'a> {
     pub clock: &'a Clock,
     pub camera: [f32; 3],
     pub ticks: u64,
+    /// The car (or free-fly camera) on the ground, `[x, z]`, and its heading (sim
+    /// convention), for the maps.
+    pub car: [f32; 2],
+    pub heading: f32,
 }
 
 const TEXT: [u8; 4] = [238, 234, 222, 255];
@@ -36,6 +43,16 @@ const SHADOW: [u8; 4] = [0, 0, 0, 170];
 const GRAPH_OK: [u8; 4] = [110, 210, 130, 230];
 const GRAPH_SLOW: [u8; 4] = [255, 178, 62, 230];
 const GRAPH_BAD: [u8; 4] = [235, 80, 70, 230];
+/// The minimap's rim and what shows past the place's edge; the full map's backdrop.
+const MAP_RIM: [u8; 4] = [16, 20, 30, 235];
+const MAP_SHADE: [u8; 4] = [8, 10, 18, 250];
+const ARROW_EDGE: [u8; 4] = [24, 16, 8, 255];
+/// Minimap rim width and arrow size, virtual units.
+const RIM: f32 = 4.0;
+const MINI_ARROW: f32 = 24.0;
+const FULL_ARROW: f32 = 26.0;
+/// Room under the full map for its controls line, virtual units.
+pub(super) const FULL_MAP_FOOTER: f32 = 32.0;
 
 /// Menu text scale (virtual units per font pixel) and metrics in virtual units.
 const S: f32 = 2.0;
@@ -123,6 +140,26 @@ impl Display for Glyph<'_> {
     }
 }
 
+/// The device's two MapZoom inputs, "out/in" ("-/=", "L1/R1").
+struct ZoomGlyphs<'a>(&'a Ui, DeviceKind);
+
+impl Display for ZoomGlyphs<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ZoomGlyphs(ui, device) = *self;
+        let list = ui.bindings.get(device, Action::MapZoom);
+        if list.is_empty() {
+            return f.write_str("?");
+        }
+        for (i, b) in list.iter().take(2).enumerate() {
+            if i > 0 {
+                f.write_str("/")?;
+            }
+            names::write_raw(f, b.raw, b.sign)?;
+        }
+        Ok(())
+    }
+}
+
 struct SliderValue(f32, Unit);
 
 impl Display for SliderValue {
@@ -164,6 +201,8 @@ impl Ui {
         hud.begin(self.settings.ui_scale);
         if self.menu.is_some() {
             self.draw_menu(&mut hud);
+        } else if self.map.full.open {
+            self.draw_full_map(&mut hud, ctx);
         } else {
             self.draw_driving(&mut hud, ctx);
         }
@@ -438,6 +477,12 @@ impl Ui {
 
     fn draw_driving(&self, hud: &mut HudBuilder, ctx: &DrawCtx) {
         let [sx, sy, sw, sh] = hud.safe_rect();
+        // The toast sits above the minimap when there is one.
+        let mut toast_y = sy + sh - font::CAP_HEIGHT as f32 * 2.0;
+        if let (true, Some(geom)) = (self.settings.minimap, &self.map.geom) {
+            self.draw_minimap(hud, ctx, geom);
+            toast_y -= MINIMAP_DIAMETER + RIM + 16.0;
+        }
         let right = sx + sw;
         let minutes = (ctx.clock.seconds_of_day / 60.0) as u32 % (24 * 60);
         text_right(
@@ -469,8 +514,131 @@ impl Ui {
         };
         if let Some(t) = self.toast() {
             let args = ToastText(t);
-            hud.text_fmt(sx, sy + sh - cap * 2.0, 2.0, ACCENT, format_args!("{args}"));
+            hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
         }
+    }
+
+    /// The minimap's circle at the bottom left of the safe area: the map around the car
+    /// (turned with it, or north-up), a north badge on the rim, and the player arrow.
+    fn draw_minimap(&self, hud: &mut HudBuilder, ctx: &DrawCtx, geom: &MapGeom) {
+        let [sx, sy, _, sh] = hud.safe_rect();
+        let r = MINIMAP_DIAMETER * 0.5;
+        let center = [sx + r + RIM, sy + sh - r - RIM];
+        let s = &self.settings;
+        let m = Minimap::new(
+            center,
+            r,
+            ctx.car,
+            ctx.heading,
+            s.minimap_rotate,
+            s.minimap_range_m,
+        );
+        hud.image(HudImage::disc(center[0], center[1], r + RIM, MAP_RIM));
+        hud.image(m.image(geom));
+        // The player: always at the center.
+        let rot = m.arrow_rotation();
+        hud.image(HudImage::arrow(
+            center[0],
+            center[1],
+            MINI_ARROW + 6.0,
+            rot,
+            ARROW_EDGE,
+        ));
+        hud.image(HudImage::arrow(
+            center[0], center[1], MINI_ARROW, rot, ACCENT,
+        ));
+        // North: a badge with an N, straddling the rim where north is.
+        let n = m.north();
+        let [bx, by] = [center[0] + n[0] * r, center[1] + n[1] * r];
+        hud.image(HudImage::disc(bx, by, 13.0, ACCENT));
+        hud.image(HudImage::disc(bx, by, 11.0, MAP_RIM));
+        let w = width("N", 2.0);
+        hud.text(bx - w * 0.5, by - font::CAP_HEIGHT as f32, 2.0, ACCENT, "N");
+    }
+
+    /// The full-screen map: the whole place fit to the safe area (panned and zoomed),
+    /// labelled points of interest, the player arrow, the time and the controls.
+    fn draw_full_map(&self, hud: &mut HudBuilder, ctx: &DrawCtx) {
+        let [vw, vh] = hud.size();
+        hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, MAP_SHADE);
+        let Some(geom) = &self.map.geom else { return };
+        let rect = self.full_map_rect();
+        let [sx, sy, sw, sh] = rect;
+        let view = self.map.full.view(geom, rect);
+        if let Some(img) = view.image(geom, 10.0) {
+            let pad = 4.0;
+            hud.image(HudImage {
+                x: img.x - pad,
+                y: img.y - pad,
+                w: img.w + 2.0 * pad,
+                h: img.h + 2.0 * pad,
+                mask: render::HudMask::Rounded(10.0 + pad),
+                ..HudImage::disc(0.0, 0.0, 0.0, MAP_RIM)
+            });
+            hud.image(img);
+        }
+        for poi in &self.map.pois {
+            let q = view.to_screen(poi.pos);
+            if !view.contains(q) {
+                continue;
+            }
+            let [r, g, b] = map::poi_color(poi.kind);
+            hud.image(HudImage::disc(q[0], q[1], 7.0, ARROW_EDGE));
+            hud.image(HudImage::disc(q[0], q[1], 5.0, [r, g, b, 255]));
+            let (tx, ty) = (q[0] + 11.0, q[1] - font::CAP_HEIGHT as f32);
+            hud.text(tx + 2.0, ty + 2.0, 2.0, SHADOW, &poi.name);
+            hud.text(tx, ty, 2.0, TEXT, &poi.name);
+        }
+        let q = view.to_screen(ctx.car);
+        if view.contains(q) {
+            let rot = -ctx.heading;
+            hud.image(HudImage::arrow(
+                q[0],
+                q[1],
+                FULL_ARROW + 6.0,
+                rot,
+                ARROW_EDGE,
+            ));
+            hud.image(HudImage::arrow(q[0], q[1], FULL_ARROW, rot, ACCENT));
+        }
+
+        // Title and time at the top corners, the controls centered under the map.
+        hud.text(sx + 2.0, sy + 2.0, TITLE_S, SHADOW, "Map");
+        hud.text(sx, sy, TITLE_S, TEXT, "Map");
+        let minutes = (ctx.clock.seconds_of_day / 60.0) as u32 % (24 * 60);
+        text_right(
+            hud,
+            sx + sw,
+            sy,
+            3.0,
+            TEXT,
+            true,
+            format_args!("{:02}:{:02}", minutes / 60, minutes % 60),
+        );
+
+        let d = self.last_device;
+        let pan = if d == DeviceKind::Gamepad {
+            "Stick"
+        } else {
+            "Arrows"
+        };
+        let wheel = if d == DeviceKind::Gamepad {
+            ""
+        } else {
+            "/Wheel"
+        };
+        text_center(
+            hud,
+            sx + sw * 0.5,
+            sy + sh + FULL_MAP_FOOTER - LINE_H,
+            S,
+            DIM,
+            format_args!(
+                "[{}] Close   [{pan}] Pan   [{}{wheel}] Zoom",
+                Glyph(self, d, Action::MapToggle),
+                ZoomGlyphs(self, d),
+            ),
+        );
     }
 
     fn draw_overlay(&self, hud: &mut HudBuilder, ctx: &DrawCtx) {

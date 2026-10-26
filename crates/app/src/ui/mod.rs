@@ -1,10 +1,14 @@
 //! In-game UI: the pause and settings menus (gamepad first), the remap capture flow, the
-//! driving HUD and the performance overlay, plus loading and saving the settings.
+//! driving HUD with its minimap, the full-screen map, and the performance overlay, plus
+//! loading and saving the settings.
 //!
 //! The UI owns the user's [`Settings`] and [`Bindings`]; the platform's [`InputMapper`]
 //! gets a copy of the bindings whenever they change. While a menu is open the simulation
-//! is paused and only the Menu actions are read. Every frame the UI draws itself into a
-//! [`HudBuilder`] that [`crate::App::scene_view`] hands to the renderer.
+//! is paused and only the Menu actions are read. The full map (MapToggle) is not a pause:
+//! the simulation runs on, the car gets no driving input, and the menu directions pan the
+//! map while MapZoom and the mouse wheel zoom it; MapToggle, Back or Pause close it. Every
+//! frame the UI draws itself into a [`HudBuilder`] that [`crate::App::scene_view`] hands to
+//! the renderer.
 
 mod draw;
 mod menu;
@@ -19,9 +23,13 @@ use crate::input::{
     Action, AxisOptions, Binding, Bindings, Conflict, DeviceKind, InputMapper, InputState, PadAxis,
     PadButton, RawInput, Sign,
 };
+use crate::map::view::{
+    FullMap, MapGeom, MINIMAP_RANGES_M, ZOOM_OCTAVES_PER_NOTCH, ZOOM_OCTAVES_PER_S,
+};
+use crate::map::MapPoi;
 use crate::settings::{Settings, SettingsStore};
 use crate::App;
-use render::{Hud, HudBuilder, RenderStats, Sky};
+use render::{Hud, HudBuilder, HudLayout, RenderStats, Sky};
 use skywave_core::Steps;
 
 /// Seconds a remap capture waits for an input before giving up.
@@ -63,6 +71,15 @@ pub enum Toast {
     Reset(DeviceKind),
 }
 
+/// What the minimap and the full map show, set once when the place loads.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MapHud {
+    /// Where the uploaded map image lies; `None` draws no map at all.
+    pub geom: Option<MapGeom>,
+    pub pois: Vec<MapPoi>,
+    pub full: FullMap,
+}
+
 pub struct Ui {
     settings: Settings,
     bindings: Bindings,
@@ -89,6 +106,9 @@ pub struct Ui {
     frame_head: usize,
     last_steps: u32,
     hud: HudBuilder,
+    map: MapHud,
+    /// A UI scale the scene asked for, kept over whatever the store loads.
+    forced_ui_scale: Option<f32>,
 }
 
 impl Default for Ui {
@@ -120,7 +140,66 @@ impl Ui {
             frame_head: 0,
             last_steps: 0,
             hud: HudBuilder::new(),
+            map: MapHud::default(),
+            forced_ui_scale: None,
         }
+    }
+
+    /// Uses UI scale `s` this session, also over settings loaded later (not saved unless
+    /// another change is).
+    pub fn force_ui_scale(&mut self, s: f32) {
+        self.forced_ui_scale = Some(s);
+        self.settings.ui_scale = s;
+        self.settings = self.settings.sanitized();
+    }
+
+    /// The map the HUD draws: its image's place in the world and the labelled POIs.
+    pub fn set_map(&mut self, geom: MapGeom, pois: Vec<MapPoi>) {
+        self.map = MapHud {
+            geom: Some(geom),
+            pois,
+            full: FullMap::default(),
+        };
+    }
+
+    pub fn map(&self) -> &MapHud {
+        &self.map
+    }
+
+    /// The full-screen map is up.
+    pub fn full_map_open(&self) -> bool {
+        self.map.full.open
+    }
+
+    /// Opens the full map on the whole place (nothing happens without a map). Returns
+    /// whether it is open.
+    pub fn open_full_map(&mut self) -> bool {
+        if let Some(geom) = &self.map.geom {
+            self.map.full.open(geom);
+        }
+        self.map.full.open
+    }
+
+    /// The area the full map may use: the safe area at this UI scale, less a line for
+    /// the controls at the bottom.
+    fn full_map_rect(&self) -> [f32; 4] {
+        let [x, y, w, h] = HudLayout::safe_rect(self.settings.ui_scale);
+        [x, y, w, h - draw::FULL_MAP_FOOTER]
+    }
+
+    /// One frame of full-map input: menu directions pan, MapZoom and the wheel zoom.
+    fn update_full_map(&mut self, s: &InputState, dt: f32) {
+        let Some(geom) = self.map.geom else { return };
+        let rect = self.full_map_rect();
+        let dir = [
+            s.axis(Action::MenuRight) - s.axis(Action::MenuLeft),
+            s.axis(Action::MenuDown) - s.axis(Action::MenuUp),
+        ];
+        let octaves =
+            s.axis(Action::MapZoom) * ZOOM_OCTAVES_PER_S * dt + s.wheel() * ZOOM_OCTAVES_PER_NOTCH;
+        let full = &mut self.map.full;
+        full.zoom_by(octaves, &geom, rect);
+        full.pan(dir, dt, &geom, rect);
     }
 
     pub fn settings(&self) -> &Settings {
@@ -177,6 +256,10 @@ impl Ui {
                 self.bindings = b;
             }
             self.bindings_changed = true;
+        }
+        if let Some(s) = self.forced_ui_scale {
+            self.settings.ui_scale = s;
+            self.settings = self.settings.sanitized();
         }
         self.store = Some(store);
         self.dirty = false;
@@ -257,6 +340,21 @@ impl Ui {
             return;
         }
         let Some(menu) = &self.menu else {
+            if self.map.full.open {
+                // Back and Pause close the map rather than open the menu over it.
+                if s.just_pressed(Action::MapToggle)
+                    || s.just_pressed(Action::MenuBack)
+                    || s.just_pressed(Action::Pause)
+                {
+                    self.map.full.close();
+                } else {
+                    self.update_full_map(s, dt);
+                }
+                return;
+            }
+            if s.just_pressed(Action::MapToggle) && self.open_full_map() {
+                return;
+            }
             if s.just_pressed(Action::Pause) {
                 self.open(Page::Pause, s);
                 self.rebuild(clock);
@@ -287,6 +385,10 @@ impl Ui {
             Effect::Slide(id, v) => self.set_slider(id, v, clock),
             Effect::Choose(ItemId::ClockSpeed, i) => {
                 self.settings.clock_speed = CLOCK_SPEEDS[i.min(CLOCK_SPEEDS.len() - 1)];
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::MinimapZoom, i) => {
+                self.settings.minimap_range_m = MINIMAP_RANGES_M[i.min(MINIMAP_RANGES_M.len() - 1)];
                 self.dirty = true;
             }
             Effect::Choose(..) => {}
@@ -341,6 +443,14 @@ impl Ui {
             }
             ItemId::DebugOverlay => {
                 self.settings.debug_overlay = on;
+                self.dirty = true;
+            }
+            ItemId::Minimap => {
+                self.settings.minimap = on;
+                self.dirty = true;
+            }
+            ItemId::MinimapRotate => {
+                self.settings.minimap_rotate = on;
                 self.dirty = true;
             }
             _ => {}
@@ -577,8 +687,9 @@ impl App {
                 count: 0,
                 alpha: self.alpha,
             }
-        } else if was_open {
-            // The press that closed the menu (Space on Resume) is not also a drive input.
+        } else if was_open || self.ui.full_map_open() {
+            // The press that closed the menu (Space on Resume) is not also a drive input,
+            // and the full map takes the sticks and keys: the car coasts under it.
             self.update(&InputState::default(), dt)
         } else {
             self.update(&state, dt)
@@ -596,14 +707,33 @@ impl App {
         } else {
             self.camera.pose(&self.drive, steps.alpha).eye
         };
+        let (car, heading) = self.map_focus(steps.alpha);
         let ctx = draw::DrawCtx {
             daylight: &daylight,
             clock: &self.time.clock,
             camera: camera.to_array(),
             ticks: self.ticks,
+            car,
+            heading,
         };
         self.ui.draw(&ctx);
         steps
+    }
+
+    /// Where the map centers and which way the arrow points: the car (or the free-fly
+    /// camera) `alpha` of the way into the step, `[x, z]` and the sim's heading.
+    fn map_focus(&self, alpha: f32) -> ([f32; 2], f32) {
+        if self.fly {
+            let c = self.prev.lerp(&self.curr, alpha);
+            ([c.pos.x, c.pos.z], c.yaw)
+        } else {
+            let pose = self.drive.pose(alpha);
+            let f = pose.forward();
+            (
+                [pose.pos.x, pose.pos.z],
+                crate::map::view::heading_of([f.x, f.z]),
+            )
+        }
     }
 
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next
