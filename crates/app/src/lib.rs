@@ -23,7 +23,7 @@ pub mod ui;
 pub mod vehicles;
 mod worldmesh;
 
-pub use settings::{MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
+pub use settings::{Handling, MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
@@ -138,6 +138,10 @@ pub struct App {
     drive: Drive,
     ground: DriveGround,
     camera: CameraRig,
+    /// The scene chose the camera (`cam=`): the saved camera setting does not replace it.
+    camera_from_scene: bool,
+    /// The player cycled the camera this frame; the setting remembers it.
+    camera_cycled: bool,
     time: TimeOfDay,
     meshes: Vec<Mesh>,
     car_meshes: CarMeshes,
@@ -229,6 +233,8 @@ impl App {
             ground,
             drive,
             camera,
+            camera_from_scene: false,
+            camera_cycled: false,
             time: TimeOfDay::default(),
             meshes,
             car_meshes,
@@ -258,7 +264,8 @@ impl App {
         let ground = [pos[0], y, pos[1]];
         app.drive = Drive::with_layout(app.drive.spec.clone(), app.drive.layout, ground, heading);
         app.drive.headlights = setup.headlights;
-        app.camera = CameraRig::new(setup.camera, &app.drive);
+        app.camera_from_scene = setup.camera.is_some();
+        app.camera = CameraRig::new(setup.camera.unwrap_or(CameraMode::ChaseMid), &app.drive);
         app.curr = fly_from(&app.camera.pose(&app.drive, 1.0));
         app.prev = app.curr;
         app.set_fly(setup.fly);
@@ -335,6 +342,7 @@ impl App {
                 self.set_fly(!self.fly);
             } else if !self.fly {
                 self.camera.cycle();
+                self.camera_cycled = true;
             }
         }
         self.drive.frame(input);
@@ -400,7 +408,13 @@ impl App {
                 inst.glow = lamp_glow;
             }
         }
-        let cabin = !self.fly && self.camera.mode().first_person();
+        let cabin = if self.fly || !self.camera.mode().first_person() {
+            drive::Cabin::Outside
+        } else if self.ui.settings().dashboard {
+            drive::Cabin::Full
+        } else {
+            drive::Cabin::Frame
+        };
         self.drive.push_instances(
             alpha,
             &self.car_meshes,

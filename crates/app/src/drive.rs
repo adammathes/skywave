@@ -171,6 +171,18 @@ impl Default for CarGlow {
     }
 }
 
+/// How much of the cabin a frame draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cabin {
+    /// The outside cameras: none of it.
+    Outside,
+    /// "Hood only": the cabin walls (the shell inside out: roof, pillars, windshield frame),
+    /// no dashboard, wheel or gauges.
+    Frame,
+    /// Walls, dashboard and seats, steering wheel, gauge needles.
+    Full,
+}
+
 /// What the HUD shows, read once per frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HudState {
@@ -379,15 +391,15 @@ impl Drive {
     }
 
     /// Appends the car's instances at level of detail 0: body (pop-ups up while the
-    /// headlights are on), glass, the lamps in their state, four wheels and, when `cabin`
-    /// (the first-person cameras), the cabin walls (the shell inside out), the interior,
+    /// headlights are on), glass, the lamps in their state, four wheels and, by `cabin` (the
+    /// first-person cameras), the cabin walls (the shell inside out) and then the interior,
     /// steering wheel and gauge needles, lit by the cabin light. The lamps and the
     /// instruments glow by `glow`. At most [`MAX_CAR_INSTANCES`].
     pub fn push_instances(
         &self,
         alpha: f32,
         ids: &CarMeshes,
-        cabin: bool,
+        cabin: Cabin,
         glow: CarGlow,
         out: &mut Vec<MeshInstance>,
     ) {
@@ -409,11 +421,13 @@ impl Drive {
         for w in self.wheels(alpha) {
             out.push(instance(lod.wheel, w));
         }
-        if cabin {
+        if cabin != Cabin::Outside {
             out.push(MeshInstance {
                 color: [CABIN_WALL_TINT, CABIN_WALL_TINT, CABIN_WALL_TINT, 1.0],
                 ..inside(lod.shell_inside, body)
             });
+        }
+        if cabin == Cabin::Full {
             out.push(inside(lod.interior, body));
             out.push(inside(
                 lod.steering_wheel,
@@ -650,7 +664,7 @@ mod tests {
         let mut input = InputState::default();
         assert_eq!(d.lights(1.0).1, 0);
         let mut out = Vec::new();
-        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
+        d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
         // Body (pop-ups down), glass, unlit lamps, four wheels.
         let meshes: Vec<MeshId> = out.iter().map(|i| i.mesh).collect();
         assert_eq!(
@@ -730,7 +744,7 @@ mod tests {
         assert!(d.headlights, "holding the button does not toggle again");
 
         out.clear();
-        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
+        d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
         assert_eq!(out[0].mesh, lod.body[1], "pop-ups up");
         assert_eq!(out[2].mesh, lod.lights[1][0], "lamps lit");
         // Braking lights the brake lamps.
@@ -743,7 +757,7 @@ mod tests {
         );
         assert!(d.braking());
         out.clear();
-        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
+        d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
         assert_eq!(out[2].mesh, lod.lights[1][1]);
         let brake = d.lights(1.0).0[2];
         assert!(
@@ -752,7 +766,7 @@ mod tests {
         );
         d.headlights = false;
         out.clear();
-        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
+        d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
         assert_eq!(out[0].mesh, lod.body[0]);
         assert_eq!(out[2].mesh, lod.lights[0][1]);
         // Headlights off, braking: just the brake lamps' coronas.
@@ -774,7 +788,7 @@ mod tests {
                 lamps: 0.5,
                 instruments: 0.25,
             };
-            d.push_instances(0.5, &ids, true, glow, &mut out);
+            d.push_instances(0.5, &ids, Cabin::Full, glow, &mut out);
             let dials = d.layout.dial_count;
             assert_eq!(out.len(), 11 + dials, "{id}");
             assert!(out.len() <= MAX_CAR_INSTANCES);
@@ -796,6 +810,11 @@ mod tests {
             let n = d.needles(1.0)[0];
             let dial = d.layout.dials[0];
             assert_eq!(n, dial.needle(0.0));
+            // Hood only: the walls (windshield frame), no dashboard, wheel or gauges.
+            out.clear();
+            d.push_instances(0.5, &ids, Cabin::Frame, glow, &mut out);
+            assert_eq!(out.len(), 8, "{id}");
+            assert_eq!(out[7].mesh, lod.shell_inside);
         }
     }
 

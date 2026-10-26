@@ -756,3 +756,93 @@ fn full_map_labels_points_of_interest_in_view() {
     h.frame();
     assert!(!h.hud_text().contains(&name));
 }
+
+#[test]
+fn drive_page_switches_the_handling_and_persists() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    assert_eq!(
+        h.app.drive.assists,
+        vehicle::Assists::ARCADE,
+        "arcade by default"
+    );
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Drive)]);
+    assert_eq!(h.item(0).id, ItemId::Handling);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.settings().handling, Handling::Light);
+    assert_eq!(h.app.drive.assists, vehicle::Assists::LIGHT);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.drive.assists, vehicle::Assists::OFF);
+    h.pad(PadButton::Start);
+    let again = Harness::with_store(&store);
+    assert_eq!(again.app.settings().handling, Handling::Off);
+    assert_eq!(again.app.drive.assists, vehicle::Assists::OFF);
+}
+
+#[test]
+fn camera_page_sets_the_cockpit_and_the_camera_is_remembered() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    assert_eq!(h.app.hud_state().camera_mode, CameraMode::ChaseMid);
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Camera)]);
+    // Camera: chase mid -> chase near, applied at once.
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.settings().camera, CameraMode::ChaseNear);
+    assert_eq!(h.app.camera.selected(), CameraMode::ChaseNear);
+    // Cockpit FOV 62 -> 64, seat 2 cm up, hood only, no shake.
+    h.focus_on(ItemId::CockpitFov);
+    h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
+    h.focus_on(ItemId::SeatHeight);
+    h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
+    h.focus_on(ItemId::Dashboard);
+    h.pad(PadButton::DpadRight);
+    h.focus_on(ItemId::CameraShake);
+    h.pad(PadButton::South);
+    let s = *h.app.settings();
+    assert_eq!(
+        (
+            s.cockpit_fov_deg,
+            s.seat_height_cm,
+            s.dashboard,
+            s.camera_shake
+        ),
+        (64.0, 2.0, false, false)
+    );
+    assert!(h.hud_text().contains("+2 cm"), "{}", h.hud_text());
+    let prefs = h.app.camera.prefs;
+    assert_eq!(prefs.cockpit_fov_deg, 64.0);
+    assert!((prefs.seat_up_m - 0.02).abs() < 1e-6 && !prefs.shake);
+    h.pad(PadButton::Start);
+
+    // Cycling while driving is saved at once (no menu involved).
+    h.key(Key::KeyC);
+    assert_eq!(h.app.hud_state().camera_mode, CameraMode::ChaseMid);
+    h.key(Key::KeyC);
+    h.key(Key::KeyC);
+    assert_eq!(h.app.hud_state().camera_mode, CameraMode::Cockpit);
+    let (saved, _) = Settings::from_json(&store.load().expect("saved"));
+    assert_eq!(saved.camera, CameraMode::Cockpit);
+    // The cockpit draws its walls but not the dashboard (hood only), at the set FOV.
+    let ids = h.app.car_meshes.lods[0];
+    let view = h.app.scene_view(1.0, 16.0 / 9.0);
+    let fov = 2.0 * (1.0 / view.camera.proj[1][1]).atan();
+    assert!(
+        (fov.to_degrees() - 64.0).abs() < 1e-3,
+        "{}",
+        fov.to_degrees()
+    );
+    let meshes: Vec<_> = view.instances.iter().map(|i| i.mesh).collect();
+    assert!(meshes.contains(&ids.shell_inside) && !meshes.contains(&ids.interior));
+
+    // The next session starts in the cockpit with the same settings...
+    let again = Harness::with_store(&store);
+    assert_eq!(again.app.hud_state().camera_mode, CameraMode::Cockpit);
+    assert_eq!(again.app.settings(), h.app.settings());
+    // ...unless the scene names a camera.
+    let setup = crate::SceneSetup::from_query("cam=chase-far&stream=0").unwrap();
+    let mut scene = App::from_setup(&setup).unwrap();
+    scene.set_settings_store(Box::new(store.clone()));
+    assert_eq!(scene.hud_state().camera_mode, CameraMode::ChaseFar);
+}

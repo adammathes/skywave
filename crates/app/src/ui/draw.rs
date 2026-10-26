@@ -169,6 +169,8 @@ impl Display for SliderValue {
             Unit::Times => write!(f, "{v:.2}x"),
             Unit::Percent => write!(f, "{:.0}%", v * 100.0),
             Unit::Plain => write!(f, "{v:.2}"),
+            Unit::Degrees => write!(f, "{v:.0} deg"),
+            Unit::Centimeters => write!(f, "{v:+.0} cm"),
             Unit::Clock => {
                 let minutes = (v * 60.0).round() as u32 % (24 * 60);
                 write!(f, "{:02}:{:02}", minutes / 60, minutes % 60)

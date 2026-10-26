@@ -3,7 +3,10 @@
 //!
 //! ```text
 //! Pause:     Resume · Settings › · Quit (native only)
-//! Settings:  Controls › · Video › · HUD › · World › · About ›
+//! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · World › · About ›
+//! Drive:     Handling (Arcade / Light / Off)
+//! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
+//!            Hood only) · Camera shake
 //! Controls:  Gamepad › · Keyboard & mouse ›
 //! Device:    Invert look Y · Invert look X · Look sensitivity · Bindings › · Analog axes ›
 //!            · [pad: Swap sticks · Throttle on right stick] · Reset to defaults
@@ -18,10 +21,14 @@
 //! Conflict:  Keep on <existing action> · Move to <new action>
 //! ```
 
+use crate::camera::CameraMode;
 use crate::daylight::{Clock, CLOCK_SPEEDS};
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
-use crate::settings::{Settings, RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, UI_SCALE_STEP};
+use crate::settings::{
+    Handling, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP, RESOLUTION_SCALE_MIN,
+    RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM, UI_SCALE_STEP,
+};
 
 use super::menu::{Item, Unit, Widget};
 
@@ -29,6 +36,8 @@ use super::menu::{Item, Unit, Widget};
 pub enum Page {
     Pause,
     Settings,
+    Drive,
+    Camera,
     Controls,
     Device(DeviceKind),
     Bindings(DeviceKind),
@@ -62,6 +71,13 @@ pub enum ItemId {
     Southpaw,
     SwapTriggers,
     ResetDevice(DeviceKind),
+    Handling,
+    CameraView,
+    CockpitFov,
+    SeatHeight,
+    SeatForward,
+    Dashboard,
+    CameraShake,
     UiScale,
     ResolutionScale,
     Bloom,
@@ -87,6 +103,13 @@ pub struct PageCtx<'a> {
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
 /// Names of [`MINIMAP_RANGES_M`].
 pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] = ["100 m", "150 m", "250 m"];
+/// Names of [`Handling::ALL`].
+pub const HANDLING_NAMES: [&str; Handling::ALL.len()] = ["Arcade", "Light", "Off"];
+/// Names of [`CameraMode::CYCLE`].
+pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
+    ["Cockpit", "Hood", "Chase near", "Chase mid", "Chase far"];
+/// The Dashboard choice: index 0 draws it, 1 is hood only.
+pub const DASHBOARD_NAMES: [&str; 2] = ["Full cockpit", "Hood only"];
 
 /// The look axes "Invert look" and "Look sensitivity" set together: the driving look and
 /// the free-fly camera's look.
@@ -110,6 +133,8 @@ pub fn title(page: Page) -> &'static str {
     match page {
         Page::Pause => "Paused",
         Page::Settings => "Settings",
+        Page::Drive => "Drive",
+        Page::Camera => "Camera",
         Page::Controls => "Controls",
         Page::Device(d) => super::names::device_label(d),
         Page::Bindings(_) => "Bindings",
@@ -132,6 +157,11 @@ pub fn note(page: Page) -> Option<&'static str> {
         ),
         Page::Bindings(_) => Some("Select a row, then press the new input."),
         Page::Video => Some("Resolution scale is saved for an upcoming renderer option."),
+        Page::Drive => Some(
+            "Arcade: grippy, short stops, forgiving.\n\
+             Light: looser, the car slides more. Off: no help.",
+        ),
+        Page::Camera => Some("The camera you pick or cycle to is the one the game starts in."),
         _ => None,
     }
 }
@@ -164,6 +194,8 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
         }
         Page::Settings => {
             for (p, label) in [
+                (Page::Drive, "Drive"),
+                (Page::Camera, "Camera"),
                 (Page::Controls, "Controls"),
                 (Page::Video, "Video"),
                 (Page::Hud, "HUD"),
@@ -276,6 +308,81 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             );
             add(ItemId::Invert(d, a), "Invert", Widget::Toggle(o.invert));
             add(ItemId::ResetAction(d, a), "Reset this axis", Widget::Action);
+        }
+        Page::Drive => {
+            let index = Handling::ALL
+                .iter()
+                .position(|&h| h == ctx.settings.handling)
+                .unwrap_or(0);
+            add(
+                ItemId::Handling,
+                "Handling",
+                Widget::Choice {
+                    options: &HANDLING_NAMES,
+                    index,
+                },
+            );
+        }
+        Page::Camera => {
+            let s = ctx.settings;
+            let index = CameraMode::CYCLE
+                .iter()
+                .position(|&m| m == s.camera)
+                .unwrap_or(3);
+            add(
+                ItemId::CameraView,
+                "Camera",
+                Widget::Choice {
+                    options: &CAMERA_NAMES,
+                    index,
+                },
+            );
+            add(
+                ItemId::CockpitFov,
+                "Cockpit FOV",
+                slider(
+                    s.cockpit_fov_deg,
+                    COCKPIT_FOV_MIN,
+                    COCKPIT_FOV_MAX,
+                    COCKPIT_FOV_STEP,
+                    Unit::Degrees,
+                ),
+            );
+            add(
+                ItemId::SeatHeight,
+                "Seat height",
+                slider(
+                    s.seat_height_cm,
+                    SEAT_HEIGHT_CM[0],
+                    SEAT_HEIGHT_CM[1],
+                    SEAT_STEP_CM,
+                    Unit::Centimeters,
+                ),
+            );
+            add(
+                ItemId::SeatForward,
+                "Seat forward",
+                slider(
+                    s.seat_forward_cm,
+                    SEAT_FORWARD_CM[0],
+                    SEAT_FORWARD_CM[1],
+                    SEAT_STEP_CM,
+                    Unit::Centimeters,
+                ),
+            );
+            add(
+                ItemId::Dashboard,
+                "Dashboard",
+                Widget::Choice {
+                    options: &DASHBOARD_NAMES,
+                    index: usize::from(!s.dashboard),
+                },
+            );
+            add(
+                ItemId::CameraShake,
+                "Camera shake",
+                Widget::Toggle(s.camera_shake),
+            );
         }
         Page::Video => {
             let s = ctx.settings;
@@ -404,5 +511,21 @@ mod tests {
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));
+        build(Page::Drive, &ctx, &mut items);
+        assert!(
+            matches!(items[0].widget, Widget::Choice { index: 0, .. }),
+            "arcade"
+        );
+        build(Page::Camera, &ctx, &mut items);
+        assert!(
+            matches!(items[0].widget, Widget::Choice { index: 3, .. }),
+            "chase mid"
+        );
+        assert!(matches!(items[1].widget, Widget::Slider { value, .. } if value == 62.0));
+        assert!(
+            matches!(items[4].widget, Widget::Choice { index: 0, .. }),
+            "dashboard"
+        );
+        assert_eq!(items[5].widget, Widget::Toggle(true));
     }
 }
