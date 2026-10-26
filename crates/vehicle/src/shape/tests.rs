@@ -11,6 +11,10 @@ const CORSAIR: &str = include_str!("../../../../assets/vehicles/corsair_gtx.shap
 const PALISADE: &str = include_str!("../../../../assets/vehicles/palisade_wagon.shape.ron");
 const CORSAIR_SPEC: &str = include_str!("../../../../assets/vehicles/corsair_gtx.ron");
 const PALISADE_SPEC: &str = include_str!("../../../../assets/vehicles/palisade_wagon.ron");
+const SEABREEZE: &str = include_str!("../../../../assets/vehicles/seabreeze_convertible.shape.ron");
+const REGENT: &str = include_str!("../../../../assets/vehicles/regent_coupe_cabrio.shape.ron");
+const SEABREEZE_SPEC: &str = include_str!("../../../../assets/vehicles/seabreeze_convertible.ron");
+const REGENT_SPEC: &str = include_str!("../../../../assets/vehicles/regent_coupe_cabrio.ron");
 
 fn load(text: &str) -> ShapeSpec {
     let s: ShapeSpec = ron::from_str(text).unwrap();
@@ -18,8 +22,18 @@ fn load(text: &str) -> ShapeSpec {
     s
 }
 
-fn shapes() -> [ShapeSpec; 2] {
-    [load(CORSAIR), load(PALISADE)]
+fn shapes() -> [ShapeSpec; 4] {
+    [load(CORSAIR), load(PALISADE), load(SEABREEZE), load(REGENT)]
+}
+
+fn convertibles() -> [ShapeSpec; 2] {
+    [load(SEABREEZE), load(REGENT)]
+}
+
+/// `spec` with its convertible top raised.
+fn top_up(mut spec: ShapeSpec) -> ShapeSpec {
+    spec.roof.kind = RoofKind::Convertible { top: Top::Up };
+    spec
 }
 
 /// FNV-1a over every vertex attribute and index of every mesh, plus the cockpit.
@@ -163,9 +177,12 @@ fn wheels_fit_inside_the_arches() {
 #[test]
 fn eye_is_inside_the_greenhouse() {
     for spec in shapes() {
+        if spec.roof.convertible() {
+            continue;
+        }
         let car = build(&spec, 0).unwrap();
         let eye = car.cockpit.eye;
-        let b = body::Body::new(&spec, 0);
+        let b = body::Body::new(&spec, 0, 0);
         let s = eye[2] + spec.wheels.front_x;
         let f = b.frame(s);
         assert!(f.h > 0.2, "{}: no greenhouse at the eye", spec.id);
@@ -197,6 +214,169 @@ fn eye_is_inside_the_greenhouse() {
 }
 
 #[test]
+fn convertible_eye_sits_over_the_belt_inside_the_body() {
+    for spec in convertibles() {
+        let car = build(&spec, 0).unwrap();
+        let eye = car.cockpit.eye;
+        let b = body::Body::new(&spec, 0, 0);
+        let s = eye[2] + spec.wheels.front_x;
+        let f = b.frame(s);
+        let g = &spec.glass;
+        let header = b.frame(g.windshield.1).yt;
+        // Behind the header, ahead of the boot, as high over the belt as in a hardtop and
+        // under the header line, well inside the doors.
+        assert!(
+            s > g.windshield.1 + 0.3 && s < g.backlight.0 - 0.5,
+            "{}",
+            spec.id
+        );
+        assert!(
+            eye[1] > f.y_ledge + 0.05 && eye[1] < header - 0.15,
+            "{}: eye height {} (belt {}, header {header})",
+            spec.id,
+            eye[1],
+            f.y_ledge
+        );
+        assert!(
+            eye[0] < 0.0 && eye[0].abs() < f.z_ledge - 0.2,
+            "{}",
+            spec.id
+        );
+        let p = car.cockpit.wheel_pivot;
+        assert!(p[2] < eye[2] - 0.3 && p[1] < eye[1] && (p[0] - eye[0]).abs() < 1e-6);
+        let d = car.cockpit.radio_display;
+        let n = cross(sub(d[1], d[0]), sub(d[2], d[0]));
+        assert!(dot(n, sub(eye, d[0])) > 0.0);
+    }
+}
+
+/// Triangles of `m` whose centroid is over the open cabin: between the windshield header
+/// and the boot, inside the door caps, above the belt (plus `margin`).
+fn over_the_cabin(spec: &ShapeSpec, m: &MeshData, margin: f32) -> usize {
+    let b = body::Body::new(spec, 0, 0);
+    let g = &spec.glass;
+    let (s0, s1) = (g.windshield.1 + 0.06, g.backlight.0 - 0.04);
+    m.indices
+        .chunks(3)
+        .filter(|t| {
+            let c = [0, 1, 2].map(|k| m.positions[t[k] as usize]);
+            let (x, y, z) = (
+                (c[0][0] + c[1][0] + c[2][0]) / 3.0,
+                (c[0][1] + c[1][1] + c[2][1]) / 3.0,
+                (c[0][2] + c[1][2] + c[2][2]) / 3.0,
+            );
+            let s = z + spec.wheels.front_x;
+            if s <= s0 || s >= s1 {
+                return false;
+            }
+            let f = b.frame(s);
+            x.abs() < f.z_ledge - roof::CAP_W - 0.01 && y > f.y_ledge + margin
+        })
+        .count()
+}
+
+#[test]
+fn convertibles_have_no_roof_over_the_cabin() {
+    for spec in convertibles() {
+        for lod in 0..2 {
+            let car = build_lod(&spec, 0, lod).unwrap();
+            for (what, m) in [("body", &car.body), ("glass", &car.glass)] {
+                let n = over_the_cabin(&spec, m, 0.02);
+                assert_eq!(
+                    n, 0,
+                    "{} lod{lod}: {n} {what} triangles roof the cabin",
+                    spec.id
+                );
+            }
+            // The seats show over the doors.
+            let seats = over_the_cabin(&spec, &car.interior, 0.02);
+            assert!(
+                seats > 8,
+                "{} lod{lod}: {seats} seat triangles over the belt",
+                spec.id
+            );
+        }
+        // A hardtop's roof does count.
+        let hard = load(PALISADE);
+        let car = build(&hard, 0).unwrap();
+        assert!(over_the_cabin(&hard, &car.body, 0.02) > 50);
+    }
+}
+
+#[test]
+fn convertibles_have_a_framed_windshield_and_a_boot() {
+    for spec in convertibles() {
+        let car = build(&spec, 0).unwrap();
+        let g = &spec.glass;
+        let header = body::Body::new(&spec, 0, 0).frame(g.windshield.1).yt;
+        let z = |s: f32| s - spec.wheels.front_x;
+        // The header rail stands at the windshield's top edge.
+        assert!(car.body.positions.iter().any(|p| {
+            (p[2] - z(g.windshield.1)).abs() < 0.06 && p[1] > header && p[0].abs() < 0.1
+        }));
+        // No glass behind the windshield: no side, quarter or rear windows.
+        assert!(car
+            .glass
+            .positions
+            .iter()
+            .all(|p| p[2] <= z(g.windshield.1) + 1e-3));
+        // The boot rises over the deck behind the cabin.
+        let deck = body::Body::new(&spec, 0, 0).frame((g.backlight.0 + g.backlight.1) * 0.5);
+        let boot = car
+            .body
+            .positions
+            .iter()
+            .filter(|p| p[2] > z(g.backlight.0) && p[2] < z(g.backlight.1) && p[0].abs() < 0.3)
+            .fold(0.0f32, |m, p| m.max(p[1]));
+        assert!(
+            boot > deck.yt + 0.08,
+            "{}: boot {boot}, deck {}",
+            spec.id,
+            deck.yt
+        );
+        // LOD1 keeps the boot.
+        let low = build_lod(&spec, 0, 1).unwrap();
+        assert!(low
+            .body
+            .positions
+            .iter()
+            .any(|p| p[2] > z(g.backlight.0) && p[1] > deck.yt + 0.08));
+    }
+}
+
+#[test]
+fn a_raised_top_covers_the_cabin_with_a_rear_window() {
+    for spec in convertibles() {
+        let spec = top_up(spec);
+        assert_eq!(spec.validate(), Ok(()));
+        for lod in 0..2 {
+            let car = build_lod(&spec, 0, lod).unwrap();
+            assert_sane(&car, &spec, &alloc::format!("{} top up lod{lod}", spec.id));
+            assert!(over_the_cabin(&spec, &car.body, 0.2) > 8, "{}", spec.id);
+            let z0 = spec.glass.backlight.0 - spec.wheels.front_x;
+            assert!(
+                car.glass.positions.iter().any(|p| p[2] > z0),
+                "{} rear window",
+                spec.id
+            );
+        }
+    }
+}
+
+#[test]
+fn color_details_apply_to_their_palette_entry_only() {
+    let spec = load(SEABREEZE);
+    assert!(!spec.details.contains(&Detail::WoodApplique));
+    let plain = build(&spec, 0).unwrap();
+    let woody = build(&spec, 1).unwrap();
+    let wood = rgb([120, 74, 40]);
+    let count = |m: &MeshData| m.colors.iter().filter(|&&c| c == wood).count();
+    assert_eq!(count(&plain.body), 0);
+    assert!(count(&woody.body) > 8);
+    assert_eq!(build(&spec, 1 + spec.palette.len()).unwrap(), woody);
+}
+
+#[test]
 fn body_faces_point_outward() {
     // Signed volume of the body mesh: closed parts add their volume, open decals add
     // little. Inside-out winding would make it negative.
@@ -219,6 +399,8 @@ fn shapes_match_their_vehicle_specs() {
     for (shape, text) in [
         (load(CORSAIR), CORSAIR_SPEC),
         (load(PALISADE), PALISADE_SPEC),
+        (load(SEABREEZE), SEABREEZE_SPEC),
+        (load(REGENT), REGENT_SPEC),
     ] {
         let v: VehicleSpec = ron::from_str(text).unwrap();
         assert_eq!(v.shape, shape.id.to_string() + ".shape.ron");
@@ -253,8 +435,13 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 2] = [0x65e5_ccbe_1efa_0810, 0x8cc1_04fd_092c_d665];
-    let mut got = [0u64; 2];
+    let expected: [u64; 4] = [
+        0x65e5_ccbe_1efa_0810,
+        0x8cc1_04fd_092c_d665,
+        0x60c1_e30c_9a8a_ade9,
+        0x27ee_0832_409e_fc1f,
+    ];
+    let mut got = [0u64; 4];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -385,6 +572,27 @@ fn validate_rejects_bad_parts() {
         |s| s.seams.creases.push((0.0, 0.5, 0.1, 0.5)),
         ShapeError::Crease { index: 1 },
     );
+    rejects(
+        SEABREEZE,
+        |s| s.glass.side.push((1.5, 2.4)),
+        ShapeError::OpenTop,
+    );
+    rejects(
+        SEABREEZE,
+        |s| s.glass.backlight = (2.6, 3.0),
+        ShapeError::OpenTop,
+    );
+    // A hardtop's roof line cannot be declared open.
+    rejects(
+        PALISADE,
+        |s| s.roof.kind = RoofKind::Convertible { top: Top::Down },
+        ShapeError::OpenTop,
+    );
+    rejects(
+        SEABREEZE,
+        |s| s.color_details.push((9, Detail::WoodPanel)),
+        ShapeError::ColorDetail,
+    );
 }
 
 /// Checks a car for broken geometry and wheel/arch fit.
@@ -453,6 +661,8 @@ fn every_option_builds() {
         Detail::Badge(BadgeShape::Circle),
         Detail::Badge(BadgeShape::Bar),
         Detail::Badge(BadgeShape::Chevron),
+        Detail::WoodApplique,
+        Detail::CorneringLamps,
     ];
     for base in shapes() {
         for k in 0..5 {

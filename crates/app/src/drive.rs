@@ -396,8 +396,10 @@ impl Drive {
     /// Appends the car's instances at level of detail 0: body (pop-ups up while the
     /// headlights are on), glass, the lamps in their state, four wheels and, by `cabin` (the
     /// first-person cameras), the cabin walls (the shell inside out) and then the interior,
-    /// steering wheel and gauge needles, lit by the cabin light. The lamps and the
-    /// instruments glow by `glow`. At most [`MAX_CAR_INSTANCES`].
+    /// steering wheel and gauge needles, lit by the cabin light. An open-top car shows its
+    /// interior and steering wheel from the outside cameras too, lit like the outside ("hood
+    /// only" keeps to the walls). The lamps and the instruments glow by `glow`. At most
+    /// [`MAX_CAR_INSTANCES`].
     pub fn push_instances(
         &self,
         alpha: f32,
@@ -423,6 +425,14 @@ impl Drive {
         });
         for w in self.wheels(alpha) {
             out.push(instance(lod.wheel, w));
+        }
+        if cabin == Cabin::Outside && self.layout.open_top {
+            let open = |mesh: MeshId, m: Mat4| MeshInstance {
+                glow: glow.instruments,
+                ..instance(mesh, m)
+            };
+            out.push(open(lod.interior, body));
+            out.push(open(lod.steering_wheel, body * self.steering_wheel(alpha)));
         }
         if cabin != Cabin::Outside {
             out.push(MeshInstance {
@@ -819,6 +829,42 @@ mod tests {
             assert_eq!(out.len(), 8, "{id}");
             assert_eq!(out[7].mesh, lod.shell_inside);
         }
+    }
+
+    #[test]
+    fn an_open_top_shows_its_cabin_from_every_camera() {
+        let ids = ids();
+        let lod = ids.lods[0];
+        for id in ["seabreeze_convertible", "regent_coupe_cabrio"] {
+            let d = Drive::new(id).unwrap();
+            assert!(d.layout.open_top, "{id}");
+            let mut out = Vec::new();
+            d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
+            // Outside: the interior and wheel after the wheels, lit like the outside, and
+            // no inside-out shell.
+            assert_eq!(out.len(), 9, "{id}");
+            assert_eq!(out[7].mesh, lod.interior);
+            assert_eq!(out[8].mesh, lod.steering_wheel);
+            assert!(out
+                .iter()
+                .all(|i| i.cabin == 0.0 && i.mesh != lod.shell_inside));
+            // The cockpit draws what a hardtop's does.
+            out.clear();
+            d.push_instances(0.5, &ids, Cabin::Full, CarGlow::default(), &mut out);
+            assert_eq!(out.len(), 11 + d.layout.dial_count, "{id}");
+            assert!(out.len() <= MAX_CAR_INSTANCES);
+            assert_eq!(out[7].mesh, lod.shell_inside);
+            // "Hood only" keeps to the walls, as for a hardtop.
+            out.clear();
+            d.push_instances(0.5, &ids, Cabin::Frame, CarGlow::default(), &mut out);
+            assert_eq!(out.len(), 8, "{id}");
+            assert_eq!(out[7].mesh, lod.shell_inside);
+        }
+        let hardtop = Drive::new("palisade_wagon").unwrap();
+        assert!(!hardtop.layout.open_top);
+        let mut out = Vec::new();
+        hardtop.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
+        assert_eq!(out.len(), 7);
     }
 
     #[test]

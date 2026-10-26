@@ -1,0 +1,57 @@
+// Regent Coupe Cabrio body: a big late-80s luxury coupe, cut into a convertible by a
+// conversion shop.
+//
+// Intent: long and formal. A tall chrome-barred grille between flush rectangular lamps,
+// cornering lamps in the fender sides, a very long flat hood, a short framed windshield,
+// a long door, then the shop's tall squared padded boot where the coupe's formal roof
+// used to end, a long flat deck and a full-width tail-lamp bar. Chrome bumpers, belt
+// molding, rocker strips and lacy wheels: chrome everything. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "regent_coupe_cabrio",
+    side: [
+        (0.00, 0.80), (0.05, 0.85), (0.40, 0.875), (1.92, 0.93), (1.98, 0.935),
+        (2.52, 1.36), (2.58, 0.99), (5.05, 0.99), (5.15, 0.975), (5.20, 0.92),
+        (5.20, 0.33), (5.05, 0.26), (4.40, 0.22), (1.00, 0.21), (0.12, 0.25), (0.00, 0.33),
+    ],
+    plan: [
+        (0.00, 0.88), (0.06, 0.915), (0.40, 0.93), (4.90, 0.93), (5.12, 0.92), (5.20, 0.90),
+    ],
+    belt: [(1.98, 0.905), (2.60, 0.96), (5.20, 0.96)],
+    section: Section(shoulder: 0.95, tumblehome_deg: 12, greenhouse_frac: 0.80, crown: 0.03, tuck: 0.03),
+    // No side glass; the backlight range is the padded boot over the folded top.
+    glass: Glass(
+        windshield: (1.98, 2.52),
+        backlight: (4.22, 4.66),
+        side: [],
+    ),
+    wheels: Wheels(radius: 0.335, width: 0.21, arch_clearance: 0.05, front_x: 1.00, rear_x: 3.89, track: 1.54),
+    front: Front(lights: Rect, grille: Wide, bumper: Chrome, bumper_y: (0.30, 0.48)),
+    rear: Rear(lights: FullWidth, spoiler: None, bumper: Chrome, bumper_y: (0.32, 0.48)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.80, creases: [(0.10, 0.74, 5.15, 0.75)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: Mast, rims: Turbine, hubcaps: false),
+    // VinylRoof on a convertible: the conversion shop's padded boot.
+    details: [ChromeTrim, VinylRoof, CorneringLamps, Badge(Circle)],
+    roof: Roof(kind: Convertible(top: Down)),
+    // Dark red, ivory, midnight blue, smoke gray.
+    palette: ["#6e1a22", "#e8e1cf", "#23283a", "#6b6a68"],
+    // The padded boot and the top: ivory vinyl.
+    accent: "#ddd4c0",
+    interior: InteriorShape(
+        dash_height: 0.93,
+        dash_x: 2.28,
+        wheel_pos: (2.72, 0.76),
+        wheel_radius: 0.20,
+        column_angle_deg: 28,
+        mirror_pos: (2.40, 1.20),
+        seat: (3.10, 0.46),
+        driver_offset: 0.40,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent (oxblood leather, ivory, wood).
+        colors: ["#4a1c20", "#7a2a30", "#3e171a", "#c9bca6", "#5a2226", "#9a7044"],
+        display: "#58e0ff",
+    ),
+)

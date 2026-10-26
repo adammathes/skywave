@@ -114,10 +114,17 @@ pub struct Body<'a> {
     pub tailgate: bool,
     pub door_seams: Vec<f32>,
     pub stations: Vec<Station>,
+    /// `spec.details` plus the palette entry's `color_details`.
+    pub details: Vec<Detail>,
+    /// A convertible: the cabin is open above the belt from the windshield header to the
+    /// boot, and the windshield range has no side faces (the frame is a part).
+    pub convertible: bool,
 }
 
 impl<'a> Body<'a> {
-    pub fn new(spec: &'a ShapeSpec, lod: u8) -> Body<'a> {
+    /// The shell of `spec` at level of detail `lod` in palette entry `color` (which picks
+    /// the `color_details`).
+    pub fn new(spec: &'a ShapeSpec, lod: u8, color: usize) -> Body<'a> {
         let tail = spec.tail_index();
         let top: Vec<(f32, f32)> = spec.side[..=tail].to_vec();
         let mut bot: Vec<(f32, f32)> = spec.side[tail + 1..].to_vec();
@@ -157,6 +164,13 @@ impl<'a> Body<'a> {
         let tailgate = seams && spec.seams.trunk && !deck_ok;
 
         let ra = wh.radius + wh.arch_clearance;
+        let n_colors = spec.palette.len().max(1);
+        let mut details = spec.details.clone();
+        for &(k, d) in &spec.color_details {
+            if k as usize == color % n_colors && !details.contains(&d) {
+                details.push(d);
+            }
+        }
         let mut body = Body {
             spec,
             top,
@@ -174,6 +188,8 @@ impl<'a> Body<'a> {
             tailgate,
             door_seams: Vec::new(),
             stations: Vec::new(),
+            details,
+            convertible: spec.roof.convertible(),
         };
         if seams {
             body.door_seams = body.door_lines();
@@ -187,7 +203,23 @@ impl<'a> Body<'a> {
     }
 
     pub fn has(&self, d: Detail) -> bool {
-        self.spec.details.contains(&d)
+        self.details.contains(&d)
+    }
+
+    /// Whether ring segment `j → j+1` between stations `a` and `b` is left out because the
+    /// car is a convertible: everything above the belt over the open cabin, and the side
+    /// faces (where the door glass would be) beside the windshield.
+    fn open_cut(&self, j: usize, a: f32, b: f32) -> bool {
+        if !self.convertible {
+            return false;
+        }
+        let g = &self.spec.glass;
+        let within = |r: (f32, f32)| a >= r.0 - 1e-4 && b <= r.1 + 1e-4;
+        let i_ledge = self.idx(Slot::Ledge);
+        if within((g.windshield.1, g.backlight.0)) {
+            return j >= i_ledge;
+        }
+        within(g.windshield) && (j == i_ledge || j == self.idx(Slot::GlassB))
     }
 
     /// Model-space point for station `s` and ring point `(z, y)`: x right, y up, z rearward
@@ -377,6 +409,19 @@ impl<'a> Body<'a> {
                 seam: None,
                 order: 0,
             });
+        }
+        // A convertible's opening must start and end on a station, even over an arch.
+        if spec.roof.convertible() {
+            for s in [g.windshield.1, g.backlight.0] {
+                if st.iter().all(|t| (t.s - s).abs() > 0.01) {
+                    st.push(Station {
+                        s,
+                        clamp: self.axle_over(s),
+                        seam: None,
+                        order: 0,
+                    });
+                }
+            }
         }
         st.sort_by(|a, b| {
             a.s.partial_cmp(&b.s)
@@ -603,7 +648,8 @@ impl<'a> Body<'a> {
             return g.side.iter().any(|&r| within(r));
         }
         if j >= self.idx(Slot::Frame) && j + 1 < self.slots.len() {
-            return within(g.windshield) || within(g.backlight);
+            // A convertible's backlight range is the boot over a deck, not glass.
+            return within(g.windshield) || (!self.convertible && within(g.backlight));
         }
         false
     }
@@ -625,6 +671,9 @@ impl<'a> Body<'a> {
             let (ra, rb) = (&rings[i], &rings[i + 1]);
             let gh = ra.f.h.min(rb.f.h) > 0.02;
             for j in 0..n - 1 {
+                if self.open_cut(j, sa, sb) {
+                    continue;
+                }
                 let pa = ra.pts[j];
                 let pb = ra.pts[j + 1];
                 let pc = rb.pts[j + 1];

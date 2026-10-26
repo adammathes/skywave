@@ -1,0 +1,49 @@
+// Seabreeze Convertible: a boxy mid-80s mid-size convertible on a front-drive compact
+// platform, usually white over tan.
+//
+// Intent: a Sunday car. A modest four with a flat torque curve and a three-speed automatic
+// that shifts early and softly; it gets going without hurry. Soft springs and light damping
+// make it bob over bumps, the thin anti-roll bar lets it lean, and the nose-heavy front
+// drive pushes wide when you ask too much: comfortable, predictable understeer. Steering is
+// light and a little slow. Top down at 40 mph is the whole point.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "seabreeze_convertible",
+    name: "Seabreeze Convertible",
+    era: Eighties,
+    class: Convertible,
+
+    mass_kg: 1250,
+    dims_m: (4.62, 1.75, 1.30),    // length, width, height (to the windshield header)
+    wheelbase_m: 2.55,
+    track_m: 1.46,
+    cg_height_m: 0.52,
+    cg_fore_aft: 0.40,             // 60% front: engine and transaxle over the front wheels
+
+    // A 2.6 L four (a small V6 sounds the same): ~100 kW near the top, flat in between.
+    engine: Engine(
+        idle_rpm: 750,
+        redline_rpm: 5400,
+        torque_nm: [(800, 145), (2000, 182), (3200, 196), (4400, 194), (5000, 186), (5400, 172)],
+    ),
+    gears: [2.69, 1.55, 1.0],      // three-speed automatic
+    final_drive: 2.78,
+    reverse: 2.1,
+    shift_ms: 450,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 0.95, grip_long: 0.92, load_sens: 0.11, slip_peak_deg: 8.5),
+    suspension: Susp(spring_n_m: 23000, damper: 1800, travel_m: 0.19, antiroll: 0.15),
+    steering: Steer(max_deg: 32, speed_sens: 0.55, return_rate: 5.0),
+    brakes: Brakes(max_nm: 3000, bias_front: 0.68, abs: false, handbrake_nm: 2200),
+    aero: Aero(cd: 0.44, frontal_m2: 2.1, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.25, body_roll: 0.75, engine_sound: "i4_soft", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 85, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "seabreeze_convertible.shape.ron",
+)

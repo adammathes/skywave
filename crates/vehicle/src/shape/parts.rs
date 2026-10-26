@@ -95,18 +95,22 @@ impl<'a, 'b> Parts<'a, 'b> {
             self.trunk_outline();
         }
         self.spoiler();
-        let details: Vec<Detail> = self.b.spec.details.clone();
+        let details: Vec<Detail> = self.b.details.clone();
+        // A convertible has no roof or rear glass to dress: its vinyl is the padded boot.
+        let hardtop = !self.b.convertible;
         for d in details {
             match d {
-                Detail::Louvers => self.louvers(),
+                Detail::Louvers if hardtop => self.louvers(),
                 Detail::HoodScoop => self.hood_scoop(),
                 Detail::SideStripe if self.lod0() => self.side_stripe(),
-                Detail::WoodPanel => self.wood_panel(),
+                Detail::WoodPanel => self.wood_panel(false),
+                Detail::WoodApplique => self.wood_panel(true),
+                Detail::CorneringLamps => self.cornering_lamps(),
                 Detail::ChromeTrim if self.lod0() => self.rocker_trim(),
-                Detail::VinylRoof => self.vinyl_roof(),
+                Detail::VinylRoof if hardtop => self.vinyl_roof(),
                 Detail::RallyStripes if self.lod0() => self.rally_stripes(),
                 Detail::MudFlaps => self.mud_flaps(),
-                Detail::RoofRack => self.roof_rack(),
+                Detail::RoofRack if hardtop => self.roof_rack(),
                 Detail::Badge(shape) if self.lod0() => {
                     self.badge(shape, true);
                     self.badge(shape, false);
@@ -207,6 +211,22 @@ impl<'a, 'b> Parts<'a, 'b> {
                         self.m.rubber,
                     );
                 }
+            } else if self.b.has(Detail::ChromeTrim) {
+                // A bright strip along a painted or rubber bumper.
+                let strip = [
+                    (0.024, -0.014),
+                    (0.037, -0.011),
+                    (0.037, 0.011),
+                    (0.024, 0.014),
+                ];
+                self.body.sweep(
+                    &path[1..path.len() - 1],
+                    &us[1..us.len() - 1],
+                    &vs[1..vs.len() - 1],
+                    &strip,
+                    true,
+                    self.m.chrome,
+                );
             }
         }
     }
@@ -761,7 +781,8 @@ impl<'a, 'b> Parts<'a, 'b> {
         let g = &spec.glass;
         let (s, y, stalk) = match spec.parts.mirrors {
             Mirrors::Door => {
-                let s = g.side.first().map_or(g.windshield.1, |w| w.0) + 0.09;
+                // Without door glass (a convertible) at the windshield's foot.
+                let s = g.side.first().map_or(g.windshield.0 + 0.06, |w| w.0) + 0.09;
                 let f = self.b.frame(s);
                 (s, f.y_ledge + 0.06, 0.05)
             }
@@ -1240,11 +1261,18 @@ impl<'a, 'b> Parts<'a, 'b> {
         }
     }
 
-    fn wood_panel(&mut self) {
+    /// Wood-grain side panels: full height (a wagon's), or a narrow `applique` band under
+    /// the belt.
+    fn wood_panel(&mut self, applique: bool) {
         let b = self.b;
         let l = b.length;
         let s0 = b.axle[0] + b.ra + 0.06;
-        let s1 = l - 0.10;
+        let s1 = if applique {
+            b.axle[1] + b.ra + 0.10
+        } else {
+            l - 0.10
+        };
+        let (lo_off, hi_off) = if applique { (0.25, 0.08) } else { (0.0, 0.07) };
         let spans = self.side_spans(s0, s1);
         let wood = self.m.wood;
         let surround = self.m.wood_trim;
@@ -1253,9 +1281,14 @@ impl<'a, 'b> Parts<'a, 'b> {
             for &(a, c) in &spans {
                 let y_lo = |s: f32| {
                     let f = b.frame(s);
-                    (f.yb + 0.16).max(self.arch_floor(s, 0.05))
+                    let lo = if applique {
+                        f.y_ledge - lo_off
+                    } else {
+                        f.yb + 0.16
+                    };
+                    lo.max(self.arch_floor(s, 0.05))
                 };
-                let y_hi = |s: f32| b.frame(s).y_ledge - 0.07;
+                let y_hi = |s: f32| b.frame(s).y_ledge - hi_off;
                 let (la, lc) = (y_lo(a), y_lo(c));
                 let (ha, hc) = (y_hi(a), y_hi(c));
                 if ha - la < 0.08 || hc - lc < 0.08 {
@@ -1273,12 +1306,42 @@ impl<'a, 'b> Parts<'a, 'b> {
                     (spans.last().map_or(s1, |x| x.1), -0.03),
                 ] {
                     let f = b.frame(s);
-                    let lo = (f.yb + 0.16).max(self.arch_floor(s, 0.05));
-                    let hi = f.y_ledge - 0.07;
+                    let lo = if applique {
+                        f.y_ledge - lo_off
+                    } else {
+                        f.yb + 0.16
+                    };
+                    let lo = lo.max(self.arch_floor(s, 0.05));
+                    let hi = f.y_ledge - hi_off;
                     let (sa, sb) = if ds > 0.0 { (s, s + ds) } else { (s + ds, s) };
                     self.side_patch(sx, sa, sb, [lo, lo], [hi, hi], 0.0065, surround);
                 }
             }
+        }
+    }
+
+    /// Clear lenses in chrome bezels on the front fender sides, behind the headlamps. They
+    /// are unlit (they would only light while turning).
+    fn cornering_lamps(&mut self) {
+        let b = self.b;
+        let band = self.band(true);
+        let yc = (band.y0 + band.y1) * 0.5;
+        let s0 = 0.16f32;
+        let s1 = (s0 + 0.16).min(b.axle[0] - b.ra - 0.03).max(s0 + 0.06);
+        let (h, e) = (0.055f32.min((band.y1 - band.y0) * 0.45), 0.012);
+        let (za, zb) = (s0 - b.axle[0], s1 - b.axle[0]);
+        for sx in [-1.0f32, 1.0] {
+            let x = self.side((s0 + s1) * 0.5, yc);
+            self.body.aabb(
+                [sx * (x - 0.01), yc - h - e, za - e],
+                [sx * (x + 0.006), yc + h + e, zb + e],
+                self.m.chrome,
+            );
+            self.lights.aabb(
+                [sx * (x - 0.005), yc - h, za],
+                [sx * (x + 0.009), yc + h, zb],
+                self.m.reverse,
+            );
         }
     }
 
@@ -1322,9 +1385,14 @@ impl<'a, 'b> Parts<'a, 'b> {
     fn rally_stripes(&mut self) {
         let g = &self.b.spec.glass;
         let l = self.b.length;
+        let roof = if self.b.convertible {
+            (0.0, 0.0)
+        } else {
+            self.roof_spans()
+        };
         let spans = [
             (0.03, g.windshield.0 - 0.01),
-            self.roof_spans(),
+            roof,
             (g.backlight.1 + 0.01, l - 0.02),
         ];
         for (s0, s1) in spans {
