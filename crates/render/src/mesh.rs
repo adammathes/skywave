@@ -3,12 +3,47 @@
 use crate::atlas::{tile_uv, uv_unorm, Tile};
 use bytemuck::{Pod, Zeroable};
 
-/// One mesh vertex, 32 bytes.
+/// Highest emissive intensity scale, reached at a 7-bit intensity of 127.
+pub const EMISSIVE_MAX_SCALE: f32 = 8.0;
+/// Bit of [`Vertex::emissive`]'s alpha that marks a window (see [`emissive_window`]).
+pub const EMISSIVE_WINDOW_BIT: u8 = 0x80;
+
+/// Encodes a self-lit color for [`Vertex::emissive`]: `rgb` is linear unorm8 and `scale`
+/// (clamped to `0..=8`, stored in 7 bits) multiplies it. The vertex then emits
+/// `rgb × scale × Sky::emissive_boost` kcd/m² whatever the lighting or instance color.
+pub fn emissive(rgb: [u8; 3], scale: f32) -> [u8; 4] {
+    let a = (scale.clamp(0.0, EMISSIVE_MAX_SCALE) / EMISSIVE_MAX_SCALE * 127.0).round() as u8;
+    [rgb[0], rgb[1], rgb[2], a]
+}
+
+/// Like [`emissive`] but flagged as a lit window: it is further multiplied by
+/// `Sky::window_emissive_scale`, so windows light up at dusk and go dark by day.
+pub fn emissive_window(rgb: [u8; 3], scale: f32) -> [u8; 4] {
+    let mut e = emissive(rgb, scale);
+    e[3] |= EMISSIVE_WINDOW_BIT;
+    e
+}
+
+/// The intensity scale (`0..=8`) and window flag of an encoded emissive.
+pub fn emissive_scale(e: [u8; 4]) -> (f32, bool) {
+    let a = e[3] & !EMISSIVE_WINDOW_BIT;
+    (
+        f32::from(a) / 127.0 * EMISSIVE_MAX_SCALE,
+        e[3] & EMISSIVE_WINDOW_BIT != 0,
+    )
+}
+
+/// One mesh vertex, 36 bytes.
 ///
 /// `color` is linear RGBA in unorm8 and is multiplied by the instance color and by the
 /// atlas texel at `uv`. `uv` is a normalized position in the whole atlas (`0..=65535` maps
 /// to `0.0..=1.0`, v down); build it with [`crate::tile_uv`] and [`crate::uv_unorm`].
 /// The default uv `[0, 0]` lies in [`Tile::White`], so untextured vertices are unaffected.
+///
+/// `emissive` is self-lit color added after lighting, multiplied by neither the atlas texel
+/// nor the instance color: rgb is linear unorm8, alpha holds a 7-bit intensity scale
+/// (`0..=127` → `0..=8×`) and, in its top bit, the window flag. Build it with [`emissive`]
+/// or [`emissive_window`]; `[0; 4]` emits nothing.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct Vertex {
@@ -16,17 +51,24 @@ pub struct Vertex {
     pub normal: [f32; 3],
     pub uv: [u16; 2],
     pub color: [u8; 4],
+    pub emissive: [u8; 4],
 }
 
 impl Vertex {
-    /// An untextured vertex (uv in the white tile).
+    /// An untextured, non-emissive vertex (uv in the white tile).
     pub const fn new(pos: [f32; 3], normal: [f32; 3], color: [u8; 4]) -> Vertex {
         Vertex {
             pos,
             normal,
             uv: [0, 0],
             color,
+            emissive: [0; 4],
         }
+    }
+
+    /// This vertex with an emissive color (see [`emissive`]).
+    pub const fn with_emissive(self, emissive: [u8; 4]) -> Vertex {
+        Vertex { emissive, ..self }
     }
 }
 
@@ -106,6 +148,7 @@ impl Mesh {
                 normal,
                 uv: uv_unorm(uv),
                 color,
+                emissive: [0; 4],
             });
         }
         self.indices
@@ -148,6 +191,21 @@ impl Mesh {
                 self.push_quad_uv(cell, normal, uv, color);
             }
         }
+    }
+
+    /// Sets the emissive of the vertices in `range` (e.g. `start..m.vertices.len()` around
+    /// the pushes that built a sign face or a window grid); see [`emissive`].
+    pub fn set_emissive(&mut self, range: core::ops::Range<usize>, emissive: [u8; 4]) {
+        for v in &mut self.vertices[range] {
+            v.emissive = emissive;
+        }
+    }
+
+    /// This mesh with every vertex emitting `emissive` (a lamp head, a tail light).
+    pub fn with_emissive(mut self, emissive: [u8; 4]) -> Mesh {
+        let n = self.vertices.len();
+        self.set_emissive(0..n, emissive);
+        self
     }
 
     /// An axis-aligned box from `min` to `max` with flat-shaded faces (24 vertices).
@@ -286,6 +344,48 @@ mod tests {
         // clamp-to-edge sampling).
         assert_eq!(Vertex::new([0.0; 3], [0.0, 1.0, 0.0], [255; 4]).uv, [0, 0]);
         assert_eq!(Vertex::zeroed().uv, [0, 0]);
+    }
+
+    #[test]
+    fn builders_emit_nothing_unless_asked() {
+        let m = Mesh::cuboid_tiled([0.0; 3], [2.0, 2.0, 2.0], [255; 4], Tile::Stucco, 1.0);
+        assert!(m.vertices.iter().all(|v| v.emissive == [0; 4]));
+        assert_eq!(
+            Vertex::new([0.0; 3], [0.0, 1.0, 0.0], [255; 4]).emissive,
+            [0; 4]
+        );
+        let mut m = Mesh::unit_block([255; 4]);
+        m.set_emissive(4..8, emissive([255, 20, 120], 4.0));
+        let lit: Vec<usize> = (0..m.vertices.len())
+            .filter(|&i| m.vertices[i].emissive != [0; 4])
+            .collect();
+        assert_eq!(lit, [4, 5, 6, 7]);
+        let all = Mesh::unit_block([255; 4]).with_emissive(emissive([255; 3], 1.0));
+        assert!(all
+            .vertices
+            .iter()
+            .all(|v| v.emissive == [255, 255, 255, 16]));
+    }
+
+    #[test]
+    fn emissive_encoding_round_trips_scale_and_window_flag() {
+        for scale in [0.0, 0.5, 1.0, 3.3, 8.0] {
+            let (s, window) = emissive_scale(emissive([1, 2, 3], scale));
+            assert!(
+                !window && (s - scale).abs() <= 0.5 * 8.0 / 127.0,
+                "{scale} {s}"
+            );
+            let w = emissive_window([1, 2, 3], scale);
+            assert_eq!(&w[..3], &[1, 2, 3]);
+            let (s, window) = emissive_scale(w);
+            assert!(
+                window && (s - scale).abs() <= 0.5 * 8.0 / 127.0,
+                "{scale} {s}"
+            );
+        }
+        assert_eq!(emissive([9; 3], 100.0)[3], 127);
+        assert_eq!(emissive([9; 3], -1.0)[3], 0);
+        assert_eq!(emissive_window([9; 3], 8.0)[3], 255);
     }
 
     #[test]
