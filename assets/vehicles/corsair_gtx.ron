@@ -35,7 +35,12 @@ VehicleSpec(
 
     tires: Tires(grip_lat: 1.25, grip_long: 1.15, load_sens: 0.08, slip_peak_deg: 7.0),
     suspension: Susp(spring_n_m: 32000, damper: 3200, travel_m: 0.16, antiroll: 0.45),
-    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 9.0),   // quick and direct
+    // Quick and direct. Return rate 12 (was 9): the road wheels close on the stick in
+    // ~0.08 s, so corrections land at once (feel pass after the first play).
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 12.0),
+    // Brakes unchanged in the feel pass: with the arcade assists' 1.4x brake boost and the
+    // stronger engine braking this stops from 60 mph in ~36 m (light assists ~45 m); more
+    // torque would only have pushed the arcade stop further under its ~38 m target.
     // Handbrake 3000 (was 1800): a rear tire can hold ~1100 N·m at speed, so 900 per wheel
     // only dragged; 1500 locks the rears for the flick the handbrake exists for.
     brakes: Brakes(max_nm: 3200, bias_front: 0.62, abs: false, handbrake_nm: 3000),
