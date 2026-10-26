@@ -47,7 +47,8 @@
 //!   Facades     u32 building, u16 side, u8 cols, u8 rows, u8 ground, bool awning,
 //!               u8 sign_slots, list of u8 lit
 //!   Props       f32 x 3 pos, f32 yaw, u8 kind tag (PropKind declaration order) then its
-//!               payload: Sign u64 text_seed, NeonSign u8 palette, ParkedCar u8 class
+//!               payload: Hedge u16 len_dm, Sign u64 text_seed, NeonSign u8 palette, Fence
+//!               u16 len_dm, ParkedCar u8 class, Signal u8 arm_dm, Pier u8 len_m
 //!   Lights      f32 x 3 pos, f32 x 3 color, f32 radius, u8 kind
 //!
 //! Chunk index, at index_offset, to the end of the file
@@ -294,9 +295,14 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
             put_f32(w, p.yaw);
             w.push(prop_tag(p.kind));
             match p.kind {
+                PropKind::Hedge { len_dm } | PropKind::Fence { len_dm } => {
+                    w.extend_from_slice(&len_dm.to_le_bytes())
+                }
                 PropKind::Sign { text_seed } => w.extend_from_slice(&text_seed.to_le_bytes()),
                 PropKind::NeonSign { palette } => w.push(palette),
                 PropKind::ParkedCar { vehicle_class } => w.push(vehicle_class),
+                PropKind::Signal { arm_dm } => w.push(arm_dm),
+                PropKind::Pier { len_m } => w.push(len_m),
                 _ => {}
             }
         }
@@ -315,7 +321,7 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::StreetLight => 0,
         PropKind::PalmTree => 1,
         PropKind::Oak => 2,
-        PropKind::Hedge => 3,
+        PropKind::Hedge { .. } => 3,
         PropKind::Bench => 4,
         PropKind::Hydrant => 5,
         PropKind::Mailbox => 6,
@@ -323,8 +329,13 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::NeonSign { .. } => 8,
         PropKind::Billboard => 9,
         PropKind::PowerPole => 10,
-        PropKind::Fence => 11,
+        PropKind::Fence { .. } => 11,
         PropKind::ParkedCar { .. } => 12,
+        PropKind::Eucalyptus => 13,
+        PropKind::TrashCan => 14,
+        PropKind::StopSign => 15,
+        PropKind::Signal { .. } => 16,
+        PropKind::Pier { .. } => 17,
     }
 }
 
@@ -950,7 +961,7 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 0 => PropKind::StreetLight,
                 1 => PropKind::PalmTree,
                 2 => PropKind::Oak,
-                3 => PropKind::Hedge,
+                3 => PropKind::Hedge { len_dm: r.u16()? },
                 4 => PropKind::Bench,
                 5 => PropKind::Hydrant,
                 6 => PropKind::Mailbox,
@@ -960,10 +971,15 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 8 => PropKind::NeonSign { palette: r.u8()? },
                 9 => PropKind::Billboard,
                 10 => PropKind::PowerPole,
-                11 => PropKind::Fence,
+                11 => PropKind::Fence { len_dm: r.u16()? },
                 12 => PropKind::ParkedCar {
                     vehicle_class: r.u8()?,
                 },
+                13 => PropKind::Eucalyptus,
+                14 => PropKind::TrashCan,
+                15 => PropKind::StopSign,
+                16 => PropKind::Signal { arm_dm: r.u8()? },
+                17 => PropKind::Pier { len_m: r.u8()? },
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1423,7 +1439,7 @@ mod tests {
             PropKind::StreetLight,
             PropKind::PalmTree,
             PropKind::Oak,
-            PropKind::Hedge,
+            PropKind::Hedge { len_dm: 240 },
             PropKind::Bench,
             PropKind::Hydrant,
             PropKind::Mailbox,
@@ -1433,8 +1449,15 @@ mod tests {
             PropKind::NeonSign { palette: 3 },
             PropKind::Billboard,
             PropKind::PowerPole,
-            PropKind::Fence,
-            PropKind::ParkedCar { vehicle_class: 2 },
+            PropKind::Fence { len_dm: 612 },
+            PropKind::ParkedCar {
+                vehicle_class: 0x32,
+            },
+            PropKind::Eucalyptus,
+            PropKind::TrashCan,
+            PropKind::StopSign,
+            PropKind::Signal { arm_dm: 61 },
+            PropKind::Pier { len_m: 180 },
         ];
         let props = kinds
             .iter()

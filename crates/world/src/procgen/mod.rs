@@ -3,9 +3,9 @@
 //! arterial network with the highway (stage 3), as a `place::RoadGraph` ([`arterials()`]);
 //! then the chunk stages: local streets (stage 4: [`streets()`], [`streets_all()`]) and
 //! blocks and parcels (stage 5: [`parcels()`], [`ParcelPlan`]) and buildings (stage 6:
-//! [`buildings()`], [`buildings_all()`]).
-//! [`build_place`] runs the macro stages, the streets, parcels and buildings and fills a
-//! `place::Place`.
+//! [`buildings()`], [`buildings_all()`]) and detailing (stage 7: [`detail()`]: props and
+//! lights). [`build_place`] runs the macro stages, the streets, parcels, buildings and
+//! detailing and fills a `place::Place`.
 //!
 //! Everything is a pure function of `(seed, template, size)`. Each stage draws from its own
 //! `Rng::new(seed, &[stage, ..])` and its own noise keyed by `hash64(seed, [stage, ..])`, so
@@ -14,6 +14,7 @@
 pub mod arterials;
 pub mod build;
 pub mod buildings;
+pub mod detail;
 pub mod macro_map;
 pub mod parcels;
 pub mod streets;
@@ -23,6 +24,7 @@ pub mod zones;
 pub use arterials::{arterials, hash_graph};
 pub use build::{build_place, place_from, PLACE_CHUNKS};
 pub use buildings::{buildings, buildings_all, hash_buildings, lot_buildings};
+pub use detail::{detail, hash_detail};
 pub use macro_map::{Frame, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind};
 pub use parcels::{
     hash_parcels, parcels, parcels_all, Block, Face, FaceKind, FaceParcels, FaceStats, ParcelChunk,
@@ -50,6 +52,8 @@ pub mod stage {
     pub const PARCELS: u64 = 8;
     /// Buildings on parcels (chunk stage).
     pub const BUILDINGS: u64 = 9;
+    /// Detailing: props and lights (chunk stage).
+    pub const DETAIL: u64 = 10;
 }
 
 /// Edge length of a streaming chunk.

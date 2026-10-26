@@ -434,15 +434,17 @@ pub struct StreamBudget {
 
 impl StreamBudget {
     /// 9×9 chunks, 2 ms a step; a pool for 4.5M vertices, 189 MB of buffers. With its
-    /// buildings the coast's densest 11×11 chunks (the ring and the chunks waiting to be
-    /// evicted) take 941 pages of 4096 vertices; this is 1099.
+    /// buildings, baked props and the light tiles its street lamps cut, the coast's
+    /// densest 11×11 chunks (the ring and the chunks waiting to be evicted) take 1078 pages
+    /// of 4096 vertices on seed 1; this is 1099 (trees, cars, lamps and small furniture are
+    /// instances, outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         step_budget_s: 0.002,
         pool_vertices: 4_500_000,
     };
-    /// 13×13 chunks, 4 ms a step; 6M vertices, 252 MB: room for the whole coast (1283
-    /// pages).
+    /// 13×13 chunks, 4 ms a step; 6M vertices, 252 MB: room for the whole coast (1445
+    /// pages on seed 1).
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         step_budget_s: 0.004,
@@ -890,6 +892,8 @@ mod tests {
         parts: usize,
         most_parts: usize,
         roles: [usize; 3],
+        /// Pool pages each chunk takes.
+        pages: Vec<([i32; 2], usize)>,
     }
 
     /// Builds every chunk of `src` piece by piece as the streamer does, checking that each
@@ -936,6 +940,11 @@ mod tests {
                 }
                 assert_eq!(next as usize, m.indices.len());
                 assert!(m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
+                let page = |n: usize, per: u32| n.div_ceil(per as usize);
+                let pages = page(m.vertices.len(), ChunkPoolConfig::PAGE_VERTICES)
+                    .max(page(m.indices.len(), ChunkPoolConfig::PAGE_INDICES))
+                    .max(1);
+                c.pages.push(([x, z], pages));
                 c.vertices += m.vertices.len();
                 c.most_vertices = c.most_vertices.max(m.vertices.len());
                 c.parts += b.parts.len();
@@ -962,6 +971,33 @@ mod tests {
     }
 
     impl Costs {
+        /// The most pool pages any `side`×`side` square of chunks takes.
+        fn densest_pages(&self, side: i32) -> usize {
+            let at = |c: [i32; 2]| self.pages.iter().find(|p| p.0 == c).map_or(0, |p| p.1);
+            let (lo, hi) = self
+                .pages
+                .iter()
+                .fold(([i32::MAX; 2], [i32::MIN; 2]), |(lo, hi), p| {
+                    (
+                        [lo[0].min(p.0[0]), lo[1].min(p.0[1])],
+                        [hi[0].max(p.0[0]), hi[1].max(p.0[1])],
+                    )
+                });
+            let mut most = 0;
+            for z0 in lo[1]..=(hi[1] - side + 1).max(lo[1]) {
+                for x0 in lo[0]..=(hi[0] - side + 1).max(lo[0]) {
+                    let mut n = 0;
+                    for z in z0..z0 + side {
+                        for x in x0..x0 + side {
+                            n += at([x, z]);
+                        }
+                    }
+                    most = most.max(n);
+                }
+            }
+            most
+        }
+
         /// The time 99% of stage `s`'s pieces took at most, and the slowest's.
         fn p99(&self, s: usize) -> f64 {
             let ms = &self.piece_ms[s];
@@ -1092,5 +1128,18 @@ mod tests {
             .indices
             .iter()
             .all(|&i| (i as usize) < far.vertices.len()));
+        // The web pool holds the densest square of chunks a camera keeps resident (the ring
+        // and the chunks waiting to be evicted).
+        let side = 2 * StreamBudget::WEB.radius + 3;
+        let pages = c.densest_pages(side);
+        let pool = StreamBudget::WEB.pool_config().pages as usize;
+        let all: usize = c.pages.iter().map(|p| p.1).sum();
+        let native = StreamBudget::NATIVE.pool_config().pages as usize;
+        eprintln!(
+            "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; the whole \
+             place {all} of the native pool's {native}"
+        );
+        assert!(pages <= pool, "{pages} pages of {pool}");
+        assert!(all <= native, "{all} pages of {native}");
     }
 }

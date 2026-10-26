@@ -7,8 +7,9 @@
 //! variation): same input, bit-identical vertices on every platform. [`collide`] builds the
 //! static shapes the car collides with from the same layout.
 //!
-//! [`procgen`] is the procedural producer (macro map so far), driven by a
-//! [`template::RegionTemplate`].
+//! [`procgen`] is the procedural producer, driven by a [`template::RegionTemplate`]; its
+//! last stage ([`procgen::detail`]) lists a place's props and lights in the Place, which
+//! the meshes, the collider and the app read from there.
 #![no_std]
 
 extern crate alloc;
@@ -24,6 +25,7 @@ pub mod palette;
 pub mod procgen;
 pub mod props;
 pub mod roads;
+pub mod signs;
 pub mod template;
 
 use alloc::vec::Vec;
@@ -207,7 +209,9 @@ pub struct ChunkPlan {
     /// below it ([`buildings::footing`]); zeros on the flat test town.
     footings: Vec<(f32, f32)>,
     fronts: Vec<usize>,
-    /// Every prop in build order: the lots' parked cars, the house sites', the streets'.
+    /// Every prop meshed into the chunks, in build order: on the test town the lots'
+    /// parked cars, the house sites', the streets'; on a terrain place its `Props` table
+    /// but for the kinds the app instances ([`props::instanced`]).
     props: Vec<props::Prop>,
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
@@ -225,8 +229,10 @@ impl ChunkPlan {
             ground::blocks(&net)
         };
 
-        // Plan every building first: the ground needs to know where strip malls face.
+        // Plan every building first: the ground needs to know where strip malls face. A
+        // terrain place's buildings get the detailing's signage.
         let lookup = Lookup::new(place, &net);
+        let terrain_place = is_terrain_place(place);
         let plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)> = place
             .buildings
             .iter()
@@ -234,7 +240,10 @@ impl ChunkPlan {
             .map(|(i, b)| {
                 let env = lookup.facade_envs(i);
                 let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-                let plan = buildings::plan_building(b, &env, door_pick);
+                let mut plan = buildings::plan_building(b, &env, door_pick);
+                if terrain_place {
+                    plan.signage = Some(buildings::signage(seed, i as u32));
+                }
                 (env, plan)
             })
             .collect();
@@ -246,7 +255,7 @@ impl ChunkPlan {
             .collect();
 
         // The test town lies on flat lot pads in an apron; a terrain place on its heightfield
-        // with the roads graded in (and, until the detailing pass, only house-site props).
+        // with the roads graded in.
         let terrain = is_terrain_place(place).then(|| {
             let g = TerrainGrid::new(place, &net);
             let colors = mesh::terrain::CellColors::new(place, &g, palette, seed);
@@ -262,27 +271,37 @@ impl ChunkPlan {
             None => alloc::vec![(0.0, 0.0); place.buildings.len()],
         };
 
-        // The props, meshing nothing: the lots' parked cars, the house sites' props (their
-        // walks go to a scratch mesh), then the streets' and the parks'.
+        // The props, meshing nothing. A terrain place's are in its `Props` table. The test
+        // town's: the lots' parked cars, the house sites' props (their walks go to a
+        // scratch mesh), then the streets' and the parks'.
         let mut none = MeshSet::new(place.header.chunk_size_m, Keep::Nothing);
         let mut props = if terrain.is_none() {
             ground::build(place, &blocks, &fronts, palette, seed, &mut none)
         } else {
-            Vec::new()
+            place
+                .props
+                .items
+                .iter()
+                .filter(|p| !props::instanced(p.kind))
+                .map(|p| props::from_place(p, seed))
+                .collect()
         };
         let mut scratch = WorldMesh::default();
         for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
+            if terrain.is_some() {
+                break;
+            }
             scratch.vertices.clear();
             scratch.indices.clear();
-            let base = footings[i].0;
-            props.extend(
-                buildings::house_site(&mut scratch, b, plan, env, palette, seed, i as u32)
-                    .into_iter()
-                    .map(|mut p| {
-                        p.y += base;
-                        p
-                    }),
-            );
+            props.extend(buildings::house_site(
+                &mut scratch,
+                b,
+                plan,
+                env,
+                palette,
+                seed,
+                i as u32,
+            ));
         }
         if terrain.is_none() {
             let parks: Vec<Vec<V2>> = blocks

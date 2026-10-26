@@ -4,7 +4,8 @@
 //! fills the Place skeleton: terrain from the macro heights (which already carry the
 //! highway corridor) at [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and
 //! one `PlayerStart` in the outer lane of the strip's spine; then the chunk stages over
-//! the whole place: local streets (stage 4), parcels (stage 5) and buildings (stage 6).
+//! the whole place: local streets (stage 4), parcels (stage 5), buildings (stage 6) and
+//! the detailing (stage 7: props and lights).
 
 use alloc::vec::Vec;
 
@@ -17,6 +18,7 @@ use skywave_core::Seed;
 
 use super::arterials::arterials;
 use super::buildings::buildings_all;
+use super::detail::detail;
 use super::macro_map::{MacroMap, WaterKind};
 use super::parcels::parcels_all;
 use super::streets::streets_all;
@@ -62,6 +64,9 @@ pub fn build_place(seed: Seed, template: &RegionTemplate) -> Place {
     let mut place = assemble(&m, template, roads, start);
     place.parcels = parcels_all(seed, template, &m, &place.roads);
     place.buildings = buildings_all(seed, template, &m, &place.parcels, &place.roads);
+    // Stage 7 reads the buildings where the meshes will find them.
+    place.sort_by_chunk();
+    detail(seed, template, &m, &mut place);
     place.sort_by_chunk();
     place
 }

@@ -1,18 +1,22 @@
-//! Street furniture and plants: where they go (a deterministic detailing pass producing
-//! [`Prop`] records, as in `docs/PLACES.md`) and their low-poly meshes.
+//! Street furniture and plants: where they go on the test town (a deterministic pass
+//! producing [`Prop`] records) and their low-poly meshes. A terrain place lists its props
+//! in the Place's `Props` table (`procgen::detail`); [`from_place`] turns those into
+//! [`Prop`]s, and [`instanced`] says which the app draws as shared-mesh instances instead
+//! of meshing them into chunks (trees and parked cars).
 
 use alloc::vec::Vec;
 
 use place::{Place, RoadClass, ZoneId};
 use skywave_core::{Rng, Seed};
 
-use crate::math::{point_in_polygon, sin_cos, TAU, V2, V3};
+use crate::math::{atan2, point_in_polygon, sin_cos, TAU, V2, V3};
 use crate::mesh::{
-    boxf, face, frustum, icosphere, lathe, polygon_cap, quad, tri, Frame, Glow, Paint, Pattern,
-    UnitSphere, WorldMesh,
+    boxf, face, frustum, icosphere, lathe, polygon_cap, quad, rect, tri, Frame, Glow, Paint,
+    Pattern, UnitSphere, WorldMesh,
 };
 use crate::palette::{mix, shade, Palette};
 use crate::roads::Network;
+use crate::signs;
 use crate::{CURB_M, LOT_Y};
 
 const KEY_STREET: u64 = 0x5354_5245;
@@ -37,6 +41,34 @@ pub enum PropKind {
     },
     Fountain,
     TrashCan,
+    /// A tall gum tree: long pale trunk, a sparse crown of lobes.
+    Eucalyptus,
+    /// A wooden utility pole with a crossarm; `dir` runs along the line.
+    PowerPole,
+    /// A roadside billboard on posts facing `dir`, with an invented ad.
+    Billboard,
+    /// A curbside mailbox on a post, door toward `dir`.
+    Mailbox,
+    /// A clipped hedge `len_dm` decimeters long along `dir`, centered on `pos`.
+    Hedge {
+        len_dm: u16,
+    },
+    /// A wood fence or a block wall `len_dm` decimeters long along `dir`, centered on
+    /// `pos`.
+    Fence {
+        len_dm: u16,
+    },
+    /// A street-name post: two crossed blades lettered with an invented name.
+    StreetSign,
+    /// A vertical neon blade sign projecting along `dir` from a wall at `pos`; `palette`
+    /// indexes `Palette::neon`.
+    NeonSign {
+        palette: u8,
+    },
+    /// A pier `len_m` meters long from its land end at `pos` (on the deck) out along `dir`.
+    Pier {
+        len_m: u8,
+    },
 }
 
 /// One placed prop.
@@ -344,6 +376,15 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         PropKind::TrafficSignal { arm_dm } => signal(m, base, p.dir, f32::from(arm_dm) * 0.1, pal),
         PropKind::Fountain => fountain(m, base, pal),
         PropKind::TrashCan => trash_can(m, base, pal),
+        PropKind::Eucalyptus => eucalyptus(m, base, pal, kit, &mut rng),
+        PropKind::PowerPole => power_pole(m, base, p.dir, pal, &mut rng),
+        PropKind::Billboard => billboard(m, base, p.dir, pal, p.seed),
+        PropKind::Mailbox => mailbox(m, base, p.dir, pal, &mut rng),
+        PropKind::Hedge { len_dm } => hedge(m, base, p.dir, f32::from(len_dm) * 0.1, pal, &mut rng),
+        PropKind::Fence { len_dm } => fence(m, base, p.dir, f32::from(len_dm) * 0.1, pal, &mut rng),
+        PropKind::StreetSign => street_sign(m, base, p.dir, pal, p.seed),
+        PropKind::NeonSign { palette } => neon_sign(m, base, p.dir, palette, pal, p.seed),
+        PropKind::Pier { len_m } => pier(m, base, p.dir, f32::from(len_m), pal, &mut rng),
     }
 }
 
@@ -906,6 +947,616 @@ fn fountain(m: &mut WorldMesh, base: V3, pal: &Palette) {
         stone,
     );
 }
+
+/// The ground direction a Place prop's `yaw` faces: `(-sin yaw, -cos yaw)` (a spawn's
+/// heading convention).
+pub fn dir_of_yaw(yaw: f32) -> V2 {
+    let (s, c) = sin_cos(yaw);
+    V2::new(-s, -c)
+}
+
+/// The `yaw` that faces unit ground direction `d` ([`dir_of_yaw`]'s inverse).
+pub fn yaw_of_dir(d: V2) -> f32 {
+    atan2(-d.x, -d.y)
+}
+
+/// Whether the app draws props of `kind` as instances of shared meshes (trees, parked
+/// cars, street lights, power poles and the small street furniture) rather than as part of
+/// their chunk's mesh, on a terrain place.
+pub fn instanced(kind: place::PropKind) -> bool {
+    use place::PropKind as P;
+    matches!(
+        kind,
+        P::StreetLight
+            | P::PalmTree
+            | P::Oak
+            | P::Eucalyptus
+            | P::ParkedCar { .. }
+            | P::Hydrant
+            | P::Bench
+            | P::TrashCan
+            | P::Mailbox
+            | P::PowerPole
+            | P::StopSign
+    )
+}
+
+/// Which of the two parked-car shapes a Place `ParkedCar`'s `vehicle_class` (low 4 bits:
+/// the vehicle crate's `VehicleClass`) stands for: 0, the low sporty coupe (sports, coupe,
+/// convertible, muscle, hatch), or 1, the long wagon-sized body (the rest).
+pub fn parked_car_shape(vehicle_class: u8) -> usize {
+    // VehicleClass order: Sports, Sedan, Wagon, Coupe, Pickup, Van, Hatch, Convertible,
+    // Luxury, Muscle.
+    match vehicle_class & 15 {
+        0 | 3 | 6 | 7 | 9 => 0,
+        _ => 1,
+    }
+}
+
+/// Length, width and height of a parked car of `vehicle_class`, m: the built-in shapes'.
+pub fn parked_car_size(vehicle_class: u8) -> [f32; 3] {
+    [[4.3, 1.75, 1.15], [5.25, 1.9, 1.45]][parked_car_shape(vehicle_class)]
+}
+
+/// A Place prop as a world prop: its facing from its yaw and its variation seed from the
+/// place's `seed` and its position (a street sign's from its text seed).
+pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
+    use place::PropKind as P;
+    let kind = match p.kind {
+        P::StreetLight => PropKind::StreetLight,
+        P::PalmTree => PropKind::PalmTree,
+        P::Oak => PropKind::Oak,
+        P::Eucalyptus => PropKind::Eucalyptus,
+        P::Hedge { len_dm } => PropKind::Hedge { len_dm },
+        P::Fence { len_dm } => PropKind::Fence { len_dm },
+        P::Bench => PropKind::Bench,
+        P::Hydrant => PropKind::Hydrant,
+        P::Mailbox => PropKind::Mailbox,
+        P::TrashCan => PropKind::TrashCan,
+        P::Sign { .. } => PropKind::StreetSign,
+        P::NeonSign { palette } => PropKind::NeonSign { palette },
+        P::Billboard => PropKind::Billboard,
+        P::PowerPole => PropKind::PowerPole,
+        P::ParkedCar { vehicle_class } => PropKind::ParkedCar {
+            color: vehicle_class >> 4,
+        },
+        P::StopSign => PropKind::StopSign,
+        P::Signal { arm_dm } => PropKind::TrafficSignal { arm_dm },
+        P::Pier { len_m } => PropKind::Pier { len_m },
+    };
+    let variation = match p.kind {
+        P::Sign { text_seed } => text_seed,
+        _ => skywave_core::hash64(
+            seed,
+            &[u64::from(p.pos[0].to_bits()), u64::from(p.pos[2].to_bits())],
+        ),
+    };
+    Prop {
+        pos: V2::new(p.pos[0], p.pos[2]),
+        y: p.pos[1],
+        dir: dir_of_yaw(p.yaw),
+        kind,
+        seed: (variation ^ (variation >> 32)) as u32,
+    }
+}
+
+/// Lettering of `text` in the frame's XY plane at depth `z` (facing -Z if `back`), its
+/// left end at `x0`, baseline at `y0`, `px` meters a font pixel. Seen from behind, the
+/// text still reads left to right.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn letters(
+    m: &mut WorldMesh,
+    f: &Frame,
+    text: &[u8],
+    x0: f32,
+    y0: f32,
+    px: f32,
+    z: f32,
+    back: bool,
+    paint: Paint,
+) {
+    let w = signs::text_width(text) as f32;
+    signs::text_rects(text, |a, b, c, d| {
+        let (xa, xb) = if back {
+            (x0 + (w - c) * px, x0 + (w - a) * px)
+        } else {
+            (x0 + a * px, x0 + c * px)
+        };
+        rect(m, f, xa, y0 + b * px, xb, y0 + d * px, z, back, paint);
+    });
+}
+
+/// A eucalyptus: a tall, leaning, pale trunk, a few limbs and a sparse crown of tall
+/// lobes with sky between them.
+fn eucalyptus(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut Rng) {
+    let bark = Paint::new(mix(pal.bark, pal.stucco_white, 150), Pattern::Bark);
+    let height = rng.range_f32(14.0, 19.0);
+    let (ls, lc) = sin_cos(rng.range_f32(0.0, TAU));
+    let lean = V3::new(lc, 0.0, ls) * rng.range_f32(0.6, 1.8);
+    let spine = |t: f32| base + V3::new(0.0, height * t, 0.0) + lean * (t * t);
+    let segments = 5;
+    let r = |t: f32| 0.34 - 0.24 * t;
+    for k in 0..segments {
+        let (t0, t1) = (k as f32 / segments as f32, (k + 1) as f32 / segments as f32);
+        let (p0, p1) = (spine(t0), spine(t1));
+        let f = frame_along(p0, p1 - p0);
+        let h = (p1 - p0).length();
+        frustum(m, &f, r(t0), r(t1), h, 6, false, false, bark);
+    }
+    let leaf = Paint::new(pal.leaf_green, Pattern::Foliage);
+    let tint = rng.range(0, 64);
+    let dark = shade(mix(pal.leaf_green, pal.teal, 80 + tint), 190);
+    let light = mix(mix(pal.leaf_light, pal.sky_blue, 70), pal.lawn_dry, tint);
+    let lobes = rng.range(5, 8);
+    let spin = rng.range_f32(0.0, TAU);
+    for k in 0..lobes {
+        let t = if k == 0 {
+            1.0
+        } else {
+            0.5 + 0.45 * (k as f32 / lobes as f32)
+        };
+        let (s, c) = sin_cos(spin + TAU * 0.38 * k as f32);
+        let reach = if k == 0 {
+            0.4
+        } else {
+            rng.range_f32(1.6, 3.2) * (1.15 - 0.5 * t)
+        };
+        let at = spine(t) + V3::new(c * reach, rng.range_f32(0.2, 1.2), s * reach);
+        if (1..=3).contains(&k) {
+            // A limb out to the lobe.
+            let from = spine(t - 0.12);
+            let limb = frame_along(from, at - from);
+            let len = (at - from).length();
+            frustum(m, &limb, 0.09, 0.04, len, 5, false, false, bark);
+        }
+        let rad = rng.range_f32(1.3, 2.0);
+        let tall = rng.range_f32(1.1, 1.5);
+        icosphere(
+            m,
+            &kit.sphere1,
+            at,
+            V3::new(rad, rad * tall, rad),
+            true,
+            leaf,
+            |n| mix(dark, light, ((n.y * 0.5 + 0.5) * 240.0) as u32),
+        );
+    }
+}
+
+/// A wooden utility pole with a crossarm and insulators, and now and then a transformer.
+fn power_pole(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette, rng: &mut Rng) {
+    let wood = Paint::new(shade(pal.bark, 240), Pattern::Bark);
+    let f = Frame::upright(base, along);
+    frustum(m, &f, 0.15, 0.11, 10.4, 6, true, false, wood);
+    // Crossarm across the line, insulators on it.
+    boxf(
+        m,
+        &f,
+        [-0.06, 9.45, -1.3],
+        [0.06, 9.6, 1.3],
+        face::ALL,
+        wood,
+    );
+    let glass = Paint::new(mix(pal.mint, pal.concrete, 120), Pattern::Plain);
+    for z in [-1.15, -0.45, 0.45, 1.15] {
+        let (lo, hi) = ([-0.04, 9.6, z - 0.04], [0.04, 9.8, z + 0.04]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, glass);
+    }
+    if rng.range(0, 3) == 0 {
+        boxf(
+            m,
+            &f,
+            [-0.06, 8.6, -0.9],
+            [0.06, 8.72, 0.9],
+            face::ALL,
+            wood,
+        );
+    }
+    if rng.range(0, 4) == 0 {
+        let can = Paint::new(shade(pal.concrete, 200), Pattern::Metal);
+        let at = f.offset(0.0, 7.2, 0.42);
+        frustum(m, &at, 0.26, 0.26, 0.85, 6, true, false, can);
+    }
+}
+
+/// A billboard on two posts: a catwalk, three flood lamps and an invented ad on its face.
+fn billboard(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette, seed: u32) {
+    let mut rng = Rng::new(Seed(u64::from(seed)), &[KEY_PROP, 0xB1]);
+    let steel = Paint::new(shade(pal.metal_dark, 260), Pattern::Metal);
+    // X along the panel, +Z toward the viewer.
+    let f = Frame::upright(base, facing.left());
+    for x in [-3.2, 3.2] {
+        let (lo, hi) = ([x - 0.16, 0.0, -0.55], [x + 0.16, 9.2, -0.25]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, steel);
+    }
+    let (w, y0, y1) = (5.2, 5.6, 9.2);
+    boxf(
+        m,
+        &f,
+        [-w, y0, -0.25],
+        [w, y1, 0.0],
+        face::ALL & !face::POS_Z,
+        steel,
+    );
+    boxf(
+        m,
+        &f,
+        [-w, y0 - 0.25, 0.0],
+        [w, y0 - 0.15, 0.9],
+        face::ALL,
+        steel,
+    );
+    // The ad: a ground, a band and a name.
+    let colors = [
+        pal.sky_blue,
+        pal.salmon,
+        pal.teal,
+        pal.navy,
+        pal.peach,
+        pal.mint,
+        pal.paint_yellow,
+        pal.lavender,
+        pal.pastel_pink,
+        pal.stucco_white,
+    ];
+    let pick = |rng: &mut Rng| colors[rng.range(0, colors.len() as u32) as usize];
+    let ground = pick(&mut rng);
+    let mut band = pick(&mut rng);
+    if band == ground {
+        band = pal.hydrant_red;
+    }
+    let ground_paint = Paint::new(ground, Pattern::Paint);
+    rect(m, &f, -w, y0, w, y1, 0.0, false, ground_paint);
+    let low = rng.range(0, 2) == 0;
+    let (b0, b1) = if low {
+        (y0 + 0.25, y0 + 1.2)
+    } else {
+        (y1 - 1.0, y1 - 0.3)
+    };
+    let band_paint = Paint::new(band, Pattern::Paint);
+    rect(m, &f, -w + 0.3, b0, w - 0.3, b1, 0.01, false, band_paint);
+    let name = signs::business_name(u64::from(seed), 9);
+    let ink = if ground == pal.navy || ground == pal.teal {
+        pal.stucco_white
+    } else {
+        shade(pal.navy, 160)
+    };
+    let px = 0.24;
+    let tw = signs::text_width(&name) as f32 * px;
+    let ty = if low { y0 + 1.7 } else { y0 + 0.8 };
+    let ink = Paint::new(ink, Pattern::Paint);
+    letters(m, &f, &name, -tw * 0.5, ty, px, 0.02, false, ink);
+    // Flood lamps on arms over the catwalk, shining up at the face.
+    let lens = Paint::new(pal.window_warm, Pattern::Glass).glowing(pal.sodium, Glow::Lamp);
+    for x in [-3.4, 0.0, 3.4] {
+        let (lo, hi) = ([x - 0.04, y0 - 0.15, 0.0], [x + 0.04, y0 - 0.07, 1.25]);
+        boxf(m, &f, lo, hi, face::ALL, steel);
+        let (lo, hi) = ([x - 0.2, y0 - 0.2, 1.2], [x + 0.2, y0 + 0.05, 1.45]);
+        boxf(m, &f, lo, hi, face::ALL & !face::POS_Y, steel);
+        quad(
+            m,
+            [
+                f.p(x - 0.16, y0 + 0.051, 1.24),
+                f.p(x + 0.16, y0 + 0.051, 1.24),
+                f.p(x + 0.16, y0 + 0.051, 1.41),
+                f.p(x - 0.16, y0 + 0.051, 1.41),
+            ],
+            f.y,
+            lens,
+        );
+    }
+}
+
+/// A curbside mailbox on a wooden post with a red flag.
+fn mailbox(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette, rng: &mut Rng) {
+    let wood = Paint::new(shade(pal.bark, 280), Pattern::Plain);
+    let tones = [
+        pal.metal_light,
+        pal.stucco_white,
+        pal.navy,
+        shade(pal.metal_dark, 300),
+    ];
+    let tin = Paint::new(tones[rng.range(0, 4) as usize], Pattern::Metal);
+    // +Z toward the street.
+    let f = Frame::upright(base, facing.left());
+    boxf(
+        m,
+        &f,
+        [-0.05, 0.0, -0.05],
+        [0.05, 1.02, 0.05],
+        face::NO_BOTTOM,
+        wood,
+    );
+    boxf(
+        m,
+        &f,
+        [-0.12, 1.02, -0.26],
+        [0.12, 1.22, 0.24],
+        face::ALL,
+        tin,
+    );
+    // Rounded top as a low ridge.
+    let (a0, a1) = (f.p(-0.12, 1.22, -0.26), f.p(-0.12, 1.22, 0.24));
+    let (b0, b1) = (f.p(0.12, 1.22, -0.26), f.p(0.12, 1.22, 0.24));
+    let (r0, r1) = (f.p(0.0, 1.31, -0.26), f.p(0.0, 1.31, 0.24));
+    quad(m, [a0, a1, r1, r0], -f.x + f.y, tin);
+    quad(m, [b0, r0, r1, b1], f.x + f.y, tin);
+    tri(m, a0, r0, b0, -f.z, tin);
+    tri(m, a1, b1, r1, f.z, tin);
+    let flag = Paint::new(pal.hydrant_red, Pattern::Paint);
+    boxf(
+        m,
+        &f,
+        [0.12, 1.1, -0.12],
+        [0.14, 1.38, -0.08],
+        face::ALL,
+        flag,
+    );
+}
+
+/// A clipped hedge: lumpy boxes along the run, sunk into the ground on slopes.
+fn hedge(m: &mut WorldMesh, base: V3, along: V2, len: f32, pal: &Palette, rng: &mut Rng) {
+    let f = Frame::upright(base, along);
+    let height = rng.range_f32(1.1, 1.6);
+    let n = ((len / 1.6) as u32).max(1);
+    let step = len / n as f32;
+    for k in 0..n {
+        let x0 = -len * 0.5 + step * k as f32;
+        let h = height + rng.range_f32(-0.12, 0.12);
+        let w = rng.range_f32(0.4, 0.5);
+        let tone = rng.range(170, 230);
+        let leaf = Paint::new(shade(pal.leaf_green, tone), Pattern::Foliage);
+        boxf(
+            m,
+            &f,
+            [x0, -0.5, -w],
+            [x0 + step, h, w],
+            face::NO_BOTTOM,
+            leaf,
+        );
+    }
+}
+
+/// A wood fence (boards between posts, two rails behind) or a capped block wall.
+fn fence(m: &mut WorldMesh, base: V3, along: V2, len: f32, pal: &Palette, rng: &mut Rng) {
+    let f = Frame::upright(base, along);
+    let half = len * 0.5;
+    if rng.range(0, 2) == 0 {
+        let tones = [
+            pal.concrete,
+            pal.sand,
+            pal.stucco_cream,
+            shade(pal.concrete, 230),
+        ];
+        let block = Paint::new(tones[rng.range(0, 4) as usize], Pattern::Concrete);
+        let h = rng.range_f32(1.5, 1.8);
+        boxf(
+            m,
+            &f,
+            [-half, -0.5, -0.1],
+            [half, h, 0.1],
+            face::NO_BOTTOM,
+            block,
+        );
+        let cap = block.with_rgb(shade(block.rgb(), 230));
+        let (lo, hi) = ([-half, h, -0.13], [half, h + 0.08, 0.13]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, cap);
+        return;
+    }
+    let tones = [
+        shade(pal.bark, 300),
+        shade(pal.bark, 380),
+        mix(pal.bark, pal.sand, 120),
+    ];
+    let wood = Paint::new(tones[rng.range(0, 3) as usize], Pattern::Plain);
+    let h = 1.8;
+    let posts = ((len / 2.4) as u32).max(1);
+    for k in 0..=posts {
+        let x = (-half + len * k as f32 / posts as f32).clamp(-half + 0.05, half - 0.05);
+        let (lo, hi) = ([x - 0.05, -0.5, -0.12], [x + 0.05, h + 0.05, -0.02]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, wood);
+    }
+    for y in [0.35, 1.45] {
+        boxf(
+            m,
+            &f,
+            [-half, y, -0.1],
+            [half, y + 0.09, -0.02],
+            face::ALL,
+            wood,
+        );
+    }
+    let boards = wood.with_rgb(shade(wood.rgb(), 270));
+    rect(m, &f, -half, -0.5, half, h, 0.0, false, boards);
+    rect(m, &f, -half, -0.5, half, h, -0.02, true, boards);
+}
+
+/// A street-name post: two crossed blades whose lettering follows an invented name (a
+/// block per letter: at reading distance a sign's words are shapes).
+fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
+    let post = Paint::new(pal.metal_light, Pattern::Metal);
+    let f = Frame::upright(base, dir);
+    boxf(
+        m,
+        &f,
+        [-0.03, 0.0, -0.03],
+        [0.03, 3.05, 0.03],
+        face::NO_BOTTOM,
+        post,
+    );
+    let green = Paint::new(shade(pal.palm_green, 170), Pattern::Paint);
+    let ink = Paint::new(pal.paint_white, Pattern::Paint);
+    for (k, y) in [(0u64, 2.7f32), (1, 2.9)] {
+        let name = signs::street_name(u64::from(seed) ^ k);
+        // The second blade turned a quarter.
+        let b = if k == 0 {
+            f
+        } else {
+            Frame {
+                x: f.z,
+                z: -f.x,
+                ..f
+            }
+        };
+        let (lo, hi) = ([-0.5, y, -0.012], [0.5, y + 0.18, 0.012]);
+        boxf(m, &b, lo, hi, face::ALL & !face::NEG_Y, green);
+        let n = name.len().max(1) as f32;
+        let cell = 0.84 / n;
+        for (i, &c) in name.iter().enumerate() {
+            if c == b' ' {
+                continue;
+            }
+            let x = -0.42 + cell * i as f32;
+            let (xa, xb) = (x + cell * 0.12, x + cell * 0.88);
+            rect(m, &b, xa, y + 0.05, xb, y + 0.13, 0.0125, false, ink);
+            rect(m, &b, -xb, y + 0.05, -xa, y + 0.13, -0.0125, true, ink);
+        }
+    }
+}
+
+/// A vertical neon blade sign on brackets out from a wall: a dark box with a word in
+/// stacked neon letters on both faces, outlined in a neon tube of another color.
+fn neon_sign(m: &mut WorldMesh, base: V3, out: V2, palette: u8, pal: &Palette, seed: u32) {
+    let neons = pal.neon();
+    let c = neons[usize::from(palette) % neons.len()];
+    let tube = Paint::new(c, Pattern::Plain).glowing(c, Glow::Neon);
+    let other = neons[(usize::from(palette) + 2) % neons.len()];
+    let border = Paint::new(other, Pattern::Plain).glowing(other, Glow::Neon);
+    let dark = Paint::new(shade(pal.navy, 150), Pattern::Metal);
+    let steel = Paint::new(pal.metal_dark, Pattern::Metal);
+    // X out from the wall, Y up, the faces toward ±Z.
+    let f = Frame::upright(base, out);
+    let (x0, x1, y0, y1, t) = (0.3, 1.5, NEON_SIGN_Y.0, NEON_SIGN_Y.1, 0.12);
+    for y in [y0 + 0.4, y1 - 0.4] {
+        boxf(
+            m,
+            &f,
+            [0.0, y - 0.05, -0.05],
+            [x0, y + 0.05, 0.05],
+            face::ALL,
+            steel,
+        );
+    }
+    boxf(m, &f, [x0, y0, -t], [x1, y1, t], face::ALL, dark);
+    let word = signs::blade_word(u64::from(seed), 5);
+    let px = 0.12;
+    let n = word.len().max(1) as f32;
+    let pitch = ((y1 - y0 - 0.5) / n).min(6.5 * px);
+    let top = (y0 + y1) * 0.5 + pitch * n * 0.5;
+    for back in [false, true] {
+        let z = if back { -t - 0.01 } else { t + 0.01 };
+        for (k, &ch) in word.iter().enumerate() {
+            let w = signs::text_width(&[ch]) as f32 * px;
+            let x = (x0 + x1) * 0.5 - w * 0.5;
+            let y = top - pitch * (k as f32 + 1.0) + (pitch - 5.0 * px) * 0.5;
+            letters(m, &f, &[ch], x, y, px, z, back, tube);
+        }
+        // The outline tube.
+        let (a, b, d) = (x0 + 0.07, x1 - 0.07, 0.05);
+        rect(m, &f, a, y0 + 0.07, b, y0 + 0.07 + d, z, back, border);
+        rect(m, &f, a, y1 - 0.07 - d, b, y1 - 0.07, z, back, border);
+        rect(m, &f, a, y0 + 0.07, a + d, y1 - 0.07, z, back, border);
+        rect(m, &f, b - d, y0 + 0.07, b, y1 - 0.07, z, back, border);
+    }
+}
+
+/// Height range of a neon blade sign's box above its base, m.
+pub const NEON_SIGN_Y: (f32, f32) = (3.6, 7.6);
+/// How far a neon blade sign's box reaches out from the wall: `(near, far)`, m.
+pub const NEON_SIGN_OUT: (f32, f32) = (0.3, 1.5);
+
+/// A wooden pier on pilings: a deck with railings out over the water to a wider head with
+/// a bait shop.
+fn pier(m: &mut WorldMesh, base: V3, out: V2, len: f32, pal: &Palette, rng: &mut Rng) {
+    let f = Frame::upright(base, out);
+    let wood = mix(pal.bark, pal.sand, 130);
+    let piling = Paint::new(shade(pal.bark, 220), Pattern::Bark);
+    let rail = Paint::new(pal.stucco_white, Pattern::Paint);
+    let (hw, head_w, head_l) = (PIER_HALF_WIDTH_M, PIER_HEAD_HALF_WIDTH_M, PIER_HEAD_M);
+    let span = 6.0;
+    let n = ((len / span) as u32).max(1);
+    let sides = face::ALL & !face::NEG_Y & !face::POS_Y;
+    let deck = |m: &mut WorldMesh, x0: f32, x1: f32, w: f32, rng: &mut Rng| {
+        let p = Paint::new(shade(wood, rng.range(215, 250)), Pattern::Plain);
+        boxf(m, &f, [x0, -0.45, -w], [x1, 0.0, w], face::ALL, p);
+    };
+    for k in 0..n {
+        let x = span * k as f32;
+        deck(m, x, x + span, hw, rng);
+        // A bent of two pilings and a cap beam under each joint.
+        for z in [-hw + 0.5, hw - 0.5] {
+            let (lo, hi) = ([x + 0.2, -9.0, z - 0.18], [x + 0.56, -0.45, z + 0.18]);
+            boxf(m, &f, lo, hi, sides, piling);
+        }
+        let (lo, hi) = ([x + 0.15, -0.8, -hw], [x + 0.6, -0.45, hw]);
+        boxf(m, &f, lo, hi, face::ALL & !face::POS_Y, piling);
+    }
+    let end = span * n as f32;
+    // The head: wider, on its own pilings.
+    deck(m, end, end + head_l, head_w, rng);
+    for x in [end + 2.0, end + 8.0, end + 14.0] {
+        for z in [-head_w + 0.6, 0.0, head_w - 0.6] {
+            let (lo, hi) = ([x - 0.18, -9.0, z - 0.18], [x + 0.18, -0.45, z + 0.18]);
+            boxf(m, &f, lo, hi, sides, piling);
+        }
+    }
+    // Railings: posts every span, two rails.
+    let posts = |m: &mut WorldMesh, x0: f32, x1: f32, z: f32| {
+        let k = (((x1 - x0) / span) as u32).max(1);
+        for i in 0..=k {
+            let x = x0 + (x1 - x0) * i as f32 / k as f32;
+            let (lo, hi) = ([x - 0.06, 0.0, z - 0.06], [x + 0.06, 1.1, z + 0.06]);
+            boxf(m, &f, lo, hi, face::NO_BOTTOM, rail);
+        }
+    };
+    for z in [-hw + 0.1, hw - 0.1] {
+        posts(m, 0.0, end, z);
+        for y in [0.5, 1.02] {
+            boxf(
+                m,
+                &f,
+                [0.0, y, z - 0.04],
+                [end, y + 0.08, z + 0.04],
+                face::ALL,
+                rail,
+            );
+        }
+    }
+    for z in [-head_w + 0.1, head_w - 0.1] {
+        posts(m, end, end + head_l, z);
+        let (lo, hi) = ([end, 1.02, z - 0.04], [end + head_l, 1.1, z + 0.04]);
+        boxf(m, &f, lo, hi, face::ALL, rail);
+    }
+    let (lo, hi) = (
+        [end + head_l - 0.1, 1.02, -head_w],
+        [end + head_l, 1.1, head_w],
+    );
+    boxf(m, &f, lo, hi, face::ALL, rail);
+    // The bait shop at the end: a stucco box with a lipped flat roof, a door and a window.
+    let wall = Paint::new(pal.stucco_white, Pattern::Stucco);
+    let trim = Paint::new(pal.teal, Pattern::Paint);
+    let (sx0, sx1, sz) = (end + head_l - 7.5, end + head_l - 1.5, 3.0);
+    boxf(
+        m,
+        &f,
+        [sx0, 0.0, -sz],
+        [sx1, 3.0, sz],
+        face::NO_BOTTOM,
+        wall,
+    );
+    let (lo, hi) = ([sx0 - 0.3, 3.0, -sz - 0.3], [sx1 + 0.3, 3.25, sz + 0.3]);
+    boxf(m, &f, lo, hi, face::ALL, trim);
+    let glass = Paint::new(pal.glass, Pattern::Glass).glowing(pal.window_warm, Glow::Window);
+    // The shop's landward wall, seen from the deck.
+    let front = Frame::upright(f.p(sx0, 0.0, -sz), f.z.xz());
+    rect(m, &front, 0.8, 1.0, 2.8, 2.2, 0.01, false, glass);
+    rect(m, &front, 3.6, 0.0, 4.6, 2.2, 0.01, false, trim);
+}
+
+/// Half the width of a pier's walk, of its head, and the head's length, m.
+pub const PIER_HALF_WIDTH_M: f32 = 4.5;
+pub const PIER_HEAD_HALF_WIDTH_M: f32 = 9.0;
+pub const PIER_HEAD_M: f32 = 16.0;
 
 #[cfg(test)]
 mod tests {

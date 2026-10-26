@@ -53,6 +53,7 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 - Parcels: a face spanning several chunks is rebuilt by every chunk it touches (worst chunk ~7 ms vs the 2 ms target). Cache built faces in the plan, keyed by face id, so each chunk only slices.
 - Streaming stages: buildings and light tiles on dense chunks exceeded the step budget; now built in ~2 ms pieces (done).
 - Web chunk pool is 4.5M vertices (~189 MB of GPU buffers) to hold the densest 11×11 coast area with buildings. Reduce per-building vertices (blank unseen facades, LOD by distance) to bring it back under 128 MB.
+- With the detailing's street lamps the densest 11×11 coast area takes 1078 of the web pool's 1099 pages: the light tiles' cuts add ~15% to the lit chunks. Cutting tiles by whole triangles (no clipping) on terrain places, or fewer, larger tiles, would win most of it back.
 
 ## Not from that list, noted during M1
 - Chase camera collision with buildings (push in): M2.

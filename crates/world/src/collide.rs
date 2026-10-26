@@ -15,7 +15,8 @@
 //! - **Walls**: one vertical segment per building footprint edge, facing out. Exact for
 //!   extruded footprints, concave ones included.
 //! - **Posts and boxes**: props as vertical cylinders (lamps, trees, hydrants, poles) and
-//!   oriented boxes (benches, parked-car placeholders).
+//!   oriented boxes (benches, hedges, fences, parked cars, a pier's deck): the test town's
+//!   from its own prop passes, a terrain place's from its `Props` table.
 //!
 //! The collider is a [`vehicle::Ground`]: a wheel ray reads the patch height under it, and
 //! near a step it reads the height at which a wheel of [`WHEEL_RADIUS_M`] would touch the
@@ -375,12 +376,11 @@ impl WorldCollider {
         }
 
         let walls = building_walls(place);
-        let props = if terrain_place {
-            Vec::new()
+        let (posts, boxes) = if terrain_place {
+            place_prop_solids(place)
         } else {
-            props_of(place, &net, &blocks)
+            prop_solids(&props_of(place, &net, &blocks))
         };
-        let (posts, boxes) = prop_solids(&props);
 
         // Grid over everything, with a cell of margin.
         let mut lo = [f32::MAX, f32::MAX];
@@ -1002,6 +1002,70 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                 y1: p.y + 1.42,
                 kind: p.kind,
             }),
+            PropKind::Eucalyptus => posts.push(post(0.32, 12.0)),
+            PropKind::PowerPole => posts.push(post(0.15, 10.4)),
+            PropKind::Mailbox => posts.push(post(0.12, 1.3)),
+            PropKind::StreetSign => posts.push(post(0.05, 3.0)),
+            PropKind::Billboard => {
+                let along = p.dir.left();
+                for x in [-3.2f32, 3.2] {
+                    let c = p.pos + along * x - p.dir * 0.4;
+                    posts.push(Post {
+                        c: arr(c),
+                        ..post(0.22, 9.2)
+                    });
+                }
+            }
+            PropKind::Hedge { len_dm } | PropKind::Fence { len_dm } => boxes.push(BoxSolid {
+                c: arr(p.pos),
+                u: arr(p.dir),
+                half: [f32::from(len_dm) * 0.05, 0.45],
+                y0: p.y - 0.5,
+                y1: p.y + 1.6,
+                kind: p.kind,
+            }),
+            PropKind::Pier { len_m } => {
+                // The deck from its land end out, to the head's far end.
+                let len = f32::from(len_m) + props::PIER_HEAD_M;
+                boxes.push(BoxSolid {
+                    c: arr(p.pos + p.dir * (len * 0.5)),
+                    u: arr(p.dir),
+                    half: [len * 0.5, props::PIER_HALF_WIDTH_M],
+                    y0: p.y - 9.0,
+                    y1: p.y + 1.1,
+                    kind: p.kind,
+                })
+            }
+            // Above the sidewalk, out of the car's way.
+            PropKind::NeonSign { .. } => {}
+        }
+    }
+    (posts, boxes)
+}
+
+/// Collision shapes of a terrain place's props, from its `Props` table: [`prop_solids`]
+/// for all but the parked cars, which take their shape's size.
+fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>) {
+    let seed = place.header.seed;
+    let items = &place.props.items;
+    let props: Vec<Prop> = items
+        .iter()
+        .filter(|p| !matches!(p.kind, place::PropKind::ParkedCar { .. }))
+        .map(|p| props::from_place(p, seed))
+        .collect();
+    let (posts, mut boxes) = prop_solids(&props);
+    for p in items {
+        if let place::PropKind::ParkedCar { vehicle_class } = p.kind {
+            let w = props::from_place(p, seed);
+            let [len, width, height] = props::parked_car_size(vehicle_class);
+            boxes.push(BoxSolid {
+                c: arr(w.pos),
+                u: arr(w.dir),
+                half: [len * 0.5, width * 0.5],
+                y0: w.y + 0.1,
+                y1: w.y + height,
+                kind: w.kind,
+            });
         }
     }
     (posts, boxes)
