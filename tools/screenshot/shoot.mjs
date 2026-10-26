@@ -104,7 +104,11 @@ try {
     }),
   );
 
-  const png = await page.screenshot({ type: "png" });
+  // SwiftShader renders this scene at seconds per frame on a loaded machine; give the
+  // compositor time to produce a frame.
+  const t0 = Date.now();
+  const png = await page.screenshot({ type: "png", timeout: 180_000 });
+  console.log(`shoot: capture took ${Date.now() - t0} ms`);
   await mkdir(dirname(out), { recursive: true });
   await writeFile(out, png);
   console.log(`shoot: wrote ${out}`);
