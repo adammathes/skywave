@@ -4,7 +4,7 @@ A **Place** is the runtime's only description of the world. The procedural gener
 
 ## Format principles
 - Plain-old-data, chunked, versioned, validated on load, language-neutral. Canonical encoding is a little-endian binary stream with a documented layout (`place::codec`); a JSON encoding exists for tests and debugging.
-- Coordinates: meters, right-handed, X east, Z south, Y up (height). Origin at the Place's southwest corner. A Place is `size_chunks.x × size_chunks.y` chunks of `chunk_size_m` (128 m) each. v1 Places are 16×16 chunks (2 km square); the format allows up to 256×256.
+- Coordinates: meters, right-handed, X east, Z south, Y up (height). Origin at the Place's southwest corner for canonical places; `PlaceHeader.chunk_origin` (chunk coordinates of the southwest chunk, `[0,0]` canonically) lets a place such as the hand-laid test town stay centered on (0,0). A Place is `size_chunks.x × size_chunks.y` chunks of `chunk_size_m` (128 m) each. v1 Places are 16×16 chunks (2 km square); the format allows up to 256×256.
 - Two layers: the **skeleton** (what both producers must emit) and the **detail** (what the shared detailing pass adds). A Place file may be skeleton-only; the runtime details on load.
 
 ## Skeleton
@@ -39,7 +39,7 @@ Props        { Vec<Prop { pos, yaw, kind: StreetLight|PalmTree|Oak|Hedge|Bench|H
 Lights       { Vec<Light { pos, color, radius, kind: Street|Neon|Window|Headlight }> }
 Chunk index  { per chunk: byte ranges into every table above, plus bounds and a content hash }
 ```
-Chunking: every table is sorted by chunk; a chunk index lets the runtime stream a chunk without touching others. Objects straddling chunks belong to the chunk of their centroid; roads are split at chunk borders by the producer.
+Chunking: every object table is sorted by chunk; the chunk index holds byte ranges into the 14 object tables, a per-chunk hash (which also covers the chunk's height samples and zone cells) and bounds. The terrain grid, zones and water bodies are read once for the whole place (a height grid cannot be sliced per chunk as a byte range); only object tables stream per chunk. Objects straddling chunks belong to the chunk of their centroid; roads are split at chunk borders by the producer.
 
 ## Validation (`place::validate`, run on load and in tests)
 Indices in range; polygons simple and counter-clockwise; no two buildings overlap more than 5%; every parcel touches its frontage edge; road graph connected (one component ≥ 95% of edges); every edge profile within terrain ± 8 m; at least one `PlayerStart`; hash per chunk matches contents.
