@@ -973,9 +973,40 @@ pub fn build(
     terrain: Option<&TerrainGrid>,
     out: &mut MeshSet,
 ) {
+    build_from(
+        place,
+        net,
+        side_zone,
+        pal,
+        seed,
+        terrain,
+        out,
+        0,
+        usize::MAX,
+    );
+}
+
+/// [`build`] in pieces: the edges, then the junctions, from item `from` on (edges first,
+/// `0..edges`, then junctions), stopping after the item that brings what `out` keeps to
+/// `max_vertices` or more. Returns the item to resume from, `None` when every item is
+/// built. Resumed until done, `out` gets the same writes in the same order as one
+/// [`build`].
+#[allow(clippy::too_many_arguments)]
+pub fn build_from(
+    place: &Place,
+    net: &Network,
+    side_zone: &[[Option<ZoneId>; 2]],
+    pal: &Palette,
+    seed: u64,
+    terrain: Option<&TerrainGrid>,
+    out: &mut MeshSet,
+    from: usize,
+    max_vertices: usize,
+) -> Option<usize> {
     let paints = RoadPaints::new(pal);
     let skirt = skirt_depth(terrain);
-    for (i, e) in place.roads.edges.iter().enumerate() {
+    let edges = place.roads.edges.len();
+    for (i, e) in place.roads.edges.iter().enumerate().skip(from) {
         let path = &net.paths[i];
         let (ea, eb) = net.ends(i);
         let len = path.len();
@@ -1035,12 +1066,24 @@ pub fn build(
             &paints,
             seed ^ i as u64,
         );
-    }
-    for j in &net.junctions {
-        if out.wants(j.pos) {
-            junction(out.at(j.pos, MeshKind::Road), net, j, &paints, skirt);
+        if out.kept_vertices() >= max_vertices {
+            return Some(i + 1);
         }
     }
+    for (k, j) in net
+        .junctions
+        .iter()
+        .enumerate()
+        .skip(from.saturating_sub(edges))
+    {
+        if out.wants(j.pos) {
+            junction(out.at(j.pos, MeshKind::Road), net, j, &paints, skirt);
+            if out.kept_vertices() >= max_vertices {
+                return Some(edges + k + 1);
+            }
+        }
+    }
+    None
 }
 
 /// Flat (level across) quad covering `s0..s1` along and `t0..t1` across, `lift` above the

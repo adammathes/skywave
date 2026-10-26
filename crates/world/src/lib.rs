@@ -140,6 +140,11 @@ impl MeshSet {
         &mut self.meshes[i].mesh
     }
 
+    /// Vertices in the meshes kept so far.
+    pub fn kept_vertices(&self) -> usize {
+        self.meshes.iter().map(|c| c.mesh.vertices.len()).sum()
+    }
+
     /// The non-empty meshes, sorted by kind then chunk.
     fn finish(self) -> Vec<ChunkMesh> {
         let mut meshes = self.meshes;
@@ -196,6 +201,8 @@ pub struct ChunkPlan {
     /// A terrain place's ground with the roads graded in, and its cell colors.
     terrain: Option<(TerrainGrid, mesh::terrain::CellColors)>,
     plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)>,
+    /// Each building's footprint centroid: its meshes are filed under its chunk.
+    centroids: Vec<V2>,
     fronts: Vec<usize>,
     /// Every prop in build order: the lots' parked cars, the house sites', the streets'.
     props: Vec<props::Prop>,
@@ -229,6 +236,11 @@ impl ChunkPlan {
             })
             .collect();
         let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
+        let centroids = place
+            .buildings
+            .iter()
+            .map(|b| ground::centroid(&ground::to_v2(&b.footprint)))
+            .collect();
 
         // The test town lies on flat lot pads in an apron; a terrain place on its heightfield
         // with the roads graded in (and, until the detailing pass, only house-site props).
@@ -296,6 +308,7 @@ impl ChunkPlan {
             blocks,
             terrain,
             plans,
+            centroids,
             fronts,
             props,
             kit: props::PropKit::new(),
@@ -340,14 +353,52 @@ impl ChunkPlan {
         out.finish()
     }
 
+    /// One piece of [`ChunkPlan::build_stage`], so a streamer can stop inside a long stage:
+    /// the roads, buildings or props of `chunk` from item `*cursor` on (0 starts the stage),
+    /// up to the item that brings the piece to `max_vertices` vertices or more; the ground
+    /// is always one piece. Returns the piece's meshes, sorted by kind, and whether the
+    /// stage is finished; otherwise `*cursor` is where the next piece starts. The pieces'
+    /// meshes of each kind, appended in order, are that kind's mesh from
+    /// [`ChunkPlan::build_stage`], vertex for vertex.
+    pub fn build_stage_piece(
+        &self,
+        place: &Place,
+        palette: &Palette,
+        chunk: [i32; 2],
+        stage: Stage,
+        cursor: &mut usize,
+        max_vertices: usize,
+    ) -> (Vec<ChunkMesh>, bool) {
+        let mut out = MeshSet::new(self.chunk_size, Keep::Chunk(chunk));
+        let next = self.run_from(place, palette, stage, &mut out, None, *cursor, max_vertices);
+        *cursor = next.unwrap_or(0);
+        (out.finish(), next.is_none())
+    }
+
     fn run(
         &self,
         place: &Place,
         palette: &Palette,
         stage: Stage,
         out: &mut MeshSet,
-        mut stats: Option<&mut BuildStats>,
+        stats: Option<&mut BuildStats>,
     ) {
+        self.run_from(place, palette, stage, out, stats, 0, usize::MAX);
+    }
+
+    /// Runs `stage` from item `from` on until what `out` keeps reaches `max_vertices`;
+    /// returns the item to resume from, `None` when the stage is done.
+    #[allow(clippy::too_many_arguments)]
+    fn run_from(
+        &self,
+        place: &Place,
+        palette: &Palette,
+        stage: Stage,
+        out: &mut MeshSet,
+        mut stats: Option<&mut BuildStats>,
+        from: usize,
+        max_vertices: usize,
+    ) -> Option<usize> {
         let seed = self.seed;
         match stage {
             Stage::Ground => match &self.terrain {
@@ -360,13 +411,22 @@ impl ChunkPlan {
             Stage::Roads => {
                 let terrain = self.terrain.as_ref().map(|(g, _)| g);
                 let (net, side_zone) = (&self.net, &self.side_zone);
-                roads::build(place, net, side_zone, palette, seed, terrain, out);
+                return roads::build_from(
+                    place,
+                    net,
+                    side_zone,
+                    palette,
+                    seed,
+                    terrain,
+                    out,
+                    from,
+                    max_vertices,
+                );
             }
             Stage::Buildings => {
                 let all = place.buildings.iter().zip(&self.plans).enumerate();
-                for (i, (b, (env, plan))) in all {
-                    let fp = ground::to_v2(&b.footprint);
-                    let c = ground::centroid(&fp);
+                for (i, (b, (env, plan))) in all.skip(from) {
+                    let c = self.centroids[i];
                     if !out.wants(c) {
                         continue;
                     }
@@ -381,12 +441,18 @@ impl ChunkPlan {
                         stats.max_building_triangles =
                             stats.max_building_triangles.max(s.triangles);
                     }
+                    if out.kept_vertices() >= max_vertices {
+                        return Some(i + 1);
+                    }
                 }
             }
             Stage::Props => {
-                for p in &self.props {
+                for (i, p) in self.props.iter().enumerate().skip(from) {
                     if out.wants(p.pos) {
                         props::build(out.at(p.pos, MeshKind::Prop), p, palette, &self.kit);
+                        if out.kept_vertices() >= max_vertices {
+                            return Some(i + 1);
+                        }
                     }
                 }
                 if let Some(stats) = stats {
@@ -394,6 +460,7 @@ impl ChunkPlan {
                 }
             }
         }
+        None
     }
 }
 
@@ -743,6 +810,51 @@ mod tests {
         let one = build_chunk(&place, &pal, c);
         let slice: Vec<ChunkMesh> = all.iter().filter(|m| m.chunk == c).cloned().collect();
         assert_eq!(one, slice);
+    }
+
+    /// A stage built in pieces gives, kind by kind, the pieces' meshes one after the other:
+    /// exactly the stage's meshes.
+    #[test]
+    fn a_stage_in_pieces_is_the_stage() {
+        let place = Place::test_grid();
+        let pal = Palette::socal_1985();
+        let plan = ChunkPlan::new(&place, &pal);
+        for chunk in [[0, 0], [-1, 1], [0, -2], [2, 1]] {
+            for stage in Stage::ALL {
+                let whole = plan.build_stage(&place, &pal, chunk, stage);
+                let mut joined: Vec<ChunkMesh> = Vec::new();
+                let (mut cursor, mut pieces) = (0, 0);
+                loop {
+                    let (meshes, done) =
+                        plan.build_stage_piece(&place, &pal, chunk, stage, &mut cursor, 1500);
+                    pieces += 1;
+                    for m in meshes {
+                        match joined.iter_mut().find(|j| j.kind == m.kind) {
+                            Some(j) => {
+                                let base = j.mesh.vertices.len() as u32;
+                                j.mesh.vertices.extend_from_slice(&m.mesh.vertices);
+                                j.mesh
+                                    .indices
+                                    .extend(m.mesh.indices.iter().map(|i| i + base));
+                            }
+                            None => joined.push(m),
+                        }
+                    }
+                    if done {
+                        break;
+                    }
+                }
+                assert_eq!(cursor, 0, "a finished stage leaves the cursor at its start");
+                joined.sort_by_key(|c| c.kind);
+                assert_eq!(
+                    joined, whole,
+                    "chunk {chunk:?} {stage:?} in {pieces} pieces"
+                );
+                if stage == Stage::Buildings && chunk == [0, 0] {
+                    assert!(pieces > 3, "{pieces} pieces");
+                }
+            }
+        }
     }
 
     #[test]
