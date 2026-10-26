@@ -15,7 +15,7 @@ use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use skywave_core::{hash64, Rng, Seed};
 
 use super::{stage, Frame, CELL_M};
-use crate::math::{clamp, lerp, sqrt};
+use crate::math::{clamp, lerp, segment_distance, sqrt, V2};
 use crate::template::RegionTemplate;
 
 /// Fractal OpenSimplex2 noise in `[-1, 1]` keyed by `hash64(seed, key)`.
@@ -431,6 +431,193 @@ fn lattice(seed: Seed, nu: usize, nv: usize, p: &TerrainParams<'_>) -> Lattice {
         }
     }
     out
+}
+
+/// Steepest grade of the highway corridor's bed, a hair under the highway's 5% so the
+/// arterial stage's own profile (which re-smooths what it samples) never has to cut.
+pub const CORRIDOR_GRADE: f32 = 0.048;
+/// Half-width of the flat corridor bed: the highway's 22 m plus 4 m shoulders.
+pub const CORRIDOR_HALF_M: f32 = 15.0;
+/// Width beyond the bed over which the cut and fill slopes blend back into the terrain.
+pub const CORRIDOR_BLEND_M: f32 = 60.0;
+/// Rise over run of the corridor's cut and fill slopes (1:2).
+pub const CORRIDOR_SLOPE: f32 = 0.5;
+/// The pass valley: the hills along the highway are cut down to this far above the bed...
+pub const VALLEY_DEPTH_M: f32 = 20.0;
+/// ...across a floor this wide each side of the centerline...
+pub const VALLEY_FLOOR_M: f32 = CORRIDOR_HALF_M + CORRIDOR_BLEND_M;
+/// ...rising at this grade beyond it, and blended into the hills over this height.
+pub const VALLEY_WALL: f32 = 0.35;
+const VALLEY_SOFT_M: f32 = 14.0;
+
+/// Bilinear height of a `w × h` grid of samples [`CELL_M`] apart at world `(x, z)`,
+/// clamped to the grid.
+pub fn grid_height(heights: &[f32], w: usize, h: usize, x: f32, z: f32) -> f32 {
+    let fx = clamp(x / CELL_M, 0.0, (w - 1) as f32);
+    let fz = clamp(z / CELL_M, 0.0, (h - 1) as f32);
+    let (ix, iz) = ((fx as usize).min(w - 2), (fz as usize).min(h - 2));
+    let (tx, tz) = (fx - ix as f32, fz - iz as f32);
+    let at = |i: usize, j: usize| heights[j * w + i];
+    let a = lerp(at(ix, iz), at(ix + 1, iz), tx);
+    let b = lerp(at(ix, iz + 1), at(ix + 1, iz + 1), tx);
+    lerp(a, b, tz)
+}
+
+/// The highway corridor's bed height at every point of `line` (world `[x, z]`, the macro
+/// highway from the coast inland): the largest profile under the (smoothed) terrain that
+/// starts on the ground at the coast and never climbs or falls faster than
+/// [`CORRIDOR_GRADE`], with rounded vertical curves. Never above the terrain by more than
+/// the rounding, so the highway runs in cuts, not on embankments; where the hills rise
+/// faster than the grade, [`valley`] lowers them to meet it.
+pub fn corridor_bed(heights: &[f32], w: usize, h: usize, line: &[[f32; 2]], wl: f32) -> Vec<f32> {
+    let n = line.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut s = vec![0.0f32; n];
+    for i in 1..n {
+        let (dx, dz) = (line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]);
+        s[i] = s[i - 1] + sqrt(dx * dx + dz * dz);
+    }
+    let mut t: Vec<f32> = line
+        .iter()
+        .map(|p| grid_height(heights, w, h, p[0], p[1]))
+        .collect();
+    // Relief does not decide the bed: three passes of a 5-tap mean (about ±40 m).
+    for _ in 0..3 {
+        let prev = t.clone();
+        for (i, ti) in t.iter_mut().enumerate() {
+            let (a, b) = (i.saturating_sub(2), (i + 2).min(n - 1));
+            let mut acc = 0.0;
+            for x in &prev[a..=b] {
+                acc += x;
+            }
+            *ti = acc / (b - a + 1) as f32;
+        }
+    }
+    // The largest CORRIDOR_GRADE-Lipschitz minorant: a forward and a backward sweep.
+    let mut bed = t.clone();
+    for i in 1..n {
+        bed[i] = bed[i].min(bed[i - 1] + CORRIDOR_GRADE * (s[i] - s[i - 1]));
+    }
+    for i in (0..n - 1).rev() {
+        bed[i] = bed[i].min(bed[i + 1] + CORRIDOR_GRADE * (s[i + 1] - s[i]));
+    }
+    // Vertical curves: 3-tap means keep the grade bound; the ends stay put.
+    for _ in 0..4 {
+        let prev = bed.clone();
+        for i in 1..n.saturating_sub(1) {
+            bed[i] = (prev[i - 1] + prev[i] + prev[i + 1]) / 3.0;
+        }
+    }
+    for b in &mut bed {
+        *b = b.max(wl + 1.0);
+    }
+    bed
+}
+
+/// Smooth minimum of `a` and `b` over a blend of `k` (polynomial; exact `min` once they
+/// differ by more than `k`).
+fn smooth_min(a: f32, b: f32, k: f32) -> f32 {
+    let t = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    lerp(b, a, t) - k * t * (1.0 - t)
+}
+
+/// The pass: cuts the hills along the highway down to a valley whose floor runs
+/// [`VALLEY_DEPTH_M`] above the corridor bed for [`VALLEY_FLOOR_M`] each side of the
+/// centerline and whose walls rise at [`VALLEY_WALL`] beyond, blended into the hills.
+/// Works in the canonical frame: `line` is the highway there (`u` increasing inland),
+/// `bed` its [`corridor_bed`]; distance across is measured along `v`, corrected for the
+/// line's heading. Nothing changes seaward of the line's first point.
+pub fn valley(heights: &mut [f32], frame: &Frame, line: &[(f32, f32)], bed: &[f32]) {
+    if line.len() < 2 || bed.len() != line.len() {
+        return;
+    }
+    let nu = frame.n_u() as usize;
+    let nv = frame.n_v() as usize;
+    let hv = super::macro_map::v_per_u(line, nu);
+    let ub: Vec<(f32, f32)> = line.iter().zip(bed).map(|(p, &b)| (p.0, b)).collect();
+    let bu = super::macro_map::v_per_u(&ub, nu);
+    let u0 = line[0].0;
+    for iu in 0..nu {
+        let u = iu as f32 * CELL_M;
+        if u < u0 {
+            continue;
+        }
+        let (a, b) = (iu.saturating_sub(1), (iu + 1).min(nu - 1));
+        let dv = (hv[b] - hv[a]) / ((b - a).max(1) as f32 * CELL_M);
+        let k = 1.0 / sqrt(1.0 + dv * dv);
+        for iv in 0..nv {
+            let v = iv as f32 * CELL_M;
+            let d = abs_f(v - hv[iu]) * k;
+            let cap = bu[iu] + VALLEY_DEPTH_M + VALLEY_WALL * (d - VALLEY_FLOOR_M).max(0.0);
+            let i = frame.index(iu as u32, iv as u32);
+            if heights[i] > cap - VALLEY_SOFT_M {
+                heights[i] = smooth_min(heights[i], cap, VALLEY_SOFT_M);
+            }
+        }
+    }
+}
+
+/// Carves the corridor into `heights` (world sample order, `w × h`): flat at the bed within
+/// [`CORRIDOR_HALF_M`] of `line`, then cut and fill slopes of [`CORRIDOR_SLOPE`] blended
+/// back into the terrain over [`CORRIDOR_BLEND_M`]. Each sample takes its nearest segment
+/// (earlier segments win ties); samples under water stay. Returns how far each sample
+/// moved (carved minus before; negative in cuts).
+pub fn carve_corridor(
+    heights: &mut [f32],
+    w: usize,
+    h: usize,
+    line: &[[f32; 2]],
+    bed: &[f32],
+    wl: f32,
+) -> Vec<f32> {
+    let mut moved = vec![0.0f32; w * h];
+    if line.len() < 2 || bed.len() != line.len() {
+        return moved;
+    }
+    let reach = CORRIDOR_HALF_M + CORRIDOR_BLEND_M;
+    let mut best = vec![f32::INFINITY; w * h];
+    let mut ybed = vec![0.0f32; w * h];
+    for k in 0..line.len() - 1 {
+        let (pa, pb) = (V2::from_array(line[k]), V2::from_array(line[k + 1]));
+        let span = |a: f32, b: f32, n: usize| {
+            let lo = clamp((a.min(b) - reach) / CELL_M, 0.0, (n - 1) as f32) as usize;
+            let hi = clamp((a.max(b) + reach) / CELL_M + 1.0, 0.0, (n - 1) as f32) as usize;
+            (lo, hi)
+        };
+        let (x0, x1) = span(pa.x, pb.x, w);
+        let (z0, z1) = span(pa.y, pb.y, h);
+        for iz in z0..=z1 {
+            for ix in x0..=x1 {
+                let q = V2::new(ix as f32 * CELL_M, iz as f32 * CELL_M);
+                let (d, t) = segment_distance(q, pa, pb);
+                let i = iz * w + ix;
+                if d < reach && d < best[i] {
+                    best[i] = d;
+                    ybed[i] = lerp(bed[k], bed[k + 1], t);
+                }
+            }
+        }
+    }
+    for i in 0..w * h {
+        let d = best[i];
+        if !d.is_finite() || heights[i] < wl {
+            continue;
+        }
+        let (h0, y) = (heights[i], ybed[i]);
+        let carved = if d <= CORRIDOR_HALF_M {
+            y
+        } else {
+            let slack = (d - CORRIDOR_HALF_M) * CORRIDOR_SLOPE;
+            let sloped = clamp(h0, y - slack, y + slack);
+            let blend = smoothstep(CORRIDOR_HALF_M, reach, d);
+            sloped + (h0 - sloped) * blend
+        };
+        heights[i] = carved;
+        moved[i] = carved - h0;
+    }
+    moved
 }
 
 /// One pass of a `(2r+1)²` box blur with clamped edges, as two running-sum sweeps (both

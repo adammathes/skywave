@@ -4,9 +4,9 @@
 //! [`arterials`] runs, in order:
 //! 1. **Highway profile.** `MacroMap::highway` from the beachfront road to the inland
 //!    edge, resampled every 16 m; its height follows the terrain from the coast under a 5%
-//!    slope limit, which leaves the bed in a cut where the hills rise faster. The macro
-//!    terrain is far steeper than 5% toward the pass, so the Place's heightfield must carry
-//!    that cut: [`graded_heights`].
+//!    slope limit. The macro map already carved the corridor bed (at most 4.8%) into its
+//!    heightfield, so the profile stays on the ground and the macro heights are the
+//!    Place's heights as they are.
 //! 2. **Tensor field** on 32 m cells: a grid aligned to the smoothed coast tangent
 //!    (`Grid`/`Beachfront` zones), bent toward the downtown ring by a radial term,
 //!    contour-following on slopes (`Curvy`/`Switchback`), axis-aligned on farmland
@@ -30,9 +30,11 @@
 //!    class join; small components reconnect to the main one (straight, else by a
 //!    grade-limited route) or are dropped; routed roads climb from the network to the
 //!    gentler parts of the hills.
-//! 7. **Profiles** every 16 m on the graded terrain: crossing roads rise to an overpass
+//! 7. **Profiles** every 16 m on the terrain: crossing roads rise to an overpass
 //!    deck 7 m above the highway with 4% approaches (propagated through the graph), ramps
-//!    rise 6 m over ~150 m, and every other road keeps a 12% min/max slope filter.
+//!    run level with the highway for their first 60 m (to past the gore) and then rise
+//!    6 m over the rest of their ~150 m, and every other road keeps a 12% min/max slope
+//!    filter.
 //!
 //! Everything is a pure function of `(seed, template, macro map)`: plain loops in index
 //! order, no hash maps, `crate::math` for square roots.
@@ -72,6 +74,9 @@ pub const APPROACH_GRADE: f32 = 0.04;
 /// How far a ramp climbs from the highway, and over what length.
 pub const RAMP_RISE_M: f32 = 6.0;
 pub const RAMP_RUN_M: f32 = 150.0;
+/// A ramp stays level with the highway this far from where it leaves it (to past the
+/// gore, where it parts from the highway's pavement), or 40% of its length if shorter.
+pub const RAMP_MERGE_M: f32 = 60.0;
 /// Curb-to-curb widths by class.
 pub const HIGHWAY_WIDTH_M: f32 = 22.0;
 pub const ARTERIAL_WIDTH_M: f32 = 14.0;
@@ -80,10 +85,6 @@ pub const RURAL_WIDTH_M: f32 = 8.0;
 pub const BEACHFRONT_WIDTH_M: f32 = 12.0;
 /// A one-lane ramp with shoulders.
 pub const RAMP_WIDTH_M: f32 = 8.0;
-/// Half-width of the flat highway bed (both carriageways plus a 4 m shoulder).
-pub const BED_HALF_M: f32 = HIGHWAY_WIDTH_M * 0.5 + 4.0;
-/// Rise over run of cut and fill slopes beside the bed (1:2).
-pub const BED_SLOPE: f32 = 0.5;
 
 /// Tensor field cell size.
 const FIELD_M: f32 = 32.0;
@@ -91,7 +92,7 @@ const FIELD_M: f32 = 32.0;
 const STEER_GRADE: f32 = 0.10;
 /// The profile filter's slope, a hair under [`MAX_GRADE`] for rounding.
 const FILTER_GRADE: f32 = 0.118;
-/// How far road profiles may leave the (graded) terrain; `place::validate` allows 8 m.
+/// How far road profiles may leave the terrain; `place::validate` allows 8 m.
 const PROFILE_BAND_M: f32 = 7.8;
 /// Road length kept flat at full lift each side of a highway crossing.
 const OVERPASS_FLAT_M: f32 = HIGHWAY_WIDTH_M * 0.5 + 9.0;
@@ -102,7 +103,7 @@ const RAMP_FOOT_M: f32 = OVERPASS_FLAT_M + (OVERPASS_LIFT_M - RAMP_RISE_M) / APP
 const OVERPASS_ROOM_M: f32 = 200.0;
 /// No crossings (only dead ends) on the highway's first stretch from the coast.
 const TERMINUS_M: f32 = 300.0;
-/// Roads stop where the graded terrain leaves the natural terrain by more than this...
+/// Roads stop where the corridor carve moved the terrain by more than this...
 const CUT_BARRIER_M: f32 = 1.0;
 /// ... except that crossing roads bridge highway cuts up to this deep.
 const CROSS_CUT_M: f32 = 6.0;
@@ -291,22 +292,6 @@ fn spine_points(ctx: &Ctx<'_>, m: &MacroMap) -> Vec<V2> {
         }
     }
     pts
-}
-
-/// The macro heightfield with the highway bed cut and filled: flat at the profile height
-/// within [`BED_HALF_M`] of every `Highway` edge, then clamped to 1:2 side slopes. This is
-/// the terrain the road profiles of [`arterials`] are measured against; a Place built from
-/// that graph uses it as its heightfield. Same grid as `MacroMap::heights`.
-pub fn graded_heights(macro_map: &MacroMap, graph: &RoadGraph) -> Vec<f32> {
-    let mut segs: Vec<([f32; 3], [f32; 3])> = Vec::new();
-    for e in &graph.edges {
-        if e.class == RoadClass::Highway {
-            for w in e.profile.windows(2) {
-                segs.push((w[0], w[1]));
-            }
-        }
-    }
-    bed(macro_map, &segs)
 }
 
 /// Content hash of a road graph (every field, in order), for determinism tests.
@@ -622,8 +607,6 @@ struct Ctx<'a> {
     gz: Grid,
     spacing: [f32; 12],
     hwy: Highway,
-    /// Preliminary graded terrain minus natural terrain (from the highway samples).
-    cut: Vec<f32>,
     /// The beachfront road's pieces.
     beach: Vec<Vec<V2>>,
     /// Routing grid on zone cells: 1 where no road may go, else 0.
@@ -659,26 +642,12 @@ impl<'a> Ctx<'a> {
                 terminal: None,
                 grid: SegGrid::new(ext, 64.0),
             },
-            cut: vec![0.0; w * h],
             beach: Vec::new(),
             route_blocked: Vec::new(),
             route_height: Vec::new(),
         };
         ctx.beach = beachfront(m, &ctx);
         ctx.hwy = highway(&ctx);
-        let segs: Vec<([f32; 3], [f32; 3])> = ctx
-            .hwy
-            .pts
-            .windows(2)
-            .zip(ctx.hwy.y.windows(2))
-            .map(|(p, y)| ([p[0].x, y[0], p[0].y], [p[1].x, y[1], p[1].y]))
-            .collect();
-        let graded = bed(m, &segs);
-        ctx.cut = graded
-            .iter()
-            .zip(&m.heights)
-            .map(|(g, h0)| g - h0)
-            .collect();
         let (zw, zh) = (m.zone_width as usize, m.zone_height as usize);
         let mut blocked = vec![0u8; zw * zh];
         let mut height = vec![0.0f32; zw * zh];
@@ -721,8 +690,14 @@ impl<'a> Ctx<'a> {
         z != ZoneId::Water && z != ZoneId::Beach && self.height(p) > self.m.water_level + 0.5
     }
 
+    /// How far the macro map's corridor carve moved the terrain at `p` (negative in cuts).
     fn cut_at(&self, p: V2) -> f32 {
-        sample_nodes(&self.cut, self.m.width as usize, self.m.height as usize, p)
+        sample_nodes(
+            &self.m.corridor,
+            self.m.width as usize,
+            self.m.height as usize,
+            p,
+        )
     }
 
     /// Whether a road heading along `dir` must stop before `p` because of the highway:
@@ -1204,51 +1179,6 @@ pub(crate) fn grade_limit(
     y[0] = a;
     y[n - 1] = b;
     y
-}
-
-/// The heights with the highway bed cut and filled along `segs` (`[x, y, z]` pairs); see
-/// [`graded_heights`]. Every sample takes the nearest segment (earlier segments win ties).
-fn bed(m: &MacroMap, segs: &[([f32; 3], [f32; 3])]) -> Vec<f32> {
-    let (w, h) = (m.width as usize, m.height as usize);
-    let mut out = m.heights.clone();
-    if segs.is_empty() {
-        return out;
-    }
-    let mut best = vec![f32::INFINITY; w * h];
-    let mut ybed = vec![0.0f32; w * h];
-    for &(a, b) in segs {
-        let (pa, pb) = (V2::new(a[0], a[2]), V2::new(b[0], b[2]));
-        let dev = abs(m.height_at(pa.x, pa.y) - a[1]).max(abs(m.height_at(pb.x, pb.y) - b[1]));
-        let reach = BED_HALF_M + (dev + 20.0) / BED_SLOPE;
-        let x0 = clamp((pa.x.min(pb.x) - reach) / CELL_M, 0.0, (w - 1) as f32) as usize;
-        let x1 = clamp((pa.x.max(pb.x) + reach) / CELL_M + 1.0, 0.0, (w - 1) as f32) as usize;
-        let z0 = clamp((pa.y.min(pb.y) - reach) / CELL_M, 0.0, (h - 1) as f32) as usize;
-        let z1 = clamp((pa.y.max(pb.y) + reach) / CELL_M + 1.0, 0.0, (h - 1) as f32) as usize;
-        for iz in z0..=z1 {
-            for ix in x0..=x1 {
-                let q = V2::new(ix as f32 * CELL_M, iz as f32 * CELL_M);
-                let (d, t) = segment_distance(q, pa, pb);
-                let i = iz * w + ix;
-                if d < reach && d < best[i] {
-                    best[i] = d;
-                    ybed[i] = lerp(a[1], b[1], t);
-                }
-            }
-        }
-    }
-    for i in 0..w * h {
-        let d = best[i];
-        if d.is_finite() {
-            let y = ybed[i];
-            out[i] = if d <= BED_HALF_M {
-                y
-            } else {
-                let slack = (d - BED_HALF_M) * BED_SLOPE;
-                clamp(out[i], y - slack, y + slack)
-            };
-        }
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------------------
@@ -3315,9 +3245,8 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
         }
         profiles[i] = ys;
     }
-    let graded = bed(m, &segs);
     let (w, h) = (m.width as usize, m.height as usize);
-    let ground = |p: V2| sample_nodes(&graded, w, h, p);
+    let ground = |p: V2| sample_nodes(&m.heights, w, h, p);
     // Overpass crossings: (edge, arc along it, highway height there).
     let mut cross: Vec<(usize, f32, f32)> = Vec::new();
     for (i, e) in es.iter().enumerate() {
@@ -3449,9 +3378,23 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
         let total = e.s.last().copied().unwrap_or(0.0);
         let (ya, yb) = (elev[e.a], elev[e.b]);
         if e.kind == Kind::Ramp {
+            // Level with the highway beside it until past the gore, then up (or down) to
+            // the crossing road.
+            let (at_a, at_b) = (hw_node[e.a].is_some(), hw_node[e.b].is_some());
+            let merge = RAMP_MERGE_M.min(0.4 * total);
             profiles[i] =
                 e.s.iter()
-                    .map(|&s| lerp(ya, yb, smoothstep(0.0, total.max(1e-3), s)))
+                    .zip(&e.pts)
+                    .map(|(&s, &p)| {
+                        let beside = hw.y_at(hw.nearest(p).1);
+                        if at_a && !at_b {
+                            lerp(beside, yb, smoothstep(merge, total.max(1e-3), s))
+                        } else if at_b && !at_a {
+                            lerp(ya, beside, smoothstep(0.0, (total - merge).max(1e-3), s))
+                        } else {
+                            lerp(ya, yb, smoothstep(0.0, total.max(1e-3), s))
+                        }
+                    })
                     .collect();
             continue;
         }

@@ -12,7 +12,7 @@ use place::{
     PLACE_VERSION,
 };
 use skywave_core::Seed;
-use world::procgen::{arterials, graded_heights, hash_graph, MacroMap, ZONE_CELL_M};
+use world::procgen::{arterials, hash_graph, MacroMap, ZONE_CELL_M};
 use world::template::RegionTemplate;
 
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
@@ -38,14 +38,14 @@ fn generate(t: &RegionTemplate, seed: u64) -> (MacroMap, RoadGraph) {
 /// 1–4 before and after, and commit the new values in their own commit whose message says
 /// why they moved.
 const GOLDEN: [u64; 8] = [
-    0x5A79_EC94_5E41_6FC6,
-    0xAC88_C752_04B4_1B95,
-    0x274E_D5EA_A500_EDCA,
-    0xA899_1D2A_3C7D_FF2A,
-    0x3567_D997_0C04_64CA,
-    0x7433_D927_9515_BE55,
-    0x991F_6CE6_5E75_DE1D,
-    0x9A06_2866_1BF0_8E42,
+    0x7A01_F1B6_8A86_AE4B,
+    0xB19D_E015_B125_B639,
+    0xC28C_1CDC_5D0C_CB59,
+    0x670C_DA41_1EBE_DD11,
+    0xB828_D04C_F6C7_936D,
+    0x0611_FC42_75BC_19F7,
+    0xACF5_7142_C7E5_65E2,
+    0xE29F_46E0_A3FF_2CDC,
 ];
 
 #[test]
@@ -228,8 +228,8 @@ fn seed_one_has_highway_ramps_overpasses_and_beachfront() {
     }
 
     // Ramps: one-way collectors off the highway rising about 6 m above the ground over
-    // about 150 m (measured on the graded terrain the profiles follow).
-    let graded = graded_heights(&m, &g);
+    // about 150 m.
+    let graded = &m.heights;
     let ground = |x: f32, z: f32| {
         let w = m.width as usize;
         let (fx, fz) = (x / 4.0, z / 4.0);
@@ -459,7 +459,7 @@ fn seed_one_fits_the_budget() {
     }
 }
 
-/// A skeleton Place from the graded terrain, the zones, the graph and a player start at the
+/// A skeleton Place from the macro terrain, the zones, the graph and a player start at the
 /// strip's center.
 fn skeleton(m: &MacroMap, g: &RoadGraph) -> Place {
     let header = PlaceHeader {
@@ -474,7 +474,7 @@ fn skeleton(m: &MacroMap, g: &RoadGraph) -> Place {
     };
     let res = DEFAULT_RES_PER_CHUNK;
     let [tw, th] = Terrain::samples(&header, res);
-    let graded = graded_heights(m, g);
+    let graded = &m.heights;
     let (w, h) = (m.width as usize, m.height as usize);
     let mut heights = Vec::with_capacity(tw * th);
     for z in 0..th {
@@ -524,5 +524,40 @@ fn skeleton_places_validate() {
         let (m, g) = generate(&t, seed);
         let place = skeleton(&m, &g);
         assert_eq!(place.validate(), Ok(()), "seed {seed}");
+    }
+}
+
+/// The corridor the macro map carved holds the highway: the highway's profile stays on the
+/// macro terrain (no separate grading pass), never steeper than 5%, and the carve cuts
+/// and fills at most 30 m.
+#[test]
+fn highway_runs_in_the_carved_corridor() {
+    let t = template();
+    for seed in 1..=8 {
+        let (m, g) = generate(&t, seed);
+        let (mut grade, mut off) = (0.0f32, 0.0f32);
+        for e in g.edges.iter().filter(|e| e.class == RoadClass::Highway) {
+            for w in e.profile.windows(2) {
+                let run = ((w[1][0] - w[0][0]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt();
+                if run > 1e-3 {
+                    grade = grade.max((w[1][1] - w[0][1]).abs() / run);
+                }
+            }
+            for p in &e.profile {
+                off = off.max((p[1] - m.height_at(p[0], p[2])).abs());
+            }
+        }
+        let cut = m.corridor.iter().fold(0.0f32, |a, &c| a.min(c));
+        let fill = m.corridor.iter().fold(0.0f32, |a, &c| a.max(c));
+        let top = m.highway_bed.iter().fold(f32::MIN, |a, &b| a.max(b));
+        println!(
+            "seed {seed}: highway grade {:.2}%, off terrain {off:.2} m, corridor cut {:.1} m, fill {fill:.1} m, bed top {top:.0} m",
+            grade * 100.0,
+            -cut
+        );
+        assert!(grade <= 0.05 + 1e-4, "seed {seed}: highway grade {grade}");
+        assert!(off <= 2.0, "seed {seed}: highway {off} m off the terrain");
+        assert!(-cut <= 30.0, "seed {seed}: corridor cut {} m", -cut);
+        assert!(fill <= 30.0, "seed {seed}: corridor fill {fill} m");
     }
 }

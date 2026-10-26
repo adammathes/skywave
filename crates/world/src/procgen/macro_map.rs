@@ -11,7 +11,10 @@
 //!    measured from the true shoreline; the strip, downtown and canal pocket from the
 //!    smoothed one ([`Shore::road`]);
 //! 6. terrain smoothing by zone (urban zones blend toward a box-blurred copy, so roads sit
-//!    well), canals dug;
+//!    well), canals dug, and the highway corridor carved: a bed of at most 4.8% from the
+//!    coast inland ([`terrain::corridor_bed`]), through a valley cut into the hills before
+//!    the zones are painted ([`terrain::valley`]), so the highway climbs to a real pass in
+//!    cuts of tens of meters ([`terrain::carve_corridor`]);
 //! 7. pass (the highway's highest point) and points of interest.
 //!
 //! Grids: heights are `width × height` samples, 4 m apart, sample `(ix, iz)` at world
@@ -199,6 +202,13 @@ pub struct MacroMap {
     pub strip: Strip,
     /// Highway centerline from the coast to the inland edge, every ~16 m.
     pub highway: Vec<[f32; 2]>,
+    /// The corridor bed's height at every point of `highway` ([`terrain::corridor_bed`]):
+    /// at most 4.8% steep, carved into `heights`.
+    pub highway_bed: Vec<f32>,
+    /// How far carving the corridor moved each height sample (carved minus before;
+    /// negative in cuts, zero away from the corridor). The arterial stage keeps roads off
+    /// its cut and fill slopes.
+    pub corridor: Vec<f32>,
     /// The highway's highest point where it crosses the ridges; `None` on flat places.
     pub pass: Option<[f32; 2]>,
     pub pois: Vec<MacroPoi>,
@@ -422,11 +432,14 @@ impl MacroMap {
         if !canals.is_empty() {
             flatten_pocket(&mut heights, w, h, &canals, wl);
         }
+        // The pass: the highway's bed profile, and the hills cut down along it.
+        let to_world = |c: (f32, f32)| frame.to_world(c.0, c.1);
+        let highway: Vec<[f32; 2]> = highway_c.iter().map(|&c| to_world(c)).collect();
+        let bed = terrain::corridor_bed(&heights, w, h, &highway, wl);
+        terrain::valley(&mut heights, &frame, &highway_c, &bed);
 
         // 5. Zones.
-        let to_world = |c: (f32, f32)| frame.to_world(c.0, c.1);
         let downtown = to_world(downtown_c);
-        let highway: Vec<[f32; 2]> = highway_c.iter().map(|&c| to_world(c)).collect();
         let (zw, zh) = ((nx / ZONE_SAMPLES) as usize, (nz / ZONE_SAMPLES) as usize);
         let mean_h = cell_means(&heights, w, zw, zh);
         let inputs = zone_inputs(&frame, &shore, &mean_h, zw, zh, downtown, &highway, wl);
@@ -498,6 +511,9 @@ impl MacroMap {
             }
         }
 
+        // The highway corridor, last, so nothing smooths its bed.
+        let corridor = terrain::carve_corridor(&mut heights, w, h, &highway, &bed, wl);
+
         // 7. Pass, water bodies, points of interest.
         let mut map = MacroMap {
             seed,
@@ -520,6 +536,8 @@ impl MacroMap {
                 length_m: strip_v1 - strip_v0,
             },
             highway,
+            highway_bed: bed,
+            corridor,
             pass: None,
             pois: Vec::new(),
         };
@@ -634,6 +652,9 @@ impl MacroMap {
             f(&mut b, x);
         }
         f(&mut b, self.water_level);
+        for &x in self.highway_bed.iter().chain(&self.corridor) {
+            f(&mut b, x);
+        }
         for body in &self.water {
             b.push(body.kind as u8);
             for p in &body.polygon {
@@ -705,7 +726,7 @@ fn catmull_rom(pts: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
 }
 
 /// The polyline's `v` at every `u` sample (held beyond its ends).
-fn v_per_u(line: &[(f32, f32)], nu: usize) -> Vec<f32> {
+pub(crate) fn v_per_u(line: &[(f32, f32)], nu: usize) -> Vec<f32> {
     let mut out = vec![f32::NAN; nu];
     for s in line.windows(2) {
         let (a, b) = if s[0].0 <= s[1].0 {

@@ -2,18 +2,21 @@
 //! coast and terrain (stage 1) and the zone map (stage 2), as a [`MacroMap`], and the
 //! arterial network with the highway (stage 3), as a `place::RoadGraph` ([`arterials()`]);
 //! then the first chunk stage, local streets (stage 4: [`streets()`], [`streets_all()`]).
+//! [`build_place`] runs the macro stages and fills a skeleton `place::Place`.
 //!
 //! Everything is a pure function of `(seed, template, size)`. Each stage draws from its own
 //! `Rng::new(seed, &[stage, ..])` and its own noise keyed by `hash64(seed, [stage, ..])`, so
 //! changing one stage's draws never shifts another's.
 
 pub mod arterials;
+pub mod build;
 pub mod macro_map;
 pub mod streets;
 pub mod terrain;
 pub mod zones;
 
-pub use arterials::{arterials, graded_heights, hash_graph};
+pub use arterials::{arterials, hash_graph};
+pub use build::{build_place, place_from, PLACE_CHUNKS};
 pub use macro_map::{Frame, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind};
 pub use streets::{hash_chunk, streets, streets_all, GridCell, NodeRef, StreetChunk, StreetPlan};
 

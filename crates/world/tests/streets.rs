@@ -285,11 +285,36 @@ fn hashes_are_deterministic_and_pinned() {
     );
 }
 
+/// Whether `e` is a ramp or a piece of one: a one-way collector that reaches a highway
+/// node through one-way collectors only (the merged graph splits ramps at chunk borders and
+/// where streets join them, so a piece need not touch the highway itself).
 fn is_ramp(g: &RoadGraph, e: &Edge) -> bool {
-    e.oneway
-        && g.edges.iter().any(|h| {
-            h.class == RoadClass::Highway && [h.a, h.b].iter().any(|&n| n == e.a || n == e.b)
-        })
+    let ramp_like = |h: &Edge| h.class == RoadClass::Collector && h.oneway;
+    if !ramp_like(e) {
+        return false;
+    }
+    let mut seen = vec![false; g.nodes.len()];
+    let mut todo = vec![e.a, e.b];
+    while let Some(n) = todo.pop() {
+        if std::mem::replace(&mut seen[n as usize], true) {
+            continue;
+        }
+        let at = |h: &&Edge| h.a == n || h.b == n;
+        if g.edges
+            .iter()
+            .filter(at)
+            .any(|h| h.class == RoadClass::Highway)
+        {
+            return true;
+        }
+        // Only through the joints of a split ramp: nothing but ramp pieces meet there.
+        if g.edges.iter().filter(at).all(ramp_like) {
+            for h in g.edges.iter().filter(at) {
+                todo.extend([h.a, h.b]);
+            }
+        }
+    }
+    false
 }
 
 /// A skeleton Place from the graded terrain, the zones, the graph and a player start at

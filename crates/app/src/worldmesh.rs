@@ -143,8 +143,24 @@ fn look(pattern: u8, rgb: [u8; 3], kind: MeshKind) -> Look {
 }
 
 /// `m` with atlas uvs in `[0, 1]` (instead of meters) and colors adjusted to the tiles,
-/// its triangles cut so every repeating pattern repeats at its real-world size.
+/// its triangles cut so every repeating pattern repeats at its real-world size. Terrain
+/// and water (untiled, vertex colored, indexed with shared vertices) keep their indices.
 pub fn atlas_mesh(m: &WorldMesh, kind: MeshKind) -> WorldMesh {
+    let untiled = |v: &WorldVertex| {
+        v.color[3] == Pattern::Terrain as u8 || v.color[3] == Pattern::Water as u8
+    };
+    if kind == MeshKind::Ground && !m.vertices.is_empty() && m.vertices.iter().all(untiled) {
+        let [u0, v0, u1, v1] = PLAIN.tile.rect();
+        let uv = [(u0 + u1) * 0.5, (v0 + v1) * 0.5];
+        return WorldMesh {
+            vertices: m
+                .vertices
+                .iter()
+                .map(|v| WorldVertex { uv, ..*v })
+                .collect(),
+            indices: m.indices.clone(),
+        };
+    }
     let mut out = WorldMesh {
         vertices: Vec::with_capacity(m.vertices.len() * 3 / 2),
         indices: Vec::with_capacity(m.indices.len() * 3 / 2),

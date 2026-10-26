@@ -7,6 +7,8 @@
 use alloc::vec::Vec;
 
 use crate::math::{abs, signed_area, sin_cos, TAU, V2, V3};
+
+pub mod terrain;
 use crate::palette::Rgb;
 
 /// One vertex of a world mesh (40 bytes, `repr(C)`, no padding).
@@ -59,6 +61,10 @@ pub enum Pattern {
     Metal = 11,
     Paint = 12,
     RoofTile = 13,
+    /// Natural ground: sand, grass, scrub, soil (vertex colored, no tile).
+    Terrain = 14,
+    /// Open water; a future wave shader keys on it.
+    Water = 15,
 }
 
 /// What kind of light an emissive surface is, stored in `emissive[3]`.

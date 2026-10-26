@@ -14,6 +14,7 @@ mod input;
 pub mod lighting;
 mod lighttiles;
 pub mod map;
+mod places;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -26,7 +27,7 @@ pub use settings::{MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
-pub use scene::SceneSetup;
+pub use scene::{PlaceKey, SceneSetup};
 
 pub use input::{
     pad_table, Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context,
@@ -157,6 +158,8 @@ pub struct App {
     ui: ui::Ui,
     /// The place rasterized for the minimap and the full map.
     map: map::MapImage,
+    /// Where the place puts the car: its `PlayerStart` ground point and heading.
+    start: ([f32; 3], f32),
 }
 
 impl App {
@@ -168,24 +171,35 @@ impl App {
     /// The built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) at the start of the strip,
     /// the whole town built at load.
     pub fn new_with(seed: Seed, vehicle_id: &str) -> Result<App, String> {
-        App::build(seed, vehicle_id, None)
+        App::new_in(seed, vehicle_id, PlaceKey::TestTown)
+    }
+
+    /// The built-in car `vehicle_id` at the `PlayerStart` of the place `key` names, the
+    /// whole place built at load.
+    pub fn new_in(seed: Seed, vehicle_id: &str, key: PlaceKey) -> Result<App, String> {
+        App::build(seed, vehicle_id, key, None)
     }
 
     /// [`App::new_with`], the town streamed within `budget` round the camera instead
     /// (nothing is built until [`App::frame`] runs).
     pub fn new_streamed(seed: Seed, vehicle_id: &str, budget: StreamBudget) -> Result<App, String> {
-        App::build(seed, vehicle_id, Some(budget))
+        App::build(seed, vehicle_id, PlaceKey::TestTown, Some(budget))
     }
 
-    fn build(seed: Seed, vehicle_id: &str, stream: Option<StreamBudget>) -> Result<App, String> {
+    /// The car on the place `key` names, built at load or (with `stream`) streamed.
+    fn build(
+        seed: Seed,
+        vehicle_id: &str,
+        key: PlaceKey,
+        stream: Option<StreamBudget>,
+    ) -> Result<App, String> {
         let spec = vehicles::builtin_spec(vehicle_id)?;
         let shape = vehicles::builtin_shape(&spec)?;
         let model = CarModel::build(&spec, &shape)?;
-        // The test town's layout is fixed; the session seed drives its detailing.
-        let mut place = Place::test_grid();
-        place.header.seed = seed.0;
+        let place: Place = places::build(key, seed)?;
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
-        let drive = Drive::with_layout(spec, model.layout, start.pos, start.heading);
+        let start = (start.pos, start.heading);
+        let drive = Drive::with_layout(spec, model.layout, start.0, start.1);
         let map = map::MapImage::rasterize(&place);
         let mut ui = ui::Ui::new();
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
@@ -227,6 +241,7 @@ impl App {
             alpha: 0.0,
             ui,
             map,
+            start,
         })
     }
 
@@ -236,15 +251,12 @@ impl App {
     /// [`App::set_stream_budget`] changes that.
     pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
         let stream = setup.stream.then_some(StreamBudget::WEB);
-        let mut app = App::build(Seed(setup.seed), &setup.car, stream)?;
-        let (y, _) = app.ground.level_at(setup.pos);
-        let ground = [setup.pos[0], y, setup.pos[1]];
-        app.drive = Drive::with_layout(
-            app.drive.spec.clone(),
-            app.drive.layout,
-            ground,
-            setup.heading_rad,
-        );
+        let mut app = App::build(Seed(setup.seed), &setup.car, setup.place, stream)?;
+        let pos = setup.pos.unwrap_or([app.start.0[0], app.start.0[2]]);
+        let heading = setup.heading_rad.unwrap_or(app.start.1);
+        let (y, _) = app.ground.level_at(pos);
+        let ground = [pos[0], y, pos[1]];
+        app.drive = Drive::with_layout(app.drive.spec.clone(), app.drive.layout, ground, heading);
         app.drive.headlights = setup.headlights;
         app.camera = CameraRig::new(setup.camera, &app.drive);
         app.curr = fly_from(&app.camera.pose(&app.drive, 1.0));
@@ -1370,5 +1382,55 @@ mod tests {
         assert_ne!(a.meshes, b.meshes);
         assert_eq!(a.state_hash(), b.state_hash());
         assert_eq!(App::new(Seed(1)).meshes, a.meshes);
+    }
+
+    #[test]
+    fn the_coast_place_loads_and_the_car_drives_on_it() {
+        // Built at load: every chunk of the 16×16-chunk place meshed, each a draw or a few.
+        let query = "?seed=1&place=coast";
+        let setup = SceneSetup::from_query(&format!("{query}&stream=0")).unwrap();
+        let resident = App::from_setup(&setup).unwrap();
+        let world = resident.world_instances;
+        eprintln!("coast at load: {world} world meshes");
+        assert!((256..=512).contains(&world), "{world} world meshes");
+        assert!(resident.meshes[..world]
+            .iter()
+            .all(|m| m.vertices.len() <= 1 << 20));
+        // Streamed (the default): the ring round the start fills, every chunk within budget.
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        assert!(app.is_streamed() && app.world_instances == 0);
+        // On the ground at the start.
+        let (start, heading) = app.start;
+        let pose = app.drive.pose(1.0);
+        assert!((pose.pos.x - start[0]).abs() < 1e-3 && (pose.pos.z - start[2]).abs() < 1e-3);
+        let mut pool = render::ChunkPool::new(app.chunk_pool_config());
+        let mut mapper = InputMapper::default();
+        let mut frames = 0;
+        while !app.stream_idle() {
+            app.frame(&mut mapper, 1.0 / 60.0, &wall_clock);
+            app.sync_chunks(&mut pool);
+            frames += 1;
+            assert!(frames < 20_000, "{:?}", app.stream_stats());
+        }
+        let stats = app.stream_stats().unwrap();
+        eprintln!(
+            "coast streamed in {frames} frames: {stats:?}; {} world instances",
+            app.world_instances
+        );
+        assert_eq!(stats.upload_errors, 0);
+        assert!(stats.built >= 25, "{stats:?}");
+        assert!(app.world_instances > 0 && app.world_instances < world);
+        // Rolling forward along the road from the start, on the ground.
+        let mut input = InputState::default();
+        input.set(Action::Throttle, 0.5);
+        for _ in 0..90 {
+            app.update(&input, 1.0 / 30.0);
+        }
+        let now = app.drive.pose(1.0).pos;
+        let (y, _) = app.ground.level_at([now.x, now.z]);
+        let moved = Vec3::new(now.x - start[0], 0.0, now.z - start[2]);
+        let ahead = Vec3::new(-heading.sin(), 0.0, -heading.cos());
+        assert!(moved.dot(ahead) > 10.0, "{moved}");
+        assert!((now.y - y).abs() < 1.0, "car at {now}, ground {y}");
     }
 }

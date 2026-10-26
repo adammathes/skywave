@@ -28,9 +28,10 @@ pub mod template;
 
 use alloc::vec::Vec;
 
-use place::{Place, ZoneId, SIDEWALK_WIDTH_M};
+use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
 pub use collide::{resolve, Impact, WorldCollider};
+pub use mesh::terrain::TerrainGrid;
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;
 
@@ -167,7 +168,8 @@ pub struct BuildStats {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Stage {
-    /// Terrain apron, lots, parks and parking lots ([`MeshKind::Ground`]).
+    /// A terrain place's graded terrain and water; the test town's apron, lots, parks and
+    /// parking lots ([`MeshKind::Ground`]).
     Ground = 0,
     /// Roads, junctions and lane paint ([`MeshKind::Road`], [`MeshKind::Marking`]).
     Roads = 1,
@@ -189,7 +191,10 @@ pub struct ChunkPlan {
     chunk_size: f32,
     net: roads::Network,
     side_zone: Vec<[Option<ZoneId>; 2]>,
+    /// The test town's blocks (none on a terrain place).
     blocks: Vec<ground::Block>,
+    /// A terrain place's ground with the roads graded in, and its cell colors.
+    terrain: Option<(TerrainGrid, mesh::terrain::CellColors)>,
     plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)>,
     fronts: Vec<usize>,
     /// Every prop in build order: the lots' parked cars, the house sites', the streets'.
@@ -204,7 +209,11 @@ impl ChunkPlan {
         let seed = place.header.seed;
         let net = roads::Network::new(place);
         let side_zone = side_zones(place, &net);
-        let blocks = ground::blocks(&net);
+        let blocks = if is_terrain_place(place) {
+            Vec::new()
+        } else {
+            ground::blocks(&net)
+        };
 
         // Plan every building first: the ground needs to know where strip malls face.
         let lookup = Lookup::new(place, &net);
@@ -221,10 +230,22 @@ impl ChunkPlan {
             .collect();
         let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
 
+        // The test town lies on flat lot pads in an apron; a terrain place on its heightfield
+        // with the roads graded in (and, until the detailing pass, only house-site props).
+        let terrain = is_terrain_place(place).then(|| {
+            let g = TerrainGrid::new(place, &net);
+            let colors = mesh::terrain::CellColors::new(place, &g, palette, seed);
+            (g, colors)
+        });
+
         // The props, meshing nothing: the lots' parked cars, the house sites' props (their
         // walks go to a scratch mesh), then the streets' and the parks'.
         let mut none = MeshSet::new(place.header.chunk_size_m, Keep::Nothing);
-        let mut props = ground::build(place, &blocks, &fronts, palette, seed, &mut none);
+        let mut props = if terrain.is_none() {
+            ground::build(place, &blocks, &fronts, palette, seed, &mut none)
+        } else {
+            Vec::new()
+        };
         let mut scratch = WorldMesh::default();
         for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
             scratch.vertices.clear();
@@ -239,12 +260,14 @@ impl ChunkPlan {
                 i as u32,
             ));
         }
-        let parks: Vec<Vec<V2>> = blocks
-            .iter()
-            .filter(|b| ground::is_park(place, b))
-            .map(|b| b.poly.clone())
-            .collect();
-        props.extend(props::place(place, &net, &side_zone, &parks, seed));
+        if terrain.is_none() {
+            let parks: Vec<Vec<V2>> = blocks
+                .iter()
+                .filter(|b| ground::is_park(place, b))
+                .map(|b| b.poly.clone())
+                .collect();
+            props.extend(props::place(place, &net, &side_zone, &parks, seed));
+        }
 
         // The place's chunks and the terrain apron's.
         let o = place.header.chunk_origin;
@@ -254,7 +277,11 @@ impl ChunkPlan {
             lo[0] + i32::from(n[0].max(1)) - 1,
             lo[1] + i32::from(n[1].max(1)) - 1,
         ];
-        if let Some((a, b)) = ground::apron_bounds(place) {
+        let apron = match terrain {
+            None => ground::apron_bounds(place),
+            Some(_) => None,
+        };
+        if let Some((a, b)) = apron {
             let (a, b) = (none.chunk_of(a), none.chunk_of(b));
             for i in 0..2 {
                 lo[i] = lo[i].min(a[i]);
@@ -267,6 +294,7 @@ impl ChunkPlan {
             net,
             side_zone,
             blocks,
+            terrain,
             plans,
             fronts,
             props,
@@ -322,11 +350,18 @@ impl ChunkPlan {
     ) {
         let seed = self.seed;
         match stage {
-            Stage::Ground => {
+            Stage::Ground => match &self.terrain {
                 // Its parked cars are in `props` already.
-                ground::build(place, &self.blocks, &self.fronts, palette, seed, out);
+                None => {
+                    ground::build(place, &self.blocks, &self.fronts, palette, seed, out);
+                }
+                Some((g, colors)) => mesh::terrain::build(place, g, colors, palette, seed, out),
+            },
+            Stage::Roads => {
+                let terrain = self.terrain.as_ref().map(|(g, _)| g);
+                let (net, side_zone) = (&self.net, &self.side_zone);
+                roads::build(place, net, side_zone, palette, seed, terrain, out);
             }
-            Stage::Roads => roads::build(place, &self.net, &self.side_zone, palette, seed, out),
             Stage::Buildings => {
                 let all = place.buildings.iter().zip(&self.plans).enumerate();
                 for (i, (b, (env, plan))) in all {
@@ -396,6 +431,12 @@ pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, Bu
         stats.triangles_by_kind[c.kind as usize] += t;
     }
     (meshes, stats)
+}
+
+/// Whether `place` stands on its own heightfield (a procedural or compiled place) rather
+/// than on the hand-laid test town's flat lot pads at `y = 0`.
+pub fn is_terrain_place(place: &Place) -> bool {
+    place.header.region != RegionId::TestTown
 }
 
 /// Determinism fingerprint of built meshes: every vertex and index, in order.

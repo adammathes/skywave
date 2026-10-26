@@ -33,14 +33,14 @@ fn california(seed: u64) -> MacroMap {
 /// the new table), check the `tools/mapdump` PNGs for seeds 1–4 before and after, and
 /// commit the new values in their own commit whose message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0xF187_D790_BC1E_1897,
-    0xD695_5172_D9AA_BE14,
-    0x6DFE_3E3D_849C_27F7,
-    0x1988_69C8_9765_9785,
-    0x4BFD_AD49_EB04_49EA,
-    0x5214_05DA_6C1C_ACF1,
-    0xD2AC_BE7F_68F1_D175,
-    0xA8C5_6B4F_CF35_8D03,
+    0x807D_D128_42C5_A1A6,
+    0x3071_05C7_9D6E_0A9D,
+    0xC350_F560_6FEB_2F33,
+    0x0D3B_2DCE_449F_43F4,
+    0xC5BD_C624_6514_E21F,
+    0x3CFF_32CF_BC5C_290D,
+    0xD266_9F4F_AF61_9CB5,
+    0xA918_031A_7A25_A794,
 ];
 
 #[test]

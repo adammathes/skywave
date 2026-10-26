@@ -59,9 +59,7 @@ use core::f32::consts::FRAC_1_SQRT_2;
 use place::{Edge, Node, RoadClass, RoadGraph, ZoneId};
 use skywave_core::{hash64, hash_bytes, Seed};
 
-use super::arterials::{
-    coast_tangent, grade_limit, graded_heights, major_of, sample_nodes, seg_intersect, tensor,
-};
+use super::arterials::{coast_tangent, grade_limit, major_of, sample_nodes, seg_intersect, tensor};
 use super::macro_map::{MacroMap, MacroPoiKind};
 use super::zones::{chamfer, ALL_ZONES};
 use super::{stage, CELL_M, CHUNK_M};
@@ -662,7 +660,9 @@ impl<'a> StreetPlan<'a> {
         arterials: &'a RoadGraph,
     ) -> StreetPlan<'a> {
         let m = macro_map;
-        let graded = graded_heights(m, arterials);
+        // The macro map carries the highway corridor's cut and fill: its heights are the
+        // Place's heights.
+        let graded = m.heights.clone();
         let (w, h) = (m.width as usize, m.height as usize);
         let ext = [(w - 1) as f32 * CELL_M, (h - 1) as f32 * CELL_M];
         let rw = (ext[0] / RASTER_M) as usize + 1;
@@ -1001,7 +1001,7 @@ impl<'a> StreetPlan<'a> {
         (l != NONE).then_some(l)
     }
 
-    /// The graded terrain the street profiles follow (`graded_heights` of the arterials).
+    /// The terrain the street profiles follow: the macro heights, corridor carve and all.
     pub fn graded(&self) -> &[f32] {
         &self.graded
     }

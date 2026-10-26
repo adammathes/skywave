@@ -90,6 +90,43 @@ pub fn sin_cos(x: f32) -> (f32, f32) {
 }
 
 /// A point or direction in 3D. Y is up.
+/// The angle of `(x, y)` from the +x axis toward +y, in `(-PI, PI]`; 0 for `(0, 0)`.
+/// Two half-angle reductions and a Taylor series in f64; error about one f32 rounding.
+pub fn atan2(y: f32, x: f32) -> f32 {
+    use core::f64::consts::{FRAC_PI_2, PI as PI64};
+    let (y, x) = (f64::from(y), f64::from(x));
+    if x == 0.0 && y == 0.0 {
+        return 0.0;
+    }
+    let sqrt64 = |v: f64| f64::from(sqrt(v as f32));
+    // atan of |y/x| or |x/y| (whichever is at most 1), then two halvings:
+    // atan(z) = 2 atan(z / (1 + sqrt(1 + z^2))), with this module's (f32) square root.
+    let (ay, ax) = (if y < 0.0 { -y } else { y }, if x < 0.0 { -x } else { x });
+    let swap = ay > ax;
+    let mut z = if swap { ax / ay } else { ay / ax };
+    for _ in 0..2 {
+        z /= 1.0 + sqrt64(1.0 + z * z);
+    }
+    let z2 = z * z;
+    let mut term = z;
+    let mut sum = 0.0;
+    for k in 0..12 {
+        sum += term / (2 * k + 1) as f64;
+        term *= -z2;
+    }
+    let mut a = 4.0 * sum;
+    if swap {
+        a = FRAC_PI_2 - a;
+    }
+    if x < 0.0 {
+        a = PI64 - a;
+    }
+    if y < 0.0 {
+        a = -a;
+    }
+    a as f32
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct V3 {
     pub x: f32,
@@ -376,6 +413,25 @@ pub fn lattice(seed: u64, i: i32, j: i32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atan2_matches_std() {
+        for (y, x) in [
+            (0.0f32, 1.0f32),
+            (1.0, 1.0),
+            (1.0, 0.0),
+            (1.0, -1.0),
+            (0.0, -1.0),
+            (-1.0, -1.0),
+            (-1.0, 0.0),
+            (-3.0, 0.5),
+            (0.2, 7.0),
+            (-0.001, -5.0),
+        ] {
+            assert!((atan2(y, x) - y.atan2(x)).abs() < 2e-6, "{y} {x}");
+        }
+        assert_eq!(atan2(0.0, 0.0), 0.0);
+    }
 
     #[test]
     fn sqrt_matches_std() {
