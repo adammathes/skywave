@@ -11,6 +11,27 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
     Ok(spec)
 }
 
+/// The vehicle specs compiled into the game, as `(id, RON text)`.
+pub const BUILTIN: [(&str, &str); 2] = [
+    (
+        "corsair_gtx",
+        include_str!("../../../assets/vehicles/corsair_gtx.ron"),
+    ),
+    (
+        "palisade_wagon",
+        include_str!("../../../assets/vehicles/palisade_wagon.ron"),
+    ),
+];
+
+/// Loads the built-in spec with this id.
+pub fn builtin_spec(id: &str) -> Result<VehicleSpec, String> {
+    let (_, text) = BUILTIN
+        .iter()
+        .find(|(name, _)| *name == id)
+        .ok_or_else(|| format!("no vehicle `{id}`"))?;
+    load_spec(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +117,17 @@ mod tests {
         assert!(wagon.feel.oversteer_bias < 0.0 && sports.feel.oversteer_bias > 0.0);
         assert!(wagon.cg_fore_aft < sports.cg_fore_aft);
         assert!(wagon.tires.grip_lat < sports.tires.grip_lat);
+    }
+
+    #[test]
+    fn builtins_load_by_id() {
+        for (id, _) in BUILTIN {
+            assert_eq!(builtin_spec(id).unwrap().id, id);
+        }
+        assert_eq!(
+            builtin_spec("hovercar").unwrap_err(),
+            "no vehicle `hovercar`"
+        );
     }
 
     #[test]

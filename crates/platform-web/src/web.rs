@@ -47,7 +47,8 @@ pub async fn run(
     let _ = console_log::init_with_level(log::Level::Warn);
 
     let window = web_sys::window().ok_or("no window")?;
-    let seed = crate::seed_from_query(&window.location().search()?).unwrap_or(1);
+    let query = window.location().search()?;
+    let seed = crate::seed_from_query(&query).unwrap_or(1);
 
     let instance = wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
@@ -94,7 +95,15 @@ pub async fn run(
     }
     surface.configure(&device, &config);
 
-    let app = App::new(Seed(seed));
+    let car = crate::query_param(&query, "car").unwrap_or(app::DEFAULT_VEHICLE);
+    let mut app = App::new_with(Seed(seed), car).unwrap_or_else(|e| {
+        log::warn!("skywave: {e}; driving the {}", app::DEFAULT_VEHICLE);
+        App::new(Seed(seed))
+    });
+    if let Some(mode) = crate::query_param(&query, "cam").and_then(app::CameraMode::from_name) {
+        app.set_camera_mode(mode);
+    }
+    app.set_fly(crate::query_param(&query, "fly") == Some("1"));
     let mut renderer = Renderer::new(&device, &queue, config.format, (width, height));
     for mesh in app.meshes() {
         renderer.add_mesh(mesh);
