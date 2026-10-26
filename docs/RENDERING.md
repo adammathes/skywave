@@ -1,12 +1,15 @@
 # Rendering
 
-The look: **2002 geometry, 2026 light.** Low-poly hard-edged meshes with flat and vertex colors and almost no textures, rendered through a modern HDR pipeline with a real sky, real shadows, haze, bloom and a moving sun. If a frame could be mistaken for a PS2 screenshot that someone lit beautifully, it is right.
+The look: **2002 geometry, 2026 light.** Early-2000s console density (the GTA III/Vice City, Burnout 3, Midnight Club 2 generation), flat-shaded with tiny pattern textures, rendered through a modern HDR pipeline with a real sky, real shadows, haze, bloom and a moving sun. If a frame could be mistaken for a great PS2/Xbox screenshot that someone lit beautifully, it is right.
+
+## The fidelity bar (read this twice)
+Not a DOS game, not flat boxes on a plane. A street must have: curbs with a gutter, sidewalks with seams, crosswalks and lane paint, lamp posts with arms and heads, signs on poles, trees with volume (3–5 lobed canopies, a trunk), hydrants, parked cars. A building must have: a plinth, window insets with sills, a storefront bay with a door and awning where it faces the street, a cornice or parapet, roof clutter (vents, a water tank downtown), a sign band, drainpipes on brick. A car must read as a specific shape from 30 m with seams, mirrors, rims and lights. Then lighting makes it sing.
 
 ## Style rules
-- Geometry: hard silhouettes, face normals, no smoothing groups except wheels and curved sky objects. Buildings are extrusions. Props are < 200 triangles.
-- Color: vertex colors from a per-place palette (12–24 colors per era) plus one emissive channel. Textures only where a pattern cannot be geometry: a 4-color dither/noise tile for asphalt and sand grain, lane markings via vertex strips, window grids via geometry, instrument faces procedurally drawn. No photo textures ever.
-- Lighting is where the fidelity goes: physically plausible sun and sky, shadows, atmosphere, bloom on emissives, reflections on wet roads and water, night lights.
-- Readable at a glance from a moving car. Contrast and silhouettes over detail.
+- Geometry: hard silhouettes, face normals (smoothing only on wheels, canopies, rounded car panels and curved sky objects). Buildings are extrusions **with facade geometry**, never bare boxes. Props 300–1500 triangles. Cars 3–6k body + 1.5–3k interior.
+- Color: vertex colors from a per-place palette (16–32 colors per era) plus one emissive channel. **Tiny pattern textures are allowed and expected** where geometry is wasteful: asphalt grain, concrete, brick and stucco courses, window glass with a mullion cross, roof gravel, sand, lawn, wood siding, awning stripes. 64–256 px, generated procedurally at startup from a few parameters (never photos, never shipped bitmaps), stored in one atlas, sampled with nearest/linear and no mips below 32 px so they stay crisp and period-looking. Lane markings via vertex strips or the atlas.
+- Lighting is where the fidelity goes: physically plausible sun and sky, cascaded shadows, atmosphere, bloom on emissives, reflections on wet roads and water, night lights with real falloff.
+- Readable at a glance from a moving car. Contrast and silhouettes over clutter, but clutter exists.
 
 ## Pipeline (forward, HDR)
 ```
@@ -38,7 +41,15 @@ Ocean/canal water: planar reflection render at half res of sky + near chunks, Fr
 First person cockpit (eye position from the spec; head sways with suspension and g-forces, small lag; dashboard and wheel visible; mirrors are optional render-to-texture later), hood, chase near/mid/far (spring-damped follow with lookahead, collision pushes in), cinematic orbit when idle. FOV 75° cockpit, 65° chase. All switchable by one key/button, order cycles.
 
 ## Mesh and instance budgets
-Chunk meshes: pooled vertex/index buffers (fixed capacity, free-list per chunk slot). Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 300 web, ≤ 800 native. Vertex: position f32×3, normal octahedral-encoded u16×2, color rgba8, emissive rgba8 (24 bytes).
+Chunk meshes: pooled vertex/index buffers (fixed capacity, free-list per chunk slot), up to 256k vertices per chunk (32-bit indices). Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 400 web, ≤ 1000 native. Vertex: position f32×3, normal octahedral-encoded u16×2, uv u16×2 (atlas), color rgba8, emissive rgba8 (28 bytes). Props and cars use 2 LODs (full within 80 m, half beyond); chunks beyond 400 m drop facade detail to silhouettes.
+
+## Platform tiers
+| Tier | Target | Notes |
+|---|---|---|
+| Web | Chrome/Firefox/Safari, integrated GPU, 1080p | WebGPU, WebGL2 fallback; this is what CI tests |
+| Steam Deck | SteamOS (Linux x86_64), RDNA2 iGPU, 1280×800 @ 60, Vulkan | gamepad-only, every menu navigable with a stick and two buttons; 16:10 HUD layout |
+| TV via Deck dock | 1080p/4K output, viewed from 3 m | UI scale setting (1×–2×), large-text HUD, safe-area margins; same binary |
+A resolution-scale setting (50–100%) and a shadow/bloom quality tier keep the Deck at 60 at native res.
 
 ## Optional styles (later)
 Cel: quantized Lambert + edge detect from depth/normal. Dither/CRT: ordered dither to palette, scanline/curvature post. VHS: chroma shift, blur. All in the post pass; off by default.

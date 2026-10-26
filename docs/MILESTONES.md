@@ -2,7 +2,9 @@
 
 Work inside a milestone is autonomous and test-driven. **Gates** are where a human plays the build (from the GitHub Pages deployment of `main`) and decides whether the feel is right before more is built on it. Gate notes are appended here.
 
-Vertical slice first: **1980s California beach town, one sports car and one wagon, yacht rock.**
+Vertical slice first: **1980s California beach town, one sports car and one wagon, yacht rock.** Then the Chicago scenarios (`docs/SCENARIOS.md`).
+
+Fidelity bar from the M0 review: early-2000s console density, not flat boxes (`docs/RENDERING.md`, "The fidelity bar"). Platform order: web → Steam Deck → TV via dock.
 
 ## M0 — Foundation (this session)
 Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling natively and to WASM, fixed-step loop, lit placeholder scene (ground + boxes + sun shadow + sky), headless screenshot tool, CI, Pages deploy.
@@ -11,11 +13,11 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 ## M1 — Drive
 - `vehicle`: raycast-car sim per `docs/VEHICLES.md` with two specs (`corsair_gtx`, `palisade_wagon`), assists, auto gearbox.
 - `vehicle::shape`: parametric body + interior for those two, `tools/shape-preview`.
-- `place::test_grid` → a hand-laid flat test town (grid of roads, curbs, boxes as buildings) with collision.
+- `place::test_grid` → a hand-laid flat test town with curbs, sidewalks, crosswalks, lamp posts, trees, facade geometry on buildings, parked-car placeholders; collision.
 - `render`: CSM shadows, analytic sky, fog, bloom, tonemap, cockpit + chase cameras, HUD speed/gear.
-- `app::input`: action mapping, keyboard ramps, gamepad (native + web), remap data model (UI later).
+- `app::input`: action mapping, keyboard ramps, gamepad (native + web), per-axis invert/sensitivity/curve (invert Y mandatory), remap data model **and a gamepad-navigable bindings/settings menu**.
 - Fixed-step loop with interpolation; frame stats overlay.
-**Gate (feel):** does driving feel immediate and fun on your machine, keyboard and controller? Do the two cars feel clearly different? Is first person with the dashboard pleasant? Nothing proceeds until yes.
+**Gate (feel):** does driving feel immediate and fun on your machine, keyboard and controller (with invert Y)? Do the two cars feel clearly different? Is first person with the dashboard pleasant? Does the test town already look like a place and not a diagram?
 
 ## M2 — Beach town
 - `world`: procedural producer per `docs/WORLD_GENERATION.md` for `california_coast` (coast, strip, downtown, residential, suburb, highway through hills to farmland), detailing pass (facades, props, lights, parked cars), chunk meshes, streaming with budget, golden hashes.
@@ -38,7 +40,7 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 ## M5 — v0.1 release
 - Settings UI (controls remap, video, audio, world), seed/share codes in URL, persistence.
 - Performance pass against budgets on Intel Iris Xe and Apple M1 in Chrome/Firefox/Safari; WASM size budget.
-- Native Mac and Linux binaries via GitHub Releases; README with screenshots; itch/Pages landing page.
+- Native Linux (Steam Deck-ready tarball with a launcher script and a gamepad-only path verified at 1280×800) and Mac binaries via GitHub Releases; TV mode (UI scale, safe areas) checked at 1080p/4K; README with screenshots; Pages landing page.
 **Gate (ship):** would you send the link to a friend?
 
 ## M6 — Place compiler v1
@@ -46,7 +48,7 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 **Gate:** does the real place beat the generated one? What does the generator need to learn from it?
 
 ## M7+ — Breadth (each its own gate)
-Eras 90s/00s/10s/20s (rosters, presets, style substitutions); more regions, then `tokyo_ward`; cel/dither/CRT styles; destinations with directions; getting out of the car; YouTube source (web); mobile shells; photo-derived palettes for the compiler; threads for streaming.
+Scenarios `chicago_1977` and `north_shore_suburb_1986` (templates `great_lakes_city`, `north_shore_suburb`, rosters, presets); eras 90s/00s/10s/20s; more regions, then `tokyo_ward`; Steam build; cel/dither/CRT styles; destinations with directions; getting out of the car; YouTube source (web); mobile shells; photo-derived palettes for the compiler; threads for streaming.
 
 ## Gate notes
 (appended after each gate)

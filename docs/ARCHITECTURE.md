@@ -53,11 +53,14 @@ The world is chunked (`chunk_size_m` = 128). Each sim step `world` may spend up 
 ## Determinism
 Same seed → bit-identical Place on every platform and in every build. Rules: integer hashing (`core::hash64`) for all per-chunk randomness; `Rng` seeded from `(seed, chunk, purpose)`; no `HashMap` iteration in generation; no `mul_add`/fast-math; f32 only with explicit rounding where results cross chunks; generation never reads sim state. Tests hash every chunk of reference seeds (`docs/TESTING.md`).
 
+## Platform tiers
+Web (primary; what CI tests) → **Steam Deck** (Linux x86_64 binary, Vulkan, 1280×800 @ 60, gamepad-only UI; runs as a non-Steam game first, Steam build later) → **TV via Deck dock** (1080p/4K output, UI scale, HUD safe areas). The same `platform-native` binary serves Deck and desktop Linux; Mac via Metal. Mobile shells later. Everything in `app` is written gamepad-first.
+
 ## Memory budgets (v1, per platform tier)
 | | Web (default) | Native |
 |---|---|---|
 | Resident chunks | 9×9 (1.15 km square) | 13×13 |
-| Chunk vertices | 64k per chunk max | same |
+| Chunk vertices | 256k per chunk max | same |
 | Vehicle instances | 64 | 128 |
 | Pedestrians | 256 | 512 |
 | Point lights per frame | 256 | 1024 |

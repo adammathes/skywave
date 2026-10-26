@@ -42,7 +42,7 @@ Steering input is filtered: target angle = `max_deg × (1 − speed_sens × v/60
 Outputs for feel: speed, RPM, gear, wheel slip (audio + tire marks later), g-forces (camera), suspension compression (cockpit shake).
 
 ## Parametric mesh (`vehicle::shape`)
-A `ShapeSpec` is a few curves lofted into a low-poly body (target 600–1500 triangles per car, plus wheels):
+A `ShapeSpec` is a few curves lofted into an early-2000s-console-density body (target **3,000–6,000 triangles** for the body and wheels, plus **1,500–3,000** for the interior). Not a toy: panel seams, mirrors, rims, lights and trim must read from 30 m.
 ```
 ShapeSpec(
   side: [(x, y)...],         // side silhouette polyline (front→back along the top, then underside), 14–24 points
@@ -51,12 +51,14 @@ ShapeSpec(
   wheels: Wheels(radius: 0.32, width: 0.22, arch_clearance: 0.05, front_x, rear_x),
   front: Face(lights: PopUp|Rect|Quad|Round|Hidden, grille: Slot|Egg|Wide|None, bumper: Chrome|Body|Rubber),
   rear: Face(lights: FullWidth|Dual|Triple|Round, spoiler: None|Lip|Wing),
-  details: [Louvers, HoodScoop, SideStripe, WoodPanel, Chrome trim, Vinyl roof, Rally stripes, Mud flaps ...],
+  seams: Seams(hood: true, trunk: true, doors: 2|4, creases: [(x0,y0,x1,y1)...]),   // inset lines cut into the loft (0.6 cm deep)
+  parts: Parts(mirrors: Door|Fender, handles: Flush|Pull, wipers: 2, exhaust: Single|Dual, antenna: Mast|None, rims: Steel|Alloy5|Mesh|Turbine, hubcaps: bool),
+  details: [Louvers, HoodScoop, SideStripe, WoodPanel, ChromeTrim, VinylRoof, RallyStripes, MudFlaps, RoofRack, Badge(shape) ...],
   palette: ["#c8102e", "#f2f0e6", ...],   // era-appropriate body colors, one chosen per instance
   interior: InteriorShape(dash_height, wheel_pos, wheel_radius, mirror_pos, column_angle),
 )
 ```
-Loft: sample `side` and `plan` at shared x stations, build a ring per station from `section`, connect rings; cut wheel arches; add light/grille/bumper quads with their own flat colors and emissive (headlights, tail lights, dash glow). Normals are face normals (hard low-poly shading). Interior: dash slab, instrument cluster plane (textured procedurally at runtime with the live gauge values), steering wheel torus with spokes rotating with input, A-pillars, mirror quads, seat blocks, a radio display quad showing station text. Everything flat-colored with a 3–5 color palette per car.
+Loft: sample `side` and `plan` at 24–40 x stations, build a 12–16 point ring per station from `section` (smooth-shaded across rounded panels, hard at creases and seams), connect rings; cut wheel arches with a lip; inset seams and creases; add lights, grille slats, bumpers, mirrors, handles, wipers, exhaust and badges as small meshes with their own colors and emissive (headlights, tail lights, dash glow); rims are real spoke geometry (not a texture) with a tire sidewall ring. Tiny pattern textures from the shared atlas for grille mesh and glass. Interior: dash with a hooded cluster and a center stack, instrument faces drawn procedurally at runtime with live needles, steering wheel torus with spokes and a hub rotating with input, column stalks, A/B pillars and headliner edge, door cards with armrests, rear-view and side mirror housings, seats with bolsters, a radio head unit with a display quad showing station text, era-specific details (80s: square vents, digital green/orange displays, velour tones). Flat-colored with a 4–6 color palette per car plus the atlas.
 
 Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so agents can look at it. glTF import (`gltf` crate, MIT) is the escape hatch for a hand-made model; the same `VehicleSpec` applies.
 
@@ -82,5 +84,5 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Determinism: scripted 10 s input replay produces identical state hashes.
-- Mesh: every shape builds, is manifold enough (no NaN normals), ≤ 1500 triangles, wheels fit arches.
+- Mesh: every shape builds, is manifold enough (no NaN normals), body 3k–6k triangles, interior 1.5k–3k, wheels fit arches, LOD1 ≤ 40% of LOD0.
 - Visual: `tools/shape-preview` PNGs attached to the PR introducing or changing a car.
