@@ -14,7 +14,8 @@ use crate::palette::Rgb;
 /// - `color`: linear RGB in unorm8; alpha holds the [`Pattern`] id so a future texture
 ///   atlas can pick the right tile.
 /// - `uv`: surface coordinates in meters (walls: along the wall and up; flat surfaces: world
-///   X and Z), so a pattern tiles at its real-world size.
+///   X and Z; slopes: along the horizontal and up the slope), so a pattern tiles at its
+///   real-world size.
 /// - `emissive`: linear RGB light the surface emits; alpha holds the [`Glow`] class so the
 ///   renderer can scale windows, neon and street lights independently.
 #[repr(C)]
@@ -161,6 +162,11 @@ impl Frame {
     }
 }
 
+/// Surfaces whose normal has a vertical component in this range (slopes between about 11°
+/// and 78°) get slope UVs from [`planar_uv`].
+const SLOPE_MIN_NY: f32 = 0.2;
+const SLOPE_MAX_NY: f32 = 0.98;
+
 fn vertex(pos: V3, normal: V3, uv: [f32; 2], paint: Paint) -> WorldVertex {
     WorldVertex {
         pos: pos.to_array(),
@@ -171,8 +177,16 @@ fn vertex(pos: V3, normal: V3, uv: [f32; 2], paint: Paint) -> WorldVertex {
     }
 }
 
-/// Planar UVs in meters, projected along the dominant axis of `n`.
+/// Planar UVs in meters. Slopes (roofs) run u along the horizontal and v up the slope in
+/// true length, so courses follow the eaves; other surfaces project along the dominant
+/// axis of `n`.
 fn planar_uv(p: V3, n: V3) -> [f32; 2] {
+    let n = n.normalize();
+    if (SLOPE_MIN_NY..SLOPE_MAX_NY).contains(&abs(n.y)) {
+        let up = (V3::Y - n * n.y).normalize();
+        let along = up.cross(n);
+        return [p.dot(along), p.dot(up)];
+    }
     let (ax, ay, az) = (abs(n.x), abs(n.y), abs(n.z));
     if ay >= ax && ay >= az {
         [p.x, p.z]
@@ -811,6 +825,33 @@ mod tests {
             P,
         );
         assert_well_formed(&smooth, 0.3);
+    }
+
+    #[test]
+    fn slopes_get_uvs_along_the_eave_and_up_the_slope() {
+        // A roof plane rising 2 m over 4 m toward +X, eave along Z.
+        let mut m = WorldMesh::default();
+        let q = [
+            V3::new(0.0, 3.0, 5.0),
+            V3::new(0.0, 3.0, 0.0),
+            V3::new(4.0, 5.0, 0.0),
+            V3::new(4.0, 5.0, 5.0),
+        ];
+        quad(&mut m, q, V3::new(-1.0, 2.0, 0.0), P);
+        let at = |p: V3| {
+            let v = m.vertices.iter().find(|v| v.pos == p.to_array()).unwrap();
+            v.uv
+        };
+        let (eave, ridge) = (at(q[1]), at(q[2]));
+        // Up the slope is +v by the slope's true length; the eave is constant v.
+        assert!((ridge[1] - eave[1] - 20f32.sqrt()).abs() < 1e-4);
+        assert!((at(q[0])[1] - eave[1]).abs() < 1e-5);
+        assert!(((at(q[0])[0] - eave[0]).abs() - 5.0).abs() < 1e-4);
+        // Walls keep their projection.
+        let mut w = WorldMesh::default();
+        let wall = [[0.0, 0.0], [1.0, 0.0], [1.0, 2.0], [0.0, 2.0]];
+        quad(&mut w, wall.map(|[x, y]| V3::new(x, y, 1.0)), V3::Z, P);
+        assert!(w.vertices.iter().all(|v| v.uv == [v.pos[0], v.pos[1]]));
     }
 
     #[test]

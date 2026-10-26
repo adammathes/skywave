@@ -424,7 +424,7 @@ mod tests {
         // Pinned fingerprint: change deliberately, in its own commit, with the reason.
         assert_eq!(
             mesh_hash(&meshes),
-            0x8B56_6C2D_329E_D372,
+            0x4E88_5095_5B12_3E40,
             "{:#018X}",
             mesh_hash(&meshes)
         );
