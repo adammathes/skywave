@@ -18,6 +18,7 @@ mod places;
 pub mod scene;
 pub mod selftest;
 mod settings;
+pub mod sound;
 pub mod stream;
 pub mod ui;
 pub mod vehicles;
@@ -160,6 +161,9 @@ pub struct App {
     map: map::MapImage,
     /// Where the place puts the car: its `PlayerStart` ground point and heading.
     start: ([f32; 3], f32),
+    /// The sound's view of the game, and what it made of the last frame.
+    sound: sound::Sound,
+    audio: audio::synth::AudioParams,
 }
 
 impl App {
@@ -204,6 +208,7 @@ impl App {
         let mut ui = ui::Ui::new();
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         let ground = drive::ground_for(&place);
+        let sound = sound::Sound::new(&place, &drive);
         let town = match stream {
             None => resident_town(&place),
             Some(budget) => streamed_town(place, budget),
@@ -242,6 +247,8 @@ impl App {
             ui,
             map,
             start,
+            sound,
+            audio: audio::synth::AudioParams::default(),
         })
     }
 
@@ -349,6 +356,7 @@ impl App {
                 drive::vehicle_input(input)
             };
             self.drive.step(car_input, &self.ground);
+            self.sound.note_step(&self.drive.impact);
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);

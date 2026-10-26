@@ -453,6 +453,10 @@ impl Ui {
                 self.settings.minimap_rotate = on;
                 self.dirty = true;
             }
+            ItemId::Mute => {
+                self.settings.mute = on;
+                self.dirty = true;
+            }
             _ => {}
         }
     }
@@ -475,6 +479,18 @@ impl Ui {
             }
             ItemId::ResolutionScale => {
                 self.settings.resolution_scale = v;
+                self.dirty = true;
+            }
+            ItemId::MasterVolume => {
+                self.settings.master_volume = v;
+                self.dirty = true;
+            }
+            ItemId::EngineVolume => {
+                self.settings.engine_volume = v;
+                self.dirty = true;
+            }
+            ItemId::WorldVolume => {
+                self.settings.world_volume = v;
                 self.dirty = true;
             }
             ItemId::TimeOfDay => {
@@ -733,7 +749,20 @@ impl App {
             heading,
         };
         self.ui.draw(&ctx);
+        self.audio = self.sound.params(
+            &self.drive,
+            &self.ground,
+            &daylight,
+            &self.ui.settings,
+            self.ui.is_open(),
+        );
         steps
+    }
+
+    /// The sound parameters [`App::frame`] made, for the platform's
+    /// `audio::mixer::Mixer::set_params`.
+    pub fn audio_params(&self) -> &audio::synth::AudioParams {
+        &self.audio
     }
 
     /// Where the map centers and which way the arrow points: the car (or the free-fly

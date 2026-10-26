@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! Pause:     Resume · Settings › · Quit (native only)
-//! Settings:  Controls › · Video › · HUD › · World › · About ›
+//! Settings:  Controls › · Video › · HUD › · Audio › · World › · About ›
 //! Controls:  Gamepad › · Keyboard & mouse ›
 //! Device:    Invert look Y · Invert look X · Look sensitivity · Bindings › · Analog axes ›
 //!            · [pad: Swap sticks · Throttle on right stick] · Reset to defaults
@@ -13,6 +13,7 @@
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
 //! Video:     UI scale · Resolution scale · Bloom · Performance overlay
 //! HUD:       Minimap · Rotate with car · Minimap zoom
+//! Audio:     Master volume · Engine volume · World volume · Mute
 //! World:     Time of day · Clock speed
 //! About:     (license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
@@ -21,7 +22,9 @@
 use crate::daylight::{Clock, CLOCK_SPEEDS};
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
-use crate::settings::{Settings, RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, UI_SCALE_STEP};
+use crate::settings::{
+    Settings, RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, UI_SCALE_STEP, VOLUME_STEP,
+};
 
 use super::menu::{Item, Unit, Widget};
 
@@ -36,6 +39,7 @@ pub enum Page {
     Axis(DeviceKind, Action),
     Video,
     Hud,
+    Audio,
     World,
     About,
     /// A remap hit an input another action uses; see `Ui::conflict`.
@@ -69,6 +73,10 @@ pub enum ItemId {
     Minimap,
     MinimapRotate,
     MinimapZoom,
+    MasterVolume,
+    EngineVolume,
+    WorldVolume,
+    Mute,
     TimeOfDay,
     ClockSpeed,
     KeepExisting,
@@ -117,6 +125,7 @@ pub fn title(page: Page) -> &'static str {
         Page::Axis(_, a) => super::names::action_label(a, Sign::Full),
         Page::Video => "Video",
         Page::Hud => "HUD",
+        Page::Audio => "Audio",
         Page::World => "World",
         Page::About => "About",
         Page::Conflict => "Input already in use",
@@ -167,6 +176,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 (Page::Controls, "Controls"),
                 (Page::Video, "Video"),
                 (Page::Hud, "HUD"),
+                (Page::Audio, "Audio"),
                 (Page::World, "World"),
                 (Page::About, "About"),
             ] {
@@ -329,6 +339,22 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 },
             );
         }
+        Page::Audio => {
+            let s = ctx.settings;
+            let volume = |v: f32| slider(v, 0.0, 1.0, VOLUME_STEP, Unit::Percent);
+            add(
+                ItemId::MasterVolume,
+                "Master volume",
+                volume(s.master_volume),
+            );
+            add(
+                ItemId::EngineVolume,
+                "Engine volume",
+                volume(s.engine_volume),
+            );
+            add(ItemId::WorldVolume, "World volume", volume(s.world_volume));
+            add(ItemId::Mute, "Mute", Widget::Toggle(s.mute));
+        }
         Page::World => {
             let hours = (ctx.clock.seconds_of_day / 3600.0) as f32;
             add(
@@ -401,6 +427,9 @@ mod tests {
         assert_eq!(items[0].widget, Widget::Toggle(true));
         assert_eq!(items[1].widget, Widget::Toggle(true));
         assert!(matches!(items[2].widget, Widget::Choice { index: 1, .. }));
+        build(Page::Audio, &ctx, &mut items);
+        assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 0.8));
+        assert_eq!(items[3].widget, Widget::Toggle(false));
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));
