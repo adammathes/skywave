@@ -11,6 +11,7 @@ use crate::daylight::{Clock, Daylight};
 use crate::input::{Action, Binding, DeviceKind, Sign};
 use crate::map;
 use crate::map::view::{MapGeom, Minimap, MINIMAP_DIAMETER};
+use crate::radio::ndc_to_hud;
 
 use super::menu::{Unit, Widget};
 use super::names::{self, action_label, device_label, device_noun};
@@ -27,6 +28,23 @@ pub struct DrawCtx<'a> {
     /// convention), for the maps.
     pub car: [f32; 2],
     pub heading: f32,
+    /// The car radio's display on screen (cockpit view only).
+    pub radio_display: Option<RadioDisplay>,
+}
+
+/// The radio display quad as the cockpit camera sees it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadioDisplay {
+    /// Corners in normalized device coordinates (y up): bottom-left, bottom-right,
+    /// top-right, top-left as the driver sees them.
+    pub ndc: [[f32; 2]; 4],
+    /// Width over height of the target they were projected for.
+    pub aspect: f32,
+    /// The target's size in pixels, when the platform said (text is drawn at whole target
+    /// pixels per font pixel, so how much fits depends on it).
+    pub target: Option<(u32, u32)>,
+    /// The display's glow, sRGB.
+    pub color: [u8; 4],
 }
 
 const TEXT: [u8; 4] = [238, 234, 222, 255];
@@ -355,6 +373,10 @@ impl Ui {
                     fg,
                     format_args!("{}{}", item.label, action_label(p.conflict.wanted, p.sign)),
                 ),
+                (ItemId::Station(i), _) => {
+                    let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
+                    hud.text(px + PAD, ty, S, fg, name);
+                }
                 _ => hud.text(px + PAD, ty, S, fg, item.label),
             }
             match item.widget {
@@ -516,6 +538,70 @@ impl Ui {
             let args = ToastText(t);
             hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
         }
+        if let Some(d) = &ctx.radio_display {
+            self.draw_radio_display(hud, d);
+        }
+        // The station toast: two lines centered at the top.
+        if let Some(t) = self.radio.toast() {
+            let cx = sx + sw * 0.5;
+            let title = t.title();
+            text_center(
+                hud,
+                cx + 2.0,
+                sy + 2.0,
+                2.0,
+                SHADOW,
+                format_args!("{title}"),
+            );
+            text_center(hud, cx, sy, 2.0, ACCENT, format_args!("{title}"));
+            let detail = t.detail();
+            let y = sy + LINE_H;
+            text_center(
+                hud,
+                cx + 2.0,
+                y + 2.0,
+                2.0,
+                SHADOW,
+                format_args!("{detail}"),
+            );
+            text_center(hud, cx, y, 2.0, TEXT, format_args!("{detail}"));
+        }
+    }
+
+    /// The station on the radio's display: the quad's screen box darkened like an unlit
+    /// segment display, the name (scrolling when long) in the display's glow color,
+    /// centered vertically. Nothing while the radio is off.
+    fn draw_radio_display(&self, hud: &mut HudBuilder, d: &RadioDisplay) {
+        let size = hud.size();
+        let pts = d.ndc.map(|p| ndc_to_hud(p, d.aspect, size));
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for [x, y] in pts {
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+        let (w, h) = (x1 - x0, y1 - y0);
+        let on_screen = x1 > 0.0 && y1 > 0.0 && x0 < size[0] && y0 < size[1];
+        if !on_screen || h < 6.0 || w < 3.0 * h || w > size[0] {
+            return;
+        }
+        // Capitals about 45% of the display's height. The HUD draws a font pixel as a whole
+        // number of target pixels, so measure with what it will draw; without the target's
+        // size, allow for rounding up by half.
+        let scale = (h * 0.45 / font::CAP_HEIGHT as f32).max(0.5);
+        let drawn = match d.target {
+            Some(t) => {
+                let ppv = render::HudLayout::new(t, hud.ui_scale()).scale;
+                (scale * ppv).round().max(1.0) / ppv
+            }
+            None => scale * 1.5,
+        };
+        let pad = h * 0.15;
+        let chars = ((w - 2.0 * pad) / (font::CELL_W as f32 * drawn)).floor() as usize;
+        let Some(text) = self.radio.dash(chars.max(1)) else {
+            return;
+        };
+        hud.rect(x0, y0, w, h, [4, 8, 6, 225]);
+        let ty = y0 + (h - font::CAP_HEIGHT as f32 * drawn) * 0.5;
+        hud.text_fmt(x0 + pad, ty, scale, d.color, format_args!("{text}"));
     }
 
     /// The minimap's circle at the bottom left of the safe area: the map around the car
@@ -749,6 +835,8 @@ impl Display for ToastText {
             Toast::Southpaw => f.write_str("Sticks swapped"),
             Toast::SwapTriggers => f.write_str("Throttle and brake on the right stick"),
             Toast::Reset(d) => write!(f, "{} reset to defaults", device_label(d)),
+            Toast::StreamAdded => f.write_str("Stream added to the stations"),
+            Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }
     }
 }

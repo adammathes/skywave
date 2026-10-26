@@ -191,7 +191,7 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     assert_eq!(h.page(), Page::Pause);
     let paused_at = h.app.ticks();
     let bindings = h.app.bindings().clone();
-    let settings = *h.app.settings();
+    let settings = h.app.settings().clone();
 
     let mut visited = Vec::new();
     let mut changed = 0;
@@ -755,4 +755,109 @@ fn full_map_labels_points_of_interest_in_view() {
     h.input.axis(RawInput::MouseWheel, 8.0);
     h.frame();
     assert!(!h.hud_text().contains(&name));
+}
+
+#[test]
+fn radio_keys_tune_stations_and_the_last_one_comes_back() {
+    use audio::{PlayerEvent, RadioCommand, RadioState};
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.8)], "off until a key");
+    assert!(h.app.ui().radio().toast().is_none());
+    h.key(Key::BracketRight);
+    assert!(h.app.ui().radio().toast().is_some());
+    assert!(h.hud_text().contains("SomaFM Left Coast 70s"));
+    for _ in 0..12 {
+        h.frame();
+    }
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    let first = h.app.radio().channels()[0].clone();
+    assert!(
+        matches!(&cmds[..], [RadioCommand::TuneNoise { .. }, RadioCommand::Play { url, .. }]
+            if *url == first.urls[0]),
+        "{cmds:?}"
+    );
+    let saved = store.0.borrow().clone().unwrap();
+    let (s, _) = Settings::from_json(&saved);
+    assert!(s.radio.on);
+    assert_eq!(s.radio.last_station.as_deref(), Some(first.id.as_str()));
+    // Every URL fails: the station is in error and the dial still turns.
+    for _ in &first.urls {
+        let token = h.app.radio().token();
+        h.app.radio_event(PlayerEvent::Failed { token });
+    }
+    assert!(matches!(h.app.radio().state(), RadioState::Error { .. }));
+    h.key(Key::BracketRight);
+    assert_eq!(h.app.radio().station(), Some(1));
+    // A new session resumes the station.
+    let mut fresh = App::new(Seed(1));
+    fresh.set_settings_store(Box::new(store.clone()));
+    let mut input = InputMapper::default();
+    fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    assert_eq!(fresh.radio().station(), Some(1));
+    // Off is saved too.
+    h.key(Key::Backslash);
+    assert!(!h.app.radio().is_on());
+    let (s, _) = Settings::from_json(&store.0.borrow().clone().unwrap());
+    assert!(!s.radio.on);
+}
+
+#[test]
+fn still_scenes_keep_the_radio_off() {
+    let setup = crate::SceneSetup {
+        still: true,
+        ..crate::SceneSetup::default()
+    };
+    let mut app = App::from_setup(&setup).unwrap();
+    let mut input = InputMapper::default();
+    app.set_settings_store(Box::new(crate::MemoryStore {
+        text: Some(r#"{ "radio": { "on": true, "last_station": "somafm_u80s" } }"#.to_string()),
+        saves: 0,
+    }));
+    for _ in 0..3 {
+        input.press(RawInput::Key(Key::BracketRight));
+        app.frame(&mut input, DT, &crate::tests::wall_clock);
+        input.release(RawInput::Key(Key::BracketRight));
+        app.frame(&mut input, DT, &crate::tests::wall_clock);
+    }
+    assert!(!app.radio().is_on());
+    assert!(!app.ui().radio().started());
+    assert_eq!(app.radio_commands().count(), 0);
+    assert!(app.ui().radio().toast().is_none());
+}
+
+#[test]
+fn streams_can_be_added_by_url() {
+    let mut h = Harness::new();
+    h.app.set_text_entry(true);
+    let rows = h.app.ui().radio().rows().len();
+    h.app.add_stream_url("https://radio.example.org/live");
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    assert_eq!(h.app.ui().toast(), Some(Toast::StreamAdded));
+    assert!(h.app.radio().channels().iter().any(|c| c.id == "custom_1"));
+    h.app.add_stream_url("not a url");
+    assert_eq!(h.app.ui().toast(), Some(Toast::StreamRejected));
+    h.app.add_stream_url("  ");
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    assert!(!h.app.take_stream_url_request());
+}
+
+#[test]
+fn the_dash_shows_the_station_in_the_cockpit() {
+    let count = |h: &Harness| h.hud_text().matches("SomaFM").count();
+    let mut h = Harness::new();
+    h.app.set_target_size(1280, 720);
+    h.key(Key::BracketRight);
+    h.frame();
+    assert_eq!(
+        count(&h),
+        2,
+        "the toast and its shadow, from the chase camera"
+    );
+    h.app.set_camera_mode(crate::CameraMode::Cockpit);
+    h.frame();
+    assert_eq!(count(&h), 3, "and the dash: {}", h.hud_text());
+    h.key(Key::Backslash);
+    assert_eq!(count(&h), 0, "off: nothing on the dash");
 }

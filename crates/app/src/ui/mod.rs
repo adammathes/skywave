@@ -9,6 +9,9 @@
 //! map while MapZoom and the mouse wheel zoom it; MapToggle, Back or Pause close it. Every
 //! frame the UI draws itself into a [`HudBuilder`] that [`crate::App::scene_view`] hands to
 //! the renderer.
+//!
+//! The UI also owns the car radio ([`CarRadio`]): its settings live with the others, the
+//! station keys act while driving, and its toast and dash text are part of the HUD.
 
 mod draw;
 mod menu;
@@ -27,6 +30,7 @@ use crate::map::view::{
     FullMap, MapGeom, MINIMAP_RANGES_M, ZOOM_OCTAVES_PER_NOTCH, ZOOM_OCTAVES_PER_S,
 };
 use crate::map::MapPoi;
+use crate::radio::{self, CarRadio};
 use crate::settings::{Settings, SettingsStore};
 use crate::App;
 use render::{Hud, HudBuilder, HudLayout, RenderStats, Sky};
@@ -69,6 +73,10 @@ pub enum Toast {
     Southpaw,
     SwapTriggers,
     Reset(DeviceKind),
+    /// A stream was added to the stations.
+    StreamAdded,
+    /// The text given for a stream was not an `https://` URL (or there are too many).
+    StreamRejected,
 }
 
 /// What the minimap and the full map show, set once when the place loads.
@@ -109,6 +117,9 @@ pub struct Ui {
     map: MapHud,
     /// A UI scale the scene asked for, kept over whatever the store loads.
     forced_ui_scale: Option<f32>,
+    radio: CarRadio,
+    /// The platform can ask the user for a line of text (the "Add stream URL" item).
+    text_entry: bool,
 }
 
 impl Default for Ui {
@@ -142,6 +153,8 @@ impl Ui {
             hud: HudBuilder::new(),
             map: MapHud::default(),
             forced_ui_scale: None,
+            radio: CarRadio::new(),
+            text_entry: false,
         }
     }
 
@@ -150,7 +163,7 @@ impl Ui {
     pub fn force_ui_scale(&mut self, s: f32) {
         self.forced_ui_scale = Some(s);
         self.settings.ui_scale = s;
-        self.settings = self.settings.sanitized();
+        self.settings = std::mem::take(&mut self.settings).sanitized();
     }
 
     /// The map the HUD draws: its image's place in the world and the labelled POIs.
@@ -259,10 +272,11 @@ impl Ui {
         }
         if let Some(s) = self.forced_ui_scale {
             self.settings.ui_scale = s;
-            self.settings = self.settings.sanitized();
+            self.settings = std::mem::take(&mut self.settings).sanitized();
         }
         self.store = Some(store);
         self.dirty = false;
+        self.radio.apply(&self.settings.radio);
     }
 
     /// Writes the settings document if anything changed since the last save.
@@ -298,6 +312,8 @@ impl Ui {
             bindings: &self.bindings,
             clock,
             can_quit: self.can_quit,
+            radio: &self.radio,
+            text_entry: self.text_entry,
         }
     }
 
@@ -391,6 +407,10 @@ impl Ui {
                 self.settings.minimap_range_m = MINIMAP_RANGES_M[i.min(MINIMAP_RANGES_M.len() - 1)];
                 self.dirty = true;
             }
+            Effect::Choose(ItemId::RadioPreset, i) => {
+                radio::choose_preset(&mut self.settings.radio, i);
+                self.radio_settings_changed();
+            }
             Effect::Choose(..) => {}
             Effect::Activate(id) => self.activate(id),
             Effect::Capture {
@@ -453,6 +473,13 @@ impl Ui {
                 self.settings.minimap_rotate = on;
                 self.dirty = true;
             }
+            ItemId::Station(i) => {
+                if let Some(row) = self.radio.rows().get(i) {
+                    let id = row.id.clone();
+                    self.settings.radio.set_enabled(&id, on);
+                    self.radio_settings_changed();
+                }
+            }
             _ => {}
         }
     }
@@ -480,9 +507,13 @@ impl Ui {
             ItemId::TimeOfDay => {
                 clock.seconds_of_day = (f64::from(v) * 3600.0).rem_euclid(DAY_SECONDS);
             }
+            ItemId::RadioVolume => {
+                self.settings.radio.volume = v;
+                self.radio_settings_changed();
+            }
             _ => {}
         }
-        self.settings = self.settings.sanitized();
+        self.settings = std::mem::take(&mut self.settings).sanitized();
     }
 
     fn activate(&mut self, id: ItemId) {
@@ -512,8 +543,39 @@ impl Ui {
                 self.bindings_edited();
             }
             ItemId::KeepExisting | ItemId::UseNew => self.settle_conflict(id == ItemId::UseNew),
+            ItemId::AddStream => self.radio.request_url(),
+            ItemId::ClearStreams => {
+                self.settings.radio.clear_custom();
+                self.radio_settings_changed();
+            }
             _ => {}
         }
+    }
+
+    /// The radio follows a change to its settings, which are saved with the next save.
+    fn radio_settings_changed(&mut self) {
+        self.settings.radio = std::mem::take(&mut self.settings.radio).sanitized();
+        self.radio.apply(&self.settings.radio);
+        self.dirty = true;
+    }
+
+    /// One frame of the radio (never in a still scene): it starts from the settings on
+    /// the first, takes the station keys when `keys` (driving, no menu or map up), runs its
+    /// tune noise, and saves the power and station when they change.
+    fn radio_frame(&mut self, s: &InputState, dt: f32, keys: bool) {
+        self.radio.start(&self.settings.radio);
+        if keys {
+            self.radio.press(s);
+        }
+        self.radio.tick(dt);
+        if self.radio.store(&mut self.settings.radio) {
+            self.dirty = true;
+            self.save_if_dirty();
+        }
+    }
+
+    pub fn radio(&self) -> &CarRadio {
+        &self.radio
     }
 
     fn bindings_edited(&mut self) {
@@ -690,6 +752,10 @@ impl App {
             input.set_bindings(self.ui.bindings.clone());
         }
         self.apply_clock_speed();
+        let radio_keys = !was_open && !self.ui.is_open() && !self.ui.full_map_open();
+        if !self.still {
+            self.ui.radio_frame(&state, dt as f32, radio_keys);
+        }
         let steps = if self.ui.is_open() {
             Steps {
                 count: 0,
@@ -724,6 +790,7 @@ impl App {
             self.camera.pose(&self.drive, steps.alpha).eye
         };
         let (car, heading) = self.map_focus(steps.alpha);
+        let radio_display = self.radio_display(steps.alpha);
         let ctx = draw::DrawCtx {
             daylight: &daylight,
             clock: &self.time.clock,
@@ -731,6 +798,7 @@ impl App {
             ticks: self.ticks,
             car,
             heading,
+            radio_display,
         };
         self.ui.draw(&ctx);
         steps
@@ -749,6 +817,89 @@ impl App {
                 [pose.pos.x, pose.pos.z],
                 crate::map::view::heading_of([f.x, f.z]),
             )
+        }
+    }
+
+    /// Where the radio's display quad is on screen this frame, in the cockpit view only:
+    /// its corners in normalized device coordinates, with the aspect they were projected
+    /// at and the display's glow color. `None` when it is behind the eye.
+    fn radio_display(&self, alpha: f32) -> Option<draw::RadioDisplay> {
+        if self.fly || self.camera.mode() != crate::CameraMode::Cockpit {
+            return None;
+        }
+        let pose = self.camera.pose(&self.drive, alpha);
+        let proj = glam::camera::rh::proj::directx::perspective(
+            pose.fov_y_rad,
+            self.aspect,
+            pose.near_m,
+            pose.far_m,
+        );
+        let clip_from_world = proj * pose.view();
+        let body = self.drive.pose(alpha);
+        let mut ndc = [[0.0; 2]; 4];
+        for (out, &p) in ndc.iter_mut().zip(&self.drive.layout.radio_display) {
+            let c = clip_from_world * body.point(p).extend(1.0);
+            if c.w <= pose.near_m * 0.5 {
+                return None;
+            }
+            *out = [c.x / c.w, c.y / c.w];
+        }
+        let [r, g, b] = self.drive.layout.radio_glow;
+        Some(draw::RadioDisplay {
+            ndc,
+            aspect: self.aspect,
+            target: self.target,
+            color: [r, g, b, 255],
+        })
+    }
+
+    /// The size of the target the HUD is drawn on, pixels (the platform calls this at
+    /// start and on every resize; it sizes the dash's radio text).
+    pub fn set_target_size(&mut self, width: u32, height: u32) {
+        self.target = Some((width.max(1), height.max(1)));
+    }
+
+    /// The radio's commands for the platform's player since the last call (see
+    /// [`audio::RadioCommand`]). Call once a frame, after [`App::frame`].
+    pub fn radio_commands(&mut self) -> std::vec::Drain<'_, audio::RadioCommand> {
+        self.ui.radio.commands()
+    }
+
+    /// A report from the platform's player.
+    pub fn radio_event(&mut self, event: audio::PlayerEvent) {
+        self.ui.radio.on_event(event);
+    }
+
+    /// The radio's state, station list and volume.
+    pub fn radio(&self) -> &audio::Radio {
+        self.ui.radio.radio()
+    }
+
+    /// The platform can ask the user for a stream URL: the Audio page offers "Add stream
+    /// URL", and [`App::take_stream_url_request`] says when it was chosen.
+    pub fn set_text_entry(&mut self, on: bool) {
+        self.ui.text_entry = on;
+    }
+
+    /// True once after the user chose "Add stream URL": ask for one and pass it to
+    /// [`App::add_stream_url`].
+    pub fn take_stream_url_request(&mut self) -> bool {
+        self.ui.radio.take_url_request()
+    }
+
+    /// Adds a stream the user typed to the stations (an `https://` URL), and says so.
+    pub fn add_stream_url(&mut self, url: &str) {
+        if url.trim().is_empty() {
+            return;
+        }
+        let ui = &mut self.ui;
+        match ui.settings.radio.add_custom(url) {
+            Ok(_) => {
+                ui.radio_settings_changed();
+                ui.save_if_dirty();
+                ui.show(Toast::StreamAdded);
+            }
+            Err(_) => ui.show(Toast::StreamRejected),
         }
     }
 

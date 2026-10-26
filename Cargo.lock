@@ -68,6 +68,7 @@ dependencies = [
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "audio",
  "glam",
  "place",
  "render",

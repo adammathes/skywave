@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 skywave-core.workspace = true
+audio.workspace = true
 place.workspace = true
 world.workspace = true
 render.workspace = true

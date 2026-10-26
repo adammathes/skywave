@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! Pause:     Resume · Settings › · Quit (native only)
-//! Settings:  Controls › · Video › · HUD › · World › · About ›
+//! Settings:  Controls › · Video › · Audio › · HUD › · World › · About ›
 //! Controls:  Gamepad › · Keyboard & mouse ›
 //! Device:    Invert look Y · Invert look X · Look sensitivity · Bindings › · Analog axes ›
 //!            · [pad: Swap sticks · Throttle on right stick] · Reset to defaults
@@ -12,6 +12,9 @@
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
 //! Video:     UI scale · Resolution scale · Bloom · Performance overlay
+//! Audio:     Radio volume · Preset · Stations › · [web: Add stream URL] · [Remove added
+//!            streams, when there are some]
+//! Stations:  one on/off row per station of the preset and per added stream
 //! HUD:       Minimap · Rotate with car · Minimap zoom
 //! World:     Time of day · Clock speed
 //! About:     (license text)
@@ -21,6 +24,7 @@
 use crate::daylight::{Clock, CLOCK_SPEEDS};
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
+use crate::radio::{CarRadio, PRESET_TITLES};
 use crate::settings::{Settings, RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, UI_SCALE_STEP};
 
 use super::menu::{Item, Unit, Widget};
@@ -35,6 +39,9 @@ pub enum Page {
     Axes(DeviceKind),
     Axis(DeviceKind, Action),
     Video,
+    Audio,
+    /// The stations of the preset on the dial, and the added streams.
+    Stations,
     Hud,
     World,
     About,
@@ -71,6 +78,12 @@ pub enum ItemId {
     MinimapZoom,
     TimeOfDay,
     ClockSpeed,
+    RadioVolume,
+    RadioPreset,
+    /// Row `i` of `CarRadio::rows`: the station on the dial or not.
+    Station(usize),
+    AddStream,
+    ClearStreams,
     KeepExisting,
     UseNew,
 }
@@ -82,6 +95,9 @@ pub struct PageCtx<'a> {
     pub bindings: &'a Bindings,
     pub clock: &'a Clock,
     pub can_quit: bool,
+    pub radio: &'a CarRadio,
+    /// The platform can ask the user for a line of text (a stream URL).
+    pub text_entry: bool,
 }
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
@@ -116,6 +132,8 @@ pub fn title(page: Page) -> &'static str {
         Page::Axes(_) => "Analog axes",
         Page::Axis(_, a) => super::names::action_label(a, Sign::Full),
         Page::Video => "Video",
+        Page::Audio => "Audio",
+        Page::Stations => "Stations",
         Page::Hud => "HUD",
         Page::World => "World",
         Page::About => "About",
@@ -132,6 +150,10 @@ pub fn note(page: Page) -> Option<&'static str> {
         ),
         Page::Bindings(_) => Some("Select a row, then press the new input."),
         Page::Video => Some("Resolution scale is saved for an upcoming renderer option."),
+        Page::Audio => Some(
+            "Real internet radio: [ and ] change station, \\ turns it off.\n\
+             Streams play where the network allows; nothing is stored.",
+        ),
         _ => None,
     }
 }
@@ -166,6 +188,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             for (p, label) in [
                 (Page::Controls, "Controls"),
                 (Page::Video, "Video"),
+                (Page::Audio, "Audio"),
                 (Page::Hud, "HUD"),
                 (Page::World, "World"),
                 (Page::About, "About"),
@@ -308,6 +331,40 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 Widget::Toggle(s.debug_overlay),
             );
         }
+        Page::Audio => {
+            let r = &ctx.settings.radio;
+            add(
+                ItemId::RadioVolume,
+                "Radio volume",
+                slider(r.volume, 0.0, 1.0, 0.05, Unit::Percent),
+            );
+            add(
+                ItemId::RadioPreset,
+                "Preset",
+                Widget::Choice {
+                    options: &PRESET_TITLES,
+                    index: ctx.radio.preset_index(),
+                },
+            );
+            let (id, w) = open(Page::Stations);
+            add(id, "Stations", w);
+            if ctx.text_entry {
+                add(ItemId::AddStream, "Add stream URL", Widget::Action);
+            }
+            if !r.custom.is_empty() {
+                add(ItemId::ClearStreams, "Remove added streams", Widget::Action);
+            }
+        }
+        Page::Stations => {
+            for (i, row) in ctx.radio.rows().iter().enumerate() {
+                // The label is the station's name, drawn from the row.
+                add(
+                    ItemId::Station(i),
+                    "",
+                    Widget::Toggle(ctx.settings.radio.is_enabled(&row.id)),
+                );
+            }
+        }
         Page::Hud => {
             let s = ctx.settings;
             add(ItemId::Minimap, "Minimap", Widget::Toggle(s.minimap));
@@ -379,11 +436,14 @@ mod tests {
         o.invert = true;
         bindings.set_axis_options(DeviceKind::Gamepad, Action::LookY, o);
         let clock = Clock::new(100, 6.5 * 3600.0);
+        let radio = CarRadio::new();
         let ctx = PageCtx {
             settings: &settings,
             bindings: &bindings,
             clock: &clock,
             can_quit: false,
+            radio: &radio,
+            text_entry: false,
         };
         let mut items = Vec::new();
         build(Page::Pause, &ctx, &mut items);
@@ -404,5 +464,12 @@ mod tests {
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));
+        build(Page::Audio, &ctx, &mut items);
+        assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 0.8));
+        assert!(matches!(items[1].widget, Widget::Choice { index: 0, .. }));
+        assert_eq!(items.len(), 3, "no text entry, no added streams");
+        build(Page::Stations, &ctx, &mut items);
+        assert_eq!(items.len(), radio.rows().len());
+        assert!(items.iter().all(|i| i.widget == Widget::Toggle(true)));
     }
 }

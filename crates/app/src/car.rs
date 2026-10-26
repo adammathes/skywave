@@ -181,6 +181,8 @@ pub struct CarLayout {
     /// The radio's display quad (bottom-left, bottom-right, top-right, top-left as the
     /// driver sees it), for the radio's station text.
     pub radio_display: [Vec3; 4],
+    /// The radio display's glow, sRGB (the shape's interior `display` color).
+    pub radio_glow: [u8; 3],
     /// Headlamp centers, left then right (lit and, for pop-ups, raised).
     pub headlamps: [Vec3; 2],
     /// Tail lamp centers, left then right.
@@ -233,6 +235,7 @@ impl CarLayout {
             dials,
             dial_count: usize::from(c.dial_count).min(3),
             radio_display: c.radio_display.map(at),
+            radio_glow: hex_rgb(&shape.interior.display).unwrap_or(DEFAULT_RADIO_GLOW),
             headlamps: lamp_centers(&lit.lights, LampGroup::Head).map(|p| p + offset),
             taillamps: lamp_centers(&lit.lights, LampGroup::Tail).map(|p| p + offset),
             dims: spec.dims_m,
@@ -246,6 +249,20 @@ impl CarLayout {
         Mat4::from_translation(self.wheel_pivot)
             * Mat4::from_quat(Quat::from_axis_angle(self.wheel_axis, turn))
     }
+}
+
+/// The radio display's glow when the shape's color does not parse (a validated shape's
+/// always does).
+const DEFAULT_RADIO_GLOW: [u8; 3] = [60, 255, 122];
+
+/// `#rrggbb` as bytes.
+fn hex_rgb(s: &str) -> Option<[u8; 3]> {
+    let h = s.strip_prefix('#')?;
+    if h.len() != 6 || !h.is_ascii() {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 /// `y` of the polyline `pts` (`x` increasing) at `x`, held flat beyond its ends.

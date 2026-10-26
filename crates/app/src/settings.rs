@@ -6,12 +6,17 @@
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
 //!   "world": { "clock_speed": 10.0 },
+//!   "radio": { "volume": 0.8, "on": false, "last_station": null, "disabled": [],
+//!              "custom": [], "presets": {} },
 //!   "input": { …the bindings document, see `Bindings::to_json`… } }
 //! ```
+//!
+//! The `radio` section is [`audio::RadioSettings`].
 //!
 //! Loading is forgiving like the bindings format: missing sections or fields take their
 //! defaults, unknown ones are ignored and values are clamped into range.
 
+use audio::RadioSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -52,7 +57,7 @@ impl SettingsStore for MemoryStore {
 }
 
 /// Every user setting except the input bindings, which live beside it in the same file.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     /// HUD and menu scale, 1–2 (TV distance wants more).
     pub ui_scale: f32,
@@ -70,6 +75,8 @@ pub struct Settings {
     pub minimap_rotate: bool,
     /// Meters across the minimap; one of [`MINIMAP_RANGES_M`].
     pub minimap_range_m: f32,
+    /// Radio volume, power, last station, stations and presets.
+    pub radio: RadioSettings,
 }
 
 impl Default for Settings {
@@ -83,6 +90,7 @@ impl Default for Settings {
             minimap: true,
             minimap_rotate: true,
             minimap_range_m: MINIMAP_RANGES_M[DEFAULT_MINIMAP_RANGE],
+            radio: RadioSettings::default(),
         }
     }
 }
@@ -175,6 +183,7 @@ impl Settings {
             resolution_scale: fix(self.resolution_scale, RESOLUTION_SCALE_MIN, 1.0, 1.0),
             clock_speed: speed,
             minimap_range_m: range,
+            radio: self.radio.sanitized(),
             ..self
         }
     }
@@ -196,6 +205,7 @@ impl Settings {
                 minimap_range_m: self.minimap_range_m,
             },
             "world": World { clock_speed: self.clock_speed },
+            "radio": &self.radio,
             "input": input,
         });
         serde_json::to_string_pretty(&doc).unwrap_or_default()
@@ -213,6 +223,8 @@ impl Settings {
         let video: Video = serde_json::from_value(section(&mut root, "video")).unwrap_or_default();
         let hud: HudSection = serde_json::from_value(section(&mut root, "hud")).unwrap_or_default();
         let world: World = serde_json::from_value(section(&mut root, "world")).unwrap_or_default();
+        let radio: RadioSettings =
+            serde_json::from_value(section(&mut root, "radio")).unwrap_or_default();
         let bindings = match section(&mut root, "input") {
             v @ Value::Object(_) => Bindings::from_json(&v.to_string()).ok(),
             _ => None,
@@ -226,6 +238,7 @@ impl Settings {
             minimap: hud.minimap,
             minimap_rotate: hud.minimap_rotate,
             minimap_range_m: hud.minimap_range_m,
+            radio,
         }
         .sanitized();
         (settings, bindings)
@@ -248,7 +261,19 @@ mod tests {
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,
+            radio: RadioSettings {
+                volume: 0.45,
+                on: true,
+                last_station: Some("somafm_seventies".into()),
+                disabled: vec!["radioparadise_main".into()],
+                ..RadioSettings::default()
+            },
         };
+        let mut s = s;
+        s.radio.add_custom("https://example.org/stream").unwrap();
+        s.radio
+            .presets
+            .insert("socal_beach_1984".into(), "1977_chicago".into());
         let mut b = Bindings::default();
         let mut o = b.axis_options(DeviceKind::Gamepad, Action::LookY);
         o.invert = true;
@@ -288,6 +313,22 @@ mod tests {
         assert_eq!(s, Settings::default());
         let (_, b) = Settings::from_json(r#"{ "input": {} }"#);
         assert_eq!(b, Some(Bindings::default()));
+        // A radio section with bad values keeps what it can.
+        let (s, _) = Settings::from_json(
+            r#"{ "radio": { "volume": 9, "on": true, "custom": [{ "id": "custom_1",
+                 "name": "x", "url": "http://plain" }], "last_station": 3 } }"#,
+        );
+        assert_eq!(
+            s.radio,
+            RadioSettings::default(),
+            "a wrong type drops the section"
+        );
+        let (s, _) = Settings::from_json(
+            r#"{ "radio": { "volume": 9, "on": true, "custom": [{ "id": "custom_1",
+                 "name": "x", "url": "http://plain" }] } }"#,
+        );
+        assert_eq!((s.radio.volume, s.radio.on), (1.0, true));
+        assert!(s.radio.custom.is_empty());
     }
 
     #[test]
