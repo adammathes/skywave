@@ -8,6 +8,7 @@ members = [
     "crates/app",
     "crates/platform-native",
     "crates/platform-web",
+    "tools/shape-preview",
 ]
 
 [workspace.package]

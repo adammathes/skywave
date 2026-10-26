@@ -1,6 +1,6 @@
 [package]
 name = "vehicle"
-description = "Skywave vehicle data: VehicleSpec, its validator and the derived quantities the sim reads."
+description = "Skywave vehicle data: VehicleSpec, its validator, the derived quantities the sim reads and the parametric car mesh generator."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,3 +14,6 @@ serde = ["dep:serde"]
 
 [dependencies]
 serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+ron.workspace = true

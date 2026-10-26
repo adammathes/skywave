@@ -2,9 +2,9 @@
 //!
 //! A car is a [`VehicleSpec`] (a RON file in `assets/vehicles/`, layout in
 //! `docs/VEHICLES.md`) plus a shape file. This crate holds the spec, its validator and the
-//! derived quantities the sim reads from it. It parses nothing itself: with the default
-//! `serde` feature the spec types derive `Serialize`/`Deserialize` and the `app` crate
-//! loads the RON text.
+//! derived quantities the sim reads from it, and [`shape`], which lofts a shape file into
+//! meshes. It parses nothing itself: with the default `serde` feature the spec types derive
+//! `Serialize`/`Deserialize` and the `app` crate loads the RON text.
 //!
 //! Body space is right-handed and Y-up with the origin at the center of mass: `+x` is the
 //! driver's right, `+y` up, `-z` forward (the same convention as the camera).
@@ -12,6 +12,7 @@
 
 extern crate alloc;
 
+pub mod shape;
 mod spec;
 
 pub use spec::{

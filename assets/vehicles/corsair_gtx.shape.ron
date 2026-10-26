@@ -1,0 +1,54 @@
+// Corsair GTX body: a low early-80s wedge.
+//
+// Intent: a knife-edge nose that rises in one straight line to a very raked windshield,
+// a short flat roof, a long fastback covered in louvers and a wide, flat, upright tail
+// with a full-width lamp band. Rubber bumpers, black pillars and lips, pop-up lamps in the
+// fender tops and turbine-style alloys. The proportions say "rear-engined wedge"; no line
+// is taken from any real car.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "corsair_gtx",
+    // Top from the nose to the tail, then the underside back to the nose.
+    side: [
+        (0.00, 0.50), (0.06, 0.60), (0.45, 0.70), (1.30, 0.80), (1.42, 0.82),
+        (2.05, 1.13), (2.70, 1.15), (3.85, 0.93), (4.22, 0.92), (4.30, 0.89),
+        (4.30, 0.30), (4.12, 0.20), (3.70, 0.17), (0.70, 0.15), (0.16, 0.19), (0.00, 0.28),
+    ],
+    plan: [
+        (0.00, 0.70), (0.10, 0.80), (0.40, 0.855), (0.90, 0.875), (3.60, 0.875),
+        (4.15, 0.870), (4.30, 0.845),
+    ],
+    belt: [(1.40, 0.81), (3.90, 0.90)],
+    section: Section(shoulder: 0.93, tumblehome_deg: 24, greenhouse_frac: 0.70, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.44, 2.03),
+        backlight: (2.74, 3.80),
+        side: [(1.50, 3.05)],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.21, arch_clearance: 0.05, front_x: 0.86, rear_x: 3.31, track: 1.5),
+    front: Front(lights: PopUp, grille: Slot, bumper: Rubber, bumper_y: (0.29, 0.40)),
+    rear: Rear(lights: FullWidth, spoiler: None, bumper: Rubber, bumper_y: (0.30, 0.43)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.60, creases: [(0.25, 0.50, 4.25, 0.60)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 1, exhaust: Dual, antenna: Mast, rims: Turbine, hubcaps: false),
+    details: [Louvers, BlackTrim, SideStripe, Badge(Chevron)],
+    // Brushed silver, signal red, black, ivory, gunmetal, mustard.
+    palette: ["#b9bcc0", "#b3202a", "#1d1f22", "#e9e6dc", "#4a5058", "#d9a521"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 0.80,
+        dash_x: 1.64,
+        wheel_pos: (2.02, 0.64),
+        wheel_radius: 0.17,
+        column_angle_deg: 24,
+        mirror_pos: (1.80, 1.02),
+        seat: (2.42, 0.32),
+        driver_offset: 0.36,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent.
+        colors: ["#2b2b2d", "#4b4f57", "#26262a", "#6b6a66", "#38383b", "#9a2a22"],
+        display: "#3cff7a",
+    ),
+)
