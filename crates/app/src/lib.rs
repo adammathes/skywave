@@ -164,15 +164,9 @@ impl App {
             },
             sun: Sun {
                 direction: Vec3::new(0.70, 0.55, 0.45).normalize().to_array(),
-                color: [3.0, 2.75, 2.35],
+                illuminance: [80.0, 74.0, 63.0],
             },
-            sky: Sky {
-                zenith: [0.09, 0.22, 0.70],
-                horizon: [0.50, 0.62, 0.80],
-                ground: [0.20, 0.19, 0.17],
-                haze: 0.0009,
-            },
-            exposure: 0.7,
+            sky: Sky::default(),
             instances: &self.instances,
         }
     }
