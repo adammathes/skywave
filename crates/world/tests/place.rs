@@ -480,3 +480,62 @@ fn coast_chunks_build_as_slices_of_the_whole_build() {
     );
     assert_eq!(total, all.len());
 }
+
+/// The far terrain of a procedural place covers it in one coarse mesh within its triangle
+/// budget and lies under the graded ground everywhere (by the drop at least), so the
+/// streamed chunks always draw over it.
+#[test]
+fn far_terrain_lies_under_the_ground() {
+    use world::mesh::terrain::{TerrainGrid, FAR_DROP_M};
+    use world::roads::Network;
+    use world::{ChunkPlan, Palette, Pattern};
+    let pal = Palette::socal_1985();
+    for seed in 1..=2u64 {
+        let p = build_place(Seed(seed), &template());
+        let far = ChunkPlan::new(&p, &pal).far_terrain(&p, &pal).unwrap();
+        let grid = TerrainGrid::new(&p, &Network::new(&p));
+        let tris = far.indices.len() / 3;
+        assert!(
+            (8192..=10_000).contains(&tris),
+            "seed {seed}: {tris} triangles"
+        );
+        // Every fine sample under a ground triangle of the far mesh, against it.
+        let (mut checked, mut closest) = (0usize, f32::INFINITY);
+        for t in far.indices.chunks_exact(3) {
+            let v = [0, 1, 2].map(|k| far.vertices[t[k] as usize]);
+            if v.iter().any(|v| v.color[3] == Pattern::Water as u8) {
+                continue;
+            }
+            let [a, b, c] = v.map(|v| v.pos);
+            let lo = [a[0].min(b[0]).min(c[0]), a[2].min(b[2]).min(c[2])];
+            let hi = [a[0].max(b[0]).max(c[0]), a[2].max(b[2]).max(c[2])];
+            let den = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2]);
+            let (ix0, iz0) = ((lo[0] / grid.cell) as usize, (lo[1] / grid.cell) as usize);
+            let (ix1, iz1) = ((hi[0] / grid.cell) as usize, (hi[1] / grid.cell) as usize);
+            for iz in iz0..=iz1.min(grid.h - 1) {
+                for ix in ix0..=ix1.min(grid.w - 1) {
+                    let q = grid.pos(ix, iz);
+                    let l1 = ((b[2] - c[2]) * (q.x - c[0]) + (c[0] - b[0]) * (q.y - c[2])) / den;
+                    let l2 = ((c[2] - a[2]) * (q.x - c[0]) + (a[0] - c[0]) * (q.y - c[2])) / den;
+                    let l3 = 1.0 - l1 - l2;
+                    if l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4 {
+                        continue;
+                    }
+                    let y = l1 * a[1] + l2 * b[1] + l3 * c[1];
+                    let under = grid.sample(ix, iz) - y;
+                    checked += 1;
+                    closest = closest.min(under);
+                    assert!(
+                        under >= FAR_DROP_M - 0.01,
+                        "seed {seed}: far terrain {y} only {under} m under the ground at {q:?}"
+                    );
+                }
+            }
+        }
+        println!(
+            "seed {seed}: far terrain {tris} triangles, {checked} samples checked, closest \
+             {closest:.3} m under"
+        );
+        assert!(checked > 200_000, "{checked}");
+    }
+}

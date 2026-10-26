@@ -339,6 +339,15 @@ impl ChunkPlan {
         ]
     }
 
+    /// A terrain place's far terrain ([`mesh::terrain::build_far`]): the whole place's
+    /// ground and water as one coarse mesh under the chunks' own; `None` for the test town.
+    pub fn far_terrain(&self, place: &Place, palette: &Palette) -> Option<WorldMesh> {
+        let (g, colors) = self.terrain.as_ref()?;
+        Some(mesh::terrain::build_far(
+            place, g, colors, palette, self.seed,
+        ))
+    }
+
     /// The meshes `stage` writes in `chunk`, sorted by kind (empty ones left out): the
     /// same as [`build_chunk_meshes`] gives for that chunk and those kinds.
     pub fn build_stage(

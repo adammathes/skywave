@@ -324,6 +324,8 @@ pub struct PlaceSource {
     palette: Palette,
     plan: ChunkPlan,
     statics: Vec<StaticLight>,
+    /// A terrain place's far terrain, in render vertices.
+    far: Option<Mesh>,
 }
 
 impl PlaceSource {
@@ -369,16 +371,28 @@ impl PlaceSource {
             }
         }
         statics.sort_by_key(|s| s.chunk);
+        let far = plan
+            .far_terrain(&place, &palette)
+            .map(|m| convert(&atlas_mesh(&m, MeshKind::Ground), Part::Base));
         PlaceSource {
             place,
             palette,
             plan,
             statics,
+            far,
         }
     }
 
     pub fn place(&self) -> &Place {
         &self.place
+    }
+
+    /// A terrain place's far terrain ([`ChunkPlan::far_terrain`]): the whole place's
+    /// ground and water as one coarse static mesh under the chunks', drawn always so the
+    /// hills and the sea reach the horizon past the resident ring. `None` for the test
+    /// town.
+    pub fn far_terrain(&self) -> Option<&Mesh> {
+        self.far.as_ref()
     }
 }
 
@@ -971,6 +985,7 @@ mod tests {
         let t = std::time::Instant::now();
         let src = PlaceSource::new(place, Palette::socal_1985());
         let made = t.elapsed();
+        assert!(src.far_terrain().is_none(), "the test town is flat");
         let c = build_all(&src);
         eprintln!(
             "source {made:?}, {} statics; {} vertices (most {} in a chunk), {} parts (most {}; \
@@ -1042,5 +1057,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The coast's chunks the same, and its far terrain: one mesh of the whole place within
+    /// its triangle budget.
+    #[test]
+    fn every_coast_chunk_fits_the_pool_and_the_far_terrain_is_small() {
+        let place = crate::places::build(crate::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+        let t = std::time::Instant::now();
+        let src = PlaceSource::new(place, Palette::socal_1985());
+        let made = t.elapsed();
+        let far = src.far_terrain().expect("the coast has terrain");
+        let tris = far.indices.len() / 3;
+        let c = build_all(&src);
+        eprintln!(
+            "coast source {made:?}; far terrain {} vertices, {tris} triangles; {} vertices (most \
+             {} in a chunk), {} parts (most {}); {} pieces (most {} a chunk); stage ms total \
+             {:.1?}; pieces p99/worst {:.2?}; worst whole stage {:.2?}",
+            far.vertices.len(),
+            c.vertices,
+            c.most_vertices,
+            c.parts,
+            c.most_parts,
+            c.pieces,
+            c.most_pieces,
+            c.total,
+            c.pieces_ms(),
+            c.worst_stage,
+        );
+        assert!((8192..=10_000).contains(&tris), "{tris} triangles");
+        assert!(far
+            .indices
+            .iter()
+            .all(|&i| (i as usize) < far.vertices.len()));
     }
 }
