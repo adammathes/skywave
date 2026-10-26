@@ -6,6 +6,7 @@ members = [
     "crates/vehicle",
     "crates/world",
     "crates/render",
+    "crates/audio",
     "crates/app",
     "crates/platform-native",
     "crates/platform-web",
@@ -28,6 +29,7 @@ vehicle = { path = "crates/vehicle" }
 world = { path = "crates/world" }
 render = { path = "crates/render" }
 app = { path = "crates/app" }
+audio = { path = "crates/audio" }
 
 # Engine-level dependencies (the only ones allowed; see CLAUDE.md).
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl"] }
