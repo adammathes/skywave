@@ -22,6 +22,10 @@ pub enum Unit {
     Plain,
     /// "06:30" (the value is hours).
     Clock,
+    /// "62 deg".
+    Degrees,
+    /// "+3 cm".
+    Centimeters,
 }
 
 /// What an item is and its current value.

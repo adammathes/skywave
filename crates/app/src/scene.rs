@@ -9,7 +9,8 @@
 //! - `place=<name>`: `town` (the hand-laid test town, the default) or `coast` (the
 //!   procedural `california_coast` place for the seed).
 //! - `car=<id>`: built-in vehicle id (default [`DEFAULT_VEHICLE`]).
-//! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default `chase-mid`).
+//! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
+//!   which starts at `chase-mid` and remembers the last one picked).
 //! - `t=HH:MM`: time of day; when given the clock is frozen there (default 17:40, running).
 //! - `pos=x,z`: put the car on the ground at this point, m (default the place's
 //!   `PlayerStart`: the start of the strip).
@@ -53,7 +54,8 @@ pub struct SceneSetup {
     pub seed: u64,
     pub place: PlaceKey,
     pub car: String,
-    pub camera: CameraMode,
+    /// The camera, or `None` for the player's camera setting.
+    pub camera: Option<CameraMode>,
     /// Seconds of day the clock is frozen at, or `None` for the default running clock.
     pub time_s: Option<f64>,
     /// Ground point `[x, z]` the car starts on, m; `None` for the place's `PlayerStart`.
@@ -79,7 +81,7 @@ impl Default for SceneSetup {
             seed: 1,
             place: PlaceKey::TestTown,
             car: DEFAULT_VEHICLE.to_string(),
-            camera: CameraMode::ChaseMid,
+            camera: None,
             time_s: None,
             pos: None,
             heading_rad: None,
@@ -120,7 +122,7 @@ impl SceneSetup {
             "seed" => self.seed = value.parse().map_err(|_| bad())?,
             "place" => self.place = PlaceKey::from_name(value).ok_or_else(bad)?,
             "car" => self.car = value.to_string(),
-            "cam" => self.camera = CameraMode::from_name(value).ok_or_else(bad)?,
+            "cam" => self.camera = Some(CameraMode::from_name(value).ok_or_else(bad)?),
             "t" => self.time_s = Some(parse_clock(value).ok_or_else(bad)?),
             "pos" => {
                 let (x, z) = value.split_once(',').ok_or_else(bad)?;
@@ -197,7 +199,7 @@ mod tests {
         assert_eq!(s.seed, 7);
         assert_eq!(s.place, PlaceKey::Coast);
         assert_eq!(s.car, "palisade_wagon");
-        assert_eq!(s.camera, CameraMode::Cockpit);
+        assert_eq!(s.camera, Some(CameraMode::Cockpit));
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
         assert_eq!(s.pos, Some([-200.5, 97.0]));
         assert!((s.heading_rad.unwrap() + core::f32::consts::PI).abs() < 1e-6);

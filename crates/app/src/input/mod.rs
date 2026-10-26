@@ -176,10 +176,11 @@ impl Action {
     }
 
     /// Keyboard (digital input) ramp as `(seconds from 0 to full, seconds back to 0)`, for
-    /// the actions that have one.
+    /// the actions that have one. Steering ramps out in 120 ms (was 150 ms until the first
+    /// play found corrections slow to land).
     pub fn ramp(self) -> Option<(f32, f32)> {
         match self {
-            Action::Steer => Some((0.150, 0.300)),
+            Action::Steer => Some((0.120, 0.300)),
             Action::Throttle | Action::Brake => Some((0.100, 0.100)),
             _ => None,
         }

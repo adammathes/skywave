@@ -80,8 +80,13 @@ const LOAD_FACTOR_MAX: f32 = 1.25;
 /// Share of the force that would stop a contact's sliding in one step that the tire may
 /// apply. Below 1 the contact cannot overshoot, which makes it act as static friction at rest.
 const CONTACT_CAP: f32 = 0.5;
-/// Closed-throttle engine braking at the redline, as a fraction of peak torque.
-const ENGINE_BRAKE: f32 = 0.3;
+/// Closed-throttle engine braking: the drag it puts on the driven wheels through whatever
+/// gear is in, as a share of the car's weight (g), at idle rpm and at the redline (linear
+/// between). With aero and rolling resistance on top, every car coasts down at about
+/// 0.15 g from 25 m/s in gear. Was 0.3 × peak torque at the redline, falling to nothing at
+/// idle at the crank: ~0.05 g of coast-down in the high gears the automatic picks off
+/// throttle, which read as a car that would not slow down unless braked.
+const ENGINE_BRAKE_G: [f32; 2] = [0.13, 0.22];
 /// Torque-converter stall: the engine can rev this far into its range against stopped wheels.
 const STALL_FRACTION: f32 = 0.35;
 /// How fast a slipping engine's rpm chases its target, 1/s.
@@ -114,6 +119,17 @@ const TRACTION_RATE: f32 = 30.0;
 const ABS_SLIP: f32 = 1.1;
 /// Stability assist yaw-rate correction gain at full strength, 1/s.
 const STABILITY_GAIN: f32 = 8.0;
+/// Stability assist slide damping at full strength, 1/s: the share per second of the
+/// sideways speed at the center of mass beyond the tires' peak slip angle that it takes
+/// away (a car caught sliding wide stops sliding instead of carrying on sideways).
+const SLIDE_GAIN: f32 = 4.0;
+/// Handbrake pivot (part of the steering assist): with the handbrake held above
+/// `HANDBRAKE_PIVOT_SPEED` m/s, yaw is helped toward `steer × HANDBRAKE_YAW_RATE` rad/s at
+/// `HANDBRAKE_YAW_GAIN` 1/s, rotation only, never against it; the stability assist lets go
+/// meanwhile. The rears lock either way; this turns the lock into a pivot.
+const HANDBRAKE_YAW_RATE: f32 = 1.6;
+const HANDBRAKE_YAW_GAIN: f32 = 6.0;
+const HANDBRAKE_PIVOT_SPEED: f32 = 4.0;
 /// Body-corner ground contact: stiffness and damping per corner per kg of car.
 const BODY_STIFFNESS: f32 = 400.0;
 const BODY_DAMPING: f32 = 14.0;
@@ -147,11 +163,13 @@ pub struct VehicleInput {
     pub handbrake: bool,
 }
 
-/// Driver assists (`docs/VEHICLES.md` step 7). `Default` is "light", the arcade-sim feel;
-/// [`Assists::OFF`] is the "driver" feel.
+/// Driver assists (`docs/VEHICLES.md` step 7). `Default` is [`Assists::ARCADE`], the
+/// tight, forgiving feel; [`Assists::LIGHT`] is the arcade-sim feel the game first shipped
+/// with and [`Assists::OFF`] the "driver" feel.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Assists {
-    /// Yaw damping toward the yaw rate the steering asks for, `[0, 1]`.
+    /// `[0, 1]`: yaw damping toward the yaw rate the steering asks for, and damping of a
+    /// sideways slide past the tires' peak slip angle. Lets go while the handbrake is held.
     pub stability: f32,
     /// Driven-wheel slip cap, `[0, 1]`: 0 off, 1 holds wheelspin at the tire's peak.
     pub traction: f32,
@@ -163,8 +181,12 @@ pub struct Assists {
     /// of the turn plus the peak slip (`atan(a · wheelbase / v²) + α_peak`, with the yaw the
     /// car actually has), so full stick at speed turns as hard as the fronts can and no
     /// harder; in a slide the travel direction swings out and the wheels follow it, a
-    /// counter-steer. Fades in above 8 m/s.
+    /// counter-steer. Fades in above 8 m/s. It also pivots the car on the handbrake.
     pub steering: f32,
+    /// Tire grip multiplier, lateral and longitudinal (1 = the spec's tires).
+    pub grip_boost: f32,
+    /// Service-brake torque multiplier (1 = the spec's brakes; the handbrake is not boosted).
+    pub brake_boost: f32,
 }
 
 impl Assists {
@@ -173,12 +195,27 @@ impl Assists {
         traction: 0.0,
         abs: false,
         steering: 0.0,
+        grip_boost: 1.0,
+        brake_boost: 1.0,
     };
     pub const LIGHT: Assists = Assists {
         stability: 0.3,
         traction: 0.5,
         abs: true,
         steering: 1.0,
+        grip_boost: 1.0,
+        brake_boost: 1.0,
+    };
+    /// After the first play on real hardware ("too slippy, braking too slow"): firm
+    /// stability, strong traction control, ABS, grip-limited steering, a fifth more grip
+    /// and 40% more brake.
+    pub const ARCADE: Assists = Assists {
+        stability: 0.8,
+        traction: 0.8,
+        abs: true,
+        steering: 1.0,
+        grip_boost: 1.2,
+        brake_boost: 1.4,
     };
 }
 
@@ -220,7 +257,7 @@ pub fn steer_target(
 
 impl Default for Assists {
     fn default() -> Self {
-        Assists::LIGHT
+        Assists::ARCADE
     }
 }
 
@@ -578,12 +615,7 @@ pub fn step(
     let idle = spec.engine.idle_rpm;
     let redline = spec.engine.redline_rpm;
     let rpm_span = redline - idle;
-    let mut peak_torque = 0.0;
-    for &(_, nm) in &spec.engine.torque_nm {
-        if nm > peak_torque {
-            peak_torque = nm;
-        }
-    }
+    let grip_boost = assists.grip_boost;
 
     // Body frame at the start of the step.
     let q = state.rot;
@@ -698,8 +730,12 @@ pub fn step(
         engine_torque *= unit((REVERSE_MAX_MPS + fwd_speed) / REVERSE_FADE_MPS);
     }
     if coupled {
+        // Engine braking is set as a drag at the wheels and taken back to the crank through
+        // the gear in, so it is the same share of the car's weight in every gear.
         let rev = unit((state.engine_rpm - idle) / rpm_span);
-        engine_torque -= ENGINE_BRAKE * peak_torque * (1.0 - drive_pedal) * rev;
+        let [lo, hi] = ENGINE_BRAKE_G;
+        let wheel_drag = (lo + (hi - lo) * rev) * mass * GRAVITY * radius;
+        engine_torque -= wheel_drag / (abs(ratio) * DRIVELINE_EFFICIENCY) * (1.0 - drive_pedal);
     }
     let axle_torque = if declutched {
         0.0
@@ -783,8 +819,9 @@ pub fn step(
     // 4. Tires and wheel spin. Lateral force is explicit (capped so it cannot overshoot);
     // the stiff wheel/tire/body loop along the tire is solved implicitly, so a light wheel
     // under a big drive or brake impulse settles on its true slip in one step.
-    let brake_front = 0.5 * spec.brakes.max_nm * spec.brakes.bias_front * brake_pedal;
-    let brake_rear = 0.5 * spec.brakes.max_nm * (1.0 - spec.brakes.bias_front) * brake_pedal;
+    let brake_nm = spec.brakes.max_nm * assists.brake_boost;
+    let brake_front = 0.5 * brake_nm * spec.brakes.bias_front * brake_pedal;
+    let brake_rear = 0.5 * brake_nm * (1.0 - spec.brakes.bias_front) * brake_pedal;
     let handbrake = if state.handbrake {
         0.5 * spec.brakes.handbrake_nm
     } else {
@@ -833,7 +870,8 @@ pub fn step(
         let v_lat = dot(v_c, s_axis);
 
         let load_factor = 1.0 - tires.load_sens * (w.load - mean_load) / mean_load;
-        let load_factor = load_factor.clamp(LOAD_FACTOR_MIN, LOAD_FACTOR_MAX) * friction[i];
+        let load_factor =
+            load_factor.clamp(LOAD_FACTOR_MIN, LOAD_FACTOR_MAX) * friction[i] * grip_boost;
         let tire = Tire {
             mu_x: tires.grip_long * load_factor,
             mu_y: tires.grip_lat * load_factor * if front { 1.0 } else { rear_lat },
@@ -938,18 +976,42 @@ pub fn step(
     force = add_scaled(force, state.vel, -qbar * spec.aero.cd);
     force = add_scaled(force, up, -qbar * speed * spec.aero.downforce_coef);
 
-    // 7. Stability assist: damp yaw beyond what the steering asks for (oversteer only).
-    if assists.stability > 0.0 && abs(fwd_speed) > 2.0 {
+    // 7. Stability assist: damp yaw beyond what the steering asks for (oversteer only), and
+    // a sideways slide beyond the tires' peak slip angle. The handbrake asks for a slide, so
+    // it lets go while that is held, and the steering assist pivots the car instead.
+    let grounded = state.wheels.iter().any(|w| w.grounded);
+    let yaw = dot(state.ang_vel, up);
+    let gate = unit(abs(fwd_speed) / 5.0);
+    if assists.stability > 0.0 && abs(fwd_speed) > 2.0 && !state.handbrake {
         let wheelbase = spec.wheelbase_m;
         let (s, c) = (sin(state.steer_angle_rad), cos(state.steer_angle_rad));
         let mut wanted = -fwd_speed * s / (c * wheelbase);
-        let limit = tires.grip_lat * GRAVITY / abs(fwd_speed);
+        let limit = tires.grip_lat * grip_boost * GRAVITY / abs(fwd_speed);
         wanted = clamp_abs(wanted, limit);
-        let yaw = dot(state.ang_vel, up);
         let excess = yaw - wanted;
         if yaw * excess > 0.0 || yaw * wanted < 0.0 {
-            let gate = unit(abs(fwd_speed) / 5.0);
             let t = -unit(assists.stability) * STABILITY_GAIN * excess * inertia[1] * gate;
+            torque = add_scaled(torque, up, t);
+        }
+        if grounded {
+            let side = dot(state.vel, right);
+            let allowed = abs(fwd_speed) * sin(alpha_peak) / cos(alpha_peak);
+            let over = if side > allowed {
+                side - allowed
+            } else if side < -allowed {
+                side + allowed
+            } else {
+                0.0
+            };
+            let f = -unit(assists.stability) * SLIDE_GAIN * mass * over * gate;
+            force = add_scaled(force, right, f);
+        }
+    }
+    if assists.steering > 0.0 && state.handbrake && grounded && fwd_speed > HANDBRAKE_PIVOT_SPEED {
+        // Steering right (positive) is a clockwise, negative yaw.
+        let target = -state.steer * HANDBRAKE_YAW_RATE * unit(assists.steering);
+        if target * yaw >= 0.0 && abs(yaw) < abs(target) {
+            let t = HANDBRAKE_YAW_GAIN * (target - yaw) * inertia[1] * gate;
             torque = add_scaled(torque, up, t);
         }
     }

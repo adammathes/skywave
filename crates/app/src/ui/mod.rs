@@ -18,6 +18,7 @@ mod pages;
 pub use menu::{Effect, Item, MenuInput, MenuNav, Nav, Repeat, Unit, Widget};
 pub use pages::{ItemId, Page};
 
+use crate::camera::CameraMode;
 use crate::daylight::{Clock, CLOCK_SPEEDS, DAY_SECONDS};
 use crate::input::{
     Action, AxisOptions, Binding, Bindings, Conflict, DeviceKind, InputMapper, InputState, PadAxis,
@@ -27,7 +28,7 @@ use crate::map::view::{
     FullMap, MapGeom, MINIMAP_RANGES_M, ZOOM_OCTAVES_PER_NOTCH, ZOOM_OCTAVES_PER_S,
 };
 use crate::map::MapPoi;
-use crate::settings::{Settings, SettingsStore};
+use crate::settings::{Handling, Settings, SettingsStore};
 use crate::App;
 use render::{Hud, HudBuilder, HudLayout, RenderStats, Sky};
 use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
@@ -85,6 +86,8 @@ pub struct Ui {
     bindings: Bindings,
     /// The mapper needs the new bindings.
     bindings_changed: bool,
+    /// The Camera page picked another camera.
+    camera_changed: bool,
     /// Something changed since the last save.
     dirty: bool,
     store: Option<Box<dyn SettingsStore>>,
@@ -123,6 +126,7 @@ impl Ui {
             settings: Settings::default(),
             bindings: Bindings::default(),
             bindings_changed: false,
+            camera_changed: false,
             dirty: false,
             store: None,
             menu: None,
@@ -245,6 +249,22 @@ impl Ui {
     /// Takes the "bindings changed" flag: true once after every change.
     fn take_bindings_changed(&mut self) -> bool {
         std::mem::take(&mut self.bindings_changed)
+    }
+
+    /// Takes the "camera picked on the Camera page" flag: true once after every pick.
+    fn take_camera_changed(&mut self) -> bool {
+        std::mem::take(&mut self.camera_changed)
+    }
+
+    /// The player cycled to camera `mode` while driving: remember it (and save now, so the
+    /// next session starts there).
+    fn remember_camera(&mut self, mode: CameraMode) {
+        if mode != self.settings.camera {
+            self.settings.camera = mode;
+            self.settings = self.settings.sanitized();
+            self.dirty = true;
+            self.save_if_dirty();
+        }
     }
 
     /// Reads the settings document from `store` and keeps the store for saving.
@@ -391,6 +411,19 @@ impl Ui {
                 self.settings.minimap_range_m = MINIMAP_RANGES_M[i.min(MINIMAP_RANGES_M.len() - 1)];
                 self.dirty = true;
             }
+            Effect::Choose(ItemId::Handling, i) => {
+                self.settings.handling = Handling::ALL[i.min(Handling::ALL.len() - 1)];
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::CameraView, i) => {
+                self.settings.camera = CameraMode::CYCLE[i.min(CameraMode::CYCLE.len() - 1)];
+                self.camera_changed = true;
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::Dashboard, i) => {
+                self.settings.dashboard = i == 0;
+                self.dirty = true;
+            }
             Effect::Choose(..) => {}
             Effect::Activate(id) => self.activate(id),
             Effect::Capture {
@@ -453,6 +486,10 @@ impl Ui {
                 self.settings.minimap_rotate = on;
                 self.dirty = true;
             }
+            ItemId::CameraShake => {
+                self.settings.camera_shake = on;
+                self.dirty = true;
+            }
             _ => {}
         }
     }
@@ -475,6 +512,18 @@ impl Ui {
             }
             ItemId::ResolutionScale => {
                 self.settings.resolution_scale = v;
+                self.dirty = true;
+            }
+            ItemId::CockpitFov => {
+                self.settings.cockpit_fov_deg = v;
+                self.dirty = true;
+            }
+            ItemId::SeatHeight => {
+                self.settings.seat_height_cm = v;
+                self.dirty = true;
+            }
+            ItemId::SeatForward => {
+                self.settings.seat_forward_cm = v;
                 self.dirty = true;
             }
             ItemId::TimeOfDay => {
@@ -689,7 +738,11 @@ impl App {
         if self.ui.take_bindings_changed() {
             input.set_bindings(self.ui.bindings.clone());
         }
+        if self.ui.take_camera_changed() {
+            self.camera.set_mode(self.ui.settings.camera);
+        }
         self.apply_clock_speed();
+        self.apply_settings();
         let steps = if self.ui.is_open() {
             Steps {
                 count: 0,
@@ -703,6 +756,9 @@ impl App {
             self.update(&state, dt)
         };
         self.alpha = steps.alpha;
+        if std::mem::take(&mut self.camera_cycled) {
+            self.ui.remember_camera(self.camera.selected());
+        }
         let stream_steps = if steps.count > 0 {
             steps.count
         } else {
@@ -756,7 +812,23 @@ impl App {
     /// [`App::frame`]) and saves there from now on.
     pub fn set_settings_store(&mut self, store: Box<dyn SettingsStore>) {
         self.ui.set_store(store);
+        if !self.camera_from_scene {
+            self.camera.set_mode(self.ui.settings.camera);
+        }
         self.apply_clock_speed();
+        self.apply_settings();
+    }
+
+    /// The handling preset drives the car's assists; the camera settings reach the rig.
+    fn apply_settings(&mut self) {
+        let s = &self.ui.settings;
+        self.drive.assists = s.handling.assists();
+        self.camera.prefs = crate::camera::CameraPrefs {
+            cockpit_fov_deg: s.cockpit_fov_deg,
+            seat_up_m: s.seat_height_cm * 0.01,
+            seat_forward_m: s.seat_forward_cm * 0.01,
+            shake: s.camera_shake,
+        };
     }
 
     /// The clock runs at the clock-speed setting, unless the scene froze it at its time.
