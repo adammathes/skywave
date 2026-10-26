@@ -44,7 +44,7 @@ Street lights are warm sodium (80s) point lights with a 25 m radius; neon signs 
 Ocean/canal water: planar reflection render at half res of sky + near chunks, Fresnel blend, low-poly waves by vertex displacement. Wet-road mode: darker asphalt, screen-space reflection of emissives only (cheap), puddle mask by noise. Rain itself is a later feature.
 
 ## Cameras
-First person cockpit (eye position from the spec; head sways with suspension and g-forces, small lag; dashboard and wheel visible; mirrors are optional render-to-texture later), hood, chase near/mid/far (spring-damped follow with lookahead, collision pushes in), cinematic orbit when idle. FOV 75° cockpit, 65° chase. All switchable by one key/button, order cycles.
+First person cockpit (eye position from the spec; head sways with suspension and g-forces, small lag; dashboard and wheel visible; mirrors are optional render-to-texture later), hood, chase near/mid/far (spring-damped follow with lookahead, collision pushes in), cinematic orbit when idle. Vertical FOV 58° cockpit (≈ 92° horizontal at 16:9), 55° hood, 50° chase. All switchable by one key/button, order cycles.
 
 ## Mesh and instance budgets
 Chunk meshes: pooled vertex/index buffers (fixed capacity, free-list per chunk slot), up to 256k vertices per chunk (32-bit indices). Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 400 web, ≤ 1000 native. Vertex: position f32×3, normal f32×3, uv u16×2 (atlas), color rgba8, emissive rgba8 (36 bytes; emissive alpha bit 7 = window flag, low 7 bits = intensity 0..8×). Props and cars use 2 LODs (full within 80 m, half beyond); chunks beyond 400 m drop facade detail to silhouettes.

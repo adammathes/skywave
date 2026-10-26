@@ -1,6 +1,7 @@
 // Forward pass: the analytic sky, then Lambert-lit, atlas-textured meshes with cascaded sun
-// shadows, hemisphere sky ambient, up to 8 point lights, the emissive channel and
-// aerial-perspective fog.
+// shadows, hemisphere sky ambient (plus cabin light for a car's interior), up to 8 point
+// and spot lights, the emissive channel (soft-capped after exposure) and aerial-perspective
+// fog.
 //
 // Each fragment stage has two entry points: `fs_*` writes HDR radiance (Rgba16Float target,
 // tonemapped later) and `fs_*_ldr` tonemaps in place for targets without float rendering.
@@ -137,7 +138,20 @@ struct MeshOut {
     @location(3) uv: vec2<f32>,
     // rgb: emissive radiance (kcd/m²), never tinted by the instance or the atlas.
     @location(4) emissive: vec3<f32>,
+    // Share of the frame's cabin light.
+    @location(5) cabin: f32,
 };
+
+// Soft cap on emissive radiance in post-exposure terms: unchanged well under the cap,
+// approaching it far over (a fourth-power knee), hue kept.
+fn cap_emissive(e: vec3<f32>) -> vec3<f32> {
+    let cap = frame.emissive.w;
+    let m = max(e.r, max(e.g, e.b)) * frame.params.x / cap;
+    if m <= 0.0 {
+        return e;
+    }
+    return e * inverseSqrt(sqrt(1.0 + m * m * m * m));
+}
 
 @vertex
 fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
@@ -153,12 +167,30 @@ fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
     let a = u32(round(v.emissive.a * 255.0));
     let window = select(1.0, frame.emissive.y, (a & 128u) != 0u);
     let scale = f32(a & 127u) * (8.0 / 127.0);
-    out.emissive = v.emissive.rgb * (scale * window * frame.emissive.x);
+    out.emissive = cap_emissive(v.emissive.rgb * (scale * window * frame.emissive.x * i.params.x));
+    out.cabin = i.params.y;
     return out;
 }
 
+// Cosine of the angle off a spot's `axis` toward unit `d`, with angles above and below the
+// axis (against world up) stretched `squash` times: a beam flatter than it is wide.
+fn spot_cos(d: vec3<f32>, axis: vec3<f32>, squash: f32) -> f32 {
+    let f = dot(d, axis);
+    if squash <= 1.0 {
+        return f;
+    }
+    let right = normalize(cross(axis, vec3<f32>(0.0, 1.0, 0.0)));
+    let up = cross(right, axis);
+    let u = dot(d, up) * squash;
+    let r = dot(d, right);
+    return f * inverseSqrt(max(f * f + u * u + r * r, 1e-8));
+}
+
 // Smooth inverse-square point lights (Karis 2013 window): illuminance in klux, reaching 0
-// at each light's radius. The 0.1 m² floor stands for the bulb's size.
+// at each light's radius. The 0.1 m² floor stands for the bulb's size. A spot light also
+// fades from full intensity to nothing across its cone (smoothstep in the cosine off its
+// axis, optionally flattened vertically) and may soften the surface cosine (wrap); an omni
+// light's cone covers every direction.
 fn point_lights(world_pos: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     var sum = vec3<f32>(0.0);
     let count = min(u32(frame.emissive.z), MAX_POINT_LIGHTS);
@@ -169,8 +201,13 @@ fn point_lights(world_pos: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
         let ratio = d2 * light.color.w;
         if ratio < 1.0 {
             let window = (1.0 - ratio * ratio) * (1.0 - ratio * ratio);
-            let ndl = max(dot(n, to_light * inverseSqrt(max(d2, 1e-8))), 0.0);
-            sum += light.color.rgb * (ndl * window / (d2 + 0.1));
+            let l = to_light * inverseSqrt(max(d2, 1e-8));
+            let wrap = light.cone.z;
+            let ndl = max((dot(n, l) + wrap) / (1.0 + wrap), 0.0);
+            let off = spot_cos(-l, light.spot.xyz, light.cone.y);
+            let c = clamp((off - light.spot.w) * light.cone.x, 0.0, 1.0);
+            let cone = c * c * (3.0 - 2.0 * c);
+            sum += light.color.rgb * (ndl * window * cone / (d2 + 0.1));
         }
     }
     return sum;
@@ -242,8 +279,12 @@ fn shade(in: MeshOut) -> vec3<f32> {
     if ndl > 0.0 {
         vis = sun_visibility(in.world_pos, n, ndl);
     }
-    // Hemisphere ambient from the sky model: mean sky radiance above, lit ground below.
-    let ambient = mix(frame.sky_ground.rgb, frame.sky_up.rgb, n.y * 0.5 + 0.5);
+    // Hemisphere ambient from the sky model: mean sky radiance above, lit ground below. A car's
+    // interior adds the cabin light, full on surfaces facing up (the dash, seats, wheel) and a
+    // tenth on those facing down (the headliner): it comes in through the glass and off the
+    // dash, not from the roof.
+    let ambient = mix(frame.sky_ground.rgb, frame.sky_up.rgb, n.y * 0.5 + 0.5)
+        + frame.cabin_light.rgb * (in.cabin * (0.55 + 0.45 * n.y));
     // Point-light illuminance / pi is the luminance of a white Lambertian surface, as for
     // the sun.
     let lamps = point_lights(in.world_pos, n) * (1.0 / 3.14159265);

@@ -23,7 +23,8 @@ pub struct CameraTuning {
     /// Hood camera: height above the belt line, m, and how far ahead of the cockpit eye, m.
     pub hood_above_belt_m: f32,
     pub hood_ahead_m: f32,
-    /// Vertical fields of view, degrees.
+    /// Vertical fields of view, degrees (at 16:9 the horizontal one is wider: 58° vertical
+    /// is ≈ 92° horizontal).
     pub cockpit_fov_deg: f32,
     pub hood_fov_deg: f32,
     pub chase_fov_deg: f32,
@@ -46,6 +47,12 @@ pub struct CameraTuning {
     /// Chase follow springs (critically damped), natural frequency rad/s: the camera's yaw
     /// chasing the car's heading (lag through corners)...
     pub chase_yaw_hz: f32,
+    /// ...plus a lead into the turn: the yaw it chases (and the look-ahead) swings toward
+    /// the way the wheel is turned by up to this much, degrees, faded in between these
+    /// speeds, m/s. In a steady corner it about cancels the spring's lag, so the car stays
+    /// framed from behind and the road ahead of the turn shows.
+    pub chase_lead_deg: f32,
+    pub chase_lead_speed_mps: [f32; 2],
     /// ...and its position chasing the target spot, damped relative to the car's velocity
     /// so speed adds no lag, only acceleration does (pull back under power, push in braking).
     pub chase_pos_hz: f32,
@@ -81,23 +88,30 @@ pub struct CameraTuning {
     pub orbit_rate: f32,
 }
 
+/// Tuning notes (M1 tuning pass): FOVs were 75° cockpit, 70° hood, 65° chase, which bent
+/// the street at the edges of a 16:9 frame; the chase distances grew with the narrower
+/// chase FOV so the car fills about the same share of the frame (≈ 20% of its width from
+/// the mid camera). The yaw spring was 4 rad/s, which lagged ~11° behind the car through a
+/// 0.8 g corner at 20 m/s; 6.5 halves that and the lead takes up the rest.
 pub const TUNING: CameraTuning = CameraTuning {
     hood_above_belt_m: 0.30,
     hood_ahead_m: 1.0,
-    cockpit_fov_deg: 75.0,
-    hood_fov_deg: 70.0,
-    chase_fov_deg: 65.0,
+    cockpit_fov_deg: 58.0,
+    hood_fov_deg: 55.0,
+    chase_fov_deg: 50.0,
     cockpit_near_m: 0.1,
     near_m: 0.25,
     far_m: 3000.0,
 
-    chase_distance_m: [4.2, 6.0, 9.0],
-    chase_height_m: [1.5, 2.1, 2.9],
+    chase_distance_m: [5.0, 7.0, 10.5],
+    chase_height_m: [1.65, 2.3, 3.25],
     chase_target_height_m: 1.0,
     chase_lookahead_m: 1.0,
     chase_lookahead_s: 0.15,
     chase_lookahead_max_m: 5.0,
-    chase_yaw_hz: 4.0,
+    chase_yaw_hz: 6.5,
+    chase_lead_deg: 8.0,
+    chase_lead_speed_mps: [4.0, 15.0],
     chase_pos_hz: 5.0,
     min_clearance_m: 0.4,
     chase_min_elev_deg: 3.0,
@@ -249,6 +263,15 @@ fn wrap_pi(x: f32) -> f32 {
 fn heading(drive: &Drive, alpha: f32) -> f32 {
     let f = drive.pose(alpha).forward();
     (-f.x).atan2(-f.z)
+}
+
+/// The chase camera's lead into the turn, rad (positive left, like yaw): toward the way the
+/// wheel is turned, in proportion, faded in with speed.
+fn chase_lead(drive: &Drive, t: &CameraTuning) -> f32 {
+    let [lo, hi] = t.chase_lead_speed_mps;
+    let s = ((drive.state.speed_mps.abs() - lo) / (hi - lo)).clamp(0.0, 1.0);
+    // Steering right (positive) turns the heading clockwise: a negative yaw.
+    -drive.state.steer.clamp(-1.0, 1.0) * t.chase_lead_deg.to_radians() * s * s * (3.0 - 2.0 * s)
 }
 
 /// Horizontal unit vector at yaw `y`.
@@ -458,8 +481,8 @@ impl CameraRig {
             s.look_pitch = s.look_pitch.clamp(-1.2, 1.2);
         }
 
-        // Chase yaw spring toward the car's heading.
-        let target_yaw = heading(drive, 1.0);
+        // Chase yaw spring toward the car's heading, led into the turn.
+        let target_yaw = heading(drive, 1.0) + chase_lead(drive, &t);
         let w = t.chase_yaw_hz;
         let err = wrap_pi(target_yaw - s.yaw);
         s.yaw_rate += (w * w * err - 2.0 * w * s.yaw_rate) * dt;
@@ -544,7 +567,7 @@ impl CameraRig {
                 let ahead = (t.chase_lookahead_m + t.chase_lookahead_s * speed)
                     .min(t.chase_lookahead_max_m);
                 let dir = if self.look_back { -1.0 } else { 1.0 };
-                let yaw = heading(drive, alpha);
+                let yaw = heading(drive, alpha) + chase_lead(drive, t);
                 let target = self.pivot(drive, alpha) + yaw_dir(yaw) * (ahead * dir);
                 CameraPose {
                     eye,
@@ -624,9 +647,11 @@ mod tests {
     fn fov_is_wide_in_the_cockpit_and_narrower_in_chase() {
         let (d, mut rig) = setup(CameraMode::Cockpit);
         let fov = |rig: &CameraRig| rig.pose(&d, 1.0).fov_y_rad.to_degrees();
-        assert!((fov(&rig) - 75.0).abs() < 1e-3);
+        assert!((fov(&rig) - 58.0).abs() < 1e-3);
+        rig.set_mode(CameraMode::Hood);
+        assert!((fov(&rig) - 55.0).abs() < 1e-3);
         rig.set_mode(CameraMode::ChaseMid);
-        assert!((fov(&rig) - 65.0).abs() < 1e-3);
+        assert!((fov(&rig) - 50.0).abs() < 1e-3);
     }
 
     #[test]
@@ -774,6 +799,43 @@ mod tests {
         );
         assert!(pose.forward().y < -0.1, "pitched down");
         assert!(pose.forward().dot(car.forward()) > 0.9);
+    }
+
+    /// Through a steady corner the lead takes up the spring's lag: the camera stays close
+    /// behind the car instead of swinging out to the inside of the turn.
+    #[test]
+    fn chase_leads_into_the_turn_at_speed() {
+        let run = |lead: f32| {
+            let (mut d, mut rig) = setup(CameraMode::ChaseMid);
+            rig.tuning.chase_lead_deg = lead;
+            let g = flat();
+            let input = InputState::default();
+            let mut worst = 0.0f32;
+            for i in 0..1200 {
+                let s = i as f32 * DT;
+                let car = VehicleInput {
+                    throttle: ((14.0 - d.state.speed_mps) * 0.3).clamp(0.0, 1.0),
+                    steer: if s > 6.0 { 0.5 } else { 0.0 },
+                    ..VehicleInput::default()
+                };
+                d.step(car, &g);
+                rig.step(&d, &input, DT, &g);
+                if s > 8.0 {
+                    let off = wrap_pi(rig.curr.yaw - heading(&d, 1.0));
+                    worst = worst.max(off.abs());
+                }
+            }
+            worst.to_degrees()
+        };
+        let (with, without) = (run(TUNING.chase_lead_deg), run(0.0));
+        println!(
+            "chase yaw offset in a steady corner: {with:.1}° with lead, {without:.1}° without"
+        );
+        assert!(with < 0.6 * without, "lead {with}° vs no lead {without}°");
+        // Standing still the wheel can turn without swinging the camera.
+        let (mut d, rig) = setup(CameraMode::ChaseMid);
+        d.state.steer = 1.0;
+        assert_eq!(chase_lead(&d, &rig.tuning), 0.0);
     }
 
     #[test]

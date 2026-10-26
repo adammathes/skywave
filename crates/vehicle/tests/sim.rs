@@ -7,7 +7,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use vehicle::sim::DT;
+use vehicle::sim::{steer_target, DT, REVERSE_MAX_MPS};
 use vehicle::{step, Assists, FlatGround, VehicleInput, VehicleSpec, VehicleState};
 
 const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
@@ -575,6 +575,113 @@ fn upside_down_car_rights_itself() {
     }
 }
 
+/// Full stick from `mps` for 4 s on a light throttle (more would spin the rear-drive cars
+/// and measure a drift, not the steering): the road-wheel angle at the end, the mean
+/// lateral g and the front tires' mean slip relative to their peak over the last 2 s.
+fn full_stick_at(spec: &VehicleSpec, assists: &Assists, mps: f32) -> (f32, f32, f32) {
+    let mut s = spawn(spec);
+    up_to_speed(spec, &mut s, mps);
+    let (mut g, mut slip, mut n) = (0.0, 0.0, 0.0);
+    for i in 0..4 * STEPS_PER_S {
+        step(spec, &mut s, &input(0.15, 0.0, 1.0), assists, &GROUND);
+        if i >= 2 * STEPS_PER_S {
+            g += s.lat_g;
+            slip += 0.5 * (s.wheels[0].slip + s.wheels[1].slip);
+            n += 1.0;
+        }
+    }
+    assert_finite(&s);
+    (s.steer_angle_rad.to_degrees(), g / n, slip / n)
+}
+
+/// Grip-limited steering (on in the default assists). Before it, full stick asked for the
+/// spec's speed-sensitive lock: corsair 22.4° and palisade 22.5° at 30 m/s, far past what
+/// the tires use, so the fronts scrubbed at 2–4× their peak slip. Now full stick aims the
+/// fronts their peak slip angle off the front axle's travel (7° and 9.5° on a straight at
+/// speed, plus the turn's kinematic angle once turning), so they sit near their peak with
+/// more lateral g, a slide gets counter-steer, and full lock is still there below 8 m/s.
+/// The test prints both.
+#[test]
+fn steering_at_speed_is_grip_limited() {
+    for spec in cars() {
+        let (on, off) = (Assists::LIGHT, Assists::OFF);
+        // Rolling straight ahead (heading 0 faces -z) at `v`: the full-stick target.
+        let target = |assists: &Assists, v: f32| {
+            let mut s = spawn(&spec);
+            s.vel = [0.0, 0.0, -v];
+            steer_target(&spec, assists, &s, 1.0).to_degrees()
+        };
+        for v in [0.0, 3.0, 6.0, 7.9, -6.0] {
+            assert_eq!(
+                target(&on, v),
+                target(&off, v),
+                "{} lock at {v} m/s",
+                spec.id
+            );
+        }
+        let (old30, new30) = (target(&off, 30.0), target(&on, 30.0));
+        println!(
+            "{:15} full stick at 30 m/s: {old30:.1}° speed-sensitive, {new30:.1}° grip-limited",
+            spec.id
+        );
+        assert!(
+            (new30 - spec.tires.slip_peak_deg).abs() < 1e-3,
+            "{} {new30}°",
+            spec.id
+        );
+        assert!(new30 < 0.5 * old30);
+        // Sliding sideways to the left, hands off: the wheels follow the travel (counter-
+        // steer) instead of pointing straight.
+        let mut s = spawn(&spec);
+        s.vel = [-4.0, 0.0, -20.0];
+        assert!(steer_target(&spec, &on, &s, 0.0) < -0.15);
+        assert_eq!(steer_target(&spec, &off, &s, 0.0), 0.0);
+        for mps in [15.0, 25.0] {
+            let before = Assists {
+                steering: 0.0,
+                ..Assists::LIGHT
+            };
+            let (a0, g0, slip0) = full_stick_at(&spec, &before, mps);
+            let (angle, g, slip) = full_stick_at(&spec, &on, mps);
+            println!(
+                "{:15} full stick from {mps} m/s: {angle:.1}°, {g:.2} g, front slip {slip:.2} of \
+                 peak (speed-sensitive lock: {a0:.1}°, {g0:.2} g, {slip0:.2})",
+                spec.id
+            );
+            assert!(g > 0.95 * g0, "{} lost grip: {g} g vs {g0} g", spec.id);
+            assert!(g > 0.6, "{} turns at only {g} g at {mps} m/s", spec.id);
+            assert!(
+                slip < 2.0,
+                "{} front tires far past their peak ({slip}) at {mps} m/s",
+                spec.id
+            );
+        }
+    }
+}
+
+/// Reverse is capped at 8 m/s (before: it ran up to ~20 m/s, first gear's top speed).
+#[test]
+fn reverse_is_capped() {
+    for spec in cars() {
+        let mut s = spawn(&spec);
+        let mut fastest: f32 = 0.0;
+        for _ in 0..12 * STEPS_PER_S {
+            step(
+                &spec,
+                &mut s,
+                &input(0.0, 1.0, 0.0),
+                &Assists::default(),
+                &GROUND,
+            );
+            fastest = fastest.max(-s.speed_mps);
+        }
+        println!("{:15} reverse top speed {fastest:.2} m/s", spec.id);
+        assert_eq!(s.gear, -1);
+        assert!(fastest <= REVERSE_MAX_MPS + 0.3, "{} {fastest}", spec.id);
+        assert!(fastest > REVERSE_MAX_MPS - 1.5, "{} {fastest}", spec.id);
+    }
+}
+
 /// The scripted 10 s drive: full throttle, a steering sweep, a stop, a handbrake flick.
 fn replay_input(i: usize) -> VehicleInput {
     let t = i as f32 * DT;
@@ -617,7 +724,7 @@ fn replay_is_deterministic_and_pinned() {
     // Pinned hashes of the 10 s scripted drive. A deliberate change to the sim, a spec or the
     // script moves them: run `cargo test -p vehicle --test sim replay -- --nocapture`, copy the
     // printed hashes here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0x5e97_08cd_aef6_8212, 0xa13e_8769_6dc8_c0a3];
+    const PINNED: [u64; 2] = [0x2699_71ff_d7ab_3649, 0x2e3c_ee38_7736_a728];
     let specs = cars();
     let mut hashes = [0u64; 2];
     for (k, spec) in specs.iter().enumerate() {

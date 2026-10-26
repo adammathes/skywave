@@ -277,7 +277,9 @@ impl<'a, 'b> Interior<'a, 'b> {
         let xd = -i.driver_offset;
         let n_dials = i.dials as usize;
         let hw = 0.19f32;
-        let zc = self.z(dx - 0.10);
+        // The face stands just behind the dash's rear lip (dx + 0.015), under the hood: set
+        // into the dash (dx - 0.10) its lower half was below the dash top as the driver sees it.
+        let zc = self.z(dx + 0.025);
         let tilt = norm([0.0, 0.22, 1.0]);
         self.soup.aabb(
             [xd - hw, dh + 0.06, self.z(dx - 0.17)],

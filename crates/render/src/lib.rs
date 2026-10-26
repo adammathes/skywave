@@ -103,6 +103,25 @@ pub struct MeshInstance {
     pub transform: [[f32; 4]; 4],
     /// Linear RGBA multiplier for the mesh's vertex colors.
     pub color: [f32; 4],
+    /// Multiplier for the mesh's vertex emissive, applied before [`Sky::emissive_cap`]:
+    /// 1 as authored, 0 dark (lamps that switch, instruments on a dimmer).
+    pub glow: f32,
+    /// Share, `0..=1`, of [`Sky::cabin_light`] this instance receives as extra ambient: 1
+    /// for a car's interior seen from the driver's seat, 0 for everything else.
+    pub cabin: f32,
+}
+
+impl MeshInstance {
+    /// `mesh` at `transform`, untinted, glowing as authored, outside any cabin.
+    pub fn new(mesh: MeshId, transform: [[f32; 4]; 4]) -> MeshInstance {
+        MeshInstance {
+            mesh,
+            transform,
+            color: [1.0; 4],
+            glow: 1.0,
+            cabin: 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -166,6 +185,17 @@ pub struct Sky {
     /// (so up to 5× this in all, spread from a few pixels to a sixth of the screen); 0
     /// skips bloom entirely.
     pub bloom_strength: f32,
+    /// Most an emissive may be after exposure (tonemapper input, the scale of
+    /// `bloom_threshold`), so a sign that reads at dusk does not blow out into a blob at
+    /// night. A soft knee: values well under it pass unchanged, values far over it land on
+    /// it, hue kept. Daylight exposure leaves every emissive far under it.
+    pub emissive_cap: f32,
+    /// Ambient radiance, linear RGB kcd/m², added for instances by their
+    /// [`MeshInstance::cabin`]: the light inside a car (through the windows by day, the dome
+    /// and instrument backlight by night) that the sky hemisphere misses because the roof
+    /// and the cabin's own shadow hide it. The shader weights it by the surface's facing: all
+    /// of it on surfaces facing up, a tenth on those facing down.
+    pub cabin_light: [f32; 3],
 }
 
 impl Default for Sky {
@@ -184,23 +214,53 @@ impl Default for Sky {
             window_emissive_scale: 0.0,
             bloom_threshold: 1.0,
             bloom_strength: 0.08,
+            emissive_cap: 8.0,
+            cabin_light: [0.0; 3],
         }
     }
 }
 
-/// An omnidirectional light with a smooth inverse-square falloff that reaches zero at
-/// `radius`: a street lamp head, a neon sign's spill. It lights every mesh in the forward
-/// pass (no shadows).
+/// A light with a smooth inverse-square falloff that reaches zero at `radius`: a street
+/// lamp head, a neon sign's spill, or (with a `direction`) a headlamp's cone. It lights every
+/// mesh in the forward pass (no shadows).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointLight {
     /// World position, meters.
     pub position: [f32; 3],
     /// Luminous intensity, linear RGB, in kilocandela: the illuminance in klux it gives a
-    /// surface facing it 1 m away. A sodium street lamp is ≈ 2–3 kcd (≈ 40 lux on the
-    /// road 8 m below it).
+    /// surface facing it 1 m away (on the cone's axis for a spot). A sodium street lamp is
+    /// ≈ 2–3 kcd (≈ 40 lux on the road 8 m below it); a halogen headlamp's beam ≈ 10–40.
     pub color: [f32; 3],
     /// Distance at which the light has faded to nothing, meters (≈ 25 for a street lamp).
     pub radius: f32,
+    /// Spot axis (unit, world space), or zero for a light that shines every way.
+    pub direction: [f32; 3],
+    /// Spot cone as cosines of the angle off the axis: full intensity inside `[1]`, fading
+    /// to nothing at `[0]` (so `[0] < [1]`). Ignored without a `direction`.
+    pub cone_cos: [f32; 2],
+    /// Spot only: angles above and below the axis (against world up) count this many times
+    /// before the cone is applied, so the beam is this much narrower vertically than
+    /// across: a headlamp's flat beam. 1 is a round cone; ignored for a vertical axis.
+    pub cone_squash: f32,
+    /// Spot only: how far the surface's cosine is flattened, `(n·l + wrap) / (1 + wrap)`
+    /// (0 is Lambert). A headlamp throws most of its light toward the horizon, so the road
+    /// far ahead, met at a grazing angle, still reads; this stands in for that distribution.
+    pub wrap: f32,
+}
+
+impl PointLight {
+    /// A light shining every way.
+    pub fn omni(position: [f32; 3], color: [f32; 3], radius: f32) -> PointLight {
+        PointLight {
+            position,
+            color,
+            radius,
+            direction: [0.0; 3],
+            cone_cos: [-1.0, -1.0],
+            cone_squash: 1.0,
+            wrap: 0.0,
+        }
+    }
 }
 
 /// Everything the renderer needs for one frame.
@@ -299,6 +359,7 @@ struct FrameUniform {
     emissive: [f32; 4],
     post: [f32; 4],
     screen: [f32; 4],
+    cabin_light: [f32; 4],
     lights: [PointLightUniform; MAX_POINT_LIGHTS],
 }
 
@@ -310,6 +371,11 @@ struct PointLightUniform {
     pos_radius: [f32; 4],
     /// rgb intensity (kcd), w 1 / radius².
     color: [f32; 4],
+    /// xyz spot axis (unit, or zero for an omni light), w cosine where the cone ends.
+    spot: [f32; 4],
+    /// x 1 / (cosine of full intensity − cosine where the cone ends), y vertical squash
+    /// (1 round), z wrap (0 Lambert), w unused.
+    cone: [f32; 4],
 }
 
 impl PointLightUniform {
@@ -317,9 +383,26 @@ impl PointLightUniform {
         let r = light.radius.max(1e-3);
         let [x, y, z] = light.position;
         let [cr, cg, cb] = light.color.map(|c| c.max(0.0));
+        let axis = Vec3::from(light.direction).normalize_or_zero();
+        // An omni light's "cone" ends below -1, so every direction is inside it.
+        let (outer, inner, squash, wrap) = if axis == Vec3::ZERO {
+            (-2.0, -1.0, 1.0, 0.0)
+        } else {
+            let o = light.cone_cos[0].clamp(-1.0, 1.0);
+            let i = light.cone_cos[1].clamp(o + 1e-4, 1.0 + 1e-4);
+            // A vertical axis has no "above" to squash.
+            let squash = if axis.y.abs() > 0.999 {
+                1.0
+            } else {
+                light.cone_squash.max(1.0)
+            };
+            (o, i, squash, light.wrap.max(0.0))
+        };
         PointLightUniform {
             pos_radius: [x, y, z, r],
             color: [cr, cg, cb, 1.0 / (r * r)],
+            spot: [axis.x, axis.y, axis.z, outer],
+            cone: [1.0 / (inner - outer), squash, wrap, 0.0],
         }
     }
 }
@@ -340,6 +423,8 @@ struct InstanceRaw {
     /// Inverse-transpose of the model's upper 3x3, columns padded to vec4.
     normal: [[f32; 4]; 3],
     color: [f32; 4],
+    /// x glow (emissive multiplier), y cabin-light share, zw unused.
+    params: [f32; 4],
 }
 
 impl InstanceRaw {
@@ -354,6 +439,7 @@ impl InstanceRaw {
                 n.z_axis.extend(0.0).to_array(),
             ],
             color: inst.color,
+            params: [inst.glow.max(0.0), inst.cabin.clamp(0.0, 1.0), 0.0, 0.0],
         }
     }
 }
@@ -361,9 +447,10 @@ impl InstanceRaw {
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
     0 => Float32x3, 1 => Float32x3, 2 => Unorm16x2, 3 => Unorm8x4, 4 => Unorm8x4,
 ];
-const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
+const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
     5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4,
     9 => Float32x4, 10 => Float32x4, 11 => Float32x4, 12 => Float32x4,
+    13 => Float32x4,
 ];
 const HUD_ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
     0 => Float32x4, 1 => Float32x4, 2 => Unorm8x4,
@@ -1309,7 +1396,7 @@ impl Renderer {
                 scene.sky.emissive_boost.max(0.0),
                 scene.sky.window_emissive_scale.clamp(0.0, 1.0),
                 scene.lights.len().min(MAX_POINT_LIGHTS) as f32,
-                0.0,
+                scene.sky.emissive_cap.max(1e-3),
             ],
             post: [
                 if self.hdr {
@@ -1327,6 +1414,7 @@ impl Renderer {
                 1.0 / self.size.0 as f32,
                 1.0 / self.size.1 as f32,
             ],
+            cabin_light: v4(Vec3::from(scene.sky.cabin_light).max(Vec3::ZERO), 0.0),
             lights: std::array::from_fn(|i| {
                 scene
                     .lights
@@ -1649,9 +1737,9 @@ mod tests {
         // 16 KiB uniform block limit.
         assert_eq!(
             size_of::<FrameUniform>(),
-            5 * 64 + 25 * 16 + MAX_POINT_LIGHTS * 32
+            5 * 64 + 26 * 16 + MAX_POINT_LIGHTS * 64
         );
-        assert_eq!(size_of::<PointLightUniform>(), 32);
+        assert_eq!(size_of::<PointLightUniform>(), 64);
         assert_eq!(size_of::<FrameUniform>() % 16, 0);
         assert!(
             size_of::<FrameUniform>()
@@ -1659,7 +1747,7 @@ mod tests {
                     as usize
         );
         assert_eq!(size_of::<CascadeUniform>() as u64, CASCADE_UNIFORM_STRIDE);
-        assert_eq!(size_of::<InstanceRaw>(), 128);
+        assert_eq!(size_of::<InstanceRaw>(), 144);
         assert_eq!(size_of::<Vertex>(), 36);
         assert_eq!(VERTEX_ATTRIBUTES[2].offset, 24);
         assert_eq!(VERTEX_ATTRIBUTES[3].offset, 28);
@@ -1709,6 +1797,7 @@ mod tests {
                 "emissive",
                 "post",
                 "screen",
+                "cabin_light",
                 "lights",
             ]
         );
@@ -1720,11 +1809,7 @@ mod tests {
     #[test]
     fn normal_matrix_handles_non_uniform_scale() {
         let m = Mat4::from_scale(Vec3::new(4.0, 1.0, 1.0)) * Mat4::from_rotation_z(0.5);
-        let raw = InstanceRaw::new(&MeshInstance {
-            mesh: MeshId(0),
-            transform: m.to_cols_array_2d(),
-            color: [1.0; 4],
-        });
+        let raw = InstanceRaw::new(&MeshInstance::new(MeshId(0), m.to_cols_array_2d()));
         let n = Mat3::from_cols(
             Vec4::from(raw.normal[0]).xyz(),
             Vec4::from(raw.normal[1]).xyz(),
@@ -1796,11 +1881,7 @@ mod tests {
     /// A street lamp every 10 m, more than the uniform array holds.
     fn lamps(count: usize) -> Vec<PointLight> {
         (0..count)
-            .map(|i| PointLight {
-                position: [i as f32 * 10.0, 7.5, 0.0],
-                color: [2.5, 1.6, 0.6],
-                radius: 25.0,
-            })
+            .map(|i| PointLight::omni([i as f32 * 10.0, 7.5, 0.0], [2.5, 1.6, 0.6], 25.0))
             .collect()
     }
 
@@ -1866,25 +1947,32 @@ mod tests {
                 assert_eq!((block, ground, brick), (MeshId(0), MeshId(1), MeshId(2)));
 
                 // More instances than the initial capacity forces one buffer reallocation.
-                let mut instances = vec![MeshInstance {
-                    mesh: ground,
-                    transform: Mat4::IDENTITY.to_cols_array_2d(),
-                    color: [1.0; 4],
-                }];
+                let mut instances =
+                    vec![MeshInstance::new(ground, Mat4::IDENTITY.to_cols_array_2d())];
                 for i in 0..300 {
                     instances.push(MeshInstance {
-                        mesh: match i % 50 {
-                            0 => brick,
-                            25 => sign,
-                            _ => block,
-                        },
-                        transform: Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0))
-                            .to_cols_array_2d(),
                         color: [0.8, 0.7, 0.6, 1.0],
+                        // Some switched off, some in a cabin.
+                        glow: (i % 3) as f32 * 0.5,
+                        cabin: (i % 2) as f32,
+                        ..MeshInstance::new(
+                            match i % 50 {
+                                0 => brick,
+                                25 => sign,
+                                _ => block,
+                            },
+                            Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0))
+                                .to_cols_array_2d(),
+                        )
                     });
                 }
-                let lights = lamps(MAX_POINT_LIGHTS + 3);
+                let mut lights = lamps(MAX_POINT_LIGHTS + 3);
+                lights[1].direction = [0.0, -0.2, -1.0];
+                lights[1].cone_cos = [0.9, 0.98];
+                lights[1].cone_squash = 4.0;
+                lights[1].wrap = 0.25;
                 let mut scene = test_scene_lit(&instances, &lights);
+                scene.sky.cabin_light = [0.01, 0.008, 0.006];
                 // Odd sizes and a size smaller than the bloom chain is deep.
                 let sizes = [(64, 48), (33, 17), (5, 3)];
                 render_frames(&device, &mut r, format, &scene, &sizes);
@@ -1946,11 +2034,7 @@ mod tests {
                 };
                 let mut r = Renderer::with_options(&device, &queue, format, (64, 36), options);
                 let block = r.add_mesh(&Mesh::unit_block([255; 4]));
-                let instances = [MeshInstance {
-                    mesh: block,
-                    transform: Mat4::IDENTITY.to_cols_array_2d(),
-                    color: [1.0; 4],
-                }];
+                let instances = [MeshInstance::new(block, Mat4::IDENTITY.to_cols_array_2d())];
                 let mut scene = test_scene(&instances);
                 render_frames(&device, &mut r, format, &scene, &[(128, 72)]);
                 let base = r.stats().draw_calls;
@@ -2017,10 +2101,11 @@ mod tests {
         let mut r = Renderer::new(&device, &queue, format, (16, 16));
         let block = r.add_mesh(&Mesh::unit_block([255; 4]));
         let instances: Vec<MeshInstance> = (0..1000)
-            .map(|i| MeshInstance {
-                mesh: block,
-                transform: Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0)).to_cols_array_2d(),
-                color: [1.0; 4],
+            .map(|i| {
+                MeshInstance::new(
+                    block,
+                    Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0)).to_cols_array_2d(),
+                )
             })
             .collect();
         r.reserve_instances(instances.len());
@@ -2073,9 +2158,10 @@ mod tests {
             u.params[1], 1.0,
             "Rgba8Unorm needs sRGB encoding in the shader"
         );
-        assert_eq!(u.emissive, [0.5, 0.0, 0.0, 0.0]);
+        assert_eq!(u.emissive, [0.5, 0.0, 0.0, 8.0]);
         assert_eq!(u.post, [0.08, 1.0, VIGNETTE, BLOOM_CLAMP]);
         assert_eq!(u.screen, [8.0, 8.0, 0.125, 0.125]);
+        assert_eq!(u.cabin_light, [0.0; 4]);
         assert!(u.lights.iter().all(|l| l.color == [0.0; 4]));
     }
 
@@ -2085,20 +2171,59 @@ mod tests {
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let mut r = Renderer::new(&device, &queue, format, (8, 8));
         r.resize((640, 360));
-        let lights = lamps(MAX_POINT_LIGHTS + 2);
+        let mut lights = lamps(MAX_POINT_LIGHTS + 2);
+        // The first is a spot looking down -z, full inside 10°, dark beyond 20°.
+        lights[0].direction = [0.0, 0.0, -2.0];
+        lights[0].cone_cos = [20f32.to_radians().cos(), 10f32.to_radians().cos()];
         let mut scene = test_scene_lit(&[], &lights);
         scene.sky.window_emissive_scale = 1.5;
         scene.sky.emissive_boost = 0.25;
+        scene.sky.emissive_cap = 3.0;
         scene.sky.bloom_threshold = 2.0;
+        scene.sky.cabin_light = [0.02, -1.0, 0.01];
         let (u, _) = r.frame_uniforms(&scene);
-        assert_eq!(u.emissive, [0.25, 1.0, MAX_POINT_LIGHTS as f32, 0.0]);
+        assert_eq!(u.emissive, [0.25, 1.0, MAX_POINT_LIGHTS as f32, 3.0]);
         assert_eq!(u.post[..2], [0.08, 2.0]);
         assert_eq!(u.screen[..2], [640.0, 360.0]);
+        assert_eq!(u.cabin_light, [0.02, 0.0, 0.01, 0.0], "never negative");
         assert_eq!(u.params[1], 0.0, "the sRGB target encodes in hardware");
         for (k, l) in u.lights.iter().enumerate() {
             assert_eq!(l.pos_radius, [k as f32 * 10.0, 7.5, 0.0, 25.0]);
             assert_eq!(l.color, [2.5, 1.6, 0.6, 1.0 / 625.0]);
         }
+        // The spot's axis is normalized and its cone mapped onto the cosine ramp the shader
+        // smoothsteps; omni lights pass every direction.
+        let cone = |l: &PointLightUniform, dir: Vec3| {
+            let c = ((dir.normalize().dot(Vec4::from(l.spot).xyz()) - l.spot[3]) * l.cone[0])
+                .clamp(0.0, 1.0);
+            c * c * (3.0 - 2.0 * c)
+        };
+        let spot = &u.lights[0];
+        assert_eq!(&spot.spot[..3], &[0.0, 0.0, -1.0]);
+        let off = |deg: f32| Vec3::new(deg.to_radians().sin(), 0.0, -deg.to_radians().cos());
+        assert!((cone(spot, off(5.0)) - 1.0).abs() < 1e-6);
+        assert!((cone(spot, off(10.0)) - 1.0).abs() < 1e-4);
+        assert!((0.1..0.9).contains(&cone(spot, off(15.0))));
+        assert_eq!(cone(spot, off(25.0)), 0.0);
+        assert_eq!(cone(spot, Vec3::Z), 0.0, "nothing behind it");
+        for dir in [Vec3::X, -Vec3::Y, Vec3::Z, Vec3::new(1.0, 2.0, -3.0)] {
+            assert_eq!(cone(&u.lights[1], dir), 1.0);
+        }
+        assert_eq!(spot.cone[1..3], [1.0, 0.0], "round and Lambert by default");
+        assert_eq!(u.lights[1].cone[1..3], [1.0, 0.0]);
+
+        // A flattened, wrapped beam keeps its squash and wrap; a vertical one cannot squash.
+        let mut beams = lights.clone();
+        beams[2].direction = [0.0, -0.1, -1.0];
+        beams[2].cone_cos = [0.8, 0.9];
+        beams[2].cone_squash = 4.0;
+        beams[2].wrap = 0.25;
+        beams[3].direction = [0.0, -1.0, 0.0];
+        beams[3].cone_cos = [0.3, 0.7];
+        beams[3].cone_squash = 3.0;
+        let (b, _) = r.frame_uniforms(&test_scene_lit(&[], &beams));
+        assert_eq!(b.lights[2].cone[1..3], [4.0, 0.25]);
+        assert_eq!(b.lights[3].cone[1], 1.0);
 
         // Without float targets there is no bloom.
         let ldr = Renderer::with_options(
