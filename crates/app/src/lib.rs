@@ -5,6 +5,7 @@
 //! simulation itself only ever advances in fixed `SIM_DT` steps.
 
 mod input;
+pub mod vehicles;
 
 pub use input::{Action, InputState, Key, Keyboard};
 
