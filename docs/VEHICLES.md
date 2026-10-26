@@ -59,7 +59,10 @@ ShapeSpec(
   seams: Seams(hood: bool, trunk: bool, doors: 2|4, hood_width: 0.6, creases: [(x0, y0, x1, y1)...]),  // 6 mm insets; ≤ 2 creases
   parts: Parts(mirrors: Door|Fender, handles: Flush|Pull, wipers: 0–3, exhaust: Single|Dual, antenna: Mast|None,
                rims: Steel|Alloy5|Mesh|Turbine, hubcaps: bool),
-  details: [Louvers, HoodScoop, SideStripe, WoodPanel, ChromeTrim, VinylRoof, RallyStripes, MudFlaps, RoofRack, BlackTrim, Badge(Diamond|Circle|Bar|Chevron)],
+  details: [Louvers, HoodScoop, SideStripe, WoodPanel, WoodApplique, ChromeTrim, VinylRoof, RallyStripes, MudFlaps, RoofRack,
+            BlackTrim, CorneringLamps, Badge(Diamond|Circle|Bar|Chevron)],
+  color_details: [(1, WoodApplique)],  // optional: extra details for one palette entry
+  roof: Roof(kind: Hardtop),           // optional (default Hardtop) | Convertible(top: Down|Up)
   palette: ["#b9bcc0", ...], // era body colors (sRGB), one chosen per instance
   accent: "#1c1c1e",         // stripes, vinyl, badge fields
   interior: InteriorShape(dash_height, dash_x, wheel_pos: (x, y), wheel_radius, column_angle_deg, mirror_pos: (x, y),
@@ -67,11 +70,13 @@ ShapeSpec(
                           colors: [dash, seats, carpet, headliner, trim, accent], display: "#3cff7a"),
 )
 ```
+**Convertibles** (`roof: Roof(kind: Convertible(top: Down|Up))`): the side silhouette rises over the windshield to the header and drops straight to the deck, `glass.side` is empty and `glass.backlight` is where the top folds (the well behind the rear seat). The loft has nothing above the belt from the header to the boot and no side faces beside the windshield; the windshield gets a swept frame (A-pillars and a header rail, chrome with `ChromeTrim`, else black), the door tops a painted cap with a trim inner face, and the backlight range a deck. `top: Down` puts a padded boot over the well (six segments, rounded ends, pleat seams; `VinylRoof` makes it a conversion shop's taller, squarer boot with a bright foot molding); `top: Up` raises a slightly crowned fabric top from the header to the deck, open over the doors (the door glass is down), solid over the rear quarters, with a plastic rear window and seams. The interior keeps its door cards but no pillars or headliner; LOD1 keeps the boot and the seats (with headrests) as blocks. Louvers, roof racks and vinyl roofs are not drawn on a convertible. `WoodApplique` is a narrow wood-grain band under the belt from the front wheel to the rear wheel; `CorneringLamps` are unlit clear lenses in the front fender sides. Validation (`ShapeError::OpenTop`): no side glass, the boot behind the rear seat and ahead of the deck's end, the header 0.25 m over the belt, the deck at the belt.
+
 `build` / `build_lod` / `build_with(BuildOptions { color_index, lod, popups_up })` return a `CarMesh` of plain arrays (`MeshData`: positions, normals, uvs in meters for atlas-patterned panels, linear colors, emissive in the renderer's encoding, CCW triangles) in model space (`-z` forward, origin on the ground under the front axle; `body_offset(&VehicleSpec)` moves it to the sim's center-of-mass origin): `body` (shell and every opaque part), `wheels` (hub-local, right-side; left wheels turn 180° about `y`), `glass` (single-sided, facing out), `lights` (every lens with its emissive set as if lit), `interior`, `steering_wheel`, `wheel_centers`, `wheel_radius` and a `Cockpit` (eye, steering pivot and axis, radio display quad, up to 3 dials). Loft: 24–40 stations, a ring per station from `section`, smooth across rounded panels and hard at creases and seams; arches cut with a lip; lights, grille, bumpers, mirrors, handles, wipers, exhaust and badges as small meshes; rims with real spokes. LOD1 drops seams, small parts and interior detail and turns rims into discs.
 
-As built (LOD0): Corsair 5,402 exterior triangles (body+parts 3,466, glass 356, lights 84, wheels 4 × 374) and 1,554 interior (cabin 1,194, steering wheel 360); Palisade 5,856 (4,264, 184, 144, 4 × 316) and 1,726 (1,378, 348). Budgets: exterior 3,000–6,000, interior 1,500–3,000, LOD1 ≤ 40% (≈ 35% and 37% exterior).
+As built (LOD0): Corsair 5,402 exterior triangles (body+parts 3,466, glass 356, lights 84, wheels 4 × 374) and 1,554 interior (cabin 1,194, steering wheel 360); Palisade 5,856 (4,264, 184, 144, 4 × 316) and 1,726 (1,378, 348); Seabreeze 5,508 (3,536, 100, 144, 4 × 432) and 1,566 (1,218, 348); Regent 5,544 (3,816, 100, 132, 4 × 374) and 1,558 (1,210, 348). Budgets: exterior 3,000–6,000, interior 1,500–3,000, LOD1 ≤ 40% (≈ 35%, 37%, 34% and 32% exterior).
 
-In the game (`app::car`): LOD0 and LOD1 are built once at startup, with pop-ups down and up. Lamp states are four baked copies of `lights` (headlights off/on × brake off/on), lenses grouped by emissive hue; the headlight switch also swaps the pop-up body. Glass maps onto a pane of the window atlas tile and the `Wide`/`Egg` grille onto the egg-crate tile; with no blended pass yet, glass is opaque from outside and culled from inside. The cockpit cameras add the interior, the steering wheel (450° at full lock), the body turned inside out as the cabin walls, and procedural glowing needles and scale ticks on the dials.
+In the game (`app::car`): LOD0 and LOD1 are built once at startup, with pop-ups down and up. Lamp states are four baked copies of `lights` (headlights off/on × brake off/on), lenses grouped by emissive hue; the headlight switch also swaps the pop-up body. Glass maps onto a pane of the window atlas tile and the `Wide`/`Egg` grille onto the egg-crate tile; with no blended pass yet, glass is opaque from outside and culled from inside. The cockpit cameras add the interior, the steering wheel (450° at full lock), the body turned inside out as the cabin walls, and procedural glowing needles and scale ticks on the dials. A convertible's interior and steering wheel are drawn from every camera (its cabin is open); its inside-out shell has no roof either, so the cockpit sees the sky.
 
 Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so agents can look at it. glTF import (`gltf` crate, MIT) is the escape hatch for a hand-made model; the same `VehicleSpec` applies.
 
@@ -88,14 +93,16 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `sprint_gti` | hot hatch | Hatch | nimble, front-drive lift-off tuck |
 | `tsubame_zx` | Japanese sports coupe | Coupe | balanced, turbo surge |
 | `sunliner_cabrio` | small convertible | Convertible | light, slow, open-air camera |
+| `seabreeze_convertible` | boxy mid-size convertible on a front-drive compact platform, white over tan | Convertible | 1,250 kg, ~97 kW four, 3-speed auto, front drive; soft, bobbing, comfortable understeer; 0–60 ≈ 12.6 s |
+| `regent_coupe_cabrio` | big luxury coupe cut open by a conversion shop, padded boot | Convertible | 1,650 kg, ~146 kW V8, 4-speed auto, front drive; floaty, slow steering, lots of roll; 0–60 ≈ 10.0 s |
 
 Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, tuners; 10s: hybrid wedges; 20s: EVs with instant torque).
 
 ## Acceptance tests (`crates/vehicle/tests`)
 - Each spec loads and validates (positive mass, monotone gears, torque curve sane).
-- Straight-line: 0–60 mph times within a band per class (Sports 5–7 s, Wagon 11–15 s, etc.); top speed ordering Sports > Coupe > Sedan > Wagon > Van.
+- Straight-line: 0–60 mph times within a band per class (Sports 5–7 s, Wagon 11–15 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, etc.); top speed ordering Sports > Coupe > Sedan > Wagon > Van.
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Determinism: scripted 10 s input replay produces identical state hashes.
-- Mesh: every shape builds, is manifold enough (no NaN normals), body 3k–6k triangles, interior 1.5k–3k, wheels fit arches, LOD1 ≤ 40% of LOD0.
+- Mesh: every shape builds, is manifold enough (no NaN normals), body 3k–6k triangles, interior 1.5k–3k, wheels fit arches, LOD1 ≤ 40% of LOD0. Convertibles: no body or glass triangle over the cabin between the header and the boot, above the belt (top down), a framed windshield and a boot, a raised top that covers the cabin, and much more sky from the seat than a hardtop.
 - Visual: `tools/shape-preview` PNGs attached to the PR introducing or changing a car.
