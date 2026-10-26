@@ -72,6 +72,7 @@ RegionTemplate(
                 street_light_m: 30, street_tree_m: 14, hydrant_m: 80, power_pole_m: 0,
                 bench_per_km: 10, billboard_per_km: 0, neon: 0.25, parked_cars: (0.4, 0.7),
             ),
+            lots: Lots(width_m: (12, 25), depth_m: 40, setback_m: (0, 0, 3)),
         ),
         strip: ZoneRule(
             score: None,
@@ -84,6 +85,7 @@ RegionTemplate(
                 street_light_m: 30, street_tree_m: 18, hydrant_m: 90, power_pole_m: 0,
                 bench_per_km: 12, billboard_per_km: 2, neon: 0.7, parked_cars: (0.4, 0.7),
             ),
+            lots: Lots(width_m: (15, 40), depth_m: 40, setback_m: (1, 0, 4)),
         ),
         residential: ZoneRule(
             score: Some(Score(
@@ -104,6 +106,7 @@ RegionTemplate(
                 street_light_m: 60, street_tree_m: 16, hydrant_m: 110, power_pole_m: 45,
                 bench_per_km: 0.5, billboard_per_km: 0, neon: 0, parked_cars: (0.25, 0.5),
             ),
+            lots: Lots(width_m: (15, 20), depth_m: 40, setback_m: (6, 1.5, 6)),
         ),
         suburb: ZoneRule(
             score: Some(Score(
@@ -124,6 +127,7 @@ RegionTemplate(
                 street_light_m: 70, street_tree_m: 22, hydrant_m: 140, power_pole_m: 0,
                 bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.1, 0.3),
             ),
+            lots: Lots(width_m: (20, 30), depth_m: 40, setback_m: (8, 2, 8)),
         ),
         industrial: ZoneRule(
             score: Some(Score(
@@ -144,6 +148,7 @@ RegionTemplate(
                 street_light_m: 45, street_tree_m: 0, hydrant_m: 120, power_pole_m: 40,
                 bench_per_km: 0, billboard_per_km: 3, neon: 0, parked_cars: (0.05, 0.25),
             ),
+            lots: Lots(width_m: (60, 120), depth_m: 60, setback_m: (6, 4, 6)),
         ),
         commercial: ZoneRule(
             score: Some(Score(
@@ -164,6 +169,7 @@ RegionTemplate(
                 street_light_m: 35, street_tree_m: 20, hydrant_m: 90, power_pole_m: 0,
                 bench_per_km: 4, billboard_per_km: 1, neon: 0.35, parked_cars: (0.3, 0.6),
             ),
+            lots: Lots(width_m: (20, 40), depth_m: 40, setback_m: (3, 0, 4)),
         ),
         park: ZoneRule(
             score: None,
@@ -176,6 +182,7 @@ RegionTemplate(
                 street_light_m: 40, street_tree_m: 12, hydrant_m: 0, power_pole_m: 0,
                 bench_per_km: 20, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.2),
             ),
+            lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
         ),
         beach: ZoneRule(
             score: None,
@@ -188,6 +195,7 @@ RegionTemplate(
                 street_light_m: 35, street_tree_m: 25, hydrant_m: 0, power_pole_m: 0,
                 bench_per_km: 15, billboard_per_km: 0, neon: 0.1, parked_cars: (0.3, 0.6),
             ),
+            lots: Lots(width_m: (30, 60), depth_m: 40, setback_m: (2, 2, 2)),
         ),
         farmland: ZoneRule(
             score: Some(Score(
@@ -208,6 +216,7 @@ RegionTemplate(
                 street_light_m: 0, street_tree_m: 0, hydrant_m: 0, power_pole_m: 50,
                 bench_per_km: 0, billboard_per_km: 1, neon: 0, parked_cars: (0.0, 0.05),
             ),
+            lots: Lots(width_m: (120, 250), depth_m: 200, setback_m: (15, 10, 10)),
         ),
         hills: ZoneRule(
             score: Some(Score(
@@ -228,6 +237,7 @@ RegionTemplate(
                 street_light_m: 0, street_tree_m: 0, hydrant_m: 250, power_pole_m: 60,
                 bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.1),
             ),
+            lots: Lots(width_m: (25, 45), depth_m: 40, setback_m: (8, 4, 8)),
         ),
         highway: ZoneRule(
             score: None,
@@ -240,6 +250,7 @@ RegionTemplate(
                 street_light_m: 50, street_tree_m: 0, hydrant_m: 0, power_pole_m: 0,
                 bench_per_km: 0, billboard_per_km: 4, neon: 0, parked_cars: (0.0, 0.0),
             ),
+            lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
         ),
     ),
 )

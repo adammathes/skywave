@@ -165,6 +165,36 @@ fn other_bad_fields_are_rejected() {
     );
 
     let mut t = parse(CALIFORNIA);
+    t.zones.residential.lots.width_m = (20.0, 15.0);
+    assert_eq!(
+        t.validate(),
+        Err(TemplateError::BadLots {
+            zone: ZoneId::Residential,
+            field: "width_m"
+        })
+    );
+
+    let mut t = parse(CALIFORNIA);
+    t.zones.downtown.lots.depth_m = 2.0;
+    assert_eq!(
+        t.validate(),
+        Err(TemplateError::BadLots {
+            zone: ZoneId::Downtown,
+            field: "depth_m"
+        })
+    );
+
+    let mut t = parse(CALIFORNIA);
+    t.zones.suburb.lots.setback_m.1 = -1.0;
+    assert_eq!(
+        t.validate(),
+        Err(TemplateError::BadLots {
+            zone: ZoneId::Suburb,
+            field: "setback_m"
+        })
+    );
+
+    let mut t = parse(CALIFORNIA);
     t.era.year = 1850;
     assert_eq!(t.validate(), Err(TemplateError::EraYear));
 }
