@@ -39,7 +39,10 @@ VehicleSpec(
     tires: Tires(grip_lat: 0.88, grip_long: 0.85, load_sens: 0.12, slip_peak_deg: 9.5),
     suspension: Susp(spring_n_m: 24000, damper: 1800, travel_m: 0.22, antiroll: 0.1),
     steering: Steer(max_deg: 30, speed_sens: 0.5, return_rate: 3.5),   // slow, lots of wheel
-    brakes: Brakes(max_nm: 3000, bias_front: 0.68, abs: false, handbrake_nm: 1200),
+    // 3000 N·m stopped from 60 mph in ~70 m on the sim's 0.32 m tires, past the 60 m every
+    // car must make; 3800 still feels soft (~0.65 g) and nose-heavy without locking up.
+    // Handbrake 2400 (was 1200): 600 N·m per wheel could not lock a rear tire at speed.
+    brakes: Brakes(max_nm: 3800, bias_front: 0.68, abs: false, handbrake_nm: 2400),
     aero: Aero(cd: 0.44, frontal_m2: 2.45, downforce_coef: 0.0),
     feel: Feel(oversteer_bias: -0.3, body_roll: 0.9, engine_sound: "v8_lazy", shift_jerk: 0.1),
     interior: Interior(

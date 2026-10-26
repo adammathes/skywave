@@ -1897,7 +1897,9 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 name = "vehicle"
 version = "0.1.0"
 dependencies = [
+ "ron",
  "serde",
+ "skywave-core",
 ]
 
 [[package]]

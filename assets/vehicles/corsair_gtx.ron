@@ -36,7 +36,9 @@ VehicleSpec(
     tires: Tires(grip_lat: 1.25, grip_long: 1.15, load_sens: 0.08, slip_peak_deg: 7.0),
     suspension: Susp(spring_n_m: 32000, damper: 3200, travel_m: 0.16, antiroll: 0.45),
     steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 9.0),   // quick and direct
-    brakes: Brakes(max_nm: 3200, bias_front: 0.62, abs: false, handbrake_nm: 1800),
+    // Handbrake 3000 (was 1800): a rear tire can hold ~1100 N·m at speed, so 900 per wheel
+    // only dragged; 1500 locks the rears for the flick the handbrake exists for.
+    brakes: Brakes(max_nm: 3200, bias_front: 0.62, abs: false, handbrake_nm: 3000),
     aero: Aero(cd: 0.34, frontal_m2: 1.9, downforce_coef: 0.02),
     feel: Feel(oversteer_bias: 0.2, body_roll: 0.3, engine_sound: "v8_flatplane", shift_jerk: 0.3),
     interior: Interior(
