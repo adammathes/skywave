@@ -183,6 +183,8 @@ pub struct CarLayout {
     pub radio_display: [Vec3; 4],
     /// Headlamp centers, left then right (lit and, for pop-ups, raised).
     pub headlamps: [Vec3; 2],
+    /// Tail lamp centers, left then right.
+    pub taillamps: [Vec3; 2],
     /// Overall body extent: length, width, height, m (the spec's `dims_m`).
     pub dims: [f32; 3],
 }
@@ -231,7 +233,8 @@ impl CarLayout {
             dials,
             dial_count: usize::from(c.dial_count).min(3),
             radio_display: c.radio_display.map(at),
-            headlamps: headlamp_centers(&lit.lights).map(|p| p + offset),
+            headlamps: lamp_centers(&lit.lights, LampGroup::Head).map(|p| p + offset),
+            taillamps: lamp_centers(&lit.lights, LampGroup::Tail).map(|p| p + offset),
             dims: spec.dims_m,
         }
     }
@@ -262,12 +265,12 @@ fn polyline_at(pts: &[(f32, f32)], x: f32) -> f32 {
     pts[pts.len() - 1].1
 }
 
-/// Centers of the left (`x < 0`) and right headlamp lenses of `lights`, model space.
-fn headlamp_centers(lights: &MeshData) -> [Vec3; 2] {
+/// Centers of the left (`x < 0`) and right lenses of `group` in `lights`, model space.
+fn lamp_centers(lights: &MeshData, group: LampGroup) -> [Vec3; 2] {
     let mut sum = [Vec3::ZERO; 2];
     let mut n = [0u32; 2];
     for (p, e) in lights.positions.iter().zip(&lights.emissive) {
-        if lamp_group(*e) == LampGroup::Head {
+        if lamp_group(*e) == group {
             let side = usize::from(p[0] > 0.0);
             sum[side] += Vec3::from(*p);
             n[side] += 1;
@@ -749,6 +752,14 @@ mod tests {
             );
             let nose = m.layout.wheel_centers[0].z;
             assert!(l.z < nose && l.y < m.layout.belt_y + 0.3, "{l}");
+            // Tail lamps at the tail, either side.
+            let [tl, tr] = m.layout.taillamps;
+            let tail = m.layout.wheel_centers[2].z;
+            assert!(
+                tl.x < -0.2 && tr.x > 0.2 && (tl.x + tr.x).abs() < 1e-3,
+                "{tl} {tr}"
+            );
+            assert!(tl.z > tail && tl.y < m.layout.belt_y + 0.3, "{tl}");
         }
     }
 

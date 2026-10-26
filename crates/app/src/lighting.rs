@@ -2,6 +2,15 @@
 //! and the lights that follow it: the street lamps' photocell and pools, the glow of the
 //! car's lamps and instruments, and the light inside the cabin.
 //!
+//! **Light lists.** The renderer shades each instance with the lights its
+//! [`render::LightSet`] names, up to [`LIGHTS_PER_DRAW`] of the frame's [`MAX_LIGHTS`].
+//! [`FrameLights`] fills both once a frame: the car's own lights first, then every static
+//! light of the place (street lamps, neon, storefront fill) while the photocell has them on
+//! (the nearest to the camera when there are more than fit, the farthest of those fading
+//! out), then for each instance the nearest lights whose reach touches its bounds. Fixed
+//! arrays and buffers sized at load: nothing allocates per frame, and the cost is one
+//! box-to-sphere test per light and instance.
+//!
 //! Units: `Daylight` gives illuminance in lux and luminance in cd/m²; the renderer takes
 //! kilolux and kcd/m². Directions agree (world X east, Y up, Z south).
 //!
@@ -11,7 +20,10 @@
 //! its physical luminance up into a blown-out blob.
 
 use glam::Vec3;
-use render::{exposure_from_ev100, PointLight, Sky, Sun};
+use render::{
+    exposure_from_ev100, Corona, LightSet, MeshInstance, PointLight, Sky, Sun, LIGHTS_PER_DRAW,
+    MAX_LIGHTS,
+};
 
 use crate::daylight::{Clock, Daylight, DEFAULT_LATITUDE_DEG};
 use crate::drive::CarGlow;
@@ -52,23 +64,34 @@ const CABIN_NIGHT_RGB: [f32; 3] = [1.23, 0.96, 0.69];
 /// roofline, not black.
 const NIGHT_SKY_KCD: f32 = 2.4e-4;
 
-/// Street lamps lit as point lights at once: the renderer takes 8 and the headlights use 2.
-pub const STREETLAMP_LIGHTS: usize = 6;
 /// A sodium cobra head: intensity straight down, kcd (≈ 35 lux on the road 7.5 m below),
 /// reach, m, and color (linear, luminance 1, the town palette's sodium)...
 const STREETLAMP_KCD: f32 = 2.0;
-const STREETLAMP_RADIUS_M: f32 = 22.0;
+pub const STREETLAMP_RADIUS_M: f32 = 22.0;
 const STREETLAMP_RGB: [f32; 3] = [1.98, 0.79, 0.16];
 /// ...shining down in a cone, full to this angle from straight down and cut off by that one,
 /// degrees: a pool on the road and the shop fronts beside it, dark upper floors (an omni
-/// light lit every facade within reach as brightly as the road).
+/// light lit every facade within reach as brightly as the road)...
 const STREETLAMP_INNER_DEG: f32 = 45.0;
 const STREETLAMP_OUTER_DEG: f32 = 72.0;
-/// The nearest lamps to a point this far ahead of the camera get the lights, m...
-pub const STREETLAMP_FOCUS_AHEAD_M: f32 = 12.0;
-/// ...each fading in over this share of the distance to the first lamp left out, so a lamp
-/// joining or leaving the set never pops.
-const STREETLAMP_FADE: f32 = 0.3;
+/// ...with a warm halo round the head at night.
+const STREETLAMP_CORONA: Corona = Corona {
+    radius: 1.6,
+    strength: 1.0,
+};
+/// A neon sign's spill onto the sidewalk and the facade round it, kcd at its brightest
+/// channel (the sign's hue), and its halo.
+const NEON_KCD: f32 = 0.6;
+const NEON_CORONA: Corona = Corona {
+    radius: 2.0,
+    strength: 0.5,
+};
+/// A lit storefront's fill on the sidewalk in front of it, kcd at its brightest channel.
+const STOREFRONT_KCD: f32 = 0.4;
+/// When more static lights are on than the frame holds, the farthest kept ones fade out
+/// over this share of the distance to the first one left out, so none pops as the camera
+/// moves.
+const STATIC_FADE: f32 = 0.15;
 
 /// The game clock and where on Earth it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,54 +199,210 @@ pub fn streetlamp_glow(d: &Daylight) -> f32 {
     }
 }
 
-/// Fills `out` with the street lamps nearest `focus` as point lights (from `heads`, the
-/// lamp positions) and returns how many. Each fades in from nothing at the distance of the
-/// first lamp left out, so the set changes smoothly as the car moves. Allocates nothing.
-pub fn streetlamp_lights(
-    heads: &[Vec3],
-    focus: Vec3,
-    out: &mut [PointLight; STREETLAMP_LIGHTS],
-) -> usize {
-    // The STREETLAMP_LIGHTS + 1 nearest by squared distance, insertion-sorted; ties keep
-    // the earlier lamp, so the choice is deterministic.
-    let mut best = [(f32::INFINITY, 0usize); STREETLAMP_LIGHTS + 1];
-    for (i, h) in heads.iter().enumerate() {
-        let d2 = (*h - focus).length_squared();
-        if d2 < best[STREETLAMP_LIGHTS].0 {
-            let mut k = STREETLAMP_LIGHTS;
-            while k > 0 && best[k - 1].0 > d2 {
-                best[k] = best[k - 1];
-                k -= 1;
+/// A street lamp hanging at `head`: a sodium spot shining down, with its corona.
+pub fn streetlamp(head: Vec3) -> PointLight {
+    PointLight {
+        direction: [0.0, -1.0, 0.0],
+        cone_cos: [
+            STREETLAMP_OUTER_DEG.to_radians().cos(),
+            STREETLAMP_INNER_DEG.to_radians().cos(),
+        ],
+        corona: STREETLAMP_CORONA,
+        ..PointLight::omni(
+            head.to_array(),
+            STREETLAMP_RGB.map(|c| c * STREETLAMP_KCD),
+            STREETLAMP_RADIUS_M,
+        )
+    }
+}
+
+/// The renderer's light for one of the place's [`place::Light`]s: street lamps as
+/// [`streetlamp`], neon as a small colored omni light with a corona, lit storefronts as a
+/// fill light; car headlights are the cars' own business.
+pub fn place_light(l: &place::Light) -> Option<PointLight> {
+    let hue = Vec3::from(l.color).max(Vec3::ZERO);
+    let hue = hue / hue.max_element().max(1e-6);
+    let omni = |kcd: f32| PointLight::omni(l.pos, (hue * kcd).to_array(), l.radius.max(0.0));
+    match l.kind {
+        place::LightKind::Street => Some(streetlamp(Vec3::from(l.pos))),
+        place::LightKind::Neon => Some(PointLight {
+            corona: NEON_CORONA,
+            ..omni(NEON_KCD)
+        }),
+        place::LightKind::Window => Some(omni(STOREFRONT_KCD)),
+        place::LightKind::Headlight => None,
+    }
+}
+
+/// An axis-aligned box, world space: what a drawn mesh covers, for light culling.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl Bounds {
+    /// The box round `points`, or `None` when there are none.
+    pub fn around(points: impl IntoIterator<Item = Vec3>) -> Option<Bounds> {
+        points.into_iter().fold(None, |b, p| {
+            Some(match b {
+                None => Bounds { min: p, max: p },
+                Some(b) => Bounds {
+                    min: b.min.min(p),
+                    max: b.max.max(p),
+                },
+            })
+        })
+    }
+
+    /// A cube of half-size `r` round `center`.
+    pub fn cube(center: Vec3, r: f32) -> Bounds {
+        Bounds {
+            min: center - Vec3::splat(r),
+            max: center + Vec3::splat(r),
+        }
+    }
+
+    /// Squared distance from `p` to the box (0 inside).
+    pub fn distance_squared(&self, p: Vec3) -> f32 {
+        p.clamp(self.min, self.max).distance_squared(p)
+    }
+
+    pub fn center(&self) -> Vec3 {
+        (self.min + self.max) * 0.5
+    }
+
+    /// Whether `light` can reach anything in the box: within its radius, and not wholly
+    /// behind a spot whose cone is narrower than a hemisphere.
+    pub fn reached_by(&self, light: &PointLight) -> bool {
+        let p = Vec3::from(light.position);
+        if light.radius <= 0.0 || self.distance_squared(p) >= light.radius * light.radius {
+            return false;
+        }
+        let axis = Vec3::from(light.direction);
+        if axis != Vec3::ZERO && light.cone_cos[0] >= 0.0 {
+            let half = (self.max - self.min) * 0.5;
+            let ahead = (self.center() - p).dot(axis) + half.dot(axis.abs());
+            if ahead < 0.0 {
+                return false;
             }
-            best[k] = (d2, i);
         }
+        true
     }
-    let cut = best[STREETLAMP_LIGHTS].0.sqrt();
+}
+
+/// The nearest [`LIGHTS_PER_DRAW`] of `lights` that reach `bounds` (by distance to the
+/// box, then to its center, then order), as a light set. Allocates nothing.
+pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
+    // Insertion into a short sorted array: most boxes are reached by a handful of lights.
+    let mut best = [(f32::INFINITY, f32::INFINITY, 0usize); LIGHTS_PER_DRAW];
     let mut n = 0;
-    for &(d2, i) in &best[..STREETLAMP_LIGHTS] {
-        if !d2.is_finite() {
-            break;
+    let center = bounds.center();
+    for (i, l) in lights.iter().enumerate().take(MAX_LIGHTS) {
+        if !bounds.reached_by(l) {
+            continue;
         }
-        let w = if cut.is_finite() {
-            ((cut - d2.sqrt()) / (STREETLAMP_FADE * cut)).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        out[n] = PointLight {
-            direction: [0.0, -1.0, 0.0],
-            cone_cos: [
-                STREETLAMP_OUTER_DEG.to_radians().cos(),
-                STREETLAMP_INNER_DEG.to_radians().cos(),
-            ],
-            ..PointLight::omni(
-                heads[i].to_array(),
-                STREETLAMP_RGB.map(|c| c * STREETLAMP_KCD * w),
-                STREETLAMP_RADIUS_M,
-            )
-        };
-        n += 1;
+        let p = Vec3::from(l.position);
+        let key = (bounds.distance_squared(p), center.distance_squared(p), i);
+        let worse = |a: &(f32, f32, usize), b: &(f32, f32, usize)| (a.0, a.1) > (b.0, b.1);
+        if n == LIGHTS_PER_DRAW && !worse(&best[n - 1], &key) {
+            continue;
+        }
+        let mut k = n.min(LIGHTS_PER_DRAW - 1);
+        while k > 0 && worse(&best[k - 1], &key) {
+            best[k] = best[k - 1];
+            k -= 1;
+        }
+        best[k] = key;
+        n = (n + 1).min(LIGHTS_PER_DRAW);
     }
-    n
+    let mut set = LightSet::EMPTY;
+    for &(_, _, i) in &best[..n] {
+        set.push(i);
+    }
+    set
+}
+
+/// The frame's lights and the light set of every instance (see the module docs).
+pub struct FrameLights {
+    /// The place's static lights: street lamps, neon, storefront fill.
+    statics: Vec<PointLight>,
+    /// Scratch for picking the nearest statics: squared distance to the camera and index.
+    order: Vec<(f32, u32)>,
+    lights: [PointLight; MAX_LIGHTS],
+    len: usize,
+}
+
+impl FrameLights {
+    pub fn new(statics: Vec<PointLight>) -> FrameLights {
+        FrameLights {
+            order: Vec::with_capacity(statics.len()),
+            statics,
+            lights: [PointLight::omni([0.0; 3], [0.0; 3], 0.0); MAX_LIGHTS],
+            len: 0,
+        }
+    }
+
+    /// The place's static lights.
+    pub fn statics(&self) -> &[PointLight] {
+        &self.statics
+    }
+
+    /// Capacity of the scratch buffer, which must not grow after load.
+    pub fn order_capacity(&self) -> usize {
+        self.order.capacity()
+    }
+
+    /// This frame's lights, as last gathered.
+    pub fn lights(&self) -> &[PointLight] {
+        &self.lights[..self.len]
+    }
+
+    /// This frame's lights: `dynamic` (the car's), then the static ones when `statics_on`
+    /// (the street lamps' photocell), all of them when they fit, else those nearest `eye`,
+    /// the farthest fading out toward the first left out.
+    pub fn gather(&mut self, eye: Vec3, statics_on: bool, dynamic: &[PointLight]) {
+        let n = dynamic.len().min(MAX_LIGHTS);
+        self.lights[..n].copy_from_slice(&dynamic[..n]);
+        self.len = n;
+        if !statics_on {
+            return;
+        }
+        let room = MAX_LIGHTS - n;
+        if self.statics.len() <= room {
+            self.lights[n..n + self.statics.len()].copy_from_slice(&self.statics);
+            self.len += self.statics.len();
+            return;
+        }
+        self.order.clear();
+        self.order.extend(
+            self.statics
+                .iter()
+                .enumerate()
+                .map(|(i, l)| (Vec3::from(l.position).distance_squared(eye), i as u32)),
+        );
+        // Ties keep the earlier light, so the choice is deterministic.
+        let by_distance = |a: &(f32, u32), b: &(f32, u32)| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1));
+        let (kept, cut, _) = self.order.select_nth_unstable_by(room, by_distance);
+        let cut = cut.0.sqrt();
+        for &(d2, i) in kept.iter() {
+            let w = ((cut - d2.sqrt()) / (STATIC_FADE * cut)).clamp(0.0, 1.0);
+            let mut l = self.statics[i as usize];
+            l.color = l.color.map(|c| c * w);
+            l.corona.strength *= w;
+            self.lights[self.len] = l;
+            self.len += 1;
+        }
+    }
+
+    /// Sets each instance's light set from its bounds (`None`: lit by the sun and sky only).
+    /// `bounds` and `instances` pair up; extra instances are left alone.
+    pub fn assign(&self, bounds: &[Option<Bounds>], instances: &mut [MeshInstance]) {
+        let lights = self.lights();
+        for (inst, b) in instances.iter_mut().zip(bounds) {
+            inst.lights = b.map_or(LightSet::EMPTY, |b| light_set(lights, &b));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -336,40 +515,148 @@ mod tests {
         assert!(at(18.0 + 35.0 / 60.0).window_emissive_scale > 0.9);
     }
 
+    fn lamps_along_x(count: usize, spacing: f32) -> Vec<PointLight> {
+        (0..count)
+            .map(|i| streetlamp(Vec3::new(i as f32 * spacing, 7.5, 0.0)))
+            .collect()
+    }
+
     #[test]
-    fn the_nearest_lamps_light_and_fade_in_smoothly() {
-        let heads: Vec<Vec3> = (0..40)
-            .map(|i| Vec3::new(i as f32 * 25.0, 7.5, 0.0))
-            .collect();
-        let mut out = [PointLight::omni([0.0; 3], [0.0; 3], 1.0); STREETLAMP_LIGHTS];
-        let n = streetlamp_lights(&heads, Vec3::new(301.0, 0.0, 0.0), &mut out);
-        assert_eq!(n, STREETLAMP_LIGHTS);
-        // Nearest first: 300, 325, 275, 350, 250, 375 (and 225 is the first left out).
-        let xs: Vec<f32> = out.iter().map(|l| l.position[0]).collect();
-        assert_eq!(xs, [300.0, 325.0, 275.0, 350.0, 250.0, 375.0]);
-        assert!((out[0].color[0] - STREETLAMP_RGB[0] * STREETLAMP_KCD).abs() < 1e-5);
-        assert!(out[5].color[0] < out[0].color[0], "the farthest is fading");
-        // Moving along, every lamp's intensity changes continuously, even as the set
-        // changes: no step bigger than the motion explains.
-        let mut prev = [0.0f32; 40];
-        for step in 0..=2000 {
-            let x = 300.0 + step as f32 * 0.05;
-            let n = streetlamp_lights(&heads, Vec3::new(x, 0.0, 0.0), &mut out);
-            let mut now = [0.0f32; 40];
-            for l in &out[..n] {
-                now[(l.position[0] / 25.0) as usize] = l.color[0];
+    fn a_street_lamp_is_a_sodium_spot_with_a_halo() {
+        let l = streetlamp(Vec3::new(1.0, 7.5, 2.0));
+        assert_eq!(l.position, [1.0, 7.5, 2.0]);
+        assert_eq!(l.direction, [0.0, -1.0, 0.0]);
+        assert!(l.cone_cos[0] < l.cone_cos[1]);
+        assert!(l.color[0] > l.color[1] && l.color[1] > l.color[2]);
+        assert!(l.corona.radius > 0.5 && l.corona.strength > 0.0);
+        // The place's own lights map onto the same kinds.
+        let neon = place::Light {
+            pos: [0.0, 4.0, 0.0],
+            color: [0.5, 0.1, 1.0],
+            radius: 6.0,
+            kind: place::LightKind::Neon,
+        };
+        let n = place_light(&neon).unwrap();
+        assert_eq!(n.radius, 6.0);
+        assert!((n.color[2] - NEON_KCD).abs() < 1e-6 && n.corona.radius > 0.0);
+        let shop = place_light(&place::Light {
+            kind: place::LightKind::Window,
+            ..neon.clone()
+        })
+        .unwrap();
+        assert_eq!(shop.corona, Corona::NONE);
+        let street = place::Light {
+            kind: place::LightKind::Street,
+            ..neon.clone()
+        };
+        assert_eq!(
+            place_light(&street),
+            Some(streetlamp(Vec3::new(0.0, 4.0, 0.0)))
+        );
+        let car = place::Light {
+            kind: place::LightKind::Headlight,
+            ..neon
+        };
+        assert_eq!(place_light(&car), None);
+    }
+
+    #[test]
+    fn every_static_light_is_on_when_they_fit() {
+        let mut frame = FrameLights::new(lamps_along_x(100, 20.0));
+        let head = PointLight::omni([0.0; 3], [1.0; 3], 10.0);
+        frame.gather(Vec3::ZERO, false, &[head, head]);
+        assert_eq!(frame.lights().len(), 2, "photocell off: the car's only");
+        frame.gather(Vec3::ZERO, true, &[head, head]);
+        assert_eq!(frame.lights().len(), 102);
+        assert_eq!(frame.lights()[2..], frame.statics()[..]);
+    }
+
+    #[test]
+    fn past_the_frame_budget_the_nearest_statics_stay_and_fade_out_smoothly() {
+        let count = 400;
+        let mut frame = FrameLights::new(lamps_along_x(count, 25.0));
+        let dynamic = [PointLight::omni([0.0; 3], [1.0; 3], 10.0); 4];
+        let capacity = frame.order.capacity();
+        let mut prev = vec![0.0f32; count];
+        for step in 0..=400 {
+            let eye = Vec3::new(4000.0 + step as f32 * 0.5, 1.2, 0.0);
+            frame.gather(eye, true, &dynamic);
+            let lights = frame.lights();
+            assert_eq!(lights.len(), MAX_LIGHTS);
+            let mut now = vec![0.0f32; count];
+            for l in &lights[4..] {
+                now[(l.position[0] / 25.0).round() as usize] = l.color[0];
             }
+            // The kept ones are the nearest: the near lamps are at full strength.
+            let near = (eye.x / 25.0).round() as usize;
+            assert!((now[near] - STREETLAMP_RGB[0] * STREETLAMP_KCD).abs() < 1e-5);
             if step > 0 {
-                for k in 0..40 {
-                    assert!((now[k] - prev[k]).abs() < 0.05, "lamp {k} at x {x}");
+                for k in 0..count {
+                    assert!((now[k] - prev[k]).abs() < 0.1, "lamp {k} at x {}", eye.x);
                 }
             }
             prev = now;
         }
-        // Fewer lamps than lights: all of them, full strength.
-        let n = streetlamp_lights(&heads[..3], Vec3::ZERO, &mut out);
-        assert_eq!(n, 3);
-        assert!(out[..3].iter().all(|l| l.color[0] == out[0].color[0]));
-        assert_eq!(streetlamp_lights(&[], Vec3::ZERO, &mut out), 0);
+        assert_eq!(frame.order.capacity(), capacity, "no allocation per frame");
+    }
+
+    #[test]
+    fn instances_get_the_nearest_lights_that_reach_them() {
+        let mut lights = lamps_along_x(30, 10.0);
+        // A headlight at x 100 pointing +x, and an unlit tail lamp corona.
+        lights.push(PointLight {
+            direction: [1.0, 0.0, 0.0],
+            cone_cos: [0.8, 0.95],
+            ..PointLight::omni([100.0, 0.7, 0.0], [10.0; 3], 60.0)
+        });
+        lights.push(PointLight::omni([0.0, 0.7, 0.0], [1.0; 3], 0.0));
+        let small = Bounds::cube(Vec3::new(45.0, 1.0, 3.0), 1.0);
+        let set = light_set(&lights, &small);
+        // Lamps within 22 m of the box, nearest first (40 and 50 tie on the box distance
+        // and center; the earlier wins); those 20 m off are out of reach.
+        let got: Vec<u8> = set.indices().to_vec();
+        assert_eq!(got, [4, 5, 3, 6]);
+        // Behind the headlight nothing is lit by it; ahead it is.
+        let behind = Bounds::cube(Vec3::new(90.0, 1.0, 0.0), 2.0);
+        assert!(!light_set(&lights, &behind).indices().contains(&30));
+        let ahead = Bounds::cube(Vec3::new(130.0, 1.0, 0.0), 2.0);
+        assert!(light_set(&lights, &ahead).indices().contains(&30));
+        // A big box reached by more than fit keeps the nearest 8; the zero-radius corona
+        // light never lights anything.
+        let big = Bounds {
+            min: Vec3::new(-5.0, 0.0, -5.0),
+            max: Vec3::new(300.0, 10.0, 5.0),
+        };
+        let set = light_set(&lights, &big);
+        assert_eq!(set.len(), LIGHTS_PER_DRAW);
+        assert!(!set.indices().contains(&31));
+        // Brute force agrees on a grid of boxes.
+        for x in 0..40 {
+            for z in 0..4 {
+                let b = Bounds::cube(Vec3::new(x as f32 * 8.0, 2.0, z as f32 * 9.0), 3.0);
+                let mut reach: Vec<usize> = (0..lights.len())
+                    .filter(|&i| b.reached_by(&lights[i]))
+                    .collect();
+                let key = |i: &usize| {
+                    let p = Vec3::from(lights[*i].position);
+                    (b.distance_squared(p), b.center().distance_squared(p))
+                };
+                reach.sort_by(|a, b| key(a).partial_cmp(&key(b)).unwrap());
+                reach.truncate(LIGHTS_PER_DRAW);
+                let set = light_set(&lights, &b);
+                let got: Vec<usize> = set.indices().iter().map(|&i| usize::from(i)).collect();
+                assert_eq!(got, reach, "box at {x}, {z}");
+            }
+        }
+        // Instances get their sets; those without bounds none.
+        let mut frame = FrameLights::new(lamps_along_x(30, 10.0));
+        frame.gather(Vec3::ZERO, true, &[]);
+        let mut instances =
+            [MeshInstance::new(render::MeshId(0), glam::Mat4::IDENTITY.to_cols_array_2d()); 3];
+        instances[1].lights = LightSet::from_indices(&[1]);
+        frame.assign(&[Some(small), None], &mut instances);
+        assert_eq!(instances[0].lights.len(), 4);
+        assert!(instances[1].lights.is_empty());
+        assert_eq!(instances[2].lights, LightSet::EMPTY);
     }
 }
