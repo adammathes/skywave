@@ -50,6 +50,6 @@ Tests cannot judge feel. At each milestone gate the Pages deployment is played b
 
 ## Rules
 - A PR that changes generation output updates goldens in its own commit with reasons.
-- No test may read the network or the clock. Time is injected.
+- No test may read the network or the clock. Time is injected. The few wall-clock budget tests print their numbers always and assert only when `SKYWAVE_ENFORCE_BUDGETS` is set (CI sets it; a loaded dev machine does not).
 - Flaky tests are fixed or deleted the day they flake, never retried into green.
 - Screenshot-affecting PRs attach the PNG.

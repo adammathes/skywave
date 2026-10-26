@@ -42,6 +42,8 @@ jobs:
 
       - name: Test
         run: cargo test --locked --workspace
+        env:
+          SKYWAVE_ENFORCE_BUDGETS: "1"
 
       - name: cargo deny
         run: |
