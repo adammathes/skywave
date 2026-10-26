@@ -27,6 +27,11 @@
 //! turned inside out (reversed winding, negated normals). From outside it is always behind
 //! the shell's front faces, so it costs only triangles, and only in the first-person
 //! cameras.
+//!
+//! **Convertibles** ([`CarLayout::open_top`]) have no roof or side glass, so their cabin
+//! shows from outside: every camera draws the interior and steering wheel. The body has
+//! nothing above the belt over the cabin, so neither has its inside-out copy, and the
+//! cockpit sees the sky.
 
 use glam::{Mat4, Quat, Vec3};
 use render::{Mesh, MeshId, Tile, Vertex};
@@ -187,6 +192,9 @@ pub struct CarLayout {
     pub taillamps: [Vec3; 2],
     /// Overall body extent: length, width, height, m (the spec's `dims_m`).
     pub dims: [f32; 3],
+    /// A convertible: the cabin is open above the belt, so the interior and steering wheel
+    /// are drawn from every camera, not only the first-person ones.
+    pub open_top: bool,
 }
 
 impl CarLayout {
@@ -236,6 +244,7 @@ impl CarLayout {
             headlamps: lamp_centers(&lit.lights, LampGroup::Head).map(|p| p + offset),
             taillamps: lamp_centers(&lit.lights, LampGroup::Tail).map(|p| p + offset),
             dims: spec.dims_m,
+            open_top: shape.roof.convertible(),
         }
     }
 
@@ -673,7 +682,7 @@ mod tests {
 
     #[test]
     fn both_cars_build_in_body_space() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for (id, _) in vehicles::BUILTIN {
             let (spec, m) = model(id);
             let [len, wid, h] = spec.dims_m;
             let ground = -spec.cg_height_m;
@@ -807,7 +816,7 @@ mod tests {
 
     #[test]
     fn cockpit_layout_is_inside_the_car() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for (id, _) in vehicles::BUILTIN {
             let (spec, m) = model(id);
             let l = &m.layout;
             let [len, wid, h] = spec.dims_m;
@@ -824,6 +833,61 @@ mod tests {
             assert!(l.belt_y > ground + 0.5 && l.belt_y < e.y, "{id}");
             assert!(l.wheel_pivot.z < e.z && l.wheel_pivot.y < e.y);
             assert!(l.dial_count >= 1 && l.dial_count == spec.interior.gauges.len());
+        }
+    }
+
+    /// From the eye, the share of a hemisphere of view directions above the horizon that
+    /// reach the sky past the body (the roof, pillars and frame), by ray casting.
+    fn sky_share(m: &CarModel) -> f32 {
+        let body = &m.lods[0].body[0];
+        let tris: Vec<[Vec3; 3]> = body
+            .indices
+            .chunks_exact(3)
+            .map(|t| [t[0], t[1], t[2]].map(|i| Vec3::from(body.vertices[i as usize].pos)))
+            .collect();
+        let eye = m.layout.eye;
+        let (mut open, mut total) = (0, 0);
+        for a in 0..24 {
+            for e in 1..8 {
+                let (az, el) = (a as f32 * 15f32.to_radians(), e as f32 * 10f32.to_radians());
+                let dir = Vec3::new(az.sin() * el.cos(), el.sin(), -az.cos() * el.cos());
+                total += 1;
+                let hit = tris.iter().any(|t| {
+                    // Moller-Trumbore, either side.
+                    let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
+                    let p = dir.cross(e2);
+                    let det = e1.dot(p);
+                    if det.abs() < 1e-9 {
+                        return false;
+                    }
+                    let s = eye - t[0];
+                    let u = s.dot(p) / det;
+                    let q = s.cross(e1);
+                    let v = dir.dot(q) / det;
+                    u >= 0.0 && v >= 0.0 && u + v <= 1.0 && e2.dot(q) / det > 0.0
+                });
+                if !hit {
+                    open += 1;
+                }
+            }
+        }
+        open as f32 / total as f32
+    }
+
+    #[test]
+    fn open_tops_see_much_more_sky_from_the_seat() {
+        let (_, wagon) = model("palisade_wagon");
+        let hard = sky_share(&wagon);
+        for id in ["seabreeze_convertible", "regent_coupe_cabrio"] {
+            let (_, m) = model(id);
+            assert!(m.layout.open_top);
+            let open = sky_share(&m);
+            assert!(open > 0.85 && open > hard + 0.4, "{id}: {open} vs {hard}");
+            // The cabin walls are the body inside out: no roof over the seat either.
+            assert_eq!(
+                m.lods[0].shell_inside.indices.len(),
+                m.lods[0].body[0].indices.len()
+            );
         }
     }
 

@@ -14,7 +14,7 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
 }
 
 /// The vehicle specs compiled into the game, as `(id, RON text)`.
-pub const BUILTIN: [(&str, &str); 2] = [
+pub const BUILTIN: [(&str, &str); 4] = [
     (
         "corsair_gtx",
         include_str!("../../../assets/vehicles/corsair_gtx.ron"),
@@ -22,6 +22,14 @@ pub const BUILTIN: [(&str, &str); 2] = [
     (
         "palisade_wagon",
         include_str!("../../../assets/vehicles/palisade_wagon.ron"),
+    ),
+    (
+        "seabreeze_convertible",
+        include_str!("../../../assets/vehicles/seabreeze_convertible.ron"),
+    ),
+    (
+        "regent_coupe_cabrio",
+        include_str!("../../../assets/vehicles/regent_coupe_cabrio.ron"),
     ),
 ];
 
@@ -45,7 +53,7 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 
 /// The car body shapes compiled into the game, as `(file name, RON text)`; a
 /// `VehicleSpec::shape` names one.
-pub const BUILTIN_SHAPES: [(&str, &str); 2] = [
+pub const BUILTIN_SHAPES: [(&str, &str); 4] = [
     (
         "corsair_gtx.shape.ron",
         include_str!("../../../assets/vehicles/corsair_gtx.shape.ron"),
@@ -53,6 +61,14 @@ pub const BUILTIN_SHAPES: [(&str, &str); 2] = [
     (
         "palisade_wagon.shape.ron",
         include_str!("../../../assets/vehicles/palisade_wagon.shape.ron"),
+    ),
+    (
+        "seabreeze_convertible.shape.ron",
+        include_str!("../../../assets/vehicles/seabreeze_convertible.shape.ron"),
+    ),
+    (
+        "regent_coupe_cabrio.shape.ron",
+        include_str!("../../../assets/vehicles/regent_coupe_cabrio.shape.ron"),
     ),
 ];
 
@@ -150,6 +166,27 @@ mod tests {
         assert!(wagon.feel.oversteer_bias < 0.0 && sports.feel.oversteer_bias > 0.0);
         assert!(wagon.cg_fore_aft < sports.cg_fore_aft);
         assert!(wagon.tires.grip_lat < sports.tires.grip_lat);
+    }
+
+    #[test]
+    fn the_convertibles_are_built_in() {
+        for id in ["seabreeze_convertible", "regent_coupe_cabrio"] {
+            let spec = builtin_spec(id).unwrap();
+            assert_eq!(spec.class, VehicleClass::Convertible);
+            assert_eq!(spec.drive, Drive::Front);
+            assert_eq!(spec.era, Era::Eighties);
+            assert!(builtin_shape(&spec).unwrap().roof.convertible());
+        }
+        let seabreeze = builtin_spec("seabreeze_convertible").unwrap();
+        let regent = builtin_spec("regent_coupe_cabrio").unwrap();
+        // The big coupe: more power, more mass, slower steering, more roll.
+        assert!(peak_power_w(&regent) > 1.3 * peak_power_w(&seabreeze));
+        assert!((90e3..=105e3).contains(&peak_power_w(&seabreeze)));
+        assert!((140e3..=160e3).contains(&peak_power_w(&regent)));
+        assert!(regent.mass_kg > seabreeze.mass_kg);
+        assert!(regent.steering.return_rate < seabreeze.steering.return_rate);
+        assert!(regent.feel.body_roll > seabreeze.feel.body_roll);
+        assert_eq!((seabreeze.gear_count(), regent.gear_count()), (3, 4));
     }
 
     #[test]
