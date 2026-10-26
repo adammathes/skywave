@@ -10,7 +10,9 @@ doc for the area you are touching. `docs/MILESTONES.md` says what is in scope no
   compatible (`cargo deny check` enforces). No GPL/LGPL/ODbL code.
 - **No copyrighted assets.** No audio, lyrics, logos, fonts, textures or models we do not own.
   Radio presets are URLs only. Car designs are *inspired by* an era, never a copy of a real
-  model; no real brand or model names anywhere in code, data or docs.
+  model; no real brand or model names anywhere in code, data or docs. No real-world station call
+  signs, neighborhood or street names in procedural content either, not even as placeholders:
+  placeholders stick. Invented names only (compiled real places may use real place names).
 - **Zero violence.** Nothing can be hurt. Pedestrians are non-collidable and step aside.
 - **Offline.** The game makes no network requests except to music sources the user chose.
   No LLM/inference at runtime. Ever.
