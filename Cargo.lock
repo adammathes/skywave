@@ -433,6 +433,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastnoise-lite"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e5f3c3cc9081e5d0e18bcd50e80cd33cba47fc22f88a9da9c33ecd1c87ea5c0"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -866,6 +875,16 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "mapdump"
+version = "0.1.0"
+dependencies = [
+ "place",
+ "ron",
+ "skywave-core",
+ "world",
+]
 
 [[package]]
 name = "memchr"
@@ -2692,6 +2711,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "world"
 version = "0.1.0"
 dependencies = [
+ "fastnoise-lite",
  "place",
  "ron",
  "serde",

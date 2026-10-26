@@ -10,6 +10,7 @@ members = [
     "crates/platform-native",
     "crates/platform-web",
     "tools/shape-preview",
+    "tools/mapdump",
 ]
 
 [workspace.package]
@@ -46,6 +47,11 @@ serde_json = "=1.0.151"
 # Data files. serde without `std` keeps `vehicle` no_std; ron parses the specs in `app`.
 ron = { version = "=0.12.2", default-features = false }
 
+# Terrain noise for world generation (MIT, ~3k lines, no_std through `libm`; num-traits and
+# libm are already in the tree). It only uses add/mul, sqrt, trunc and abs, which are
+# correctly rounded or exact, so its output is bit-identical everywhere.
+fastnoise-lite = { version = "=1.1.1", default-features = false, features = ["libm"] }
+
 # Native gamepads (platform-native only). Default features: evdev + udev on Linux (the
 # Steam Deck's controller is a standard evdev pad), IOKit on macOS, Windows.Gaming.Input.
 gilrs = "=0.11.2"
@@ -62,6 +68,10 @@ console_log = "=1.1.0"
 # assertions and debug info stay on.
 [profile.dev.package.world]
 opt-level = 1
+
+# The macro map samples ~1M noise values; unoptimized noise alone would take ~0.2 s.
+[profile.dev.package.fastnoise-lite]
+opt-level = 3
 
 [profile.release]
 opt-level = 3

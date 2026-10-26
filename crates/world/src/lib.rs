@@ -6,6 +6,9 @@
 //! Everything is a pure function of the Place (and its `header.seed` for detail
 //! variation): same input, bit-identical vertices on every platform. [`collide`] builds the
 //! static shapes the car collides with from the same layout.
+//!
+//! [`procgen`] is the procedural producer (macro map so far), driven by a
+//! [`template::RegionTemplate`].
 #![no_std]
 
 extern crate alloc;
@@ -18,6 +21,7 @@ pub mod ground;
 pub mod math;
 pub mod mesh;
 pub mod palette;
+pub mod procgen;
 pub mod props;
 pub mod roads;
 pub mod template;
