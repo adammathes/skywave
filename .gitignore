@@ -4,3 +4,4 @@ node_modules
 *.png.tmp
 /tools/screenshot/out
 .DS_Store
+.claude/worktrees
