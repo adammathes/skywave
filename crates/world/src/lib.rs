@@ -196,6 +196,9 @@ pub struct ChunkPlan {
     /// A terrain place's ground with the roads graded in, and its cell colors.
     terrain: Option<(TerrainGrid, mesh::terrain::CellColors)>,
     plans: Vec<(Vec<FacadeEnv>, buildings::BuildingPlan)>,
+    /// Per building: the ground height its floor stands at and how far the ground falls
+    /// below it ([`buildings::footing`]); zeros on the flat test town.
+    footings: Vec<(f32, f32)>,
     fronts: Vec<usize>,
     /// Every prop in build order: the lots' parked cars, the house sites', the streets'.
     props: Vec<props::Prop>,
@@ -238,6 +241,15 @@ impl ChunkPlan {
             (g, colors)
         });
 
+        let footings: Vec<(f32, f32)> = match &terrain {
+            Some((g, _)) => place
+                .buildings
+                .iter()
+                .map(|b| buildings::footing(&b.footprint, |x, z| g.height_at(x, z)))
+                .collect(),
+            None => alloc::vec![(0.0, 0.0); place.buildings.len()],
+        };
+
         // The props, meshing nothing: the lots' parked cars, the house sites' props (their
         // walks go to a scratch mesh), then the streets' and the parks'.
         let mut none = MeshSet::new(place.header.chunk_size_m, Keep::Nothing);
@@ -250,15 +262,15 @@ impl ChunkPlan {
         for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
             scratch.vertices.clear();
             scratch.indices.clear();
-            props.extend(buildings::house_site(
-                &mut scratch,
-                b,
-                plan,
-                env,
-                palette,
-                seed,
-                i as u32,
-            ));
+            let base = footings[i].0;
+            props.extend(
+                buildings::house_site(&mut scratch, b, plan, env, palette, seed, i as u32)
+                    .into_iter()
+                    .map(|mut p| {
+                        p.y += base;
+                        p
+                    }),
+            );
         }
         if terrain.is_none() {
             let parks: Vec<Vec<V2>> = blocks
@@ -296,6 +308,7 @@ impl ChunkPlan {
             blocks,
             terrain,
             plans,
+            footings,
             fronts,
             props,
             kit: props::PropKit::new(),
@@ -371,9 +384,16 @@ impl ChunkPlan {
                         continue;
                     }
                     let m = out.at(c, MeshKind::Building);
-                    let s = buildings::build(m, b, plan, palette, seed, i as u32);
+                    let (base, drop) = self.footings[i];
+                    let mark = m.vertices.len();
+                    let s = buildings::build_on(m, b, plan, palette, seed, i as u32, drop);
                     // Its props are in `props` already.
                     buildings::house_site(m, b, plan, env, palette, seed, i as u32);
+                    if base != 0.0 {
+                        for v in &mut m.vertices[mark..] {
+                            v.pos[1] += base;
+                        }
+                    }
                     if let Some(stats) = stats.as_deref_mut() {
                         stats.buildings += 1;
                         stats.windows += s.windows;
@@ -532,13 +552,18 @@ fn side_zones(place: &Place, net: &roads::Network) -> Vec<[Option<ZoneId>; 2]> {
 }
 
 /// Precomputed geometry for asking what is in front of each facade.
+/// A road segment for facade lookups: ends, bounds, half width plus sidewalk, edge index.
+type RoadSeg = (V2, V2, (V2, V2), f32, usize);
+
 struct Lookup<'a> {
     place: &'a Place,
     footprints: Vec<Vec<V2>>,
     boxes: Vec<(V2, V2)>,
     parcels: Vec<(Vec<V2>, (V2, V2))>,
-    /// Road segments: ends, bounds, half width plus sidewalk.
-    roads: Vec<(V2, V2, (V2, V2), f32)>,
+    /// Road segments: ends, bounds, half width plus sidewalk, edge index. One per edge
+    /// (node to node) on the test town; one per profile segment on a terrain place, whose
+    /// streets curve.
+    roads: Vec<RoadSeg>,
 }
 
 impl Lookup<'_> {
@@ -559,19 +584,23 @@ impl Lookup<'_> {
             })
             .collect();
         let nodes = &place.roads.nodes;
-        let roads = place
-            .roads
-            .edges
-            .iter()
-            .enumerate()
-            .map(|(k, e)| {
+        let terrain = is_terrain_place(place);
+        let mut roads = Vec::new();
+        for (k, e) in place.roads.edges.iter().enumerate() {
+            let (end, _) = net.ends(k);
+            let sw = if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
+            let half = end.hw + sw;
+            if terrain && e.profile.len() > 2 {
+                for w in e.profile.windows(2) {
+                    let (ra, rb) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
+                    roads.push((ra, rb, bounds(&[ra, rb]), half, k));
+                }
+            } else {
                 let ra = V2::from_array(nodes[e.a as usize].pos);
                 let rb = V2::from_array(nodes[e.b as usize].pos);
-                let (end, _) = net.ends(k);
-                let sw = if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
-                (ra, rb, bounds(&[ra, rb]), end.hw + sw)
-            })
-            .collect();
+                roads.push((ra, rb, bounds(&[ra, rb]), half, k));
+            }
+        }
         Lookup {
             place,
             footprints,
@@ -601,7 +630,7 @@ impl Lookup<'_> {
                 let mid = (a + b) * 0.5;
                 let (mut road_dist, mut yard, mut nearest) = (f32::MAX, f32::MAX, usize::MAX);
                 let r = 130.0;
-                for (k, &(ra, rb, (lo, hi), half)) in self.roads.iter().enumerate() {
+                for &(ra, rb, (lo, hi), half, k) in &self.roads {
                     if mid.x < lo.x - r || mid.x > hi.x + r || mid.y < lo.y - r || mid.y > hi.y + r
                     {
                         continue;
