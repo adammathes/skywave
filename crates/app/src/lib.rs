@@ -452,11 +452,12 @@ mod tests {
         let end = a.drive.state.speed_mps;
         assert!(peak > 15.0, "{peak}");
         assert!(end < peak - 5.0, "{end} vs {peak}");
-        // Pinned: a change here is a change to the sim, the input mapping or the step
-        // order. Update it deliberately.
+        // Pinned: a change here is a change to the sim, the input mapping, the step order or
+        // the chase camera (the hashed debug fly camera starts at its pose). Update it
+        // deliberately.
         assert_eq!(
             a.state_hash(),
-            0x66f1_ac8c_b081_a3ba,
+            0x0c4a_c704_5986_cac0,
             "{:#x}",
             a.state_hash()
         );

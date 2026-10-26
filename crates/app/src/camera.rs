@@ -91,8 +91,8 @@ pub const TUNING: CameraTuning = CameraTuning {
     near_m: 0.25,
     far_m: 3000.0,
 
-    chase_distance_m: [4.5, 7.0, 10.0],
-    chase_height_m: [1.6, 2.4, 3.2],
+    chase_distance_m: [4.2, 6.0, 9.0],
+    chase_height_m: [1.5, 2.1, 2.9],
     chase_target_height_m: 1.0,
     chase_lookahead_m: 1.0,
     chase_lookahead_s: 0.15,
