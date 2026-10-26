@@ -49,6 +49,10 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 | Budgets as hard numbers treated as spec | **already** | `docs/ARCHITECTURE.md`, `docs/RENDERING.md`. |
 | All names original, no era placeholders because placeholders stick | **already; strengthened** | `CLAUDE.md` forbids real brands and models; this adds: no real-world station call signs, place names or vehicle names as placeholders in procedural content either. |
 
+## Performance follow-ups noted during M2
+- Parcels: a face spanning several chunks is rebuilt by every chunk it touches (worst chunk ~7 ms vs the 2 ms target). Cache built faces in the plan, keyed by face id, so each chunk only slices.
+- Streaming stages: buildings and light tiles on dense chunks exceed the step budget; split into pieces (in progress).
+
 ## Not from that list, noted during M1
 - Chase camera collision with buildings (push in): M2.
 - Look-into-the-turn and a stronger speed-sensitive steering limit: feel gate.

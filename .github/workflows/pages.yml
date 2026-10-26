@@ -2,7 +2,7 @@ name: Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/intelligent-hypatia-vnrj1a]
   workflow_dispatch:
 
 permissions:
@@ -45,6 +45,8 @@ jobs:
         run: tools/web-build.sh
 
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v4
         with:
