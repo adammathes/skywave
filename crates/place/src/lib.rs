@@ -565,36 +565,70 @@ pub struct Facades {
     pub items: Vec<Facade>,
 }
 
+/// What a [`Prop`] is. Its facing is the unit ground direction `(-sin yaw, -cos yaw)` in
+/// `(x, z)` (a [`Spawn`]'s heading convention); what that means depends on the kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PropKind {
+    /// Facing: along the arm, over the road.
     StreetLight,
     PalmTree,
     Oak,
-    Hedge,
+    /// A run of hedge `len_dm` decimeters long centered on `pos`, along the facing.
+    Hedge {
+        len_dm: u16,
+    },
+    /// Facing: the way a sitter looks.
     Bench,
     Hydrant,
+    /// A curbside mailbox on a post, its door toward the facing.
     Mailbox,
+    /// A street-name post (two crossed blades) at a junction; `text_seed` names the
+    /// streets.
     Sign {
         text_seed: u64,
     },
+    /// A neon blade sign projecting from a wall along the facing; `palette` indexes the
+    /// era's neon colors.
     NeonSign {
         palette: u8,
     },
+    /// Facing: the way the panel faces.
     Billboard,
+    /// Facing: along the line.
     PowerPole,
-    Fence,
-    /// `vehicle_class` is the vehicle crate's class, mapped by the app.
+    /// A run of fence `len_dm` decimeters long centered on `pos`, along the facing.
+    Fence {
+        len_dm: u16,
+    },
+    /// Facing: the nose. `vehicle_class`: the vehicle crate's `VehicleClass` in the low 4
+    /// bits, the paint (an index into the shape's palette, wrapping) in the high 4; the app
+    /// maps the class onto a car shape.
     ParkedCar {
         vehicle_class: u8,
+    },
+    /// A tall gum tree: a long bare trunk and a sparse, lobed crown.
+    Eucalyptus,
+    TrashCan,
+    /// Facing: toward the drivers it stops.
+    StopSign,
+    /// A traffic signal pole with a mast arm of `arm_dm` decimeters along the facing.
+    Signal {
+        arm_dm: u8,
+    },
+    /// A pier `len_m` meters long from its land end at `pos` (on its deck) out along the
+    /// facing.
+    Pier {
+        len_m: u8,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Prop {
+    /// Base point: where it stands, `[x, y, z]`.
     pub pos: [f32; 3],
-    /// Rotation about +Y, radians.
+    /// Rotation about +Y, radians (see [`PropKind`] for the facing it gives).
     pub yaw: f32,
     pub kind: PropKind,
 }

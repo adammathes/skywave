@@ -34,11 +34,14 @@ Spawns       { Vec<Spawn { pos, heading, kind: PlayerStart|Garage }> }
 Lanes        { per edge: lane centerlines, stop lines, junction turn tables }   (traffic + AI)
 Sidewalks    { polylines with crossings }                                        (pedestrians)
 Facades      { per building: window grid, ground-floor type, awning, sign slots, emissive windows mask }
-Props        { Vec<Prop { pos, yaw, kind: StreetLight|PalmTree|Oak|Hedge|Bench|Hydrant|Mailbox|Sign{text_seed}|
-                         NeonSign{palette}|Billboard|PowerPole|Fence|ParkedCar{vehicle_class} }> }
+Props        { Vec<Prop { pos, yaw, kind: StreetLight|PalmTree|Oak|Hedge{len_dm}|Bench|Hydrant|Mailbox|Sign{text_seed}|
+                         NeonSign{palette}|Billboard|PowerPole|Fence{len_dm}|ParkedCar{vehicle_class}|
+                         Eucalyptus|TrashCan|StopSign|Signal{arm_dm}|Pier{len_m} }> }
 Lights       { Vec<Light { pos, color, radius, kind: Street|Neon|Window|Headlight }> }
 Chunk index  { per chunk: byte ranges into every table above, plus bounds and a content hash }
 ```
+A prop's `pos` is where it stands (a hedge's or fence's run is centered on it, a pier starts there) and its `yaw` gives its facing `(-sin yaw, -cos yaw)` in `(x, z)`, a spawn's heading convention. `ParkedCar::vehicle_class` packs the vehicle crate's `VehicleClass` (low 4 bits) and the paint, an index into the car shape's palette (high 4 bits).
+
 Chunking: every object table is sorted by chunk; the chunk index holds byte ranges into the 14 object tables, a per-chunk hash (which also covers the chunk's height samples and zone cells) and bounds. The terrain grid, zones and water bodies are read once for the whole place (a height grid cannot be sliced per chunk as a byte range); only object tables stream per chunk. Objects straddling chunks belong to the chunk of their centroid; roads are split at chunk borders by the producer.
 
 ## Validation (`place::validate`, run on load and in tests)
