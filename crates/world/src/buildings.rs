@@ -13,6 +13,11 @@
 //! curtain wall with mullions), barns (gambrel roof, braced doors; octagons are silos) and
 //! detached garages (`Parking`). Brick, deco and stucco towers of
 //! [`STEP_BACK_MIN_FLOORS`] floors or more step back above [`STEP_BACK_FLOORS`].
+//!
+//! A terrain place's detailing gives its buildings [`Signage`]: invented names lettered on
+//! the sign bands (or a backlit sign box) and an awning of one of several kinds; some shops
+//! are open late (the detailing puts a warm fill light in front of them). Without it (the
+//! test town) a building keeps its original look.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -116,6 +121,41 @@ pub struct BuildingPlan {
     /// The part of a tall building stepped back above [`STEP_BACK_FLOORS`]; this plan is
     /// then the base.
     pub tower: Option<Box<TowerPlan>>,
+    /// What the detailing adds to the street front; `None` keeps the plain look.
+    pub signage: Option<Signage>,
+}
+
+/// What a terrain place's detailing adds to a building's street front.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Signage {
+    /// Seeds the invented names on its signs.
+    pub name_seed: u64,
+    /// The storefront awning: 0 striped (the plain look's), 1 one solid color, 2 a flat
+    /// canopy, 3 none.
+    pub awning: u8,
+    /// Its signs are backlit boxes with dark letters rather than neon letters.
+    pub lit_box: bool,
+    /// The shop is open late: the detailing lights the walk in front of it at night (its
+    /// glass is not emissive: a big pane at a lit window's brightness reads as a white
+    /// wall).
+    pub shop_lit: bool,
+}
+
+/// Rng key for signage.
+const KEY_SIGNAGE: u64 = 0x5349_474E;
+/// Share of shops (out of 256) open late, and of signs that are backlit boxes.
+const SHOP_LIT_256: u64 = 115;
+const LIT_BOX_256: u64 = 70;
+
+/// The signage of building `index` of a place with detail seed `seed`.
+pub fn signage(seed: u64, index: u32) -> Signage {
+    let h = skywave_core::hash64(seed, &[KEY_SIGNAGE, u64::from(index)]);
+    Signage {
+        name_seed: h,
+        awning: ((h >> 8) % 4) as u8,
+        lit_box: (h >> 16) & 255 < LIT_BOX_256,
+        shop_lit: (h >> 24) & 255 < SHOP_LIT_256,
+    }
 }
 
 /// The stepped-back upper part of a tower: a building of its own (inset footprint, the
@@ -480,6 +520,7 @@ fn plan_one(b: &Building, env: &[FacadeEnv], door_pick: u32, budget: usize) -> B
         door_w,
         door_h,
         tower: None,
+        signage: None,
     }
 }
 
@@ -505,6 +546,8 @@ struct Look {
     sky: Rgb,
     /// Upper-floor siding of two-tone houses.
     upper: Paint,
+    /// The building's signage, if the detailing gave it any.
+    signage: Option<Signage>,
 }
 
 fn choose<T: Copy>(rng: &mut Rng, items: &[T]) -> T {
@@ -674,6 +717,7 @@ fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
         neon,
         sky: pal.sky_blue,
         upper: Paint::new(wall_rgb, pattern),
+        signage: None,
     }
     .styled(b, pal, rng)
 }
@@ -779,7 +823,8 @@ pub fn build_on(
 ) -> BuildingStats {
     let start = m.indices.len();
     let mut rng = Rng::new(Seed(seed), &[KEY_BUILDING, u64::from(index)]);
-    let look = look(b, pal, &mut rng);
+    let mut look = look(b, pal, &mut rng);
+    look.signage = plan.signage;
     let fp: Vec<V2> = b.footprint.iter().map(|&p| V2::from_array(p)).collect();
     let n = fp.len();
     let mut stats = BuildingStats::default();
@@ -2098,7 +2143,23 @@ fn storefront(
             look.plinth,
         );
     }
-    awning(m, f, x0 - 0.2, x1 + 0.2, glass_top + 0.15, 1.4, 0.6, look);
+    match look.signage.map_or(0, |s| s.awning) {
+        0 => awning(m, f, x0 - 0.2, x1 + 0.2, glass_top + 0.15, 1.4, 0.6, look),
+        1 => {
+            let solid = Look {
+                awning: [look.awning[0], look.awning[0]],
+                ..*look
+            };
+            awning(m, f, x0 - 0.2, x1 + 0.2, glass_top + 0.2, 1.1, 0.45, &solid);
+        }
+        2 => {
+            // A flat canopy with a fascia in the trim color.
+            let y = glass_top + 0.2;
+            let (lo, hi) = ([x0 - 0.3, y, 0.0], [x1 + 0.3, y + 0.28, 1.7]);
+            boxf(m, f, lo, hi, face::ALL & !face::NEG_Z, look.trim);
+        }
+        _ => {}
+    }
     if signs {
         let sy0 = glass_top + 0.4;
         let sy1 = (sy0 + 0.8).min(y1 - 0.15);
@@ -2170,6 +2231,11 @@ fn sign_band(
         return;
     }
     let depth = 0.14;
+    if let Some(s) = look.signage {
+        if named_sign(m, f, x0, x1, y0, y1, depth, look, s) {
+            return;
+        }
+    }
     boxf(
         m,
         f,
@@ -2203,6 +2269,65 @@ fn sign_band(
         }
         x += w.abs() + lh * 0.22;
     }
+}
+
+/// A sign box lettered with an invented name: neon letters on a dark box, or dark letters
+/// on a backlit one. False (nothing drawn) when no name fits.
+#[allow(clippy::too_many_arguments)]
+fn named_sign(
+    m: &mut WorldMesh,
+    f: &Frame,
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    depth: f32,
+    look: &Look,
+    s: Signage,
+) -> bool {
+    let h = y1 - y0;
+    let px = (h * 0.56 / 5.0).min(0.15);
+    let max = ((x1 - x0 - 0.3) / (4.0 * px)) as usize;
+    // Each sign of a building its own name, keyed by where it starts along the wall.
+    let key = skywave_core::mix64(s.name_seed ^ u64::from(x0.to_bits()));
+    let name = crate::signs::business_name(key, max.min(18));
+    if name.is_empty() {
+        return false;
+    }
+    let (box_paint, ink) = if s.lit_box {
+        let face = shade(mix(look.neon, [255, 244, 214], 190), 140);
+        let lit = Paint::new(face, Pattern::Plain).glowing(face, Glow::Neon);
+        (lit, Paint::new(shade(look.sign.rgb(), 120), Pattern::Plain))
+    } else {
+        let neon = Paint::new(look.neon, Pattern::Plain).glowing(look.neon, Glow::Neon);
+        (look.sign, neon)
+    };
+    boxf(
+        m,
+        f,
+        [x0, y0, 0.0],
+        [x1, y1, depth],
+        face::ALL & !face::NEG_Z,
+        look.sign,
+    );
+    if s.lit_box {
+        rect(
+            m,
+            f,
+            x0 + 0.06,
+            y0 + 0.06,
+            x1 - 0.06,
+            y1 - 0.06,
+            depth + 0.005,
+            false,
+            box_paint,
+        );
+    }
+    let w = crate::signs::text_width(&name) as f32 * px;
+    let lx = (x0 + x1 - w) * 0.5;
+    let ly = (y0 + y1) * 0.5 - 2.5 * px;
+    crate::props::letters(m, f, &name, lx, ly, px, depth + 0.012, false, ink);
+    true
 }
 
 /// The strip mall's front: a row of shop units under one deep canopy on posts, signs on
