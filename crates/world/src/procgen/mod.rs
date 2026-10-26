@@ -11,7 +11,7 @@ pub mod macro_map;
 pub mod terrain;
 pub mod zones;
 
-pub use arterials::{arterials, graded_heights, hash_graph};
+pub use arterials::{arterials, hash_graph};
 pub use macro_map::{Frame, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind};
 
 /// Stage ids, the first word of every stage's hash key.
