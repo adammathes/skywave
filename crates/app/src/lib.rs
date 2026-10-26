@@ -12,6 +12,7 @@ pub mod daylight;
 pub mod drive;
 mod input;
 pub mod lighting;
+mod places;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -23,7 +24,7 @@ pub use settings::{MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
-pub use scene::SceneSetup;
+pub use scene::{PlaceKey, SceneSetup};
 
 pub use input::{
     pad_table, Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context,
@@ -148,6 +149,8 @@ pub struct App {
     alpha: f32,
     /// Menus, HUD, overlay and the user's settings and bindings.
     ui: ui::Ui,
+    /// Where the place puts the car: its `PlayerStart` ground point and heading.
+    start: ([f32; 3], f32),
 }
 
 impl App {
@@ -158,16 +161,20 @@ impl App {
 
     /// The built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) at the start of the strip.
     pub fn new_with(seed: Seed, vehicle_id: &str) -> Result<App, String> {
+        App::new_in(seed, vehicle_id, PlaceKey::TestTown)
+    }
+
+    /// The built-in car `vehicle_id` at the `PlayerStart` of the place `key` names.
+    pub fn new_in(seed: Seed, vehicle_id: &str, key: PlaceKey) -> Result<App, String> {
         let spec = vehicles::builtin_spec(vehicle_id)?;
         let shape = vehicles::builtin_shape(&spec)?;
         let model = CarModel::build(&spec, &shape)?;
-        // The test town's layout is fixed; the session seed drives its detailing.
-        let mut place = Place::test_grid();
-        place.header.seed = seed.0;
+        let place: Place = places::build(key, seed)?;
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
-        let drive = Drive::with_layout(spec, model.layout, start.pos, start.heading);
+        let start = (start.pos, start.heading);
+        let drive = Drive::with_layout(spec, model.layout, start.0, start.1);
         let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
-        let town = render_meshes(&chunks);
+        let town = render_meshes(&chunks, places::merge(key));
         let mut meshes = town.meshes;
         let mut instances: Vec<MeshInstance> = (0..meshes.len())
             .map(|i| MeshInstance {
@@ -208,21 +215,19 @@ impl App {
             lights: [PointLight::omni([0.0; 3], [0.0; 3], 1.0); MAX_POINT_LIGHTS],
             alpha: 0.0,
             ui: ui::Ui::new(),
+            start,
         })
     }
 
     /// The scene `setup` describes: its seed and car, the car on the ground at its point
     /// and heading, its camera, its headlights, and its clock (frozen when it gives a time).
     pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
-        let mut app = App::new_with(Seed(setup.seed), &setup.car)?;
-        let (y, _) = app.ground.level_at(setup.pos);
-        let ground = [setup.pos[0], y, setup.pos[1]];
-        app.drive = Drive::with_layout(
-            app.drive.spec.clone(),
-            app.drive.layout,
-            ground,
-            setup.heading_rad,
-        );
+        let mut app = App::new_in(Seed(setup.seed), &setup.car, setup.place)?;
+        let pos = setup.pos.unwrap_or([app.start.0[0], app.start.0[2]]);
+        let heading = setup.heading_rad.unwrap_or(app.start.1);
+        let (y, _) = app.ground.level_at(pos);
+        let ground = [pos[0], y, pos[1]];
+        app.drive = Drive::with_layout(app.drive.spec.clone(), app.drive.layout, ground, heading);
         app.drive.headlights = setup.headlights;
         app.camera = CameraRig::new(setup.camera, &app.drive);
         app.curr = fly_from(&app.camera.pose(&app.drive, 1.0));
@@ -418,8 +423,9 @@ struct TownMeshes {
 /// format: every chunk mesh without its street lamp lenses (lit windows slightly tinted),
 /// then one mesh holding all neon and signal triangles colored by their glow, drawn with a
 /// boosted instance color, then one holding every street lamp lens, which the photocell
-/// switches. The lamp heads are where the lenses cluster.
-fn render_meshes(chunks: &[ChunkMesh]) -> TownMeshes {
+/// switches. The lamp heads are where the lenses cluster. With `merge` above 1, the chunk
+/// meshes of each `merge × merge` block of chunks (every kind) become one mesh.
+fn render_meshes(chunks: &[ChunkMesh], merge: i32) -> TownMeshes {
     let mut meshes = Vec::with_capacity(chunks.len() + 2);
     let (mut glow, mut lamps) = (Mesh::default(), Mesh::default());
     let append = |all: &mut Mesh, part: Mesh| {
@@ -427,9 +433,23 @@ fn render_meshes(chunks: &[ChunkMesh]) -> TownMeshes {
         all.vertices.extend_from_slice(&part.vertices);
         all.indices.extend(part.indices.iter().map(|i| i + base));
     };
+    // Merged blocks, in first-seen order (the chunks come sorted).
+    let mut blocks: Vec<([i32; 2], usize)> = Vec::new();
     for c in chunks {
         let mesh = worldmesh::atlas_mesh(&c.mesh, c.kind);
-        meshes.push(convert(&mesh, Part::Base));
+        let base = convert(&mesh, Part::Base);
+        if merge > 1 {
+            let key = [c.chunk[0].div_euclid(merge), c.chunk[1].div_euclid(merge)];
+            match blocks.iter().find(|b| b.0 == key) {
+                Some(&(_, i)) => append(&mut meshes[i], base),
+                None => {
+                    blocks.push((key, meshes.len()));
+                    meshes.push(base);
+                }
+            }
+        } else {
+            meshes.push(base);
+        }
         append(&mut glow, convert(&mesh, Part::Glow));
         append(&mut lamps, convert(&mesh, Part::Lamps));
     }
@@ -929,5 +949,32 @@ mod tests {
         assert_ne!(a.meshes, b.meshes);
         assert_eq!(a.state_hash(), b.state_hash());
         assert_eq!(App::new(Seed(1)).meshes, a.meshes);
+    }
+
+    #[test]
+    fn the_coast_place_loads_and_the_car_drives_on_it() {
+        let setup = SceneSetup::from_query("?seed=1&place=coast").unwrap();
+        let mut app = App::from_setup(&setup).unwrap();
+        // Every chunk meshed, merged into few draws.
+        let world = app.world_instances;
+        assert!((40..=80).contains(&world), "{world} world meshes");
+        assert!(app.meshes[..world]
+            .iter()
+            .all(|m| m.vertices.len() <= 1 << 20));
+        // On the ground at the start, rolling forward along the road.
+        let (start, heading) = app.start;
+        let pose = app.drive.pose(1.0);
+        assert!((pose.pos.x - start[0]).abs() < 1e-3 && (pose.pos.z - start[2]).abs() < 1e-3);
+        let mut input = InputState::default();
+        input.set(Action::Throttle, 0.5);
+        for _ in 0..90 {
+            app.update(&input, 1.0 / 30.0);
+        }
+        let now = app.drive.pose(1.0).pos;
+        let (y, _) = app.ground.level_at([now.x, now.z]);
+        let moved = Vec3::new(now.x - start[0], 0.0, now.z - start[2]);
+        let ahead = Vec3::new(-heading.sin(), 0.0, -heading.cos());
+        assert!(moved.dot(ahead) > 10.0, "{moved}");
+        assert!((now.y - y).abs() < 1.0, "car at {now}, ground {y}");
     }
 }

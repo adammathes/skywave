@@ -4,33 +4,59 @@
 //! URL query (`?t=17:40&cam=cockpit`), the desktop build from `--scene key=value` flags.
 //!
 //! Keys (every one optional):
-//! - `seed=<u64>`: detail seed of the town (default 1).
+//! - `seed=<u64>`: seed of the place (default 1): the test town's detail, or the whole
+//!   procedural place.
+//! - `place=<name>`: `town` (the hand-laid test town, the default) or `coast` (the
+//!   procedural `california_coast` place for the seed).
 //! - `car=<id>`: built-in vehicle id (default [`DEFAULT_VEHICLE`]).
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default `chase-mid`).
 //! - `t=HH:MM`: time of day; when given the clock is frozen there (default 17:40, running).
-//! - `pos=x,z`: put the car on the ground at this point, m (default the start of the strip).
+//! - `pos=x,z`: put the car on the ground at this point, m (default the place's
+//!   `PlayerStart`: the start of the strip).
 //! - `yaw=<deg>`: the car's compass heading, degrees clockwise from north (-z): 0 north,
-//!   90 east (the default), 180 south, 270 west.
+//!   90 east, 180 south, 270 west (default the `PlayerStart`'s: east in the test town).
 //! - `lights=1`: headlights on.
 //! - `fly=1`: the free-fly debug camera.
 //! - `still=1`: the simulation does not run, so every frame is the same picture of the
 //!   scene at rest (for screenshot goldens; input is ignored).
 
 use crate::camera::CameraMode;
-use crate::drive::{DEFAULT_VEHICLE, START_GROUND, START_HEADING_RAD};
+use crate::drive::DEFAULT_VEHICLE;
+
+/// Which place a scene is in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlaceKey {
+    /// The hand-laid test town (`place::Place::test_grid`).
+    #[default]
+    TestTown,
+    /// The procedural `california_coast` place of the scene's seed.
+    Coast,
+}
+
+impl PlaceKey {
+    pub fn from_name(name: &str) -> Option<PlaceKey> {
+        match name {
+            "town" => Some(PlaceKey::TestTown),
+            "coast" => Some(PlaceKey::Coast),
+            _ => None,
+        }
+    }
+}
 
 /// A starting scene; `Default` is the normal start of the game.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneSetup {
     pub seed: u64,
+    pub place: PlaceKey,
     pub car: String,
     pub camera: CameraMode,
     /// Seconds of day the clock is frozen at, or `None` for the default running clock.
     pub time_s: Option<f64>,
-    /// Ground point `[x, z]` the car starts on, m.
-    pub pos: [f32; 2],
-    /// Heading in the sim's convention: radians, 0 faces -z, positive turns left.
-    pub heading_rad: f32,
+    /// Ground point `[x, z]` the car starts on, m; `None` for the place's `PlayerStart`.
+    pub pos: Option<[f32; 2]>,
+    /// Heading in the sim's convention: radians, 0 faces -z, positive turns left; `None`
+    /// for the `PlayerStart`'s.
+    pub heading_rad: Option<f32>,
     pub headlights: bool,
     pub fly: bool,
     /// Draw the scene without running the simulation.
@@ -41,11 +67,12 @@ impl Default for SceneSetup {
     fn default() -> SceneSetup {
         SceneSetup {
             seed: 1,
+            place: PlaceKey::TestTown,
             car: DEFAULT_VEHICLE.to_string(),
             camera: CameraMode::ChaseMid,
             time_s: None,
-            pos: [START_GROUND[0], START_GROUND[2]],
-            heading_rad: START_HEADING_RAD,
+            pos: None,
+            heading_rad: None,
             headlights: false,
             fly: false,
             still: false,
@@ -68,8 +95,8 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 9] = [
-        "seed", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still",
+    pub const KEYS: [&'static str; 10] = [
+        "seed", "place", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still",
     ];
 
     /// Sets one key (see the module docs).
@@ -77,6 +104,7 @@ impl SceneSetup {
         let bad = || format!("bad scene value {key}={value}");
         match key {
             "seed" => self.seed = value.parse().map_err(|_| bad())?,
+            "place" => self.place = PlaceKey::from_name(value).ok_or_else(bad)?,
             "car" => self.car = value.to_string(),
             "cam" => self.camera = CameraMode::from_name(value).ok_or_else(bad)?,
             "t" => self.time_s = Some(parse_clock(value).ok_or_else(bad)?),
@@ -87,14 +115,14 @@ impl SceneSetup {
                 if !(x.is_finite() && z.is_finite()) {
                     return Err(bad());
                 }
-                self.pos = [x, z];
+                self.pos = Some([x, z]);
             }
             "yaw" => {
                 let deg: f32 = value.parse().map_err(|_| bad())?;
                 if !deg.is_finite() {
                     return Err(bad());
                 }
-                self.heading_rad = -deg.to_radians();
+                self.heading_rad = Some(-deg.to_radians());
             }
             "lights" => self.headlights = parse_switch(value).ok_or_else(bad)?,
             "fly" => self.fly = parse_switch(value).ok_or_else(bad)?,
@@ -137,20 +165,23 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1",
+            "?seed=7&place=coast&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1",
         )
         .unwrap();
         assert_eq!(s.seed, 7);
+        assert_eq!(s.place, PlaceKey::Coast);
         assert_eq!(s.car, "palisade_wagon");
         assert_eq!(s.camera, CameraMode::Cockpit);
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
-        assert_eq!(s.pos, [-200.5, 97.0]);
-        assert!((s.heading_rad + core::f32::consts::PI).abs() < 1e-6);
+        assert_eq!(s.pos, Some([-200.5, 97.0]));
+        assert!((s.heading_rad.unwrap() + core::f32::consts::PI).abs() < 1e-6);
         assert!(s.headlights && !s.fly && s.still);
-        // East is the default heading.
+        // 90 is east, the test town's start heading.
         let mut east = SceneSetup::default();
         east.set("yaw", "90").unwrap();
-        assert!((east.heading_rad - START_HEADING_RAD).abs() < 1e-6);
+        let start = crate::drive::START_HEADING_RAD;
+        assert!((east.heading_rad.unwrap() - start).abs() < 1e-6);
+        assert_eq!(SceneSetup::default().place, PlaceKey::TestTown);
     }
 
     #[test]
@@ -167,6 +198,7 @@ mod tests {
             "pos=nan,0",
             "yaw=inf",
             "lights=2",
+            "place=moon",
         ] {
             assert!(SceneSetup::from_query(q).is_err(), "{q}");
         }
