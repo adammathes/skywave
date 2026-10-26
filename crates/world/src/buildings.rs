@@ -447,6 +447,27 @@ fn plan_one(b: &Building, env: &[FacadeEnv], door_pick: u32, budget: usize) -> B
         facades = make(&bays);
         round += 1;
     }
+    // Still over (tall towers on many-sided lots): blank the facades least seen, farthest
+    // from a road and shortest first, never the frontage.
+    if estimate(b, &facades, floors) > budget {
+        let mut order: Vec<usize> = (0..n).filter(|&i| i != frontage).collect();
+        order.sort_by(|&a, &c| {
+            let key = |i: usize| (env[i].road_dist.min(1e6), -len(i));
+            let (ka, kc) = (key(a), key(c));
+            kc.0.total_cmp(&ka.0).then(kc.1.total_cmp(&ka.1))
+        });
+        for i in order {
+            if estimate(b, &facades, floors) <= budget {
+                break;
+            }
+            let f = &mut facades[i];
+            f.columns = 0;
+            f.window_rows = 0;
+            f.door = None;
+            f.garage = None;
+            f.walkway = false;
+        }
+    }
     BuildingPlan {
         plinth_top,
         roof_y,

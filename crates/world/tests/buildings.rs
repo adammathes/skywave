@@ -297,6 +297,25 @@ fn chunks_build_their_slice() {
     );
 }
 
+/// The coast's buildings mesh within the per-building triangle budget.
+#[test]
+fn seed_one_meshes_within_budget() {
+    let t = template();
+    let p = build_place(Seed(1), &t);
+    let (_, s) = world::build_with_stats(&p, &world::Palette::socal_1985());
+    println!(
+        "seed 1: {} buildings, {} building triangles of {}, max {} per building, {} windows ({} lit)",
+        s.buildings,
+        s.triangles_by_kind[world::MeshKind::Building as usize],
+        s.triangles,
+        s.max_building_triangles,
+        s.windows,
+        s.lit_windows
+    );
+    assert_eq!(s.buildings, p.buildings.len());
+    assert!(s.max_building_triangles <= world::buildings::BUILDING_TRIANGLE_BUDGET);
+}
+
 /// Farmsteads get a house and a barn; bungalows now and then a garage; motels and strip
 /// malls exist on the strip, towers downtown, warehouses in industry.
 #[test]
