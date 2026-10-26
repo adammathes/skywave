@@ -32,12 +32,67 @@ wasm-bindgen --target web --no-typescript --out-dir "$dist" \
 wasm="$dist/platform_web_bg.wasm"
 if command -v wasm-opt >/dev/null 2>&1; then
     # The features rustc's wasm32 target enables by default, so the output stays valid for
-    # the same browsers. Binaryen keeps IEEE float semantics, so the self-test hashes hold.
+    # the same browsers (all of them in Safari 15+, Chrome 91+, Firefox 89+); nothing newer
+    # (no SIMD, threads, memory64, exception handling or tail calls). Binaryen keeps IEEE
+    # float semantics, so the self-test hashes hold.
     wasm-opt "${SKYWAVE_WASM_OPT:--Oz}" --enable-bulk-memory --enable-nontrapping-float-to-int \
         --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue \
         "$wasm" -o "$wasm"
 else
     echo "web-build: wasm-opt not found, skipping (optional)" >&2
+fi
+
+# The wasm must not use a feature Safari 15 lacks: read the `target_features` section rustc
+# writes (wasm-opt keeps it), and check that no memory is shared or 64-bit and that there is
+# no exception tag section.
+if command -v node >/dev/null 2>&1; then
+    node --input-type=module - "$wasm" <<'JS'
+import { readFileSync } from "node:fs";
+const allowed = new Set(["mutable-globals", "nontrapping-fptoint", "sign-ext", "bulk-memory",
+  "bulk-memory-opt", "reference-types", "call-indirect-overlong", "multivalue"]);
+const b = readFileSync(process.argv[2]);
+let p = 8;
+const leb = () => {
+  let r = 0, s = 0, x;
+  do { x = b[p++]; r += (x & 0x7f) * 2 ** s; s += 7; } while (x & 0x80);
+  return r;
+};
+const bad = [], used = [];
+while (p < b.length) {
+  const id = b[p++], len = leb(), end = p + len;
+  if (id === 13) bad.push("exception handling (tag section)");
+  if (id === 5) {
+    for (let n = leb(); n > 0; n--) {
+      const flags = leb();
+      if (flags & 2) bad.push("shared memory (threads)");
+      if (flags & 4) bad.push("memory64");
+      leb();
+      if (flags & 1) leb();
+    }
+  }
+  if (id === 0) {
+    const nameLen = leb();
+    const name = b.subarray(p, p + nameLen).toString();
+    p += nameLen;
+    if (name === "target_features") {
+      for (let n = leb(); n > 0; n--) {
+        const prefix = String.fromCharCode(b[p++]), l = leb();
+        const feature = b.subarray(p, p + l).toString();
+        p += l;
+        if (prefix !== "-") (allowed.has(feature) ? used : bad).push(feature);
+      }
+    }
+  }
+  p = end;
+}
+if (bad.length) {
+  console.error(`web-build: the wasm uses features older browsers lack: ${bad.join(", ")}`);
+  process.exit(1);
+}
+console.error(`web-build: wasm features: ${used.join(", ") || "(no target_features section)"}`);
+JS
+else
+    echo "web-build: node not found, skipping the wasm feature check" >&2
 fi
 
 game_version="$(git describe --tags --always --dirty 2>/dev/null || true)"

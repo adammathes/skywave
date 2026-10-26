@@ -33,6 +33,7 @@ web-sys = { workspace = true, features = [
     "Location",
     "MouseEvent",
     "Navigator",
+    "Node",
     "Performance",
     "Storage",
     "WheelEvent",

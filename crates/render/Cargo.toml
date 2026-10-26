@@ -13,8 +13,9 @@ glam.workspace = true
 bytemuck.workspace = true
 
 [dev-dependencies]
-# Headless device for pipeline/limit validation without a GPU, and naga's GLSL ES writer
-# to prove every shader translates for WebGL2. Both are already in wgpu's dependency tree.
+# Headless device for pipeline/limit validation without a GPU, and naga's GLSL ES, MSL and
+# SPIR-V writers to prove every shader translates for WebGL2, Metal (Safari, macOS) and
+# Vulkan. All are already in wgpu's dependency tree.
 wgpu = { workspace = true, features = ["noop"] }
-naga = { workspace = true, features = ["wgsl-in", "glsl-out"] }
+naga = { workspace = true, features = ["wgsl-in", "glsl-out", "msl-out", "spv-out"] }
 pollster.workspace = true

@@ -492,13 +492,14 @@ fn hud_shows_speed_time_and_the_overlay() {
 
     // F3 toggles the overlay, which shows the renderer's counters and a frame graph.
     h.app.set_render_stats(RenderStats {
+        backend: "WebGL2",
         draw_calls: 123,
         instances: 45,
         ..RenderStats::default()
     });
     h.key(Key::F3);
     let text = h.hud_text();
-    assert!(text.contains("draws 123"), "{text}");
+    assert!(text.contains("WebGL2  draws 123"), "{text}");
     assert!(text.contains("instances 45"), "{text}");
     assert!(text.contains("fps"));
     assert!(text.contains("steps/frame"));

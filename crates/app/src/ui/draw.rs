@@ -705,12 +705,13 @@ impl Ui {
             s,
             TEXT,
             format_args!(
-                "draws {}  (shadow {}, bloom {})\n\
+                "{}  draws {}  (shadow {}, bloom {})\n\
                  instances {}  lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
                  hud {} quads  ({} dropped)",
+                if r.backend.is_empty() { "?" } else { r.backend },
                 r.draw_calls,
                 r.shadow_draw_calls,
                 r.bloom_draw_calls,

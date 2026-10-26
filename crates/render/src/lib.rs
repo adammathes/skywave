@@ -410,6 +410,34 @@ pub struct SceneView<'a> {
     pub hud: Hud<'a>,
 }
 
+impl SceneView<'_> {
+    /// A small fixed scene for start-up checks: the camera 30 m back from the origin and
+    /// looking at it, a low sun straight ahead (so the sky, the sun's corona and, in float
+    /// mode, bloom and the tonemap all draw), plus the caller's `instances` and `lights`.
+    pub fn probe<'a>(instances: &'a [MeshInstance], lights: &'a [PointLight]) -> SceneView<'a> {
+        SceneView {
+            camera: Camera {
+                view: glam::camera::rh::view::look_at_mat4(
+                    Vec3::new(0.0, 4.0, 30.0),
+                    Vec3::ZERO,
+                    Vec3::Y,
+                )
+                .to_cols_array_2d(),
+                proj: glam::camera::rh::proj::directx::perspective(1.0, 16.0 / 9.0, 0.1, 1000.0)
+                    .to_cols_array_2d(),
+            },
+            sun: Sun {
+                direction: Vec3::new(0.0, 0.15, -1.0).normalize().to_array(),
+                illuminance: [30.0, 22.0, 12.0],
+            },
+            sky: Sky::default(),
+            instances,
+            lights,
+            hud: Hud::EMPTY,
+        }
+    }
+}
+
 /// How the renderer stores the lit image before tonemapping.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HdrMode {
@@ -422,10 +450,37 @@ pub enum HdrMode {
     Ldr,
 }
 
+/// How the corona pass reads the scene's depth.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CoronaDepth {
+    /// `Sampled` on GL (WebGL2), `Loaded` on every other backend.
+    #[default]
+    Auto,
+    /// The depth texture bound as an unfilterable float texture and read through a nearest
+    /// sampler: what GL needs (a float depth texture is incomplete there unless sampled
+    /// with nearest filtering).
+    Sampled,
+    /// The depth texture bound as a `texture_depth_2d` and read with `textureLoad`, no
+    /// sampler: the plainest depth read on WebGPU, Metal, Vulkan and D3D12.
+    Loaded,
+}
+
+/// Where an optional feature's start-up check stands. The browser's WebGPU answers error
+/// scopes a moment later, so a check can be pending for the first frames; the feature is
+/// left out of frames until it passes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Probe<'a> {
+    Pending,
+    Passed,
+    /// Failed with the device's error message; the feature stays off.
+    Failed(&'a str),
+}
+
 /// Construction options for [`Renderer::with_options`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RendererOptions {
     pub hdr: HdrMode,
+    pub corona_depth: CoronaDepth,
     /// Far view depth of each shadow cascade, meters, increasing.
     pub cascade_splits: [f32; CASCADES],
     /// The pooled chunk geometry, allocated here once ([`ChunkStore`]).
@@ -436,6 +491,7 @@ impl Default for RendererOptions {
     fn default() -> RendererOptions {
         RendererOptions {
             hdr: HdrMode::Auto,
+            corona_depth: CoronaDepth::Auto,
             cascade_splits: DEFAULT_CASCADE_SPLITS,
             chunk_pool: ChunkPoolConfig::NONE,
         }
@@ -445,6 +501,8 @@ impl Default for RendererOptions {
 /// Counters for the last rendered frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RenderStats {
+    /// The graphics backend ([`backend_label`]).
+    pub backend: &'static str,
     /// Frames rendered so far.
     pub frames: u64,
     /// Draw calls in the last frame, all passes.
@@ -722,16 +780,29 @@ pub mod shaders {
         include_str!("../shaders/common.wgsl"),
         include_str!("../shaders/hud.wgsl")
     );
+    /// Coronas reading the depth through a nearest sampler ([`CoronaDepth::Sampled`], GL).
+    ///
+    /// [`CoronaDepth::Sampled`]: crate::CoronaDepth::Sampled
     pub const CORONA: &str = concat!(
         include_str!("../shaders/common.wgsl"),
+        include_str!("../shaders/corona_sample.wgsl"),
         include_str!("../shaders/corona.wgsl")
     );
-    pub const ALL: [(&str, &str); 5] = [
+    /// Coronas reading a `texture_depth_2d` with `textureLoad` ([`CoronaDepth::Loaded`]).
+    ///
+    /// [`CoronaDepth::Loaded`]: crate::CoronaDepth::Loaded
+    pub const CORONA_LOAD: &str = concat!(
+        include_str!("../shaders/common.wgsl"),
+        include_str!("../shaders/corona_load.wgsl"),
+        include_str!("../shaders/corona.wgsl")
+    );
+    pub const ALL: [(&str, &str); 6] = [
         ("shadow", SHADOW),
         ("forward", FORWARD),
         ("post", POST),
         ("hud", HUD),
         ("corona", CORONA),
+        ("corona_load", CORONA_LOAD),
     ];
 }
 
@@ -805,6 +876,10 @@ pub struct Renderer {
     hud_buffer: wgpu::Buffer,
     hud_staging: Vec<HudQuad>,
     corona_pipeline: wgpu::RenderPipeline,
+    /// The corona pipeline's start-up check: coronas are drawn once it has passed.
+    corona_probe: ProbeState,
+    /// `Sampled` or `Loaded`, as resolved from the options.
+    corona_depth: CoronaDepth,
     corona_layout: wgpu::BindGroupLayout,
     depth_sampler: wgpu::Sampler,
     /// Room for [`MAX_CORONAS`] sprites, allocated once.
@@ -1281,9 +1356,16 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        // Coronas read the scene's depth as a plain float texture in the vertex stage,
-        // through a nearest sampler without comparison (GL counts a float depth texture
-        // sampled any other way as incomplete and reads zeros), and add onto the lit image.
+        // Coronas read the scene's depth in the vertex stage and add onto the lit image. On
+        // GL the depth is a plain float texture read through a nearest sampler without
+        // comparison (GL counts a float depth texture sampled any other way as incomplete
+        // and reads zeros); elsewhere a depth texture read with `textureLoad`, which leaves
+        // the sampler binding unused.
+        let corona_load = match options.corona_depth {
+            CoronaDepth::Auto => device.adapter_info().backend != wgpu::Backend::Gl,
+            CoronaDepth::Sampled => false,
+            CoronaDepth::Loaded => true,
+        };
         let corona_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("corona"),
             entries: &[
@@ -1291,7 +1373,11 @@ impl Renderer {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        sample_type: if corona_load {
+                            wgpu::TextureSampleType::Depth
+                        } else {
+                            wgpu::TextureSampleType::Float { filterable: false }
+                        },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -1311,7 +1397,14 @@ impl Renderer {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let corona_module = module("corona", shaders::CORONA);
+        // An optional pass: built in its own error scope, so a device that rejects it loses
+        // the coronas rather than the frame (see `ProbeState`).
+        let corona_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let corona_module = if corona_load {
+            module("corona", shaders::CORONA_LOAD)
+        } else {
+            module("corona", shaders::CORONA)
+        };
         let corona_pl = layout("corona", &[Some(&frame_layout), Some(&corona_layout)]);
         let add = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::One,
@@ -1358,6 +1451,8 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let corona_probe = ProbeState::new(corona_scope);
+        let backend = backend_label(device.adapter_info().backend);
         let corona_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("coronas"),
             size: (MAX_CORONAS * size_of::<CoronaRaw>()) as u64,
@@ -1417,6 +1512,12 @@ impl Renderer {
             hud_buffer,
             hud_staging: Vec::with_capacity(MAX_HUD_QUADS),
             corona_pipeline,
+            corona_probe,
+            corona_depth: if corona_load {
+                CoronaDepth::Loaded
+            } else {
+                CoronaDepth::Sampled
+            },
             corona_layout,
             depth_sampler,
             corona_buffer,
@@ -1428,8 +1529,21 @@ impl Renderer {
             instance_buffer,
             instance_capacity,
             instance_staging: Vec::with_capacity(instance_capacity),
-            stats: RenderStats::default(),
+            stats: RenderStats {
+                backend,
+                ..RenderStats::default()
+            },
         }
+    }
+
+    /// The corona pass's start-up check ([`Probe`]); coronas are drawn once it passed.
+    pub fn corona_probe(&mut self) -> Probe<'_> {
+        self.corona_probe.poll()
+    }
+
+    /// How the corona pass reads depth on this device: `Sampled` or `Loaded`.
+    pub fn corona_depth(&self) -> CoronaDepth {
+        self.corona_depth
     }
 
     /// True when lighting goes through an `Rgba16Float` target and a tonemap pass; false
@@ -1586,7 +1700,9 @@ impl Renderer {
             }
         }
         self.corona_staging.clear();
-        self.push_coronas(scene);
+        if self.corona_probe.poll() == Probe::Passed {
+            self.push_coronas(scene);
+        }
         let coronas = self.corona_staging.len() as u32;
         if coronas > 0 {
             self.queue.write_buffer(
@@ -1960,6 +2076,76 @@ impl Renderer {
             }),
         };
         (uniform, cascades)
+    }
+}
+
+/// The name of a graphics backend as the platform layers and overlays show it.
+pub fn backend_label(backend: wgpu::Backend) -> &'static str {
+    match backend {
+        wgpu::Backend::BrowserWebGpu => "WebGPU",
+        wgpu::Backend::Gl if cfg!(target_arch = "wasm32") => "WebGL2",
+        wgpu::Backend::Gl => "GL",
+        wgpu::Backend::Metal => "Metal",
+        wgpu::Backend::Vulkan => "Vulkan",
+        wgpu::Backend::Dx12 => "DX12",
+        wgpu::Backend::Noop => "noop",
+    }
+}
+
+/// Whether an adapter reporting `features` for [`HDR_TEXTURE_FORMAT`] can hold the lit
+/// image: the float path renders to it, blends into it (coronas, bloom) and filters it
+/// (bloom). Where this is false, pass [`HdrMode::Ldr`].
+pub fn hdr_format_supported(features: wgpu::TextureFormatFeatures) -> bool {
+    features
+        .allowed_usages
+        .contains(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+        && features.flags.contains(
+            wgpu::TextureFormatFeatureFlags::BLENDABLE
+                | wgpu::TextureFormatFeatureFlags::FILTERABLE,
+        )
+}
+
+/// The texture format of the lit image in float mode, for [`hdr_format_supported`].
+pub const HDR_TEXTURE_FORMAT: wgpu::TextureFormat = HDR_FORMAT;
+
+/// The pending answer of an error scope pushed round an optional pipeline's creation.
+#[cfg(target_arch = "wasm32")]
+type ScopeFuture = std::pin::Pin<Box<dyn Future<Output = Option<wgpu::Error>>>>;
+#[cfg(not(target_arch = "wasm32"))]
+type ScopeFuture = std::pin::Pin<Box<dyn Future<Output = Option<wgpu::Error>> + Send>>;
+
+/// The start-up check of an optional pipeline: the error scope pushed round its creation,
+/// polled (with a no-op waker, no allocation) until it answers. The GL, native and no-op
+/// backends answer at once; the browser's WebGPU a frame or two later.
+enum ProbeState {
+    Pending(ScopeFuture),
+    Passed,
+    Failed(String),
+}
+
+impl ProbeState {
+    fn new(scope: wgpu::ErrorScopeGuard) -> ProbeState {
+        let mut state = ProbeState::Pending(Box::pin(scope.pop()));
+        state.poll();
+        state
+    }
+
+    fn poll(&mut self) -> Probe<'_> {
+        if let ProbeState::Pending(future) = self {
+            match future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+            {
+                Poll::Ready(None) => *self = ProbeState::Passed,
+                Poll::Ready(Some(error)) => *self = ProbeState::Failed(error.to_string()),
+                Poll::Pending => {}
+            }
+        }
+        match self {
+            ProbeState::Pending(_) => Probe::Pending,
+            ProbeState::Passed => Probe::Passed,
+            ProbeState::Failed(error) => Probe::Failed(error),
+        }
     }
 }
 
@@ -2354,6 +2540,11 @@ mod tests {
         use naga::back::glsl;
         let mut entry_points = Vec::new();
         for (name, source) in shaders::ALL {
+            if name == "corona_load" {
+                // Never used on GL: GLSL has no `textureLoad` from a depth texture (naga
+                // refuses it), hence `CoronaDepth::Sampled` there.
+                continue;
+            }
             let module = naga::front::wgsl::parse_str(source)
                 .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
             // `unpack2x16float` (the packed lights) needs f16-in-f32 support, which every GLES
@@ -2416,6 +2607,148 @@ mod tests {
         ] {
             assert!(entry_points.iter().any(|e| e == ep), "missing {ep}");
         }
+    }
+
+    /// Parses and validates every shader module the way the GLSL test does.
+    fn validated_shaders() -> Vec<(&'static str, naga::Module, naga::valid::ModuleInfo)> {
+        shaders::ALL
+            .iter()
+            .map(|&(name, source)| {
+                let module = naga::front::wgsl::parse_str(source)
+                    .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
+                let info = naga::valid::Validator::new(
+                    naga::valid::ValidationFlags::all(),
+                    naga::valid::Capabilities::SHADER_FLOAT16_IN_FLOAT32,
+                )
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
+                (name, module, info)
+            })
+            .collect()
+    }
+
+    /// Every entry point must translate to Metal Shading Language. Safari compiles WGSL to
+    /// Metal itself (not through naga), but naga's MSL writer trips over much the same
+    /// things (depth reads, packing builtins, interpolation, reserved names), so this is the
+    /// cheapest stand-in for a Safari we cannot run here; it also covers native Metal.
+    #[test]
+    fn shaders_translate_to_metal_msl() {
+        use naga::back::msl;
+        let mut written = 0;
+        for (name, module, info) in validated_shaders() {
+            for ep in &module.entry_points {
+                let options = msl::Options {
+                    // Metal 2.1: macOS 10.14 / iOS 12, below anything with WebGPU.
+                    lang_version: (2, 1),
+                    ..Default::default()
+                };
+                let pipeline = msl::PipelineOptions {
+                    entry_point: Some((ep.stage, ep.name.clone())),
+                    ..Default::default()
+                };
+                let (out, _) = msl::write_string(&module, &info, &options, &pipeline)
+                    .unwrap_or_else(|e| panic!("{name}::{}: {e}", ep.name));
+                assert!(
+                    out.contains("#include <metal_stdlib>"),
+                    "{name}::{}",
+                    ep.name
+                );
+                assert!(out.contains(&ep.name), "{name}::{}", ep.name);
+                written += 1;
+            }
+        }
+        // The 18 the GLSL test names, and the `textureLoad` corona's 3.
+        assert_eq!(written, 21);
+    }
+
+    /// Every entry point must translate to SPIR-V (native Vulkan; a cheap extra check).
+    #[test]
+    fn shaders_translate_to_spirv() {
+        use naga::back::spv;
+        for (name, module, info) in validated_shaders() {
+            for ep in &module.entry_points {
+                let pipeline = spv::PipelineOptions {
+                    shader_stage: ep.stage,
+                    entry_point: ep.name.clone(),
+                };
+                let words =
+                    spv::write_vec(&module, &info, &spv::Options::default(), Some(&pipeline))
+                        .unwrap_or_else(|e| panic!("{name}::{}: {e}", ep.name));
+                assert_eq!(words.first(), Some(&0x0723_0203), "{name}::{}", ep.name);
+            }
+        }
+    }
+
+    /// The shaders stick to core WGSL, which every browser takes as is: no `enable` or
+    /// `requires` directives (so no `f16`), no `@builtin(sample_index)`, no `override`s,
+    /// no depth texture sampled without a comparison, nothing beyond the WebGL2 subset.
+    #[test]
+    fn shaders_use_only_core_wgsl() {
+        for (name, source) in shaders::ALL {
+            for word in [
+                "enable ",
+                "requires ",
+                "diagnostic",
+                "f16",
+                "sample_index",
+                "sample_mask",
+                "override ",
+                "var<storage",
+                "var<workgroup",
+                "texture_storage",
+                "texture_2d_array",
+                "texture_external",
+                "@compute",
+                "subgroup",
+            ] {
+                let hit = source
+                    .lines()
+                    .filter(|l| !l.trim_start().starts_with("//"))
+                    .any(|l| l.contains(word));
+                assert!(!hit, "{name} uses `{word}`");
+            }
+            // Depth textures are read with a comparison sampler or `textureLoad` only.
+            if source.contains("texture_depth_2d") {
+                let depth_vars: Vec<&str> = source
+                    .lines()
+                    .filter(|l| l.contains(": texture_depth_2d"))
+                    .filter_map(|l| l.split("var ").nth(1)?.split(':').next())
+                    .collect();
+                for var in depth_vars {
+                    for call in ["textureSample(", "textureSampleLevel(", "textureGather("] {
+                        assert!(
+                            !source.contains(&format!("{call}{var},")),
+                            "{name} samples depth `{var}` without a comparison"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hdr_needs_a_renderable_blendable_filterable_float_format() {
+        use wgpu::{TextureFormatFeatureFlags as F, TextureUsages as U};
+        let features = |usages, flags| wgpu::TextureFormatFeatures {
+            allowed_usages: usages,
+            flags,
+        };
+        let all = U::RENDER_ATTACHMENT | U::TEXTURE_BINDING | U::COPY_SRC;
+        assert!(hdr_format_supported(features(
+            all,
+            F::BLENDABLE | F::FILTERABLE
+        )));
+        // WebGL2 without EXT_color_buffer_float, EXT_float_blend or float filtering.
+        assert!(!hdr_format_supported(features(
+            U::TEXTURE_BINDING,
+            F::BLENDABLE | F::FILTERABLE
+        )));
+        assert!(!hdr_format_supported(features(all, F::FILTERABLE)));
+        assert!(!hdr_format_supported(features(all, F::BLENDABLE)));
+        // WebGPU guarantees all of it for Rgba16Float.
+        assert!(hdr_format_supported(
+            HDR_TEXTURE_FORMAT.guaranteed_format_features(wgpu::Features::empty())
+        ));
     }
 
     #[test]
@@ -2752,13 +3085,22 @@ mod tests {
             wgpu::TextureFormat::Bgra8UnormSrgb,
             wgpu::TextureFormat::Rgba8Unorm,
         ] {
-            for mode in [HdrMode::Float16, HdrMode::Ldr] {
+            for (mode, corona_depth) in [
+                (HdrMode::Float16, CoronaDepth::Sampled),
+                (HdrMode::Float16, CoronaDepth::Loaded),
+                (HdrMode::Ldr, CoronaDepth::Sampled),
+                (HdrMode::Ldr, CoronaDepth::Loaded),
+            ] {
                 let options = RendererOptions {
                     hdr: mode,
+                    corona_depth,
                     ..Default::default()
                 };
                 let mut r = Renderer::with_options(&device, &queue, format, (64, 48), options);
                 assert_eq!(r.is_hdr(), mode == HdrMode::Float16);
+                // The no-op backend answers the corona pipeline's error scope at once.
+                assert_eq!(r.corona_probe(), Probe::Passed);
+                assert_eq!(r.corona_depth(), corona_depth);
                 // WebGL2's 2048 texture limit leaves a third of that per cascade.
                 assert_eq!(r.shadow_cascade_size(), 2048 / 3);
                 let block = r.add_mesh(&Mesh::unit_block([255; 4]));
@@ -2860,6 +3202,46 @@ mod tests {
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             }
         }
+    }
+
+    /// The start-up probe scene draws on every path, a failed corona check leaves coronas
+    /// out instead of breaking frames, and the stats name the backend.
+    #[test]
+    fn probe_scene_and_a_failed_corona_check() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let format = wgpu::TextureFormat::Bgra8Unorm;
+        for mode in [HdrMode::Float16, HdrMode::Ldr] {
+            let options = RendererOptions {
+                hdr: mode,
+                ..Default::default()
+            };
+            let mut r = Renderer::with_options(&device, &queue, format, (32, 18), options);
+            assert_eq!(r.stats().backend, "noop");
+            // Not GL, so the depth is read with `textureLoad`.
+            assert_eq!(r.corona_depth(), CoronaDepth::Loaded);
+            let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+            let instances = [MeshInstance::new(block, Mat4::IDENTITY.to_cols_array_2d())];
+            let mut lamp = PointLight::omni([0.0, 3.0, 0.0], [2.5, 1.6, 0.6], 25.0);
+            lamp.corona = Corona {
+                radius: 1.0,
+                strength: 1.0,
+            };
+            let lights = [lamp];
+            let mut scene = SceneView::probe(&instances, &lights);
+            render_frames(&device, &mut r, format, &scene, &[(32, 18)]);
+            let stats = r.stats();
+            assert_eq!((stats.frames, stats.instances), (1, 1));
+            assert!(stats.coronas >= 1, "{stats:?}");
+
+            r.corona_probe = ProbeState::Failed("rejected".to_string());
+            assert_eq!(r.corona_probe(), Probe::Failed("rejected"));
+            scene.sky.exposure = exposure_from_ev100(3.0);
+            render_frames(&device, &mut r, format, &scene, &[(32, 18)]);
+            assert_eq!(r.stats().coronas, 0);
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        }
+        assert_eq!(backend_label(wgpu::Backend::BrowserWebGpu), "WebGPU");
+        assert_eq!(backend_label(wgpu::Backend::Gl), "GL");
     }
 
     /// Text and rectangles go over the frame in one instanced draw in both HDR modes, on

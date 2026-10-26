@@ -23,7 +23,19 @@
 //!
 //! Sound: `sfx` renders the mixer each animation frame for the page's AudioWorklet glue
 //! (`window.skywaveSfx`), which starts on the first key, click or touch.
+//!
+//! **Backends.** WebGPU is tried first where the browser offers it; if anything fails
+//! before the first frame (no adapter, `requestDevice` rejected, the canvas refusing its
+//! configuration or giving no texture, an error while the pipelines are built or while a
+//! probe frame is drawn, the device lost) the attempt is torn down and the game starts
+//! again on WebGL2 on a fresh canvas (a canvas keeps the first kind of context it gave
+//! out). The reason goes to the console and to the page (`onNote`). `?gl=1` goes straight
+//! to WebGL2; `?gpu=1` uses WebGPU only, failing loudly, for diagnosis. `?diag=1` runs the
+//! start-up checks on both backends without the game and reports them as text. See
+//! [`fallback`] and docs/RENDERING.md.
 
+#[cfg(target_arch = "wasm32")]
+mod diag;
 #[cfg(target_arch = "wasm32")]
 mod sfx;
 #[cfg(target_arch = "wasm32")]
@@ -31,8 +43,9 @@ mod web;
 
 /// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
 /// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`, `map`,
-/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and
-/// `selftest=1` runs the determinism self-test instead of the game.
+/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu,
+/// `selftest=1` runs the determinism self-test and `diag=1` the start-up diagnostics instead
+/// of the game, and `gl=1` / `gpu=1` pick the backend ([`BackendChoice`]).
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
         .trim_start_matches('?')
@@ -44,6 +57,181 @@ pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 /// screenshots of the menu.
 pub fn menu_from_query(query: &str) -> bool {
     query_param(query, "menu") == Some("1")
+}
+
+/// The graphics backends the browser build can run on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebBackend {
+    WebGpu,
+    WebGl2,
+}
+
+impl WebBackend {
+    /// The name the page, the console and the overlay show.
+    pub fn label(self) -> &'static str {
+        match self {
+            WebBackend::WebGpu => "WebGPU",
+            WebBackend::WebGl2 => "WebGL2",
+        }
+    }
+}
+
+/// Which backend the URL asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendChoice {
+    /// WebGPU where the browser offers it, else (or when it fails) WebGL2.
+    Auto,
+    /// `gl=1`: WebGL2 only.
+    WebGl2,
+    /// `gpu=1`: WebGPU only, no fallback, so its failures stay visible.
+    WebGpu,
+}
+
+impl BackendChoice {
+    /// From the URL query (`gl=1` wins over `gpu=1`), or from the page's `backend` option
+    /// ("gl" / "gpu") when it gives one.
+    pub fn from_query(query: &str, option: Option<&str>) -> BackendChoice {
+        match option {
+            Some("gl") => return BackendChoice::WebGl2,
+            Some("gpu") => return BackendChoice::WebGpu,
+            _ => {}
+        }
+        if query_param(query, "gl") == Some("1") {
+            BackendChoice::WebGl2
+        } else if query_param(query, "gpu") == Some("1") {
+            BackendChoice::WebGpu
+        } else {
+            BackendChoice::Auto
+        }
+    }
+
+    /// The backend to start on, given whether the browser has `navigator.gpu`.
+    pub fn first(self, has_webgpu: bool) -> WebBackend {
+        match self {
+            BackendChoice::Auto if has_webgpu => WebBackend::WebGpu,
+            BackendChoice::Auto | BackendChoice::WebGl2 => WebBackend::WebGl2,
+            // Tried anyway, so the failure says why.
+            BackendChoice::WebGpu => WebBackend::WebGpu,
+        }
+    }
+}
+
+/// Why starting on a backend failed, before the first frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartFailure {
+    /// `navigator.gpu` is missing or `requestAdapter()` gave nothing.
+    NoWebGpu,
+    /// No adapter could drive the canvas.
+    NoAdapter,
+    /// `requestDevice` rejected (limits or features the browser would not grant).
+    Device,
+    /// The canvas would not give a surface, take a configuration or hand out a texture.
+    Surface,
+    /// An error while the pipelines and render targets were built.
+    Pipeline,
+    /// An error while the probe frame was drawn and presented.
+    FirstFrame,
+    /// The device was lost during start-up.
+    DeviceLost,
+    /// The wasm trapped (a panic) before the first frame; seen by the page.
+    Panic,
+}
+
+impl StartFailure {
+    pub const ALL: [StartFailure; 8] = [
+        StartFailure::NoWebGpu,
+        StartFailure::NoAdapter,
+        StartFailure::Device,
+        StartFailure::Surface,
+        StartFailure::Pipeline,
+        StartFailure::FirstFrame,
+        StartFailure::DeviceLost,
+        StartFailure::Panic,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StartFailure::NoWebGpu => "no WebGPU adapter",
+            StartFailure::NoAdapter => "no adapter for the canvas",
+            StartFailure::Device => "device request rejected",
+            StartFailure::Surface => "canvas surface unusable",
+            StartFailure::Pipeline => "pipeline creation error",
+            StartFailure::FirstFrame => "first frame error",
+            StartFailure::DeviceLost => "device lost",
+            StartFailure::Panic => "crashed",
+        }
+    }
+
+    /// The `onNote`/`failure` name the page passes back for [`StartFailure::Panic`] retries.
+    pub fn from_label(label: &str) -> Option<StartFailure> {
+        StartFailure::ALL.into_iter().find(|f| f.label() == label)
+    }
+}
+
+/// What to do after starting on `failed` went wrong.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fallback {
+    /// The backend to try next, if any.
+    pub retry: Option<WebBackend>,
+    /// One line for the console and the page.
+    pub note: String,
+}
+
+/// The fallback decision: any WebGPU failure before the first frame retries on WebGL2,
+/// unless the URL forced WebGPU (`gpu=1`); a WebGL2 failure is final.
+pub fn fallback(
+    choice: BackendChoice,
+    failed: WebBackend,
+    why: StartFailure,
+    detail: &str,
+) -> Fallback {
+    let retry = match (choice, failed) {
+        (BackendChoice::WebGpu, _) | (_, WebBackend::WebGl2) => None,
+        (_, WebBackend::WebGpu) => Some(WebBackend::WebGl2),
+    };
+    let detail = detail.trim();
+    let mut note = format!("{} failed: {}", failed.label(), why.label());
+    if !detail.is_empty() {
+        note.push_str(" (");
+        // One line (a panic puts its message on the second), and browser messages can
+        // run to pages: the first few hundred bytes are the useful part.
+        let line = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut end = line.len().min(300);
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        note.push_str(&line[..end]);
+        note.push(')');
+    }
+    match retry {
+        Some(next) => {
+            note.push_str("; falling back to ");
+            note.push_str(next.label());
+        }
+        None if choice == BackendChoice::WebGpu => note.push_str("; no fallback with gpu=1"),
+        None => {}
+    }
+    Fallback { retry, note }
+}
+
+/// The canvas's drawing-buffer size for a CSS client size and `devicePixelRatio`: scaled
+/// down as a whole (keeping the aspect) to fit `max` (the device's widest texture), at least
+/// 1×1. `None` while the canvas has no layout size (hidden, or not laid out yet), so a
+/// surface is never configured at 0×0 or from a bogus ratio.
+pub fn canvas_size(client: (i32, i32), device_pixel_ratio: f64, max: u32) -> Option<(u32, u32)> {
+    let dpr = if device_pixel_ratio.is_finite() && device_pixel_ratio > 0.0 {
+        device_pixel_ratio
+    } else {
+        1.0
+    };
+    let (w, h) = (f64::from(client.0) * dpr, f64::from(client.1) * dpr);
+    if w < 0.5 || h < 0.5 {
+        return None;
+    }
+    let max = f64::from(max.max(1));
+    let scale = (max / w.max(h)).min(1.0);
+    let fit = |x: f64| ((x * scale).round() as u32).clamp(1, max as u32);
+    Some((fit(w), fit(h)))
 }
 
 /// Picks "the" gamepad from the connected ones, given as `(index, has standard mapping)`.
@@ -103,6 +291,100 @@ pub fn wheel_notches(delta_y: f64, delta_mode: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_choice_from_the_query_and_the_page() {
+        assert_eq!(BackendChoice::from_query("", None), BackendChoice::Auto);
+        assert_eq!(
+            BackendChoice::from_query("?gl=1", None),
+            BackendChoice::WebGl2
+        );
+        assert_eq!(
+            BackendChoice::from_query("?seed=2&gpu=1", None),
+            BackendChoice::WebGpu
+        );
+        assert_eq!(
+            BackendChoice::from_query("?gpu=1&gl=1", None),
+            BackendChoice::WebGl2
+        );
+        assert_eq!(
+            BackendChoice::from_query("?gl=0", None),
+            BackendChoice::Auto
+        );
+        assert_eq!(
+            BackendChoice::from_query("?gpu=1", Some("gl")),
+            BackendChoice::WebGl2
+        );
+        assert_eq!(
+            BackendChoice::from_query("", Some("gpu")),
+            BackendChoice::WebGpu
+        );
+        assert_eq!(BackendChoice::Auto.first(true), WebBackend::WebGpu);
+        assert_eq!(BackendChoice::Auto.first(false), WebBackend::WebGl2);
+        assert_eq!(BackendChoice::WebGl2.first(true), WebBackend::WebGl2);
+        assert_eq!(BackendChoice::WebGpu.first(false), WebBackend::WebGpu);
+    }
+
+    #[test]
+    fn every_webgpu_failure_falls_back_to_webgl2() {
+        for why in StartFailure::ALL {
+            let f = fallback(
+                BackendChoice::Auto,
+                WebBackend::WebGpu,
+                why,
+                "the reason:\n  more ",
+            );
+            assert_eq!(f.retry, Some(WebBackend::WebGl2), "{why:?}");
+            assert_eq!(
+                f.note,
+                format!(
+                    "WebGPU failed: {} (the reason: more); falling back to WebGL2",
+                    why.label()
+                )
+            );
+            assert_eq!(StartFailure::from_label(why.label()), Some(why));
+            // Forced WebGPU never falls back; WebGL2 has nothing to fall back to.
+            let forced = fallback(BackendChoice::WebGpu, WebBackend::WebGpu, why, "");
+            assert_eq!(forced.retry, None, "{why:?}");
+            assert!(
+                forced.note.ends_with("no fallback with gpu=1"),
+                "{}",
+                forced.note
+            );
+            for choice in [BackendChoice::Auto, BackendChoice::WebGl2] {
+                assert_eq!(fallback(choice, WebBackend::WebGl2, why, "x").retry, None);
+            }
+        }
+        let long = "é".repeat(400);
+        assert!(
+            fallback(
+                BackendChoice::Auto,
+                WebBackend::WebGpu,
+                StartFailure::Device,
+                &long
+            )
+            .note
+            .len()
+                < 400
+        );
+    }
+
+    #[test]
+    fn canvas_size_follows_the_pixel_ratio_within_the_texture_limit() {
+        assert_eq!(canvas_size((1280, 720), 2.0, 8192), Some((2560, 1440)));
+        assert_eq!(canvas_size((1280, 720), 1.25, 8192), Some((1600, 900)));
+        // Too big for the device: scaled down as a whole.
+        assert_eq!(canvas_size((5000, 2500), 2.0, 8192), Some((8192, 4096)));
+        assert_eq!(canvas_size((3000, 10), 4.0, 2048), Some((2048, 7)));
+        // Not laid out: nothing to configure.
+        assert_eq!(canvas_size((0, 720), 2.0, 8192), None);
+        assert_eq!(canvas_size((1280, 0), 2.0, 8192), None);
+        assert_eq!(canvas_size((-3, 5), 1.0, 8192), None);
+        // A bogus ratio counts as 1; a sliver is at least a pixel.
+        assert_eq!(canvas_size((640, 360), f64::NAN, 8192), Some((640, 360)));
+        assert_eq!(canvas_size((640, 360), 0.0, 8192), Some((640, 360)));
+        assert_eq!(canvas_size((1, 1), 0.6, 8192), Some((1, 1)));
+    }
 
     #[test]
     fn reads_other_parameters() {
