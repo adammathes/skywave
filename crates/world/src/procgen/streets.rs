@@ -56,10 +56,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::f32::consts::FRAC_1_SQRT_2;
 
-use place::{Edge, Node, RoadClass, RoadGraph, ZoneId};
+use place::{Edge, Node, RoadClass, RoadGraph, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::{hash64, hash_bytes, Seed};
 
-use super::arterials::{coast_tangent, grade_limit, major_of, sample_nodes, seg_intersect, tensor};
+use super::arterials::{
+    coast_tangent, grade_limit, major_of, sample_nodes, seg_intersect, tensor, HIGHWAY_WIDTH_M,
+};
 use super::macro_map::{MacroMap, MacroPoiKind};
 use super::zones::{chamfer, ALL_ZONES};
 use super::{stage, CELL_M, CHUNK_M};
@@ -2515,6 +2517,32 @@ impl<'a> StreetPlan<'a> {
         }
     }
 
+    /// Whether a bulb's centerline point `p` keeps the bulb's street and sidewalk off every
+    /// arterial's (the highway's included): the two half widths, both sidewalks and a
+    /// meter apart.
+    fn bulb_clear(&self, p: V2) -> bool {
+        let own = 0.5 * LOCAL_WIDTH_M + SIDEWALK_WIDTH_M + 1.0;
+        let r = own + 0.5 * HIGHWAY_WIDTH_M + SIDEWALK_WIDTH_M;
+        if self.adist_at(p) > r + RASTER_M * 1.5 {
+            return true;
+        }
+        let (i0, i1, j0, j1) = self.index.range(p.x - r, p.y - r, p.x + r, p.y + r);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                for &[e, s] in self.index.cell(i, j) {
+                    let edge = &self.art.edges[e as usize];
+                    let side = if edge.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
+                    let (a, b) = self.seg(e, s);
+                    let (d, _) = segment_distance(p, V2::new(a[0], a[2]), V2::new(b[0], b[2]));
+                    if d < own + 0.5 * edge.width_m + side {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
     /// A cul-de-sac bulb at `n1` (road height `y1`) heading along `dir`: two half circles
     /// of [`BULB_RADIUS_M`] from `n1` to the far point, or `None` where it does not fit.
     fn bulb(&self, n1: V2, y1: f32, dir: V2, key: u64) -> Option<[Feature; 2]> {
@@ -2530,7 +2558,7 @@ impl<'a> StreetPlan<'a> {
                 pts.push(c - dir * (cs * BULB_RADIUS_M) + dir.left() * (side * sn * BULB_RADIUS_M));
             }
             pts.push(n2);
-            if self.adist_at(pts[2]) < 10.0 {
+            if self.adist_at(pts[2]) < 10.0 || !pts[1..].iter().all(|&p| self.bulb_clear(p)) {
                 return None;
             }
             let f = self.make(
