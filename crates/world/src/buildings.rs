@@ -135,8 +135,9 @@ fn parapet(b: &Building) -> f32 {
     match (b.style, b.usage) {
         (StyleTag::StuccoBox, BuildingUse::Residential) => 0.5,
         (StyleTag::StuccoBox, _) => 0.8,
-        (StyleTag::Brick, _) | (StyleTag::Deco, _) => 1.0,
         (StyleTag::StripMall, _) => 1.8,
+        // Brick, Deco and the styles that have no look of their own yet (see `look`).
+        _ => 1.0,
     }
 }
 
@@ -147,7 +148,7 @@ pub fn plan_building(b: &Building, env: &[FacadeEnv], door_pick: u32) -> Buildin
     let n = fp.len();
     let floors = usize::from(b.floors.clamp(1, 40));
     let residential = b.usage == BuildingUse::Residential;
-    let top = b.height;
+    let top = b.height_m;
     let roof_y = top - parapet(b).min(top * 0.3);
     let plinth = match (residential, b.style) {
         (true, _) => 0.12,
@@ -321,8 +322,14 @@ fn choose<T: Copy>(rng: &mut Rng, items: &[T]) -> T {
 }
 
 fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
+    // Styles without a look of their own yet borrow the closest one.
     let (wall_rgb, pattern, trim_rgb) = match b.style {
-        StyleTag::StuccoBox => {
+        StyleTag::StuccoBox
+        | StyleTag::Dingbat
+        | StyleTag::Craftsman
+        | StyleTag::Ranch
+        | StyleTag::Tract70s
+        | StyleTag::Motel => {
             let w = choose(rng, &pal.stucco_walls());
             (
                 w,
@@ -333,12 +340,12 @@ fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
                 ),
             )
         }
-        StyleTag::Brick => (
+        StyleTag::Brick | StyleTag::Warehouse | StyleTag::Barn => (
             choose(rng, &[pal.brick_red, pal.brick_brown]),
             Pattern::Brick,
             choose(rng, &[pal.stucco_cream, pal.concrete]),
         ),
-        StyleTag::Deco => (
+        StyleTag::Deco | StyleTag::Glass => (
             choose(
                 rng,
                 &[
@@ -1327,6 +1334,15 @@ fn style_details(m: &mut WorldMesh, b: &Building, plan: &BuildingPlan, fp: &[V2]
             }
         }
         StyleTag::StripMall => {}
+        // No details of their own yet.
+        StyleTag::Dingbat
+        | StyleTag::Craftsman
+        | StyleTag::Ranch
+        | StyleTag::Tract70s
+        | StyleTag::Glass
+        | StyleTag::Warehouse
+        | StyleTag::Barn
+        | StyleTag::Motel => {}
     }
 }
 
@@ -1505,7 +1521,8 @@ fn pitched_roof(
     let (overhang, pitch) = (0.5, 0.42);
     let eave = offset_polygon(fp, |_| overhang);
     let rise = (short * 0.5 + overhang) * pitch;
-    let hip = b.roof == Roof::Hip;
+    // Mansard roofs are drawn as hips until they get their own shape.
+    let hip = matches!(b.roof, Roof::Hip | Roof::Mansard);
     let ridge_half = if hip {
         (long - short) * 0.5
     } else {
@@ -1705,10 +1722,11 @@ mod tests {
         Building {
             // 12 m along x, 9 m along z.
             footprint: alloc::vec![[0.0, 0.0], [0.0, 9.0], [12.0, 9.0], [12.0, 0.0]],
-            height: f32::from(floors) * 3.1 + 0.8,
+            height_m: f32::from(floors) * 3.1 + 0.8,
             floors,
             roof: Roof::Flat,
             style: StyleTag::StuccoBox,
+            built_year: None,
             usage: BuildingUse::Residential,
         }
     }
@@ -1747,7 +1765,7 @@ mod tests {
         let mut b = house(3);
         b.usage = BuildingUse::Commercial;
         b.style = StyleTag::Brick;
-        b.height = 3.0 * 3.7 + 1.4;
+        b.height_m = 3.0 * 3.7 + 1.4;
         let plan = plan_building(&b, &env(4), 0);
         let front = plan.facades[plan.frontage];
         assert!(front.storefront);
@@ -1765,10 +1783,11 @@ mod tests {
     fn big_buildings_widen_bays_to_fit_the_budget() {
         let b = Building {
             footprint: alloc::vec![[0.0, 0.0], [0.0, 30.0], [28.0, 30.0], [28.0, 0.0]],
-            height: 8.0 * 3.7 + 1.4,
+            height_m: 8.0 * 3.7 + 1.4,
             floors: 8,
             roof: Roof::Flat,
             style: StyleTag::Deco,
+            built_year: None,
             usage: BuildingUse::Office,
         };
         let plan = plan_building(&b, &env(4), 0);

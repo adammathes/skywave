@@ -682,7 +682,7 @@ fn building_walls(place: &Place) -> Vec<Wall> {
                 b: arr(c),
                 n: arr(normal),
                 y0: -1.0,
-                y1: LOT_Y + b.height,
+                y1: LOT_Y + b.height_m,
             });
         }
     }

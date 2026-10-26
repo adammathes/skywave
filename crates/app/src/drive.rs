@@ -28,8 +28,9 @@ pub fn ground_for(place: &Place) -> DriveGround {
     world::WorldCollider::build(place)
 }
 
-/// Where the car starts until Places carry spawn points (`docs/PLACES.md`, "Spawns"): on
-/// the ground in the test town's eastbound outer lane at the west end of the strip...
+/// The test town's `PlayerStart` spawn, for what starts without a Place at hand
+/// ([`Drive::new`], the default scene; [`crate::App`] reads the spawn itself): on the
+/// ground in the eastbound outer lane at the west end of the strip...
 pub const START_GROUND: [f32; 3] = [-92.0, 0.0, 4.9];
 /// ...facing east down it, so the late-afternoon sun is behind the car. Heading 0 faces
 /// `-z` (north), positive turns left.
@@ -391,6 +392,13 @@ mod tests {
 
     fn flat() -> DriveGround {
         ground_for(&place::Place::test_grid())
+    }
+
+    #[test]
+    fn start_is_the_test_towns_player_start() {
+        let place = place::Place::test_grid();
+        let s = place.player_start().unwrap();
+        assert_eq!((s.pos, s.heading), (START_GROUND, START_HEADING_RAD));
     }
 
     fn throttle(t: f32) -> VehicleInput {
