@@ -1,15 +1,20 @@
 //! Deterministic primitives shared by every Skywave crate.
 //!
-//! Everything here is `no_std`, allocation-free and bit-identical on every platform:
-//! integer hashing, a seeded PCG32 generator and the fixed-timestep accumulator that
-//! drives the 120 Hz simulation.
+//! Everything here is `no_std` and bit-identical on every platform: integer hashing, a
+//! seeded PCG32 generator, the fixed-timestep accumulator that drives the 120 Hz simulation,
+//! and fixed-capacity containers. The only heap allocation is an `Arena`'s buffer, made once
+//! when the arena is built.
 #![no_std]
 
+extern crate alloc;
+
 mod hash;
+mod pool;
 mod rng;
 mod step;
 
 pub use hash::{hash64, hash_bytes, mix64};
+pub use pool::{Arena, FixedVec, Handle, Pool, PoolIter, ARENA_MAX_ALIGN};
 pub use rng::Rng;
 pub use step::{FixedStep, Steps, MAX_STEPS_PER_FRAME, SIM_DT, SIM_HZ};
 
