@@ -45,6 +45,7 @@ pub mod font;
 mod hud;
 mod light;
 mod mesh;
+mod pool;
 mod sky;
 
 pub use atlas::{
@@ -61,6 +62,10 @@ pub use light::{
 pub use mesh::{
     emissive, emissive_scale, emissive_window, Mesh, Vertex, EMISSIVE_MAX_SCALE,
     EMISSIVE_WINDOW_BIT,
+};
+pub use pool::{
+    ChunkPool, ChunkPoolConfig, ChunkStore, ChunkWrite, PoolError, PoolStats, SlotId,
+    MAX_CHUNK_PARTS, MAX_CHUNK_VERTICES,
 };
 pub use sky::{exposure_from_ev100, MOON_ANGULAR_RADIUS, SUN_ANGULAR_RADIUS};
 
@@ -423,6 +428,8 @@ pub struct RendererOptions {
     pub hdr: HdrMode,
     /// Far view depth of each shadow cascade, meters, increasing.
     pub cascade_splits: [f32; CASCADES],
+    /// The pooled chunk geometry, allocated here once ([`ChunkStore`]).
+    pub chunk_pool: ChunkPoolConfig,
 }
 
 impl Default for RendererOptions {
@@ -430,6 +437,7 @@ impl Default for RendererOptions {
         RendererOptions {
             hdr: HdrMode::Auto,
             cascade_splits: DEFAULT_CASCADE_SPLITS,
+            chunk_pool: ChunkPoolConfig::NONE,
         }
     }
 }
@@ -459,6 +467,8 @@ pub struct RenderStats {
     pub hud_quads_dropped: u32,
     /// GPU resources `render` has created over the renderer's life (instance buffer growth).
     pub resources_created: u32,
+    /// The chunk pool's slots and bytes.
+    pub chunk_pool: PoolStats,
 }
 
 /// GPU layout of the per-frame uniform block; mirrors `Frame` in shaders/common.wgsl.
@@ -802,6 +812,9 @@ pub struct Renderer {
     corona_staging: Vec<CoronaRaw>,
 
     meshes: Vec<GpuMesh>,
+    chunk_pool: ChunkPool,
+    chunk_vertices: wgpu::Buffer,
+    chunk_indices: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
     instance_capacity: usize,
     instance_staging: Vec<InstanceRaw>,
@@ -1354,6 +1367,25 @@ impl Renderer {
 
         let instance_capacity = 256;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
+        let pool_buffer = |label, size: u64, usage| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                // Never empty, so a renderer without a pool still binds valid buffers.
+                size: size.max(wgpu::COPY_BUFFER_ALIGNMENT),
+                usage: usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let chunk_vertices = pool_buffer(
+            "chunk vertices",
+            options.chunk_pool.vertex_bytes(),
+            wgpu::BufferUsages::VERTEX,
+        );
+        let chunk_indices = pool_buffer(
+            "chunk indices",
+            options.chunk_pool.index_bytes(),
+            wgpu::BufferUsages::INDEX,
+        );
         let targets = create_targets(&device, post.as_ref(), &corona_layout, &depth_sampler, size);
 
         Renderer {
@@ -1390,6 +1422,9 @@ impl Renderer {
             corona_buffer,
             corona_staging: Vec::with_capacity(MAX_CORONAS),
             meshes: Vec::new(),
+            chunk_pool: ChunkPool::new(options.chunk_pool),
+            chunk_vertices,
+            chunk_indices,
             instance_buffer,
             instance_capacity,
             instance_staging: Vec::with_capacity(instance_capacity),
@@ -1422,7 +1457,10 @@ impl Renderer {
 
     /// Counters for the last frame.
     pub fn stats(&self) -> RenderStats {
-        self.stats
+        RenderStats {
+            chunk_pool: self.chunk_pool.stats(),
+            ..self.stats
+        }
     }
 
     /// Grows the instance buffer now so frames drawing up to `count` instances never
@@ -1501,6 +1539,11 @@ impl Renderer {
             index_count: mesh.indices.len() as u32,
         });
         MeshId(self.meshes.len() as u32 - 1)
+    }
+
+    /// The chunk pool's counters.
+    pub fn chunk_pool_stats(&self) -> PoolStats {
+        self.chunk_pool.stats()
     }
 
     /// Renders `scene` into `view`, which must have the surface format given to `new` and
@@ -1794,7 +1837,12 @@ impl Renderer {
             while end < instances.len() && instances[end].mesh == id {
                 end += 1;
             }
-            if let Some(mesh) = self.meshes.get(id.0 as usize) {
+            if let Some([first, count]) = self.chunk_pool.draw_range(id) {
+                pass.set_vertex_buffer(0, self.chunk_vertices.slice(..));
+                pass.set_index_buffer(self.chunk_indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(first..first + count, 0, start as u32..end as u32);
+                draws += 1;
+            } else if let Some(mesh) = self.meshes.get(id.0 as usize) {
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, start as u32..end as u32);
@@ -2105,6 +2153,42 @@ fn upload_map_texture(
         );
     }
     texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// Chunk slots live in the buffers made at load: writing one is a queue copy, never a new
+/// buffer.
+impl ChunkStore for Renderer {
+    fn alloc_chunk_slot(&mut self) -> Result<SlotId, PoolError> {
+        self.chunk_pool.alloc()
+    }
+
+    fn write_chunk(
+        &mut self,
+        slot: SlotId,
+        mesh: &Mesh,
+        parts: &[[u32; 2]],
+    ) -> Result<(), PoolError> {
+        let w = self.chunk_pool.stage_write(slot, mesh, parts)?;
+        if !mesh.vertices.is_empty() {
+            self.queue.write_buffer(
+                &self.chunk_vertices,
+                w.vertex_offset,
+                bytemuck::cast_slice(&mesh.vertices),
+            );
+        }
+        if !w.indices.is_empty() {
+            self.queue.write_buffer(
+                &self.chunk_indices,
+                w.index_offset,
+                bytemuck::cast_slice(w.indices),
+            );
+        }
+        Ok(())
+    }
+
+    fn free_chunk_slot(&mut self, slot: SlotId) -> Result<(), PoolError> {
+        self.chunk_pool.free(slot)
+    }
 }
 
 fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -2930,6 +3014,88 @@ mod tests {
         assert!(r.is_hdr());
         assert_eq!(r.shadow_cascade_size(), SHADOW_CASCADE_SIZE);
         assert_eq!(r.cascade_splits(), DEFAULT_CASCADE_SPLITS);
+    }
+
+    /// Chunk parts draw their slot's index runs from the pool's buffers (one draw per run
+    /// of instances, like meshes); freed or unwritten parts draw nothing; writing, freeing
+    /// and refusing never creates a buffer.
+    #[test]
+    fn chunk_slots_draw_their_parts_from_the_pool() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let config = ChunkPoolConfig {
+            slots: 2,
+            pages: 3,
+            page_vertices: 64,
+            page_indices: 96,
+        };
+        let options = RendererOptions {
+            hdr: HdrMode::Ldr,
+            chunk_pool: config,
+            ..Default::default()
+        };
+        let mut r = Renderer::with_options(&device, &queue, format, (32, 24), options);
+        assert_eq!(r.stats().chunk_pool.bytes, 3 * 64 * 36 + 3 * 96 * 4);
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let id = MeshInstance::new(block, Mat4::IDENTITY.to_cols_array_2d());
+        let draws = |r: &mut Renderer, instances: &[MeshInstance]| {
+            render_frames(&device, r, format, &test_scene(instances), &[(32, 24)]);
+            let s = r.stats();
+            (s.draw_calls - s.shadow_draw_calls, s.shadow_draw_calls)
+        };
+        let (forward0, shadow0) = draws(&mut r, &[id]);
+
+        // Two cuboids in one slot (two parts), one in the other.
+        let a = r.alloc_chunk_slot().unwrap();
+        let b = r.alloc_chunk_slot().unwrap();
+        assert_eq!(r.alloc_chunk_slot(), Err(PoolError::Full));
+        let mut two = Mesh::cuboid([0.0; 3], [1.0; 3], [200; 4]);
+        let far = Mesh::cuboid([3.0, 0.0, 0.0], [4.0, 1.0, 1.0], [90; 4]);
+        let base = two.vertices.len() as u32;
+        two.vertices.extend_from_slice(&far.vertices);
+        two.indices.extend(far.indices.iter().map(|i| i + base));
+        r.write_chunk(a, &two, &[[0, 36], [36, 36]]).unwrap();
+        r.write_chunk(b, &far, &[[0, 36]]).unwrap();
+        let part = |slot, k| MeshInstance::new(MeshId::chunk_part(slot, k), id.transform);
+        // Too big for the pool's three pages: refused, nothing created.
+        let big = Mesh::cuboid([0.0; 3], [1.0; 3], [1; 4]);
+        let mut huge = Mesh::default();
+        for _ in 0..10 {
+            append_mesh(&mut huge, &big);
+        }
+        assert!(matches!(
+            r.write_chunk(b, &huge, &[]),
+            Err(PoolError::TooBig { .. })
+        ));
+        let instances = [
+            id,
+            part(a, 0),
+            part(a, 0),
+            part(a, 1),
+            part(b, 0),
+            // Never written: skipped.
+            part(b, 5),
+        ];
+        let (forward, shadow) = draws(&mut r, &instances);
+        assert_eq!(forward, forward0 + 3, "one draw per run of a part");
+        assert!(shadow > shadow0);
+        let stats = r.stats().chunk_pool;
+        assert_eq!((stats.used, stats.peak, stats.writes), (2, 2, 2));
+        assert_eq!(stats.pages_used, 2);
+        // Freed, b's part draws nothing; its slot comes back.
+        r.free_chunk_slot(b).unwrap();
+        assert_eq!(r.free_chunk_slot(b), Err(PoolError::BadSlot(b)));
+        let (forward, _) = draws(&mut r, &instances);
+        assert_eq!(forward, forward0 + 2);
+        assert_eq!(r.alloc_chunk_slot(), Ok(b));
+        assert_eq!(r.stats().resources_created, 0);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    fn append_mesh(all: &mut Mesh, part: &Mesh) {
+        let base = all.vertices.len() as u32;
+        all.vertices.extend_from_slice(&part.vertices);
+        all.indices.extend(part.indices.iter().map(|i| i + base));
     }
 
     /// After warmup, frames reuse every buffer: no GPU resources are created and the
