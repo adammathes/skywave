@@ -19,6 +19,7 @@ mod math;
 mod mesh;
 mod params;
 mod parts;
+mod roof;
 mod wheel;
 
 #[cfg(all(test, feature = "serde"))]
@@ -27,8 +28,8 @@ mod tests;
 pub use mesh::MeshData;
 pub use params::{
     Antenna, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles, HeadLights,
-    InteriorShape, Mirrors, Parts, Rear, Rims, Seams, Section, ShapeError, ShapeSpec, Spoiler,
-    TailLights, Wheels,
+    InteriorShape, Mirrors, Parts, Rear, Rims, Roof, RoofKind, Seams, Section, ShapeError,
+    ShapeSpec, Spoiler, TailLights, Top, Wheels,
 };
 
 use crate::VehicleSpec;
@@ -167,7 +168,7 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
     spec.validate()?;
     let lod = opts.lod.min(1);
     let mats = Materials::new(spec, opts.color_index);
-    let b = body::Body::new(spec, lod);
+    let b = body::Body::new(spec, lod, opts.color_index);
 
     let mut shell = mesh::Soup::new(38.0);
     let mut glass = mesh::Soup::new(30.0);
@@ -176,6 +177,11 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
     let mut p = parts::Parts::new(&b, &mats, opts.popups_up);
     p.build();
     shell.extend(p.body);
+
+    let mut open = roof::OpenTop::new(&b, &mats);
+    open.build();
+    shell.extend(open.body);
+    glass.extend(open.glass);
 
     let mut int = interior::Interior::new(&b, &mats);
     int.build();

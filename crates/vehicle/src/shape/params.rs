@@ -224,6 +224,56 @@ pub enum Detail {
     /// Black pillars, window frames and arch lips.
     BlackTrim,
     Badge(BadgeShape),
+    /// A narrow wood-grain band along the doors and quarters with a light surround.
+    WoodApplique,
+    /// Clear lamps in the front fender sides, behind the headlamps.
+    CorneringLamps,
+}
+
+/// Where a convertible's fabric top is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Top {
+    /// Folded into the well behind the rear seat under a padded boot.
+    #[default]
+    Down,
+    /// Raised over the cabin, with a plastic rear window.
+    Up,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RoofKind {
+    /// A fixed roof over the greenhouse.
+    #[default]
+    Hardtop,
+    /// No fixed roof: a framed windshield with A-pillars, a cabin open above the belt, no
+    /// side or rear glass, and a fabric top that folds into the `glass.backlight` range
+    /// (the boot when down; the top's rear window when up).
+    Convertible { top: Top },
+}
+
+/// The roof over the cabin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Roof {
+    pub kind: RoofKind,
+}
+
+impl Roof {
+    /// Whether this is a convertible (top up or down).
+    pub fn convertible(&self) -> bool {
+        matches!(self.kind, RoofKind::Convertible { .. })
+    }
+
+    /// The convertible's top position, if it is one.
+    pub fn top(&self) -> Option<Top> {
+        match self.kind {
+            RoofKind::Hardtop => None,
+            RoofKind::Convertible { top } => Some(top),
+        }
+    }
 }
 
 /// Cockpit layout. `x` values are m from the nose, `y` above the ground.
@@ -280,6 +330,13 @@ pub struct ShapeSpec {
     pub seams: Seams,
     pub parts: Parts,
     pub details: Vec<Detail>,
+    /// Extra details for single palette entries, `(index, detail)`: e.g. wood-grain trim
+    /// on the second color only. Optional.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub color_details: Vec<(u32, Detail)>,
+    /// Hardtop (the default when left out) or convertible.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub roof: Roof,
     /// Era body colors `#rrggbb` (sRGB); one is chosen per instance.
     pub palette: Vec<String>,
     /// Stripe, vinyl and badge-field color, `#rrggbb`.
@@ -351,6 +408,11 @@ pub enum ShapeError {
     BadAccent,
     /// The cockpit does not fit in the cabin, or a cockpit color is bad.
     Interior,
+    /// A convertible with side windows, a boot (`glass.backlight`) not between the rear
+    /// seat and the deck, or a greenhouse behind the windshield header.
+    OpenTop,
+    /// A `color_details` index past the end of the palette.
+    ColorDetail,
 }
 
 /// Parses `#rrggbb` into sRGB bytes.
@@ -601,6 +663,13 @@ impl ShapeSpec {
         if parse_hex(&self.accent).is_none() {
             return Err(ShapeError::BadAccent);
         }
+        if self
+            .color_details
+            .iter()
+            .any(|&(k, _)| k as usize >= self.palette.len())
+        {
+            return Err(ShapeError::ColorDetail);
+        }
 
         let i = &self.interior;
         let inside = |x: f32| x > g.windshield.0 && x < length;
@@ -621,6 +690,23 @@ impl ShapeSpec {
             && parse_hex(&i.display).is_some();
         if !ok {
             return Err(ShapeError::Interior);
+        }
+        if self.roof.convertible() {
+            // The cabin opens from the header back to the boot well; the rear seat sits
+            // ahead of the well and the deck behind the header is at the belt (there is no
+            // greenhouse to fold away).
+            let at = super::math::polyline_at;
+            let header_y = at(&top, g.windshield.1);
+            let mid = (g.windshield.1 + g.backlight.0) * 0.5;
+            let ok = g.side.is_empty()
+                && g.backlight.0 > i.seat.0 + 0.5
+                && g.backlight.1 < length - 0.25
+                && header_y > at(&self.belt, g.windshield.1) + 0.25
+                && at(&top, mid) < at(&self.belt, mid) + 0.08
+                && at(&top, g.backlight.1) < at(&self.belt, g.backlight.1) + 0.08;
+            if !ok {
+                return Err(ShapeError::OpenTop);
+            }
         }
         Ok(())
     }

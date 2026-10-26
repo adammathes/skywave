@@ -74,15 +74,20 @@ impl<'a, 'b> Interior<'a, 'b> {
 
     fn cabin_end(&self) -> f32 {
         let spec = self.b.spec;
-        if spec.interior.rear_seat {
+        if self.b.convertible {
+            // The front wall of the well the top folds into.
+            spec.glass.backlight.0
+        } else if spec.interior.rear_seat {
             self.b.length - 0.06
         } else {
             spec.glass.backlight.1.min(self.b.length - 0.1)
         }
     }
 
-    /// Inward-facing trim over the inside of the body, skipping the glass.
+    /// Inward-facing trim over the inside of the body, skipping the glass. A convertible
+    /// keeps only the door cards: no pillars or headliner over the open cabin.
     fn shell(&mut self) {
+        let open = self.b.convertible;
         let b = self.b;
         let g = &b.spec.glass;
         let s0 = g.windshield.0 + 0.02;
@@ -125,6 +130,7 @@ impl<'a, 'b> Interior<'a, 'b> {
             let top_glass = within(g.windshield) || within(g.backlight);
             for j in 0..6 {
                 let mat: Mat = match j {
+                    _ if open && j >= 2 => continue,
                     0 => m.door_card,
                     1 => m.int_trim,
                     2 if side_glass => continue,
@@ -600,6 +606,9 @@ impl<'a, 'b> Interior<'a, 'b> {
                 self.soup
                     .obox(c, ax, [(half_w - cw) * 0.5, 0.27, 0.07], m.seat_bolster);
             }
+        }
+        // A convertible shows its headrests over the doors even at LOD1.
+        if lod0 || self.b.convertible {
             self.soup.obox(
                 madd(madd(hinge, d, 0.68), nb, 0.06),
                 ax,
@@ -634,6 +643,36 @@ impl<'a, 'b> Interior<'a, 'b> {
                 [w, 0.27, 0.06],
                 m.seat,
             );
+            if self.b.convertible && self.lod0() {
+                // In plain view under the open sky: two pleated places with headrests,
+                // a fold-down center armrest and armrests in the quarter trim.
+                let ax = [RIGHT, d, nb];
+                for sx in [-1.0f32, 1.0] {
+                    let cx = sx * off;
+                    self.soup.obox(
+                        madd(madd([cx, hinge[1], hinge[2]], d, 0.6), nb, 0.07),
+                        ax,
+                        [0.11, 0.075, 0.04],
+                        m.seat,
+                    );
+                    for k in [-1.0f32, 1.0] {
+                        let c = [cx + k * 0.12, y + 0.01, z(sr - 0.2)];
+                        self.soup.aabb(
+                            sub(c, [0.012, 0.03, 0.2]),
+                            add(c, [0.012, 0.03, 0.2]),
+                            m.seat_bolster,
+                        );
+                    }
+                    let c = [sx * (w - 0.04), y + 0.12, z(sr - 0.12)];
+                    self.soup.aabb(
+                        sub(c, [0.04, 0.03, 0.22]),
+                        add(c, [0.04, 0.03, 0.22]),
+                        m.door_card.shade(0.85),
+                    );
+                }
+                let c = madd(madd(hinge, d, 0.2), nb, 0.015);
+                self.soup.obox(c, ax, [0.09, 0.2, 0.05], m.seat_bolster);
+            }
         }
     }
 
@@ -698,6 +737,10 @@ impl<'a, 'b> Interior<'a, 'b> {
             0.006,
             m.int_trim,
         );
+        if b.convertible {
+            self.header_visors();
+            return;
+        }
         // Sun visors folded up under the headliner.
         let s = spec.glass.windshield.1 + 0.07;
         let f = b.frame(s);
@@ -709,6 +752,36 @@ impl<'a, 'b> Interior<'a, 'b> {
                 [cx - hx, y - 0.012, self.z(s - 0.09)],
                 [cx + hx, y + 0.008, self.z(s + 0.08)],
                 m.headliner.shade(0.9),
+            );
+        }
+    }
+
+    /// A convertible's sun visors: short, folded flat against the windshield under the header
+    /// so they keep out of the open view.
+    fn header_visors(&mut self) {
+        let b = self.b;
+        let spec = b.spec;
+        let w1 = spec.glass.windshield.1;
+        let (s_top, s_low) = (w1 - 0.03, w1 - 0.2);
+        let (ft, fl) = (b.frame(s_top), b.frame(s_low));
+        // Along the glass (down and forward) and its inward normal.
+        let along = norm([0.0, fl.yt - ft.yt, s_low - s_top]);
+        let inward = norm(cross(along, RIGHT));
+        let inward = if inward[1] < 0.0 {
+            inward
+        } else {
+            scale(inward, -1.0)
+        };
+        for sx in [-1.0f32, 1.0] {
+            let cx = sx * spec.interior.driver_offset;
+            let hx = (0.17f32).min(ft.z_re * 0.5);
+            let c = [cx, ft.yt, self.z(s_top)];
+            let c = madd(madd(c, along, 0.045), inward, 0.03);
+            self.soup.obox(
+                c,
+                [RIGHT, along, inward],
+                [hx * 0.8, 0.042, 0.008],
+                self.m.headliner.shade(0.9),
             );
         }
     }

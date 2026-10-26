@@ -1,0 +1,50 @@
+// Regent Coupe Cabrio: a big late-80s luxury coupe turned into a convertible by a
+// conversion shop.
+//
+// Intent: a living room that moves. A big lazy V8 with lots of torque low down and a
+// four-speed automatic with a tall overdrive, so it surges away quietly and cruises at low
+// revs. Heavy, nose-heavy front drive, very soft springs, weak damping and almost no
+// anti-roll bar: it floats over crests, leans hard into corners and squats under braking.
+// Steering is slow and light with a long return, and it understeers gently. Faster than
+// the Seabreeze in a straight line, never in a hurry anywhere else.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "regent_coupe_cabrio",
+    name: "Regent Coupe Cabrio",
+    era: Eighties,
+    class: Convertible,
+
+    mass_kg: 1650,
+    dims_m: (5.2, 1.86, 1.36),     // length, width, height (to the windshield header)
+    wheelbase_m: 2.89,
+    track_m: 1.54,
+    cg_height_m: 0.56,
+    cg_fore_aft: 0.40,             // 60% front: a big V8 over the front wheels
+
+    // A 4.5 L V8: ~150 kW, most of its torque by 2000 rpm.
+    engine: Engine(
+        idle_rpm: 600,
+        redline_rpm: 4800,
+        torque_nm: [(800, 270), (2000, 330), (3000, 350), (4000, 330), (4400, 312), (4800, 290)],
+    ),
+    gears: [2.77, 1.54, 1.0, 0.70],   // four-speed automatic with overdrive
+    final_drive: 2.73,
+    reverse: 2.3,
+    shift_ms: 500,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 0.92, grip_long: 0.9, load_sens: 0.12, slip_peak_deg: 9.5),
+    suspension: Susp(spring_n_m: 21000, damper: 1600, travel_m: 0.22, antiroll: 0.08),
+    steering: Steer(max_deg: 30, speed_sens: 0.5, return_rate: 3.0),   // slow, lots of wheel
+    brakes: Brakes(max_nm: 4000, bias_front: 0.68, abs: false, handbrake_nm: 2400),
+    aero: Aero(cd: 0.46, frontal_m2: 2.35, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.25, body_roll: 0.95, engine_sound: "v8_lazy", shift_jerk: 0.05),
+    interior: Interior(
+        dash: "luxury_80s",
+        gauges: [Speedo(0, 85, mph), Tach(0, 6000)],
+        radio: "digital_blue",
+    ),
+    shape: "regent_coupe_cabrio.shape.ron",
+)

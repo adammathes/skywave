@@ -1,0 +1,61 @@
+// Seabreeze Convertible body: a boxy mid-80s mid-size convertible on a front-drive
+// compact platform.
+//
+// Intent: a short-nosed three-box shape with flat panels and crisp corners. A flat upright
+// face with a chrome-barred grille between two pairs of square sealed-beam lamps, a low
+// flat hood, an upright framed windshield, no roof: two doors with bare tops, the folded
+// top under a tan boot behind the rear seat, a flat deck and a squared-off tail. Painted
+// bumpers with bright strips, chrome belt molding and wire-look wheels. Usually white over
+// tan; the second color adds a wood-grain side applique. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "seabreeze_convertible",
+    // Top from the nose over the windshield header, straight down to the deck and on to
+    // the tail, then the underside back to the nose.
+    side: [
+        (0.00, 0.74), (0.04, 0.79), (0.30, 0.82), (1.32, 0.877), (1.38, 0.887),
+        (1.92, 1.30), (1.98, 0.935), (4.48, 0.935), (4.58, 0.92), (4.62, 0.86),
+        (4.62, 0.30), (4.50, 0.24), (3.95, 0.20), (0.95, 0.19), (0.12, 0.23), (0.00, 0.31),
+    ],
+    plan: [
+        (0.00, 0.84), (0.06, 0.865), (0.30, 0.875), (4.40, 0.875), (4.56, 0.865), (4.62, 0.85),
+    ],
+    belt: [(1.30, 0.875), (2.00, 0.905), (4.62, 0.905)],
+    section: Section(shoulder: 0.96, tumblehome_deg: 10, greenhouse_frac: 0.82, crown: 0.03, tuck: 0.03),
+    // No side glass; the backlight range is where the top folds (the boot).
+    glass: Glass(
+        windshield: (1.38, 1.92),
+        backlight: (3.58, 3.98),
+        side: [],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.19, arch_clearance: 0.05, front_x: 0.90, rear_x: 3.45, track: 1.46),
+    front: Front(lights: Quad, grille: Wide, bumper: Body, bumper_y: (0.30, 0.46)),
+    rear: Rear(lights: Triple, spoiler: None, bumper: Body, bumper_y: (0.31, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.88, creases: [(0.10, 0.66, 4.58, 0.68)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Mesh, hubcaps: false),
+    details: [ChromeTrim, Badge(Bar)],
+    // The second color is the wood-grain edition.
+    color_details: [(1, WoodApplique)],
+    roof: Roof(kind: Convertible(top: Down)),
+    // White, white (wood-grain), powder blue, cranberry, silver, black.
+    palette: ["#f1efe8", "#ece8dc", "#9fb3c4", "#7a1f2a", "#b8b9b6", "#1e1f22"],
+    // The top and its boot: tan canvas.
+    accent: "#c4ab84",
+    interior: InteriorShape(
+        dash_height: 0.88,
+        dash_x: 1.66,
+        wheel_pos: (2.08, 0.72),
+        wheel_radius: 0.19,
+        column_angle_deg: 26,
+        mirror_pos: (1.82, 1.16),
+        seat: (2.45, 0.41),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent (tan vinyl and cloth).
+        colors: ["#9a7f5c", "#cdb48c", "#8a6f50", "#d8c8a8", "#a88d68", "#7a5f40"],
+        display: "#ffae3b",
+    ),
+)
