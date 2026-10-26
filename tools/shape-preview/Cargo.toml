@@ -1,0 +1,12 @@
+[package]
+name = "shape-preview"
+description = "Renders a vehicle ShapeSpec to a PNG from fixed angles with a tiny software rasterizer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+vehicle.workspace = true
+ron.workspace = true

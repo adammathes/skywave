@@ -1,6 +1,6 @@
 [package]
 name = "vehicle"
-description = "Skywave vehicles: VehicleSpec, its validator, and the raycast-car simulation."
+description = "Skywave vehicles: VehicleSpec, its validator, the raycast-car simulation and the parametric car mesh generator."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,5 +17,5 @@ serde = { workspace = true, optional = true }
 skywave-core.workspace = true
 
 [dev-dependencies]
-# The integration tests load the real specs from assets/vehicles/.
+# The integration tests load the real specs and shapes from assets/vehicles/.
 ron.workspace = true
