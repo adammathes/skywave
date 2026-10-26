@@ -5,3 +5,4 @@ node_modules
 /tools/screenshot/out
 .DS_Store
 .claude/worktrees
+.claude/target-shared
