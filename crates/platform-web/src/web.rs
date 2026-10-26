@@ -1,9 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use app::{pad_table, App, InputMapper, Key, RawInput, MOUSE_BUTTONS, MOUSE_RIGHT};
+use app::{pad_table, App, InputMapper, Key, RawInput, SceneSetup, MOUSE_BUTTONS, MOUSE_RIGHT};
 use render::Renderer;
-use skywave_core::Seed;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -34,9 +33,14 @@ fn js_err(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 
-/// Starts the game on `canvas`. Resolves once the first frame is scheduled; rejects with a
-/// readable message if no WebGPU or WebGL2 adapter is available. `on_first_frame` is called
-/// with the backend name ("WebGPU" or "WebGL2") after the first frame is presented.
+/// Starts the game on `canvas` in the scene the URL query describes (`app::scene`).
+/// Resolves once the first frame is scheduled; rejects with a readable message if no WebGPU
+/// or WebGL2 adapter is available. `on_first_frame` is called with the backend name
+/// ("WebGPU" or "WebGL2") after the first frame is presented.
+///
+/// With `?selftest=1` nothing is drawn: the determinism self-test (`app::selftest`) runs,
+/// prints its one JSON line to the console, and `on_first_frame` is called with
+/// "selftest".
 #[wasm_bindgen]
 pub async fn run(
     canvas: HtmlCanvasElement,
@@ -48,7 +52,16 @@ pub async fn run(
 
     let window = web_sys::window().ok_or("no window")?;
     let query = window.location().search()?;
-    let seed = crate::seed_from_query(&query).unwrap_or(1);
+    if crate::query_param(&query, "selftest") == Some("1") {
+        let line = app::selftest::SelfTest::run().console_line();
+        console::log_1(&JsValue::from_str(&line));
+        let _ = on_first_frame.call1(&JsValue::NULL, &JsValue::from_str("selftest"));
+        return Ok(());
+    }
+    let setup = SceneSetup::from_query(&query).unwrap_or_else(|e| {
+        log::warn!("skywave: {e}; starting the default scene");
+        SceneSetup::default()
+    });
 
     let instance = wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
@@ -95,20 +108,19 @@ pub async fn run(
     }
     surface.configure(&device, &config);
 
-    let car = crate::query_param(&query, "car").unwrap_or(app::DEFAULT_VEHICLE);
-    let mut app = App::new_with(Seed(seed), car).unwrap_or_else(|e| {
+    let app = App::from_setup(&setup).unwrap_or_else(|e| {
         log::warn!("skywave: {e}; driving the {}", app::DEFAULT_VEHICLE);
-        App::new(Seed(seed))
+        let default_car = SceneSetup {
+            car: app::DEFAULT_VEHICLE.to_string(),
+            ..setup.clone()
+        };
+        App::from_setup(&default_car).expect("the default car is built in")
     });
-    if let Some(mode) = crate::query_param(&query, "cam").and_then(app::CameraMode::from_name) {
-        app.set_camera_mode(mode);
-    }
-    app.set_fly(crate::query_param(&query, "fly") == Some("1"));
     let mut renderer = Renderer::new(&device, &queue, config.format, (width, height));
     for mesh in app.meshes() {
         renderer.add_mesh(mesh);
     }
-    log::info!("skywave: {backend}, {:?}, seed {seed}", config.format);
+    log::info!("skywave: {backend}, {:?}, {setup:?}", config.format);
 
     let state = Rc::new(RefCell::new(State {
         canvas,

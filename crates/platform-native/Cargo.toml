@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 app.workspace = true
 render.workspace = true
-skywave-core.workspace = true
 wgpu = { workspace = true, features = ["vulkan", "metal", "dx12", "gles", "parking_lot"] }
 winit.workspace = true
 pollster.workspace = true

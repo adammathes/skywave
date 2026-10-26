@@ -7,8 +7,11 @@
 //! with the button or when the window loses focus. Platforms that refuse both just keep a
 //! free cursor; the raw motion still drives the look.
 //!
-//! Usage: `skywave [--seed N] [--car ID] [--stats]`. `--stats` also prints the detected gamepads at
-//! startup and as they connect; otherwise that goes to the info log (`RUST_LOG=info`).
+//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats]`. `--scene` sets
+//! one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`, `pos=-92,4.9`,
+//! `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are `--scene seed=N` and
+//! `--scene car=ID`. `--stats` also prints the detected gamepads at startup and as they
+//! connect; otherwise that goes to the info log (`RUST_LOG=info`).
 
 mod pad;
 
@@ -17,10 +20,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use app::{Action, App, InputMapper, Key, RawInput, MOUSE_RIGHT};
+use app::{Action, App, InputMapper, Key, RawInput, SceneSetup, MOUSE_RIGHT};
 use pad::Pads;
 use render::Renderer;
-use skywave_core::Seed;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -36,16 +38,13 @@ const PIXELS_PER_NOTCH: f64 = 100.0;
 
 #[derive(Debug, PartialEq)]
 struct Options {
-    seed: u64,
-    /// Built-in vehicle id.
-    car: String,
+    scene: SceneSetup,
     stats: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut opts = Options {
-        seed: 1,
-        car: app::DEFAULT_VEHICLE.to_string(),
+        scene: SceneSetup::default(),
         stats: false,
     };
     let mut args = args.into_iter();
@@ -54,9 +53,19 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--stats" => opts.stats = true,
             "--seed" => {
                 let v = args.next().ok_or("--seed needs a value")?;
-                opts.seed = v.parse().map_err(|_| format!("bad seed: {v}"))?;
+                opts.scene.set("seed", &v)?;
             }
-            "--car" => opts.car = args.next().ok_or("--car needs a vehicle id")?,
+            "--car" => {
+                let v = args.next().ok_or("--car needs a vehicle id")?;
+                opts.scene.set("car", &v)?;
+            }
+            "--scene" => {
+                let kv = args.next().ok_or("--scene needs key=value")?;
+                let (key, value) = kv
+                    .split_once('=')
+                    .ok_or_else(|| format!("--scene needs key=value, not `{kv}`"))?;
+                opts.scene.set(key, value)?;
+            }
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -395,7 +404,7 @@ fn main() -> ExitCode {
             if !e.is_empty() {
                 eprintln!("skywave: {e}");
             }
-            eprintln!("usage: skywave [--seed N] [--car ID] [--stats]");
+            eprintln!("usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats]");
             return if e.is_empty() {
                 ExitCode::SUCCESS
             } else {
@@ -416,7 +425,7 @@ fn main() -> ExitCode {
     } else {
         log::info!("{}", pads.summary());
     }
-    let app = match App::new_with(Seed(opts.seed), &opts.car) {
+    let app = match App::from_setup(&opts.scene) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("skywave: {e}");
@@ -461,19 +470,40 @@ mod tests {
         assert_eq!(
             args(&[]),
             Ok(Options {
-                seed: 1,
-                car: "corsair_gtx".to_string(),
+                scene: SceneSetup::default(),
                 stats: false
             })
         );
+        let mut scene = SceneSetup::from_query("seed=42&car=palisade_wagon").unwrap();
         assert_eq!(
             args(&["--stats", "--seed", "42", "--car", "palisade_wagon"]),
             Ok(Options {
-                seed: 42,
-                car: "palisade_wagon".to_string(),
+                scene: scene.clone(),
                 stats: true
             })
         );
+        scene.set("t", "22:30").unwrap();
+        scene.set("cam", "cockpit").unwrap();
+        assert_eq!(
+            args(&[
+                "--seed",
+                "42",
+                "--scene",
+                "car=palisade_wagon",
+                "--scene",
+                "t=22:30",
+                "--scene",
+                "cam=cockpit"
+            ]),
+            Ok(Options {
+                scene,
+                stats: false
+            })
+        );
+        assert!(args(&["--scene"]).is_err());
+        assert!(args(&["--scene", "t"]).is_err());
+        assert!(args(&["--scene", "t=25:00"]).is_err());
+        assert!(args(&["--scene", "zoom=2"]).is_err());
         assert!(args(&["--seed"]).is_err());
         assert!(args(&["--car"]).is_err());
         assert!(args(&["--seed", "x"]).is_err());

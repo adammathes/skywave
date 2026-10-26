@@ -13,7 +13,6 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 app.workspace = true
 render.workspace = true
-skywave-core.workspace = true
 wgpu = { workspace = true, features = ["webgpu", "webgl"] }
 log.workspace = true
 wasm-bindgen.workspace = true

@@ -1397,7 +1397,6 @@ dependencies = [
  "log",
  "pollster",
  "render",
- "skywave-core",
  "wgpu",
  "winit",
 ]
@@ -1412,7 +1411,6 @@ dependencies = [
  "js-sys",
  "log",
  "render",
- "skywave-core",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

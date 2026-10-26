@@ -1,9 +1,18 @@
 #!/usr/bin/env node
-// Headless smoke test for the web build: serves dist/, opens it in Chromium on SwiftShader
-// (so the WebGL2 path is exercised), waits for the first frame, saves a screenshot and
-// fails if the page errored or the image is blank.
+// Headless captures of the web build: serves dist/, opens it in Chromium on SwiftShader (so
+// the WebGL2 path is exercised), waits for the first frame and a few more, saves a 1280×720
+// screenshot and fails if the page errored or the image is blank.
 //
-//   node tools/screenshot/shoot.mjs [--url-query "?seed=1"] [--out path.png]
+//   node tools/screenshot/shoot.mjs --scene strip-golden-chase   # -> out/<name>.png
+//   node tools/screenshot/shoot.mjs --all                         # every scene in scenes.json
+//   node tools/screenshot/shoot.mjs --all --golden                # -> golden/<name>.png
+//   node tools/screenshot/shoot.mjs --selftest                    # wasm vs native hashes
+//   node tools/screenshot/shoot.mjs [--url-query "?seed=1"] [--out path.png]   # ad hoc
+//
+// `--scene` may repeat and combines with `--selftest`. Scenes are named URL queries in
+// `scenes.json` (keys: crates/app/src/scene.rs). `--selftest` opens `?selftest=1`, reads
+// the `{"skywave_selftest": {...}}` console line and compares it with `selftest.json`, the
+// values native tests pin. Compare captures with goldens using `diff.mjs`.
 //
 // Uses an already-installed `playwright` package (global/NODE_PATH or tools/screenshot/
 // node_modules); it does not download browsers.
@@ -11,8 +20,9 @@
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { dirname, extname, join, normalize, resolve, sep } from "node:path";
+import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readPng } from "./png.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
@@ -23,11 +33,41 @@ const opt = (name, fallback) => {
   const i = args.indexOf(name);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
 };
-const query = opt("--url-query", "?seed=1");
-const out = resolve(opt("--out", join(here, "out", "skeleton.png")));
+const opts = (name) => args.flatMap((a, i) => (a === name && i + 1 < args.length ? [args[i + 1]] : []));
+const flag = (name) => args.includes(name);
+
 const WIDTH = 1280;
 const HEIGHT = 720;
 const READY_TIMEOUT_MS = 60_000;
+// SwiftShader renders the town at seconds per frame on a loaded machine.
+const CAPTURE_TIMEOUT_MS = 180_000;
+
+const scenes = JSON.parse(await readFile(join(here, "scenes.json"), "utf8"));
+// Written out as is: the game does not percent-decode, and `t=17:40`/`pos=x,z` need none.
+const sceneQuery = (name) =>
+  "?" + Object.entries(scenes[name].params).map(([k, v]) => `${k}=${v}`).join("&");
+
+const golden = flag("--golden");
+let names = flag("--all") ? Object.keys(scenes) : opts("--scene");
+for (const n of names) {
+  if (!scenes[n]) {
+    console.error(`shoot: no scene "${n}" (have: ${Object.keys(scenes).join(", ")})`);
+    process.exit(2);
+  }
+}
+const jobs = names.map((name) => ({
+  name,
+  query: sceneQuery(name),
+  out: join(here, golden ? "golden" : "out", `${name}.png`),
+}));
+const selftest = flag("--selftest");
+if (jobs.length === 0 && !selftest) {
+  jobs.push({
+    name: "ad hoc",
+    query: opt("--url-query", "?seed=1"),
+    out: resolve(opt("--out", join(here, "out", "skeleton.png"))),
+  });
+}
 
 let chromium;
 try {
@@ -66,25 +106,29 @@ const server = createServer(async (req, res) => {
   }
 });
 await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
-const url = `http://127.0.0.1:${server.address().port}/${query}`;
+const base = `http://127.0.0.1:${server.address().port}/`;
 
 const browser = await chromium.launch({
   headless: true,
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
 });
-const problems = [];
-let exitCode = 0;
-try {
+
+/// Opens `query` and waits until the page is ready. Returns the page, the console problems
+/// list (filled as they come) and every `console.log` text.
+async function open(tag, query) {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
+  const problems = [];
+  const logs = [];
   page.on("console", (msg) => {
     if (msg.type() === "error" || msg.type() === "warning") {
       problems.push(`console.${msg.type()}: ${msg.text()}`);
+    } else if (msg.type() === "log") {
+      logs.push(msg.text());
     }
   });
   page.on("pageerror", (err) => problems.push(`pageerror: ${err.message}`));
-
-  console.log(`shoot: opening ${url}`);
-  await page.goto(url);
+  console.log(`shoot: ${tag}: opening ${base}${query}`);
+  await page.goto(base + query);
   const started = Date.now();
   await page.waitForFunction(() => window.skywaveReady === true || !!window.skywaveError, null, {
     timeout: READY_TIMEOUT_MS,
@@ -94,58 +138,103 @@ try {
     error: window.skywaveError,
   }));
   if (error) throw new Error(`page reported: ${error}`);
-  console.log(`shoot: first frame after ${Date.now() - started} ms on ${backend}`);
-  // Let a few more frames run so the capture is a steady-state frame.
-  await page.evaluate(
-    () => new Promise((ok) => {
-      let n = 0;
-      const tick = () => (++n >= 10 ? ok() : requestAnimationFrame(tick));
-      requestAnimationFrame(tick);
-    }),
-  );
+  console.log(`shoot: ${tag}: ready after ${Date.now() - started} ms on ${backend}`);
+  return { page, problems, logs };
+}
 
-  // SwiftShader renders this scene at seconds per frame on a loaded machine; give the
-  // compositor time to produce a frame.
-  const t0 = Date.now();
-  const png = await page.screenshot({ type: "png", timeout: 180_000 });
-  console.log(`shoot: capture took ${Date.now() - t0} ms`);
-  await mkdir(dirname(out), { recursive: true });
-  await writeFile(out, png);
-  console.log(`shoot: wrote ${out}`);
-
-  // Decode the PNG in a blank page and sample a grid of pixels.
-  const probe = await browser.newPage();
-  const distinct = await probe.evaluate(async (b64) => {
-    const img = new Image();
-    img.src = `data:image/png;base64,${b64}`;
-    await img.decode();
-    const c = document.createElement("canvas");
-    c.width = img.width;
-    c.height = img.height;
-    const ctx = c.getContext("2d");
-    ctx.drawImage(img, 0, 0);
-    const seen = new Set();
-    for (let y = 0; y < 18; y++) {
-      for (let x = 0; x < 32; x++) {
-        const px = ctx.getImageData(
-          Math.floor(((x + 0.5) * img.width) / 32),
-          Math.floor(((y + 0.5) * img.height) / 18),
-          1,
-          1,
-        ).data;
-        seen.add(`${px[0]},${px[1]},${px[2]}`);
-      }
+/// Distinct colors in a 32×18 grid of samples.
+function distinctColors({ width, height, rgba }) {
+  const seen = new Set();
+  for (let y = 0; y < 18; y++) {
+    for (let x = 0; x < 32; x++) {
+      const px = Math.floor(((x + 0.5) * width) / 32);
+      const py = Math.floor(((y + 0.5) * height) / 18);
+      const i = (py * width + px) * 4;
+      seen.add(`${rgba[i]},${rgba[i + 1]},${rgba[i + 2]}`);
     }
-    return seen.size;
-  }, png.toString("base64"));
-  console.log(`shoot: ${distinct} distinct colors in a 32x18 sample grid`);
-  if (distinct < 3) throw new Error("screenshot looks blank");
-} catch (e) {
-  console.error(`shoot: FAILED: ${e.message}`);
-  exitCode = 1;
+  }
+  return seen.size;
+}
+
+async function shoot(job) {
+  const { page, problems } = await open(job.name, job.query);
+  try {
+    // Let a few more frames run so the capture is a steady-state frame.
+    await page.evaluate(
+      () => new Promise((ok) => {
+        let n = 0;
+        const tick = () => (++n >= 10 ? ok() : requestAnimationFrame(tick));
+        requestAnimationFrame(tick);
+      }),
+    );
+    const t0 = Date.now();
+    const png = await page.screenshot({ type: "png", timeout: CAPTURE_TIMEOUT_MS });
+    console.log(`shoot: ${job.name}: capture took ${Date.now() - t0} ms`);
+    const img = readPng(png);
+    if (img.width !== WIDTH || img.height !== HEIGHT) {
+      throw new Error(`capture is ${img.width}x${img.height}, not ${WIDTH}x${HEIGHT}`);
+    }
+    const distinct = distinctColors(img);
+    console.log(`shoot: ${job.name}: ${distinct} distinct colors in a 32x18 sample grid`);
+    // A blank capture never becomes a golden; it still lands in out/ to look at.
+    const out = distinct < 3 ? join(here, "out", `${job.name}.blank.png`) : job.out;
+    await mkdir(dirname(out), { recursive: true });
+    await writeFile(out, png);
+    console.log(`shoot: ${job.name}: wrote ${relative(process.cwd(), out) || out}`);
+    if (distinct < 3) throw new Error("screenshot looks blank");
+  } finally {
+    for (const p of problems) console.error(`shoot: ${job.name}: ${p}`);
+    await page.close();
+  }
+}
+
+async function runSelftest() {
+  const want = JSON.parse(await readFile(join(here, "selftest.json"), "utf8"));
+  const { page, problems, logs } = await open("selftest", "?selftest=1");
+  try {
+    const prefix = '{"skywave_selftest"';
+    let line;
+    for (let waited = 0; !(line = logs.find((l) => l.startsWith(prefix))) && waited < 5000; waited += 100) {
+      await new Promise((ok) => setTimeout(ok, 100));
+    }
+    if (!line) throw new Error("the page printed no skywave_selftest line");
+    const got = JSON.parse(line).skywave_selftest;
+    console.log(`shoot: selftest: wasm ${JSON.stringify(got)}`);
+    const keys = [...new Set([...Object.keys(want), ...Object.keys(got)])].sort();
+    const bad = keys.filter((k) => want[k] !== got[k]);
+    for (const k of bad) {
+      console.error(`shoot: selftest: ${k}: wasm ${got[k] ?? "(missing)"}, native ${want[k] ?? "(missing)"}`);
+    }
+    if (problems.length) throw new Error("the self-test page logged errors or warnings");
+    if (bad.length) throw new Error(`${bad.length} of ${keys.length} hashes differ from selftest.json`);
+    console.log(`shoot: selftest: all ${keys.length} hashes match selftest.json`);
+  } finally {
+    for (const p of problems) console.error(`shoot: selftest: ${p}`);
+    await page.close();
+  }
+}
+
+let failed = 0;
+try {
+  if (selftest) {
+    try {
+      await runSelftest();
+    } catch (e) {
+      console.error(`shoot: selftest: FAILED: ${e.message}`);
+      failed++;
+    }
+  }
+  // One at a time: SwiftShader already uses every core.
+  for (const job of jobs) {
+    try {
+      await shoot(job);
+    } catch (e) {
+      console.error(`shoot: ${job.name}: FAILED: ${e.message}`);
+      failed++;
+    }
+  }
 } finally {
-  for (const p of problems) console.error(`shoot: ${p}`);
   await browser.close();
   server.close();
 }
-process.exit(exitCode);
+process.exit(failed ? 1 : 0);

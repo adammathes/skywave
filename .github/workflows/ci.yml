@@ -60,8 +60,12 @@ jobs:
           npm install --global "playwright@$PLAYWRIGHT_VERSION"
           npx "playwright@$PLAYWRIGHT_VERSION" install --with-deps chromium
 
-      - name: Screenshot smoke test (WebGL2 on SwiftShader)
-        run: NODE_PATH="$(npm root --global)" node tools/screenshot/shoot.mjs
+      # One scene keeps CI time reasonable; the full golden set is `--all` (see docs/TESTING.md).
+      - name: Screenshot smoke test and wasm self-test (WebGL2 on SwiftShader)
+        run: |
+          export NODE_PATH="$(npm root --global)"
+          node tools/screenshot/shoot.mjs --selftest --scene strip-golden-chase
+          node tools/screenshot/diff.mjs --scene strip-golden-chase
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -73,6 +77,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: screenshot
-          path: tools/screenshot/out/skeleton.png
+          name: screenshots
+          path: tools/screenshot/out/
           if-no-files-found: warn
