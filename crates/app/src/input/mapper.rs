@@ -522,7 +522,7 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_steering_ramps_up_in_150_ms_and_back_in_300_ms() {
+    fn keyboard_steering_ramps_up_in_120_ms_and_back_in_300_ms() {
         let hold = |dt, expect| Step {
             press: &[],
             release: &[],
@@ -533,11 +533,11 @@ mod tests {
             Step {
                 press: &[Key::KeyD],
                 release: &[],
-                dt: 0.050,
+                dt: 0.040,
                 expect: &[(Action::Steer, 1.0 / 3.0)],
             },
-            hold(0.050, &[(Action::Steer, 2.0 / 3.0)]),
-            hold(0.050, &[(Action::Steer, 1.0)]),
+            hold(0.040, &[(Action::Steer, 2.0 / 3.0)]),
+            hold(0.040, &[(Action::Steer, 1.0)]),
             hold(0.100, &[(Action::Steer, 1.0)]),
             Step {
                 press: &[],
@@ -548,12 +548,13 @@ mod tests {
             hold(0.150, &[(Action::Steer, 0.0)]),
             hold(0.100, &[(Action::Steer, 0.0)]),
         ]);
-        // At 120 Hz, 18 samples (150 ms) land exactly on 1.0; 36 more (300 ms) exactly on 0.
+        // At 120 Hz, 15 samples (125 ms, the first past 120 ms) land exactly on 1.0; 36 more
+        // (300 ms) exactly on 0.
         let mut m = InputMapper::default();
         m.press(key(Key::KeyD));
-        for i in 0..18 {
+        for i in 0..15 {
             let v = m.sample(1.0 / 120.0).axis(Action::Steer);
-            assert_eq!(v == 1.0, i == 17, "sample {i}: {v}");
+            assert_eq!(v == 1.0, i == 14, "sample {i}: {v}");
         }
         m.release(key(Key::KeyD));
         for i in 0..36 {
@@ -591,10 +592,10 @@ mod tests {
                 expect: &[(Action::Steer, 0.0)],
             },
             Step {
-                // ...then out at the 150 ms rate.
+                // ...then out at the 120 ms rate.
                 press: &[],
                 release: &[],
-                dt: 0.075,
+                dt: 0.06,
                 expect: &[(Action::Steer, 0.5)],
             },
         ]);

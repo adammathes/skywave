@@ -7,7 +7,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 |---|---|---|---|
 | Throttle | axis 0..1 | W / Up | Right trigger |
 | Brake/Reverse | axis 0..1 | S / Down | Left trigger |
-| Steer | axis −1..1 | A/D, Left/Right (150 ms ramp, 300 ms return) | Left stick X (deadzone 0.08, response curve 1.5) |
+| Steer | axis −1..1 | A/D, Left/Right (120 ms ramp, 300 ms return) | Left stick X (deadzone 0.08, response curve 1.5) |
 | Handbrake | button | Space | A / Cross |
 | Camera cycle | button | C | Y / Triangle |
 | Look (cockpit/chase) | axis pair | Mouse (hold right button) | Right stick |
