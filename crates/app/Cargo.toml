@@ -12,3 +12,5 @@ skywave-core.workspace = true
 place.workspace = true
 render.workspace = true
 glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true

@@ -1,5 +1,6 @@
 //! Browser shell for Skywave: owns the canvas, picks WebGPU or falls back to WebGL2,
-//! forwards keyboard input and drives the frame loop with `requestAnimationFrame`.
+//! feeds keyboard events to the input mapper and drives the frame loop with
+//! `requestAnimationFrame`.
 //!
 //! JavaScript entry point (see `web/index.html`):
 //! `await run(canvas, backend => { window.skywaveReady = true; })`.

@@ -1,12 +1,17 @@
 //! Skywave's game loop logic, independent of any window or browser.
 //!
-//! The platform crate samples input every frame into an [`InputState`], calls
+//! The platform crate feeds raw input events to an [`InputMapper`], samples it once per
+//! frame into an [`InputState`], calls
 //! [`App::update`] with the real frame time, and draws [`App::scene_view`]. The
 //! simulation itself only ever advances in fixed `SIM_DT` steps.
 
 mod input;
 
-pub use input::{Action, InputState, Key, Keyboard};
+pub use input::{
+    Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context, DeviceKind,
+    InputMapper, InputState, Key, MouseAxis, PadAxis, PadButton, RawInput, Sign, BINDINGS_VERSION,
+    MOUSE_BUTTONS, MOUSE_LOOK_PER_PIXEL, MOUSE_RIGHT,
+};
 
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
@@ -50,16 +55,17 @@ struct FlyCamera {
 
 impl FlyCamera {
     fn step(&mut self, input: &InputState, dt: f32) {
-        self.yaw -= input.axis(Action::LookX) * TURN_RATE * dt;
-        self.pitch =
-            (self.pitch + input.axis(Action::LookY) * TURN_RATE * dt).clamp(-MAX_PITCH, MAX_PITCH);
+        self.yaw -= input.axis(Action::FlyLookX) * TURN_RATE * dt;
+        // FlyLookY is screen space (+ looks down); pitch is + up.
+        self.pitch = (self.pitch - input.axis(Action::FlyLookY) * TURN_RATE * dt)
+            .clamp(-MAX_PITCH, MAX_PITCH);
         let (s, c) = self.yaw.sin_cos();
         let forward = Vec3::new(-s, 0.0, -c);
         let right = Vec3::new(c, 0.0, -s);
         let axis = |pos: Action, neg: Action| input.axis(pos) - input.axis(neg);
-        let wish = forward * axis(Action::Forward, Action::Back)
-            + right * axis(Action::Right, Action::Left)
-            + Vec3::Y * axis(Action::Up, Action::Down);
+        let wish = forward * axis(Action::FlyForward, Action::FlyBack)
+            + right * axis(Action::FlyRight, Action::FlyLeft)
+            + Vec3::Y * axis(Action::FlyUp, Action::FlyDown);
         let wish = if wish.length_squared() > 1.0 {
             wish.normalize()
         } else {
@@ -237,15 +243,15 @@ mod tests {
         for frame in 0..600u32 {
             input.clear();
             if frame < 240 {
-                input.set(Action::Forward, 1.0);
+                input.set(Action::FlyForward, 1.0);
             }
             if (120..360).contains(&frame) {
-                input.set(Action::LookX, 0.5);
-                input.set(Action::Up, 1.0);
+                input.set(Action::FlyLookX, 0.5);
+                input.set(Action::FlyUp, 1.0);
             }
             if frame >= 300 {
-                input.set(Action::Right, 1.0);
-                input.set(Action::LookY, -0.25);
+                input.set(Action::FlyRight, 1.0);
+                input.set(Action::FlyLookY, 0.25);
             }
             let dt = 1.0 / 60.0 + f64::from(frame % 7) * 0.0013 - 0.003;
             app.update(&input, dt);
@@ -272,7 +278,7 @@ mod tests {
         app.prev = app.curr;
         let start = app.curr.pos;
         let mut input = InputState::default();
-        input.set(Action::Forward, 1.0);
+        input.set(Action::FlyForward, 1.0);
         for _ in 0..120 {
             app.update(&input, SIM_DT);
         }
@@ -286,8 +292,8 @@ mod tests {
     fn camera_stays_above_ground_and_pitch_is_limited() {
         let mut app = App::new(Seed(0));
         let mut input = InputState::default();
-        input.set(Action::Down, 1.0);
-        input.set(Action::LookY, -1.0);
+        input.set(Action::FlyDown, 1.0);
+        input.set(Action::FlyLookY, 1.0);
         for _ in 0..600 {
             app.update(&input, 1.0 / 30.0);
         }
@@ -299,7 +305,7 @@ mod tests {
     fn scene_view_interpolates_and_is_well_formed() {
         let mut app = App::new(Seed(5));
         let mut input = InputState::default();
-        input.set(Action::Forward, 1.0);
+        input.set(Action::FlyForward, 1.0);
         let steps = app.update(&input, SIM_DT * 1.5);
         assert_eq!(steps.count, 1);
         let at = |alpha| Mat4::from_cols_array_2d(&app.scene_view(alpha, 1.5).camera.view);
