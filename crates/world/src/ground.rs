@@ -74,7 +74,7 @@ pub fn blocks(net: &Network) -> Vec<Block> {
 
 /// How a block's open ground is surfaced.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Surface {
+pub(crate) enum Surface {
     Lawn,
     ParkLawn,
     Paved,
@@ -139,7 +139,7 @@ pub fn is_park(place: &Place, b: &Block) -> bool {
     })
 }
 
-fn block_surface(place: &Place, b: &Block) -> Surface {
+pub(crate) fn block_surface(place: &Place, b: &Block) -> Surface {
     if is_park(place, b) {
         return Surface::ParkLawn;
     }
@@ -334,7 +334,7 @@ fn park_paths(b: &Block, pal: &Palette, out: &mut MeshSet) {
 /// Asphalt in front of a strip mall with stall lines, from its front wall to the property
 /// line, leaving a lawn strip along the street.
 #[allow(clippy::too_many_arguments)]
-fn parking_lot(
+pub(crate) fn parking_lot(
     footprint: &[V2],
     front: usize,
     b: &Block,

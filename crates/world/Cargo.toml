@@ -10,3 +10,9 @@ rust-version.workspace = true
 [dependencies]
 skywave-core.workspace = true
 place.workspace = true
+# Collision answers the car sim's `Ground` trait and moves its `VehicleState`.
+vehicle.workspace = true
+
+[dev-dependencies]
+# The collision tests load the real specs from assets/vehicles/.
+ron.workspace = true

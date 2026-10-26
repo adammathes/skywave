@@ -2687,7 +2687,9 @@ name = "world"
 version = "0.1.0"
 dependencies = [
  "place",
+ "ron",
  "skywave-core",
+ "vehicle",
 ]
 
 [[package]]

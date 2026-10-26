@@ -4,7 +4,8 @@
 //! parapets; street lights, trees, palms, hydrants, benches, signals and parked cars.
 //!
 //! Everything is a pure function of the Place (and its `header.seed` for detail
-//! variation): same input, bit-identical vertices on every platform.
+//! variation): same input, bit-identical vertices on every platform. [`collide`] builds the
+//! static shapes the car collides with from the same layout.
 #![no_std]
 
 extern crate alloc;
@@ -12,6 +13,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod buildings;
+pub mod collide;
 pub mod ground;
 pub mod math;
 pub mod mesh;
@@ -23,6 +25,7 @@ use alloc::vec::Vec;
 
 use place::{Place, ZoneId, SIDEWALK_WIDTH_M};
 
+pub use collide::{resolve, Impact, WorldCollider};
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;
 

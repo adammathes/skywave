@@ -733,7 +733,7 @@ fn skirt(m: &mut WorldMesh, a: V2, b: V2, out: V2, p: &RoadPaints) {
 }
 
 /// Points on the arc of radius `r` around `q` from `a` to `b` (both included).
-fn arc(q: V2, r: f32, a: V2, b: V2) -> Vec<V2> {
+pub(crate) fn arc(q: V2, r: f32, a: V2, b: V2) -> Vec<V2> {
     const SEGMENTS: u32 = 6;
     let (va, vb) = (a - q, b - q);
     (0..=SEGMENTS)
