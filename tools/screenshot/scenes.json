@@ -22,5 +22,9 @@
   "town-map-full": {
     "about": "The full-screen map at the default start: the whole town north-up with the player arrow.",
     "params": { "seed": "1", "car": "corsair_gtx", "cam": "chase-mid", "t": "17:40", "map": "1", "still": "1", "stream": "0" }
+  },
+  "coast-strip-golden": {
+    "about": "The procedural coast streamed round its start on the strip at golden hour from the far chase camera: the resident ring, the far terrain's hills behind it.",
+    "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-far", "t": "17:40", "still": "1", "stream": "1" }
   }
 }

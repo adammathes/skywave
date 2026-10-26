@@ -455,11 +455,14 @@ struct Streaming {
     source: PlaceSource,
     streamer: Streamer,
     light_chunks: Vec<[i32; 2]>,
+    /// World instances drawn whatever is resident (the far terrain), before the chunks'.
+    fixed: usize,
 }
 
 /// The town an [`App`] starts with.
 struct Town {
-    /// Static meshes (the whole town when it is built at load; none when it streams).
+    /// Static meshes (the whole town when it is built at load; when it streams, a terrain
+    /// place's far terrain).
     meshes: Vec<Mesh>,
     instances: Vec<MeshInstance>,
     roles: Vec<PartRole>,
@@ -525,7 +528,8 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
     }
 }
 
-/// `place` to be streamed within `budget`: nothing built yet, every static light known
+/// `place` to be streamed within `budget`: nothing built yet but a terrain place's far
+/// terrain (drawn always, under the chunks, out to the horizon), every static light known
 /// (and off until its chunk is drawn), room for every part the resident chunks can have.
 fn streamed_town(place: Place, budget: StreamBudget) -> Town {
     let source = PlaceSource::new(place, Palette::socal_1985());
@@ -534,18 +538,29 @@ fn streamed_town(place: Place, budget: StreamBudget) -> Town {
     let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());
     lights.set_active(|_| false);
     let light_chunks = statics.iter().map(|s| s.chunk).collect();
-    let parts = streamer.capacity() * MAX_CHUNK_PARTS;
+    let meshes: Vec<Mesh> = source.far_terrain().cloned().into_iter().collect();
+    let fixed = meshes.len();
+    let capacity = fixed + streamer.capacity() * MAX_CHUNK_PARTS;
+    let mut instances = Vec::with_capacity(capacity);
+    let mut roles = Vec::with_capacity(capacity);
+    let mut bounds = Vec::with_capacity(capacity);
+    for i in 0..fixed {
+        instances.push(world_instance(MeshId(i as u32), PartRole::Tile));
+        roles.push(PartRole::Tile);
+        bounds.push(None);
+    }
     Town {
-        meshes: Vec::new(),
-        instances: Vec::with_capacity(parts),
-        roles: Vec::with_capacity(parts),
-        bounds: Vec::with_capacity(parts),
-        world_capacity: parts,
+        meshes,
+        instances,
+        roles,
+        bounds,
+        world_capacity: capacity,
         lights,
         stream: Some(Box::new(Streaming {
             source,
             streamer,
             light_chunks,
+            fixed,
         })),
     }
 }
@@ -634,9 +649,9 @@ impl App {
         if !s.streamer.sync(gpu) {
             return;
         }
-        self.instances.clear();
-        self.roles.clear();
-        self.bounds.clear();
+        self.instances.truncate(s.fixed);
+        self.roles.truncate(s.fixed);
+        self.bounds.truncate(s.fixed);
         for (slot, parts) in s.streamer.drawn() {
             for (k, p) in parts.iter().enumerate() {
                 self.instances
@@ -1386,19 +1401,26 @@ mod tests {
 
     #[test]
     fn the_coast_place_loads_and_the_car_drives_on_it() {
-        // Built at load: every chunk of the 16×16-chunk place meshed, each a draw or a few.
+        // Built at load: every chunk of the 16×16-chunk place meshed, a draw for each kind
+        // of mesh it has (ground, roads, paint), and no far terrain.
         let query = "?seed=1&place=coast";
         let setup = SceneSetup::from_query(&format!("{query}&stream=0")).unwrap();
         let resident = App::from_setup(&setup).unwrap();
         let world = resident.world_instances;
         eprintln!("coast at load: {world} world meshes");
-        assert!((256..=512).contains(&world), "{world} world meshes");
+        assert!((256..=768).contains(&world), "{world} world meshes");
         assert!(resident.meshes[..world]
             .iter()
             .all(|m| m.vertices.len() <= 1 << 20));
-        // Streamed (the default): the ring round the start fills, every chunk within budget.
+        // Streamed (the default): the far terrain drawn from the start, under the ring round
+        // the start as it fills, every chunk within budget.
         let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
-        assert!(app.is_streamed() && app.world_instances == 0);
+        assert!(app.is_streamed() && app.world_instances == 1);
+        let far = app.meshes()[0].indices.len() / 3;
+        assert!(
+            (8192..=10_000).contains(&far),
+            "far terrain: {far} triangles"
+        );
         // On the ground at the start.
         let (start, heading) = app.start;
         let pose = app.drive.pose(1.0);
@@ -1419,7 +1441,12 @@ mod tests {
         );
         assert_eq!(stats.upload_errors, 0);
         assert!(stats.built >= 25, "{stats:?}");
-        assert!(app.world_instances > 0 && app.world_instances < world);
+        assert!(app.world_instances > 1 && app.world_instances < world);
+        assert_eq!(
+            app.instances[0].mesh,
+            MeshId(0),
+            "the far terrain stays drawn"
+        );
         // Rolling forward along the road from the start, on the ground.
         let mut input = InputState::default();
         input.set(Action::Throttle, 0.5);

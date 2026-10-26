@@ -108,6 +108,7 @@ pub fn split_for_lights(
 }
 
 /// One side of a cut being built: its mesh and where the source's vertices went in it.
+#[derive(Debug)]
 struct Side {
     mesh: Mesh,
     remap: Vec<u32>,
@@ -150,7 +151,63 @@ pub fn split(mesh: &Mesh, axis: usize, at: f32) -> (Mesh, Mesh) {
         Side::new(mesh.vertices.len()),
         Side::new(mesh.vertices.len()),
     ];
-    for tri in mesh.indices.chunks_exact(3) {
+    cut_triangles(mesh, axis, at, 0..mesh.indices.len() / 3, &mut sides);
+    let [below, above] = sides;
+    (below.mesh, above.mesh)
+}
+
+/// [`split`] a run of triangles at a time, so a long cut can stop between runs.
+#[derive(Debug)]
+pub struct Cut {
+    src: Mesh,
+    axis: usize,
+    at: f32,
+    /// The next triangle to cut.
+    next: usize,
+    sides: [Side; 2],
+}
+
+impl Cut {
+    pub fn new(src: Mesh, axis: usize, at: f32) -> Cut {
+        let n = src.vertices.len();
+        Cut {
+            src,
+            axis,
+            at,
+            next: 0,
+            sides: [Side::new(n), Side::new(n)],
+        }
+    }
+
+    /// Cuts up to `max` more triangles; returns how many it cut and whether every
+    /// triangle is cut now.
+    pub fn run(&mut self, max: usize) -> (usize, bool) {
+        let total = self.src.indices.len() / 3;
+        let end = total.min(self.next.saturating_add(max));
+        let tris = self.next..end;
+        cut_triangles(&self.src, self.axis, self.at, tris, &mut self.sides);
+        let done = end - self.next;
+        self.next = end;
+        (done, end == total)
+    }
+
+    /// The two parts, as [`split`] gives them, once [`Cut::run`] says it is done.
+    pub fn halves(self) -> (Mesh, Mesh) {
+        let [below, above] = self.sides;
+        (below.mesh, above.mesh)
+    }
+}
+
+/// Cuts triangles `tris` of `mesh` along the plane `pos[axis] = at` into `sides` (below,
+/// above), in order.
+fn cut_triangles(
+    mesh: &Mesh,
+    axis: usize,
+    at: f32,
+    tris: std::ops::Range<usize>,
+    sides: &mut [Side; 2],
+) {
+    for tri in mesh.indices[tris.start * 3..tris.end * 3].chunks_exact(3) {
         let d = [0, 1, 2].map(|k| mesh.vertices[tri[k] as usize].pos[axis] - at);
         if d.iter().all(|&x| x <= 0.0) || d.iter().all(|&x| x >= 0.0) {
             let side = &mut sides[usize::from(d.iter().any(|&x| x > 0.0))];
@@ -193,8 +250,6 @@ pub fn split(mesh: &Mesh, axis: usize, at: f32) -> (Mesh, Mesh) {
             }
         }
     }
-    let [below, above] = sides;
-    (below.mesh, above.mesh)
 }
 
 /// The point where edge `a`–`b` meets the plane `pos[axis] = at`, every attribute
@@ -236,65 +291,326 @@ fn cut(a: &Vertex, b: &Vertex, axis: usize, at: f32) -> Vertex {
     }
 }
 
-/// The light tiles of one streamed chunk's geometry `base` (all its kinds as one mesh),
-/// built without its neighbours: whole when none of `lights` reaches it (the terrain
-/// apron), else cut along the chunk grid and each piece split for `lights` as
-/// [`split_for_lights`] does. Pieces past the chunk's own cell (lane paint running on into
-/// the next one) become tiles of their own instead of joining the neighbour's, so the
-/// chunk can come and go alone. At most `max_tiles` (at least 1): the last ones are
-/// merged when there would be more.
-pub fn chunk_tiles(
-    base: Mesh,
+/// The light tiles of one streamed chunk's geometry (all its kinds as one mesh), built
+/// without its neighbours, a piece at a time so a streamer can stop between pieces: whole
+/// when none of the lights reaches it (the terrain apron), else cut along the chunk grid
+/// and each piece split for the lights as [`split_for_lights`] does (the same tiles, in
+/// the same order). Pieces past the chunk's own cell (lane paint running on into the next
+/// one) become tiles of their own instead of joining the neighbour's, so the chunk can
+/// come and go alone. At most `max_tiles` (at least 1): the last ones are merged when
+/// there would be more.
+///
+/// [`Tiler::start`], then [`Tiler::step`] until it returns the tiles: each step does about
+/// [`TILE_PIECE_TRIANGLES`] triangles' worth of cutting (a cut stops part way and goes on
+/// in the next step). Reused from chunk to chunk.
+#[derive(Debug, Default)]
+pub struct Tiler {
     own: [i32; 2],
     cell: f32,
-    lights: &[PointLight],
     max_tiles: usize,
-) -> Vec<Tile> {
-    let mut tiles = Vec::new();
-    let Some(bounds) = mesh_bounds(&base).filter(|_| !base.indices.is_empty()) else {
-        return tiles;
-    };
-    if !lights.iter().any(|l| bounds.reached_by(l)) {
-        tiles.push(Tile { mesh: base, bounds });
-        return tiles;
+    lights: Vec<PointLight>,
+    /// Grid lines across z the chunk's mesh spans: `[first, last]`.
+    z_lines: [i32; 2],
+    /// Work left, the next on top.
+    todo: Vec<Job>,
+    /// The chunk's mesh cut along the grid, by cell `[z, x]`.
+    cells: Vec<([i32; 2], Mesh)>,
+    /// Tiles of the chunk's own cell, and pieces past it, so far.
+    tiles: Vec<Tile>,
+    over: Vec<Tile>,
+}
+
+/// Triangles' worth of work in one [`Tiler::step`] (cutting a triangle, or looking at a
+/// vertex's bounds): about 2 ms in a release build.
+pub const TILE_PIECE_TRIANGLES: usize = 6_000;
+
+/// A piece of [`Tiler`]'s work.
+#[derive(Debug)]
+enum Job {
+    /// Cut the chunk's mesh along the chunk grid.
+    Bin(Mesh),
+    /// Peel `mesh` along `axis` at grid lines `k..=last` (`x`: the column, peeling z).
+    Peel {
+        mesh: Mesh,
+        axis: usize,
+        k: i32,
+        last: i32,
+        x: i32,
+    },
+    /// A cut under way, and where its parts go.
+    Cutting { cut: Cut, then: Then },
+    /// Every cell is cut out: split them in turn, in rows.
+    Cells,
+    /// Keep a mesh whole as a tile if its lights fit, or quarter it (its square cell's
+    /// corner `origin`, edge `size`; `own`: in the chunk's own cell).
+    Split {
+        mesh: Mesh,
+        origin: [f32; 2],
+        size: f32,
+        own: bool,
+    },
+    /// Merge the pieces past the cell into the tiles and cap their number.
+    Finish,
+}
+
+/// Where the parts of a [`Job::Cutting`] go.
+#[derive(Debug)]
+enum Then {
+    /// Peeling: below is the piece before line `k`, above goes on from line `k + 1`.
+    Peel {
+        axis: usize,
+        k: i32,
+        last: i32,
+        x: i32,
+    },
+    /// Quartering, cut across x: each half is cut across z next, the west one first.
+    Halves {
+        origin: [f32; 2],
+        half: f32,
+        own: bool,
+    },
+    /// Quartering, a half cut across z: its north and south quarters are split in turn.
+    Quarters {
+        origin: [f32; 2],
+        half: f32,
+        own: bool,
+    },
+}
+
+impl Tiler {
+    /// Starts on `base`, chunk `own` of the `cell`-sized grid, for the static `lights`
+    /// (those that cannot reach it change nothing).
+    pub fn start(
+        &mut self,
+        base: Mesh,
+        own: [i32; 2],
+        cell: f32,
+        lights: impl IntoIterator<Item = PointLight>,
+        max_tiles: usize,
+    ) {
+        self.own = own;
+        self.cell = cell;
+        self.max_tiles = max_tiles;
+        self.lights.clear();
+        self.lights.extend(lights);
+        self.todo.clear();
+        self.cells.clear();
+        self.tiles.clear();
+        self.over.clear();
+        self.todo.push(Job::Finish);
+        self.todo.push(Job::Bin(base));
     }
-    let mut cells = BTreeMap::new();
-    bin_by_cells(base, cell, &mut cells);
-    let mut over = Vec::new();
-    for ([z, x], mesh) in cells {
-        let origin = [x as f32 * cell, z as f32 * cell];
-        let into = if [x, z] == own { &mut tiles } else { &mut over };
-        split_for_lights(mesh, origin, cell, lights, into);
-    }
-    // A piece past the cell joins the first tile it can share a light set with: the two
-    // together are still reached by no more lights than one draw takes.
-    for piece in over {
-        let union = |b: &Bounds| Bounds {
-            min: b.min.min(piece.bounds.min),
-            max: b.max.max(piece.bounds.max),
-        };
-        let fits = |t: &Tile| {
-            let u = union(&t.bounds);
-            lights.iter().filter(|l| u.reached_by(l)).count() <= STATIC_LIGHTS_PER_TILE
-        };
-        match tiles.iter_mut().find(|t| fits(t)) {
-            Some(t) => {
-                append(&mut t.mesh, &piece.mesh);
-                t.bounds = union(&t.bounds);
+
+    /// Runs the next piece of work; returns the tiles after the last.
+    pub fn step(&mut self) -> Option<Vec<Tile>> {
+        let mut left = TILE_PIECE_TRIANGLES;
+        while left > 0 {
+            // A pass over a whole mesh (its bounds) that does not fit what is left of this
+            // step waits for the next one.
+            let whole = match self.todo.last() {
+                Some(Job::Bin(m)) | Some(Job::Split { mesh: m, .. }) => m.vertices.len(),
+                _ => 0,
+            };
+            if whole > left && left < TILE_PIECE_TRIANGLES {
+                break;
             }
-            None => tiles.push(piece),
+            let job = self.todo.pop().unwrap_or(Job::Finish);
+            let cost = match job {
+                Job::Finish => return Some(self.finish()),
+                Job::Bin(base) => self.bin(base),
+                Job::Peel {
+                    mesh,
+                    axis,
+                    k,
+                    last,
+                    x,
+                } => {
+                    if k <= last {
+                        let at = k as f32 * self.cell;
+                        let cut = Cut::new(mesh, axis, at);
+                        let then = Then::Peel { axis, k, last, x };
+                        self.todo.push(Job::Cutting { cut, then });
+                    } else {
+                        self.peeled(axis, last, x, mesh);
+                    }
+                    0
+                }
+                Job::Cutting { mut cut, then } => {
+                    let (n, done) = cut.run(left);
+                    if done {
+                        self.cut_done(cut.halves(), then);
+                    } else {
+                        self.todo.push(Job::Cutting { cut, then });
+                    }
+                    n.max(1)
+                }
+                Job::Cells => {
+                    self.cells.sort_by_key(|c| c.0);
+                    // Pushed last first, so they run in the cells' (row) order.
+                    while let Some(([z, x], mesh)) = self.cells.pop() {
+                        self.todo.push(Job::Split {
+                            mesh,
+                            origin: [x as f32 * self.cell, z as f32 * self.cell],
+                            size: self.cell,
+                            own: [x, z] == self.own,
+                        });
+                    }
+                    0
+                }
+                Job::Split {
+                    mesh,
+                    origin,
+                    size,
+                    own,
+                } => self.split_job(mesh, origin, size, own),
+            };
+            left = left.saturating_sub(cost);
+        }
+        None
+    }
+
+    /// Starts on the chunk's mesh: whole when no light reaches it, else peeled along the
+    /// grid lines across x, then each column across z (as [`bin_by_cells`] cuts).
+    fn bin(&mut self, base: Mesh) -> usize {
+        let cost = base.vertices.len();
+        let Some(b) = mesh_bounds(&base).filter(|_| !base.indices.is_empty()) else {
+            return cost;
+        };
+        if !self.lights.iter().any(|l| b.reached_by(l)) {
+            self.tiles.push(Tile {
+                mesh: base,
+                bounds: b,
+            });
+            return cost;
+        }
+        let index = |v: f32| (v / self.cell).floor() as i32;
+        self.z_lines = [index(b.min.z) + 1, index(b.max.z)];
+        self.todo.push(Job::Cells);
+        self.todo.push(Job::Peel {
+            mesh: base,
+            axis: 0,
+            k: index(b.min.x) + 1,
+            last: index(b.max.x),
+            x: 0,
+        });
+        cost
+    }
+
+    /// A peeled piece: the one before grid line `k + 1` along `axis` (a column, peeled
+    /// across z next, or a cell).
+    fn peeled(&mut self, axis: usize, k: i32, x: i32, mesh: Mesh) {
+        if mesh.indices.is_empty() {
+            return;
+        }
+        if axis == 0 {
+            let [first, last] = self.z_lines;
+            self.todo.push(Job::Peel {
+                mesh,
+                axis: 2,
+                k: first,
+                last,
+                x: k,
+            });
+        } else {
+            self.cells.push(([k, x], mesh));
         }
     }
-    while tiles.len() > max_tiles.max(1) {
-        let last = tiles.pop().expect("more than one tile");
-        let into = tiles.last_mut().expect("at least one tile");
-        append(&mut into.mesh, &last.mesh);
-        into.bounds = Bounds {
-            min: into.bounds.min.min(last.bounds.min),
-            max: into.bounds.max.max(last.bounds.max),
-        };
+
+    fn cut_done(&mut self, (below, above): (Mesh, Mesh), then: Then) {
+        match then {
+            Then::Peel { axis, k, last, x } => {
+                self.todo.push(Job::Peel {
+                    mesh: above,
+                    axis,
+                    k: k + 1,
+                    last,
+                    x,
+                });
+                self.peeled(axis, k - 1, x, below);
+            }
+            Then::Halves { origin, half, own } => {
+                let mid = origin[1] + half;
+                for (mesh, x) in [(above, origin[0] + half), (below, origin[0])] {
+                    self.todo.push(Job::Cutting {
+                        cut: Cut::new(mesh, 2, mid),
+                        then: Then::Quarters {
+                            origin: [x, origin[1]],
+                            half,
+                            own,
+                        },
+                    });
+                }
+            }
+            Then::Quarters { origin, half, own } => {
+                let south = [origin[0], origin[1] + half];
+                for (mesh, origin) in [(above, south), (below, origin)] {
+                    self.todo.push(Job::Split {
+                        mesh,
+                        origin,
+                        size: half,
+                        own,
+                    });
+                }
+            }
+        }
     }
-    tiles
+
+    /// One level of [`split_for_lights`]: a tile, or its quarters to come.
+    fn split_job(&mut self, mesh: Mesh, origin: [f32; 2], size: f32, own: bool) -> usize {
+        let cost = mesh.vertices.len();
+        if mesh.indices.is_empty() {
+            return cost;
+        }
+        let Some(bounds) = mesh_bounds(&mesh) else {
+            return cost;
+        };
+        let reached = self.lights.iter().filter(|l| bounds.reached_by(l)).count();
+        if reached <= STATIC_LIGHTS_PER_TILE || size <= MIN_TILE_M {
+            let into = if own { &mut self.tiles } else { &mut self.over };
+            into.push(Tile { mesh, bounds });
+            return cost;
+        }
+        let half = size * 0.5;
+        self.todo.push(Job::Cutting {
+            cut: Cut::new(mesh, 0, origin[0] + half),
+            then: Then::Halves { origin, half, own },
+        });
+        cost
+    }
+
+    fn finish(&mut self) -> Vec<Tile> {
+        let mut tiles = std::mem::take(&mut self.tiles);
+        let lights = &self.lights;
+        // A piece past the cell joins the first tile it can share a light set with: the two
+        // together are still reached by no more lights than one draw takes.
+        for piece in self.over.drain(..) {
+            let union = |b: &Bounds| Bounds {
+                min: b.min.min(piece.bounds.min),
+                max: b.max.max(piece.bounds.max),
+            };
+            let fits = |t: &Tile| {
+                let u = union(&t.bounds);
+                lights.iter().filter(|l| u.reached_by(l)).count() <= STATIC_LIGHTS_PER_TILE
+            };
+            match tiles.iter_mut().find(|t| fits(t)) {
+                Some(t) => {
+                    append(&mut t.mesh, &piece.mesh);
+                    t.bounds = union(&t.bounds);
+                }
+                None => tiles.push(piece),
+            }
+        }
+        while tiles.len() > self.max_tiles.max(1) {
+            let last = tiles.pop().expect("more than one tile");
+            let into = tiles.last_mut().expect("at least one tile");
+            append(&mut into.mesh, &last.mesh);
+            into.bounds = Bounds {
+                min: into.bounds.min.min(last.bounds.min),
+                max: into.bounds.max.max(last.bounds.max),
+            };
+        }
+        tiles
+    }
 }
 
 #[cfg(test)]
@@ -434,5 +750,58 @@ mod tests {
         assert!(out
             .iter()
             .any(|t| t.bounds.min.x >= 64.0 && t.bounds.max.x - t.bounds.min.x > 63.0));
+    }
+
+    /// The tiler gives a chunk's tiles as [`split_for_lights`] gives them, in the same
+    /// order, a cut at a time; a chunk no light reaches stays whole.
+    #[test]
+    fn the_tiler_cuts_as_split_for_lights_does() {
+        // Chunk (1, 0) on the 128 m grid, lamps down x = 160 every 8 m.
+        let mut chunk = grid(32, 128.0);
+        for v in &mut chunk.vertices {
+            v.pos[0] += 128.0;
+        }
+        let lamps: Vec<PointLight> = (0..16)
+            .map(|i| streetlamp(Vec3::new(160.0, 7.5, i as f32 * 8.0)))
+            .collect();
+        let mut tiler = Tiler::default();
+        tiler.start(chunk.clone(), [1, 0], 128.0, lamps.iter().copied(), 30);
+        let mut steps = 1;
+        let tiles = loop {
+            if let Some(t) = tiler.step() {
+                break t;
+            }
+            steps += 1;
+        };
+        let mut want = Vec::new();
+        split_for_lights(chunk.clone(), [128.0, 0.0], 128.0, &lamps, &mut want);
+        assert!(
+            want.len() > 4 && steps > 1,
+            "{} tiles, {steps} steps",
+            want.len()
+        );
+        assert!(tiles == want);
+        // No light: one tile, the whole mesh.
+        tiler.start(chunk.clone(), [1, 0], 128.0, [], 30);
+        let tiles = loop {
+            if let Some(t) = tiler.step() {
+                break t;
+            }
+        };
+        assert_eq!(tiles.len(), 1);
+        assert!(tiles[0].mesh == chunk);
+    }
+
+    #[test]
+    fn a_cut_in_runs_is_the_split() {
+        let m = grid(9, 100.0);
+        let whole = split(&m, 2, 41.0);
+        let mut cut = Cut::new(m.clone(), 2, 41.0);
+        let mut runs = 0;
+        while !cut.run(7).1 {
+            runs += 1;
+        }
+        assert!(runs > 10);
+        assert!(cut.halves() == whole);
     }
 }

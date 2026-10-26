@@ -1,10 +1,10 @@
 //! The procedural pipeline end to end: a skeleton [`Place`] from a seed and a template.
 //!
-//! [`build_place`] runs the macro map (stages 1–2) and the arterial network (stage 3), then
-//! fills the Place skeleton: terrain from the macro heights (which already carry the
-//! highway corridor) at [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and
-//! one `PlayerStart` in the outer lane of the strip's spine. Local streets, parcels and
-//! buildings come later.
+//! [`build_place`] runs the macro map (stages 1–2), the arterial network (stage 3) and the
+//! local streets of every chunk (stage 4, merged with the arterials), then fills the Place
+//! skeleton: terrain from the macro heights (which already carry the highway corridor) at
+//! [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and one `PlayerStart` in
+//! the outer lane of the strip's spine. Parcels and buildings come later.
 
 use alloc::vec::Vec;
 
@@ -17,6 +17,7 @@ use skywave_core::Seed;
 
 use super::arterials::arterials;
 use super::macro_map::{MacroMap, WaterKind};
+use super::streets::streets_all;
 use super::{RES_PER_CHUNK, ZONE_SAMPLES};
 use crate::math::{atan2, segment_distance, V2};
 use crate::template::RegionTemplate;
@@ -50,12 +51,25 @@ pub fn era_of(year: u16) -> Era {
 /// passed [`RegionTemplate::validate`]. Deterministic.
 pub fn build_place(seed: Seed, template: &RegionTemplate) -> Place {
     let m = MacroMap::generate(seed, template, PLACE_CHUNKS);
-    let roads = arterials(seed, template, &m);
-    place_from(&m, template, roads)
+    let arterials = arterials(seed, template, &m);
+    // The start is found on the arterials as they are, before the streets split them.
+    let start = player_start(&m, &arterials);
+    let roads = streets_all(seed, template, &m, &arterials);
+    assemble(&m, template, roads, start)
 }
 
-/// The Place skeleton for a macro map and its road graph.
+/// The Place skeleton for a macro map and its road graph, the start on its arterials.
 pub fn place_from(m: &MacroMap, template: &RegionTemplate, roads: RoadGraph) -> Place {
+    let start = player_start(m, &roads);
+    assemble(m, template, roads, start)
+}
+
+fn assemble(
+    m: &MacroMap,
+    template: &RegionTemplate,
+    roads: RoadGraph,
+    start: Option<Spawn>,
+) -> Place {
     let header = PlaceHeader {
         version: PLACE_VERSION,
         seed: m.seed.0,
@@ -99,7 +113,7 @@ pub fn place_from(m: &MacroMap, template: &RegionTemplate, roads: RoadGraph) -> 
             },
         })
         .collect();
-    let spawns = player_start(m, &roads).into_iter().collect();
+    let spawns = start.into_iter().collect();
     let mut place = Place {
         header,
         terrain: Terrain {

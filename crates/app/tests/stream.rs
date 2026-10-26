@@ -1,5 +1,5 @@
 //! Acceptance tests for `app::stream`: a camera driven across the test town at 30 m/s for a
-//! minute, every step timed by a fake clock that charges a fixed cost per stage, the chunks
+//! minute, every step timed by a fake clock that charges a fixed cost per piece, the chunks
 //! written into a GPU-less `render::ChunkPool`. Run with `--nocapture` to read the numbers:
 //! `cargo test -p app --test stream -- --nocapture`.
 
@@ -42,7 +42,7 @@ const STEP_HZ: f64 = 120.0;
 const DRIVE_S: f64 = 60.0;
 const SPEED: f32 = 30.0;
 
-/// A source whose stages each cost `cost` seconds of the fake clock `now`.
+/// A source whose pieces of stages each cost `cost` seconds of the fake clock `now`.
 struct Timed<'a, S> {
     inner: &'a S,
     now: &'a Cell<f64>,
@@ -181,7 +181,7 @@ fn drive<S: ChunkSource>(
 }
 
 /// The test town streamed at the web budget across its whole width (and out past its
-/// apron): a step overruns by at most one stage, the ring is complete whenever the
+/// apron): a step overruns by at most one piece, the ring is complete whenever the
 /// streamer says it is idle, chunks behind are evicted, the pools never overflow, and
 /// steps that build nothing allocate nothing.
 #[test]

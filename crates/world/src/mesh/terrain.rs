@@ -15,6 +15,13 @@
 //! the beach band fades into the grass, darkened and turned to bare soil on steep cuts, and
 //! mottled by seeded noise; plus a flat water plane at `water_level` in every chunk that
 //! has water, reaching far out to sea from the place's edges.
+//!
+//! [`build_far`] is the whole place's terrain and water in one coarse mesh (a sample every
+//! [`FAR_STEP_M`]), drawn behind the streamed chunks out to the horizon. It sits under the
+//! ground everywhere: [`FAR_DROP_M`] lower, and each of its samples lowered further by
+//! whatever the coarse surface would otherwise poke above the fine one in the cells around
+//! it (valleys and road cuts; on ridges the coarse surface lies under the fine one anyway),
+//! so a resident chunk always wins the depth test.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -31,6 +38,9 @@ use crate::{MeshKind, MeshSet};
 pub const SHOULDER_M: f32 = 4.0;
 /// Extra graded width so no terrain triangle under a road's edge keeps an ungraded corner.
 pub const GRID_COVER_M: f32 = 2.0;
+/// Most a sample under a road goes lower where the road surface bends up round it
+/// ([`bend_up`]): tight hairpins bend it more than any 4 m grid follows.
+const MAX_BEND_DROP_M: f32 = 0.05;
 /// Width over which the 1:2 cut and fill slopes blend back into the terrain.
 pub const BLEND_M: f32 = 8.0;
 /// Rise over run of road cut and fill slopes.
@@ -46,6 +56,10 @@ const WATER_SPLIT: u32 = 4;
 const KEY_GROUND: u64 = 0x4752_4F55;
 const KEY_GROUND_FINE: u64 = 0x4752_4646;
 const KEY_STANDS: u64 = 0x5354_4E44;
+/// Distance between the samples of the far terrain ([`build_far`]).
+pub const FAR_STEP_M: f32 = 32.0;
+/// How far the far terrain and its water sit under the ground and the water.
+pub const FAR_DROP_M: f32 = 0.75;
 
 /// The place's heights with the roads graded in, on the place's terrain grid.
 #[derive(Clone, Debug, PartialEq)]
@@ -95,6 +109,28 @@ fn local_height(net: &Network, (edge, seg): (u32, u32), q: V2) -> f32 {
     let k0 = (seg as usize).saturating_sub(2);
     let k1 = (seg as usize + 3).min(n - 1);
     profile_height(&path.raw[k0..=k1], &path.raw_y[k0..=k1], q)
+}
+
+/// How far the surface of `road` bends up round `q` (where it is at `y`): the largest
+/// second difference over `h` along x, z and the diagonals, 0 where it is straight or bends
+/// down. Ground interpolated between samples `2h` apart rises above such a surface by about
+/// half of it (sags, and the inside of tight bends on a grade, where the height lines of
+/// the segments either side blend), so the samples there go that much lower.
+fn bend_up(net: &Network, road: (u32, u32), q: V2, y: f32, h: f32) -> f32 {
+    if net.paths[road.0 as usize].flat.is_some() {
+        return 0.0;
+    }
+    let mut most = 0.0f32;
+    for d in [
+        V2::new(h, 0.0),
+        V2::new(0.0, h),
+        V2::new(h, h),
+        V2::new(h, -h),
+    ] {
+        let second = local_height(net, road, q + d) + local_height(net, road, q - d) - 2.0 * y;
+        most = most.max(second);
+    }
+    most
 }
 
 impl TerrainGrid {
@@ -192,7 +228,9 @@ impl TerrainGrid {
                         c.core
                     };
                     roads[iz * g.w + ix] = road;
-                    *hp = local_height(net, road, q) - UNDER_ROAD_M;
+                    let y = local_height(net, road, q);
+                    let bend = 0.5 * bend_up(net, road, q, y, 0.5 * g.cell);
+                    *hp = y - UNDER_ROAD_M - bend.min(MAX_BEND_DROP_M);
                 } else if c.blend != NONE {
                     let y = local_height(net, c.blend, q) - UNDER_ROAD_M;
                     let (h0, s) = (*hp, c.blend_s);
@@ -460,19 +498,7 @@ pub fn build(
                             }
                         }
                     }
-                    let mut rgb: Rgb = acc.map(|a| (a / 16) as u8);
-                    // Wet sand at the waterline, the sea floor darker still.
-                    if y < wl + 0.6 {
-                        let wet = clamp((wl + 0.6 - y) * 120.0, 0.0, 150.0);
-                        rgb = shade(rgb, 256 - wet as u32);
-                    }
-                    // Bare soil on steep cuts and fills, then slope darkening.
-                    let steep = clamp((0.93 - nrm.y) / 0.2, 0.0, 1.0);
-                    rgb = mix(rgb, shade(pal.soil, 200), (steep * 200.0) as u32);
-                    let coarse = value_noise(seed ^ KEY_GROUND, p.x, p.y, 37.0);
-                    let fine = value_noise(seed ^ KEY_GROUND_FINE, p.x, p.y, 7.0);
-                    let tone = 200.0 + 40.0 * nrm.y * nrm.y + 16.0 * fine;
-                    rgb = shade(rgb, (tone - 10.0 + 20.0 * coarse) as u32);
+                    let rgb = ground_rgb(acc.map(|a| (a / 16) as u8), y, wl, nrm, p, pal, seed);
                     m.vertices.push(WorldVertex {
                         pos: [p.x, y, p.y],
                         normal: nrm.to_array(),
@@ -494,7 +520,16 @@ pub fn build(
                     }
                 }
             }
-            water(place, grid, pal, [cx, cz], res, &zone_at, &mut m);
+            water(
+                place,
+                grid,
+                pal,
+                [cx, cz],
+                res,
+                &zone_at,
+                WATER_SPLIT,
+                &mut m,
+            );
             let dst = out.at(center, MeshKind::Ground);
             let base = dst.vertices.len() as u32;
             dst.vertices.extend_from_slice(&m.vertices);
@@ -503,9 +538,176 @@ pub fn build(
     }
 }
 
-/// The water plane of chunk `c` if any of its zone cells is water: a grid of flat quads at
-/// the water level, reaching [`OCEAN_SKIRT_M`] past each place edge the chunk lies on
-/// where that edge is water.
+/// A terrain vertex's color: `rgb`, its zones' blended color, wet at the waterline, bare
+/// soil on steep ground, shaded by slope and mottled by noise at ground point `p`.
+fn ground_rgb(rgb: Rgb, y: f32, wl: f32, nrm: V3, p: V2, pal: &Palette, seed: u64) -> Rgb {
+    let mut rgb = rgb;
+    // Wet sand at the waterline, the sea floor darker still.
+    if y < wl + 0.6 {
+        let wet = clamp((wl + 0.6 - y) * 120.0, 0.0, 150.0);
+        rgb = shade(rgb, 256 - wet as u32);
+    }
+    // Bare soil on steep cuts and fills, then slope darkening.
+    let steep = clamp((0.93 - nrm.y) / 0.2, 0.0, 1.0);
+    rgb = mix(rgb, shade(pal.soil, 200), (steep * 200.0) as u32);
+    let coarse = value_noise(seed ^ KEY_GROUND, p.x, p.y, 37.0);
+    let fine = value_noise(seed ^ KEY_GROUND_FINE, p.x, p.y, 7.0);
+    let tone = 200.0 + 40.0 * nrm.y * nrm.y + 16.0 * fine;
+    shade(rgb, (tone - 10.0 + 20.0 * coarse) as u32)
+}
+
+/// Height at `(tx, tz)` (each in `[0, 1]`) in a cell with corner heights `h` (`00`, `10`,
+/// `01`, `11`), split along its `10`–`01` diagonal when `flip`, as
+/// [`TerrainGrid::height_at`] interpolates.
+fn cell_height(h: [f32; 4], flip: bool, tx: f32, tz: f32) -> f32 {
+    let [h00, h10, h01, h11] = h;
+    if flip {
+        if tx + tz <= 1.0 {
+            h00 + (h10 - h00) * tx + (h01 - h00) * tz
+        } else {
+            h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz)
+        }
+    } else if tx >= tz {
+        h00 + (h10 - h00) * tx + (h11 - h10) * tz
+    } else {
+        h00 + (h01 - h00) * tz + (h11 - h01) * tx
+    }
+}
+
+/// The far terrain: the whole place's ground and water as one coarse mesh, a sample every
+/// [`FAR_STEP_M`] (65×65 samples, 8192 triangles, for a 2 km place), colored by zone as
+/// [`build`] colors it, under the fine ground everywhere (see the module docs), and a
+/// water plane [`FAR_DROP_M`] under the water level in every chunk with water (one quad
+/// apiece, and the skirts out to sea).
+pub fn build_far(
+    place: &Place,
+    grid: &TerrainGrid,
+    colors: &CellColors,
+    pal: &Palette,
+    seed: u64,
+) -> WorldMesh {
+    let step = floor(FAR_STEP_M / grid.cell + 0.5).max(1.0) as usize;
+    let axis = |n: usize| {
+        let mut v: Vec<usize> = (0..n).step_by(step).collect();
+        if v.last() != Some(&(n - 1)) {
+            v.push(n - 1);
+        }
+        v
+    };
+    let (xs, zs) = (axis(grid.w), axis(grid.h));
+    let (nx, nz) = (xs.len(), zs.len());
+    let plain: Vec<f32> = zs
+        .iter()
+        .flat_map(|&z| xs.iter().map(move |&x| grid.sample(x, z)))
+        .collect();
+    // Each cell's diagonal (the one nearer the fine ground at its center) and how far its
+    // plain interpolation rises above the fine samples it covers.
+    let cells = (nx - 1) * (nz - 1);
+    let (mut flip, mut poke) = (vec![false; cells], vec![0.0f32; cells]);
+    for cz in 0..nz - 1 {
+        for cx in 0..nx - 1 {
+            let (x0, x1, z0, z1) = (xs[cx], xs[cx + 1], zs[cz], zs[cz + 1]);
+            let v = cz * nx + cx;
+            let h = [plain[v], plain[v + 1], plain[v + nx], plain[v + nx + 1]];
+            let mid = grid.sample((x0 + x1) / 2, (z0 + z1) / 2);
+            let f = (0.5 * (h[1] + h[2]) - mid).abs() + 1e-4 < (0.5 * (h[0] + h[3]) - mid).abs();
+            let mut worst = 0.0f32;
+            for iz in z0..=z1 {
+                for ix in x0..=x1 {
+                    let tx = (ix - x0) as f32 / (x1 - x0) as f32;
+                    let tz = (iz - z0) as f32 / (z1 - z0) as f32;
+                    worst = worst.max(cell_height(h, f, tx, tz) - grid.sample(ix, iz));
+                }
+            }
+            flip[cz * (nx - 1) + cx] = f;
+            poke[cz * (nx - 1) + cx] = worst;
+        }
+    }
+    // A sample drops by the most any cell round it pokes up: every point of a cell then
+    // interpolates corners lowered at least as far as the cell pokes there.
+    let mut heights = plain.clone();
+    for j in 0..nz {
+        for i in 0..nx {
+            let mut drop = 0.0f32;
+            for cz in j.saturating_sub(1)..j.min(nz - 2) + 1 {
+                for cx in i.saturating_sub(1)..i.min(nx - 2) + 1 {
+                    drop = drop.max(poke[cz * (nx - 1) + cx]);
+                }
+            }
+            heights[j * nx + i] -= drop + FAR_DROP_M;
+        }
+    }
+    let pos = |i: usize, j: usize| grid.pos(xs[i], zs[j]);
+    let normal = |i: usize, j: usize| {
+        let (i0, i1) = (i.saturating_sub(1), (i + 1).min(nx - 1));
+        let (j0, j1) = (j.saturating_sub(1), (j + 1).min(nz - 1));
+        let dx = (heights[j * nx + i1] - heights[j * nx + i0]) / (pos(i1, j).x - pos(i0, j).x);
+        let dz = (heights[j1 * nx + i] - heights[j0 * nx + i]) / (pos(i, j1).y - pos(i, j0).y);
+        V3::new(-dx, 1.0, -dz).normalize()
+    };
+    let (cw, ch) = (colors.w, colors.h);
+    let half = step / 2;
+    let paint = Paint::new(pal.lawn, Pattern::Terrain);
+    let wl = grid.water_level;
+    let mut m = WorldMesh::default();
+    for j in 0..nz {
+        for i in 0..nx {
+            let (ix, iz) = (xs[i], zs[j]);
+            let p = pos(i, j);
+            let nrm = normal(i, j);
+            // The zone colors of the cells within half a step.
+            let mut acc = [0u32; 3];
+            let mut n = 0;
+            for qz in iz.saturating_sub(half)..(iz + half).min(ch) {
+                for qx in ix.saturating_sub(half)..(ix + half).min(cw) {
+                    let c = colors.rgb[qz * cw + qx];
+                    for k in 0..3 {
+                        acc[k] += c[k];
+                    }
+                    n += 1;
+                }
+            }
+            let avg = acc.map(|a| (a / n.max(1)) as u8);
+            let rgb = ground_rgb(avg, grid.sample(ix, iz), wl, nrm, p, pal, seed);
+            m.vertices.push(WorldVertex {
+                pos: [p.x, heights[j * nx + i], p.y],
+                normal: nrm.to_array(),
+                uv: [p.x, p.y],
+                color: paint.with_rgb(rgb).color,
+                emissive: paint.emissive,
+            });
+        }
+    }
+    for cz in 0..nz - 1 {
+        for cx in 0..nx - 1 {
+            let v00 = (cz * nx + cx) as u32;
+            let (v10, v01, v11) = (v00 + 1, v00 + nx as u32, v00 + nx as u32 + 1);
+            if flip[cz * (nx - 1) + cx] {
+                m.indices.extend_from_slice(&[v00, v01, v10, v10, v01, v11]);
+            } else {
+                m.indices.extend_from_slice(&[v00, v11, v10, v00, v01, v11]);
+            }
+        }
+    }
+    let ground = m.vertices.len();
+    let res = usize::from(place.terrain.res_per_chunk.max(1));
+    let zone_at = |cx: usize, cz: usize| colors.zone_at(cx, cz);
+    let [cnx, cnz] = place.header.size_chunks.map(usize::from);
+    for cz in 0..cnz {
+        for cx in 0..cnx {
+            water(place, grid, pal, [cx, cz], res, &zone_at, 1, &mut m);
+        }
+    }
+    for v in &mut m.vertices[ground..] {
+        v.pos[1] -= FAR_DROP_M;
+    }
+    m
+}
+
+/// The water plane of chunk `c` if any of its zone cells is water: a grid of `split` ×
+/// `split` flat quads at the water level, reaching [`OCEAN_SKIRT_M`] past each place edge
+/// the chunk lies on where that edge is water.
+#[allow(clippy::too_many_arguments)]
 fn water(
     place: &Place,
     grid: &TerrainGrid,
@@ -513,6 +715,7 @@ fn water(
     c: [usize; 2],
     res: usize,
     zone_at: &dyn Fn(usize, usize) -> ZoneId,
+    split: u32,
     m: &mut WorldMesh,
 ) {
     let (c0x, c0z) = (c[0] * res, c[1] * res);
@@ -541,9 +744,9 @@ fn water(
     let y = grid.water_level;
     let paint = Paint::new(pal.water, Pattern::Water);
     // Inside the chunk a grid; the skirts as single wide quads around it.
-    let k = WATER_SPLIT as f32;
-    for j in 0..WATER_SPLIT {
-        for i in 0..WATER_SPLIT {
+    let k = split as f32;
+    for j in 0..split {
+        for i in 0..split {
             let (a, b) = (o.x + size * i as f32 / k, o.x + size * (i + 1) as f32 / k);
             let (cz0, cz1) = (o.y + size * j as f32 / k, o.y + size * (j + 1) as f32 / k);
             water_quad(m, [a, b, cz0, cz1], y, paint);

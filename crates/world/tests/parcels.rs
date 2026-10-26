@@ -316,10 +316,10 @@ fn places_with_parcels_validate() {
 /// PNGs for seeds 1–2 before and after, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 4] = [
-    0x20B4_BA39_F364_54A2,
-    0xA4D9_BB30_1F8D_9A7E,
-    0x3FE3_9B65_1426_F467,
-    0x15FF_546A_4A3F_AA34,
+    0x440F_7EF3_0A84_712C,
+    0xA1B5_7AB4_D9C2_7539,
+    0xF132_3C1E_3721_E0BC,
+    0x3B0C_2CC1_24B5_4F10,
 ];
 
 fn table(hs: &[u64]) -> String {
