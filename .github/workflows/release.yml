@@ -98,8 +98,8 @@ jobs:
         with:
           key: release-linux
 
-      - name: Linux build deps (libudev for gilrs)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+      - name: Linux build deps (libudev for gilrs, ALSA for cpal)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config
 
       - name: Build
         run: cargo build --release -p platform-native --locked
