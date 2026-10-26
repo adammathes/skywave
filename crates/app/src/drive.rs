@@ -9,7 +9,7 @@
 use core::f32::consts::{FRAC_PI_2, PI, TAU};
 use glam::{Mat4, Quat, Vec3};
 use place::Place;
-use render::{MeshId, MeshInstance, PointLight};
+use render::{Corona, MeshId, MeshInstance, PointLight};
 use vehicle::sim::{DT, FRONT_LEFT, FRONT_RIGHT, REAR_LEFT};
 use vehicle::{Assists, VehicleInput, VehicleSpec, VehicleState};
 
@@ -61,6 +61,23 @@ pub const HEADLIGHT_KCD: f32 = 14.0;
 const HEADLIGHT_RADIUS_M: f32 = 60.0;
 /// Halogen white, linear RGB.
 const HEADLIGHT_COLOR: [f32; 3] = [1.0, 0.86, 0.68];
+/// The headlamps' halo, seen from in front.
+const HEADLIGHT_CORONA: Corona = Corona {
+    radius: 0.6,
+    strength: 0.8,
+};
+/// Tail lamps light nothing much; they are coronas only (radius-0 lights), red, as bright
+/// (kcd, as the corona reads it) with the headlights on and under braking...
+const TAIL_RGB: [f32; 3] = [1.0, 0.04, 0.02];
+const TAIL_KCD: f32 = 4.0;
+const BRAKE_KCD: f32 = 12.0;
+/// ...from just behind the lens, with this halo.
+const TAIL_CORONA: Corona = Corona {
+    radius: 0.4,
+    strength: 0.8,
+};
+/// Most lights one car gives the frame: two headlamps, two tail lamps.
+pub const CAR_LIGHTS: usize = 4;
 /// Instance tint of the cabin walls (the body shell inside out, so in the paint color): the
 /// inside of the roof and pillars reads as a dark lining, not as bright paint under the
 /// cabin light.
@@ -410,9 +427,10 @@ impl Drive {
         }
     }
 
-    /// The headlight beams (two spots, from the left and right headlamps along the car's
-    /// nose, pitched down) when the headlights are on, else none.
-    pub fn lights(&self, alpha: f32) -> ([PointLight; 2], usize) {
+    /// The car's lights: the headlight beams (two spots, from the left and right headlamps
+    /// along the car's nose, pitched down) when the headlights are on, then the tail lamps'
+    /// coronas while they are lit (headlights on or braking). Returns them and how many.
+    pub fn lights(&self, alpha: f32) -> ([PointLight; CAR_LIGHTS], usize) {
         let pose = self.pose(alpha);
         let pitch = HEADLIGHT_PITCH_DEG.to_radians();
         let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
@@ -427,9 +445,30 @@ impl Drive {
             ],
             cone_squash: HEADLIGHT_SQUASH,
             wrap: HEADLIGHT_WRAP,
+            corona: HEADLIGHT_CORONA,
+        };
+        let tail_kcd = if self.braking() { BRAKE_KCD } else { TAIL_KCD };
+        let tail = |lamp: Vec3| PointLight {
+            corona: TAIL_CORONA,
+            ..PointLight::omni(
+                pose.point(lamp - Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
+                TAIL_RGB.map(|c| c * tail_kcd),
+                0.0,
+            )
         };
         let [l, r] = self.layout.headlamps;
-        ([at(l), at(r)], if self.headlights { 2 } else { 0 })
+        let [tl, tr] = self.layout.taillamps;
+        let mut out = [at(l), at(r), tail(tl), tail(tr)];
+        let n = match (self.headlights, self.braking()) {
+            (true, _) => 4,
+            (false, true) => {
+                out[0] = out[2];
+                out[1] = out[3];
+                2
+            }
+            (false, false) => 0,
+        };
+        (out, n)
     }
 }
 
@@ -633,9 +672,10 @@ mod tests {
         d.frame(&input);
         assert!(d.headlights && d.horn);
         let (lights, n) = d.lights(1.0);
-        assert_eq!(n, 2);
+        assert_eq!(n, 4);
         let pose = d.pose(1.0);
         for (l, lamp) in lights.iter().zip(d.layout.headlamps) {
+            assert!(l.corona.radius > 0.0 && l.radius > 10.0);
             // Just behind its lamp, aimed down the road ahead and a little down.
             let local = pose.rot.inverse() * (Vec3::from(l.position) - pose.pos);
             assert!((local - lamp - Vec3::Z * HEADLIGHT_SETBACK_M).length() < 1e-4);
@@ -646,6 +686,13 @@ mod tests {
             );
             assert!(l.cone_cos[0] < l.cone_cos[1]);
             assert!(l.color[0] > l.color[2], "warm");
+        }
+        // Then the tail lamps: red coronas that light nothing, just behind their lenses.
+        for (l, lamp) in lights[2..].iter().zip(d.layout.taillamps) {
+            let local = pose.rot.inverse() * (Vec3::from(l.position) - pose.pos);
+            assert!((local - lamp + Vec3::Z * HEADLIGHT_SETBACK_M).length() < 1e-4);
+            assert_eq!(l.radius, 0.0);
+            assert!(l.corona.radius > 0.0 && l.color[0] > 10.0 * l.color[1]);
         }
         // The pool on the road: what the asphalt straight ahead receives (the renderer's
         // squashed smoothstep cone and wrapped cosine) at the lamp's height, relative to
@@ -698,11 +745,22 @@ mod tests {
         out.clear();
         d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
         assert_eq!(out[2].mesh, lod.lights[1][1]);
+        let brake = d.lights(1.0).0[2];
+        assert!(
+            brake.color[0] > lights[2].color[0],
+            "brighter under braking"
+        );
         d.headlights = false;
         out.clear();
         d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
         assert_eq!(out[0].mesh, lod.body[0]);
         assert_eq!(out[2].mesh, lod.lights[0][1]);
+        // Headlights off, braking: just the brake lamps' coronas.
+        let (lights, n) = d.lights(1.0);
+        assert_eq!(n, 2);
+        assert!(lights[..2]
+            .iter()
+            .all(|l| l.radius == 0.0 && l.corona == brake.corona));
     }
 
     #[test]

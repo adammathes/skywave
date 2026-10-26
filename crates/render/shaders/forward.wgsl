@@ -1,7 +1,7 @@
 // Forward pass: the analytic sky, then Lambert-lit, atlas-textured meshes with cascaded sun
-// shadows, hemisphere sky ambient (plus cabin light for a car's interior), up to 8 point
-// and spot lights, the emissive channel (soft-capped after exposure) and aerial-perspective
-// fog.
+// shadows, hemisphere sky ambient (plus cabin light for a car's interior), the point and
+// spot lights of each instance's light set (up to 8 of the frame's 256), the emissive
+// channel (soft-capped after exposure) and aerial-perspective fog.
 //
 // Each fragment stage has two entry points: `fs_*` writes HDR radiance (Rgba16Float target,
 // tonemapped later) and `fs_*_ldr` tonemaps in place for targets without float rendering.
@@ -140,6 +140,8 @@ struct MeshOut {
     @location(4) emissive: vec3<f32>,
     // Share of the frame's cabin light.
     @location(5) cabin: f32,
+    // x: lights in the instance's set, y, z: their indices, a byte each.
+    @location(6) @interpolate(flat) lights: vec3<u32>,
 };
 
 // Soft cap on emissive radiance in post-exposure terms: unchanged well under the cap,
@@ -167,9 +169,51 @@ fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
     let a = u32(round(v.emissive.a * 255.0));
     let window = select(1.0, frame.emissive.y, (a & 128u) != 0u);
     let scale = f32(a & 127u) * (8.0 / 127.0);
-    out.emissive = cap_emissive(v.emissive.rgb * (scale * window * frame.emissive.x * i.params.x));
-    out.cabin = i.params.y;
+    let glow = bitcast<f32>(i.params.x);
+    out.emissive = cap_emissive(v.emissive.rgb * (scale * window * frame.emissive.x * glow));
+    out.cabin = f32(i.params.y & 0xffffu) * (1.0 / 65535.0);
+    out.lights = vec3<u32>(min(i.params.y >> 16u, LIGHTS_PER_DRAW), i.params.z, i.params.w);
     return out;
+}
+
+struct Light {
+    pos: vec3<f32>,
+    // 1 / radius².
+    inv_r2: f32,
+    color: vec3<f32>,
+    // Spot axis (unit) and the cosine off it where the cone ends (below -1: omni).
+    axis: vec3<f32>,
+    cone_end: f32,
+    // 1 / (cosine of full intensity - cone_end).
+    cone_scale: f32,
+    squash: f32,
+    wrap: f32,
+};
+
+// Octahedral unit vector (Cigolle et al. 2014) from two snorm values.
+fn oct_decode(e: vec2<f32>) -> vec3<f32> {
+    var v = vec3<f32>(e, 1.0 - abs(e.x) - abs(e.y));
+    if v.z < 0.0 {
+        let s = select(vec2<f32>(-1.0), vec2<f32>(1.0), v.xy >= vec2<f32>(0.0));
+        v = vec3<f32>((1.0 - abs(v.yx)) * s, v.z);
+    }
+    return normalize(v);
+}
+
+// Mirrors `PackedLight::new` in src/lib.rs.
+fn unpack_light(p: PackedLight) -> Light {
+    var l: Light;
+    l.pos = p.pos_radius.xyz;
+    l.inv_r2 = 1.0 / max(p.pos_radius.w * p.pos_radius.w, 1e-6);
+    let rg = unpack2x16float(p.bits.x);
+    let b_end = unpack2x16float(p.bits.y);
+    l.color = vec3<f32>(rg, b_end.x);
+    l.cone_end = b_end.y;
+    l.axis = oct_decode(unpack2x16snorm(p.bits.z));
+    l.cone_scale = unpack2x16float(p.bits.w & 0xffffu).x;
+    l.squash = 1.0 + f32((p.bits.w >> 16u) & 255u) * (1.0 / 16.0);
+    l.wrap = f32(p.bits.w >> 24u) * (1.0 / 255.0);
+    return l;
 }
 
 // Cosine of the angle off a spot's `axis` toward unit `d`, with angles above and below the
@@ -186,28 +230,31 @@ fn spot_cos(d: vec3<f32>, axis: vec3<f32>, squash: f32) -> f32 {
     return f * inverseSqrt(max(f * f + u * u + r * r, 1e-8));
 }
 
-// Smooth inverse-square point lights (Karis 2013 window): illuminance in klux, reaching 0
-// at each light's radius. The 0.1 m² floor stands for the bulb's size. A spot light also
+// Smooth inverse-square point lights (Karis 2013 window) of the instance's light set
+// (`light_set`: count, then the indices a byte each): illuminance in klux, reaching 0 at each
+// light's radius. The 0.1 m² floor stands for the bulb's size. A spot light also
 // fades from full intensity to nothing across its cone (smoothstep in the cosine off its
 // axis, optionally flattened vertically) and may soften the surface cosine (wrap); an omni
 // light's cone covers every direction.
-fn point_lights(world_pos: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec3<u32>) -> vec3<f32> {
     var sum = vec3<f32>(0.0);
-    let count = min(u32(frame.emissive.z), MAX_POINT_LIGHTS);
-    for (var i = 0u; i < count; i++) {
-        let light = frame.lights[i];
-        let to_light = light.pos_radius.xyz - world_pos;
+    for (var k = 0u; k < light_set.x; k++) {
+        let word = select(light_set.z, light_set.y, k < 4u);
+        let index = min((word >> ((k & 3u) * 8u)) & 255u, MAX_LIGHTS - 1u);
+        let packed = frame.lights[index];
+        let to_light = packed.pos_radius.xyz - world_pos;
         let d2 = dot(to_light, to_light);
-        let ratio = d2 * light.color.w;
-        if ratio < 1.0 {
+        let r2 = packed.pos_radius.w * packed.pos_radius.w;
+        if d2 < r2 {
+            let light = unpack_light(packed);
+            let ratio = d2 * light.inv_r2;
             let window = (1.0 - ratio * ratio) * (1.0 - ratio * ratio);
             let l = to_light * inverseSqrt(max(d2, 1e-8));
-            let wrap = light.cone.z;
-            let ndl = max((dot(n, l) + wrap) / (1.0 + wrap), 0.0);
-            let off = spot_cos(-l, light.spot.xyz, light.cone.y);
-            let c = clamp((off - light.spot.w) * light.cone.x, 0.0, 1.0);
+            let ndl = max((dot(n, l) + light.wrap) / (1.0 + light.wrap), 0.0);
+            let off = spot_cos(-l, light.axis, light.squash);
+            let c = clamp((off - light.cone_end) * light.cone_scale, 0.0, 1.0);
             let cone = c * c * (3.0 - 2.0 * c);
-            sum += light.color.rgb * (ndl * window * cone / (d2 + 0.1));
+            sum += light.color * (ndl * window * cone / (d2 + 0.1));
         }
     }
     return sum;
@@ -287,7 +334,7 @@ fn shade(in: MeshOut) -> vec3<f32> {
         + frame.cabin_light.rgb * (in.cabin * (0.55 + 0.45 * n.y));
     // Point-light illuminance / pi is the luminance of a white Lambertian surface, as for
     // the sun.
-    let lamps = point_lights(in.world_pos, n) * (1.0 / 3.14159265);
+    let lamps = point_lights(in.world_pos, n, in.lights) * (1.0 / 3.14159265);
     var c = albedo * (frame.sun_light.rgb * (ndl * vis) + ambient + lamps);
     // Self-lit color, untouched by texture and instance tint; fog still dims it.
     c += in.emissive;

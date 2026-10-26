@@ -536,7 +536,7 @@ impl Ui {
             TEXT,
             format_args!(
                 "draws {}  (shadow {}, bloom {})\n\
-                 instances {}  lights {}\n\
+                 instances {}  lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
@@ -545,7 +545,9 @@ impl Ui {
                 r.shadow_draw_calls,
                 r.bloom_draw_calls,
                 r.instances,
-                r.point_lights,
+                r.lights_used,
+                r.lights_submitted,
+                r.coronas,
                 self.last_steps,
                 ctx.ticks,
                 d.sun_elevation_deg,

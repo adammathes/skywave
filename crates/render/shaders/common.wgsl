@@ -1,20 +1,19 @@
 // Shared declarations, prepended to every shader module by the renderer.
 // Layout must match `FrameUniform` in src/lib.rs. Radiance is linear sRGB in kcd/m².
 
-// Must match `MAX_POINT_LIGHTS` in src/lib.rs.
-const MAX_POINT_LIGHTS: u32 = 8u;
+// Must match `MAX_LIGHTS` and `LIGHTS_PER_DRAW` in src/lib.rs.
+const MAX_LIGHTS: u32 = 256u;
+const LIGHTS_PER_DRAW: u32 = 8u;
 
-struct PointLight {
+// One point or spot light in 32 bytes (`PackedLight` in src/lib.rs; see `unpack_light`).
+struct PackedLight {
     // xyz: position (m), w: radius (m) beyond which it adds nothing.
     pos_radius: vec4<f32>,
-    // rgb: luminous intensity (kcd, i.e. klux at 1 m), w: 1 / radius².
-    color: vec4<f32>,
-    // xyz: spot axis (unit; zero for an omni light), w: cosine off the axis where the cone
-    // ends (below -1 for an omni light).
-    spot: vec4<f32>,
-    // x: 1 / (cosine of full intensity - spot.w), y: vertical squash (1 = round cone),
-    // z: wrap of the surface cosine (0 = Lambert), w: unused.
-    cone: vec4<f32>,
+    // x: f16 intensity r, g (kcd); y: f16 intensity b, cosine off the axis where the cone
+    // ends (below -1 for an omni light); z: spot axis, octahedral snorm16 x2; w: low half
+    // f16 1 / (cosine of full intensity - cone end), bits 16..23 vertical squash
+    // (1 + n / 16), bits 24..31 wrap of the surface cosine (n / 255).
+    bits: vec4<u32>,
 };
 
 struct Frame {
@@ -64,7 +63,7 @@ struct Frame {
     // (texels), w: shadow normal offset (texels).
     params: vec4<f32>,
     // x: emissive boost (kcd/m² per unit of emissive), y: window emissive scale 0..1,
-    // z: number of point lights in use, w: emissive cap (post-exposure).
+    // z: number of lights in `lights`, w: emissive cap (post-exposure).
     emissive: vec4<f32>,
     // x: bloom strength (0 = no bloom), y: bloom threshold (post-exposure), z: vignette
     // strength, w: highest post-exposure value fed to bloom.
@@ -73,7 +72,10 @@ struct Frame {
     screen: vec4<f32>,
     // rgb: cabin ambient radiance, scaled per instance by its cabin share.
     cabin_light: vec4<f32>,
-    lights: array<PointLight, 8>,
+    // x: focal length (px, vertical), y: shortest corona radius (px), z: longest corona
+    // radius (px), w: unused.
+    corona: vec4<f32>,
+    lights: array<PackedLight, 256>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -96,8 +98,10 @@ struct InstanceIn {
     @location(10) n1: vec4<f32>,
     @location(11) n2: vec4<f32>,
     @location(12) color: vec4<f32>,
-    // x: emissive multiplier (glow), y: cabin-light share, zw: unused.
-    @location(13) params: vec4<f32>,
+    // x: emissive multiplier (glow) as f32 bits, y: cabin-light share (unorm16, low half)
+    // and the number of lights in its set (high half), zw: indices of those lights in
+    // `frame.lights`, one byte each, little end first.
+    @location(13) params: vec4<u32>,
 };
 
 fn instance_model(i: InstanceIn) -> mat4x4<f32> {

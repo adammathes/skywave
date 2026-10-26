@@ -12,6 +12,7 @@ pub mod daylight;
 pub mod drive;
 mod input;
 pub mod lighting;
+mod lighttiles;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -36,9 +37,9 @@ use car::{CarMeshes, CarModel};
 use drive::{Drive, DriveGround};
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
-use lighting::TimeOfDay;
+use lighting::{Bounds, FrameLights, TimeOfDay};
 use place::Place;
-use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex, MAX_POINT_LIGHTS};
+use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
 use world::{ChunkMesh, Glow, Palette, WorldMesh};
 
@@ -140,10 +141,10 @@ pub struct App {
     world_instances: usize,
     /// Instance of the street lamp heads' mesh, switched with the photocell.
     lamp_instance: Option<usize>,
-    /// Where the street lamps' lights hang, world space.
-    lamp_heads: Vec<Vec3>,
-    /// This frame's lights: the headlights, then the nearest street lamps.
-    lights: [PointLight; MAX_POINT_LIGHTS],
+    /// What each world instance covers, for light culling (`None`: lit by no lamp).
+    bounds: Vec<Option<Bounds>>,
+    /// This frame's lights, and the place's static ones they are picked from.
+    lights: FrameLights,
     /// Interpolation alpha of the last frame, held while paused.
     alpha: f32,
     /// Menus, HUD, overlay and the user's settings and bindings.
@@ -167,7 +168,19 @@ impl App {
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let drive = Drive::with_layout(spec, model.layout, start.pos, start.heading);
         let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
-        let town = render_meshes(&chunks);
+        let place_lights: Vec<PointLight> = place
+            .lights
+            .items
+            .iter()
+            .filter_map(lighting::place_light)
+            .collect();
+        // Until the place lists its street lamps, they hang where the lamp heads are.
+        let has_lamps = place
+            .lights
+            .items
+            .iter()
+            .any(|l| l.kind == place::LightKind::Street);
+        let town = render_meshes(&chunks, place.header.chunk_size_m, place_lights, !has_lamps);
         let mut meshes = town.meshes;
         let mut instances: Vec<MeshInstance> = (0..meshes.len())
             .map(|i| MeshInstance {
@@ -204,8 +217,8 @@ impl App {
             instances,
             world_instances,
             lamp_instance: town.lamps,
-            lamp_heads: town.lamp_heads,
-            lights: [PointLight::omni([0.0; 3], [0.0; 3], 1.0); MAX_POINT_LIGHTS],
+            bounds: town.bounds,
+            lights: FrameLights::new(town.statics),
             alpha: 0.0,
             ui: ui::Ui::new(),
         })
@@ -360,19 +373,19 @@ impl App {
             lighting::car_glow(&daylight),
             &mut self.instances,
         );
-        let (head, mut n) = self.drive.lights(alpha);
-        self.lights[..n].copy_from_slice(&head[..n]);
-        if daylight.streetlights_on {
-            // The lamps nearest a point down the view light the road where the eye is.
-            let inv = view.inverse();
-            let eye = inv.w_axis.truncate();
-            let fwd = -inv.z_axis.truncate();
-            let flat = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero();
-            let focus = eye + flat * lighting::STREETLAMP_FOCUS_AHEAD_M;
-            let mut lamps = [self.lights[0]; lighting::STREETLAMP_LIGHTS];
-            let m = lighting::streetlamp_lights(&self.lamp_heads, focus, &mut lamps);
-            self.lights[n..n + m].copy_from_slice(&lamps[..m]);
-            n += m;
+        // The car's lamps, then every static light the photocell has on; each instance gets
+        // the nearest that reach it, the car's instances those round the car.
+        let (car_lights, n) = self.drive.lights(alpha);
+        let eye = view.inverse().w_axis.truncate();
+        self.lights
+            .gather(eye, daylight.streetlights_on, &car_lights[..n]);
+        let (world, car) = self.instances.split_at_mut(self.world_instances);
+        self.lights.assign(&self.bounds, world);
+        let reach = 0.5 * self.drive.layout.dims.iter().fold(0.0f32, |a, &b| a.max(b));
+        let around = Bounds::cube(self.drive.pose(alpha).pos, reach);
+        let set = lighting::light_set(self.lights.lights(), &around);
+        for inst in car {
+            inst.lights = set;
         }
         SceneView {
             camera: Camera {
@@ -382,7 +395,7 @@ impl App {
             sun: lighting::sun(&daylight),
             sky: self.ui.video_sky(lighting::sky(&daylight)),
             instances: &self.instances,
-            lights: &self.lights[..n],
+            lights: self.lights.lights(),
             hud: self.ui.hud(),
         }
     }
@@ -403,40 +416,78 @@ fn fly_from(pose: &camera::CameraPose) -> FlyCamera {
 
 /// The town as the renderer draws it ([`render_meshes`]).
 struct TownMeshes {
-    /// Draw order: the chunk meshes, then the glow mesh and the street lamp heads (each
-    /// when there is any).
+    /// Draw order: the light tiles of the chunks, then the glow mesh and the street lamp
+    /// heads (each when there is any).
     meshes: Vec<Mesh>,
+    /// What each mesh covers, for light culling; `None` for the glow and lamp meshes,
+    /// which glow by themselves (and span the town).
+    bounds: Vec<Option<Bounds>>,
     /// Index of the glow mesh (drawn with a boosted instance color) and of the lamp heads'
     /// mesh (switched by the instance's glow).
     glow: Option<usize>,
     lamps: Option<usize>,
-    /// Where each street lamp's light hangs, world space.
-    lamp_heads: Vec<Vec3>,
+    /// The town's static lights: `place_lights`, then a street lamp at each lamp head
+    /// when asked to derive them.
+    statics: Vec<PointLight>,
 }
 
 /// Converts world meshes (patterned by [`worldmesh::atlas_mesh`]) to the renderer's vertex
-/// format: every chunk mesh without its street lamp lenses (lit windows slightly tinted),
-/// then one mesh holding all neon and signal triangles colored by their glow, drawn with a
-/// boosted instance color, then one holding every street lamp lens, which the photocell
-/// switches. The lamp heads are where the lenses cluster.
-fn render_meshes(chunks: &[ChunkMesh]) -> TownMeshes {
-    let mut meshes = Vec::with_capacity(chunks.len() + 2);
+/// format: each chunk's meshes without their street lamp lenses (lit windows slightly
+/// tinted) as one, cut into light tiles ([`lighttiles`]) where more static lights reach it
+/// than a draw takes, then one mesh holding all neon and signal triangles colored by their
+/// glow, drawn with a boosted instance color, then one holding every street lamp lens,
+/// which the photocell switches. The lamp heads are where the lenses cluster; with
+/// `derive_lamps` each gets a street lamp among the static lights.
+fn render_meshes(
+    chunks: &[ChunkMesh],
+    chunk_size: f32,
+    place_lights: Vec<PointLight>,
+    derive_lamps: bool,
+) -> TownMeshes {
     let (mut glow, mut lamps) = (Mesh::default(), Mesh::default());
-    let append = |all: &mut Mesh, part: Mesh| {
-        let base = all.vertices.len() as u32;
-        all.vertices.extend_from_slice(&part.vertices);
-        all.indices.extend(part.indices.iter().map(|i| i + base));
-    };
+    let mut bases = Vec::with_capacity(chunks.len());
     for c in chunks {
         let mesh = worldmesh::atlas_mesh(&c.mesh, c.kind);
-        meshes.push(convert(&mesh, Part::Base));
-        append(&mut glow, convert(&mesh, Part::Glow));
-        append(&mut lamps, convert(&mesh, Part::Lamps));
+        bases.push(convert(&mesh, Part::Base));
+        lighttiles::append(&mut glow, &convert(&mesh, Part::Glow));
+        lighttiles::append(&mut lamps, &convert(&mesh, Part::Lamps));
     }
     let lamp_heads = lamp_heads(&lamps);
+    let mut statics = place_lights;
+    if derive_lamps {
+        statics.extend(lamp_heads.iter().map(|&h| lighting::streetlamp(h)));
+    }
+    // Meshes no static light reaches (the terrain apron) are drawn as they are; the rest go
+    // into one mesh per chunk, cut into light tiles.
+    let mut tiles = Vec::new();
+    let mut cells = std::collections::BTreeMap::new();
+    for base in bases {
+        let Some(b) = lighttiles::mesh_bounds(&base).filter(|_| !base.indices.is_empty()) else {
+            continue;
+        };
+        if statics.iter().any(|l| b.reached_by(l)) {
+            lighttiles::bin_by_cells(base, chunk_size, &mut cells);
+        } else {
+            tiles.push(lighttiles::Tile {
+                mesh: base,
+                bounds: b,
+            });
+        }
+    }
+    for ([z, x], mesh) in cells {
+        let origin = [x as f32 * chunk_size, z as f32 * chunk_size];
+        lighttiles::split_for_lights(mesh, origin, chunk_size, &statics, &mut tiles);
+    }
+    let mut meshes = Vec::with_capacity(tiles.len() + 2);
+    let mut bounds = Vec::with_capacity(tiles.len() + 2);
+    for t in tiles {
+        meshes.push(t.mesh);
+        bounds.push(Some(t.bounds));
+    }
     let mut push = |m: Mesh| {
         (!m.indices.is_empty()).then(|| {
             meshes.push(m);
+            bounds.push(None);
             meshes.len() - 1
         })
     };
@@ -444,9 +495,10 @@ fn render_meshes(chunks: &[ChunkMesh]) -> TownMeshes {
     let lamps = push(lamps);
     TownMeshes {
         meshes,
+        bounds,
         glow,
         lamps,
-        lamp_heads,
+        statics,
     }
 }
 
@@ -668,11 +720,16 @@ mod tests {
         assert!(hud.headlights);
         assert!(hud.speed_mps > 2.0, "{}", hud.speed_mps);
         assert!(hud.time_of_day > app.hud_state().time_of_day - 1.0);
-        // Headlights on: two pools of light ahead and the lit lamps drawn.
+        // Headlights on: two pools of light ahead, the tail lamps' coronas and the lit
+        // lamps drawn; the car is lit by its own beams.
         let lamps = app.car_meshes.lods[0].lights[1];
+        let world = app.world_instances;
         let view = app.scene_view(0.5, 1.5);
-        assert_eq!(view.lights.len(), 2);
+        assert_eq!(view.lights.len(), 4);
         assert!(view.instances.iter().any(|i| lamps.contains(&i.mesh)));
+        assert!(view.instances[world..]
+            .iter()
+            .all(|i| i.lights.indices() == [0, 1]));
     }
 
     #[test]
@@ -842,13 +899,15 @@ mod tests {
         }
         assert_eq!(app.hud_state().time_of_day, 22.5 * 3600.0);
         assert!(app.scene_view(0.5, 1.5).sun.direction[1] < 0.0);
-        // Night: the two headlight beams, then the nearest street lamps.
+        // Night: the two headlight beams, the tail lamps, then street lamps up to the
+        // frame's limit (the town has more).
         let view = app.scene_view(0.5, 1.5);
-        assert_eq!(view.lights.len(), 2 + lighting::STREETLAMP_LIGHTS);
+        assert_eq!(view.lights.len(), render::MAX_LIGHTS);
         assert!(view.lights[..2].iter().all(|l| l.direction != [0.0; 3]));
-        assert!(view.lights[2..]
+        assert!(view.lights[2..4].iter().all(|l| l.radius == 0.0));
+        assert!(view.lights[4..]
             .iter()
-            .all(|l| l.direction == [0.0, -1.0, 0.0]));
+            .all(|l| l.direction == [0.0, -1.0, 0.0] && l.corona.radius > 0.0));
         // Parked on the street it stays parked.
         let moved = (app.drive.pose(1.0).pos - pose.pos).length();
         assert!(moved < 0.05, "{moved}");
@@ -891,13 +950,19 @@ mod tests {
         let mut app = App::new(Seed(1));
         let k = app.lamp_instance.expect("the test town has street lamps");
         // One light per lamp head, up on the poles, all inside the town.
-        assert!(app.lamp_heads.len() >= 20, "{}", app.lamp_heads.len());
-        for h in &app.lamp_heads {
+        let heads: Vec<Vec3> = app
+            .lights
+            .statics()
+            .iter()
+            .map(|l| Vec3::from(l.position))
+            .collect();
+        assert!(heads.len() >= 300, "{}", heads.len());
+        for h in &heads {
             assert!((5.0..12.0).contains(&h.y), "{h}");
             assert!(h.x.abs() < 1000.0 && h.z.abs() < 1000.0, "{h}");
         }
-        for (a, i) in app.lamp_heads.iter().zip(1..) {
-            for b in &app.lamp_heads[i..] {
+        for (a, i) in heads.iter().zip(1..) {
+            for b in &heads[i..] {
                 assert!(a.distance(*b) > 2.0, "{a} and {b} are one lamp");
             }
         }
@@ -907,19 +972,101 @@ mod tests {
             let (s, window) = render::emissive_scale(v.emissive);
             (s - LAMP_GLOW).abs() < 0.05 && !window
         }));
-        // Golden hour: off and no lamp lights; 18:35: on, with lights.
+        // Golden hour: off and no lamp lights; 18:35: on, as many as the frame holds, the
+        // ones round the camera at full strength.
         let golden = app.scene_view(1.0, 1.5);
         assert_eq!(golden.instances[k].glow, 0.0);
         assert!(golden.lights.is_empty());
+        assert!(golden.instances.iter().all(|i| i.lights.is_empty()));
         app.time.clock = daylight::Clock::new(lighting::DEFAULT_DAY_OF_YEAR, 18.6 * 3600.0);
         let dusk = app.scene_view(1.0, 1.5);
         assert_eq!(dusk.instances[k].glow, 1.0);
-        assert_eq!(dusk.lights.len(), lighting::STREETLAMP_LIGHTS);
-        // The chase camera's lamps are round the car, not across town.
-        let car = Vec3::from(app.drive.state.pos);
-        for l in app.scene_view(1.0, 1.5).lights {
-            assert!(Vec3::from(l.position).distance(car) < 80.0);
+        assert_eq!(dusk.lights.len(), heads.len().min(render::MAX_LIGHTS));
+        let eye = Mat4::from_cols_array_2d(&dusk.camera.view)
+            .inverse()
+            .w_axis
+            .truncate();
+        let lit: Vec<Vec3> = dusk.lights.iter().map(|l| Vec3::from(l.position)).collect();
+        for h in heads.iter().filter(|h| h.distance(eye) < 200.0) {
+            let l = dusk.lights.iter().find(|l| Vec3::from(l.position) == *h);
+            let l = l.unwrap_or_else(|| panic!("lamp at {h} is off"));
+            assert_eq!(
+                l.color,
+                lighting::streetlamp(*h).color,
+                "{h} at full strength"
+            );
         }
+        assert!(lit.iter().all(|p| p.distance(eye) < 600.0));
+    }
+
+    /// The point under every lamp round the camera is in a tile whose light set holds that
+    /// lamp, so each lamp pools on the road; few lights reaching a tile are left out of its
+    /// set. The culling allocates nothing per frame.
+    #[test]
+    fn every_lamp_round_the_camera_pools_on_the_tiles_under_it() {
+        let setup = SceneSetup::from_query("t=22:30&cam=cockpit&lights=1&still=1").unwrap();
+        let mut app = App::from_setup(&setup).unwrap();
+        let world = app.world_instances;
+        let caps = (app.instances.capacity(), app.lights.order_capacity());
+        let started = std::time::Instant::now();
+        let frames = 20;
+        for _ in 0..frames {
+            app.scene_view(1.0, 16.0 / 9.0);
+        }
+        let per_frame = started.elapsed() / frames;
+        let bounds = app.bounds.clone();
+        // The culling alone: every world instance against every light.
+        let mut instances = app.instances.clone();
+        let started = std::time::Instant::now();
+        for _ in 0..frames {
+            app.lights.assign(&bounds, &mut instances[..world]);
+        }
+        let culling = started.elapsed() / frames;
+        let view = app.scene_view(1.0, 16.0 / 9.0);
+        let eye = Mat4::from_cols_array_2d(&view.camera.view)
+            .inverse()
+            .w_axis
+            .truncate();
+        let (mut pairs, mut dropped) = (0, 0);
+        for (inst, b) in view.instances[..world].iter().zip(&bounds) {
+            let Some(b) = b else { continue };
+            for (i, l) in view.lights.iter().enumerate() {
+                if b.reached_by(l) {
+                    pairs += 1;
+                    dropped += usize::from(!inst.lights.indices().contains(&(i as u8)));
+                }
+            }
+        }
+        eprintln!(
+            "{} instances, {} lights: {pairs} light-tile pairs, {dropped} left out; scene_view {per_frame:?}, culling {culling:?}",
+            view.instances.len(),
+            view.lights.len()
+        );
+        assert!(dropped * 50 < pairs, "{dropped} of {pairs}");
+        for (i, l) in view.lights.iter().enumerate().skip(4) {
+            let h = Vec3::from(l.position);
+            if h.distance(eye) > 250.0 {
+                continue;
+            }
+            let ground = Vec3::new(h.x, 0.0, h.z);
+            let under = view.instances[..world]
+                .iter()
+                .zip(&bounds)
+                .filter(|(_, b)| b.is_some_and(|b| b.distance_squared(ground) == 0.0));
+            let mut any = false;
+            for (inst, _) in under {
+                any = true;
+                assert!(inst.lights.indices().contains(&(i as u8)), "lamp at {h}");
+            }
+            assert!(any, "nothing drawn under the lamp at {h}");
+        }
+        assert_eq!(
+            (app.instances.capacity(), app.lights.order_capacity()),
+            caps
+        );
+        // Tiles that fit their lights, and still fewer draws than the 372 meshes the town
+        // was as one per chunk and kind.
+        assert!(world < 372, "{world}");
     }
 
     #[test]

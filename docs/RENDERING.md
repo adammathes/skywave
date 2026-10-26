@@ -17,10 +17,12 @@ shadow pass    sun CSM, 3 cascades (0–40 m, 40–160 m, 160–600 m), 2048² e
 depth prepass  (optional on web; on for native)  → used by fog/SSAO later
 main pass      → HDR Rgba16Float: Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
                sun with CSM shadow, sky ambient (hemisphere: sky color up, ground color down),
-               up to N point/spot lights per object via per-chunk light lists (WebGL2: N=8 per draw, uniform array),
+               up to 8 point/spot lights per draw picked from the frame's 256 (uniform array, 32 bytes each;
+               each instance carries its 8 light indices, culled on the CPU by the app per tile),
                height + distance fog tinted by sky toward the sun, emissive channel added last
 sky            analytic sky model (Preetham or Hosek-Wilkie fit, evaluated in the shader per pixel) + sun disc + moon + stars at night
 transparents   water (planar reflection, phase 2), windows glow quads
+coronas        additive soft sprites over lamp heads, car lamps, neon, the sun and moon; occlusion from 5 depth samples
 bloom          threshold on emissive/bright, 5-level downsample/upsample (Rgba16Float, half-res)
 tonemap        AgX or ACES-fitted, exposure from time-of-day curve (no auto-exposure in v1), then sRGB; optional
                style post (cel/dither/CRT) here
@@ -32,13 +34,13 @@ get bars, so nothing stretches), shrunk to `1280/ui_scale × 720/ui_scale` for t
 quads in one draw from a fixed 4096-quad buffer (extra quads are dropped and counted). The font is our own
 bold 7×9 pixel face for ASCII 32–126 (`render::font`, `const` bit rows rasterized at startup); text is
 drawn at a whole number of pixels per font pixel with nearest sampling, so it is crisp at any resolution.
-WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
+WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler (raw depth reads, as the coronas do, need a nearest non-comparison sampler: GL calls a float depth texture with linear filtering incomplete and reads zeros), no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky
 A `Daylight` struct is derived from `(latitude 34°N, day-of-year, seconds)`: sun elevation/azimuth, sun color/intensity (through a simple atmosphere: scattering tint by air mass), sky model params (turbidity by weather), moon phase/position, exposure, fog density/color, streetlight on/off (civil dusk), window emissive scale, star brightness. Default clock runs at 10× real time (24 h in 2.4 h); configurable 0× (frozen), 1×, 10×, 60×, and a scrub control. Golden hour and blue hour are the showpieces; tune there first.
 
 ## Night
-Street lights are warm sodium (80s) point lights with a 25 m radius; neon signs are emissive meshes with matching small point lights; windows are emissive quads with a mask; headlights are two spotlights with a 60 m cone casting no shadow (v1), lighting the road and props ahead; tail lights emissive. Light culling: per chunk, a list of lights; per draw, the 8 nearest. Phase 2: clustered lighting on WebGPU/native.
+Street lights are warm sodium (80s) point lights with a 25 m radius; neon signs are emissive meshes with matching small point lights; windows are emissive quads with a mask; headlights are two spotlights with a 60 m cone casting no shadow (v1), lighting the road and props ahead; tail lights emissive. Light culling: every light in the resident chunks goes into the frame (up to 256, the nearest to the camera when there are more); each chunk's meshes are drawn as one and quartered, down to 32 m tiles, until the static lights reaching a tile fit a draw; per draw, the 8 nearest lights that reach its bounds. Coronas (Vice City glow sprites) sit over lamp heads, headlamps, tail lamps, neon and the sun and moon, scaled by distance, faded by occlusion and by exposure (a halo at night, nothing by day), `Sky::corona_strength` 0.6 by default. Phase 2: clustered lighting on WebGPU/native.
 
 ## Reflections and wetness (phase 2)
 Ocean/canal water: planar reflection render at half res of sky + near chunks, Fresnel blend, low-poly waves by vertex displacement. Wet-road mode: darker asphalt, screen-space reflection of emissives only (cheap), puddle mask by noise. Rain itself is a later feature.

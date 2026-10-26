@@ -8,21 +8,31 @@
 //!    orthographic projection fitted to a slice of the camera frustum and snapped to texels.
 //! 2. **Forward**: the analytic sky (Preetham, sun and moon discs, stars), then meshes:
 //!    vertex color × atlas texel, Lambert sun with 3×3 PCF cascaded shadows, hemisphere sky
-//!    ambient, up to [`MAX_POINT_LIGHTS`] point lights, the vertex emissive channel and
+//!    ambient, the point and spot lights of each instance's [`LightSet`] (up to
+//!    [`LIGHTS_PER_DRAW`] of the frame's [`MAX_LIGHTS`]), the vertex emissive channel and
 //!    aerial-perspective fog, into an `Rgba16Float` HDR target.
-//! 3. **Bloom**: a soft-threshold, Karis-averaged 13-tap downsample into a five-level
+//! 3. **Coronas**: an additive soft sprite over each light with a [`Corona`] and over the
+//!    sun and moon discs, faded by how much of it the scene's depth hides (see
+//!    `shaders/corona.wgsl`), in one instanced draw. Skipped when there are none.
+//! 4. **Bloom**: a soft-threshold, Karis-averaged 13-tap downsample into a five-level
 //!    half-resolution `Rgba16Float` chain, then 9-tap tent upsamples added back up it
 //!    (Jimenez 2014). Skipped when [`Sky::bloom_strength`] is 0.
-//! 4. **Tonemap**: exposure, bloom, AgX, a light vignette and an 8-bit dither from the HDR
+//! 5. **Tonemap**: exposure, bloom, AgX, a light vignette and an 8-bit dither from the HDR
 //!    target to the swapchain.
-//! 5. **HUD**: text and rectangles from [`SceneView::hud`] as alpha-blended quads straight
+//! 6. **HUD**: text and rectangles from [`SceneView::hud`] as alpha-blended quads straight
 //!    onto the swapchain, in one instanced draw (see [`HudLayout`] for the layout rules
 //!    and [`font`] for the bitmap face). Skipped when there is nothing to draw.
 //!
 //! Where the device cannot render to `Rgba16Float` (WebGL2 without
 //! `EXT_color_buffer_float`) the forward pass tonemaps in its fragment shaders (AgX,
 //! vignette and dither included) and writes the swapchain directly; there is no bloom and no
-//! tonemap pass. The HUD pass is the same in both modes.
+//! tonemap pass; coronas are added to the tonemapped image. The HUD pass is the same in both
+//! modes.
+//!
+//! **Lights.** The frame's lights live in the per-frame uniform block, 32 bytes each
+//! ([`MAX_LIGHTS`] × 32 = 8 KiB of the block's 16 KiB WebGL2 limit), and every instance
+//! names the ones that reach it in its [`LightSet`], packed into its instance attributes;
+//! the caller does the culling (it knows its chunks), the shader loops over the set.
 //!
 //! The renderer knows nothing about the game; it draws a [`SceneView`] of plain data.
 //! Radiance is linear sRGB in kcd/m² (1 = 1000 cd/m²) throughout; see [`Sun`] and [`Sky`].
@@ -72,9 +82,37 @@ const SHADOW_NORMAL_OFFSET: f32 = 1.5;
 const SHADOW_SUN_OFFSET: f32 = 1.0;
 /// Frames after which `render` must not create GPU resources (debug-asserted).
 pub const WARMUP_FRAMES: u64 = 4;
-/// Point lights applied per frame; [`SceneView::lights`] beyond this are ignored. Fits a
-/// WebGL2 uniform block many times over (32 bytes each).
-pub const MAX_POINT_LIGHTS: usize = 8;
+/// Lights per frame; [`SceneView::lights`] beyond this are ignored. 32 bytes each in the
+/// per-frame uniform block.
+pub const MAX_LIGHTS: usize = 256;
+/// Lights one instance is shaded by at most ([`LightSet`]).
+pub const LIGHTS_PER_DRAW: usize = 8;
+/// Coronas per frame: one per light at most, plus the sun and the moon.
+pub const MAX_CORONAS: usize = MAX_LIGHTS + 2;
+// A light set travels in two words of instance attributes, a byte per light index.
+const _: () = assert!(LIGHTS_PER_DRAW <= 8 && MAX_LIGHTS <= 256);
+/// Corona brightness after exposure, as the brightest channel at the sprite's center, that
+/// a light reaches as it gets much brighter than the exposure (a soft knee: `x / (1 + x)`
+/// of this), before [`Sky::corona_strength`]...
+const CORONA_PEAK: f32 = 2.0;
+/// ...where `x` is the light's luminous intensity (kcd, luminance-weighted) × exposure ×
+/// this: a sodium lamp (2 kcd) at night (exposure ≈ 100) sits well up the knee, at dusk
+/// about a third of the way, and a headlamp at noon nowhere.
+const CORONA_GAIN: f32 = 0.02;
+/// The same for the sun (its illuminance in klux) and the moon (its disc luminance in
+/// kcd/m² × the lit fraction), with their sprite radii in radians.
+const SUN_CORONA_GAIN: f32 = 0.1;
+const SUN_CORONA_STRENGTH: f32 = 0.5;
+const SUN_CORONA_RADIUS: f32 = 0.07;
+const MOON_CORONA_GAIN: f32 = 0.02;
+const MOON_CORONA_STRENGTH: f32 = 0.35;
+const MOON_CORONA_RADIUS: f32 = 0.035;
+/// Coronas dimmer than this after exposure are not drawn.
+const CORONA_MIN_PEAK: f32 = 2e-3;
+/// Shortest and longest corona radius on screen, in pixels at 720 lines (scaled with the
+/// target's height).
+const CORONA_MIN_PX: f32 = 2.5;
+const CORONA_MAX_PX: f32 = 140.0;
 /// Levels in the bloom chain, the first at half the target resolution.
 pub const BLOOM_LEVELS: usize = 5;
 /// Vignette strength: the corners lose this fraction of their light.
@@ -109,10 +147,13 @@ pub struct MeshInstance {
     /// Share, `0..=1`, of [`Sky::cabin_light`] this instance receives as extra ambient: 1
     /// for a car's interior seen from the driver's seat, 0 for everything else.
     pub cabin: f32,
+    /// The [`SceneView::lights`] that shade it (the sun always does).
+    pub lights: LightSet,
 }
 
 impl MeshInstance {
-    /// `mesh` at `transform`, untinted, glowing as authored, outside any cabin.
+    /// `mesh` at `transform`, untinted, glowing as authored, outside any cabin, lit by the
+    /// sun and sky only.
     pub fn new(mesh: MeshId, transform: [[f32; 4]; 4]) -> MeshInstance {
         MeshInstance {
             mesh,
@@ -120,7 +161,55 @@ impl MeshInstance {
             color: [1.0; 4],
             glow: 1.0,
             cabin: 0.0,
+            lights: LightSet::EMPTY,
         }
+    }
+}
+
+/// Up to [`LIGHTS_PER_DRAW`] indices into [`SceneView::lights`]: the lights an instance is
+/// shaded by. Indices past the end of the frame's lights are ignored.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LightSet {
+    len: u8,
+    indices: [u8; LIGHTS_PER_DRAW],
+}
+
+impl LightSet {
+    pub const EMPTY: LightSet = LightSet {
+        len: 0,
+        indices: [0; LIGHTS_PER_DRAW],
+    };
+
+    /// Adds light `index`; false (and unchanged) when the set is full or `index` is not
+    /// below [`MAX_LIGHTS`].
+    pub fn push(&mut self, index: usize) -> bool {
+        if usize::from(self.len) >= LIGHTS_PER_DRAW || index >= MAX_LIGHTS {
+            return false;
+        }
+        self.indices[usize::from(self.len)] = index as u8;
+        self.len += 1;
+        true
+    }
+
+    /// The set from `indices` (the first [`LIGHTS_PER_DRAW`] of them below [`MAX_LIGHTS`]).
+    pub fn from_indices(indices: &[usize]) -> LightSet {
+        let mut set = LightSet::EMPTY;
+        for &i in indices {
+            set.push(i);
+        }
+        set
+    }
+
+    pub fn len(&self) -> usize {
+        usize::from(self.len)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn indices(&self) -> &[u8] {
+        &self.indices[..self.len()]
     }
 }
 
@@ -196,6 +285,10 @@ pub struct Sky {
     /// and the cabin's own shadow hide it. The shader weights it by the surface's facing: all
     /// of it on surfaces facing up, a tenth on those facing down.
     pub cabin_light: [f32; 3],
+    /// Brightness of every corona ([`Corona`], and the sun's and moon's), 0 (none) to 1.
+    /// A corona's own brightness follows its light against the exposure: a warm halo round
+    /// a street lamp at night, nothing by day.
+    pub corona_strength: f32,
 }
 
 impl Default for Sky {
@@ -216,6 +309,7 @@ impl Default for Sky {
             bloom_strength: 0.08,
             emissive_cap: 8.0,
             cabin_light: [0.0; 3],
+            corona_strength: 0.6,
         }
     }
 }
@@ -246,10 +340,13 @@ pub struct PointLight {
     /// (0 is Lambert). A headlamp throws most of its light toward the horizon, so the road
     /// far ahead, met at a grazing angle, still reads; this stands in for that distribution.
     pub wrap: f32,
+    /// The glow sprite drawn over the light, if any. A light with radius 0 lights nothing
+    /// but still draws its corona (a tail lamp).
+    pub corona: Corona,
 }
 
 impl PointLight {
-    /// A light shining every way.
+    /// A light shining every way, without a corona.
     pub fn omni(position: [f32; 3], color: [f32; 3], radius: f32) -> PointLight {
         PointLight {
             position,
@@ -259,8 +356,29 @@ impl PointLight {
             cone_cos: [-1.0, -1.0],
             cone_squash: 1.0,
             wrap: 0.0,
+            corona: Corona::NONE,
         }
     }
+}
+
+/// A soft additive glow over a light, drawn after the forward pass (the Vice City corona).
+/// Its color is the light's; its brightness follows the light's intensity against the
+/// exposure, up to a cap, times `strength` and [`Sky::corona_strength`]. Hidden by whatever
+/// the scene draws in front of the light, and faded as the light turns away from the view.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Corona {
+    /// Radius in the world, m: the sprite shrinks with distance down to a few pixels and
+    /// then dims instead. 0 draws none.
+    pub radius: f32,
+    /// Brightness multiplier, 0 to 1.
+    pub strength: f32,
+}
+
+impl Corona {
+    pub const NONE: Corona = Corona {
+        radius: 0.0,
+        strength: 0.0,
+    };
 }
 
 /// Everything the renderer needs for one frame.
@@ -273,7 +391,8 @@ pub struct SceneView<'a> {
     pub sun: Sun,
     pub sky: Sky,
     pub instances: &'a [MeshInstance],
-    /// Point lights for this frame; only the first [`MAX_POINT_LIGHTS`] are used.
+    /// Lights for this frame; only the first [`MAX_LIGHTS`] are used. Each lights the
+    /// instances whose [`LightSet`] names it, and draws its [`Corona`].
     pub lights: &'a [PointLight],
     /// Text and rectangles drawn over the frame ([`Hud::EMPTY`] for none).
     pub hud: Hud<'a>,
@@ -319,8 +438,12 @@ pub struct RenderStats {
     pub shadow_draw_calls: u32,
     /// Of which in the bloom passes (0 with bloom off or in LDR mode).
     pub bloom_draw_calls: u32,
-    /// Point lights applied in the last frame.
-    pub point_lights: u32,
+    /// Lights in the last frame's scene (at most [`MAX_LIGHTS`]).
+    pub lights_submitted: u32,
+    /// Of which in at least one instance's [`LightSet`].
+    pub lights_used: u32,
+    /// Corona sprites submitted (before the depth test hides any).
+    pub coronas: u32,
     /// Mesh instances in the last frame's scene.
     pub instances: u32,
     /// HUD quads (glyphs and rectangles) drawn in the last frame.
@@ -360,27 +483,26 @@ struct FrameUniform {
     post: [f32; 4],
     screen: [f32; 4],
     cabin_light: [f32; 4],
-    lights: [PointLightUniform; MAX_POINT_LIGHTS],
+    corona: [f32; 4],
+    lights: [PackedLight; MAX_LIGHTS],
 }
 
-/// GPU layout of one point light; mirrors `PointLight` in shaders/common.wgsl.
+/// GPU layout of one light in 32 bytes; mirrors `PackedLight` in shaders/common.wgsl and
+/// `unpack_light` in shaders/forward.wgsl.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PointLightUniform {
-    /// xyz position (m), w radius (m).
+struct PackedLight {
+    /// xyz position (m), w radius (m; 0 lights nothing).
     pos_radius: [f32; 4],
-    /// rgb intensity (kcd), w 1 / radius².
-    color: [f32; 4],
-    /// xyz spot axis (unit, or zero for an omni light), w cosine where the cone ends.
-    spot: [f32; 4],
-    /// x 1 / (cosine of full intensity − cosine where the cone ends), y vertical squash
-    /// (1 round), z wrap (0 Lambert), w unused.
-    cone: [f32; 4],
+    /// x: f16 intensity r | g << 16 (kcd); y: f16 intensity b | f16 cosine where the cone
+    /// ends << 16 (below -1 for an omni light); z: spot axis, octahedral, snorm16 x | y <<
+    /// 16; w: f16 1 / (cosine of full intensity − cosine where the cone ends) | vertical
+    /// squash as `(squash − 1) × 16` (u8) << 16 | wrap × 255 (u8) << 24.
+    bits: [u32; 4],
 }
 
-impl PointLightUniform {
-    fn new(light: &PointLight) -> PointLightUniform {
-        let r = light.radius.max(1e-3);
+impl PackedLight {
+    fn new(light: &PointLight) -> PackedLight {
         let [x, y, z] = light.position;
         let [cr, cg, cb] = light.color.map(|c| c.max(0.0));
         let axis = Vec3::from(light.direction).normalize_or_zero();
@@ -396,15 +518,83 @@ impl PointLightUniform {
             } else {
                 light.cone_squash.max(1.0)
             };
-            (o, i, squash, light.wrap.max(0.0))
+            (o, i, squash, light.wrap.clamp(0.0, 1.0))
         };
-        PointLightUniform {
-            pos_radius: [x, y, z, r],
-            color: [cr, cg, cb, 1.0 / (r * r)],
-            spot: [axis.x, axis.y, axis.z, outer],
-            cone: [1.0 / (inner - outer), squash, wrap, 0.0],
+        let half2 = |a: f32, b: f32| u32::from(f16_bits(a)) | u32::from(f16_bits(b)) << 16;
+        let [ox, oy] = oct_encode(axis).map(|v| u32::from(snorm16(v)));
+        let squash = ((squash - 1.0) * 16.0).round().clamp(0.0, 255.0) as u32;
+        let wrap = (wrap * 255.0).round() as u32;
+        PackedLight {
+            pos_radius: [x, y, z, light.radius.max(0.0)],
+            bits: [
+                half2(cr, cg),
+                half2(cb, outer),
+                ox | oy << 16,
+                u32::from(f16_bits(1.0 / (inner - outer))) | squash << 16 | wrap << 24,
+            ],
         }
     }
+}
+
+/// IEEE 754 half-precision bits of `x`, rounded to nearest even; magnitudes past the largest
+/// half (65504) saturate to it, NaN stays NaN. The shader reads them with `unpack2x16float`.
+fn f16_bits(x: f32) -> u16 {
+    let b = x.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let exp = ((b >> 23) & 0xff) as i32;
+    let man = b & 0x7f_ffff;
+    if exp == 0xff {
+        return sign | if man != 0 { 0x7e00 } else { 0x7bff };
+    }
+    // Round `m >> shift` to nearest, ties to even.
+    let round = |m: u32, shift: u32| -> u32 {
+        let q = m >> shift;
+        let rem = m & ((1 << shift) - 1);
+        let half = 1 << (shift - 1);
+        q + u32::from(rem > half || (rem == half && q & 1 == 1))
+    };
+    let e = exp - 127 + 15;
+    let h = if e >= 1 {
+        // Normal; a carry out of the mantissa bumps the exponent, as it should.
+        ((e as u32) << 10) + round(man, 13)
+    } else if exp == 0 || 126 - exp > 24 {
+        0
+    } else {
+        // Subnormal half: the value in units of 2^-24.
+        round(man | 0x80_0000, (126 - exp) as u32)
+    };
+    sign | h.min(0x7bff) as u16
+}
+
+/// `x` (clamped to `[-1, 1]`) as a snorm16, as `unpack2x16snorm` reads it.
+fn snorm16(x: f32) -> u16 {
+    (x.clamp(-1.0, 1.0) * 32767.0).round() as i16 as u16
+}
+
+/// Octahedral encoding (Cigolle et al. 2014) of unit `v` (zero maps to `[0, 0]`); the
+/// shader's `oct_decode` inverts it.
+fn oct_encode(v: Vec3) -> [f32; 2] {
+    let l1 = v.x.abs() + v.y.abs() + v.z.abs();
+    if l1 == 0.0 {
+        return [0.0; 2];
+    }
+    let n = v / l1;
+    if n.z >= 0.0 {
+        return [n.x, n.y];
+    }
+    let sign = |a: f32| if a >= 0.0 { 1.0 } else { -1.0 };
+    [(1.0 - n.y.abs()) * sign(n.x), (1.0 - n.x.abs()) * sign(n.y)]
+}
+
+/// GPU layout of one corona sprite (vertex buffer, step mode instance); mirrors `CoronaIn`
+/// in shaders/corona.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CoronaRaw {
+    /// xyz world position (m), w radius (m); or xyz unit direction, w −angular radius.
+    pos_size: [f32; 4],
+    /// rgb radiance at the center (kcd/m²), w unused.
+    color: [f32; 4],
 }
 
 /// One cascade's matrix for the shadow pass, padded to its uniform slot.
@@ -423,12 +613,14 @@ struct InstanceRaw {
     /// Inverse-transpose of the model's upper 3x3, columns padded to vec4.
     normal: [[f32; 4]; 3],
     color: [f32; 4],
-    /// x glow (emissive multiplier), y cabin-light share, zw unused.
-    params: [f32; 4],
+    /// x glow (emissive multiplier) as f32 bits, y cabin-light share as unorm16 | the light
+    /// set's length << 16, zw the set's light indices, a byte each, low byte first.
+    params: [u32; 4],
 }
 
 impl InstanceRaw {
-    fn new(inst: &MeshInstance) -> InstanceRaw {
+    /// `inst` for a frame with `lights` lights (indices at or past it are left out).
+    fn new(inst: &MeshInstance, lights: usize) -> InstanceRaw {
         let model = Mat4::from_cols_array_2d(&inst.transform);
         let n = Mat3::from_mat4(model).inverse().transpose();
         InstanceRaw {
@@ -439,9 +631,28 @@ impl InstanceRaw {
                 n.z_axis.extend(0.0).to_array(),
             ],
             color: inst.color,
-            params: [inst.glow.max(0.0), inst.cabin.clamp(0.0, 1.0), 0.0, 0.0],
+            params: instance_params(inst, lights),
         }
     }
+}
+
+/// The packed `params` of [`InstanceRaw`].
+fn instance_params(inst: &MeshInstance, lights: usize) -> [u32; 4] {
+    let mut words = [0u32; 2];
+    let mut n = 0;
+    for &i in inst.lights.indices() {
+        if usize::from(i) < lights {
+            words[n / 4] |= u32::from(i) << (8 * (n % 4));
+            n += 1;
+        }
+    }
+    let cabin = (inst.cabin.clamp(0.0, 1.0) * 65535.0).round() as u32;
+    [
+        inst.glow.max(0.0).to_bits(),
+        cabin | (n as u32) << 16,
+        words[0],
+        words[1],
+    ]
 }
 
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
@@ -450,7 +661,10 @@ const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
 const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
     5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4,
     9 => Float32x4, 10 => Float32x4, 11 => Float32x4, 12 => Float32x4,
-    13 => Float32x4,
+    13 => Uint32x4,
+];
+const CORONA_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
+    0 => Float32x4, 1 => Float32x4,
 ];
 const HUD_ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
     0 => Float32x4, 1 => Float32x4, 2 => Unorm8x4,
@@ -491,11 +705,16 @@ pub mod shaders {
         include_str!("../shaders/common.wgsl"),
         include_str!("../shaders/hud.wgsl")
     );
-    pub const ALL: [(&str, &str); 4] = [
+    pub const CORONA: &str = concat!(
+        include_str!("../shaders/common.wgsl"),
+        include_str!("../shaders/corona.wgsl")
+    );
+    pub const ALL: [(&str, &str); 5] = [
         ("shadow", SHADOW),
         ("forward", FORWARD),
         ("post", POST),
         ("hud", HUD),
+        ("corona", CORONA),
     ];
 }
 
@@ -509,6 +728,8 @@ struct GpuMesh {
 struct Targets {
     hdr: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
+    /// Reads `depth` for the corona pass's occlusion test.
+    corona_group: wgpu::BindGroup,
     post: Option<PostTargets>,
 }
 
@@ -560,6 +781,12 @@ pub struct Renderer {
     /// Room for [`MAX_HUD_QUADS`] quads, allocated once.
     hud_buffer: wgpu::Buffer,
     hud_staging: Vec<HudQuad>,
+    corona_pipeline: wgpu::RenderPipeline,
+    corona_layout: wgpu::BindGroupLayout,
+    depth_sampler: wgpu::Sampler,
+    /// Room for [`MAX_CORONAS`] sprites, allocated once.
+    corona_buffer: wgpu::Buffer,
+    corona_staging: Vec<CoronaRaw>,
 
     meshes: Vec<GpuMesh>,
     instance_buffer: wgpu::Buffer,
@@ -1025,9 +1252,93 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        // Coronas read the scene's depth as a plain float texture in the vertex stage,
+        // through a nearest sampler without comparison (GL counts a float depth texture
+        // sampled any other way as incomplete and reads zeros), and add onto the lit image.
+        let corona_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("corona"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        });
+        let depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene depth"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let corona_module = module("corona", shaders::CORONA);
+        let corona_pl = layout("corona", &[Some(&frame_layout), Some(&corona_layout)]);
+        let add = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let keep = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let corona_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("corona"),
+            layout: Some(&corona_pl),
+            vertex: wgpu::VertexState {
+                module: &corona_module,
+                entry_point: Some("vs_corona"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<CoronaRaw>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &CORONA_ATTRIBUTES,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &corona_module,
+                entry_point: Some(if hdr { "fs_corona" } else { "fs_corona_ldr" }),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState {
+                        color: add,
+                        alpha: keep,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let corona_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("coronas"),
+            size: (MAX_CORONAS * size_of::<CoronaRaw>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let instance_capacity = 256;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
-        let targets = create_targets(&device, post.as_ref(), size);
+        let targets = create_targets(&device, post.as_ref(), &corona_layout, &depth_sampler, size);
 
         Renderer {
             device,
@@ -1052,6 +1363,11 @@ impl Renderer {
             hud_group,
             hud_buffer,
             hud_staging: Vec::with_capacity(MAX_HUD_QUADS),
+            corona_pipeline,
+            corona_layout,
+            depth_sampler,
+            corona_buffer,
+            corona_staging: Vec::with_capacity(MAX_CORONAS),
             meshes: Vec::new(),
             instance_buffer,
             instance_capacity,
@@ -1104,7 +1420,13 @@ impl Renderer {
         let size = (size.0.max(1), size.1.max(1));
         if size != self.size {
             self.size = size;
-            self.targets = create_targets(&self.device, self.post.as_ref(), size);
+            self.targets = create_targets(
+                &self.device,
+                self.post.as_ref(),
+                &self.corona_layout,
+                &self.depth_sampler,
+                size,
+            );
         }
     }
 
@@ -1154,9 +1476,33 @@ impl Renderer {
             self.reserve_instances(scene.instances.len());
             self.stats.resources_created += 1;
         }
+        let lights = scene.lights.len().min(MAX_LIGHTS);
         self.instance_staging.clear();
-        self.instance_staging
-            .extend(scene.instances.iter().map(InstanceRaw::new));
+        self.instance_staging.extend(
+            scene
+                .instances
+                .iter()
+                .map(|inst| InstanceRaw::new(inst, lights)),
+        );
+        // Which lights any instance uses, for the stats.
+        let mut used = [0u64; MAX_LIGHTS / 64];
+        for inst in scene.instances {
+            for &i in inst.lights.indices() {
+                if usize::from(i) < lights {
+                    used[usize::from(i) / 64] |= 1 << (i % 64);
+                }
+            }
+        }
+        self.corona_staging.clear();
+        self.push_coronas(scene);
+        let coronas = self.corona_staging.len() as u32;
+        if coronas > 0 {
+            self.queue.write_buffer(
+                &self.corona_buffer,
+                0,
+                bytemuck::cast_slice(&self.corona_staging),
+            );
+        }
         if !self.instance_staging.is_empty() {
             self.queue.write_buffer(
                 &self.instance_buffer,
@@ -1215,7 +1561,8 @@ impl Renderer {
                     view: &self.targets.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
+                        // Kept for the corona pass's occlusion test.
+                        store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
                 }),
@@ -1227,6 +1574,28 @@ impl Renderer {
             pass.draw(0..3, 0..1);
             pass.set_pipeline(&self.mesh_pipeline);
             forward_draws += self.draw_instances(&mut pass, scene.instances);
+        }
+        if coronas > 0 {
+            let color = self.targets.hdr.as_ref().unwrap_or(view);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("coronas"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.corona_pipeline);
+            pass.set_bind_group(0, &self.frame_group, &[]);
+            pass.set_bind_group(1, &self.targets.corona_group, &[]);
+            pass.set_vertex_buffer(0, self.corona_buffer.slice(..));
+            pass.draw(0..4, 0..coronas);
+            forward_draws += 1;
         }
         let mut bloom_draws = 0;
         if let (Some(post), Some(targets)) = (&self.post, &self.targets.post) {
@@ -1294,10 +1663,69 @@ impl Renderer {
         self.stats.shadow_draw_calls = shadow_draws;
         self.stats.bloom_draw_calls = bloom_draws;
         self.stats.draw_calls = shadow_draws + forward_draws + bloom_draws;
-        self.stats.point_lights = scene.lights.len().min(MAX_POINT_LIGHTS) as u32;
+        self.stats.lights_submitted = lights as u32;
+        self.stats.lights_used = used.iter().map(|w| w.count_ones()).sum();
+        self.stats.coronas = coronas;
         self.stats.instances = scene.instances.len() as u32;
         self.stats.hud_quads = hud_quads;
         self.stats.hud_quads_dropped = hud_dropped;
+    }
+
+    /// Fills `corona_staging` with the frame's coronas: one per light with a [`Corona`],
+    /// then the sun and the moon, each as bright as its light against the exposure (see
+    /// [`CORONA_PEAK`]); the invisible ones are left out.
+    fn push_coronas(&mut self, scene: &SceneView) {
+        let sky = &scene.sky;
+        let strength = sky.corona_strength.clamp(0.0, 1.0);
+        if strength <= 0.0 {
+            return;
+        }
+        let exposure = sky.exposure.max(1e-6);
+        let luma = |c: Vec3| c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+        // Radiance whose brightest channel lands at the knee of `x` after exposure, in the
+        // hue of `color`, or none when that is too dim to see.
+        let peak = |color: Vec3, x: f32, k: f32| {
+            let e = CORONA_PEAK * (x / (1.0 + x)) * k * strength;
+            let max = color.max_element();
+            (e >= CORONA_MIN_PEAK && max > 0.0).then(|| color * (e / (max * exposure)))
+        };
+        for light in &scene.lights[..scene.lights.len().min(MAX_LIGHTS)] {
+            let c = light.corona;
+            if c.radius <= 0.0 || c.strength <= 0.0 {
+                continue;
+            }
+            let color = Vec3::from(light.color).max(Vec3::ZERO);
+            let x = luma(color) * exposure * CORONA_GAIN;
+            if let Some(rgb) = peak(color, x, c.strength.min(1.0)) {
+                let [px, py, pz] = light.position;
+                self.corona_staging.push(CoronaRaw {
+                    pos_size: [px, py, pz, c.radius],
+                    color: rgb.extend(0.0).to_array(),
+                });
+            }
+        }
+        // The sun and moon, while above the horizon.
+        let sun_dir = Vec3::from(scene.sun.direction).normalize_or(Vec3::Y);
+        let moon_dir = Vec3::from(sky.moon_direction).normalize_or(Vec3::NEG_Y);
+        let above = |d: Vec3| smoothstep(-0.01, 0.02, d.y);
+        let sun = Vec3::from(scene.sun.illuminance).max(Vec3::ZERO);
+        let x = luma(sun) * exposure * SUN_CORONA_GAIN;
+        if let Some(rgb) = peak(sun, x, SUN_CORONA_STRENGTH * above(sun_dir)) {
+            self.corona_staging.push(CoronaRaw {
+                pos_size: sun_dir.extend(-SUN_CORONA_RADIUS).to_array(),
+                color: rgb.extend(0.0).to_array(),
+            });
+        }
+        // The lit fraction of the disc follows from the angle between the sun and moon.
+        let lit = 0.5 * (1.0 - sun_dir.dot(moon_dir));
+        let x = sky.moon_luminance.max(0.0) * lit * exposure * MOON_CORONA_GAIN;
+        let moonlight = Vec3::new(1.0, 0.96, 0.9);
+        if let Some(rgb) = peak(moonlight, x, MOON_CORONA_STRENGTH * above(moon_dir)) {
+            self.corona_staging.push(CoronaRaw {
+                pos_size: moon_dir.extend(-MOON_CORONA_RADIUS).to_array(),
+                color: rgb.extend(0.0).to_array(),
+            });
+        }
     }
 
     /// Issues one instanced draw per run of consecutive instances sharing a mesh and
@@ -1395,7 +1823,7 @@ impl Renderer {
             emissive: [
                 scene.sky.emissive_boost.max(0.0),
                 scene.sky.window_emissive_scale.clamp(0.0, 1.0),
-                scene.lights.len().min(MAX_POINT_LIGHTS) as f32,
+                scene.lights.len().min(MAX_LIGHTS) as f32,
                 scene.sky.emissive_cap.max(1e-3),
             ],
             post: [
@@ -1415,11 +1843,18 @@ impl Renderer {
                 1.0 / self.size.1 as f32,
             ],
             cabin_light: v4(Vec3::from(scene.sky.cabin_light).max(Vec3::ZERO), 0.0),
+            corona: [
+                // Pixels per unit of view-space slope, vertically.
+                0.5 * self.size.1 as f32 * proj.y_axis.y.abs(),
+                CORONA_MIN_PX * self.size.1 as f32 / 720.0,
+                CORONA_MAX_PX * self.size.1 as f32 / 720.0,
+                0.0,
+            ],
             lights: std::array::from_fn(|i| {
                 scene
                     .lights
                     .get(i)
-                    .map_or(PointLightUniform::zeroed(), PointLightUniform::new)
+                    .map_or(PackedLight::zeroed(), PackedLight::new)
             }),
         };
         (uniform, cascades)
@@ -1574,12 +2009,24 @@ fn fullscreen_pass(
     pass.draw(0..3, 0..1);
 }
 
+/// Hermite step from 0 at `e0` to 1 at `e1`, as in WGSL.
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Size of bloom level `k` for a `size` target: half, quarter, … of it, at least 1 px.
 fn bloom_level_size(size: (u32, u32), k: usize) -> (u32, u32) {
     ((size.0 >> (k + 1)).max(1), (size.1 >> (k + 1)).max(1))
 }
 
-fn create_targets(device: &wgpu::Device, post: Option<&Post>, size: (u32, u32)) -> Targets {
+fn create_targets(
+    device: &wgpu::Device,
+    post: Option<&Post>,
+    corona_layout: &wgpu::BindGroupLayout,
+    depth_sampler: &wgpu::Sampler,
+    size: (u32, u32),
+) -> Targets {
     let target = |label, format, usage, (width, height): (u32, u32)| {
         device
             .create_texture(&wgpu::TextureDescriptor {
@@ -1601,13 +2048,28 @@ fn create_targets(device: &wgpu::Device, post: Option<&Post>, size: (u32, u32)) 
     let depth = target(
         "depth",
         DEPTH_FORMAT,
-        wgpu::TextureUsages::RENDER_ATTACHMENT,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         size,
     );
+    let corona_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("corona"),
+        layout: corona_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&depth),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(depth_sampler),
+            },
+        ],
+    });
     let Some(post) = post else {
         return Targets {
             hdr: None,
             depth,
+            corona_group,
             post: None,
         };
     };
@@ -1658,6 +2120,7 @@ fn create_targets(device: &wgpu::Device, post: Option<&Post>, size: (u32, u32)) 
     Targets {
         hdr: Some(hdr),
         depth,
+        corona_group,
         post: Some(post),
     }
 }
@@ -1675,9 +2138,12 @@ mod tests {
         for (name, source) in shaders::ALL {
             let module = naga::front::wgsl::parse_str(source)
                 .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
+            // `unpack2x16float` (the packed lights) needs f16-in-f32 support, which every GLES
+            // 3 device reports (wgpu-hal's GL adapter sets `SHADER_F16_IN_F32` always; it is
+            // `unpackHalf2x16` in GLSL ES 3.00) and WGSL has in core.
             let info = naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),
-                naga::valid::Capabilities::empty(),
+                naga::valid::Capabilities::SHADER_FLOAT16_IN_FLOAT32,
             )
             .validate(&module)
             .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
@@ -1726,6 +2192,9 @@ mod tests {
             "fs_tonemap",
             "vs_hud",
             "fs_hud",
+            "vs_corona",
+            "fs_corona",
+            "fs_corona_ldr",
         ] {
             assert!(entry_points.iter().any(|e| e == ep), "missing {ep}");
         }
@@ -1737,9 +2206,10 @@ mod tests {
         // 16 KiB uniform block limit.
         assert_eq!(
             size_of::<FrameUniform>(),
-            5 * 64 + 26 * 16 + MAX_POINT_LIGHTS * 64
+            5 * 64 + 27 * 16 + MAX_LIGHTS * 32
         );
-        assert_eq!(size_of::<PointLightUniform>(), 64);
+        assert_eq!(size_of::<PackedLight>(), 32);
+        assert_eq!(size_of::<CoronaRaw>(), 32);
         assert_eq!(size_of::<FrameUniform>() % 16, 0);
         assert!(
             size_of::<FrameUniform>()
@@ -1748,6 +2218,7 @@ mod tests {
         );
         assert_eq!(size_of::<CascadeUniform>() as u64, CASCADE_UNIFORM_STRIDE);
         assert_eq!(size_of::<InstanceRaw>(), 144);
+        assert_eq!(INSTANCE_ATTRIBUTES[8].format, wgpu::VertexFormat::Uint32x4);
         assert_eq!(size_of::<Vertex>(), 36);
         assert_eq!(VERTEX_ATTRIBUTES[2].offset, 24);
         assert_eq!(VERTEX_ATTRIBUTES[3].offset, 28);
@@ -1798,18 +2269,159 @@ mod tests {
                 "post",
                 "screen",
                 "cabin_light",
+                "corona",
                 "lights",
             ]
         );
-        // The light array length agrees with MAX_POINT_LIGHTS.
-        assert!(wgsl.contains(&format!("MAX_POINT_LIGHTS: u32 = {MAX_POINT_LIGHTS}u;")));
-        assert!(body.contains(&format!("array<PointLight, {MAX_POINT_LIGHTS}>")));
+        // The light array length and the set size agree with the shaders.
+        assert!(wgsl.contains(&format!("MAX_LIGHTS: u32 = {MAX_LIGHTS}u;")));
+        assert!(wgsl.contains(&format!("LIGHTS_PER_DRAW: u32 = {LIGHTS_PER_DRAW}u;")));
+        assert!(body.contains(&format!("array<PackedLight, {MAX_LIGHTS}>")));
+    }
+
+    /// The half-float writer agrees with IEEE 754 binary16, rounding to nearest even.
+    #[test]
+    fn f16_bits_round_like_ieee() {
+        for (x, bits) in [
+            (0.0f32, 0x0000u16),
+            (-0.0, 0x8000),
+            (1.0, 0x3c00),
+            (-2.0, 0xc000),
+            (0.5, 0x3800),
+            (65504.0, 0x7bff),
+            (1e6, 0x7bff),
+            (f32::INFINITY, 0x7bff),
+            (2f32.powi(-14), 0x0400),
+            (2f32.powi(-24), 0x0001),
+            (2f32.powi(-26), 0x0000),
+            // 1 + 2^-11 is halfway between 1 and the next half: ties go to the even 1.
+            (1.0 + 2f32.powi(-11), 0x3c00),
+            (1.0 + 3.0 * 2f32.powi(-11), 0x3c02),
+            (0.1, 0x2e66),
+            (-0.309017, 0xb4f2),
+        ] {
+            assert_eq!(f16_bits(x), bits, "{x}");
+        }
+        assert_eq!(f16_bits(f32::NAN) & 0x7c00, 0x7c00);
+        for i in 0..2000 {
+            let x = (i as f32 - 1000.0) * 0.0173;
+            assert!(
+                (f16_value(f16_bits(x)) - x).abs() <= x.abs() / 1024.0 + 1e-7,
+                "{x}"
+            );
+        }
+    }
+
+    /// Inverse of `f16_bits` for finite values (what `unpack2x16float` does).
+    fn f16_value(h: u16) -> f32 {
+        let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+        let e = i32::from((h >> 10) & 0x1f);
+        let m = f32::from(h & 0x3ff);
+        sign * if e == 0 {
+            m * 2f32.powi(-24)
+        } else {
+            (1.0 + m / 1024.0) * 2f32.powi(e - 15)
+        }
+    }
+
+    /// `oct_decode` in shaders/forward.wgsl.
+    fn oct_decode(e: [f32; 2]) -> Vec3 {
+        let mut v = Vec3::new(e[0], e[1], 1.0 - e[0].abs() - e[1].abs());
+        if v.z < 0.0 {
+            let s = |a: f32| if a >= 0.0 { 1.0 } else { -1.0 };
+            v = Vec3::new((1.0 - v.y.abs()) * s(v.x), (1.0 - v.x.abs()) * s(v.y), v.z);
+        }
+        v.normalize()
+    }
+
+    fn snorm_value(bits: u32) -> f32 {
+        (f32::from(bits as u16 as i16) / 32767.0).max(-1.0)
+    }
+
+    /// A light as the shader sees it after `unpack_light`.
+    struct Unpacked {
+        pos: Vec3,
+        radius: f32,
+        color: Vec3,
+        axis: Vec3,
+        cone_end: f32,
+        cone_scale: f32,
+        squash: f32,
+        wrap: f32,
+    }
+
+    fn unpack(p: &PackedLight) -> Unpacked {
+        let lo = |w: u32| f16_value(w as u16);
+        let hi = |w: u32| f16_value((w >> 16) as u16);
+        let [x, y, z, w] = p.bits;
+        Unpacked {
+            pos: Vec4::from(p.pos_radius).xyz(),
+            radius: p.pos_radius[3],
+            color: Vec3::new(lo(x), hi(x), lo(y)),
+            axis: oct_decode([snorm_value(z), snorm_value(z >> 16)]),
+            cone_end: hi(y),
+            cone_scale: lo(w),
+            squash: 1.0 + ((w >> 16) & 255) as f32 / 16.0,
+            wrap: (w >> 24) as f32 / 255.0,
+        }
+    }
+
+    #[test]
+    fn octahedral_axes_round_trip() {
+        for i in 0..400 {
+            // A spiral over the sphere, both poles and the seams included.
+            let t = i as f32 / 399.0;
+            let y = 1.0 - 2.0 * t;
+            let r = (1.0 - y * y).max(0.0).sqrt();
+            let a = i as f32 * 2.399_963;
+            for v in [
+                Vec3::new(r * a.cos(), y, r * a.sin()),
+                Vec3::new(y, r * a.cos(), r * a.sin()),
+                Vec3::new(r * a.cos(), r * a.sin(), y),
+            ] {
+                let e = oct_encode(v).map(|c| snorm_value(u32::from(snorm16(c))));
+                let back = oct_decode(e);
+                assert!(back.dot(v) > 0.999_999, "{v} -> {back}");
+            }
+        }
+        assert_eq!(oct_encode(Vec3::ZERO), [0.0, 0.0]);
+    }
+
+    /// Instances carry their light set in the last attribute: count in the high half of
+    /// `y`, indices a byte each in `z` and `w`; indices past the frame's lights drop out.
+    #[test]
+    fn instance_params_pack_glow_cabin_and_light_set() {
+        let mut inst = MeshInstance {
+            glow: 0.75,
+            cabin: 0.5,
+            lights: LightSet::from_indices(&[3, 255, 7, 0, 200, 1, 2, 9, 11]),
+            ..MeshInstance::new(MeshId(0), Mat4::IDENTITY.to_cols_array_2d())
+        };
+        assert_eq!(inst.lights.len(), LIGHTS_PER_DRAW, "the ninth is left out");
+        let p = instance_params(&inst, MAX_LIGHTS);
+        assert_eq!(f32::from_bits(p[0]), 0.75);
+        assert_eq!(p[1] & 0xffff, 32768);
+        assert_eq!(p[1] >> 16, 8);
+        assert_eq!(p[2], 3 | 255 << 8 | 7 << 16);
+        assert_eq!(p[3], 200 | 1 << 8 | 2 << 16 | 9 << 24);
+        // With 10 lights in the frame, 255 and 200 are not there.
+        let p = instance_params(&inst, 10);
+        assert_eq!(p[1] >> 16, 6);
+        assert_eq!(p[2], 3 | 7 << 8 | 1 << 24);
+        assert_eq!(p[3], 2 | 9 << 8);
+        inst.lights = LightSet::EMPTY;
+        inst.glow = -1.0;
+        inst.cabin = 2.0;
+        assert_eq!(instance_params(&inst, 4), [0, 65535, 0, 0]);
+        let mut set = LightSet::EMPTY;
+        assert!(set.is_empty() && !set.push(MAX_LIGHTS) && set.push(MAX_LIGHTS - 1));
+        assert_eq!(set.indices(), &[255]);
     }
 
     #[test]
     fn normal_matrix_handles_non_uniform_scale() {
         let m = Mat4::from_scale(Vec3::new(4.0, 1.0, 1.0)) * Mat4::from_rotation_z(0.5);
-        let raw = InstanceRaw::new(&MeshInstance::new(MeshId(0), m.to_cols_array_2d()));
+        let raw = InstanceRaw::new(&MeshInstance::new(MeshId(0), m.to_cols_array_2d()), 0);
         let n = Mat3::from_cols(
             Vec4::from(raw.normal[0]).xyz(),
             Vec4::from(raw.normal[1]).xyz(),
@@ -1966,20 +2578,41 @@ mod tests {
                         )
                     });
                 }
-                let mut lights = lamps(MAX_POINT_LIGHTS + 3);
+                // More lights than a frame holds; every tenth draws a corona, one lights
+                // nothing (a tail lamp).
+                let mut lights = lamps(MAX_LIGHTS + 3);
                 lights[1].direction = [0.0, -0.2, -1.0];
                 lights[1].cone_cos = [0.9, 0.98];
                 lights[1].cone_squash = 4.0;
                 lights[1].wrap = 0.25;
+                lights[5].radius = 0.0;
+                for l in lights.iter_mut().step_by(10) {
+                    l.corona = Corona {
+                        radius: 1.0,
+                        strength: 1.0,
+                    };
+                }
+                // Each instance is lit by up to 8 lights round it.
+                for (i, inst) in instances.iter_mut().enumerate() {
+                    let near: Vec<usize> =
+                        (0..MAX_LIGHTS).filter(|k| k.abs_diff(i / 10) < 4).collect();
+                    inst.lights = LightSet::from_indices(&near);
+                }
                 let mut scene = test_scene_lit(&instances, &lights);
                 scene.sky.cabin_light = [0.01, 0.008, 0.006];
+                // Night: the lamps' coronas show.
+                scene.sky.exposure = exposure_from_ev100(3.0);
                 // Odd sizes and a size smaller than the bloom chain is deep.
                 let sizes = [(64, 48), (33, 17), (5, 3)];
                 render_frames(&device, &mut r, format, &scene, &sizes);
                 let stats = r.stats();
                 assert_eq!(stats.frames, 3);
                 assert_eq!(stats.resources_created, 1);
-                assert_eq!(stats.point_lights, MAX_POINT_LIGHTS as u32);
+                assert_eq!(stats.lights_submitted, MAX_LIGHTS as u32);
+                // Instances 0..=300 reach lights 0..=33.
+                assert_eq!(stats.lights_used, 34);
+                // Lights 0, 10, ..., 250, the sun and the moon.
+                assert_eq!(stats.coronas, 26 + 2);
                 // Ground, then runs of block with a brick or sign every 25 instances, drawn
                 // in 3 cascades + forward.
                 let runs = 1 + 1 + 12 + 11;
@@ -1991,17 +2624,20 @@ mod tests {
                     0
                 };
                 assert_eq!(stats.bloom_draw_calls, bloom);
-                let passes = if r.is_hdr() { 2 } else { 1 };
+                // Sky, coronas and (HDR) tonemap.
+                let passes = if r.is_hdr() { 3 } else { 2 };
                 assert_eq!(stats.draw_calls, 4 * runs + passes + bloom);
 
-                // Bloom off and no lights: the bloom passes are skipped.
+                // Bloom off, no lights, no coronas: those passes are skipped.
                 scene.sky.bloom_strength = 0.0;
+                scene.sky.corona_strength = 0.0;
                 scene.lights = &[];
                 render_frames(&device, &mut r, format, &scene, &[(64, 48)]);
                 let stats = r.stats();
                 assert_eq!(stats.bloom_draw_calls, 0);
-                assert_eq!(stats.point_lights, 0);
-                assert_eq!(stats.draw_calls, 4 * runs + passes);
+                assert_eq!((stats.lights_submitted, stats.lights_used), (0, 0));
+                assert_eq!(stats.coronas, 0);
+                assert_eq!(stats.draw_calls, 4 * runs + passes - 1);
                 assert_eq!(stats.resources_created, 1);
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             }
@@ -2118,14 +2754,28 @@ mod tests {
         let capacity = r.instance_staging.capacity();
         let sizes = [(16, 16); WARMUP_FRAMES as usize + 4];
         render_frames(&device, &mut r, format, &scene, &sizes);
-        // Lights and bloom on or off change nothing either.
-        let lights = lamps(4);
+        // Lights, coronas and bloom on or off change nothing either.
+        let mut lights = lamps(MAX_LIGHTS);
+        for l in &mut lights {
+            l.corona = Corona {
+                radius: 1.0,
+                strength: 1.0,
+            };
+        }
+        let corona_capacity = r.corona_staging.capacity();
         let mut lit = test_scene_lit(&instances, &lights);
+        lit.sky.exposure = exposure_from_ev100(3.0);
         render_frames(&device, &mut r, format, &lit, &[(16, 16)]);
         lit.sky.bloom_strength = 0.0;
         render_frames(&device, &mut r, format, &lit, &[(16, 16)]);
         assert_eq!(r.stats().resources_created, 0);
         assert_eq!(r.instance_staging.capacity(), capacity);
+        assert_eq!(
+            r.stats().coronas as usize,
+            MAX_LIGHTS + 2,
+            "and the sun and moon"
+        );
+        assert_eq!(r.corona_staging.capacity(), corona_capacity);
         // Fewer instances later is fine too.
         render_frames(
             &device,
@@ -2162,7 +2812,13 @@ mod tests {
         assert_eq!(u.post, [0.08, 1.0, VIGNETTE, BLOOM_CLAMP]);
         assert_eq!(u.screen, [8.0, 8.0, 0.125, 0.125]);
         assert_eq!(u.cabin_light, [0.0; 4]);
-        assert!(u.lights.iter().all(|l| l.color == [0.0; 4]));
+        assert!(u
+            .lights
+            .iter()
+            .all(|l| l.pos_radius == [0.0; 4] && l.bits == [0; 4]));
+        // Corona sizes: the focal length of a 1 rad vertical field on 8 lines.
+        assert!((u.corona[0] - 4.0 / (0.5f32).tan()).abs() < 1e-4);
+        assert!(u.corona[1] < u.corona[2]);
     }
 
     #[test]
@@ -2171,7 +2827,7 @@ mod tests {
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let mut r = Renderer::new(&device, &queue, format, (8, 8));
         r.resize((640, 360));
-        let mut lights = lamps(MAX_POINT_LIGHTS + 2);
+        let mut lights = lamps(MAX_LIGHTS + 2);
         // The first is a spot looking down -z, full inside 10°, dark beyond 20°.
         lights[0].direction = [0.0, 0.0, -2.0];
         lights[0].cone_cos = [20f32.to_radians().cos(), 10f32.to_radians().cos()];
@@ -2182,35 +2838,47 @@ mod tests {
         scene.sky.bloom_threshold = 2.0;
         scene.sky.cabin_light = [0.02, -1.0, 0.01];
         let (u, _) = r.frame_uniforms(&scene);
-        assert_eq!(u.emissive, [0.25, 1.0, MAX_POINT_LIGHTS as f32, 3.0]);
+        assert_eq!(u.emissive, [0.25, 1.0, MAX_LIGHTS as f32, 3.0]);
         assert_eq!(u.post[..2], [0.08, 2.0]);
         assert_eq!(u.screen[..2], [640.0, 360.0]);
         assert_eq!(u.cabin_light, [0.02, 0.0, 0.01, 0.0], "never negative");
         assert_eq!(u.params[1], 0.0, "the sRGB target encodes in hardware");
         for (k, l) in u.lights.iter().enumerate() {
-            assert_eq!(l.pos_radius, [k as f32 * 10.0, 7.5, 0.0, 25.0]);
-            assert_eq!(l.color, [2.5, 1.6, 0.6, 1.0 / 625.0]);
+            let l = unpack(l);
+            assert_eq!(l.pos, Vec3::new(k as f32 * 10.0, 7.5, 0.0));
+            assert_eq!(l.radius, 25.0);
+            // Half floats: within a part in a thousand.
+            let c = Vec3::new(2.5, 1.6, 0.6);
+            assert!(
+                (l.color - c).abs().max_element() < 1e-3 * 2.5,
+                "{}",
+                l.color
+            );
         }
         // The spot's axis is normalized and its cone mapped onto the cosine ramp the shader
         // smoothsteps; omni lights pass every direction.
-        let cone = |l: &PointLightUniform, dir: Vec3| {
-            let c = ((dir.normalize().dot(Vec4::from(l.spot).xyz()) - l.spot[3]) * l.cone[0])
-                .clamp(0.0, 1.0);
+        let cone = |l: &Unpacked, dir: Vec3| {
+            let c = ((dir.normalize().dot(l.axis) - l.cone_end) * l.cone_scale).clamp(0.0, 1.0);
             c * c * (3.0 - 2.0 * c)
         };
-        let spot = &u.lights[0];
-        assert_eq!(&spot.spot[..3], &[0.0, 0.0, -1.0]);
+        let spot = unpack(&u.lights[0]);
+        assert!((spot.axis - Vec3::NEG_Z).length() < 1e-4, "{}", spot.axis);
         let off = |deg: f32| Vec3::new(deg.to_radians().sin(), 0.0, -deg.to_radians().cos());
-        assert!((cone(spot, off(5.0)) - 1.0).abs() < 1e-6);
-        assert!((cone(spot, off(10.0)) - 1.0).abs() < 1e-4);
-        assert!((0.1..0.9).contains(&cone(spot, off(15.0))));
-        assert_eq!(cone(spot, off(25.0)), 0.0);
-        assert_eq!(cone(spot, Vec3::Z), 0.0, "nothing behind it");
+        assert!((cone(&spot, off(5.0)) - 1.0).abs() < 1e-6);
+        assert!((cone(&spot, off(10.0)) - 1.0).abs() < 2e-2);
+        assert!((0.1..0.9).contains(&cone(&spot, off(15.0))));
+        assert_eq!(cone(&spot, off(25.0)), 0.0);
+        assert_eq!(cone(&spot, Vec3::Z), 0.0, "nothing behind it");
+        let omni = unpack(&u.lights[1]);
         for dir in [Vec3::X, -Vec3::Y, Vec3::Z, Vec3::new(1.0, 2.0, -3.0)] {
-            assert_eq!(cone(&u.lights[1], dir), 1.0);
+            assert_eq!(cone(&omni, dir), 1.0);
         }
-        assert_eq!(spot.cone[1..3], [1.0, 0.0], "round and Lambert by default");
-        assert_eq!(u.lights[1].cone[1..3], [1.0, 0.0]);
+        assert_eq!(
+            (spot.squash, spot.wrap),
+            (1.0, 0.0),
+            "round and Lambert by default"
+        );
+        assert_eq!((omni.squash, omni.wrap), (1.0, 0.0));
 
         // A flattened, wrapped beam keeps its squash and wrap; a vertical one cannot squash.
         let mut beams = lights.clone();
@@ -2222,8 +2890,14 @@ mod tests {
         beams[3].cone_cos = [0.3, 0.7];
         beams[3].cone_squash = 3.0;
         let (b, _) = r.frame_uniforms(&test_scene_lit(&[], &beams));
-        assert_eq!(b.lights[2].cone[1..3], [4.0, 0.25]);
-        assert_eq!(b.lights[3].cone[1], 1.0);
+        let beam = unpack(&b.lights[2]);
+        assert_eq!(beam.squash, 4.0);
+        assert!((beam.wrap - 0.25).abs() < 0.5 / 255.0);
+        assert!((beam.axis - Vec3::new(0.0, -0.1, -1.0).normalize()).length() < 1e-4);
+        assert!((beam.cone_end - 0.8).abs() < 1e-3 && (beam.cone_scale - 10.0).abs() < 0.02);
+        let down = unpack(&b.lights[3]);
+        assert_eq!(down.squash, 1.0);
+        assert!((down.axis - Vec3::NEG_Y).length() < 1e-4);
 
         // Without float targets there is no bloom.
         let ldr = Renderer::with_options(
@@ -2237,6 +2911,68 @@ mod tests {
             },
         );
         assert_eq!(ldr.frame_uniforms(&scene).0.post[0], 0.0);
+    }
+
+    /// A lamp's corona glows at night, fades through dusk and is gone by day; the sun has a
+    /// faint one by day and the moon one at night, each only above the horizon.
+    #[test]
+    fn coronas_follow_their_lights_against_the_exposure() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let mut r = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, (8, 8));
+        let mut lamp = lamps(1)[0];
+        lamp.corona = Corona {
+            radius: 1.5,
+            strength: 1.0,
+        };
+        let lights = [lamp];
+        let peak = |r: &mut Renderer, ev: f32, sun_y: f32, moon: f32| {
+            let mut scene = test_scene_lit(&[], &lights);
+            scene.sky.exposure = exposure_from_ev100(ev);
+            scene.sun.direction = [0.0, sun_y, -1.0];
+            scene.sky.moon_luminance = moon;
+            r.corona_staging.clear();
+            r.push_coronas(&scene);
+            r.corona_staging
+                .iter()
+                .map(|c| {
+                    (
+                        c.pos_size[3],
+                        Vec4::from(c.color).max_element() * scene.sky.exposure,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let strength = Sky::default().corona_strength;
+        // Night (EV 3), sun well down, no moon: the lamp only, near the cap, sodium hued.
+        let night = peak(&mut r, 3.0, -0.5, 0.0);
+        assert_eq!(night.len(), 1);
+        assert_eq!(night[0].0, 1.5);
+        assert!(
+            (0.7..1.0).contains(&(night[0].1 / (CORONA_PEAK * strength))),
+            "{night:?}"
+        );
+        let rgb = Vec4::from(r.corona_staging[0].color);
+        assert!(rgb.x > rgb.y && rgb.y > rgb.z, "warm: {rgb}");
+        // Dusk (EV 6): dimmer. Noon (EV 15): nothing from the lamp, a faint sun.
+        let dusk = peak(&mut r, 6.0, -0.1, 0.0);
+        assert!(
+            dusk[0].1 < 0.8 * night[0].1 && dusk[0].1 > 0.2 * night[0].1,
+            "{dusk:?}"
+        );
+        let noon = peak(&mut r, 15.0, 1.0, 0.0);
+        assert_eq!(noon.len(), 1, "{noon:?}");
+        assert!(noon[0].0 < 0.0, "at infinity");
+        assert!(noon[0].1 < 0.5 * CORONA_PEAK * strength, "{noon:?}");
+        // A full moon at night (sun opposite it) adds its own; strength 0 hides them all.
+        let moonlit = peak(&mut r, 3.0, -0.5, 2.5);
+        assert_eq!(moonlit.len(), 2);
+        let moon = moonlit[1];
+        assert!(moon.0 == -MOON_CORONA_RADIUS && moon.1 > 0.05, "{moon:?}");
+        let mut scene = test_scene_lit(&[], &lights);
+        scene.sky.corona_strength = 0.0;
+        r.corona_staging.clear();
+        r.push_coronas(&scene);
+        assert!(r.corona_staging.is_empty());
     }
 
     /// At the default exposure the daytime sky more than 30° from the sun stays under the
