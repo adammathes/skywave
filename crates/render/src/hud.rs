@@ -1,0 +1,513 @@
+//! The HUD: text and rectangles drawn over the finished frame.
+//!
+//! Items are laid out in a virtual 1280×720 space (at `ui_scale` 1) that is letterboxed
+//! into the largest centered 16:9 box of the target: a 16:10 Steam Deck screen or a 4:3
+//! window gets bars above and below, an ultra-wide one at the sides, so layouts never
+//! stretch. `ui_scale` (1–2) enlarges everything for TV distance by shrinking the virtual
+//! space to `1280/ui_scale × 720/ui_scale` over the same box. [`HudLayout::safe_rect`]
+//! insets that space by [`HUD_SAFE_MARGIN`] on every side; put anything that must be
+//! readable on a TV inside it. Items may extend past the virtual space (a full-screen dim
+//! behind a menu) and are clipped only by the target.
+//!
+//! Text is drawn with the [`crate::font`] face at a whole number of target pixels per font
+//! pixel (the nearest to `scale` × pixels per virtual unit, at least 1) from a
+//! pixel-snapped origin, so it is always crisp; widths therefore differ from
+//! `font::text_width(text) * scale` by under half a font pixel per glyph.
+//!
+//! The frame's items are plain data ([`Hud`]): a slice of [`HudItem`]s whose text lives in
+//! one shared string. [`HudBuilder`] fills both and reuses its buffers frame to frame.
+
+use std::fmt::{self, Write as _};
+
+use bytemuck::{Pod, Zeroable};
+
+use crate::font::{self, CELL_H, CELL_W, GLYPH_H, LINE_HEIGHT, SOLID_CELL};
+
+/// Virtual HUD width at `ui_scale` 1.
+pub const HUD_WIDTH: f32 = 1280.0;
+/// Virtual HUD height at `ui_scale` 1.
+pub const HUD_HEIGHT: f32 = 720.0;
+/// Safe-area inset on each side, as a fraction of the HUD's width and height.
+pub const HUD_SAFE_MARGIN: f32 = 0.03;
+/// Range of the UI scale setting.
+pub const UI_SCALE_MIN: f32 = 1.0;
+pub const UI_SCALE_MAX: f32 = 2.0;
+/// Quads (glyphs and rectangles) the HUD pass draws per frame; the rest are dropped and
+/// counted in [`crate::RenderStats::hud_quads_dropped`].
+pub const MAX_HUD_QUADS: usize = 4096;
+
+/// A byte range of [`Hud::text`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextRange {
+    pub start: u32,
+    pub len: u32,
+}
+
+/// One thing to draw. Coordinates are virtual units from the top-left of the HUD space.
+/// Colors are sRGB-encoded RGBA with straight alpha.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HudItem {
+    /// A run of text whose top-left (top of the cell, not the baseline) is at `(x, y)`.
+    /// `scale` is virtual units per font pixel (2 makes 14×18-unit capitals' cells).
+    /// `'\n'` starts a new line [`LINE_HEIGHT`] font pixels further down.
+    Text {
+        x: f32,
+        y: f32,
+        scale: f32,
+        color: [u8; 4],
+        text: TextRange,
+    },
+    /// A filled rectangle (menu panels, focus bars, graph bars).
+    Rect {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: [u8; 4],
+    },
+}
+
+/// The HUD for one frame, drawn in order (later items on top).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hud<'a> {
+    pub items: &'a [HudItem],
+    /// Backing store of every [`HudItem::Text`]'s range.
+    pub text: &'a str,
+    /// 1–2; see the module docs.
+    pub ui_scale: f32,
+}
+
+impl<'a> Hud<'a> {
+    /// Nothing to draw.
+    pub const EMPTY: Hud<'static> = Hud {
+        items: &[],
+        text: "",
+        ui_scale: 1.0,
+    };
+
+    /// The text of an item's range, or "" if the range is not in [`Hud::text`].
+    pub fn str(&self, range: TextRange) -> &'a str {
+        range_str(self.text, range)
+    }
+}
+
+impl Default for Hud<'_> {
+    fn default() -> Self {
+        Hud::EMPTY
+    }
+}
+
+fn range_str(text: &str, range: TextRange) -> &str {
+    let start = range.start as usize;
+    text.get(start..start.saturating_add(range.len as usize))
+        .unwrap_or("")
+}
+
+/// Clamps a UI scale into [`UI_SCALE_MIN`]..=[`UI_SCALE_MAX`]; non-finite values give 1.
+pub fn clamp_ui_scale(ui_scale: f32) -> f32 {
+    if ui_scale.is_finite() {
+        ui_scale.clamp(UI_SCALE_MIN, UI_SCALE_MAX)
+    } else {
+        UI_SCALE_MIN
+    }
+}
+
+/// Fills a [`Hud`] frame by frame without allocating once its buffers have grown.
+#[derive(Clone, Debug)]
+pub struct HudBuilder {
+    items: Vec<HudItem>,
+    text: String,
+    ui_scale: f32,
+}
+
+impl Default for HudBuilder {
+    fn default() -> Self {
+        HudBuilder::new()
+    }
+}
+
+impl HudBuilder {
+    pub fn new() -> HudBuilder {
+        HudBuilder {
+            items: Vec::with_capacity(1024),
+            text: String::with_capacity(8192),
+            ui_scale: 1.0,
+        }
+    }
+
+    /// Clears everything for a new frame laid out at `ui_scale`.
+    pub fn begin(&mut self, ui_scale: f32) {
+        self.items.clear();
+        self.text.clear();
+        self.ui_scale = clamp_ui_scale(ui_scale);
+    }
+
+    pub fn ui_scale(&self) -> f32 {
+        self.ui_scale
+    }
+
+    /// The virtual space's size at this frame's UI scale.
+    pub fn size(&self) -> [f32; 2] {
+        HudLayout::virtual_size(self.ui_scale)
+    }
+
+    /// The safe area `[x, y, w, h]` at this frame's UI scale.
+    pub fn safe_rect(&self) -> [f32; 4] {
+        HudLayout::safe_rect(self.ui_scale)
+    }
+
+    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [u8; 4]) {
+        self.items.push(HudItem::Rect { x, y, w, h, color });
+    }
+
+    pub fn text(&mut self, x: f32, y: f32, scale: f32, color: [u8; 4], text: &str) {
+        self.text_fmt(x, y, scale, color, format_args!("{text}"));
+    }
+
+    /// Text formatted straight into the shared buffer (no intermediate `String`).
+    pub fn text_fmt(&mut self, x: f32, y: f32, scale: f32, color: [u8; 4], args: fmt::Arguments) {
+        let start = self.text.len();
+        // Writing to a String cannot fail.
+        let _ = self.text.write_fmt(args);
+        let text = TextRange {
+            start: start as u32,
+            len: (self.text.len() - start) as u32,
+        };
+        self.items.push(HudItem::Text {
+            x,
+            y,
+            scale,
+            color,
+            text,
+        });
+    }
+
+    /// The text of the last item, if it is text (for measuring what was just written).
+    pub fn last_text(&self) -> &str {
+        match self.items.last() {
+            Some(HudItem::Text { text, .. }) => range_str(&self.text, *text),
+            _ => "",
+        }
+    }
+
+    /// Moves the last item right by `dx` (e.g. to right-align text after measuring it).
+    pub fn shift_last(&mut self, dx: f32) {
+        match self.items.last_mut() {
+            Some(HudItem::Text { x, .. } | HudItem::Rect { x, .. }) => *x += dx,
+            None => {}
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn view(&self) -> Hud<'_> {
+        Hud {
+            items: &self.items,
+            text: &self.text,
+            ui_scale: self.ui_scale,
+        }
+    }
+}
+
+/// Where the virtual HUD space lands on a target of a given size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HudLayout {
+    /// The letterboxed 16:9 box in target pixels: `[x, y, w, h]`.
+    pub viewport: [f32; 4],
+    /// Target pixels per virtual unit.
+    pub scale: f32,
+    /// Size of the virtual space: `[HUD_WIDTH, HUD_HEIGHT] / ui_scale`.
+    pub size: [f32; 2],
+}
+
+impl HudLayout {
+    pub fn new(target: (u32, u32), ui_scale: f32) -> HudLayout {
+        let (tw, th) = (target.0.max(1) as f32, target.1.max(1) as f32);
+        let w = tw.min(th * HUD_WIDTH / HUD_HEIGHT);
+        let h = w * HUD_HEIGHT / HUD_WIDTH;
+        let size = HudLayout::virtual_size(ui_scale);
+        HudLayout {
+            viewport: [(tw - w) * 0.5, (th - h) * 0.5, w, h],
+            scale: w / size[0],
+            size,
+        }
+    }
+
+    /// The virtual space's size at `ui_scale` (clamped to 1–2).
+    pub fn virtual_size(ui_scale: f32) -> [f32; 2] {
+        let s = clamp_ui_scale(ui_scale);
+        [HUD_WIDTH / s, HUD_HEIGHT / s]
+    }
+
+    /// The safe area `[x, y, w, h]` in virtual units at `ui_scale`: the virtual space less
+    /// [`HUD_SAFE_MARGIN`] on each side.
+    pub fn safe_rect(ui_scale: f32) -> [f32; 4] {
+        let [w, h] = HudLayout::virtual_size(ui_scale);
+        let (mx, my) = (w * HUD_SAFE_MARGIN, h * HUD_SAFE_MARGIN);
+        [mx, my, w - 2.0 * mx, h - 2.0 * my]
+    }
+
+    /// Target pixel position of a virtual point (unrounded).
+    pub fn to_pixels(&self, x: f32, y: f32) -> [f32; 2] {
+        [
+            self.viewport[0] + x * self.scale,
+            self.viewport[1] + y * self.scale,
+        ]
+    }
+
+    /// Whole target pixels per font pixel for text at `scale`.
+    pub fn font_pixels(&self, scale: f32) -> u32 {
+        let p = (scale * self.scale).round();
+        if p.is_finite() && p >= 1.0 {
+            p as u32
+        } else {
+            1
+        }
+    }
+}
+
+/// GPU layout of one HUD quad (vertex buffer, step mode instance); mirrors `HudIn` in
+/// shaders/hud.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub(crate) struct HudQuad {
+    /// Target pixels: left, top, right, bottom.
+    pub rect: [f32; 4],
+    /// Atlas uv (0..1): left, top, right, bottom.
+    pub uv: [f32; 4],
+    /// sRGB RGBA, straight alpha.
+    pub color: [u8; 4],
+}
+
+/// Turns `hud` into quads for a target of size `target`, appending to `out` until it holds
+/// `capacity` quads. Returns the number of quads that did not fit.
+pub(crate) fn build_quads(
+    hud: &Hud,
+    target: (u32, u32),
+    out: &mut Vec<HudQuad>,
+    capacity: usize,
+) -> u32 {
+    let layout = HudLayout::new(target, hud.ui_scale);
+    let (aw, ah) = (font::ATLAS_WIDTH as f32, font::ATLAS_HEIGHT as f32);
+    let uv_rect = |x: u32, y: u32, w: u32, h: u32| {
+        [
+            x as f32 / aw,
+            y as f32 / ah,
+            (x + w) as f32 / aw,
+            (y + h) as f32 / ah,
+        ]
+    };
+    // The middle texel of the solid cell: every sample of it is fully covered.
+    let [sx, sy] = font::cell_origin(SOLID_CELL);
+    let solid = uv_rect(sx + CELL_W / 2 - 1, sy + CELL_H / 2 - 1, 1, 1);
+    let mut dropped = 0;
+    let mut push = |q: HudQuad| {
+        if out.len() < capacity {
+            out.push(q);
+        } else {
+            dropped += 1;
+        }
+    };
+    for item in hud.items {
+        match *item {
+            HudItem::Rect { x, y, w, h, color } => {
+                let [x0, y0] = layout.to_pixels(x, y);
+                let [x1, y1] = layout.to_pixels(x + w, y + h);
+                let (x0, y0, x1, y1) = (x0.round(), y0.round(), x1.round(), y1.round());
+                if x1 > x0 && y1 > y0 && color[3] > 0 {
+                    push(HudQuad {
+                        rect: [x0, y0, x1, y1],
+                        uv: solid,
+                        color,
+                    });
+                }
+            }
+            HudItem::Text {
+                x,
+                y,
+                scale,
+                color,
+                text,
+            } => {
+                if color[3] == 0 {
+                    continue;
+                }
+                let p = layout.font_pixels(scale) as f32;
+                let [ox, oy] = layout.to_pixels(x, y);
+                let (ox, mut py) = (ox.round(), oy.round());
+                let mut px = ox;
+                for c in hud.str(text).chars() {
+                    if c == '\n' {
+                        px = ox;
+                        py += LINE_HEIGHT as f32 * p;
+                        continue;
+                    }
+                    let index = font::glyph_index(c);
+                    let w = u32::from(font::GLYPHS[index].width);
+                    if c != ' ' {
+                        let [u, v] = font::cell_origin(index);
+                        push(HudQuad {
+                            rect: [px, py, px + w as f32 * p, py + GLYPH_H as f32 * p],
+                            uv: uv_rect(u, v, w, GLYPH_H),
+                            color,
+                        });
+                    }
+                    px += (w + 1) as f32 * p;
+                }
+            }
+        }
+    }
+    dropped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: [f32; 2], b: [f32; 2]) -> bool {
+        (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3
+    }
+
+    #[test]
+    fn letterbox_keeps_16_9_on_every_aspect() {
+        // (target, viewport [x, y, w, h], pixels per unit at ui scale 1)
+        let cases: [((u32, u32), [f32; 4], f32); 6] = [
+            ((1280, 720), [0.0, 0.0, 1280.0, 720.0], 1.0),
+            ((1920, 1080), [0.0, 0.0, 1920.0, 1080.0], 1.5),
+            ((3840, 2160), [0.0, 0.0, 3840.0, 2160.0], 3.0),
+            // 16:10 Steam Deck: bars of 40 px above and below.
+            ((1280, 800), [0.0, 40.0, 1280.0, 720.0], 1.0),
+            // 4:3: 1024×576 box, bars of 96 px.
+            ((1024, 768), [0.0, 96.0, 1024.0, 576.0], 0.8),
+            // Ultra-wide 21:9: bars at the sides.
+            ((2560, 1080), [320.0, 0.0, 1920.0, 1080.0], 1.5),
+        ];
+        for (target, viewport, scale) in cases {
+            let l = HudLayout::new(target, 1.0);
+            assert_eq!(l.viewport, viewport, "{target:?}");
+            assert!((l.scale - scale).abs() < 1e-6, "{target:?}");
+            assert_eq!(l.size, [HUD_WIDTH, HUD_HEIGHT]);
+            // The virtual corners land on the box corners.
+            assert!(close(l.to_pixels(0.0, 0.0), [viewport[0], viewport[1]]));
+            assert!(close(
+                l.to_pixels(HUD_WIDTH, HUD_HEIGHT),
+                [viewport[0] + viewport[2], viewport[1] + viewport[3]]
+            ));
+        }
+        // Degenerate targets do not divide by zero.
+        assert!(HudLayout::new((0, 0), 1.0).scale.is_finite());
+    }
+
+    #[test]
+    fn safe_area_is_three_percent_of_the_box() {
+        for target in [(1280, 720), (1280, 800), (1024, 768), (3840, 2160)] {
+            let l = HudLayout::new(target, 1.0);
+            let [x, y, w, h] = HudLayout::safe_rect(1.0);
+            let [bx, by, bw, bh] = l.viewport;
+            assert!(close(l.to_pixels(x, y), [bx + 0.03 * bw, by + 0.03 * bh]));
+            assert!(close(
+                l.to_pixels(x + w, y + h),
+                [bx + 0.97 * bw, by + 0.97 * bh]
+            ));
+        }
+        let s1 = HudLayout::safe_rect(1.0);
+        assert!(close([s1[0], s1[1]], [38.4, 21.6]));
+        // At 2× the safe area is the same part of the screen in half the units.
+        let s2 = HudLayout::safe_rect(2.0);
+        assert!(close([s2[0], s2[1]], [19.2, 10.8]));
+        assert!(close([s2[2], s2[3]], [640.0 * 0.94, 360.0 * 0.94]));
+    }
+
+    #[test]
+    fn ui_scale_enlarges_everything() {
+        let one = HudLayout::new((1920, 1080), 1.0);
+        let two = HudLayout::new((1920, 1080), 2.0);
+        let big = HudLayout::new((1920, 1080), 1.5);
+        assert_eq!(two.size, [640.0, 360.0]);
+        assert_eq!(two.scale, 2.0 * one.scale);
+        assert_eq!(big.scale, 1.5 * one.scale);
+        // Text at scale 2: 3 px per font pixel at 1×, 6 px at 2×.
+        assert_eq!(one.font_pixels(2.0), 3);
+        assert_eq!(two.font_pixels(2.0), 6);
+        // Out-of-range settings are clamped.
+        assert_eq!(HudLayout::new((1920, 1080), 9.0), two);
+        assert_eq!(HudLayout::new((1920, 1080), f32::NAN), one);
+        assert_eq!(HudLayout::new((1920, 1080), 0.2), one);
+        // Font pixels never drop below one target pixel.
+        assert_eq!(HudLayout::new((320, 180), 1.0).font_pixels(1.0), 1);
+    }
+
+    #[test]
+    fn items_become_snapped_quads_in_order() {
+        let mut b = HudBuilder::new();
+        b.begin(1.0);
+        b.rect(10.25, 20.0, 100.0, 30.0, [0, 0, 0, 128]);
+        b.text(40.0, 50.0, 2.0, [255; 4], "Hi you");
+        b.rect(0.0, 0.0, 10.0, 10.0, [0, 0, 0, 0]);
+        b.text_fmt(0.0, 0.0, 1.0, [255; 4], format_args!("{}\n{}", 1, 2));
+        let hud = b.view();
+        let mut quads = Vec::new();
+        let dropped = build_quads(&hud, (1920, 1080), &mut quads, MAX_HUD_QUADS);
+        assert_eq!(dropped, 0);
+        // Rect, 5 glyphs (the space draws nothing), invisible rect skipped, 2 glyphs.
+        assert_eq!(quads.len(), 1 + 5 + 2);
+        assert_eq!(quads[0].rect, [15.0, 30.0, 165.0, 75.0]);
+        // "H" at (60, 75), 3 px per font pixel: 7 columns wide, 9 rows tall.
+        assert_eq!(quads[1].rect, [60.0, 75.0, 81.0, 102.0]);
+        // "i" follows after H's 7 columns and a gap.
+        assert_eq!(quads[2].rect[0], 60.0 + 8.0 * 3.0);
+        // "y" after "Hi" (8 + 3) and a space (4).
+        assert_eq!(quads[3].rect[0], 60.0 + (8.0 + 3.0 + 4.0) * 3.0);
+        // Rect uv is a single solid texel; glyph uv covers its columns exactly.
+        let u = |t: f32| t * font::ATLAS_WIDTH as f32;
+        assert_eq!(u(quads[0].uv[2]) - u(quads[0].uv[0]), 1.0);
+        assert_eq!(u(quads[1].uv[2]) - u(quads[1].uv[0]), 7.0);
+        // The second line of "1\n2" starts LINE_HEIGHT font pixels lower (2 px each).
+        assert_eq!(quads[6].rect[1], 0.0);
+        assert_eq!(quads[7].rect[1], 2.0 * LINE_HEIGHT as f32);
+        assert_eq!(quads[7].rect[0], quads[6].rect[0]);
+        assert!(quads.iter().all(|q| q.color[3] > 0));
+    }
+
+    #[test]
+    fn quads_past_capacity_are_dropped_and_counted() {
+        let mut b = HudBuilder::new();
+        b.begin(1.0);
+        b.text(0.0, 0.0, 1.0, [255; 4], "abcdefghij");
+        let mut quads = Vec::with_capacity(4);
+        let dropped = build_quads(&b.view(), (1280, 720), &mut quads, 4);
+        assert_eq!((quads.len(), dropped), (4, 6));
+        assert_eq!(quads.capacity(), 4);
+    }
+
+    #[test]
+    fn builder_reuses_its_buffers() {
+        let mut b = HudBuilder::new();
+        let fill = |b: &mut HudBuilder| {
+            b.begin(1.25);
+            for i in 0..200 {
+                b.text_fmt(0.0, i as f32, 2.0, [255; 4], format_args!("line {i:3}"));
+                b.rect(0.0, 0.0, 1.0, 1.0, [1; 4]);
+            }
+        };
+        fill(&mut b);
+        let caps = (b.items.capacity(), b.text.capacity());
+        for _ in 0..10 {
+            fill(&mut b);
+        }
+        assert_eq!((b.items.capacity(), b.text.capacity()), caps);
+        assert_eq!(b.len(), 400);
+        assert_eq!(b.view().ui_scale, 1.25);
+        b.text(0.0, 0.0, 1.0, [255; 4], "last");
+        assert_eq!(b.last_text(), "last");
+        b.shift_last(5.0);
+        assert!(matches!(b.view().items.last(), Some(HudItem::Text { x, .. }) if *x == 5.0));
+        assert_eq!(Hud::EMPTY.str(TextRange { start: 3, len: 9 }), "");
+    }
+}

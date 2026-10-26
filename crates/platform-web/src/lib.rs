@@ -12,6 +12,9 @@
 //! Mouse look: pressing the right button on the canvas requests pointer lock and releasing
 //! it exits, so look-while-held needs no separate capture click. Browsers that refuse the
 //! lock keep a free cursor, and `movementX/Y` still drive the look.
+//!
+//! Settings and bindings are kept in `localStorage` (key `skywave.settings`). `?menu=1`
+//! opens the settings menu at startup.
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -27,6 +30,12 @@ pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 /// Reads `seed=<u64>` from a URL query string such as `?seed=123&x=1`.
 pub fn seed_from_query(query: &str) -> Option<u64> {
     query_param(query, "seed").and_then(|v| v.parse().ok())
+}
+
+/// True when the URL query asks to open the settings menu at startup (`menu=1`), for
+/// screenshots of the menu.
+pub fn menu_from_query(query: &str) -> bool {
+    query_param(query, "menu") == Some("1")
 }
 
 /// Picks "the" gamepad from the connected ones, given as `(index, has standard mapping)`.
@@ -109,6 +118,15 @@ mod tests {
         assert_eq!(query_param(q, "ca"), None);
         assert_eq!(query_param("?cars=2", "car"), None);
         assert_eq!(query_param("", "car"), None);
+    }
+
+    #[test]
+    fn parses_menu_parameter() {
+        assert!(menu_from_query("?menu=1"));
+        assert!(menu_from_query("?seed=4&menu=1"));
+        assert!(!menu_from_query("?menu=0"));
+        assert!(!menu_from_query("?mymenu=1"));
+        assert!(!menu_from_query(""));
     }
 
     #[test]

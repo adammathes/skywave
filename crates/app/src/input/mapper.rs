@@ -15,6 +15,9 @@ const ANALOG_BUTTON_DEADZONE: f32 = 0.25;
 const CHORD_USE: f32 = 0.3;
 /// A ramp this close to its target snaps onto it.
 const RAMP_SNAP: f32 = 1e-4;
+/// A pad axis counts as "moved" (for remap capture and [`InputMapper::last_device`]) when
+/// it crosses this from nearer the centre.
+const AXIS_MOVED: f32 = 0.5;
 
 /// Turns raw platform events into a per-frame [`InputState`] through the user's
 /// [`Bindings`]. Feed events as they arrive, then call [`InputMapper::sample`] once per frame.
@@ -41,6 +44,10 @@ pub struct InputMapper {
     ramp: [[f32; Action::ANALOG.len()]; DeviceKind::COUNT],
     was_pressed: [bool; Action::COUNT],
     state: InputState,
+    /// Remap capture: armed by [`InputMapper::arm_capture`], filled by the next press.
+    capture_armed: bool,
+    captured: Option<(RawInput, f32)>,
+    last_device: DeviceKind,
 }
 
 impl Default for InputMapper {
@@ -62,6 +69,9 @@ impl InputMapper {
             ramp: [[0.0; Action::ANALOG.len()]; DeviceKind::COUNT],
             was_pressed: [false; Action::COUNT],
             state: InputState::default(),
+            capture_armed: false,
+            captured: None,
+            last_device: DeviceKind::KeyboardMouse,
         };
         m.index_modifiers();
         m
@@ -105,6 +115,7 @@ impl InputMapper {
         self.pressed_edge[i] = true;
         self.chord_used[i] = false;
         self.note_chord_use(raw);
+        self.note_moved(raw, 1.0);
     }
 
     /// A key or button went up.
@@ -138,6 +149,9 @@ impl InputMapper {
         if raw.is_relative() {
             self.value[i] += value;
         } else {
+            if value.abs() > AXIS_MOVED && self.value[i].abs() <= AXIS_MOVED {
+                self.note_moved(raw, value);
+            }
             self.value[i] = value;
         }
         if value.abs() > CHORD_USE || (raw.is_relative() && value != 0.0) {
@@ -163,6 +177,48 @@ impl InputMapper {
                 }
             }
         }
+    }
+
+    /// A key or button went down, or a pad axis moved past [`AXIS_MOVED`].
+    fn note_moved(&mut self, raw: RawInput, value: f32) {
+        self.last_device = raw.device();
+        if self.capture_armed && self.captured.is_none() {
+            self.captured = Some((raw, value));
+        }
+    }
+
+    /// The device of the latest key or button press or pad stick/trigger movement (mouse
+    /// motion does not count), for showing the right button glyphs.
+    pub fn last_device(&self) -> DeviceKind {
+        self.last_device
+    }
+
+    /// Starts a remap capture: the next key, mouse button or pad button pressed, or pad axis
+    /// pushed past halfway, from now on is kept for [`InputMapper::take_capture`]. Inputs
+    /// already held do not count until pressed again. Actions are still mapped as usual.
+    pub fn arm_capture(&mut self) {
+        self.capture_armed = true;
+        self.captured = None;
+    }
+
+    /// The input captured since [`InputMapper::arm_capture`], with its value (1 for keys and
+    /// buttons, the signed position for an axis); taking it ends the capture.
+    pub fn take_capture(&mut self) -> Option<(RawInput, f32)> {
+        let got = self.captured.take();
+        if got.is_some() {
+            self.capture_armed = false;
+        }
+        got
+    }
+
+    /// Ends a capture without taking anything.
+    pub fn cancel_capture(&mut self) {
+        self.capture_armed = false;
+        self.captured = None;
+    }
+
+    pub fn is_capturing(&self) -> bool {
+        self.capture_armed
     }
 
     /// Lets go of everything at once, e.g. when the window loses focus.
@@ -712,5 +768,40 @@ mod tests {
         assert!(s.pressed(Action::Horn) && !s.pressed(Action::Handbrake));
         // Space still flies up: a different context.
         assert!(s.pressed(Action::FlyUp));
+    }
+
+    #[test]
+    fn capture_takes_the_next_fresh_press_or_axis_push() {
+        let mut m = InputMapper::default();
+        // Held before arming: not captured until pressed again.
+        m.press(btn(PadButton::South));
+        m.axis(pad(PadAxis::LeftX), 0.9);
+        m.arm_capture();
+        assert!(m.is_capturing());
+        m.axis(pad(PadAxis::LeftX), 0.95);
+        m.press(btn(PadButton::South));
+        assert_eq!(m.take_capture(), None);
+        // A small stick wobble is ignored; a push past halfway is taken, with its sign.
+        m.axis(pad(PadAxis::RightY), -0.3);
+        m.axis(pad(PadAxis::RightY), -0.8);
+        m.axis(pad(PadAxis::RightX), 0.9);
+        assert_eq!(m.take_capture(), Some((pad(PadAxis::RightY), -0.8)));
+        assert!(!m.is_capturing());
+        assert_eq!(m.take_capture(), None);
+        // Keys and mouse buttons, and the last device follows them.
+        assert_eq!(m.last_device(), PAD);
+        m.arm_capture();
+        m.press(key(Key::KeyJ));
+        m.press(key(Key::KeyK));
+        assert_eq!(m.take_capture(), Some((key(Key::KeyJ), 1.0)));
+        assert_eq!(m.last_device(), KB);
+        m.arm_capture();
+        m.cancel_capture();
+        m.press(RawInput::MouseButton(0));
+        assert_eq!(m.take_capture(), None);
+        // Mapping goes on while armed.
+        m.arm_capture();
+        m.press(key(Key::KeyH));
+        assert!(m.sample(0.01).pressed(Action::Horn));
     }
 }

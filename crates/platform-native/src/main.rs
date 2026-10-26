@@ -9,15 +9,19 @@
 //!
 //! Usage: `skywave [--seed N] [--car ID] [--stats]`. `--stats` also prints the detected gamepads at
 //! startup and as they connect; otherwise that goes to the info log (`RUST_LOG=info`).
+//!
+//! Esc / Start opens the pause menu; settings and bindings are saved to
+//! `$XDG_CONFIG_HOME/skywave/settings.json` (see `settings`).
 
 mod pad;
+mod settings;
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use app::{Action, App, InputMapper, Key, RawInput, MOUSE_RIGHT};
+use app::{App, InputMapper, Key, RawInput, MOUSE_RIGHT};
 use pad::Pads;
 use render::Renderer;
 use skywave_core::Seed;
@@ -259,6 +263,10 @@ impl Gpu {
         self.window.pre_present_notify();
         self.queue.present(frame);
     }
+
+    fn stats(&self) -> render::RenderStats {
+        self.renderer.stats()
+    }
 }
 
 struct Shell {
@@ -351,15 +359,14 @@ impl ApplicationHandler for Shell {
                 let dt = self.last_frame.map_or(Duration::ZERO, |t| now - t);
                 self.last_frame = Some(now);
                 self.pads.poll(&mut self.input, self.focused);
-                let input = self.input.sample(dt.as_secs_f32());
-                // No pause menu yet: Pause (Esc) quits, as before.
-                if input.just_pressed(Action::Pause) {
+                let steps = self.app.frame(&mut self.input, dt.as_secs_f64());
+                if self.app.quit_requested() {
                     event_loop.exit();
                     return;
                 }
-                let steps = self.app.update(input, dt.as_secs_f64());
                 if let Some(gpu) = &mut self.gpu {
                     gpu.draw(&mut self.app, steps.alpha);
+                    self.app.set_render_stats(gpu.stats());
                 }
                 if self.opts.stats && !dt.is_zero() {
                     if let Some(line) = self.stats.record(dt) {
@@ -416,13 +423,15 @@ fn main() -> ExitCode {
     } else {
         log::info!("{}", pads.summary());
     }
-    let app = match App::new_with(Seed(opts.seed), &opts.car) {
+    let mut app = match App::new_with(Seed(opts.seed), &opts.car) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("skywave: {e}");
             return ExitCode::from(2);
         }
     };
+    app.set_can_quit(true);
+    app.set_settings_store(Box::new(settings::FileStore::from_env()));
     let mut shell = Shell {
         app,
         opts,

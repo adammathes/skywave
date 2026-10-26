@@ -1,18 +1,22 @@
 //! Skywave's game loop logic, independent of any window or browser.
 //!
-//! The platform crate feeds raw input events to an [`InputMapper`], samples it once per
-//! frame into an [`InputState`], calls
-//! [`App::update`] with the real frame time, and draws [`App::scene_view`]. The
-//! simulation itself only ever advances in fixed `SIM_DT` steps: the car ([`drive`]), then
-//! its cameras ([`camera`]), then the clock ([`lighting`]).
+//! The platform crate feeds raw input events to an [`InputMapper`], calls [`App::frame`]
+//! once per frame with the real frame time (it samples the mapper, runs the menus and
+//! [`ui`], and calls [`App::update`] unless a menu has the game paused), and draws
+//! [`App::scene_view`]. The simulation itself only ever advances in fixed `SIM_DT` steps:
+//! the car ([`drive`]), then its cameras ([`camera`]), then the clock ([`lighting`]).
 
 pub mod camera;
 pub mod daylight;
 pub mod drive;
 mod input;
 pub mod lighting;
+mod settings;
+pub mod ui;
 pub mod vehicles;
 mod worldmesh;
+
+pub use settings::{MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
@@ -114,6 +118,10 @@ pub struct App {
     instances: Vec<MeshInstance>,
     world_instances: usize,
     lights: [PointLight; 2],
+    /// Interpolation alpha of the last frame, held while paused.
+    alpha: f32,
+    /// Menus, HUD, overlay and the user's settings and bindings.
+    ui: ui::Ui,
 }
 
 impl App {
@@ -175,6 +183,8 @@ impl App {
                 color: [0.0; 3],
                 radius: 1.0,
             }; 2],
+            alpha: 0.0,
+            ui: ui::Ui::new(),
         })
     }
 
@@ -294,9 +304,10 @@ impl App {
                 proj: proj.to_cols_array_2d(),
             },
             sun: lighting::sun(&daylight),
-            sky: lighting::sky(&daylight),
+            sky: self.ui.video_sky(lighting::sky(&daylight)),
             instances: &self.instances,
             lights: &self.lights[..n],
+            hud: self.ui.hud(),
         }
     }
 }

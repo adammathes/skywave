@@ -34,6 +34,13 @@ Present mode vsync with one frame in flight; no input queue; sim at 120 Hz so a 
 ## Gamepad-first UI (Steam Deck, TV)
 Every menu, dialog and the remap flow is fully navigable with a stick/d-pad and two buttons (confirm/back), with on-screen button glyphs, focus highlight, and no hover-only states. Mouse and keyboard are additions, not requirements. UI scale setting for TV distance. Steam Deck's controller appears as a standard gamepad; nothing Steam-specific is required.
 
+Remap flow (`app::ui`): selecting a bindings row waits up to 8 s for the next fresh press (key, mouse button,
+pad button, or a stick/trigger pushed past halfway) on that row's device; the device's Back input cancels.
+Two-way actions have a row per direction; a key binds one direction, a stick axis binds whole. If another
+action in the same context uses the input, a dialog offers "Keep on <that action>" or "Move to <this one>"
+(`Bindings::resolve_conflict`). The new input replaces that row's previous inputs on the device. The menu
+tree is documented in `crates/app/src/ui/pages.rs`; the sim is paused while a menu is open.
+
 ## Settings UI (bindings UI ships in M1, the rest grows per milestone)
 A minimal in-game menu (bitmap font, keyboard/gamepad navigable, mouse optional): Drive (assists, units mph/kph, auto/manual), Controls (remap table, deadzones), Video (resolution scale, shadow quality, bloom, style post, fov), Audio (radio volume, engine volume, stations manager), World (seed code, era, region, time speed, traffic/pedestrian density), About (license, credits). All stored in one settings JSON.
 
