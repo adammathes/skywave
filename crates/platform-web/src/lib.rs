@@ -20,7 +20,12 @@
 //! `performance.now()`; `window.skywaveStreamIdle` turns true when nothing is left to
 //! stream (at once with `?stream=0`), and `window.skywaveStreamStats` then holds the
 //! streamer's counters.
+//!
+//! Sound: `sfx` renders the mixer each animation frame for the page's AudioWorklet glue
+//! (`window.skywaveSfx`), which starts on the first key, click or touch.
 
+#[cfg(target_arch = "wasm32")]
+mod sfx;
 #[cfg(target_arch = "wasm32")]
 mod web;
 

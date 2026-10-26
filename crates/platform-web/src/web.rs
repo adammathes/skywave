@@ -34,6 +34,8 @@ struct State {
     stream_idle: Option<bool>,
     backend: &'static str,
     on_first_frame: Option<js_sys::Function>,
+    /// The sound sink, when the page has its glue.
+    sfx: Option<crate::sfx::Sfx>,
 }
 
 /// Settings in the page's `localStorage`. Browsers that refuse storage (private modes,
@@ -181,6 +183,7 @@ pub async fn run(
         stream_idle: None,
         backend,
         on_first_frame: Some(on_first_frame),
+        sfx: crate::sfx::Sfx::new(&window),
     }));
     listen_keys(&window, &state)?;
     listen_mouse(&window, &state)?;
@@ -471,6 +474,9 @@ impl State {
         let performance = &self.performance;
         let now = || performance.as_ref().map_or(0.0, |p| p.now() / 1000.0);
         let steps = self.app.frame(&mut self.input, dt, &now);
+        if let Some(sfx) = &mut self.sfx {
+            sfx.frame(self.app.audio_params(), dt);
+        }
         self.app.sync_chunks(&mut self.renderer);
         let idle = self.app.stream_idle();
         if self.stream_idle != Some(idle) {
