@@ -20,6 +20,7 @@ pub mod mesh;
 pub mod palette;
 pub mod props;
 pub mod roads;
+pub mod template;
 
 use alloc::vec::Vec;
 

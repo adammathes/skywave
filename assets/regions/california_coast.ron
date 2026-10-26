@@ -1,0 +1,245 @@
+// California coast: a beach town on a bay. Ocean west, a beach band, a neon strip one or
+// two blocks inland, a small downtown behind it, a residential grid on the coastal plain,
+// curvy suburbs on the foothills, brown ridges with a highway pass, a farm valley.
+//
+// Layout and units: crates/world/src/template.rs and docs/WORLD_GENERATION.md. Distances
+// are meters, slopes are rise over run. Zone scores: every scored zone sums
+// base + coast(d) + slope(s) + downtown(d) + highway(d) + noise per 16 m cell and the
+// highest total wins; Beach, Strip and Highway are placed by structure, Park patches are
+// placed on top.
+RegionTemplate(
+    name: "california_coast",
+    driving_side: Right,
+    sign_language: EnUs,
+    era: EraDefaults(year: 1984, street_lights: Sodium, palette: "sunbleached_pastel"),
+
+    coast: Coast(
+        side: West,
+        water: Ocean,
+        offset_m: (140, 220),
+        wiggle_m: 45,
+        bays: (1, 2),
+        bay_depth_m: (200, 320),
+        bay_width_m: (1000, 1400),
+        // The canal motif: a few finger canals behind one end of the strip.
+        canals: Some(Canals(chance: 0.8, fingers: (3, 4), spacing_m: 64, length_m: (180, 260), width_m: 16)),
+    ),
+
+    elevation: Elevation(
+        water_level_m: 0,
+        shelf_depth_m: 14,
+        beach_width_m: (60, 120),
+        beach_height_m: 2.5,
+        plain_width_m: (720, 860),
+        plain_rise_m: (12, 22),
+        relief_m: 3,
+        warp_m: 140,
+        ridge_count: (2, 3),
+        ridge_height_m: (120, 250),
+        ridge_width_m: (170, 240),
+        valley_count: (1, 2),
+        valley_length_m: (520, 760),
+        valley_width_m: (300, 420),
+        valley_floor_m: (8, 20),
+    ),
+
+    layout: Layout(
+        strip: StripRule(length_m: (800, 1500), inland_m: (60, 110), width_m: (70, 96)),
+        downtown_inland_m: (260, 400),
+        highway: HighwayRule(corridor_m: 44, pass_depth: 0.62, pass_width_m: 200),
+        parks: ParkRule(count: (2, 4), radius_m: (60, 110)),
+        pier: true,
+        overlooks: (1, 2),
+    ),
+
+    zones: Zones(
+        downtown: ZoneRule(
+            score: Some(Score(
+                base: 0,
+                coast: [],
+                slope: [(0.06, 0), (0.14, -3)],
+                downtown: [(0, 3.2), (150, 2.6), (240, -1), (400, -4)],
+                highway: [],
+                noise: 0.7,
+                noise_scale_m: 160,
+            )),
+            block_m: ((80, 120), (60, 90)),
+            streets: Grid,
+            alleys: true,
+            styles: [Deco, StuccoBox, Brick, Glass],
+            trees: [(Palm, 0.5), (Jacaranda, 0.5)],
+            props: Props(
+                street_light_m: 30, street_tree_m: 14, hydrant_m: 80, power_pole_m: 0,
+                bench_per_km: 10, billboard_per_km: 0, neon: 0.25, parked_cars: (0.4, 0.7),
+            ),
+        ),
+        strip: ZoneRule(
+            score: None,
+            block_m: ((90, 140), (50, 80)),
+            streets: Grid,
+            alleys: true,
+            styles: [StuccoBox, Deco, Motel, StripMall, Dingbat],
+            trees: [(Palm, 0.8), (FanPalm, 0.2)],
+            props: Props(
+                street_light_m: 30, street_tree_m: 18, hydrant_m: 90, power_pole_m: 0,
+                bench_per_km: 12, billboard_per_km: 2, neon: 0.7, parked_cars: (0.4, 0.7),
+            ),
+        ),
+        residential: ZoneRule(
+            score: Some(Score(
+                base: 1.0,
+                coast: [(0, 0.6), (950, 0.6), (1250, -1.0)],
+                slope: [(0.05, 0.3), (0.1, -0.6), (0.16, -2)],
+                downtown: [(0, -1.5), (260, 0), (500, 0.2)],
+                highway: [],
+                noise: 0.3,
+                noise_scale_m: 240,
+            )),
+            block_m: ((90, 130), (60, 80)),
+            streets: Grid,
+            alleys: false,
+            styles: [StuccoBox, Dingbat, Craftsman, Bungalow],
+            trees: [(Palm, 0.35), (Jacaranda, 0.25), (Oak, 0.25), (Sycamore, 0.15)],
+            props: Props(
+                street_light_m: 60, street_tree_m: 16, hydrant_m: 110, power_pole_m: 45,
+                bench_per_km: 0.5, billboard_per_km: 0, neon: 0, parked_cars: (0.25, 0.5),
+            ),
+        ),
+        suburb: ZoneRule(
+            score: Some(Score(
+                base: 0.6,
+                coast: [(0, -3), (500, -1), (800, 0.6)],
+                slope: [(0, 0.2), (0.04, 1.1), (0.12, 1.5), (0.2, 0.5), (0.28, -2)],
+                downtown: [(0, -3), (300, -0.8), (600, 0.3)],
+                highway: [],
+                noise: 0.35,
+                noise_scale_m: 260,
+            )),
+            block_m: ((110, 180), (70, 110)),
+            streets: Curvy,
+            alleys: false,
+            styles: [Ranch, Tract70s, StuccoBox],
+            trees: [(Oak, 0.4), (Pine, 0.2), (Eucalyptus, 0.2), (Jacaranda, 0.2)],
+            props: Props(
+                street_light_m: 70, street_tree_m: 22, hydrant_m: 140, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.1, 0.3),
+            ),
+        ),
+        industrial: ZoneRule(
+            score: Some(Score(
+                base: -0.4,
+                coast: [(0, -0.5), (120, 0.4)],
+                slope: [(0, 0.4), (0.05, 0.1), (0.09, -3)],
+                downtown: [(0, -4), (450, -1.5), (650, 0.3)],
+                highway: [(0, 1.8), (140, 1.4), (300, -1.5)],
+                noise: 0.8,
+                noise_scale_m: 300,
+            )),
+            block_m: ((180, 260), (140, 220)),
+            streets: Industrial,
+            alleys: false,
+            styles: [Warehouse, Brick],
+            trees: [(Eucalyptus, 1.0)],
+            props: Props(
+                street_light_m: 45, street_tree_m: 0, hydrant_m: 120, power_pole_m: 40,
+                bench_per_km: 0, billboard_per_km: 3, neon: 0, parked_cars: (0.05, 0.25),
+            ),
+        ),
+        commercial: ZoneRule(
+            score: Some(Score(
+                base: 0,
+                coast: [],
+                slope: [(0.06, 0), (0.14, -3)],
+                downtown: [(0, 1.6), (300, 1.6), (430, 0.9), (580, -1.5)],
+                highway: [(0, 0.3), (200, 0)],
+                noise: 0.5,
+                noise_scale_m: 180,
+            )),
+            block_m: ((90, 130), (60, 90)),
+            streets: Grid,
+            alleys: true,
+            styles: [StripMall, StuccoBox, Deco, Brick],
+            trees: [(Palm, 0.6), (FanPalm, 0.4)],
+            props: Props(
+                street_light_m: 35, street_tree_m: 20, hydrant_m: 90, power_pole_m: 0,
+                bench_per_km: 4, billboard_per_km: 1, neon: 0.35, parked_cars: (0.3, 0.6),
+            ),
+        ),
+        park: ZoneRule(
+            score: None,
+            block_m: ((120, 240), (100, 200)),
+            streets: Curvy,
+            alleys: false,
+            styles: [],
+            trees: [(Palm, 0.3), (Oak, 0.3), (Sycamore, 0.2), (Cypress, 0.2)],
+            props: Props(
+                street_light_m: 40, street_tree_m: 12, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 20, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.2),
+            ),
+        ),
+        beach: ZoneRule(
+            score: None,
+            block_m: ((150, 300), (60, 120)),
+            streets: Beachfront,
+            alleys: false,
+            styles: [StuccoBox],
+            trees: [(Palm, 0.7), (FanPalm, 0.3)],
+            props: Props(
+                street_light_m: 35, street_tree_m: 25, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 15, billboard_per_km: 0, neon: 0.1, parked_cars: (0.3, 0.6),
+            ),
+        ),
+        farmland: ZoneRule(
+            score: Some(Score(
+                base: 0,
+                coast: [(0, -5), (700, -2), (880, 1.2)],
+                slope: [(0, 1.6), (0.05, 1.0), (0.09, -2)],
+                downtown: [(0, -5), (350, -2), (600, 0.5), (800, 1.0)],
+                highway: [(0, -1), (120, 0)],
+                noise: 0.3,
+                noise_scale_m: 300,
+            )),
+            block_m: ((400, 805), (400, 805)),
+            streets: Sections,
+            alleys: false,
+            styles: [Barn, Ranch],
+            trees: [(Orchard, 0.6), (Eucalyptus, 0.3), (Oak, 0.1)],
+            props: Props(
+                street_light_m: 0, street_tree_m: 0, hydrant_m: 0, power_pole_m: 50,
+                bench_per_km: 0, billboard_per_km: 1, neon: 0, parked_cars: (0.0, 0.05),
+            ),
+        ),
+        hills: ZoneRule(
+            score: Some(Score(
+                base: 0.4,
+                coast: [(0, -4), (600, -1), (900, 0.4)],
+                slope: [(0.1, -2), (0.18, 1.4), (0.3, 3)],
+                downtown: [],
+                highway: [],
+                noise: 0.2,
+                noise_scale_m: 200,
+            )),
+            block_m: ((200, 400), (150, 300)),
+            streets: Switchback,
+            alleys: false,
+            styles: [Ranch, Craftsman, Glass],
+            trees: [(Eucalyptus, 0.5), (Oak, 0.4), (Pine, 0.1)],
+            props: Props(
+                street_light_m: 0, street_tree_m: 0, hydrant_m: 250, power_pole_m: 60,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.1),
+            ),
+        ),
+        highway: ZoneRule(
+            score: None,
+            block_m: ((400, 800), (44, 44)),
+            streets: Grid,
+            alleys: false,
+            styles: [],
+            trees: [(Eucalyptus, 0.6), (Palm, 0.4)],
+            props: Props(
+                street_light_m: 50, street_tree_m: 0, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 4, neon: 0, parked_cars: (0.0, 0.0),
+            ),
+        ),
+    ),
+)

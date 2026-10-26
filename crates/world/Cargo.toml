@@ -7,7 +7,14 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# Region template derives. serde is used without its `std` feature, so the crate stays
+# no_std with this on; parsing RON happens in `app` and the tools.
+default = ["serde"]
+serde = ["dep:serde"]
+
 [dependencies]
+serde = { workspace = true, optional = true }
 skywave-core.workspace = true
 place.workspace = true
 # Collision answers the car sim's `Ground` trait and moves its `VehicleState`.
