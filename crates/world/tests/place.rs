@@ -79,3 +79,207 @@ fn places_validate_and_are_deterministic() {
         "place hashes moved; see the update rule on GOLDEN"
     );
 }
+
+/// Where a terrain point under a road is judged against that road: on its asphalt, away
+/// from junctions (whose fans blend between roads) and from where its graded band overlaps
+/// another stretch of road (crossings, the legs of a tight switchback).
+struct Roads<'a> {
+    place: &'a place::Place,
+    net: &'a world::roads::Network,
+    /// Junction centers and the radius their fans and trims cover.
+    zones: Vec<(world::math::V2, f32)>,
+}
+
+impl Roads<'_> {
+    /// The edge, profile segment and surface height of the road whose asphalt (plus `slack`)
+    /// holds `q` with the height closest to `y`, if any, outside junctions.
+    fn under(&self, q: world::math::V2, y: f32, slack: f32) -> Option<(usize, usize, f32)> {
+        use world::math::segment_distance;
+        if self.zones.iter().any(|&(c, r)| (q - c).length() < r) {
+            return None;
+        }
+        let mut best: Option<(usize, usize, f32)> = None;
+        for (i, e) in self.place.roads.edges.iter().enumerate() {
+            let path = &self.net.paths[i];
+            let (d, k) = (0..path.raw.len() - 1)
+                .map(|k| (segment_distance(q, path.raw[k], path.raw[k + 1]).0, k))
+                .fold((f32::INFINITY, 0), |a, b| if b.0 < a.0 { b } else { a });
+            if d <= e.width_m * 0.5 + slack {
+                let h = world::roads::profile_height(&path.raw, &path.raw_y, q);
+                if best.is_none_or(|b| (h - y).abs() < (b.2 - y).abs()) {
+                    best = Some((i, k, h));
+                }
+            }
+        }
+        best
+    }
+
+    /// Whether another stretch of `edge` far along it lies near `q` (a folded switchback).
+    fn folded(&self, q: world::math::V2, edge: usize, seg: usize) -> bool {
+        use world::math::segment_distance;
+        let path = &self.net.paths[edge];
+        let arc = |k: usize, t: f32| {
+            let mut s = 0.0;
+            for w in path.raw[..=k].windows(2) {
+                s += (w[1] - w[0]).length();
+            }
+            s + t * (path.raw[k + 1] - path.raw[k]).length()
+        };
+        let s_q = arc(seg, segment_distance(q, path.raw[seg], path.raw[seg + 1]).1);
+        (0..path.raw.len() - 1).any(|k| {
+            let (d, t) = segment_distance(q, path.raw[k], path.raw[k + 1]);
+            d < 20.0 && (arc(k, t) - s_q).abs() > 2.0 * d + 8.0
+        })
+    }
+}
+
+/// Meshes of a procedural place: well formed, within the chunk budget, roads on their
+/// profiles, the ground graded under them, water planes only where there is water.
+#[test]
+fn coast_meshes_sit_roads_on_the_terrain() {
+    use world::math::V2;
+    use world::mesh::terrain::{TerrainGrid, UNDER_ROAD_M};
+    use world::roads::{Network, DECK_CLEARANCE_M};
+    use world::{build_with_stats, MeshKind, Palette, Pattern};
+    let t = template();
+    for seed in 1..=2u64 {
+        let p = build_place(Seed(seed), &t);
+        let start = Instant::now();
+        let (meshes, stats) = build_with_stats(&p, &Palette::socal_1985());
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        let net = Network::new(&p);
+        let (grid, graded) = TerrainGrid::graded(&p, &net);
+        let max_vertices = meshes.iter().map(|c| c.mesh.vertices.len()).max().unwrap();
+        let count = |k: MeshKind| meshes.iter().filter(|c| c.kind == k).count();
+        println!(
+            "seed {seed}: {} meshes ({} ground, {} road, {} marking), {} triangles, {} vertices, max {max_vertices} per mesh, {ms:.0} ms",
+            meshes.len(),
+            count(MeshKind::Ground),
+            count(MeshKind::Road),
+            count(MeshKind::Marking),
+            stats.triangles,
+            stats.vertices,
+        );
+        assert_eq!(count(MeshKind::Ground), p.header.chunk_count());
+        assert!(max_vertices <= 256 * 1024);
+        let roads = Roads {
+            place: &p,
+            net: &net,
+            zones: net
+                .junctions
+                .iter()
+                .map(|j| {
+                    let r = j.ends.iter().map(|e| e.trim + e.hw).fold(0.0, f32::max);
+                    (j.pos, r)
+                })
+                .collect(),
+        };
+
+        // Every asphalt vertex of a ribbon on its profile; the ground there never through
+        // it (interpolated over 4 m cells it may dip a little under it at grade breaks).
+        let (mut checked, mut worst_road) = (0usize, 0.0f32);
+        let (mut worst_under, mut worst_over) = (0.0f32, f32::MIN);
+        for c in &meshes {
+            let m = &c.mesh;
+            assert!(m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
+            for v in &m.vertices {
+                assert!(v.pos.iter().chain(&v.normal).all(|x| x.is_finite()));
+            }
+            if c.kind != MeshKind::Road {
+                continue;
+            }
+            let asphalt = m
+                .vertices
+                .iter()
+                .filter(|v| v.color[3] == Pattern::Asphalt as u8);
+            for v in asphalt {
+                let q = V2::new(v.pos[0], v.pos[2]);
+                // Miter offsets put ribbon edges up to a little past the half width.
+                let Some((edge, seg, y)) = roads.under(q, v.pos[1], 0.25) else {
+                    continue;
+                };
+                checked += 1;
+                let off = (v.pos[1] - y).abs();
+                worst_road = worst_road.max(off);
+                assert!(
+                    off <= 0.05,
+                    "seed {seed}: road vertex {:?} {off} m off its profile",
+                    v.pos
+                );
+                let own = grid.triangle_at(q.x, q.y).iter().all(|&(ix, iz)| {
+                    let (e, k) = graded[iz * grid.w + ix];
+                    e as usize == edge && (k as usize).abs_diff(seg) <= 1
+                });
+                let g = grid.height_at(q.x, q.y);
+                if !own || roads.folded(q, edge, seg) || y - g > DECK_CLEARANCE_M {
+                    continue;
+                }
+                worst_under = worst_under.max(y - g);
+                worst_over = worst_over.max(g - y);
+                assert!(
+                    g - y <= UNDER_ROAD_M,
+                    "seed {seed}: ground {g} pokes through the road at {:?}",
+                    v.pos
+                );
+                assert!(
+                    y - g <= 0.25,
+                    "seed {seed}: ground {g} far under the road at {:?}",
+                    v.pos
+                );
+            }
+        }
+        assert!(checked > 1000);
+
+        // Every terrain sample under a road's asphalt within 0.1 m of its profile.
+        let (mut samples, mut worst_sample) = (0usize, 0.0f32);
+        for iz in 0..grid.h {
+            for ix in 0..grid.w {
+                let (e, k) = graded[iz * grid.w + ix];
+                if e == u32::MAX {
+                    continue;
+                }
+                let q = grid.pos(ix, iz);
+                let g = grid.sample(ix, iz);
+                let Some((edge, seg, y)) = roads.under(q, g, 0.0) else {
+                    continue;
+                };
+                if edge != e as usize
+                    || (k as usize).abs_diff(seg) > 1
+                    || roads.folded(q, edge, seg)
+                {
+                    continue;
+                }
+                samples += 1;
+                worst_sample = worst_sample.max((g - y).abs());
+                assert!(
+                    (g - y).abs() <= 0.1,
+                    "seed {seed}: terrain sample {g} at {q:?} under a road at {y}"
+                );
+            }
+        }
+        println!(
+            "seed {seed}: {checked} asphalt vertices, worst {worst_road:.3} m off profile; ground \
+             under them {worst_under:.3} m under to {worst_over:.3} m over; {samples} terrain \
+             samples under roads, worst {worst_sample:.3} m off"
+        );
+        assert!(samples > 1000);
+
+        // Water planes only in chunks with water, and in every one of them.
+        let res = usize::from(p.terrain.res_per_chunk);
+        let cw = usize::from(p.header.size_chunks[0]) * res;
+        for c in meshes.iter().filter(|c| c.kind == MeshKind::Ground) {
+            let wet = c
+                .mesh
+                .vertices
+                .iter()
+                .any(|v| v.color[3] == Pattern::Water as u8);
+            let [cx, cz] = [c.chunk[0] as usize, c.chunk[1] as usize];
+            let has = (0..res).any(|j| {
+                (0..res).any(|i| {
+                    p.zones.cells[(cz * res + j) * cw + cx * res + i] == place::ZoneId::Water
+                })
+            });
+            assert_eq!(wet, has, "seed {seed}: chunk {:?}", c.chunk);
+        }
+    }
+}

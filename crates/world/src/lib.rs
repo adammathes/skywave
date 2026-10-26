@@ -28,9 +28,10 @@ pub mod template;
 
 use alloc::vec::Vec;
 
-use place::{Place, ZoneId, SIDEWALK_WIDTH_M};
+use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
 pub use collide::{resolve, Impact, WorldCollider};
+pub use mesh::terrain::TerrainGrid;
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;
 
@@ -133,7 +134,11 @@ pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, Bu
     let mut stats = BuildStats::default();
     let net = roads::Network::new(place);
     let side_zone = side_zones(place, &net);
-    let blocks = ground::blocks(&net);
+    let blocks = if is_terrain_place(place) {
+        Vec::new()
+    } else {
+        ground::blocks(&net)
+    };
 
     // Plan every building first: the ground needs to know where strip malls face.
     let lookup = Lookup::new(place, &net);
@@ -150,8 +155,25 @@ pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, Bu
         .collect();
     let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
 
-    let mut props = ground::build(place, &blocks, &fronts, palette, seed, &mut out);
-    roads::build(place, &net, &side_zone, palette, seed, &mut out);
+    // The test town lies on flat lot pads in an apron; a terrain place on its heightfield
+    // with the roads graded in (and, until the detailing pass, no props).
+    let terrain = is_terrain_place(place).then(|| TerrainGrid::new(place, &net));
+    let mut props = match &terrain {
+        None => ground::build(place, &blocks, &fronts, palette, seed, &mut out),
+        Some(g) => {
+            mesh::terrain::build(place, g, palette, seed, &mut out);
+            Vec::new()
+        }
+    };
+    roads::build(
+        place,
+        &net,
+        &side_zone,
+        palette,
+        seed,
+        terrain.as_ref(),
+        &mut out,
+    );
 
     for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
         let fp = ground::to_v2(&b.footprint);
@@ -166,12 +188,14 @@ pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, Bu
         stats.max_building_triangles = stats.max_building_triangles.max(s.triangles);
     }
 
-    let parks: Vec<Vec<V2>> = blocks
-        .iter()
-        .filter(|b| ground::is_park(place, b))
-        .map(|b| b.poly.clone())
-        .collect();
-    props.extend(props::place(place, &net, &side_zone, &parks, seed));
+    if terrain.is_none() {
+        let parks: Vec<Vec<V2>> = blocks
+            .iter()
+            .filter(|b| ground::is_park(place, b))
+            .map(|b| b.poly.clone())
+            .collect();
+        props.extend(props::place(place, &net, &side_zone, &parks, seed));
+    }
     let kit = props::PropKit::new();
     for p in &props {
         props::build(out.at(p.pos, MeshKind::Prop), p, palette, &kit);
@@ -188,6 +212,12 @@ pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, Bu
         stats.triangles_by_kind[c.kind as usize] += t;
     }
     (meshes, stats)
+}
+
+/// Whether `place` stands on its own heightfield (a procedural or compiled place) rather
+/// than on the hand-laid test town's flat lot pads at `y = 0`.
+pub fn is_terrain_place(place: &Place) -> bool {
+    place.header.region != RegionId::TestTown
 }
 
 /// Determinism fingerprint of built meshes: every vertex and index, in order.

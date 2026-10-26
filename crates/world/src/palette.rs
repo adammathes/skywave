@@ -37,6 +37,13 @@ pub struct Palette {
     pub roof_gravel: Rgb,
     pub lawn: Rgb,
     pub lawn_dry: Rgb,
+    // Open country and water.
+    /// Dry chaparral on the hills.
+    pub scrub: Rgb,
+    /// Tilled fields and cut banks.
+    pub soil: Rgb,
+    /// Shallow coastal water, blue-green.
+    pub water: Rgb,
     // Plants.
     pub palm_green: Rgb,
     pub leaf_green: Rgb,
@@ -82,6 +89,9 @@ impl Palette {
             roof_gravel: srgb(0x7E7A72),
             lawn: srgb(0x6A9440),
             lawn_dry: srgb(0x9C9A58),
+            scrub: srgb(0x8C8256),
+            soil: srgb(0x8E6C4A),
+            water: srgb(0x2A6E78),
             palm_green: srgb(0x4A7A34),
             leaf_green: srgb(0x3E6A2C),
             leaf_light: srgb(0x6E9A3E),
