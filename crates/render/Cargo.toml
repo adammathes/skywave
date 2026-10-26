@@ -1,6 +1,6 @@
 [package]
 name = "render"
-description = "Skywave's wgpu renderer: sun shadow map, HDR forward pass, tonemap. Runs on WebGL2."
+description = "Skywave's wgpu renderer: cascaded sun shadows, pattern atlas, analytic sky, HDR forward pass, tonemap. Runs on WebGL2."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
