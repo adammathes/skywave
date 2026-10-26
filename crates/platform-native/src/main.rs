@@ -7,7 +7,7 @@
 //! with the button or when the window loses focus. Platforms that refuse both just keep a
 //! free cursor; the raw motion still drives the look.
 //!
-//! Usage: `skywave [--seed N] [--stats]`. `--stats` also prints the detected gamepads at
+//! Usage: `skywave [--seed N] [--car ID] [--stats]`. `--stats` also prints the detected gamepads at
 //! startup and as they connect; otherwise that goes to the info log (`RUST_LOG=info`).
 
 mod pad;
@@ -37,12 +37,15 @@ const PIXELS_PER_NOTCH: f64 = 100.0;
 #[derive(Debug, PartialEq)]
 struct Options {
     seed: u64,
+    /// Built-in vehicle id.
+    car: String,
     stats: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut opts = Options {
         seed: 1,
+        car: app::DEFAULT_VEHICLE.to_string(),
         stats: false,
     };
     let mut args = args.into_iter();
@@ -53,6 +56,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
                 let v = args.next().ok_or("--seed needs a value")?;
                 opts.seed = v.parse().map_err(|_| format!("bad seed: {v}"))?;
             }
+            "--car" => opts.car = args.next().ok_or("--car needs a vehicle id")?,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -236,7 +240,7 @@ impl Gpu {
         self.renderer.resize((width, height));
     }
 
-    fn draw(&mut self, app: &App, alpha: f32) {
+    fn draw(&mut self, app: &mut App, alpha: f32) {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -355,7 +359,7 @@ impl ApplicationHandler for Shell {
                 }
                 let steps = self.app.update(input, dt.as_secs_f64());
                 if let Some(gpu) = &mut self.gpu {
-                    gpu.draw(&self.app, steps.alpha);
+                    gpu.draw(&mut self.app, steps.alpha);
                 }
                 if self.opts.stats && !dt.is_zero() {
                     if let Some(line) = self.stats.record(dt) {
@@ -391,7 +395,7 @@ fn main() -> ExitCode {
             if !e.is_empty() {
                 eprintln!("skywave: {e}");
             }
-            eprintln!("usage: skywave [--seed N] [--stats]");
+            eprintln!("usage: skywave [--seed N] [--car ID] [--stats]");
             return if e.is_empty() {
                 ExitCode::SUCCESS
             } else {
@@ -412,8 +416,15 @@ fn main() -> ExitCode {
     } else {
         log::info!("{}", pads.summary());
     }
+    let app = match App::new_with(Seed(opts.seed), &opts.car) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("skywave: {e}");
+            return ExitCode::from(2);
+        }
+    };
     let mut shell = Shell {
-        app: App::new(Seed(opts.seed)),
+        app,
         opts,
         input: InputMapper::default(),
         pads,
@@ -451,17 +462,20 @@ mod tests {
             args(&[]),
             Ok(Options {
                 seed: 1,
+                car: "corsair_gtx".to_string(),
                 stats: false
             })
         );
         assert_eq!(
-            args(&["--stats", "--seed", "42"]),
+            args(&["--stats", "--seed", "42", "--car", "palisade_wagon"]),
             Ok(Options {
                 seed: 42,
+                car: "palisade_wagon".to_string(),
                 stats: true
             })
         );
         assert!(args(&["--seed"]).is_err());
+        assert!(args(&["--car"]).is_err());
         assert!(args(&["--seed", "x"]).is_err());
         assert!(args(&["--fast"]).is_err());
         assert_eq!(args(&["--help"]), Err(String::new()));

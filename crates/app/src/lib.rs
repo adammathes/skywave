@@ -3,11 +3,18 @@
 //! The platform crate feeds raw input events to an [`InputMapper`], samples it once per
 //! frame into an [`InputState`], calls
 //! [`App::update`] with the real frame time, and draws [`App::scene_view`]. The
-//! simulation itself only ever advances in fixed `SIM_DT` steps.
+//! simulation itself only ever advances in fixed `SIM_DT` steps: the car ([`drive`]), then
+//! its cameras ([`camera`]), then the clock ([`lighting`]).
 
+pub mod camera;
 pub mod daylight;
+pub mod drive;
 mod input;
+pub mod lighting;
 pub mod vehicles;
+
+pub use camera::CameraMode;
+pub use drive::{HudState, DEFAULT_VEHICLE};
 
 pub use input::{
     pad_table, Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context,
@@ -15,10 +22,13 @@ pub use input::{
     BINDINGS_VERSION, MOUSE_BUTTONS, MOUSE_LOOK_PER_PIXEL, MOUSE_RIGHT,
 };
 
+use camera::CameraRig;
+use drive::{CarMeshes, Drive, DriveGround};
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
+use lighting::TimeOfDay;
 use place::Place;
-use render::{Camera, Mesh, MeshId, MeshInstance, SceneView, Sky, Sun, Vertex};
+use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
 use world::{ChunkMesh, Glow, Palette, WorldMesh};
 
@@ -38,7 +48,7 @@ const GLOW_BOOST: f32 = 1.8;
 /// read as warmer panes in daylight.
 const WINDOW_TINT_256: u32 = 24;
 
-/// The free-fly camera, the entire simulation state for now.
+/// The free-fly debug camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FlyCamera {
     pos: Vec3,
@@ -89,20 +99,37 @@ impl FlyCamera {
 pub struct App {
     clock: FixedStep,
     ticks: u64,
+    /// The free-fly camera drives the view instead of the car's cameras.
+    fly: bool,
     prev: FlyCamera,
     curr: FlyCamera,
+    drive: Drive,
+    ground: DriveGround,
+    camera: CameraRig,
+    time: TimeOfDay,
     meshes: Vec<Mesh>,
+    car_meshes: CarMeshes,
+    /// The world's instances, then this frame's car instances (refilled by `scene_view`).
     instances: Vec<MeshInstance>,
+    world_instances: usize,
+    lights: [PointLight; 2],
 }
 
 impl App {
+    /// The default car at the start of the strip.
     pub fn new(seed: Seed) -> App {
+        App::new_with(seed, DEFAULT_VEHICLE).expect("the default car is built in")
+    }
+
+    /// The built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) at the start of the strip.
+    pub fn new_with(seed: Seed, vehicle_id: &str) -> Result<App, String> {
+        let drive = Drive::new(vehicle_id)?;
         // The test town's layout is fixed; the session seed drives its detailing.
         let mut place = Place::test_grid();
         place.header.seed = seed.0;
         let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
-        let meshes = render_meshes(&chunks);
-        let instances = (0..meshes.len())
+        let mut meshes = render_meshes(&chunks);
+        let mut instances: Vec<MeshInstance> = (0..meshes.len())
             .map(|i| MeshInstance {
                 mesh: MeshId(i as u32),
                 transform: Mat4::IDENTITY.to_cols_array_2d(),
@@ -113,20 +140,67 @@ impl App {
                 },
             })
             .collect();
-        // Eye height above the arterial, in the westbound lane at the east end of the
-        // strip, looking west down it with the afternoon sun behind.
-        let camera = FlyCamera {
-            pos: Vec3::new(92.0, 3.0, -3.6),
-            yaw: std::f32::consts::FRAC_PI_2 - 0.06,
-            pitch: -0.05,
+        let world_instances = instances.len();
+        let mut add = |m: Mesh| {
+            meshes.push(m);
+            MeshId(meshes.len() as u32 - 1)
         };
-        App {
+        let eye = camera::cockpit_eye(&drive.spec, &camera::TUNING);
+        let car_meshes = CarMeshes {
+            body: add(drive::body_mesh(&drive.spec, eye)),
+            wheel: add(drive::wheel_mesh()),
+            lamps: add(drive::lamp_mesh(&drive.spec)),
+        };
+        // Body, lamps and four wheels.
+        instances.reserve_exact(6);
+        let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
+        let fly = fly_from(&camera.pose(&drive, 1.0));
+        Ok(App {
             clock: FixedStep::new(),
             ticks: 0,
-            prev: camera,
-            curr: camera,
+            fly: false,
+            prev: fly,
+            curr: fly,
+            ground: drive::ground_for(&place),
+            drive,
+            camera,
+            time: TimeOfDay::default(),
             meshes,
+            car_meshes,
             instances,
+            world_instances,
+            lights: [PointLight {
+                position: [0.0; 3],
+                color: [0.0; 3],
+                radius: 1.0,
+            }; 2],
+        })
+    }
+
+    /// Selects a car camera.
+    pub fn set_camera_mode(&mut self, mode: CameraMode) {
+        self.camera.set_mode(mode);
+    }
+
+    /// Switches the free-fly debug camera on or off. It starts where the view is now.
+    pub fn set_fly(&mut self, on: bool) {
+        if on && !self.fly {
+            self.curr = fly_from(&self.camera.pose(&self.drive, 1.0));
+            self.prev = self.curr;
+        }
+        self.fly = on;
+    }
+
+    /// What the HUD shows this frame.
+    pub fn hud_state(&self) -> HudState {
+        let s = &self.drive.state;
+        HudState {
+            speed_mps: s.speed_mps,
+            rpm: s.engine_rpm,
+            gear: s.gear,
+            time_of_day: self.time.clock.seconds_of_day as f32,
+            camera_mode: self.camera.mode(),
+            headlights: self.drive.headlights,
         }
     }
 
@@ -144,9 +218,29 @@ impl App {
     /// Pass the returned `alpha` to [`App::scene_view`].
     pub fn update(&mut self, input: &InputState, dt_real: f64) -> Steps {
         let steps = self.clock.advance(dt_real);
+        // Presses act once per frame, however many steps it holds.
+        if input.just_pressed(Action::CameraCycle) {
+            if input.pressed(Action::DebugOverlay) {
+                self.set_fly(!self.fly);
+            } else if !self.fly {
+                self.camera.cycle();
+            }
+        }
+        self.drive.frame(input);
+        let none = InputState::default();
+        let dt = SIM_DT as f32;
         for _ in 0..steps.count {
             self.prev = self.curr;
-            self.curr.step(input, SIM_DT as f32);
+            let car_input = if self.fly {
+                self.curr.step(input, dt);
+                vehicle::VehicleInput::default()
+            } else {
+                drive::vehicle_input(input)
+            };
+            self.drive.step(car_input, &self.ground);
+            let cam_input = if self.fly { &none } else { input };
+            self.camera.step(&self.drive, cam_input, dt, &self.ground);
+            self.time.step(input, SIM_DT);
             self.ticks += 1;
         }
         steps
@@ -156,6 +250,7 @@ impl App {
     pub fn state_hash(&self) -> u64 {
         let c = &self.curr;
         let bits = |v: f32| u64::from(v.to_bits());
+        let clock = &self.time.clock;
         hash64(
             self.ticks,
             &[
@@ -164,27 +259,57 @@ impl App {
                 bits(c.pos.z),
                 bits(c.yaw),
                 bits(c.pitch),
+                self.drive.state.hash(),
+                clock.seconds_of_day.to_bits(),
+                u64::from(clock.day_of_year),
+                u64::from(self.drive.headlights),
             ],
         )
     }
 
     /// The scene interpolated `alpha` of the way from the previous to the current step.
-    pub fn scene_view(&self, alpha: f32, aspect: f32) -> SceneView<'_> {
-        let cam = self.prev.lerp(&self.curr, alpha.clamp(0.0, 1.0));
-        let proj = directx::perspective(62f32.to_radians(), aspect.max(1e-3), 0.25, 3000.0);
+    /// Refills the car's instances in place (no allocation after the first frame).
+    pub fn scene_view(&mut self, alpha: f32, aspect: f32) -> SceneView<'_> {
+        let alpha = alpha.clamp(0.0, 1.0);
+        let aspect = aspect.max(1e-3);
+        let (view, proj) = if self.fly {
+            let cam = self.prev.lerp(&self.curr, alpha);
+            let proj = directx::perspective(FLY_FOV_DEG.to_radians(), aspect, 0.25, 3000.0);
+            (cam.view(), proj)
+        } else {
+            let pose = self.camera.pose(&self.drive, alpha);
+            let proj = directx::perspective(pose.fov_y_rad, aspect, pose.near_m, pose.far_m);
+            (pose.view(), proj)
+        };
+        self.instances.truncate(self.world_instances);
+        self.drive
+            .push_instances(alpha, &self.car_meshes, &mut self.instances);
+        let (lights, n) = self.drive.lights(alpha);
+        self.lights = lights;
+        let daylight = self.time.daylight();
         SceneView {
             camera: Camera {
-                view: cam.view().to_cols_array_2d(),
+                view: view.to_cols_array_2d(),
                 proj: proj.to_cols_array_2d(),
             },
-            sun: Sun {
-                direction: Vec3::new(0.70, 0.55, 0.45).normalize().to_array(),
-                illuminance: [80.0, 74.0, 63.0],
-            },
-            sky: Sky::default(),
+            sun: lighting::sun(&daylight),
+            sky: lighting::sky(&daylight),
             instances: &self.instances,
-            lights: &[],
+            lights: &self.lights[..n],
         }
+    }
+}
+
+/// Vertical field of view of the free-fly camera, degrees.
+const FLY_FOV_DEG: f32 = 62.0;
+
+/// A free-fly camera where `pose` is, looking the same way.
+fn fly_from(pose: &camera::CameraPose) -> FlyCamera {
+    let f = pose.forward();
+    FlyCamera {
+        pos: pose.eye,
+        yaw: (-f.x).atan2(-f.z),
+        pitch: f.y.clamp(-1.0, 1.0).asin().clamp(-MAX_PITCH, MAX_PITCH),
     }
 }
 
@@ -224,8 +349,10 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
         // Emissive: the renderer encodes window-flagged glow (scaled by time of day) and plain
         // glow with an intensity; the town's Glow classes map onto that. The atlas uv stays in
         // the white tile until the pattern ids are mapped onto atlas tiles.
+        // Street lamps share the window flag, so they are dark by day and lit from dusk.
         let emissive = match e[3] {
             x if x == Glow::Window as u8 => render::emissive_window([e[0], e[1], e[2]], 1.0),
+            x if x == Glow::Lamp as u8 => render::emissive_window([e[0], e[1], e[2]], 2.0),
             x if x == Glow::None as u8 => [0, 0, 0, 0],
             _ => render::emissive([e[0], e[1], e[2]], 2.0),
         };
@@ -260,48 +387,154 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
 mod tests {
     use super::*;
 
-    /// A fixed script of (frame dt, held actions) with jittery frame times.
-    fn run_script(app: &mut App) {
+    /// Jittery frame times around 60 Hz.
+    fn frame_dt(frame: u32) -> f64 {
+        1.0 / 60.0 + f64::from(frame % 7) * 0.0013 - 0.003
+    }
+
+    /// The scripted drive: 5 s full throttle, 2 s steering right, 2 s braking. Returns the
+    /// peak speed.
+    fn run_script(app: &mut App) -> f32 {
         let mut input = InputState::default();
-        for frame in 0..600u32 {
+        let mut t = 0.0;
+        let mut peak = 0.0f32;
+        let mut frame = 0;
+        while t < 9.0 {
             input.clear();
-            if frame < 240 {
-                input.set(Action::FlyForward, 1.0);
+            if t < 5.0 {
+                input.set(Action::Throttle, 1.0);
+            } else if t < 7.0 {
+                input.set(Action::Steer, 0.6);
+            } else {
+                input.set(Action::Brake, 1.0);
             }
-            if (120..360).contains(&frame) {
-                input.set(Action::FlyLookX, 0.5);
-                input.set(Action::FlyUp, 1.0);
-            }
-            if frame >= 300 {
-                input.set(Action::FlyRight, 1.0);
-                input.set(Action::FlyLookY, 0.25);
-            }
-            let dt = 1.0 / 60.0 + f64::from(frame % 7) * 0.0013 - 0.003;
+            let dt = frame_dt(frame);
             app.update(&input, dt);
+            t += dt;
+            frame += 1;
+            peak = peak.max(app.drive.state.speed_mps);
+            let s = &app.drive.state;
+            assert!(
+                s.pos
+                    .iter()
+                    .chain(&s.rot)
+                    .chain(&s.vel)
+                    .all(|v| v.is_finite()),
+                "NaN at {t}"
+            );
+            let alpha = (frame % 4) as f32 / 4.0;
+            let view = app.scene_view(alpha, 1.5);
+            for i in view.instances {
+                assert!(Mat4::from_cols_array_2d(&i.transform).is_finite());
+            }
         }
+        peak
     }
 
     #[test]
-    fn update_is_deterministic_for_scripted_input() {
+    fn scripted_drive_moves_the_car_deterministically() {
         let mut a = App::new(Seed(1));
         let mut b = App::new(Seed(1));
-        run_script(&mut a);
+        let start = Vec3::from(a.drive.state.pos);
+        let peak = run_script(&mut a);
         run_script(&mut b);
         assert_eq!(a.ticks(), b.ticks());
-        assert!(a.ticks() > 1100, "{}", a.ticks());
+        assert!(a.ticks() >= 1080, "{}", a.ticks());
+        assert_eq!(a.drive.state, b.drive.state);
         assert_eq!(a.state_hash(), b.state_hash());
-        assert_eq!(a.curr, b.curr);
-        assert_ne!(a.curr, App::new(Seed(1)).curr);
+
+        let moved = (Vec3::from(a.drive.state.pos) - start).length();
+        assert!(moved > 50.0, "{moved}");
+        let end = a.drive.state.speed_mps;
+        assert!(peak > 15.0, "{peak}");
+        assert!(end < peak - 5.0, "{end} vs {peak}");
+        // Pinned: a change here is a change to the sim, the input mapping or the step
+        // order. Update it deliberately.
+        assert_eq!(
+            a.state_hash(),
+            0x863e_2110_3da3_c4c7,
+            "{:#x}",
+            a.state_hash()
+        );
     }
 
     #[test]
-    fn forward_flies_along_minus_z_at_fly_speed() {
+    fn the_wagon_drives_too() {
+        let mut app = App::new_with(Seed(1), "palisade_wagon").unwrap();
+        assert_eq!(app.drive.spec.id, "palisade_wagon");
+        let start = Vec3::from(app.drive.state.pos);
+        run_script(&mut app);
+        assert!((Vec3::from(app.drive.state.pos) - start).length() > 30.0);
+        assert!(App::new_with(Seed(1), "hovercar").is_err());
+    }
+
+    fn press(input: &mut InputState, action: Action) {
+        input.set(action, 1.0);
+        input.set_just_pressed(action, true);
+    }
+
+    #[test]
+    fn camera_cycle_and_the_debug_fly_toggle() {
         let mut app = App::new(Seed(0));
+        assert_eq!(app.hud_state().camera_mode, CameraMode::ChaseMid);
+        let mut input = InputState::default();
+        press(&mut input, Action::CameraCycle);
+        app.update(&input, SIM_DT);
+        assert_eq!(app.hud_state().camera_mode, CameraMode::ChaseFar);
+        app.update(&input, SIM_DT);
+        assert_eq!(app.hud_state().camera_mode, CameraMode::Cockpit);
+        assert!(!app.fly);
+
+        input.set(Action::DebugOverlay, 1.0);
+        app.update(&input, SIM_DT);
+        assert!(app.fly);
+        assert_eq!(
+            app.hud_state().camera_mode,
+            CameraMode::Cockpit,
+            "not cycled"
+        );
+        app.update(&input, SIM_DT);
+        assert!(!app.fly);
+    }
+
+    #[test]
+    fn hud_state_reads_the_car_clock_and_switches() {
+        let mut app = App::new(Seed(0));
+        let hud = app.hud_state();
+        assert_eq!(hud.gear, 1);
+        assert_eq!(hud.speed_mps, 0.0);
+        assert!(hud.rpm > 500.0);
+        assert!((hud.time_of_day - (17.0 * 3600.0 + 40.0 * 60.0)).abs() < 1.0);
+        assert!(!hud.headlights);
+        let mut input = InputState::default();
+        press(&mut input, Action::Headlights);
+        input.set(Action::Throttle, 1.0);
+        for _ in 0..60 {
+            app.update(&input, 1.0 / 60.0);
+            input.set_just_pressed(Action::Headlights, false);
+        }
+        let hud = app.hud_state();
+        assert!(hud.headlights);
+        assert!(hud.speed_mps > 2.0, "{}", hud.speed_mps);
+        assert!(hud.time_of_day > app.hud_state().time_of_day - 1.0);
+        // Headlights on: two pools of light ahead and the lamp mesh drawn.
+        let lamps = app.car_meshes.lamps;
+        let view = app.scene_view(0.5, 1.5);
+        assert_eq!(view.lights.len(), 2);
+        assert!(view.instances.iter().any(|i| i.mesh == lamps));
+    }
+
+    #[test]
+    fn fly_camera_flies_along_minus_z_at_fly_speed() {
+        let mut app = App::new(Seed(0));
+        app.set_fly(true);
         app.curr.yaw = 0.0;
         app.prev = app.curr;
         let start = app.curr.pos;
+        let car = app.drive.state;
         let mut input = InputState::default();
         input.set(Action::FlyForward, 1.0);
+        input.set(Action::Throttle, 1.0);
         for _ in 0..120 {
             app.update(&input, SIM_DT);
         }
@@ -309,11 +542,15 @@ mod tests {
         assert_eq!(app.ticks(), 120);
         assert!((moved.z + FLY_SPEED).abs() < 1e-2, "{moved}");
         assert!(moved.x.abs() < 1e-4 && moved.y.abs() < 1e-4);
+        // The car ignores the throttle while flying.
+        let rolled = Vec3::from(app.drive.state.pos) - Vec3::from(car.pos);
+        assert!(rolled.length() < 0.05, "{rolled}");
     }
 
     #[test]
-    fn camera_stays_above_ground_and_pitch_is_limited() {
+    fn fly_camera_stays_above_ground_and_pitch_is_limited() {
         let mut app = App::new(Seed(0));
+        app.set_fly(true);
         let mut input = InputState::default();
         input.set(Action::FlyDown, 1.0);
         input.set(Action::FlyLookY, 1.0);
@@ -328,20 +565,39 @@ mod tests {
     fn scene_view_interpolates_and_is_well_formed() {
         let mut app = App::new(Seed(5));
         let mut input = InputState::default();
-        input.set(Action::FlyForward, 1.0);
+        input.set(Action::Throttle, 1.0);
+        for _ in 0..120 {
+            app.update(&input, SIM_DT);
+        }
         let steps = app.update(&input, SIM_DT * 1.5);
         assert_eq!(steps.count, 1);
-        let at = |alpha| Mat4::from_cols_array_2d(&app.scene_view(alpha, 1.5).camera.view);
-        assert_eq!(at(0.0), app.prev.view());
-        assert_eq!(at(1.0), app.curr.view());
-        assert_ne!(at(0.5), at(0.0));
+        let mut at = |alpha| Mat4::from_cols_array_2d(&app.scene_view(alpha, 1.5).camera.view);
+        let (v0, v5, v1) = (at(0.0), at(0.5), at(1.0));
+        assert_eq!(v0, app.camera.pose(&app.drive, 0.0).view());
+        assert_eq!(v1, app.camera.pose(&app.drive, 1.0).view());
+        assert_ne!(v5, v0);
 
+        let world = app.world_instances;
+        let meshes = app.meshes().len();
+        let ids = app.car_meshes;
         let view = app.scene_view(steps.alpha, 16.0 / 9.0);
-        assert_eq!(view.instances.len(), app.meshes().len());
-        for (i, inst) in view.instances.iter().enumerate() {
+        // The world, then the car: body and four wheels (lamps off).
+        assert_eq!(world, meshes - 3);
+        assert_eq!(view.instances.len(), world + 5);
+        for (i, inst) in view.instances[..world].iter().enumerate() {
             assert_eq!(inst.mesh, MeshId(i as u32));
+        }
+        assert_eq!(view.instances[world].mesh, ids.body);
+        assert!(view.instances[world + 1..]
+            .iter()
+            .all(|i| i.mesh == ids.wheel));
+        for inst in view.instances {
             assert!(Mat4::from_cols_array_2d(&inst.transform).is_finite());
         }
+        assert!(view.lights.is_empty(), "headlights off");
+        // Golden hour: low warm sun in the west.
+        assert!(view.sun.direction[0] < -0.9 && view.sun.direction[1] > 0.0);
+        assert!(view.sun.illuminance[0] > view.sun.illuminance[2]);
         // Some meshes carry glowing signs and lamps, drawn boosted.
         assert!(view.instances.iter().any(|i| i.color[0] == GLOW_BOOST));
         let tris: usize = app.meshes().iter().map(|m| m.indices.len() / 3).sum();
@@ -349,6 +605,27 @@ mod tests {
         for m in app.meshes() {
             assert!(m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
         }
+        // Refilling does not grow the list.
+        let cap = app.instances.capacity();
+        for _ in 0..3 {
+            app.scene_view(0.3, 1.0);
+        }
+        assert_eq!(app.instances.capacity(), cap);
+    }
+
+    #[test]
+    fn the_car_starts_on_the_road_in_the_chase_view() {
+        let mut app = App::new(Seed(1));
+        let view = app.scene_view(1.0, 16.0 / 9.0);
+        let v = Mat4::from_cols_array_2d(&view.camera.view);
+        let p = Mat4::from_cols_array_2d(&view.camera.proj);
+        let car = Vec3::from(app.drive.state.pos);
+        let clip = p * v * car.extend(1.0);
+        let ndc = clip.truncate() / clip.w;
+        assert!(
+            clip.w > 0.0 && ndc.x.abs() < 0.2 && ndc.y.abs() < 0.6,
+            "{ndc}"
+        );
     }
 
     #[test]

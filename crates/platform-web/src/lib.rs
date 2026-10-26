@@ -16,13 +16,17 @@
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-/// Reads `seed=<u64>` from a URL query string such as `?seed=123&x=1`.
-pub fn seed_from_query(query: &str) -> Option<u64> {
+/// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
+pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
         .trim_start_matches('?')
         .split('&')
-        .find_map(|pair| pair.strip_prefix("seed="))
-        .and_then(|v| v.parse().ok())
+        .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
+}
+
+/// Reads `seed=<u64>` from a URL query string such as `?seed=123&x=1`.
+pub fn seed_from_query(query: &str) -> Option<u64> {
+    query_param(query, "seed").and_then(|v| v.parse().ok())
 }
 
 /// Picks "the" gamepad from the connected ones, given as `(index, has standard mapping)`.
@@ -94,6 +98,17 @@ mod tests {
         assert_eq!(seed_from_query(""), None);
         assert_eq!(seed_from_query("?seed=abc"), None);
         assert_eq!(seed_from_query("?myseed=4"), None);
+    }
+
+    #[test]
+    fn reads_other_parameters() {
+        let q = "?seed=3&car=palisade_wagon&cam=cockpit&fly=1";
+        assert_eq!(query_param(q, "car"), Some("palisade_wagon"));
+        assert_eq!(query_param(q, "cam"), Some("cockpit"));
+        assert_eq!(query_param(q, "fly"), Some("1"));
+        assert_eq!(query_param(q, "ca"), None);
+        assert_eq!(query_param("?cars=2", "car"), None);
+        assert_eq!(query_param("", "car"), None);
     }
 
     #[test]
