@@ -19,6 +19,7 @@ mod propinst;
 pub mod scene;
 pub mod selftest;
 mod settings;
+pub mod sound;
 pub mod stream;
 pub mod ui;
 pub mod vehicles;
@@ -167,6 +168,9 @@ pub struct App {
     start: ([f32; 3], f32),
     /// A terrain place's trees and parked cars, drawn as instances near the camera.
     props: Option<propinst::PropInstances>,
+    /// The sound's view of the game, and what it made of the last frame.
+    sound: sound::Sound,
+    audio: audio::synth::AudioParams,
 }
 
 impl App {
@@ -218,6 +222,7 @@ impl App {
                 world::math::floor(p[1] / chunk_size) as i32,
             ]
         })?;
+        let sound = sound::Sound::new(&place, &drive);
         let town = match stream {
             None => resident_town(&place),
             Some(budget) => streamed_town(place, budget),
@@ -271,6 +276,8 @@ impl App {
             map,
             start,
             props,
+            sound,
+            audio: audio::synth::AudioParams::default(),
         })
     }
 
@@ -380,6 +387,7 @@ impl App {
                 drive::vehicle_input(input)
             };
             self.drive.step(car_input, &self.ground);
+            self.sound.note_step(&self.drive.impact);
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);

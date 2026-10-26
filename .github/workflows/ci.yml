@@ -28,8 +28,8 @@ jobs:
       # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/.
       - uses: Swatinem/rust-cache@v2
 
-      - name: Linux build deps (libudev for gilrs)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+      - name: Linux build deps (libudev for gilrs, ALSA for cpal)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config
 
       - name: Format
         run: cargo fmt --all --check

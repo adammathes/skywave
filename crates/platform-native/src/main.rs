@@ -19,9 +19,13 @@
 //!
 //! Esc / Start opens the pause menu; settings and bindings are saved to
 //! `$XDG_CONFIG_HOME/skywave/settings.json` (see `settings`).
+//!
+//! Sound plays through the default output device at 48 kHz (`sfx`); without one the game
+//! runs silent.
 
 mod pad;
 mod settings;
+mod sfx;
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
@@ -309,6 +313,8 @@ struct Shell {
     started: Instant,
     stats: Stats,
     error: Option<String>,
+    /// The sound sink, if a device opened.
+    sfx: Option<sfx::Sfx>,
 }
 
 impl Shell {
@@ -388,6 +394,9 @@ impl ApplicationHandler for Shell {
                 self.pads.poll(&mut self.input, self.focused);
                 let clock = || self.started.elapsed().as_secs_f64();
                 let steps = self.app.frame(&mut self.input, dt.as_secs_f64(), &clock);
+                if let Some(sfx) = &self.sfx {
+                    sfx.set_params(self.app.audio_params());
+                }
                 if self.app.quit_requested() {
                     event_loop.exit();
                     return;
@@ -479,6 +488,7 @@ fn main() -> ExitCode {
         started: Instant::now(),
         stats: Stats::default(),
         error: None,
+        sfx: sfx::Sfx::start(),
     };
     if let Err(e) = event_loop.run_app(&mut shell) {
         eprintln!("skywave: event loop failed: {e}");

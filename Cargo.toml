@@ -6,11 +6,13 @@ members = [
     "crates/vehicle",
     "crates/world",
     "crates/render",
+    "crates/audio",
     "crates/app",
     "crates/platform-native",
     "crates/platform-web",
     "tools/shape-preview",
     "tools/mapdump",
+    "tools/audio-preview",
 ]
 
 [workspace.package]
@@ -28,6 +30,7 @@ vehicle = { path = "crates/vehicle" }
 world = { path = "crates/world" }
 render = { path = "crates/render" }
 app = { path = "crates/app" }
+audio = { path = "crates/audio" }
 
 # Engine-level dependencies (the only ones allowed; see CLAUDE.md).
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl"] }
@@ -55,6 +58,10 @@ fastnoise-lite = { version = "=1.1.1", default-features = false, features = ["li
 # Native gamepads (platform-native only). Default features: evdev + udev on Linux (the
 # Steam Deck's controller is a standard evdev pad), IOKit on macOS, Windows.Gaming.Input.
 gilrs = "=0.11.2"
+
+# Native audio output (platform-native only; Apache-2.0). ALSA on Linux (libasound2-dev to
+# build), CoreAudio on macOS, WASAPI on Windows.
+cpal = { version = "=0.18.2", default-features = false }
 
 # Web.
 wasm-bindgen = "=0.2.129"

@@ -8,6 +8,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+audio.workspace = true
 skywave-core.workspace = true
 place.workspace = true
 world.workspace = true

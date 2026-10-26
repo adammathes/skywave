@@ -1,0 +1,10 @@
+[package]
+name = "audio"
+description = "Skywave's sound: the mixer and the synthesized engine, tire, wind and ambience sounds."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]

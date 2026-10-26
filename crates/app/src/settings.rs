@@ -9,6 +9,7 @@
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
 //!   "world": { "clock_speed": 10.0 },
+//!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false },
 //!   "input": { …the bindings document, see `Bindings::to_json`… } }
 //! ```
 //!
@@ -135,6 +136,11 @@ pub struct Settings {
     pub minimap_rotate: bool,
     /// Meters across the minimap; one of [`MINIMAP_RANGES_M`].
     pub minimap_range_m: f32,
+    /// Sound volumes, `[0, 1]`: everything, the engine, the world (tires, wind, ambience).
+    pub master_volume: f32,
+    pub engine_volume: f32,
+    pub world_volume: f32,
+    pub mute: bool,
 }
 
 impl Default for Settings {
@@ -155,6 +161,10 @@ impl Default for Settings {
             minimap: true,
             minimap_rotate: true,
             minimap_range_m: MINIMAP_RANGES_M[DEFAULT_MINIMAP_RANGE],
+            master_volume: 0.8,
+            engine_volume: 0.8,
+            world_volume: 0.8,
+            mute: false,
         }
     }
 }
@@ -162,6 +172,7 @@ impl Default for Settings {
 pub const UI_SCALE_STEP: f32 = 0.25;
 pub const RESOLUTION_SCALE_MIN: f32 = 0.5;
 pub const RESOLUTION_SCALE_STEP: f32 = 0.05;
+pub const VOLUME_STEP: f32 = 0.05;
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -261,6 +272,27 @@ impl Default for World {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct Audio {
+    master: f32,
+    engine: f32,
+    world: f32,
+    mute: bool,
+}
+
+impl Default for Audio {
+    fn default() -> Audio {
+        let s = Settings::default();
+        Audio {
+            master: s.master_volume,
+            engine: s.engine_volume,
+            world: s.world_volume,
+            mute: s.mute,
+        }
+    }
+}
+
 impl Settings {
     /// Every value inside its range: scales clamped (non-finite ones take the default),
     /// the clock speed and minimap range snapped to the nearest offered value.
@@ -312,6 +344,9 @@ impl Settings {
                 d.ui_scale,
             ),
             resolution_scale: fix(self.resolution_scale, RESOLUTION_SCALE_MIN, 1.0, 1.0),
+            master_volume: fix(self.master_volume, 0.0, 1.0, d.master_volume),
+            engine_volume: fix(self.engine_volume, 0.0, 1.0, d.engine_volume),
+            world_volume: fix(self.world_volume, 0.0, 1.0, d.world_volume),
             clock_speed: speed,
             minimap_range_m: range,
             ..self
@@ -337,6 +372,12 @@ impl Settings {
                 minimap_range_m: self.minimap_range_m,
             },
             "world": World { clock_speed: self.clock_speed },
+            "audio": Audio {
+                master: self.master_volume,
+                engine: self.engine_volume,
+                world: self.world_volume,
+                mute: self.mute,
+            },
             "input": input,
         });
         serde_json::to_string_pretty(&doc).unwrap_or_default()
@@ -358,6 +399,7 @@ impl Settings {
         let video: Video = serde_json::from_value(section(&mut root, "video")).unwrap_or_default();
         let hud: HudSection = serde_json::from_value(section(&mut root, "hud")).unwrap_or_default();
         let world: World = serde_json::from_value(section(&mut root, "world")).unwrap_or_default();
+        let audio: Audio = serde_json::from_value(section(&mut root, "audio")).unwrap_or_default();
         let bindings = match section(&mut root, "input") {
             v @ Value::Object(_) => Bindings::from_json(&v.to_string()).ok(),
             _ => None,
@@ -379,6 +421,10 @@ impl Settings {
             minimap: hud.minimap,
             minimap_rotate: hud.minimap_rotate,
             minimap_range_m: hud.minimap_range_m,
+            master_volume: audio.master,
+            engine_volume: audio.engine,
+            world_volume: audio.world,
+            mute: audio.mute,
         }
         .sanitized();
         (settings, bindings)
@@ -408,6 +454,10 @@ mod tests {
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,
+            master_volume: 0.5,
+            engine_volume: 0.25,
+            world_volume: 1.0,
+            mute: true,
         };
         let mut b = Bindings::default();
         let mut o = b.axis_options(DeviceKind::Gamepad, Action::LookY);
@@ -433,7 +483,9 @@ mod tests {
                  "hud": { "minimap_rotate": false, "minimap_range_m": 120 },
                  "drive": { "handling": "light" },
                  "camera": { "mode": "orbit", "cockpit_fov_deg": 120, "seat_height_cm": -9,
-                             "seat_forward_cm": 4 } }"#,
+                             "seat_forward_cm": 4 },
+
+                 "audio": { "master": 3, "engine": -1, "mute": true } }"#,
         );
         assert_eq!(
             s,
@@ -447,6 +499,9 @@ mod tests {
                 clock_speed: 10.0,
                 minimap_rotate: false,
                 minimap_range_m: 100.0,
+                master_volume: 1.0,
+                engine_volume: 0.0,
+                mute: true,
                 ..Settings::default()
             }
         );

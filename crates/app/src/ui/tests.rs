@@ -846,3 +846,41 @@ fn camera_page_sets_the_cockpit_and_the_camera_is_remembered() {
     scene.set_settings_store(Box::new(store.clone()));
     assert_eq!(scene.hud_state().camera_mode, CameraMode::ChaseFar);
 }
+
+#[test]
+fn the_sound_follows_the_car_and_the_audio_page() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    let p = *h.app.audio_params();
+    assert_eq!(p.engine.profile, audio::synth::EngineProfile::V8Flatplane);
+    assert!(!p.paused && !p.muted && !p.horn);
+    let idle = p.engine.rpm;
+    // Throttle revs it; the horn key sounds the horn.
+    h.input.axis(RawInput::PadAxis(PadAxis::R2), 1.0);
+    h.input.press(RawInput::Key(Key::KeyH));
+    for _ in 0..60 {
+        h.frame();
+    }
+    let p = *h.app.audio_params();
+    assert!(
+        p.engine.rpm > idle + 500.0 && p.engine.throttle > 0.9,
+        "{p:?}"
+    );
+    assert!(p.horn && p.speed_mps > 1.0);
+    h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
+    h.input.release(RawInput::Key(Key::KeyH));
+    // Audio page: the master volume down a step, mute on; a menu pauses the sound.
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    assert!(h.app.audio_params().paused);
+    h.focus_on(ItemId::MasterVolume);
+    h.pad(PadButton::DpadLeft);
+    h.focus_on(ItemId::Mute);
+    h.pad(PadButton::South);
+    let p = *h.app.audio_params();
+    assert!((p.master - 0.75).abs() < 1e-6 && p.muted);
+    h.pad(PadButton::Start);
+    assert!(!h.app.audio_params().paused);
+    let saved = store.0.borrow().clone().expect("saved on close");
+    let (s, _) = Settings::from_json(&saved);
+    assert!(s.mute && (s.master_volume - 0.75).abs() < 1e-6);
+}

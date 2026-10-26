@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 app.workspace = true
+audio.workspace = true
 render.workspace = true
 wgpu = { workspace = true, features = ["webgpu", "webgl"] }
 log.workspace = true

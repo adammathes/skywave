@@ -20,3 +20,5 @@ pollster.workspace = true
 log.workspace = true
 env_logger.workspace = true
 gilrs.workspace = true
+cpal.workspace = true
+audio.workspace = true

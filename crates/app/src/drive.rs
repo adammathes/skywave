@@ -210,6 +210,8 @@ pub struct Drive {
     pub assists: Assists,
     /// What the last step was asked for.
     pub input: VehicleInput,
+    /// What the collider did in the last step (for the sound).
+    pub impact: world::Impact,
     pub headlights: bool,
     /// Held this frame (for the audio task).
     pub horn: bool,
@@ -255,6 +257,7 @@ impl Drive {
             prev: state,
             assists: Assists::default(),
             input: VehicleInput::default(),
+            impact: world::Impact::default(),
             headlights: false,
             horn: false,
             roll: [0.0; 4],
@@ -286,7 +289,7 @@ impl Drive {
         self.prev_roll = self.roll;
         self.input = input;
         vehicle::step(&self.spec, &mut self.state, &input, &self.assists, ground);
-        world::resolve(&mut self.state, &self.spec, ground);
+        self.impact = world::resolve(&mut self.state, &self.spec, ground);
         for i in 0..4 {
             let r = self.roll[i] + self.state.wheels[i].spin * DT;
             let wrap = if r >= TAU {

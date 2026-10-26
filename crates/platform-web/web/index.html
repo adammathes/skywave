@@ -12,7 +12,7 @@
   Query keys: see crates/platform-web/src/lib.rs. Page-only keys: help=1 always shows the
   controls; nohelp=1 (implied by still=1 and selftest=1) never does.
   Hooks for tools/screenshot: window.skywaveReady (overlays are gone by then),
-  window.skywaveBackend, window.skywaveError.
+  window.skywaveBackend, window.skywaveError. Sound: window.skywaveAudio (see the sfx script).
 -->
 <style>
   :root {
@@ -88,6 +88,119 @@
   </div>
 </div>
 <footer>Skywave <span id="version">%SKYWAVE_VERSION%</span> · <a href="https://github.com/adammathes/skywave" target="_blank" rel="noopener">source</a> · BSD-3-Clause</footer>
+<script id="sfx">
+  // Sound effects sink (crates/platform-web/src/sfx.rs). The game renders 48 kHz stereo on
+  // the main thread every animation frame and pushes it here; an AudioWorklet, registered
+  // from a Blob URL so it needs no extra file, plays it from a ring buffer (resampling if
+  // the browser would not run the context at 48 kHz). The context starts on the first key,
+  // click or tap (browsers allow sound only after a gesture) and later gestures resume it.
+  // window.skywaveSfx.start() starts it from any other gesture handler. window.skywaveAudio
+  // reports { state, worklet, sampleRate, pushed, consumed, underruns, queued, error }.
+  (() => {
+    const RATE = 48000, BLOCK = 256, RING = 16384; // frames; the ring holds ~340 ms
+    const processor = `
+      class SkywaveSfx extends AudioWorkletProcessor {
+        constructor(options) {
+          super();
+          this.ring = new Float32Array(${RING} * 2);
+          this.write = 0; this.read = 0; this.queued = 0; this.frac = 0;
+          this.step = options.processorOptions.step; // 48 kHz frames per output frame
+          this.consumed = 0; this.underruns = 0; this.fed = false; this.reported = 0;
+          this.port.onmessage = (e) => this.take(e.data);
+        }
+        take(x) {
+          const n = x.length >> 1;
+          for (let i = 0; i < n; i++) {
+            this.ring[2 * this.write] = x[2 * i];
+            this.ring[2 * this.write + 1] = x[2 * i + 1];
+            this.write = (this.write + 1) % ${RING};
+          }
+          this.queued += n;
+          if (this.queued > ${RING}) { // overrun: drop the oldest
+            this.read = (this.read + this.queued - ${RING}) % ${RING};
+            this.queued = ${RING};
+          }
+          this.fed = true;
+        }
+        process(inputs, outputs) {
+          const l = outputs[0][0], r = outputs[0][1] || l, ring = this.ring;
+          let starved = false;
+          for (let i = 0; i < l.length; i++) {
+            if (this.queued < 2) { l[i] = 0; r[i] = 0; starved = true; continue; }
+            const a = this.read, b = (a + 1) % ${RING}, f = this.frac;
+            l[i] = ring[2 * a] + (ring[2 * b] - ring[2 * a]) * f;
+            r[i] = ring[2 * a + 1] + (ring[2 * b + 1] - ring[2 * a + 1]) * f;
+            this.frac += this.step;
+            const whole = Math.floor(this.frac);
+            this.frac -= whole;
+            this.read = (this.read + whole) % ${RING};
+            this.queued -= whole;
+            this.consumed += whole;
+          }
+          if (starved && this.fed) this.underruns++;
+          if (currentTime - this.reported >= 0.1) {
+            this.reported = currentTime;
+            this.port.postMessage({ consumed: this.consumed, underruns: this.underruns, queued: this.queued });
+          }
+          return true;
+        }
+      }
+      registerProcessor("skywave-sfx", SkywaveSfx);`;
+    const audio = (window.skywaveAudio = {
+      state: "off", worklet: false, sampleRate: 0, pushed: 0, consumed: 0, underruns: 0, queued: 0, error: null,
+    });
+    let ctx = null, node = null, starting = null, written = 0;
+    function start() {
+      if (ctx) {
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
+        return starting;
+      }
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx || !window.AudioWorkletNode) { audio.state = "unsupported"; return null; }
+      try { ctx = new Ctx({ sampleRate: RATE, latencyHint: "interactive" }); }
+      catch { ctx = new Ctx({ latencyHint: "interactive" }); }
+      audio.sampleRate = ctx.sampleRate;
+      audio.state = ctx.state;
+      ctx.onstatechange = () => { audio.state = ctx.state; };
+      const url = URL.createObjectURL(new Blob([processor], { type: "text/javascript" }));
+      starting = ctx.audioWorklet.addModule(url).then(() => {
+        node = new AudioWorkletNode(ctx, "skywave-sfx", {
+          numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
+          processorOptions: { step: RATE / ctx.sampleRate },
+        });
+        node.port.onmessage = (e) => Object.assign(audio, e.data);
+        node.connect(ctx.destination);
+        written = ctx.currentTime * RATE;
+        audio.worklet = true;
+      }).catch((e) => { audio.error = String(e); }).finally(() => URL.revokeObjectURL(url));
+      if (ctx.state === "suspended") ctx.resume().catch(() => {});
+      return starting;
+    }
+    // 48 kHz frames the game should render now: enough for two blocks plus one animation
+    // frame (dt seconds, capped) queued ahead of what the context has played.
+    function wanted(dt) {
+      if (!node || ctx.state !== "running") return 0;
+      const played = ctx.currentTime * RATE;
+      if (written < played) written = played; // ran dry, or just started
+      const lead = Math.min(RING / 2, 2 * BLOCK + Math.ceil(Math.min(dt, 0.1) * RATE));
+      const need = lead - (written - played);
+      return need > 0 ? Math.ceil(need / BLOCK) * BLOCK : 0;
+    }
+    // A view into wasm memory: copied at once, then handed to the worklet.
+    function push(view) {
+      if (!node) return;
+      const copy = view.slice();
+      const frames = copy.length / 2;
+      node.port.postMessage(copy, [copy.buffer]); // detaches `copy`
+      written += frames;
+      audio.pushed += frames;
+    }
+    window.skywaveSfx = { start, wanted, push };
+    for (const t of ["keydown", "pointerdown", "pointerup", "touchend"]) {
+      window.addEventListener(t, start, { capture: true, passive: true });
+    }
+  })();
+</script>
 <script type="module">
   import init, { run } from "./platform_web.js";
 
