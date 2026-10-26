@@ -5,18 +5,23 @@
 //! With `--roads`, also generates the arterial network and highway (stage 3) and draws its
 //! edges by class on top, nodes as dots. With `--streets` (implies `--roads`), also
 //! generates the local streets of every chunk (stage 4), merges them with the arterials and
-//! draws locals thin and alleys faint under the arterials, with timings per chunk.
+//! draws locals thin and alleys faint under the arterials, with timings per chunk. With
+//! `--parcels` (implies `--streets`), also builds the blocks and parcels of every chunk
+//! (stage 5) and draws them under the roads: a faint outline per parcel, tinted by lot kind
+//! (lots pale, parks green, empty lots and fields tan).
 //!
 //! Usage: `cargo run -p mapdump -- --seed 1 --template assets/regions/california_coast.ron
-//! --out map.png [--size 16x16] [--scale 1] [--roads] [--streets]`
+//! --out map.png [--size 16x16] [--scale 1] [--roads] [--streets] [--parcels]`
 
 mod png;
 
 use std::time::Instant;
 
-use place::{RoadClass, RoadGraph, ZoneId};
+use place::{LotKind, Parcel, RoadClass, RoadGraph, ZoneId};
 use skywave_core::Seed;
-use world::procgen::{arterials, hash_graph, MacroMap, MacroPoiKind, StreetPlan};
+use world::procgen::{
+    arterials, hash_graph, hash_parcels, MacroMap, MacroPoiKind, ParcelPlan, StreetPlan,
+};
 use world::template::RegionTemplate;
 
 /// Zone colors by `ZoneId` discriminant (Water is shaded separately).
@@ -77,6 +82,49 @@ impl Image {
             for dx in -ri..=ri {
                 if ((dx * dx + dy * dy) as f32) <= r * r {
                     self.put(cx as i64 + dx, cy as i64 + dy, c);
+                }
+            }
+        }
+    }
+
+    fn blend(&mut self, x: i64, y: i64, c: [u8; 3], a: f32) {
+        if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h {
+            let i = (y as usize * self.w + x as usize) * 3;
+            for (px, &ch) in self.rgb[i..i + 3].iter_mut().zip(&c) {
+                let v = *px as f32 * (1.0 - a) + ch as f32 * a;
+                *px = v.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+
+    /// Fills a polygon (pixel coordinates, even-odd) blended at `a`.
+    fn fill(&mut self, poly: &[[f32; 2]], c: [u8; 3], a: f32) {
+        let y0 = poly
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::INFINITY, f32::min)
+            .floor() as i64;
+        let y1 = poly
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil() as i64;
+        let mut xs: Vec<f32> = Vec::new();
+        for y in y0.max(0)..=y1.min(self.h as i64 - 1) {
+            let yc = y as f32 + 0.5;
+            xs.clear();
+            for i in 0..poly.len() {
+                let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+                if (p[1] > yc) != (q[1] > yc) {
+                    xs.push(p[0] + (yc - p[1]) / (q[1] - p[1]) * (q[0] - p[0]));
+                }
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for pair in xs.chunks(2) {
+                if let [l, r] = pair {
+                    for x in (l - 0.5).ceil() as i64..=(r - 0.5).floor() as i64 {
+                        self.blend(x, y, c, a);
+                    }
                 }
             }
         }
@@ -277,9 +325,95 @@ pub fn draw_roads(rgb: &mut [u8], w: usize, h: usize, scale: usize, g: &RoadGrap
     rgb.copy_from_slice(&img.rgb);
 }
 
+/// Parcel tint by lot kind.
+fn lot_rgb(kind: LotKind) -> [u8; 3] {
+    match kind {
+        LotKind::Lot => [255, 250, 235],
+        LotKind::Park => [40, 190, 80],
+        LotKind::LotEmpty => [165, 120, 70],
+    }
+}
+
+/// Draws parcels over a rendered map: a tinted fill and a faint dark outline each.
+pub fn draw_parcels(rgb: &mut [u8], w: usize, h: usize, scale: usize, parcels: &[Parcel]) {
+    let mut img = Image {
+        w,
+        h,
+        rgb: rgb.to_vec(),
+    };
+    let s = scale as f32 / 4.0;
+    for p in parcels {
+        let poly: Vec<[f32; 2]> = p.polygon.iter().map(|q| [q[0] * s, q[1] * s]).collect();
+        img.fill(&poly, lot_rgb(p.lot_kind), 0.45);
+    }
+    for p in parcels {
+        let n = p.polygon.len();
+        for i in 0..n {
+            let (a, b) = (p.polygon[i], p.polygon[(i + 1) % n]);
+            let (a, b) = ([a[0] * s, a[1] * s], [b[0] * s, b[1] * s]);
+            let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+            let steps = (len * 2.0).ceil().max(1.0) as usize;
+            for k in 0..=steps {
+                let t = k as f32 / steps as f32;
+                let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                img.blend(q[0] as i64, q[1] as i64, [50, 45, 40], 0.5);
+            }
+        }
+    }
+    rgb.copy_from_slice(&img.rgb);
+}
+
+/// Builds every chunk's parcels with timings, prints counts, returns them in chunk order.
+pub fn generate_parcels(
+    seed: Seed,
+    t: &RegionTemplate,
+    map: &MacroMap,
+    merged: &RoadGraph,
+) -> Vec<Parcel> {
+    let start = Instant::now();
+    let plan = ParcelPlan::new(seed, t, map, merged);
+    let plan_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let mut times: Vec<f64> = Vec::new();
+    let mut parcels: Vec<Parcel> = Vec::new();
+    for z in 0..i32::from(map.size_chunks[1]) {
+        for x in 0..i32::from(map.size_chunks[0]) {
+            let s = Instant::now();
+            parcels.extend(plan.chunk([x, z]).parcels);
+            times.push(s.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    let mut sorted = times.clone();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let st = plan.stats();
+    println!(
+        "parcels: plan {plan_ms:.1} ms, {} chunks in {:.1} ms (median {:.2} ms, max {:.2} ms)",
+        times.len(),
+        times.iter().sum::<f64>(),
+        sorted[sorted.len() / 2],
+        sorted[sorted.len() - 1],
+    );
+    println!(
+        "  faces: {} walked, {} kept ({} open); dropped {} outer, {} islands, {} > 1 km², {} beach, {} with holes; {} with water built open; {} crossings split, {} cell cuts",
+        st.walked, st.kept, st.open, st.outer, st.islands, st.too_big, st.beach, st.holes, st.water, st.crossings, st.cuts
+    );
+    let mut count = [0usize; 3];
+    for p in &parcels {
+        count[p.lot_kind as usize] += 1;
+    }
+    println!(
+        "  {} parcels: {} lots (pale), {} parks (green), {} empty lots and fields (tan), hash {:016x}",
+        parcels.len(),
+        count[0],
+        count[1],
+        count[2],
+        hash_parcels(&parcels)
+    );
+    parcels
+}
+
 fn usage() -> ! {
     eprintln!(
-        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S] [--roads] [--streets]"
+        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S] [--roads] [--streets] [--parcels]"
     );
     std::process::exit(2);
 }
@@ -293,6 +427,7 @@ fn main() {
     let mut scale = 1usize;
     let mut roads = false;
     let mut streets = false;
+    let mut parcels = false;
     let mut k = 1;
     while k < args.len() {
         let val = args.get(k + 1).cloned();
@@ -305,6 +440,13 @@ fn main() {
             "--streets" => {
                 roads = true;
                 streets = true;
+                k += 1;
+                continue;
+            }
+            "--parcels" => {
+                roads = true;
+                streets = true;
+                parcels = true;
                 k += 1;
                 continue;
             }
@@ -408,6 +550,10 @@ fn main() {
         );
         if streets {
             let merged = generate_streets(Seed(seed), &t, &map, &g);
+            if parcels {
+                let ps = generate_parcels(Seed(seed), &t, &map, &merged);
+                draw_parcels(&mut rgb, w, h, scale.max(1), &ps);
+            }
             draw_roads(&mut rgb, w, h, scale.max(1), &merged);
         } else {
             draw_roads(&mut rgb, w, h, scale.max(1), &g);
@@ -499,6 +645,8 @@ mod tests {
         let g = arterials(Seed(1), &t, &map);
         draw_roads(&mut rgb, w, h, 1, &g);
         let merged = generate_streets(Seed(1), &t, &map, &g);
+        let ps = generate_parcels(Seed(1), &t, &map, &merged);
+        draw_parcels(&mut rgb, w, h, 1, &ps);
         draw_roads(&mut rgb, w, h, 1, &merged);
     }
 }

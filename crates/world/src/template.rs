@@ -332,6 +332,22 @@ pub struct ZoneRule {
     /// `(species, relative weight)`.
     pub trees: Vec<(Tree, f32)>,
     pub props: Props,
+    pub lots: Lots,
+}
+
+/// How a zone's blocks are cut into parcels (`docs/WORLD_GENERATION.md` stage 5) and where
+/// buildings sit in them (stage 6).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Lots {
+    /// Lot width along the frontage. In `Farmland` it is the width of a field.
+    pub width_m: Range,
+    /// Deepest lot, measured from the frontage. Blocks deeper than about twice this keep
+    /// an interior core (`Park` or `LotEmpty`); thinner ones are split back to back.
+    pub depth_m: f32,
+    /// Building setbacks from the `(front, side, rear)` lot lines.
+    pub setback_m: (f32, f32, f32),
 }
 
 /// One rule per land zone, in `ZoneId` order.
@@ -454,6 +470,10 @@ pub enum TemplateError {
         zone: ZoneId,
         field: &'static str,
     },
+    BadLots {
+        zone: ZoneId,
+        field: &'static str,
+    },
 }
 
 impl fmt::Display for TemplateError {
@@ -486,6 +506,9 @@ impl fmt::Display for TemplateError {
             }
             TemplateError::BadProps { zone, field } => {
                 write!(f, "zones.{zone:?}.props.{field} is invalid")
+            }
+            TemplateError::BadLots { zone, field } => {
+                write!(f, "zones.{zone:?}.lots.{field} is invalid")
             }
         }
     }
@@ -748,6 +771,31 @@ fn validate_zone(zone: ZoneId, rule: &ZoneRule) -> Result<(), TemplateError> {
         return Err(TemplateError::BadProps {
             zone,
             field: "parked_cars",
+        });
+    }
+    let l = &rule.lots;
+    let (w0, w1) = l.width_m;
+    // Lots narrower than 4 m could not hold a building; widths below 8 m are slivers.
+    if !(w0.is_finite() && w1.is_finite() && 4.0 <= w0 && w0 <= w1 && w1 <= 1000.0) {
+        return Err(TemplateError::BadLots {
+            zone,
+            field: "width_m",
+        });
+    }
+    if !(l.depth_m.is_finite() && (8.0..=1000.0).contains(&l.depth_m)) {
+        return Err(TemplateError::BadLots {
+            zone,
+            field: "depth_m",
+        });
+    }
+    let (a, b, c) = l.setback_m;
+    if ![a, b, c]
+        .iter()
+        .all(|x| x.is_finite() && (0.0..=100.0).contains(x))
+    {
+        return Err(TemplateError::BadLots {
+            zone,
+            field: "setback_m",
         });
     }
     Ok(())
