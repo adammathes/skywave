@@ -36,9 +36,11 @@ bytemuck = { version = "=1.25.2", features = ["derive"] }
 log = "=0.4.34"
 env_logger = { version = "=0.11.11", default-features = false }
 pollster = "=1.0.1"
+# Settings JSON (app only; see docs/adr/0002-serde-json.md).
+serde = { version = "=1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = "=1.0.151"
 
 # Data files. serde without `std` keeps `vehicle` no_std; ron parses the specs in `app`.
-serde = { version = "=1.0.229", default-features = false, features = ["derive", "alloc"] }
 ron = { version = "=0.12.2", default-features = false }
 
 # Web.

@@ -1,13 +1,14 @@
-//! `skywave`: the desktop shell. Opens a window, sets up wgpu, maps keys to game actions
-//! and drives the platform-independent `App` once per redraw.
+//! `skywave`: the desktop shell. Opens a window, sets up wgpu, feeds key events to the
+//! input mapper and drives the platform-independent `App` once per redraw.
 //!
 //! Usage: `skywave [--seed N] [--stats]`
 
+use std::fmt::Write as _;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use app::{App, Key, Keyboard};
+use app::{Action, App, InputMapper, Key, RawInput};
 use render::Renderer;
 use skywave_core::Seed;
 use winit::application::ApplicationHandler;
@@ -43,22 +44,30 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
     Ok(opts)
 }
 
+/// Maps a winit key to a game key. winit's `KeyCode` names are the DOM `code` names
+/// [`Key::from_code`] knows; the name is formatted on the stack, so this never allocates.
 fn map_key(code: KeyCode) -> Option<Key> {
-    Some(match code {
-        KeyCode::KeyW => Key::KeyW,
-        KeyCode::KeyA => Key::KeyA,
-        KeyCode::KeyS => Key::KeyS,
-        KeyCode::KeyD => Key::KeyD,
-        KeyCode::KeyE => Key::KeyE,
-        KeyCode::KeyQ => Key::KeyQ,
-        KeyCode::Space => Key::Space,
-        KeyCode::ShiftLeft => Key::ShiftLeft,
-        KeyCode::ArrowUp => Key::ArrowUp,
-        KeyCode::ArrowDown => Key::ArrowDown,
-        KeyCode::ArrowLeft => Key::ArrowLeft,
-        KeyCode::ArrowRight => Key::ArrowRight,
-        _ => return None,
-    })
+    struct Name {
+        buf: [u8; 24],
+        len: usize,
+    }
+    impl std::fmt::Write for Name {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            let end = self.len + s.len();
+            self.buf
+                .get_mut(self.len..end)
+                .ok_or(std::fmt::Error)?
+                .copy_from_slice(s.as_bytes());
+            self.len = end;
+            Ok(())
+        }
+    }
+    let mut name = Name {
+        buf: [0; 24],
+        len: 0,
+    };
+    write!(name, "{code:?}").ok()?;
+    Key::from_code(std::str::from_utf8(&name.buf[..name.len]).ok()?)
 }
 
 /// Frame-time statistics, printed to stderr once per second with `--stats`.
@@ -197,7 +206,7 @@ impl Gpu {
 struct Shell {
     opts: Options,
     app: App,
-    keys: Keyboard,
+    input: InputMapper,
     gpu: Option<Gpu>,
     last_frame: Option<Instant>,
     stats: Stats,
@@ -226,13 +235,15 @@ impl ApplicationHandler for Shell {
                     gpu.resize(size.width, size.height);
                 }
             }
-            WindowEvent::Focused(false) => self.keys.release_all(),
+            WindowEvent::Focused(false) => self.input.release_all(),
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if code == KeyCode::Escape {
-                        event_loop.exit();
-                    } else if let Some(key) = map_key(code) {
-                        self.keys.set(key, event.state == ElementState::Pressed);
+                if let Some(key) = match event.physical_key {
+                    PhysicalKey::Code(code) => map_key(code),
+                    PhysicalKey::Unidentified(_) => None,
+                } {
+                    match event.state {
+                        ElementState::Pressed => self.input.press(RawInput::Key(key)),
+                        ElementState::Released => self.input.release(RawInput::Key(key)),
                     }
                 }
             }
@@ -240,7 +251,13 @@ impl ApplicationHandler for Shell {
                 let now = Instant::now();
                 let dt = self.last_frame.map_or(Duration::ZERO, |t| now - t);
                 self.last_frame = Some(now);
-                let steps = self.app.update(&self.keys.input(), dt.as_secs_f64());
+                let input = self.input.sample(dt.as_secs_f32());
+                // No pause menu yet: Pause (Esc) quits, as before.
+                if input.just_pressed(Action::Pause) {
+                    event_loop.exit();
+                    return;
+                }
+                let steps = self.app.update(input, dt.as_secs_f64());
                 if let Some(gpu) = &mut self.gpu {
                     gpu.draw(&self.app, steps.alpha);
                 }
@@ -287,7 +304,7 @@ fn main() -> ExitCode {
     let mut shell = Shell {
         app: App::new(Seed(opts.seed)),
         opts,
-        keys: Keyboard::default(),
+        input: InputMapper::default(),
         gpu: None,
         last_frame: None,
         stats: Stats::default(),
@@ -339,26 +356,87 @@ mod tests {
     #[test]
     fn every_game_key_has_a_winit_code() {
         let codes = [
-            KeyCode::KeyW,
             KeyCode::KeyA,
-            KeyCode::KeyS,
+            KeyCode::KeyB,
+            KeyCode::KeyC,
             KeyCode::KeyD,
             KeyCode::KeyE,
+            KeyCode::KeyF,
+            KeyCode::KeyG,
+            KeyCode::KeyH,
+            KeyCode::KeyI,
+            KeyCode::KeyJ,
+            KeyCode::KeyK,
+            KeyCode::KeyL,
+            KeyCode::KeyM,
+            KeyCode::KeyN,
+            KeyCode::KeyO,
+            KeyCode::KeyP,
             KeyCode::KeyQ,
+            KeyCode::KeyR,
+            KeyCode::KeyS,
+            KeyCode::KeyT,
+            KeyCode::KeyU,
+            KeyCode::KeyV,
+            KeyCode::KeyW,
+            KeyCode::KeyX,
+            KeyCode::KeyY,
+            KeyCode::KeyZ,
+            KeyCode::Digit0,
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+            KeyCode::Digit6,
+            KeyCode::Digit7,
+            KeyCode::Digit8,
+            KeyCode::Digit9,
+            KeyCode::F1,
+            KeyCode::F2,
+            KeyCode::F3,
+            KeyCode::F4,
+            KeyCode::F5,
+            KeyCode::F6,
+            KeyCode::F7,
+            KeyCode::F8,
+            KeyCode::F9,
+            KeyCode::F10,
+            KeyCode::F11,
+            KeyCode::F12,
+            KeyCode::Escape,
+            KeyCode::Enter,
             KeyCode::Space,
+            KeyCode::Tab,
+            KeyCode::Backspace,
             KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::AltLeft,
+            KeyCode::AltRight,
             KeyCode::ArrowUp,
             KeyCode::ArrowDown,
             KeyCode::ArrowLeft,
             KeyCode::ArrowRight,
+            KeyCode::BracketLeft,
+            KeyCode::BracketRight,
+            KeyCode::Backslash,
+            KeyCode::Comma,
+            KeyCode::Period,
+            KeyCode::Slash,
+            KeyCode::Semicolon,
+            KeyCode::Quote,
+            KeyCode::Minus,
+            KeyCode::Equal,
+            KeyCode::Backquote,
         ];
         assert_eq!(codes.len(), Key::COUNT);
-        for code in codes {
-            // winit's KeyCode names are the DOM `code` names the web build uses.
-            assert_eq!(map_key(code), Key::from_code(&format!("{code:?}")));
-            assert!(map_key(code).is_some());
+        for (code, key) in codes.into_iter().zip(Key::all()) {
+            assert_eq!(map_key(code), Some(key), "{code:?}");
         }
-        assert_eq!(map_key(KeyCode::KeyZ), None);
+        assert_eq!(map_key(KeyCode::NumpadEnter), None);
+        assert_eq!(map_key(KeyCode::MediaPlayPause), None);
     }
 
     #[test]

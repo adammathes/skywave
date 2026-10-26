@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use app::{App, Key, Keyboard};
+use app::{App, InputMapper, Key, RawInput};
 use render::Renderer;
 use skywave_core::Seed;
 use wasm_bindgen::prelude::*;
@@ -16,7 +16,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     app: App,
-    keys: Keyboard,
+    input: InputMapper,
     last_ms: Option<f64>,
     backend: &'static str,
     on_first_frame: Option<js_sys::Function>,
@@ -101,7 +101,7 @@ pub async fn run(
         config,
         renderer,
         app,
-        keys: Keyboard::default(),
+        input: InputMapper::default(),
         last_ms: None,
         backend,
         on_first_frame: Some(on_first_frame),
@@ -123,8 +123,17 @@ fn listen_keys(window: &web_sys::Window, state: &Rc<RefCell<State>>) -> Result<(
         let state = state.clone();
         let handler = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
             if let Some(key) = Key::from_code(&e.code()) {
-                e.prevent_default();
-                state.borrow_mut().keys.set(key, down);
+                let raw = RawInput::Key(key);
+                let input = &mut state.borrow_mut().input;
+                // Keep browser shortcuts (Ctrl+R, F5, ...) unless the game uses the key.
+                if input.bindings().is_bound(raw) && !e.ctrl_key() && !e.meta_key() {
+                    e.prevent_default();
+                }
+                if down {
+                    input.press(raw);
+                } else {
+                    input.release(raw);
+                }
             }
         });
         window.add_event_listener_with_callback(event, handler.as_ref().unchecked_ref())?;
@@ -132,7 +141,7 @@ fn listen_keys(window: &web_sys::Window, state: &Rc<RefCell<State>>) -> Result<(
         handler.forget();
     }
     let state = state.clone();
-    let blur = Closure::<dyn FnMut()>::new(move || state.borrow_mut().keys.release_all());
+    let blur = Closure::<dyn FnMut()>::new(move || state.borrow_mut().input.release_all());
     window.add_event_listener_with_callback("blur", blur.as_ref().unchecked_ref())?;
     blur.forget();
     Ok(())
@@ -178,7 +187,7 @@ impl State {
             }
         }
 
-        let steps = self.app.update(&self.keys.input(), dt);
+        let steps = self.app.update(self.input.sample(dt as f32), dt);
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
