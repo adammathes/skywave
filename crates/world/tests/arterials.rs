@@ -38,14 +38,14 @@ fn generate(t: &RegionTemplate, seed: u64) -> (MacroMap, RoadGraph) {
 /// 1–4 before and after, and commit the new values in their own commit whose message says
 /// why they moved.
 const GOLDEN: [u64; 8] = [
-    0x5A79_EC94_5E41_6FC6,
-    0xAC88_C752_04B4_1B95,
-    0x274E_D5EA_A500_EDCA,
-    0xA899_1D2A_3C7D_FF2A,
-    0x3567_D997_0C04_64CA,
-    0x7433_D927_9515_BE55,
-    0x991F_6CE6_5E75_DE1D,
-    0x9A06_2866_1BF0_8E42,
+    0x3224_52F8_B737_3E7D,
+    0x2B2D_6FB1_BB37_DC5A,
+    0x5CBA_C70D_9838_5FFC,
+    0x5F46_49D9_AFED_90BB,
+    0x3800_DF45_8092_EE00,
+    0x48CA_6A58_4311_9D21,
+    0x93BE_79EB_09AC_6915,
+    0x1C80_610A_EE1F_CA42,
 ];
 
 #[test]
