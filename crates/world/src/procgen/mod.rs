@@ -2,7 +2,7 @@
 //! coast and terrain (stage 1) and the zone map (stage 2), as a [`MacroMap`], and the
 //! arterial network with the highway (stage 3), as a `place::RoadGraph` ([`arterials()`]);
 //! then the first chunk stage, local streets (stage 4: [`streets()`], [`streets_all()`]).
-//! [`build_place`] runs the macro stages and fills a skeleton `place::Place`.
+//! [`build_place`] runs the macro stages and the streets and fills a skeleton `place::Place`.
 //!
 //! Everything is a pure function of `(seed, template, size)`. Each stage draws from its own
 //! `Rng::new(seed, &[stage, ..])` and its own noise keyed by `hash64(seed, [stage, ..])`, so

@@ -311,8 +311,51 @@ fn collider_follows_slopes_and_decks() {
             .expect("ground under the probe");
         y - hit.t
     };
+    // Where two streets that do not meet overlap at different heights (closer than an
+    // overpass clears), the probe stands on whichever slab it meets first (an overlap from
+    // stage 4: skipped and counted here).
+    let boxes: Vec<[f32; 4]> = p
+        .roads
+        .edges
+        .iter()
+        .map(|e| {
+            let r = 0.5 * e.width_m + 3.5;
+            e.profile
+                .iter()
+                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, q| {
+                    [
+                        b[0].min(q[0] - r),
+                        b[1].min(q[2] - r),
+                        b[2].max(q[0] + r),
+                        b[3].max(q[2] + r),
+                    ]
+                })
+        })
+        .collect();
+    let overlaps = |i: usize, q: world::math::V3| {
+        use world::math::{segment_distance, V2};
+        use world::procgen::arterials::OVERPASS_LIFT_M;
+        let v = V2::new(q.x, q.z);
+        let own = &p.roads.edges[i];
+        p.roads.edges.iter().enumerate().any(|(j, e)| {
+            let b = boxes[j];
+            let meets = [e.a, e.b].iter().any(|n| *n == own.a || *n == own.b);
+            j != i
+                && !meets
+                && v.x >= b[0]
+                && v.x <= b[2]
+                && v.y >= b[1]
+                && v.y <= b[3]
+                && e.profile.windows(2).any(|w| {
+                    let (a, c) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
+                    let (d, u) = segment_distance(v, a, c);
+                    let dy = (w[0][1] + (w[1][1] - w[0][1]) * u - q.y).abs();
+                    d < 0.5 * e.width_m + 3.5 && dy > 0.1 && dy < OVERPASS_LIFT_M - 2.0
+                })
+        })
+    };
     // Road centerlines on grades of 3% and more.
-    let (mut roads, mut worst_road, mut decks) = (0usize, 0.0f32, 0usize);
+    let (mut roads, mut worst_road, mut decks, mut overlapped) = (0usize, 0.0f32, 0usize, 0usize);
     for (i, path) in net.paths.iter().enumerate() {
         let (ea, eb) = net.ends(i);
         let mut s = ea.trim + 2.0;
@@ -321,6 +364,10 @@ fn collider_follows_slopes_and_decks() {
             let ahead = path.p(s + 1.0, 0.0, 0.0);
             s += 7.0;
             if (ahead.y - q.y).abs() < 0.03 {
+                continue;
+            }
+            if overlaps(i, q) {
+                overlapped += 1;
                 continue;
             }
             if q.y - grid.height_at(q.x, q.z) > DECK_CLEARANCE_M {
@@ -335,19 +382,35 @@ fn collider_follows_slopes_and_decks() {
             );
         }
     }
-    // Terrain away from roads, on slopes of 20% and more.
+    // Terrain away from roads (their sidewalks and curbs too), on slopes of 20% and more.
+    let near_road = |v: world::math::V2| {
+        p.roads.edges.iter().enumerate().any(|(j, e)| {
+            let b = boxes[j];
+            v.x >= b[0]
+                && v.x <= b[2]
+                && v.y >= b[1]
+                && v.y <= b[3]
+                && e.profile.windows(2).any(|w| {
+                    let (a, c) = (
+                        world::math::V2::new(w[0][0], w[0][2]),
+                        world::math::V2::new(w[1][0], w[1][2]),
+                    );
+                    world::math::segment_distance(v, a, c).0 < 0.5 * e.width_m + 3.5
+                })
+        })
+    };
     let (mut slopes, mut worst_ground) = (0usize, 0.0f32);
     for iz in (2..grid.h - 2).step_by(5) {
         for ix in (2..grid.w - 2).step_by(5) {
             let q = grid.pos(ix, iz) + world::math::V2::new(1.3, 2.1);
             let g = grid.height_at(q.x, q.y);
             let gx = grid.height_at(q.x + 2.0, q.y) - grid.height_at(q.x - 2.0, q.y);
-            if gx.abs() < 0.8 || g < p.terrain.water_level {
+            if gx.abs() < 0.8 || g < p.terrain.water_level || near_road(q) {
                 continue;
             }
             let y = probe(q.x, g + 20.0, q.y);
             if (y - g).abs() > 0.3 {
-                continue; // a road or a deck above the terrain here
+                continue; // a deck above the terrain here
             }
             slopes += 1;
             worst_ground = worst_ground.max((y - g).abs());
@@ -355,7 +418,11 @@ fn collider_follows_slopes_and_decks() {
         }
     }
     println!(
-        "{roads} sloped road points (worst {worst_road:.3} m, {decks} on decks), {slopes} hillside points (worst {worst_ground:.3} m)"
+        "{roads} sloped road points (worst {worst_road:.3} m, {decks} on decks, {overlapped} on overlapping streets skipped), {slopes} hillside points (worst {worst_ground:.3} m)"
+    );
+    assert!(
+        overlapped * 20 < roads,
+        "{overlapped} of {roads} on overlapping streets"
     );
     assert!(roads > 200 && slopes > 200);
     // A deck: the probe from above stands on it, from under it on what is below.

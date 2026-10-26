@@ -1386,13 +1386,14 @@ mod tests {
 
     #[test]
     fn the_coast_place_loads_and_the_car_drives_on_it() {
-        // Built at load: every chunk of the 16×16-chunk place meshed, each a draw or a few.
+        // Built at load: every chunk of the 16×16-chunk place meshed, a draw for each kind
+        // of mesh it has (ground, roads, paint).
         let query = "?seed=1&place=coast";
         let setup = SceneSetup::from_query(&format!("{query}&stream=0")).unwrap();
         let resident = App::from_setup(&setup).unwrap();
         let world = resident.world_instances;
         eprintln!("coast at load: {world} world meshes");
-        assert!((256..=512).contains(&world), "{world} world meshes");
+        assert!((256..=768).contains(&world), "{world} world meshes");
         assert!(resident.meshes[..world]
             .iter()
             .all(|m| m.vertices.len() <= 1 << 20));
