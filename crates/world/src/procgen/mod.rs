@@ -2,7 +2,8 @@
 //! coast and terrain (stage 1) and the zone map (stage 2), as a [`MacroMap`], and the
 //! arterial network with the highway (stage 3), as a `place::RoadGraph` ([`arterials()`]);
 //! then the chunk stages: local streets (stage 4: [`streets()`], [`streets_all()`]) and
-//! blocks and parcels (stage 5: [`parcels()`], [`ParcelPlan`]).
+//! blocks and parcels (stage 5: [`parcels()`], [`ParcelPlan`]) and buildings (stage 6:
+//! [`buildings()`], [`buildings_all()`]).
 //! [`build_place`] runs the macro stages and fills a skeleton `place::Place`.
 //!
 //! Everything is a pure function of `(seed, template, size)`. Each stage draws from its own
@@ -11,6 +12,7 @@
 
 pub mod arterials;
 pub mod build;
+pub mod buildings;
 pub mod macro_map;
 pub mod parcels;
 pub mod streets;
@@ -19,6 +21,7 @@ pub mod zones;
 
 pub use arterials::{arterials, hash_graph};
 pub use build::{build_place, place_from, PLACE_CHUNKS};
+pub use buildings::{buildings, buildings_all, hash_buildings, lot_buildings};
 pub use macro_map::{Frame, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind};
 pub use parcels::{
     hash_parcels, parcels, parcels_all, Block, Face, FaceKind, FaceParcels, FaceStats, ParcelChunk,
@@ -44,6 +47,8 @@ pub mod stage {
     pub const STREETS: u64 = 7;
     /// Blocks and parcels (chunk stage).
     pub const PARCELS: u64 = 8;
+    /// Buildings on parcels (chunk stage).
+    pub const BUILDINGS: u64 = 9;
 }
 
 /// Edge length of a streaming chunk.

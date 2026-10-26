@@ -3,8 +3,8 @@
 //! [`build_place`] runs the macro map (stages 1–2) and the arterial network (stage 3), then
 //! fills the Place skeleton: terrain from the macro heights (which already carry the
 //! highway corridor) at [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and
-//! one `PlayerStart` in the outer lane of the strip's spine. Local streets, parcels and
-//! buildings come later.
+//! one `PlayerStart` in the outer lane of the strip's spine; then the chunk stages over
+//! the whole place: local streets (stage 4), parcels (stage 5) and buildings (stage 6).
 
 use alloc::vec::Vec;
 
@@ -16,7 +16,10 @@ use place::{
 use skywave_core::Seed;
 
 use super::arterials::arterials;
+use super::buildings::buildings_all;
 use super::macro_map::{MacroMap, WaterKind};
+use super::parcels::parcels_all;
+use super::streets::streets_all;
 use super::{RES_PER_CHUNK, ZONE_SAMPLES};
 use crate::math::{atan2, segment_distance, V2};
 use crate::template::RegionTemplate;
@@ -51,7 +54,14 @@ pub fn era_of(year: u16) -> Era {
 pub fn build_place(seed: Seed, template: &RegionTemplate) -> Place {
     let m = MacroMap::generate(seed, template, PLACE_CHUNKS);
     let roads = arterials(seed, template, &m);
-    place_from(&m, template, roads)
+    // Stages 4-6: local streets merged into the graph, then parcels and buildings on it
+    // (against the graph as the Place stores it, sorted by chunk).
+    let roads = streets_all(seed, template, &m, &roads);
+    let mut place = place_from(&m, template, roads);
+    place.parcels = parcels_all(seed, template, &m, &place.roads);
+    place.buildings = buildings_all(seed, template, &m, &place.parcels, &place.roads);
+    place.sort_by_chunk();
+    place
 }
 
 /// The Place skeleton for a macro map and its road graph.

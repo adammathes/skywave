@@ -45,7 +45,7 @@ fn places_validate_and_are_deterministic() {
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(p.validate(), Ok(()), "seed {seed}");
         assert_eq!(p.header.region, RegionId::CaliforniaCoast);
-        assert!(p.buildings.is_empty() && p.parcels.is_empty());
+        assert!(!p.buildings.is_empty() && !p.parcels.is_empty());
         let s = p.player_start().expect("a PlayerStart");
         assert_eq!(s.kind, SpawnKind::PlayerStart);
         let ground = p
