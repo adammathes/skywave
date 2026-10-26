@@ -8,6 +8,7 @@
 pub mod daylight;
 mod input;
 pub mod vehicles;
+mod worldmesh;
 
 pub use input::{
     pad_table, Action, AxisOptions, Binding, Bindings, BindingsError, Conflict, Context,
@@ -188,16 +189,17 @@ impl App {
     }
 }
 
-/// Converts world meshes to the renderer's vertex format, which has no UV or emissive
-/// channel yet: every chunk mesh as is (lit windows slightly tinted), followed by one mesh
+/// Converts world meshes (patterned by [`worldmesh::atlas_mesh`]) to the renderer's vertex
+/// format: every chunk mesh as is (lit windows slightly tinted), followed by one mesh
 /// holding all neon, lamp and signal triangles colored by their glow, drawn with a boosted
 /// instance color.
 fn render_meshes(chunks: &[ChunkMesh]) -> Vec<Mesh> {
     let mut out = Vec::with_capacity(chunks.len() + 1);
     let mut glow = Mesh::default();
     for c in chunks {
-        out.push(convert(&c.mesh, false));
-        let g = convert(&c.mesh, true);
+        let mesh = worldmesh::atlas_mesh(&c.mesh, c.kind);
+        out.push(convert(&mesh, false));
+        let g = convert(&mesh, true);
         let base = glow.vertices.len() as u32;
         glow.vertices.extend_from_slice(&g.vertices);
         glow.indices.extend(g.indices.iter().map(|i| i + base));
@@ -222,8 +224,7 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
             [c[0], c[1], c[2], 255]
         };
         // Emissive: the renderer encodes window-flagged glow (scaled by time of day) and plain
-        // glow with an intensity; the town's Glow classes map onto that. The atlas uv stays in
-        // the white tile until the pattern ids are mapped onto atlas tiles.
+        // glow with an intensity; the town's Glow classes map onto that.
         let emissive = match e[3] {
             x if x == Glow::Window as u8 => render::emissive_window([e[0], e[1], e[2]], 1.0),
             x if x == Glow::None as u8 => [0, 0, 0, 0],
@@ -232,7 +233,7 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
         Vertex {
             pos: v.pos,
             normal: v.normal,
-            uv: [0, 0],
+            uv: render::uv_unorm(v.uv),
             color,
             emissive,
         }
