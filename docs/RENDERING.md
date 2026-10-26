@@ -26,6 +26,12 @@ tonemap        AgX or ACES-fitted, exposure from time-of-day curve (no auto-expo
                style post (cel/dither/CRT) here
 HUD            2D pass: minimap texture, speed, station, menu text (bitmap font, one texture)
 ```
+HUD layout: a virtual 1280×720 space letterboxed into the largest centered 16:9 box (16:10 Deck and 4:3
+get bars, so nothing stretches), shrunk to `1280/ui_scale × 720/ui_scale` for the UI scale (1–2×), with a
+3% safe-area inset for TVs. Items are text runs and rectangles, drawn in order as alpha-blended instanced
+quads in one draw from a fixed 4096-quad buffer (extra quads are dropped and counted). The font is our own
+bold 7×9 pixel face for ASCII 32–126 (`render::font`, `const` bit rows rasterized at startup); text is
+drawn at a whole number of pixels per font pixel with nearest sampling, so it is crisp at any resolution.
 WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky

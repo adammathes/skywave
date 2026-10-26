@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use app::{pad_table, App, InputMapper, Key, RawInput, MOUSE_BUTTONS, MOUSE_RIGHT};
+use app::{pad_table, App, InputMapper, Key, RawInput, SettingsStore, MOUSE_BUTTONS, MOUSE_RIGHT};
 use render::Renderer;
 use skywave_core::Seed;
 use wasm_bindgen::prelude::*;
@@ -28,6 +28,30 @@ struct State {
     last_ms: Option<f64>,
     backend: &'static str,
     on_first_frame: Option<js_sys::Function>,
+}
+
+/// Settings in the page's `localStorage`. Browsers that refuse storage (private modes,
+/// blocked cookies) just keep the defaults.
+struct LocalStore;
+
+const STORAGE_KEY: &str = "skywave.settings";
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+impl SettingsStore for LocalStore {
+    fn load(&self) -> Option<String> {
+        local_storage()?.get_item(STORAGE_KEY).ok()?
+    }
+
+    fn save(&mut self, json: &str) {
+        if let Some(storage) = local_storage() {
+            if storage.set_item(STORAGE_KEY, json).is_err() {
+                log::warn!("skywave: could not save settings to localStorage");
+            }
+        }
+    }
 }
 
 fn js_err(e: impl std::fmt::Display) -> JsValue {
@@ -104,6 +128,10 @@ pub async fn run(
         app.set_camera_mode(mode);
     }
     app.set_fly(crate::query_param(&query, "fly") == Some("1"));
+    app.set_settings_store(Box::new(LocalStore));
+    if crate::menu_from_query(&query) {
+        app.open_settings();
+    }
     let mut renderer = Renderer::new(&device, &queue, config.format, (width, height));
     for mesh in app.meshes() {
         renderer.add_mesh(mesh);
@@ -411,7 +439,7 @@ impl State {
             self.poll_gamepads(&window);
         }
 
-        let steps = self.app.update(self.input.sample(dt as f32), dt);
+        let steps = self.app.frame(&mut self.input, dt);
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -429,6 +457,7 @@ impl State {
         self.renderer
             .render(&view, &self.app.scene_view(steps.alpha, aspect));
         self.queue.present(frame);
+        self.app.set_render_stats(self.renderer.stats());
 
         if let Some(cb) = self.on_first_frame.take() {
             let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(self.backend));

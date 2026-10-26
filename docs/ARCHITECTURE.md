@@ -71,7 +71,7 @@ Web (primary; what CI tests) → **Steam Deck** (Linux x86_64 binary, Vulkan, 12
 Budgets are constants in `app::budgets` and tested where measurable.
 
 ## Platform contract (`app::Platform` trait implemented per platform)
-`now_seconds()`, `surface size`, `input bindings load/save`, `settings load/save` (JSON string; localStorage on web, XDG config dir native), `open_music_files()` (file picker / folder scan → list of `MusicSource`), `audio sink` (push f32 interleaved stereo at 48 kHz), `open_url` (for the sharing code), `log`. Nothing else.
+`now_seconds()`, `surface size`, `input bindings load/save`, `settings load/save` (JSON string through `app::SettingsStore`; localStorage on web, XDG config dir native; bindings live in the same document), `open_music_files()` (file picker / folder scan → list of `MusicSource`), `audio sink` (push f32 interleaved stereo at 48 kHz), `open_url` (for the sharing code), `log`. Nothing else.
 
 ## Settings and sharing
 Settings are one JSON document, versioned, with defaults filled on load. Share codes: `sw1:<era>:<region>:<seed-hex>` plus optional `:t<time-of-day>` and `:v<vehicle-id>`; also encoded in the web URL query. Loading a code reproduces the place, time and car.

@@ -15,16 +15,21 @@
 //!    (Jimenez 2014). Skipped when [`Sky::bloom_strength`] is 0.
 //! 4. **Tonemap**: exposure, bloom, AgX, a light vignette and an 8-bit dither from the HDR
 //!    target to the swapchain.
+//! 5. **HUD**: text and rectangles from [`SceneView::hud`] as alpha-blended quads straight
+//!    onto the swapchain, in one instanced draw (see [`HudLayout`] for the layout rules
+//!    and [`font`] for the bitmap face). Skipped when there is nothing to draw.
 //!
 //! Where the device cannot render to `Rgba16Float` (WebGL2 without
 //! `EXT_color_buffer_float`) the forward pass tonemaps in its fragment shaders (AgX,
 //! vignette and dither included) and writes the swapchain directly; there is no bloom and no
-//! tonemap pass.
+//! tonemap pass. The HUD pass is the same in both modes.
 //!
 //! The renderer knows nothing about the game; it draws a [`SceneView`] of plain data.
 //! Radiance is linear sRGB in kcd/m² (1 = 1000 cd/m²) throughout; see [`Sun`] and [`Sky`].
 
 mod atlas;
+pub mod font;
+mod hud;
 mod light;
 mod mesh;
 mod sky;
@@ -32,6 +37,10 @@ mod sky;
 pub use atlas::{
     tile_uv, uv_unorm, TextureAtlas, Tile, ATLAS_MIP_LEVELS, ATLAS_SIZE, TILES_PER_ROW, TILE_INSET,
     TILE_SIZE,
+};
+pub use hud::{
+    clamp_ui_scale, Hud, HudBuilder, HudItem, HudLayout, TextRange, HUD_HEIGHT, HUD_SAFE_MARGIN,
+    HUD_WIDTH, MAX_HUD_QUADS, UI_SCALE_MAX, UI_SCALE_MIN,
 };
 pub use light::{
     camera_depth_range, fit_cascades, slice_corners, sun_view_proj, CascadeFit, CASCADES,
@@ -44,6 +53,7 @@ pub use sky::{exposure_from_ev100, MOON_ANGULAR_RADIUS, SUN_ANGULAR_RADIUS};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4Swizzles};
+use hud::HudQuad;
 use sky::SkyModel;
 use std::future::Future;
 use std::task::{Context, Poll, Waker};
@@ -77,6 +87,7 @@ const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const FONT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 /// Stride of the per-cascade uniform slots; the largest offset alignment WebGPU allows.
 const CASCADE_UNIFORM_STRIDE: u64 = 256;
 
@@ -204,6 +215,8 @@ pub struct SceneView<'a> {
     pub instances: &'a [MeshInstance],
     /// Point lights for this frame; only the first [`MAX_POINT_LIGHTS`] are used.
     pub lights: &'a [PointLight],
+    /// Text and rectangles drawn over the frame ([`Hud::EMPTY`] for none).
+    pub hud: Hud<'a>,
 }
 
 /// How the renderer stores the lit image before tonemapping.
@@ -248,6 +261,12 @@ pub struct RenderStats {
     pub bloom_draw_calls: u32,
     /// Point lights applied in the last frame.
     pub point_lights: u32,
+    /// Mesh instances in the last frame's scene.
+    pub instances: u32,
+    /// HUD quads (glyphs and rectangles) drawn in the last frame.
+    pub hud_quads: u32,
+    /// HUD quads beyond [`MAX_HUD_QUADS`] left out of the last frame.
+    pub hud_quads_dropped: u32,
     /// GPU resources `render` has created over the renderer's life (instance buffer growth).
     pub resources_created: u32,
 }
@@ -346,6 +365,9 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array!
     5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4,
     9 => Float32x4, 10 => Float32x4, 11 => Float32x4, 12 => Float32x4,
 ];
+const HUD_ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
+    0 => Float32x4, 1 => Float32x4, 2 => Unorm8x4,
+];
 
 fn mesh_buffer_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
     [
@@ -378,7 +400,16 @@ pub mod shaders {
         include_str!("../shaders/bloom.wgsl"),
         include_str!("../shaders/tonemap.wgsl")
     );
-    pub const ALL: [(&str, &str); 3] = [("shadow", SHADOW), ("forward", FORWARD), ("post", POST)];
+    pub const HUD: &str = concat!(
+        include_str!("../shaders/common.wgsl"),
+        include_str!("../shaders/hud.wgsl")
+    );
+    pub const ALL: [(&str, &str); 4] = [
+        ("shadow", SHADOW),
+        ("forward", FORWARD),
+        ("post", POST),
+        ("hud", HUD),
+    ];
 }
 
 struct GpuMesh {
@@ -437,6 +468,11 @@ pub struct Renderer {
     shadow_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    hud_pipeline: wgpu::RenderPipeline,
+    hud_group: wgpu::BindGroup,
+    /// Room for [`MAX_HUD_QUADS`] quads, allocated once.
+    hud_buffer: wgpu::Buffer,
+    hud_staging: Vec<HudQuad>,
 
     meshes: Vec<GpuMesh>,
     instance_buffer: wgpu::Buffer,
@@ -833,6 +869,75 @@ impl Renderer {
             }
         });
 
+        let font_view = upload_font(&device, &queue, &font::FontAtlas::generate());
+        let font_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("font"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let hud_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("hud"),
+            entries: &[
+                texture_entry(0, wgpu::TextureSampleType::Float { filterable: true }),
+                sampler_entry(1, wgpu::SamplerBindingType::Filtering),
+            ],
+        });
+        let hud_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hud"),
+            layout: &hud_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&font_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&font_sampler),
+                },
+            ],
+        });
+        let hud_module = module("hud", shaders::HUD);
+        let hud_pl = layout("hud", &[Some(&frame_layout), Some(&hud_layout)]);
+        let hud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("hud"),
+            layout: Some(&hud_pl),
+            vertex: wgpu::VertexState {
+                module: &hud_module,
+                entry_point: Some("vs_hud"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<HudQuad>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &HUD_ATTRIBUTES,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &hud_module,
+                entry_point: Some("fs_hud"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let hud_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hud quads"),
+            size: (MAX_HUD_QUADS * size_of::<HudQuad>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let instance_capacity = 256;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
         let targets = create_targets(&device, post.as_ref(), size);
@@ -856,6 +961,10 @@ impl Renderer {
             shadow_pipeline,
             sky_pipeline,
             mesh_pipeline,
+            hud_pipeline,
+            hud_group,
+            hud_buffer,
+            hud_staging: Vec::with_capacity(MAX_HUD_QUADS),
             meshes: Vec::new(),
             instance_buffer,
             instance_capacity,
@@ -1066,12 +1175,42 @@ impl Renderer {
             fullscreen_pass(&mut encoder, view, clear, &post.tonemap, groups);
             forward_draws += 1;
         }
+        self.hud_staging.clear();
+        let hud_dropped =
+            hud::build_quads(&scene.hud, self.size, &mut self.hud_staging, MAX_HUD_QUADS);
+        let hud_quads = self.hud_staging.len() as u32;
+        if hud_quads > 0 {
+            self.queue
+                .write_buffer(&self.hud_buffer, 0, bytemuck::cast_slice(&self.hud_staging));
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("hud"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.hud_pipeline);
+            pass.set_bind_group(0, &self.frame_group, &[]);
+            pass.set_bind_group(1, &self.hud_group, &[]);
+            pass.set_vertex_buffer(0, self.hud_buffer.slice(..));
+            pass.draw(0..4, 0..hud_quads);
+            forward_draws += 1;
+        }
         self.queue.submit([encoder.finish()]);
         self.stats.frames += 1;
         self.stats.shadow_draw_calls = shadow_draws;
         self.stats.bloom_draw_calls = bloom_draws;
         self.stats.draw_calls = shadow_draws + forward_draws + bloom_draws;
         self.stats.point_lights = scene.lights.len().min(MAX_POINT_LIGHTS) as u32;
+        self.stats.instances = scene.instances.len() as u32;
+        self.stats.hud_quads = hud_quads;
+        self.stats.hud_quads_dropped = hud_dropped;
     }
 
     /// Issues one instanced draw per run of consecutive instances sharing a mesh and
@@ -1271,6 +1410,46 @@ fn upload_atlas(
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// Uploads the HUD font as a single-channel texture (no mips: it is only ever drawn at
+/// whole multiples of its size).
+fn upload_font(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    atlas: &font::FontAtlas,
+) -> wgpu::TextureView {
+    let size = wgpu::Extent3d {
+        width: font::ATLAS_WIDTH,
+        height: font::ATLAS_HEIGHT,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("hud font"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FONT_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &atlas.pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(font::ATLAS_WIDTH),
+            rows_per_image: Some(font::ATLAS_HEIGHT),
+        },
+        size,
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("instances"),
@@ -1457,6 +1636,8 @@ mod tests {
             "fs_bloom_up",
             "vs_tonemap",
             "fs_tonemap",
+            "vs_hud",
+            "fs_hud",
         ] {
             assert!(entry_points.iter().any(|e| e == ep), "missing {ep}");
         }
@@ -1608,6 +1789,7 @@ mod tests {
             },
             instances,
             lights,
+            hud: Hud::EMPTY,
         }
     }
 
@@ -1738,6 +1920,79 @@ mod tests {
         }
     }
 
+    /// Text and rectangles go over the frame in one instanced draw in both HDR modes, on
+    /// any target aspect; quads past the fixed buffer are dropped and counted.
+    #[test]
+    fn hud_draws_text_and_rects_in_one_call() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let mut hud = HudBuilder::new();
+        hud.begin(1.0);
+        hud.rect(-100.0, -100.0, 2000.0, 1000.0, [0, 0, 0, 120]);
+        hud.rect(100.0, 100.0, 400.0, 32.0, [255, 176, 64, 255]);
+        hud.text(110.0, 107.0, 2.0, [20, 16, 10, 255], "Invert look Y");
+        hud.text_fmt(40.0, 40.0, 1.0, [255; 4], format_args!("{:.2} ms", 16.67));
+        let glyphs = "InvertlookY".len() + "16.67ms".len();
+        let mut flood = HudBuilder::new();
+        flood.begin(2.0);
+        flood.text(0.0, 0.0, 1.0, [255; 4], &"#".repeat(MAX_HUD_QUADS + 100));
+        for format in [
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ] {
+            for mode in [HdrMode::Float16, HdrMode::Ldr] {
+                let options = RendererOptions {
+                    hdr: mode,
+                    ..Default::default()
+                };
+                let mut r = Renderer::with_options(&device, &queue, format, (64, 36), options);
+                let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+                let instances = [MeshInstance {
+                    mesh: block,
+                    transform: Mat4::IDENTITY.to_cols_array_2d(),
+                    color: [1.0; 4],
+                }];
+                let mut scene = test_scene(&instances);
+                render_frames(&device, &mut r, format, &scene, &[(128, 72)]);
+                let base = r.stats().draw_calls;
+                assert_eq!(r.stats().hud_quads, 0);
+
+                scene.hud = hud.view();
+                // 16:9, 16:10 (letterboxed) and a target smaller than one glyph.
+                for size in [(128, 72), (128, 80), (7, 5)] {
+                    render_frames(&device, &mut r, format, &scene, &[size]);
+                    let stats = r.stats();
+                    assert_eq!(stats.draw_calls, base + 1, "{size:?}");
+                    // Rects that round to nothing on the tiny target are skipped.
+                    let min = if size.0 < 10 { glyphs } else { 2 + glyphs };
+                    assert!((min..=2 + glyphs).contains(&(stats.hud_quads as usize)));
+                    assert_eq!(stats.hud_quads_dropped, 0);
+                    assert_eq!(stats.instances, 1);
+                }
+
+                scene.hud = flood.view();
+                render_frames(&device, &mut r, format, &scene, &[(128, 72)]);
+                let stats = r.stats();
+                assert_eq!(stats.hud_quads as usize, MAX_HUD_QUADS);
+                assert_eq!(stats.hud_quads_dropped, 100);
+                assert_eq!(stats.draw_calls, base + 1);
+                assert_eq!(stats.resources_created, 0);
+                assert_eq!(r.hud_staging.capacity(), MAX_HUD_QUADS);
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn hud_quad_layout_matches_the_shader() {
+        assert_eq!(size_of::<HudQuad>(), 36);
+        assert_eq!(HUD_ATTRIBUTES[1].offset, 16);
+        assert_eq!(HUD_ATTRIBUTES[2].offset, 32);
+        let wgsl = include_str!("../shaders/hud.wgsl");
+        for (i, name) in ["rect", "uv", "color"].iter().enumerate() {
+            assert!(wgsl.contains(&format!("@location({i}) {name}: vec4<f32>")));
+        }
+    }
+
     /// The noop device renders Rgba16Float, so detection picks the float path; with full
     /// texture limits the cascades get their full size.
     #[test]
@@ -1769,7 +2024,12 @@ mod tests {
             })
             .collect();
         r.reserve_instances(instances.len());
-        let scene = test_scene(&instances);
+        let mut hud = HudBuilder::new();
+        hud.begin(1.0);
+        hud.rect(0.0, 0.0, 100.0, 20.0, [0, 0, 0, 128]);
+        hud.text(4.0, 4.0, 2.0, [255; 4], "frame 16.7 ms");
+        let mut scene = test_scene(&instances);
+        scene.hud = hud.view();
         let capacity = r.instance_staging.capacity();
         let sizes = [(16, 16); WARMUP_FRAMES as usize + 4];
         render_frames(&device, &mut r, format, &scene, &sizes);
