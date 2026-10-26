@@ -31,6 +31,9 @@ use crate::{MeshKind, MeshSet};
 pub const SHOULDER_M: f32 = 4.0;
 /// Extra graded width so no terrain triangle under a road's edge keeps an ungraded corner.
 pub const GRID_COVER_M: f32 = 2.0;
+/// Most a sample under a road goes lower where the road surface bends up round it
+/// ([`bend_up`]): tight hairpins bend it more than any 4 m grid follows.
+const MAX_BEND_DROP_M: f32 = 0.05;
 /// Width over which the 1:2 cut and fill slopes blend back into the terrain.
 pub const BLEND_M: f32 = 8.0;
 /// Rise over run of road cut and fill slopes.
@@ -95,6 +98,28 @@ fn local_height(net: &Network, (edge, seg): (u32, u32), q: V2) -> f32 {
     let k0 = (seg as usize).saturating_sub(2);
     let k1 = (seg as usize + 3).min(n - 1);
     profile_height(&path.raw[k0..=k1], &path.raw_y[k0..=k1], q)
+}
+
+/// How far the surface of `road` bends up round `q` (where it is at `y`): the largest
+/// second difference over `h` along x, z and the diagonals, 0 where it is straight or bends
+/// down. Ground interpolated between samples `2h` apart rises above such a surface by about
+/// half of it (sags, and the inside of tight bends on a grade, where the height lines of
+/// the segments either side blend), so the samples there go that much lower.
+fn bend_up(net: &Network, road: (u32, u32), q: V2, y: f32, h: f32) -> f32 {
+    if net.paths[road.0 as usize].flat.is_some() {
+        return 0.0;
+    }
+    let mut most = 0.0f32;
+    for d in [
+        V2::new(h, 0.0),
+        V2::new(0.0, h),
+        V2::new(h, h),
+        V2::new(h, -h),
+    ] {
+        let second = local_height(net, road, q + d) + local_height(net, road, q - d) - 2.0 * y;
+        most = most.max(second);
+    }
+    most
 }
 
 impl TerrainGrid {
@@ -192,7 +217,9 @@ impl TerrainGrid {
                         c.core
                     };
                     roads[iz * g.w + ix] = road;
-                    *hp = local_height(net, road, q) - UNDER_ROAD_M;
+                    let y = local_height(net, road, q);
+                    let bend = 0.5 * bend_up(net, road, q, y, 0.5 * g.cell);
+                    *hp = y - UNDER_ROAD_M - bend.min(MAX_BEND_DROP_M);
                 } else if c.blend != NONE {
                     let y = local_height(net, c.blend, q) - UNDER_ROAD_M;
                     let (h0, s) = (*hp, c.blend_s);
