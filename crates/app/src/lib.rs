@@ -176,6 +176,7 @@ impl App {
             },
             sky: Sky::default(),
             instances: &self.instances,
+            lights: &[],
         }
     }
 }

@@ -8,12 +8,18 @@
 //!    orthographic projection fitted to a slice of the camera frustum and snapped to texels.
 //! 2. **Forward**: the analytic sky (Preetham, sun and moon discs, stars), then meshes:
 //!    vertex color × atlas texel, Lambert sun with 3×3 PCF cascaded shadows, hemisphere sky
-//!    ambient and aerial-perspective fog, into an `Rgba16Float` HDR target.
-//! 3. **Tonemap**: exposure and an ACES fitted curve from the HDR target to the swapchain.
+//!    ambient, up to [`MAX_POINT_LIGHTS`] point lights, the vertex emissive channel and
+//!    aerial-perspective fog, into an `Rgba16Float` HDR target.
+//! 3. **Bloom**: a soft-threshold, Karis-averaged 13-tap downsample into a five-level
+//!    half-resolution `Rgba16Float` chain, then 9-tap tent upsamples added back up it
+//!    (Jimenez 2014). Skipped when [`Sky::bloom_strength`] is 0.
+//! 4. **Tonemap**: exposure, bloom, AgX, a light vignette and an 8-bit dither from the HDR
+//!    target to the swapchain.
 //!
 //! Where the device cannot render to `Rgba16Float` (WebGL2 without
-//! `EXT_color_buffer_float`) the forward pass tonemaps in its fragment shaders and writes the
-//! swapchain directly; there is no tonemap pass.
+//! `EXT_color_buffer_float`) the forward pass tonemaps in its fragment shaders (AgX,
+//! vignette and dither included) and writes the swapchain directly; there is no bloom and no
+//! tonemap pass.
 //!
 //! The renderer knows nothing about the game; it draws a [`SceneView`] of plain data.
 //! Radiance is linear sRGB in kcd/m² (1 = 1000 cd/m²) throughout; see [`Sun`] and [`Sky`].
@@ -30,7 +36,10 @@ pub use atlas::{
 pub use light::{
     camera_depth_range, fit_cascades, slice_corners, sun_view_proj, CascadeFit, CASCADES,
 };
-pub use mesh::{Mesh, Vertex};
+pub use mesh::{
+    emissive, emissive_scale, emissive_window, Mesh, Vertex, EMISSIVE_MAX_SCALE,
+    EMISSIVE_WINDOW_BIT,
+};
 pub use sky::{exposure_from_ev100, MOON_ANGULAR_RADIUS, SUN_ANGULAR_RADIUS};
 
 use bytemuck::{Pod, Zeroable};
@@ -53,6 +62,16 @@ const SHADOW_NORMAL_OFFSET: f32 = 1.5;
 const SHADOW_SUN_OFFSET: f32 = 1.0;
 /// Frames after which `render` must not create GPU resources (debug-asserted).
 pub const WARMUP_FRAMES: u64 = 4;
+/// Point lights applied per frame; [`SceneView::lights`] beyond this are ignored. Fits a
+/// WebGL2 uniform block many times over (32 bytes each).
+pub const MAX_POINT_LIGHTS: usize = 8;
+/// Levels in the bloom chain, the first at half the target resolution.
+pub const BLOOM_LEVELS: usize = 5;
+/// Vignette strength: the corners lose this fraction of their light.
+pub const VIGNETTE: f32 = 0.15;
+/// Highest post-exposure channel value a pixel feeds into bloom (brighter pixels are scaled
+/// down to it, keeping their hue), so the sun disc or a lamp cannot flood the chain.
+const BLOOM_CLAMP: f32 = 64.0;
 
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -120,6 +139,22 @@ pub struct Sky {
     /// Multiplier from luminance in kcd/m² to tonemapper input (≈ 0.05 on a sunny day); see
     /// [`exposure_from_ev100`].
     pub exposure: f32,
+    /// Luminance, kcd/m², of a vertex emissive with rgb 255 and scale 1 (see
+    /// [`emissive`]). At the default 0.5 a neon tube (scale 4–8) is 2–4 kcd/m² like a real
+    /// one: faint in sunshine, glowing at dusk, blown out with a halo at night; lit windows
+    /// want scale 0.1–0.3 (50–150 cd/m²).
+    pub emissive_boost: f32,
+    /// Multiplier, 0..1, for emissives flagged as windows ([`emissive_window`]): 0 by day,
+    /// 1 at night.
+    pub window_emissive_scale: f32,
+    /// Post-exposure luminance (tonemapper input, where 0.18 is mid grey and AgX's white
+    /// is ≈ 16) above which light blooms, with a soft knee half as wide below it. At the
+    /// default 1.0 the noon sky away from the sun stays under it.
+    pub bloom_threshold: f32,
+    /// Weight of each of the five blurred copies of the over-threshold light added back
+    /// (so up to 5× this in all, spread from a few pixels to a sixth of the screen); 0
+    /// skips bloom entirely.
+    pub bloom_strength: f32,
 }
 
 impl Default for Sky {
@@ -134,8 +169,27 @@ impl Default for Sky {
             ground_albedo: [0.12, 0.11, 0.10],
             fog_density: 0.0003,
             exposure: exposure_from_ev100(14.0),
+            emissive_boost: 0.5,
+            window_emissive_scale: 0.0,
+            bloom_threshold: 1.0,
+            bloom_strength: 0.08,
         }
     }
+}
+
+/// An omnidirectional light with a smooth inverse-square falloff that reaches zero at
+/// `radius`: a street lamp head, a neon sign's spill. It lights every mesh in the forward
+/// pass (no shadows).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointLight {
+    /// World position, meters.
+    pub position: [f32; 3],
+    /// Luminous intensity, linear RGB, in kilocandela: the illuminance in klux it gives a
+    /// surface facing it 1 m away. A sodium street lamp is ≈ 2–3 kcd (≈ 40 lux on the
+    /// road 8 m below it).
+    pub color: [f32; 3],
+    /// Distance at which the light has faded to nothing, meters (≈ 25 for a street lamp).
+    pub radius: f32,
 }
 
 /// Everything the renderer needs for one frame.
@@ -148,6 +202,8 @@ pub struct SceneView<'a> {
     pub sun: Sun,
     pub sky: Sky,
     pub instances: &'a [MeshInstance],
+    /// Point lights for this frame; only the first [`MAX_POINT_LIGHTS`] are used.
+    pub lights: &'a [PointLight],
 }
 
 /// How the renderer stores the lit image before tonemapping.
@@ -188,6 +244,10 @@ pub struct RenderStats {
     pub draw_calls: u32,
     /// Of which in the shadow pass.
     pub shadow_draw_calls: u32,
+    /// Of which in the bloom passes (0 with bloom off or in LDR mode).
+    pub bloom_draw_calls: u32,
+    /// Point lights applied in the last frame.
+    pub point_lights: u32,
     /// GPU resources `render` has created over the renderer's life (instance buffer growth).
     pub resources_created: u32,
 }
@@ -217,6 +277,32 @@ struct FrameUniform {
     sky_ground: [f32; 4],
     sky_horizon: [f32; 4],
     params: [f32; 4],
+    emissive: [f32; 4],
+    post: [f32; 4],
+    screen: [f32; 4],
+    lights: [PointLightUniform; MAX_POINT_LIGHTS],
+}
+
+/// GPU layout of one point light; mirrors `PointLight` in shaders/common.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct PointLightUniform {
+    /// xyz position (m), w radius (m).
+    pos_radius: [f32; 4],
+    /// rgb intensity (kcd), w 1 / radius².
+    color: [f32; 4],
+}
+
+impl PointLightUniform {
+    fn new(light: &PointLight) -> PointLightUniform {
+        let r = light.radius.max(1e-3);
+        let [x, y, z] = light.position;
+        let [cr, cg, cb] = light.color.map(|c| c.max(0.0));
+        PointLightUniform {
+            pos_radius: [x, y, z, r],
+            color: [cr, cg, cb, 1.0 / (r * r)],
+        }
+    }
 }
 
 /// One cascade's matrix for the shadow pass, padded to its uniform slot.
@@ -253,12 +339,12 @@ impl InstanceRaw {
     }
 }
 
-const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
-    0 => Float32x3, 1 => Float32x3, 2 => Unorm16x2, 3 => Unorm8x4,
+const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+    0 => Float32x3, 1 => Float32x3, 2 => Unorm16x2, 3 => Unorm8x4, 4 => Unorm8x4,
 ];
 const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
-    4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
-    8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Float32x4,
+    5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4,
+    9 => Float32x4, 10 => Float32x4, 11 => Float32x4, 12 => Float32x4,
 ];
 
 fn mesh_buffer_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
@@ -286,15 +372,13 @@ pub mod shaders {
         include_str!("../shaders/common.wgsl"),
         include_str!("../shaders/forward.wgsl")
     );
-    pub const TONEMAP: &str = concat!(
+    /// Bloom and tonemap entry points in one module (the tonemap reuses bloom's tent).
+    pub const POST: &str = concat!(
         include_str!("../shaders/common.wgsl"),
+        include_str!("../shaders/bloom.wgsl"),
         include_str!("../shaders/tonemap.wgsl")
     );
-    pub const ALL: [(&str, &str); 3] = [
-        ("shadow", SHADOW),
-        ("forward", FORWARD),
-        ("tonemap", TONEMAP),
-    ];
+    pub const ALL: [(&str, &str); 3] = [("shadow", SHADOW), ("forward", FORWARD), ("post", POST)];
 }
 
 struct GpuMesh {
@@ -303,11 +387,33 @@ struct GpuMesh {
     index_count: u32,
 }
 
-/// Size-dependent render targets. `hdr` and `tonemap_group` exist only in float mode.
+/// Size-dependent render targets. `hdr` and `post` exist only in float mode.
 struct Targets {
     hdr: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
-    tonemap_group: Option<wgpu::BindGroup>,
+    post: Option<PostTargets>,
+}
+
+/// The bloom chain and the bind groups that read it.
+struct PostTargets {
+    /// Level `k` is `size >> (k + 1)` (at least 1 px).
+    bloom: [wgpu::TextureView; BLOOM_LEVELS],
+    /// Samples the HDR target: the prefilter's source.
+    hdr_group: wgpu::BindGroup,
+    /// `level_groups[k]` samples bloom level `k`.
+    level_groups: [wgpu::BindGroup; BLOOM_LEVELS],
+    tonemap_group: wgpu::BindGroup,
+}
+
+/// Size-independent state of the bloom and tonemap passes (float mode only).
+struct Post {
+    bloom_layout: wgpu::BindGroupLayout,
+    tonemap_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    prefilter: wgpu::RenderPipeline,
+    down: wgpu::RenderPipeline,
+    up: wgpu::RenderPipeline,
+    tonemap: wgpu::RenderPipeline,
 }
 
 pub struct Renderer {
@@ -325,13 +431,12 @@ pub struct Renderer {
     cascade_groups: [wgpu::BindGroup; CASCADES],
     shadow_view: wgpu::TextureView,
     forward_group: wgpu::BindGroup,
-    tonemap_layout: wgpu::BindGroupLayout,
+    post: Option<Post>,
     targets: Targets,
 
     shadow_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
-    tonemap_pipeline: Option<wgpu::RenderPipeline>,
 
     meshes: Vec<GpuMesh>,
     instance_buffer: wgpu::Buffer,
@@ -518,14 +623,6 @@ impl Renderer {
                 },
             ],
         });
-        let tonemap_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("tonemap"),
-            entries: &[texture_entry(
-                0,
-                wgpu::TextureSampleType::Float { filterable: false },
-            )],
-        });
-
         let module = |label: &str, source: &str| {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
@@ -644,35 +741,101 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
-        let tonemap_pipeline = hdr.then(|| {
-            let tonemap_module = module("tonemap", shaders::TONEMAP);
+        let post = hdr.then(|| {
+            let filtered = wgpu::TextureSampleType::Float { filterable: true };
+            let bloom_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bloom"),
+                entries: &[
+                    texture_entry(0, filtered),
+                    sampler_entry(1, wgpu::SamplerBindingType::Filtering),
+                ],
+            });
+            let tonemap_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("tonemap"),
+                    entries: &[
+                        texture_entry(0, filtered),
+                        sampler_entry(1, wgpu::SamplerBindingType::Filtering),
+                        texture_entry(2, wgpu::TextureSampleType::Float { filterable: false }),
+                    ],
+                });
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("bloom"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            let post_module = module("post", shaders::POST);
+            let bloom_pl = layout("bloom", &[Some(&frame_layout), Some(&bloom_layout)]);
             let tonemap_pl = layout("tonemap", &[Some(&frame_layout), Some(&tonemap_layout)]);
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("tonemap"),
-                layout: Some(&tonemap_pl),
-                vertex: wgpu::VertexState {
-                    module: &tonemap_module,
-                    entry_point: Some("vs_tonemap"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &tonemap_module,
-                    entry_point: Some("fs_tonemap"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState::from(surface_format))],
+            let fullscreen = |label, pl: &wgpu::PipelineLayout, vs, fs, target| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(pl),
+                    vertex: wgpu::VertexState {
+                        module: &post_module,
+                        entry_point: Some(vs),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &post_module,
+                        entry_point: Some(fs),
+                        compilation_options: Default::default(),
+                        targets: &[Some(target)],
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            };
+            let bloom_target = wgpu::ColorTargetState::from(HDR_FORMAT);
+            let add = wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            };
+            let additive = wgpu::ColorTargetState {
+                blend: Some(wgpu::BlendState {
+                    color: add,
+                    alpha: wgpu::BlendComponent::REPLACE,
                 }),
-                multiview_mask: None,
-                cache: None,
-            })
+                ..bloom_target.clone()
+            };
+            Post {
+                prefilter: fullscreen(
+                    "bloom prefilter",
+                    &bloom_pl,
+                    "vs_bloom",
+                    "fs_bloom_prefilter",
+                    bloom_target.clone(),
+                ),
+                down: fullscreen(
+                    "bloom down",
+                    &bloom_pl,
+                    "vs_bloom",
+                    "fs_bloom_down",
+                    bloom_target,
+                ),
+                up: fullscreen("bloom up", &bloom_pl, "vs_bloom", "fs_bloom_up", additive),
+                tonemap: fullscreen(
+                    "tonemap",
+                    &tonemap_pl,
+                    "vs_tonemap",
+                    "fs_tonemap",
+                    wgpu::ColorTargetState::from(surface_format),
+                ),
+                bloom_layout,
+                tonemap_layout,
+                sampler,
+            }
         });
 
         let instance_capacity = 256;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
-        let targets = create_targets(&device, &tonemap_layout, size, hdr);
+        let targets = create_targets(&device, post.as_ref(), size);
 
         Renderer {
             device,
@@ -688,12 +851,11 @@ impl Renderer {
             cascade_groups,
             shadow_view,
             forward_group,
-            tonemap_layout,
+            post,
             targets,
             shadow_pipeline,
             sky_pipeline,
             mesh_pipeline,
-            tonemap_pipeline,
             meshes: Vec::new(),
             instance_buffer,
             instance_capacity,
@@ -746,7 +908,7 @@ impl Renderer {
         let size = (size.0.max(1), size.1.max(1));
         if size != self.size {
             self.size = size;
-            self.targets = create_targets(&self.device, &self.tonemap_layout, size, self.hdr);
+            self.targets = create_targets(&self.device, self.post.as_ref(), size);
         }
     }
 
@@ -870,31 +1032,46 @@ impl Renderer {
             pass.set_pipeline(&self.mesh_pipeline);
             forward_draws += self.draw_instances(&mut pass, scene.instances);
         }
-        if let (Some(pipeline), Some(group)) = (&self.tonemap_pipeline, &self.targets.tonemap_group)
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("tonemap"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &self.frame_group, &[]);
-            pass.set_bind_group(1, group, &[]);
-            pass.draw(0..3, 0..1);
+        let mut bloom_draws = 0;
+        if let (Some(post), Some(targets)) = (&self.post, &self.targets.post) {
+            if scene.sky.bloom_strength > 0.0 {
+                // Down the chain: the prefilter reads the HDR target, each later level the
+                // one before it.
+                for (k, level) in targets.bloom.iter().enumerate() {
+                    let (pipeline, group) = match k {
+                        0 => (&post.prefilter, &targets.hdr_group),
+                        _ => (&post.down, &targets.level_groups[k - 1]),
+                    };
+                    let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+                    fullscreen_pass(
+                        &mut encoder,
+                        level,
+                        clear,
+                        pipeline,
+                        [&self.frame_group, group],
+                    );
+                    bloom_draws += 1;
+                }
+                // Back up: each level adds a tent-filtered copy of the (already summed)
+                // level below it.
+                for k in (0..BLOOM_LEVELS - 1).rev() {
+                    let groups = [&self.frame_group, &targets.level_groups[k + 1]];
+                    let level = &targets.bloom[k];
+                    fullscreen_pass(&mut encoder, level, wgpu::LoadOp::Load, &post.up, groups);
+                    bloom_draws += 1;
+                }
+            }
+            let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+            let groups = [&self.frame_group, &targets.tonemap_group];
+            fullscreen_pass(&mut encoder, view, clear, &post.tonemap, groups);
             forward_draws += 1;
         }
         self.queue.submit([encoder.finish()]);
         self.stats.frames += 1;
         self.stats.shadow_draw_calls = shadow_draws;
-        self.stats.draw_calls = shadow_draws + forward_draws;
+        self.stats.bloom_draw_calls = bloom_draws;
+        self.stats.draw_calls = shadow_draws + forward_draws + bloom_draws;
+        self.stats.point_lights = scene.lights.len().min(MAX_POINT_LIGHTS) as u32;
     }
 
     /// Issues one instanced draw per run of consecutive instances sharing a mesh and
@@ -989,6 +1166,34 @@ impl Renderer {
                 SHADOW_SUN_OFFSET,
                 SHADOW_NORMAL_OFFSET,
             ],
+            emissive: [
+                scene.sky.emissive_boost.max(0.0),
+                scene.sky.window_emissive_scale.clamp(0.0, 1.0),
+                scene.lights.len().min(MAX_POINT_LIGHTS) as f32,
+                0.0,
+            ],
+            post: [
+                if self.hdr {
+                    scene.sky.bloom_strength.max(0.0)
+                } else {
+                    0.0
+                },
+                scene.sky.bloom_threshold.max(0.0),
+                VIGNETTE,
+                BLOOM_CLAMP,
+            ],
+            screen: [
+                self.size.0 as f32,
+                self.size.1 as f32,
+                1.0 / self.size.0 as f32,
+                1.0 / self.size.1 as f32,
+            ],
+            lights: std::array::from_fn(|i| {
+                scene
+                    .lights
+                    .get(i)
+                    .map_or(PointLightUniform::zeroed(), PointLightUniform::new)
+            }),
         };
         (uniform, cascades)
     }
@@ -1075,19 +1280,46 @@ fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffe
     })
 }
 
-fn create_targets(
-    device: &wgpu::Device,
-    tonemap_layout: &wgpu::BindGroupLayout,
-    size: (u32, u32),
-    hdr: bool,
-) -> Targets {
-    let target = |label, format, usage| {
+/// One fullscreen-triangle pass into `target` (no depth).
+fn fullscreen_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+    pipeline: &wgpu::RenderPipeline,
+    groups: [&wgpu::BindGroup; 2],
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("fullscreen"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        ..Default::default()
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, groups[0], &[]);
+    pass.set_bind_group(1, groups[1], &[]);
+    pass.draw(0..3, 0..1);
+}
+
+/// Size of bloom level `k` for a `size` target: half, quarter, … of it, at least 1 px.
+fn bloom_level_size(size: (u32, u32), k: usize) -> (u32, u32) {
+    ((size.0 >> (k + 1)).max(1), (size.1 >> (k + 1)).max(1))
+}
+
+fn create_targets(device: &wgpu::Device, post: Option<&Post>, size: (u32, u32)) -> Targets {
+    let target = |label, format, usage, (width, height): (u32, u32)| {
         device
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d {
-                    width: size.0,
-                    height: size.1,
+                    width,
+                    height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -1103,31 +1335,63 @@ fn create_targets(
         "depth",
         DEPTH_FORMAT,
         wgpu::TextureUsages::RENDER_ATTACHMENT,
+        size,
     );
-    if !hdr {
+    let Some(post) = post else {
         return Targets {
             hdr: None,
             depth,
-            tonemap_group: None,
+            post: None,
         };
-    }
-    let hdr = target(
-        "hdr color",
-        HDR_FORMAT,
-        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-    );
+    };
+    let sampled = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+    let hdr = target("hdr color", HDR_FORMAT, sampled, size);
+    let bloom: [wgpu::TextureView; BLOOM_LEVELS] =
+        std::array::from_fn(|k| target("bloom", HDR_FORMAT, sampled, bloom_level_size(size, k)));
+    let sample_group = |view: &wgpu::TextureView| {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom"),
+            layout: &post.bloom_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&post.sampler),
+                },
+            ],
+        })
+    };
     let tonemap_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("tonemap"),
-        layout: tonemap_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&hdr),
-        }],
+        layout: &post.tonemap_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&bloom[0]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&post.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&hdr),
+            },
+        ],
     });
+    let post = PostTargets {
+        hdr_group: sample_group(&hdr),
+        level_groups: std::array::from_fn(|k| sample_group(&bloom[k])),
+        tonemap_group,
+        bloom,
+    };
     Targets {
         hdr: Some(hdr),
         depth,
-        tonemap_group: Some(tonemap_group),
+        post: Some(post),
     }
 }
 
@@ -1187,6 +1451,10 @@ mod tests {
             "vs_mesh",
             "fs_mesh",
             "fs_mesh_ldr",
+            "vs_bloom",
+            "fs_bloom_prefilter",
+            "fs_bloom_down",
+            "fs_bloom_up",
             "vs_tonemap",
             "fs_tonemap",
         ] {
@@ -1198,7 +1466,11 @@ mod tests {
     fn uniform_and_instance_layouts() {
         // std140-compatible: only mat4 and vec4 members, 16-byte multiple, under WebGL2's
         // 16 KiB uniform block limit.
-        assert_eq!(size_of::<FrameUniform>(), 5 * 64 + 22 * 16);
+        assert_eq!(
+            size_of::<FrameUniform>(),
+            5 * 64 + 25 * 16 + MAX_POINT_LIGHTS * 32
+        );
+        assert_eq!(size_of::<PointLightUniform>(), 32);
         assert_eq!(size_of::<FrameUniform>() % 16, 0);
         assert!(
             size_of::<FrameUniform>()
@@ -1207,9 +1479,10 @@ mod tests {
         );
         assert_eq!(size_of::<CascadeUniform>() as u64, CASCADE_UNIFORM_STRIDE);
         assert_eq!(size_of::<InstanceRaw>(), 128);
-        assert_eq!(size_of::<Vertex>(), 32);
+        assert_eq!(size_of::<Vertex>(), 36);
         assert_eq!(VERTEX_ATTRIBUTES[2].offset, 24);
         assert_eq!(VERTEX_ATTRIBUTES[3].offset, 28);
+        assert_eq!(VERTEX_ATTRIBUTES[4].offset, 32);
         let attributes = VERTEX_ATTRIBUTES.len() + INSTANCE_ATTRIBUTES.len();
         assert!(
             attributes <= wgpu::Limits::downlevel_webgl2_defaults().max_vertex_attributes as usize
@@ -1252,8 +1525,15 @@ mod tests {
                 "sky_ground",
                 "sky_horizon",
                 "params",
+                "emissive",
+                "post",
+                "screen",
+                "lights",
             ]
         );
+        // The light array length agrees with MAX_POINT_LIGHTS.
+        assert!(wgsl.contains(&format!("MAX_POINT_LIGHTS: u32 = {MAX_POINT_LIGHTS}u;")));
+        assert!(body.contains(&format!("array<PointLight, {MAX_POINT_LIGHTS}>")));
     }
 
     #[test]
@@ -1297,7 +1577,14 @@ mod tests {
         .expect("noop device")
     }
 
-    fn test_scene(instances: &[MeshInstance]) -> SceneView<'_> {
+    fn test_scene<'a>(instances: &'a [MeshInstance]) -> SceneView<'a> {
+        test_scene_lit(instances, &[])
+    }
+
+    fn test_scene_lit<'a>(
+        instances: &'a [MeshInstance],
+        lights: &'a [PointLight],
+    ) -> SceneView<'a> {
         SceneView {
             camera: Camera {
                 view: glam::camera::rh::view::look_at_mat4(
@@ -1320,7 +1607,19 @@ mod tests {
                 ..Sky::default()
             },
             instances,
+            lights,
         }
+    }
+
+    /// A street lamp every 10 m, more than the uniform array holds.
+    fn lamps(count: usize) -> Vec<PointLight> {
+        (0..count)
+            .map(|i| PointLight {
+                position: [i as f32 * 10.0, 7.5, 0.0],
+                color: [2.5, 1.6, 0.6],
+                radius: 25.0,
+            })
+            .collect()
     }
 
     fn render_frames(
@@ -1378,6 +1677,10 @@ mod tests {
                     Tile::BrickRed,
                     0.6,
                 ));
+                let sign = r.add_mesh(
+                    &Mesh::cuboid([-1.0, 0.0, -0.1], [1.0, 0.6, 0.1], [20, 20, 20, 255])
+                        .with_emissive(emissive([255, 40, 160], 6.0)),
+                );
                 assert_eq!((block, ground, brick), (MeshId(0), MeshId(1), MeshId(2)));
 
                 // More instances than the initial capacity forces one buffer reallocation.
@@ -1388,22 +1691,48 @@ mod tests {
                 }];
                 for i in 0..300 {
                     instances.push(MeshInstance {
-                        mesh: if i % 50 == 0 { brick } else { block },
+                        mesh: match i % 50 {
+                            0 => brick,
+                            25 => sign,
+                            _ => block,
+                        },
                         transform: Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0))
                             .to_cols_array_2d(),
                         color: [0.8, 0.7, 0.6, 1.0],
                     });
                 }
-                let scene = test_scene(&instances);
-                render_frames(&device, &mut r, format, &scene, &[(64, 48), (32, 32)]);
+                let lights = lamps(MAX_POINT_LIGHTS + 3);
+                let mut scene = test_scene_lit(&instances, &lights);
+                // Odd sizes and a size smaller than the bloom chain is deep.
+                let sizes = [(64, 48), (33, 17), (5, 3)];
+                render_frames(&device, &mut r, format, &scene, &sizes);
                 let stats = r.stats();
-                assert_eq!(stats.frames, 2);
+                assert_eq!(stats.frames, 3);
                 assert_eq!(stats.resources_created, 1);
-                // Ground + alternating runs of block/brick, drawn in 3 cascades + forward.
-                let runs = 1 + 6 + 6;
+                assert_eq!(stats.point_lights, MAX_POINT_LIGHTS as u32);
+                // Ground, then runs of block with a brick or sign every 25 instances, drawn
+                // in 3 cascades + forward.
+                let runs = 1 + 1 + 12 + 11;
                 assert_eq!(stats.shadow_draw_calls, 3 * runs);
+                // Bloom: five levels down, four back up; sky and tonemap are one draw each.
+                let bloom = if r.is_hdr() {
+                    2 * BLOOM_LEVELS as u32 - 1
+                } else {
+                    0
+                };
+                assert_eq!(stats.bloom_draw_calls, bloom);
                 let passes = if r.is_hdr() { 2 } else { 1 };
+                assert_eq!(stats.draw_calls, 4 * runs + passes + bloom);
+
+                // Bloom off and no lights: the bloom passes are skipped.
+                scene.sky.bloom_strength = 0.0;
+                scene.lights = &[];
+                render_frames(&device, &mut r, format, &scene, &[(64, 48)]);
+                let stats = r.stats();
+                assert_eq!(stats.bloom_draw_calls, 0);
+                assert_eq!(stats.point_lights, 0);
                 assert_eq!(stats.draw_calls, 4 * runs + passes);
+                assert_eq!(stats.resources_created, 1);
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             }
         }
@@ -1444,6 +1773,12 @@ mod tests {
         let capacity = r.instance_staging.capacity();
         let sizes = [(16, 16); WARMUP_FRAMES as usize + 4];
         render_frames(&device, &mut r, format, &scene, &sizes);
+        // Lights and bloom on or off change nothing either.
+        let lights = lamps(4);
+        let mut lit = test_scene_lit(&instances, &lights);
+        render_frames(&device, &mut r, format, &lit, &[(16, 16)]);
+        lit.sky.bloom_strength = 0.0;
+        render_frames(&device, &mut r, format, &lit, &[(16, 16)]);
         assert_eq!(r.stats().resources_created, 0);
         assert_eq!(r.instance_staging.capacity(), capacity);
         // Fewer instances later is fine too.
@@ -1478,5 +1813,78 @@ mod tests {
             u.params[1], 1.0,
             "Rgba8Unorm needs sRGB encoding in the shader"
         );
+        assert_eq!(u.emissive, [0.5, 0.0, 0.0, 0.0]);
+        assert_eq!(u.post, [0.08, 1.0, VIGNETTE, BLOOM_CLAMP]);
+        assert_eq!(u.screen, [8.0, 8.0, 0.125, 0.125]);
+        assert!(u.lights.iter().all(|l| l.color == [0.0; 4]));
+    }
+
+    #[test]
+    fn frame_uniforms_carry_lights_emissive_and_post() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let mut r = Renderer::new(&device, &queue, format, (8, 8));
+        r.resize((640, 360));
+        let lights = lamps(MAX_POINT_LIGHTS + 2);
+        let mut scene = test_scene_lit(&[], &lights);
+        scene.sky.window_emissive_scale = 1.5;
+        scene.sky.emissive_boost = 0.25;
+        scene.sky.bloom_threshold = 2.0;
+        let (u, _) = r.frame_uniforms(&scene);
+        assert_eq!(u.emissive, [0.25, 1.0, MAX_POINT_LIGHTS as f32, 0.0]);
+        assert_eq!(u.post[..2], [0.08, 2.0]);
+        assert_eq!(u.screen[..2], [640.0, 360.0]);
+        assert_eq!(u.params[1], 0.0, "the sRGB target encodes in hardware");
+        for (k, l) in u.lights.iter().enumerate() {
+            assert_eq!(l.pos_radius, [k as f32 * 10.0, 7.5, 0.0, 25.0]);
+            assert_eq!(l.color, [2.5, 1.6, 0.6, 1.0 / 625.0]);
+        }
+
+        // Without float targets there is no bloom.
+        let ldr = Renderer::with_options(
+            &device,
+            &queue,
+            format,
+            (8, 8),
+            RendererOptions {
+                hdr: HdrMode::Ldr,
+                ..Default::default()
+            },
+        );
+        assert_eq!(ldr.frame_uniforms(&scene).0.post[0], 0.0);
+    }
+
+    /// At the default exposure the daytime sky more than 30° from the sun stays under the
+    /// bloom threshold, so bloom does not haze the frame at noon; only the aureole right
+    /// around the sun crosses it (by at most ~50%), and the disc itself blooms fully.
+    #[test]
+    fn noon_sky_does_not_bloom() {
+        let sky = Sky::default();
+        let luma = Vec3::new(0.2126, 0.7152, 0.0722);
+        for elev in [20f32, 35.0, 60.0, 80.0] {
+            let e = elev.to_radians();
+            let sun = Sun {
+                direction: [0.0, e.sin(), -e.cos()],
+                illuminance: [100.0, 97.0, 90.0],
+            };
+            let model = SkyModel::new(&sun, &sky);
+            let (mut aureole, mut rest) = (0f32, 0f32);
+            for i in 0..=45 {
+                for j in 0..180 {
+                    let (el, az) = ((i as f32 * 2.0).to_radians(), (j as f32 * 2.0).to_radians());
+                    let d = Vec3::new(el.cos() * az.sin(), el.sin(), -el.cos() * az.cos());
+                    let lum = (model.radiance(d) * sky.exposure).dot(luma);
+                    let angle = d.dot(model.sun_dir).clamp(-1.0, 1.0).acos().to_degrees();
+                    if angle > 30.0 {
+                        rest = rest.max(lum);
+                    } else if angle > 2.0 {
+                        aureole = aureole.max(lum);
+                    }
+                }
+            }
+            assert!(rest < sky.bloom_threshold, "{elev}: {rest}");
+            assert!(aureole < 1.6 * sky.bloom_threshold, "{elev}: {aureole}");
+            assert!(model.sun_disc.max_element() * sky.exposure > BLOOM_CLAMP);
+        }
     }
 }

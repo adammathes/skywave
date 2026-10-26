@@ -1,5 +1,6 @@
 // Forward pass: the analytic sky, then Lambert-lit, atlas-textured meshes with cascaded sun
-// shadows, hemisphere sky ambient and aerial-perspective fog.
+// shadows, hemisphere sky ambient, up to 8 point lights, the emissive channel and
+// aerial-perspective fog.
 //
 // Each fragment stage has two entry points: `fs_*` writes HDR radiance (Rgba16Float target,
 // tonemapped later) and `fs_*_ldr` tonemaps in place for targets without float rendering.
@@ -123,7 +124,7 @@ fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_sky_ldr(in: SkyOut) -> @location(0) vec4<f32> {
-    return display(sky_full(sky_dir(in.ndc)));
+    return display(sky_full(sky_dir(in.ndc)), in.clip.xy);
 }
 
 // ---- Meshes ---------------------------------------------------------------------------
@@ -134,6 +135,8 @@ struct MeshOut {
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
     @location(3) uv: vec2<f32>,
+    // rgb: emissive radiance (kcd/m²), never tinted by the instance or the atlas.
+    @location(4) emissive: vec3<f32>,
 };
 
 @vertex
@@ -146,7 +149,31 @@ fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
     out.normal = normal_matrix * v.normal;
     out.color = v.color * i.color;
     out.uv = v.uv;
+    // Alpha: 7-bit intensity (0..127 -> 0..8x) plus the window flag in bit 7.
+    let a = u32(round(v.emissive.a * 255.0));
+    let window = select(1.0, frame.emissive.y, (a & 128u) != 0u);
+    let scale = f32(a & 127u) * (8.0 / 127.0);
+    out.emissive = v.emissive.rgb * (scale * window * frame.emissive.x);
     return out;
+}
+
+// Smooth inverse-square point lights (Karis 2013 window): illuminance in klux, reaching 0
+// at each light's radius. The 0.1 m² floor stands for the bulb's size.
+fn point_lights(world_pos: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    let count = min(u32(frame.emissive.z), MAX_POINT_LIGHTS);
+    for (var i = 0u; i < count; i++) {
+        let light = frame.lights[i];
+        let to_light = light.pos_radius.xyz - world_pos;
+        let d2 = dot(to_light, to_light);
+        let ratio = d2 * light.color.w;
+        if ratio < 1.0 {
+            let window = (1.0 - ratio * ratio) * (1.0 - ratio * ratio);
+            let ndl = max(dot(n, to_light * inverseSqrt(max(d2, 1e-8))), 0.0);
+            sum += light.color.rgb * (ndl * window / (d2 + 0.1));
+        }
+    }
+    return sum;
 }
 
 // 3×3 PCF with hardware 2×2 comparison filtering (an effective 4×4 texel kernel) in one
@@ -217,7 +244,12 @@ fn shade(in: MeshOut) -> vec3<f32> {
     }
     // Hemisphere ambient from the sky model: mean sky radiance above, lit ground below.
     let ambient = mix(frame.sky_ground.rgb, frame.sky_up.rgb, n.y * 0.5 + 0.5);
-    var c = albedo * (frame.sun_light.rgb * (ndl * vis) + ambient);
+    // Point-light illuminance / pi is the luminance of a white Lambertian surface, as for
+    // the sun.
+    let lamps = point_lights(in.world_pos, n) * (1.0 / 3.14159265);
+    var c = albedo * (frame.sun_light.rgb * (ndl * vis) + ambient + lamps);
+    // Self-lit color, untouched by texture and instance tint; fog still dims it.
+    c += in.emissive;
 
     let to_frag = in.world_pos - frame.camera_pos.xyz;
     let dist = length(to_frag);
@@ -233,5 +265,5 @@ fn fs_mesh(in: MeshOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_mesh_ldr(in: MeshOut) -> @location(0) vec4<f32> {
-    return display(shade(in));
+    return display(shade(in), in.clip.xy);
 }

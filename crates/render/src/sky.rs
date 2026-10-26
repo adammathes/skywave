@@ -240,9 +240,9 @@ fn perez_f(p: &[Vec3; 5], cos_theta: f32, gamma: f32, cos_gamma: f32) -> Vec3 {
 }
 
 /// Exposure multiplier (from luminance in kcd/m² to tonemapper input) for a camera
-/// exposure value at ISO 100: `1000 / (1.2 · 2^ev100)`. With the ACES fitted tonemap
-/// (which maps 0.18 to about 0.1) good values run a stop under a light meter: sunny day
-/// ≈ EV 14, golden hour ≈ 11–12, blue hour ≈ 7–8, street-lit night ≈ 1–3.
+/// exposure value at ISO 100: `1000 / (1.2 · 2^ev100)`. With the AgX tonemap and its look
+/// (which map 0.18 to about 0.15) good values run about a stop under a light meter: sunny
+/// day ≈ EV 14, golden hour ≈ 11–12, blue hour ≈ 7–8, street-lit night ≈ 1–3.
 pub fn exposure_from_ev100(ev100: f32) -> f32 {
     1000.0 / (1.2 * 2f32.powf(ev100))
 }
