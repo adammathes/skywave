@@ -368,7 +368,7 @@ impl Grid {
 
 /// Bilinear sample of a node-centered grid of 4 m samples (the `MacroMap::heights`
 /// layout), clamped like `MacroMap::height_at`.
-fn sample_nodes(v: &[f32], w: usize, h: usize, p: V2) -> f32 {
+pub(crate) fn sample_nodes(v: &[f32], w: usize, h: usize, p: V2) -> f32 {
     let fx = clamp(p.x / CELL_M, 0.0, (w - 1) as f32);
     let fz = clamp(p.y / CELL_M, 0.0, (h - 1) as f32);
     let (ix, iz) = ((fx as usize).min(w - 2), (fz as usize).min(h - 2));
@@ -380,12 +380,12 @@ fn sample_nodes(v: &[f32], w: usize, h: usize, p: V2) -> f32 {
 }
 
 /// The symmetric tensor of a unit direction, as `(cos 2θ, sin 2θ)`.
-fn tensor(d: V2) -> [f32; 2] {
+pub(crate) fn tensor(d: V2) -> [f32; 2] {
     [d.x * d.x - d.y * d.y, 2.0 * d.x * d.y]
 }
 
 /// Major eigenvector (unit, sign arbitrary) and coherence `|t|` of a blended tensor.
-fn major_of(t: [f32; 2]) -> (V2, f32) {
+pub(crate) fn major_of(t: [f32; 2]) -> (V2, f32) {
     let c = sqrt(t[0] * t[0] + t[1] * t[1]);
     if c < 1e-6 {
         return (V2::new(1.0, 0.0), 0.0);
@@ -857,7 +857,7 @@ fn gradient(m: &MacroMap, radius: usize, passes: usize) -> (Grid, Grid) {
 
 /// Unit coast tangent (along increasing `v`) at a world point, from the smoothed
 /// shoreline differenced over 400 m.
-fn coast_tangent(m: &MacroMap, p: V2) -> V2 {
+pub(crate) fn coast_tangent(m: &MacroMap, p: V2) -> V2 {
     let (_, v) = m.frame.to_canon([p.x, p.y]);
     let slope = (m.shore.road_u(v + 200.0) - m.shore.road_u(v - 200.0)) / 400.0;
     let k = 1.0 / sqrt(1.0 + slope * slope);
@@ -1152,7 +1152,7 @@ fn highway(ctx: &Ctx<'_>) -> Highway {
 /// `g`, starting at `a` and ending at `b` when given (else at the target's ends), and kept
 /// within `band` of the target where the slope bound allows. The average of a forward and
 /// a backward pass, each clamping to the reachable band from both pinned ends.
-fn grade_limit(
+pub(crate) fn grade_limit(
     target: &[f32],
     s: &[f32],
     g: f32,
@@ -1778,7 +1778,7 @@ fn truncate_tail(ctx: &Ctx<'_>, lines: &[Line], index: &Index, pts: &mut Vec<V2>
 }
 
 /// Segment intersection parameters `(t, u)` along `p1→p2` and `q1→q2`, both in `[0, 1]`.
-fn seg_intersect(p1: V2, p2: V2, q1: V2, q2: V2) -> Option<(f32, f32)> {
+pub(crate) fn seg_intersect(p1: V2, p2: V2, q1: V2, q2: V2) -> Option<(f32, f32)> {
     let r = p2 - p1;
     let s = q2 - q1;
     let den = r.x * s.y - r.y * s.x;

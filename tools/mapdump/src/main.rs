@@ -3,10 +3,12 @@
 //! points of interest. One pixel per 4 m height sample, times `--scale`.
 //!
 //! With `--roads`, also generates the arterial network and highway (stage 3) and draws its
-//! edges by class on top, nodes as dots.
+//! edges by class on top, nodes as dots. With `--streets` (implies `--roads`), also
+//! generates the local streets of every chunk (stage 4), merges them with the arterials and
+//! draws locals thin and alleys faint under the arterials, with timings per chunk.
 //!
 //! Usage: `cargo run -p mapdump -- --seed 1 --template assets/regions/california_coast.ron
-//! --out map.png [--size 16x16] [--scale 1] [--roads]`
+//! --out map.png [--size 16x16] [--scale 1] [--roads] [--streets]`
 
 mod png;
 
@@ -14,7 +16,7 @@ use std::time::Instant;
 
 use place::{RoadClass, RoadGraph, ZoneId};
 use skywave_core::Seed;
-use world::procgen::{arterials, hash_graph, MacroMap, MacroPoiKind};
+use world::procgen::{arterials, hash_graph, MacroMap, MacroPoiKind, StreetPlan};
 use world::template::RegionTemplate;
 
 /// Zone colors by `ZoneId` discriminant (Water is shaded separately).
@@ -214,7 +216,8 @@ fn road_style(class: RoadClass, oneway: bool) -> ([u8; 3], f32) {
         RoadClass::Collector => ([255, 225, 90], 10.0),
         RoadClass::Beachfront => ([0, 210, 255], 12.0),
         RoadClass::Rural => ([110, 60, 20], 8.0),
-        RoadClass::Local | RoadClass::Alley => ([200, 200, 200], 6.0),
+        RoadClass::Local => ([235, 235, 235], 6.0),
+        RoadClass::Alley => ([150, 150, 150], 2.5),
     }
 }
 
@@ -240,17 +243,34 @@ pub fn draw_roads(rgb: &mut [u8], w: usize, h: usize, scale: usize, g: &RoadGrap
         for &i in &order {
             let e = &g.edges[i];
             let (c, width) = road_style(e.class, e.oneway);
-            let wpx = (width * s).max(1.5);
+            let minor = matches!(e.class, RoadClass::Local | RoadClass::Alley);
+            let wpx = if minor {
+                (width * s).max(1.0)
+            } else {
+                (width * s).max(1.5)
+            };
             for seg in e.profile.windows(2) {
                 if pass == 0 {
-                    img.line(px(seg[0]), px(seg[1]), wpx + 2.0, [20, 20, 20]);
+                    // Alleys get no casing: faint lines.
+                    if e.class != RoadClass::Alley {
+                        let casing = if minor { 1.0 } else { 2.0 };
+                        img.line(px(seg[0]), px(seg[1]), wpx + casing, [20, 20, 20]);
+                    }
                 } else {
                     img.line(px(seg[0]), px(seg[1]), wpx, c);
                 }
             }
         }
     }
-    for n in &g.nodes {
+    // Nodes of the major roads only (street nodes would clutter the grids).
+    let mut major = vec![false; g.nodes.len()];
+    for e in &g.edges {
+        if !matches!(e.class, RoadClass::Local | RoadClass::Alley) {
+            major[e.a as usize] = true;
+            major[e.b as usize] = true;
+        }
+    }
+    for (n, _) in g.nodes.iter().zip(&major).filter(|(_, &m)| m) {
         let p = [n.pos[0] * s, n.pos[1] * s];
         img.disc(p[0], p[1], 1.2 * scale as f32, [0, 0, 0]);
     }
@@ -259,7 +279,7 @@ pub fn draw_roads(rgb: &mut [u8], w: usize, h: usize, scale: usize, g: &RoadGrap
 
 fn usage() -> ! {
     eprintln!(
-        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S] [--roads]"
+        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S] [--roads] [--streets]"
     );
     std::process::exit(2);
 }
@@ -272,12 +292,19 @@ fn main() {
     let mut size = [16u16, 16];
     let mut scale = 1usize;
     let mut roads = false;
+    let mut streets = false;
     let mut k = 1;
     while k < args.len() {
         let val = args.get(k + 1).cloned();
         match args[k].as_str() {
             "--roads" => {
                 roads = true;
+                k += 1;
+                continue;
+            }
+            "--streets" => {
+                roads = true;
+                streets = true;
                 k += 1;
                 continue;
             }
@@ -379,12 +406,82 @@ fn main() {
             count[RoadClass::Beachfront as usize],
             count[RoadClass::Rural as usize],
         );
-        draw_roads(&mut rgb, w, h, scale.max(1), &g);
+        if streets {
+            let merged = generate_streets(Seed(seed), &t, &map, &g);
+            draw_roads(&mut rgb, w, h, scale.max(1), &merged);
+        } else {
+            draw_roads(&mut rgb, w, h, scale.max(1), &g);
+        }
     }
     std::fs::write(&out, png::encode(w as u32, h as u32, &rgb)).unwrap_or_else(|e| {
         eprintln!("{out}: {e}");
         std::process::exit(1);
     });
+}
+
+/// Generates every chunk's streets with timings, prints counts, returns the merged graph.
+pub fn generate_streets(
+    seed: Seed,
+    t: &RegionTemplate,
+    map: &MacroMap,
+    g: &RoadGraph,
+) -> RoadGraph {
+    let start = Instant::now();
+    let plan = StreetPlan::new(seed, t, map, g);
+    let plan_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let mut times: Vec<f64> = Vec::new();
+    let mut chunks = Vec::new();
+    for z in 0..i32::from(map.size_chunks[1]) {
+        for x in 0..i32::from(map.size_chunks[0]) {
+            let s = Instant::now();
+            chunks.push(plan.chunk([x, z]));
+            times.push(s.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    let merged = plan.merge(&chunks);
+    let total: f64 = times.iter().sum();
+    let mut sorted = times.clone();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let max_at = times
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map_or(0, |m| m.0);
+    let sx = usize::from(map.size_chunks[0]);
+    let mut count = [0usize; 7];
+    let mut len = [0.0f32; 7];
+    for e in &merged.edges {
+        count[e.class as usize] += 1;
+        len[e.class as usize] += e
+            .profile
+            .windows(2)
+            .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt())
+            .sum::<f32>();
+    }
+    let farms: usize = chunks.iter().map(|c| c.farmsteads.len()).sum();
+    println!(
+        "streets: plan {plan_ms:.1} ms, {} chunks in {total:.1} ms (median {:.2} ms, max {:.2} ms at chunk {:?})",
+        times.len(),
+        sorted[sorted.len() / 2],
+        sorted[sorted.len() - 1],
+        [max_at % sx, max_at / sx],
+    );
+    println!(
+        "  merged: {} nodes, {} edges, hash {:016x}",
+        merged.nodes.len(),
+        merged.edges.len(),
+        hash_graph(&merged),
+    );
+    println!(
+        "  local {} edges {:.1} km (light gray), alley {} edges {:.1} km (faint gray), rural {} edges {:.1} km (brown, incl. arterial farm roads), {farms} farmsteads",
+        count[RoadClass::Local as usize],
+        len[RoadClass::Local as usize] / 1000.0,
+        count[RoadClass::Alley as usize],
+        len[RoadClass::Alley as usize] / 1000.0,
+        count[RoadClass::Rural as usize],
+        len[RoadClass::Rural as usize] / 1000.0,
+    );
+    merged
 }
 
 #[cfg(test)]
@@ -401,5 +498,7 @@ mod tests {
         assert_eq!(rgb.len(), w * h * 3);
         let g = arterials(Seed(1), &t, &map);
         draw_roads(&mut rgb, w, h, 1, &g);
+        let merged = generate_streets(Seed(1), &t, &map, &g);
+        draw_roads(&mut rgb, w, h, 1, &merged);
     }
 }
