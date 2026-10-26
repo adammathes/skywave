@@ -834,17 +834,27 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
             }
         }
     }
+    for j in &net.junctions {
+        for mg in &j.merges {
+            let w = net.merge_wedge(j, mg);
+            for k in 0..w.len().saturating_sub(1) {
+                let q = [w[k].0, w[k + 1].0, w[k + 1].1, w[k].1];
+                fan(out, &q, Surface::Asphalt);
+            }
+        }
+    }
     for i in 0..place.roads.edges.len() {
         let path = &net.paths[i];
-        let (ea, eb) = net.ends(i);
-        let len = path.len();
+        let (ea, _) = net.ends(i);
         // Without a sidewalk the curb top is still a 0.2 m strip.
         let sw = if ea.sw > 0.0 { ea.sw } else { 0.2 };
         let hw = ea.hw;
-        for (sigma, s0, s1) in [
-            (1.0, ea.s_left, len - eb.s_right),
-            (-1.0, ea.s_right, len - eb.s_left),
-        ] {
+        let [left, right] = net.side_spans(i);
+        let spans = left
+            .into_iter()
+            .map(|s| (1.0, s))
+            .chain(right.into_iter().map(|s| (-1.0, s)));
+        for (sigma, [s0, s1]) in spans {
             if s1 > s0 {
                 let (t0, t1) = (sigma * hw, sigma * (hw + sw));
                 path.pieces(s0, s1, |a, b| {

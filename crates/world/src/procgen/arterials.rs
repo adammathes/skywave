@@ -32,7 +32,9 @@
 //!    gentler parts of the hills.
 //! 7. **Profiles** every 16 m on the terrain: crossing roads rise to an overpass
 //!    deck 7 m above the highway with 4% approaches (propagated through the graph), ramps
-//!    rise 6 m over ~150 m, and every other road keeps a 12% min/max slope filter.
+//!    run level with the highway for their first 60 m (to past the gore) and then rise
+//!    6 m over the rest of their ~150 m, and every other road keeps a 12% min/max slope
+//!    filter.
 //!
 //! Everything is a pure function of `(seed, template, macro map)`: plain loops in index
 //! order, no hash maps, `crate::math` for square roots.
@@ -72,6 +74,9 @@ pub const APPROACH_GRADE: f32 = 0.04;
 /// How far a ramp climbs from the highway, and over what length.
 pub const RAMP_RISE_M: f32 = 6.0;
 pub const RAMP_RUN_M: f32 = 150.0;
+/// A ramp stays level with the highway this far from where it leaves it (to past the
+/// gore, where it parts from the highway's pavement), or 40% of its length if shorter.
+pub const RAMP_MERGE_M: f32 = 60.0;
 /// Curb-to-curb widths by class.
 pub const HIGHWAY_WIDTH_M: f32 = 22.0;
 pub const ARTERIAL_WIDTH_M: f32 = 14.0;
@@ -3373,9 +3378,23 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
         let total = e.s.last().copied().unwrap_or(0.0);
         let (ya, yb) = (elev[e.a], elev[e.b]);
         if e.kind == Kind::Ramp {
+            // Level with the highway beside it until past the gore, then up (or down) to
+            // the crossing road.
+            let (at_a, at_b) = (hw_node[e.a].is_some(), hw_node[e.b].is_some());
+            let merge = RAMP_MERGE_M.min(0.4 * total);
             profiles[i] =
                 e.s.iter()
-                    .map(|&s| lerp(ya, yb, smoothstep(0.0, total.max(1e-3), s)))
+                    .zip(&e.pts)
+                    .map(|(&s, &p)| {
+                        let beside = hw.y_at(hw.nearest(p).1);
+                        if at_a && !at_b {
+                            lerp(beside, yb, smoothstep(merge, total.max(1e-3), s))
+                        } else if at_b && !at_a {
+                            lerp(ya, beside, smoothstep(0.0, (total - merge).max(1e-3), s))
+                        } else {
+                            lerp(ya, yb, smoothstep(0.0, total.max(1e-3), s))
+                        }
+                    })
                     .collect();
             continue;
         }

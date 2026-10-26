@@ -74,7 +74,34 @@ pub struct RoadEnd {
     pub s_left: f32,
     /// Same for the right side.
     pub s_right: f32,
+    /// Stretch `[from, to]` (distances from the node) where the left curb gives way to a
+    /// road merging in from that side; `[0, 0]` for none.
+    pub gap_left: [f32; 2],
+    /// Same for the right side.
+    pub gap_right: [f32; 2],
 }
+
+/// A road joining another at a shallow angle (a ramp at the highway): it is not part of
+/// the junction's fan; its ribbon starts at the gore, where its inner curb leaves the
+/// other road's pavement, and a wedge of asphalt fills its pavement outside the other
+/// road's from where its outer edge leaves it to the gore.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Merge {
+    pub end: RoadEnd,
+    /// Slot in `Junction::ends` of the road it joins.
+    pub major: usize,
+    /// Distances from the node along the merging road where its outer edge and its inner
+    /// curb leave the major road's pavement.
+    pub s_outer: f32,
+    pub s_gore: f32,
+    /// 1 when it lies to the major's left, -1 to its right.
+    pub side: f32,
+}
+
+/// Ends meeting at less than this angle's cosine (about 30 degrees) merge.
+const MERGE_COS: f32 = 0.866;
+/// Merges whose gore would lie farther than this from the node are ordinary corners.
+const MERGE_MAX_M: f32 = 160.0;
 
 /// The corner between consecutive ends `a` and `b` (counter-clockwise), lying on `a`'s
 /// left and `b`'s right.
@@ -116,6 +143,8 @@ pub struct Junction {
     pub ends: Vec<RoadEnd>,
     /// `corners[i]` lies between `ends[i]` and `ends[(i + 1) % n]`; empty for dead ends.
     pub corners: Vec<Corner>,
+    /// Roads merging into one of `ends` at a shallow angle (slots after `ends`).
+    pub merges: Vec<Merge>,
 }
 
 /// The centerline an edge's meshes are laid along, and its height profile.
@@ -377,6 +406,7 @@ impl Network {
         let nodes = &place.roads.nodes;
         let edges = &place.roads.edges;
         let raws: Vec<(Vec<V2>, Vec<f32>)> = edges.iter().map(|e| raw_line(place, e)).collect();
+        let lines: Vec<Vec<V2>> = raws.iter().map(|r| r.0.clone()).collect();
         let mut incident: Vec<Vec<RoadEnd>> = (0..nodes.len()).map(|_| Vec::new()).collect();
         let mut end_y: Vec<Vec<f32>> = (0..nodes.len()).map(|_| Vec::new()).collect();
         for (i, e) in edges.iter().enumerate() {
@@ -393,6 +423,8 @@ impl Network {
                     trim: 0.0,
                     s_left: 0.0,
                     s_right: 0.0,
+                    gap_left: [0.0; 2],
+                    gap_right: [0.0; 2],
                 });
                 end_y[node as usize].push(y);
             }
@@ -418,6 +450,11 @@ impl Network {
                     .then(x.edge.cmp(&y.edge))
             });
             let pos = V2::from_array(nodes[node].pos);
+            let at_b: Vec<bool> = ends
+                .iter()
+                .map(|e| edges[e.edge].a as usize != node)
+                .collect();
+            let merges_at = merges(&mut ends, &lines, &at_b);
             let n = ends.len();
             let mut corners = Vec::new();
             if n >= 2 {
@@ -433,7 +470,8 @@ impl Network {
                 }
             }
             let j = junctions.len();
-            for (slot, e) in ends.iter().enumerate() {
+            let all = ends.iter().chain(merges_at.iter().map(|m| &m.end));
+            for (slot, e) in all.enumerate() {
                 let which = usize::from(edges[e.edge].a as usize != node);
                 edge_ends[e.edge][which] = (j, slot);
             }
@@ -443,6 +481,7 @@ impl Network {
                 y,
                 ends,
                 corners,
+                merges: merges_at,
             });
         }
         let paths = raws
@@ -450,8 +489,16 @@ impl Network {
             .enumerate()
             .map(|(i, (raw, ys))| {
                 let [(ja, sa), (jb, sb)] = edge_ends[i];
-                let (ta, tb) = (junctions[ja].ends[sa].trim, junctions[jb].ends[sb].trim);
-                layout(raw, ys, ta, tb)
+                // A merging end keeps its curve: no straight run out to its (far) trim.
+                let straight = |j: usize, slot: usize| {
+                    let jn: &Junction = &junctions[j];
+                    if slot < jn.ends.len() {
+                        jn.ends[slot].trim
+                    } else {
+                        0.0
+                    }
+                };
+                layout(raw, ys, straight(ja, sa), straight(jb, sb))
             })
             .collect();
         Network {
@@ -464,11 +511,86 @@ impl Network {
     /// The two ends of edge `e`: at node `a` and at node `b`.
     pub fn ends(&self, e: usize) -> (&RoadEnd, &RoadEnd) {
         let [(ja, sa), (jb, sb)] = self.edge_ends[e];
-        (&self.junctions[ja].ends[sa], &self.junctions[jb].ends[sb])
+        (self.junctions[ja].end(sa), self.junctions[jb].end(sb))
+    }
+
+    /// Whether edge `e`'s end at node `a` (`b_end` false) or `b` merges into another road.
+    pub fn merges_in(&self, e: usize, b_end: bool) -> bool {
+        let (j, slot) = self.edge_ends[e][usize::from(b_end)];
+        slot >= self.junctions[j].ends.len()
+    }
+
+    /// The wedge of merge `mg` at junction `j`, as pairs of points from where the merging
+    /// road's outer edge leaves the major road's pavement to the gore: each its outer edge
+    /// (at its own height) and where its cross section meets the major's edge (at the
+    /// major's height).
+    pub fn merge_wedge(&self, j: &Junction, mg: &Merge) -> Vec<(V3, V3)> {
+        let e = mg.end.edge;
+        let path = &self.paths[e];
+        let major = &self.paths[j.ends[mg.major].edge];
+        let hw_a = j.ends[mg.major].hw;
+        let len = path.len();
+        let from_b = self.junctions[self.edge_ends[e][1].0].node == j.node;
+        // In the path's own terms: arc from its `a` end, offsets to its left.
+        let s_at = |s: f32| if from_b { len - s } else { s };
+        let inner = if from_b { mg.side } else { -mg.side } * mg.end.hw;
+        let dist = |q: V2| polyline_nearest(&major.raw, q).0 - hw_a;
+        let steps = ((mg.s_gore - mg.s_outer) / 4.0) as u32 + 1;
+        (0..=steps)
+            .map(|k| {
+                let s = s_at(lerp(mg.s_outer, mg.s_gore, k as f32 / steps as f32));
+                let o = path.xz(s, -inner);
+                // Bisect for the major's edge between the outer edge and the inner curb.
+                let (mut lo, mut hi) = (-inner, inner);
+                for _ in 0..16 {
+                    let mid = 0.5 * (lo + hi);
+                    if dist(path.xz(s, mid)) >= 0.0 {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                let i = path.xz(s, lo);
+                (o.at(path.y_at(o)), i.at(major.y_at(i)))
+            })
+            .collect()
     }
 
     pub fn degree(&self, junction: usize) -> usize {
-        self.junctions[junction].ends.len()
+        let j = &self.junctions[junction];
+        j.ends.len() + j.merges.len()
+    }
+
+    /// The sides of edge `e` where curbs and sidewalks run: for its left side (seen from
+    /// `a` toward `b`) then its right, the `[from, to]` stretches along the edge (from its
+    /// `a` end), around the corners at both ends and the gaps merging roads leave.
+    pub fn side_spans(&self, e: usize) -> [Vec<[f32; 2]>; 2] {
+        let (ea, eb) = self.ends(e);
+        let len = self.paths[e].len();
+        let flip = |g: [f32; 2]| [len - g[1], len - g[0]];
+        let sides = [
+            (ea.s_left, len - eb.s_right, ea.gap_left, flip(eb.gap_right)),
+            (ea.s_right, len - eb.s_left, ea.gap_right, flip(eb.gap_left)),
+        ];
+        sides.map(|(s0, s1, ga, gb)| {
+            let mut spans = alloc::vec![[s0, s1]];
+            for g in [ga, gb] {
+                if g[1] <= g[0] {
+                    continue;
+                }
+                let mut next = Vec::with_capacity(spans.len() + 1);
+                for [a, b] in spans {
+                    if g[0] > a {
+                        next.push([a, g[0].min(b)]);
+                    }
+                    if g[1] < b {
+                        next.push([g[1].max(a), b]);
+                    }
+                }
+                spans = next;
+            }
+            spans
+        })
     }
 
     /// Junction `j`'s asphalt as a fan: the center, then the ring of trimmed ends and curb
@@ -571,6 +693,163 @@ impl Network {
             ],
         }
     }
+}
+
+impl Junction {
+    /// The road end in `slot`: one of `ends`, then the merges.
+    pub fn end(&self, slot: usize) -> &RoadEnd {
+        if slot < self.ends.len() {
+            &self.ends[slot]
+        } else {
+            &self.merges[slot - self.ends.len()].end
+        }
+    }
+}
+
+/// Distance from `p` to the polyline `line`, and the arc length at the nearest point.
+fn polyline_nearest(line: &[V2], p: V2) -> (f32, f32) {
+    let (mut best, mut arc, mut acc) = (f32::INFINITY, 0.0, 0.0);
+    for w in line.windows(2) {
+        let len = (w[1] - w[0]).length();
+        let (d, t) = segment_distance(p, w[0], w[1]);
+        if d < best {
+            best = d;
+            arc = acc + t * len;
+        }
+        acc += len;
+    }
+    (best, arc)
+}
+
+/// `line` (a profile polyline) as seen from one of its ends: reversed when `from_b`.
+fn from_end(line: &[V2], from_b: bool) -> Vec<V2> {
+    let mut v = line.to_vec();
+    if from_b {
+        v.reverse();
+    }
+    v
+}
+
+/// Point and unit direction at arc `s` along `line` (held at its end).
+fn along(line: &[V2], s: f32) -> (V2, V2) {
+    let last = line.len() - 2;
+    let mut acc = 0.0;
+    for (k, w) in line.windows(2).enumerate() {
+        let len = (w[1] - w[0]).length();
+        if s <= acc + len || k == last {
+            let d = (w[1] - w[0]).normalize();
+            return (w[0] + d * (s - acc).min(len), d);
+        }
+        acc += len;
+    }
+    (line[0], V2::new(1.0, 0.0))
+}
+
+/// Takes the ends that join a wider road at a shallow angle out of `ends` (sorted, which
+/// stays sorted) as merges, and opens the gaps they need in the wider roads' curbs.
+/// `lines[e]` is edge `e`'s profile polyline and `node_at_b[k]` whether `ends[k]` is its
+/// edge's `b` end.
+fn merges(ends: &mut Vec<RoadEnd>, lines: &[Vec<V2>], node_at_b: &[bool]) -> Vec<Merge> {
+    let count = ends.len();
+    // For each end, the wider road it would merge into (the most nearly parallel).
+    let mut into: Vec<Option<usize>> = alloc::vec![None; count];
+    for i in 0..count {
+        let b = &ends[i];
+        let mut best: Option<(f32, usize)> = None;
+        for (k, a) in ends.iter().enumerate() {
+            let wider = a.hw > b.hw || (a.hw == b.hw && a.edge < b.edge);
+            let cos = a.dir.dot(b.dir);
+            if k != i && wider && cos > MERGE_COS && best.is_none_or(|q| cos > q.0) {
+                best = Some((cos, k));
+            }
+        }
+        into[i] = best.map(|q| q.1);
+    }
+    // A road that merges cannot be merged into.
+    for i in 0..count {
+        if let Some(k) = into[i] {
+            if into[k].is_some() {
+                into[i] = None;
+            }
+        }
+    }
+    let mut out: Vec<(usize, usize, RoadEnd, f32, f32, f32)> = Vec::new();
+    for i in 0..count {
+        let Some(k) = into[i] else { continue };
+        let (a, mut b) = (ends[k], ends[i]);
+        let side = if a.dir.turn(b.dir) > 0.0 { 1.0 } else { -1.0 };
+        let major = from_end(&lines[a.edge], node_at_b[k]);
+        let minor = from_end(&lines[b.edge], node_at_b[i]);
+        let len: f32 = minor.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+        // Walk out along the merging road until its outer edge, then its inner curb, are
+        // off the major's pavement.
+        let off = |s: f32, t: f32| {
+            let (p, d) = along(&minor, s);
+            polyline_nearest(&major, p + d.right() * (side * t)).0 >= a.hw
+        };
+        let (mut s_outer, mut s_gore) = (None, None);
+        let mut s = 0.0;
+        while s < len.min(MERGE_MAX_M) && s_gore.is_none() {
+            if s_outer.is_none() && off(s, -b.hw) {
+                s_outer = Some(s);
+            }
+            if off(s, b.hw) {
+                s_gore = Some(s);
+            }
+            s += 1.0;
+        }
+        let (Some(so), Some(sg)) = (s_outer, s_gore) else {
+            continue;
+        };
+        // The gap in the major's curb: between where the two edges leave its pavement.
+        let at = |s: f32, t: f32| {
+            let (p, d) = along(&minor, s);
+            polyline_nearest(&major, p + d.right() * (side * t)).1
+        };
+        let (ga0, ga1) = (at(so, -b.hw), at(sg, b.hw));
+        if sg <= 0.0 || ga1 <= ga0 {
+            continue;
+        }
+        b.trim = sg;
+        if side > 0.0 {
+            (b.s_right, b.s_left) = (sg, so);
+        } else {
+            (b.s_left, b.s_right) = (sg, so);
+        }
+        out.push((i, k, b, so, sg, side));
+        let gap = if side > 0.0 {
+            &mut ends[k].gap_left
+        } else {
+            &mut ends[k].gap_right
+        };
+        *gap = if gap[1] > gap[0] {
+            [gap[0].min(ga0), gap[1].max(ga1)]
+        } else {
+            [ga0, ga1]
+        };
+    }
+    if out.is_empty() {
+        return Vec::new();
+    }
+    // Remove the merging ends; renumber the majors' slots.
+    let gone: Vec<usize> = out.iter().map(|m| m.0).collect();
+    let slot = |k: usize| k - gone.iter().filter(|&&g| g < k).count();
+    let merges = out
+        .iter()
+        .map(|&(_, k, end, s_outer, s_gore, side)| Merge {
+            end,
+            major: slot(k),
+            s_outer,
+            s_gore,
+            side,
+        })
+        .collect();
+    let mut i = 0;
+    ends.retain(|_| {
+        i += 1;
+        !gone.contains(&(i - 1))
+    });
+    merges
 }
 
 /// Corner radius of the curb return between two roads.
@@ -705,30 +984,33 @@ pub fn build(
         } else {
             path.xz(len * 0.5, 0.0)
         };
-        let deg = [
-            net.degree(net.edge_ends[i][0].0),
-            net.degree(net.edge_ends[i][1].0),
-        ];
+        // A merging end has no crosswalk: it joins the other road's lanes.
+        let deg = [false, true].map(|b_end| {
+            if net.merges_in(i, b_end) {
+                0
+            } else {
+                net.degree(net.edge_ends[i][usize::from(b_end)].0)
+            }
+        });
         {
             let m = out.at(mid, MeshKind::Road);
             ribbon(m, path, ea.trim, len - eb.trim, ea.hw, &paints, seed);
             // Left side runs from a's left curb to b's right curb, and vice versa.
-            let sides = [
-                (1.0, ea.s_left, len - eb.s_right),
-                (-1.0, ea.s_right, len - eb.s_left),
-            ];
-            for (k, (sigma, s0, s1)) in sides.into_iter().enumerate() {
+            for (k, spans) in net.side_spans(i).into_iter().enumerate() {
+                let sigma = if k == 0 { 1.0 } else { -1.0 };
                 let parkway = side_has_parkway(e.class, side_zone[i][k]);
-                let side = Side {
-                    sigma,
-                    s0,
-                    s1,
-                    hw: ea.hw,
-                    sw: ea.sw,
-                    parkway,
-                    skirt,
-                };
-                side_strip(m, path, &side, &paints, seed ^ i as u64);
+                for [s0, s1] in spans {
+                    let side = Side {
+                        sigma,
+                        s0,
+                        s1,
+                        hw: ea.hw,
+                        sw: ea.sw,
+                        parkway,
+                        skirt,
+                    };
+                    side_strip(m, path, &side, &paints, seed ^ i as u64);
+                }
             }
             if e.class == RoadClass::Highway {
                 median(m, path, ea.trim, len - eb.trim, &paints);
@@ -1226,6 +1508,14 @@ fn markings(
 
 /// Junction asphalt (a fan around the node) and the corner curbs and sidewalks.
 fn junction(m: &mut WorldMesh, net: &Network, j: &Junction, p: &RoadPaints, skirt_y: f32) {
+    // Merge wedges: the merging road's pavement outside the road it joins.
+    for mg in &j.merges {
+        let w = net.merge_wedge(j, mg);
+        for k in 0..w.len().saturating_sub(1) {
+            let q = [w[k].0, w[k + 1].0, w[k + 1].1, w[k].1];
+            quad(m, q, V3::Y, p.asphalt);
+        }
+    }
     let n = j.ends.len();
     if n < 2 {
         return;

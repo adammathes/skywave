@@ -169,7 +169,13 @@ fn coast_meshes_sit_roads_on_the_terrain() {
                 .junctions
                 .iter()
                 .map(|j| {
-                    let r = j.ends.iter().map(|e| e.trim + e.hw).fold(0.0, f32::max);
+                    let merges = j.merges.iter().map(|m| &m.end);
+                    let r = j
+                        .ends
+                        .iter()
+                        .chain(merges)
+                        .map(|e| e.trim + e.hw)
+                        .fold(0.0, f32::max);
                     (j.pos, r)
                 })
                 .collect(),
