@@ -38,7 +38,7 @@ use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
 use lighting::TimeOfDay;
 use place::Place;
-use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
+use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex, MAX_POINT_LIGHTS};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
 use world::{ChunkMesh, Glow, Palette, WorldMesh};
 
@@ -57,6 +57,17 @@ const GLOW_BOOST: f32 = 1.8;
 /// Share of a lit window's glow mixed into its glass color (out of 256), so lit windows
 /// read as warmer panes in daylight.
 const WINDOW_TINT_256: u32 = 24;
+/// Emissive scales of the town's glow classes (see `render::emissive`; 1 = 0.5 kcd/m² for
+/// white). Lit windows 0.125 (≈ 40 cd/m², a warm pane; was 1.0, which put every window at
+/// the emissive cap at night), street lamp heads and neon 2.
+const WINDOW_GLOW: f32 = 0.125;
+const LAMP_GLOW: f32 = 2.0;
+const NEON_GLOW: f32 = 2.0;
+/// Street lamp lens vertices this close (m) belong to the same lamp head.
+const LAMP_CLUSTER_M: f32 = 1.0;
+/// The light sits this far above the center of its lens (m): inside the head, so the head
+/// itself is not lit, only what is below it.
+const LAMP_LIGHT_ABOVE_LENS_M: f32 = 0.05;
 
 /// The free-fly debug camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,7 +138,12 @@ pub struct App {
     /// The world's instances, then this frame's car instances (refilled by `scene_view`).
     instances: Vec<MeshInstance>,
     world_instances: usize,
-    lights: [PointLight; 2],
+    /// Instance of the street lamp heads' mesh, switched with the photocell.
+    lamp_instance: Option<usize>,
+    /// Where the street lamps' lights hang, world space.
+    lamp_heads: Vec<Vec3>,
+    /// This frame's lights: the headlights, then the nearest street lamps.
+    lights: [PointLight; MAX_POINT_LIGHTS],
     /// Interpolation alpha of the last frame, held while paused.
     alpha: f32,
     /// Menus, HUD, overlay and the user's settings and bindings.
@@ -155,16 +171,16 @@ impl App {
         let mut place = Place::test_grid();
         place.header.seed = seed.0;
         let chunks = world::build_chunk_meshes(&place, &Palette::socal_1985());
-        let mut meshes = render_meshes(&chunks);
+        let town = render_meshes(&chunks);
+        let mut meshes = town.meshes;
         let mut instances: Vec<MeshInstance> = (0..meshes.len())
             .map(|i| MeshInstance {
-                mesh: MeshId(i as u32),
-                transform: Mat4::IDENTITY.to_cols_array_2d(),
-                color: if i < chunks.len() {
-                    [1.0; 4]
-                } else {
+                color: if Some(i) == town.glow {
                     [GLOW_BOOST, GLOW_BOOST, GLOW_BOOST, 1.0]
+                } else {
+                    [1.0; 4]
                 },
+                ..MeshInstance::new(MeshId(i as u32), Mat4::IDENTITY.to_cols_array_2d())
             })
             .collect();
         let world_instances = instances.len();
@@ -191,11 +207,9 @@ impl App {
             car_meshes,
             instances,
             world_instances,
-            lights: [PointLight {
-                position: [0.0; 3],
-                color: [0.0; 3],
-                radius: 1.0,
-            }; 2],
+            lamp_instance: town.lamps,
+            lamp_heads: town.lamp_heads,
+            lights: [PointLight::omni([0.0; 3], [0.0; 3], 1.0); MAX_POINT_LIGHTS],
             alpha: 0.0,
             ui: ui::Ui::new(),
         })
@@ -337,13 +351,33 @@ impl App {
             let proj = directx::perspective(pose.fov_y_rad, aspect, pose.near_m, pose.far_m);
             (pose.view(), proj)
         };
-        self.instances.truncate(self.world_instances);
-        let cabin = !self.fly && self.camera.mode().first_person();
-        self.drive
-            .push_instances(alpha, &self.car_meshes, cabin, &mut self.instances);
-        let (lights, n) = self.drive.lights(alpha);
-        self.lights = lights;
         let daylight = self.time.daylight();
+        self.instances.truncate(self.world_instances);
+        if let Some(k) = self.lamp_instance {
+            self.instances[k].glow = lighting::streetlamp_glow(&daylight);
+        }
+        let cabin = !self.fly && self.camera.mode().first_person();
+        self.drive.push_instances(
+            alpha,
+            &self.car_meshes,
+            cabin,
+            lighting::car_glow(&daylight),
+            &mut self.instances,
+        );
+        let (head, mut n) = self.drive.lights(alpha);
+        self.lights[..n].copy_from_slice(&head[..n]);
+        if daylight.streetlights_on {
+            // The lamps nearest a point down the view light the road where the eye is.
+            let inv = view.inverse();
+            let eye = inv.w_axis.truncate();
+            let fwd = -inv.z_axis.truncate();
+            let flat = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or_zero();
+            let focus = eye + flat * lighting::STREETLAMP_FOCUS_AHEAD_M;
+            let mut lamps = [self.lights[0]; lighting::STREETLAMP_LIGHTS];
+            let m = lighting::streetlamp_lights(&self.lamp_heads, focus, &mut lamps);
+            self.lights[n..n + m].copy_from_slice(&lamps[..m]);
+            n += m;
+        }
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),
@@ -371,34 +405,78 @@ fn fly_from(pose: &camera::CameraPose) -> FlyCamera {
     }
 }
 
-/// Converts world meshes (patterned by [`worldmesh::atlas_mesh`]) to the renderer's vertex
-/// format: every chunk mesh as is (lit windows slightly tinted), followed by one mesh
-/// holding all neon, lamp and signal triangles colored by their glow, drawn with a boosted
-/// instance color.
-fn render_meshes(chunks: &[ChunkMesh]) -> Vec<Mesh> {
-    let mut out = Vec::with_capacity(chunks.len() + 1);
-    let mut glow = Mesh::default();
-    for c in chunks {
-        let mesh = worldmesh::atlas_mesh(&c.mesh, c.kind);
-        out.push(convert(&mesh, false));
-        let g = convert(&mesh, true);
-        let base = glow.vertices.len() as u32;
-        glow.vertices.extend_from_slice(&g.vertices);
-        glow.indices.extend(g.indices.iter().map(|i| i + base));
-    }
-    if !glow.indices.is_empty() {
-        out.push(glow);
-    }
-    out
+/// The town as the renderer draws it ([`render_meshes`]).
+struct TownMeshes {
+    /// Draw order: the chunk meshes, then the glow mesh and the street lamp heads (each
+    /// when there is any).
+    meshes: Vec<Mesh>,
+    /// Index of the glow mesh (drawn with a boosted instance color) and of the lamp heads'
+    /// mesh (switched by the instance's glow).
+    glow: Option<usize>,
+    lamps: Option<usize>,
+    /// Where each street lamp's light hangs, world space.
+    lamp_heads: Vec<Vec3>,
 }
 
-fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
-    let glows = |e: [u8; 4]| e[3] != Glow::None as u8 && e[3] != Glow::Window as u8;
+/// Converts world meshes (patterned by [`worldmesh::atlas_mesh`]) to the renderer's vertex
+/// format: every chunk mesh without its street lamp lenses (lit windows slightly tinted),
+/// then one mesh holding all neon and signal triangles colored by their glow, drawn with a
+/// boosted instance color, then one holding every street lamp lens, which the photocell
+/// switches. The lamp heads are where the lenses cluster.
+fn render_meshes(chunks: &[ChunkMesh]) -> TownMeshes {
+    let mut meshes = Vec::with_capacity(chunks.len() + 2);
+    let (mut glow, mut lamps) = (Mesh::default(), Mesh::default());
+    let append = |all: &mut Mesh, part: Mesh| {
+        let base = all.vertices.len() as u32;
+        all.vertices.extend_from_slice(&part.vertices);
+        all.indices.extend(part.indices.iter().map(|i| i + base));
+    };
+    for c in chunks {
+        let mesh = worldmesh::atlas_mesh(&c.mesh, c.kind);
+        meshes.push(convert(&mesh, Part::Base));
+        append(&mut glow, convert(&mesh, Part::Glow));
+        append(&mut lamps, convert(&mesh, Part::Lamps));
+    }
+    let lamp_heads = lamp_heads(&lamps);
+    let mut push = |m: Mesh| {
+        (!m.indices.is_empty()).then(|| {
+            meshes.push(m);
+            meshes.len() - 1
+        })
+    };
+    let glow = push(glow);
+    let lamps = push(lamps);
+    TownMeshes {
+        meshes,
+        glow,
+        lamps,
+        lamp_heads,
+    }
+}
+
+/// Which triangles of a world mesh [`convert`] keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    /// Everything but street lamp lenses.
+    Base,
+    /// Neon and signal triangles, colored by their glow.
+    Glow,
+    /// Street lamp lenses.
+    Lamps,
+}
+
+fn convert(m: &WorldMesh, part: Part) -> Mesh {
+    let is = |v: &world::WorldVertex, g: Glow| v.emissive[3] == g as u8;
+    let keep = |v: &world::WorldVertex| match part {
+        Part::Base => !is(v, Glow::Lamp),
+        Part::Glow => is(v, Glow::Neon) || is(v, Glow::Signal),
+        Part::Lamps => is(v, Glow::Lamp),
+    };
     let vertex = |v: &world::WorldVertex| {
         let (c, e) = (v.color, v.emissive);
-        let color = if glow_only {
+        let color = if part == Part::Glow {
             [e[0], e[1], e[2], 255]
-        } else if e[3] == Glow::Window as u8 {
+        } else if is(v, Glow::Window) {
             let t = WINDOW_TINT_256;
             let mix = |a: u8, b: u8| ((u32::from(a) * (256 - t) + u32::from(b) * t) >> 8) as u8;
             [mix(c[0], e[0]), mix(c[1], e[1]), mix(c[2], e[2]), 255]
@@ -406,13 +484,14 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
             [c[0], c[1], c[2], 255]
         };
         // Emissive: the renderer encodes window-flagged glow (scaled by time of day) and plain
-        // glow with an intensity; the town's Glow classes map onto that.
-        // Street lamps share the window flag, so they are dark by day and lit from dusk.
+        // glow with an intensity; the town's Glow classes map onto that. Street lamps are
+        // plain glow in their own mesh, whose instance the photocell switches.
+        let rgb = [e[0], e[1], e[2]];
         let emissive = match e[3] {
-            x if x == Glow::Window as u8 => render::emissive_window([e[0], e[1], e[2]], 1.0),
-            x if x == Glow::Lamp as u8 => render::emissive_window([e[0], e[1], e[2]], 2.0),
+            x if x == Glow::Window as u8 => render::emissive_window(rgb, WINDOW_GLOW),
+            x if x == Glow::Lamp as u8 => render::emissive(rgb, LAMP_GLOW),
             x if x == Glow::None as u8 => [0, 0, 0, 0],
-            _ => render::emissive([e[0], e[1], e[2]], 2.0),
+            _ => render::emissive(rgb, NEON_GLOW),
         };
         Vertex {
             pos: v.pos,
@@ -422,15 +501,21 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
             emissive,
         }
     };
-    if !glow_only {
+    let tris = m.indices.chunks_exact(3);
+    if part == Part::Base {
+        // Every vertex, without the triangles whose corners are all lamp lens.
         return Mesh {
             vertices: m.vertices.iter().map(vertex).collect(),
-            indices: m.indices.clone(),
+            indices: tris
+                .filter(|t| !t.iter().all(|&i| is(&m.vertices[i as usize], Glow::Lamp)))
+                .flatten()
+                .copied()
+                .collect(),
         };
     }
     let mut out = Mesh::default();
-    for tri in m.indices.chunks_exact(3) {
-        if tri.iter().all(|&i| glows(m.vertices[i as usize].emissive)) {
+    for tri in tris {
+        if tri.iter().all(|&i| keep(&m.vertices[i as usize])) {
             let base = out.vertices.len() as u32;
             for &i in tri {
                 out.vertices.push(vertex(&m.vertices[i as usize]));
@@ -439,6 +524,29 @@ fn convert(m: &WorldMesh, glow_only: bool) -> Mesh {
         }
     }
     out
+}
+
+/// Street lamp heads from their lenses' vertices: each cluster of vertices within
+/// [`LAMP_CLUSTER_M`] of its first is one lamp, its light just above the lens's center.
+/// Deterministic (first-come clusters, in mesh order).
+fn lamp_heads(lenses: &Mesh) -> Vec<Vec3> {
+    let mut sums: Vec<(Vec3, Vec3, u32)> = Vec::new();
+    for v in &lenses.vertices {
+        let p = Vec3::from(v.pos);
+        match sums
+            .iter_mut()
+            .find(|(first, _, _)| first.distance_squared(p) < LAMP_CLUSTER_M * LAMP_CLUSTER_M)
+        {
+            Some((_, sum, n)) => {
+                *sum += p;
+                *n += 1;
+            }
+            None => sums.push((p, p, 1)),
+        }
+    }
+    sums.iter()
+        .map(|&(_, sum, n)| sum / n as f32 + Vec3::Y * LAMP_LIGHT_ABOVE_LENS_M)
+        .collect()
 }
 
 #[cfg(test)]
@@ -738,7 +846,13 @@ mod tests {
         }
         assert_eq!(app.hud_state().time_of_day, 22.5 * 3600.0);
         assert!(app.scene_view(0.5, 1.5).sun.direction[1] < 0.0);
-        assert_eq!(app.scene_view(0.5, 1.5).lights.len(), 2);
+        // Night: the two headlight beams, then the nearest street lamps.
+        let view = app.scene_view(0.5, 1.5);
+        assert_eq!(view.lights.len(), 2 + lighting::STREETLAMP_LIGHTS);
+        assert!(view.lights[..2].iter().all(|l| l.direction != [0.0; 3]));
+        assert!(view.lights[2..]
+            .iter()
+            .all(|l| l.direction == [0.0, -1.0, 0.0]));
         // Parked on the street it stays parked.
         let moved = (app.drive.pose(1.0).pos - pose.pos).length();
         assert!(moved < 0.05, "{moved}");
@@ -773,6 +887,42 @@ mod tests {
                 assert_eq!(view(&mut app, steps.alpha), first, "{query} frame {frame}");
             }
             assert_eq!(app.ticks(), 0);
+        }
+    }
+
+    #[test]
+    fn street_lamps_have_their_own_mesh_and_switch_at_dusk() {
+        let mut app = App::new(Seed(1));
+        let k = app.lamp_instance.expect("the test town has street lamps");
+        // One light per lamp head, up on the poles, all inside the town.
+        assert!(app.lamp_heads.len() >= 20, "{}", app.lamp_heads.len());
+        for h in &app.lamp_heads {
+            assert!((5.0..12.0).contains(&h.y), "{h}");
+            assert!(h.x.abs() < 1000.0 && h.z.abs() < 1000.0, "{h}");
+        }
+        for (a, i) in app.lamp_heads.iter().zip(1..) {
+            for b in &app.lamp_heads[i..] {
+                assert!(a.distance(*b) > 2.0, "{a} and {b} are one lamp");
+            }
+        }
+        // The lenses left the chunk meshes for the lamp mesh: all of it glows.
+        let lamps = &app.meshes[k];
+        assert!(lamps.vertices.iter().all(|v| {
+            let (s, window) = render::emissive_scale(v.emissive);
+            (s - LAMP_GLOW).abs() < 0.05 && !window
+        }));
+        // Golden hour: off and no lamp lights; 18:35: on, with lights.
+        let golden = app.scene_view(1.0, 1.5);
+        assert_eq!(golden.instances[k].glow, 0.0);
+        assert!(golden.lights.is_empty());
+        app.time.clock = daylight::Clock::new(lighting::DEFAULT_DAY_OF_YEAR, 18.6 * 3600.0);
+        let dusk = app.scene_view(1.0, 1.5);
+        assert_eq!(dusk.instances[k].glow, 1.0);
+        assert_eq!(dusk.lights.len(), lighting::STREETLAMP_LIGHTS);
+        // The chase camera's lamps are round the car, not across town.
+        let car = Vec3::from(app.drive.state.pos);
+        for l in app.scene_view(1.0, 1.5).lights {
+            assert!(Vec3::from(l.position).distance(car) < 80.0);
         }
     }
 

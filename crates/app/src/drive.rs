@@ -40,15 +40,30 @@ pub const START_HEADING_RAD: f32 = -FRAC_PI_2;
 /// needles.
 pub const MAX_CAR_INSTANCES: usize = 14;
 
-/// Headlights as two warm point lights pooled on the road ahead (the renderer has no spot
-/// lights yet), one per headlamp: this far ahead of its lamp and this high above the
-/// ground, m; intensity per lamp, kcd (≈ 35 lux on the road below each); falloff radius, m.
-pub const HEADLIGHT_AHEAD_M: f32 = 10.0;
-const HEADLIGHT_HEIGHT_M: f32 = 1.5;
-const HEADLIGHT_KCD: f32 = 0.08;
-const HEADLIGHT_RADIUS_M: f32 = 20.0;
+/// Headlights: one spot per headlamp, from just behind its lens (inside the lamp, so the
+/// car's own nose is not lit), aimed this far below the car's forward axis, degrees...
+pub const HEADLIGHT_SETBACK_M: f32 = 0.05;
+pub const HEADLIGHT_PITCH_DEG: f32 = 2.0;
+/// ...at full intensity within this angle across the axis and gone beyond that one,
+/// degrees, and `HEADLIGHT_SQUASH` times narrower above and below it (2.5° and 8°): a flat
+/// low beam that meets the road from ~5 m past the bumper and lights both lanes...
+pub const HEADLIGHT_INNER_DEG: f32 = 10.0;
+pub const HEADLIGHT_OUTER_DEG: f32 = 32.0;
+pub const HEADLIGHT_SQUASH: f32 = 4.0;
+/// ...with the road's grazing cosine flattened by this wrap, so the pool reaches ~25 m
+/// instead of dying 10 m out (a point source falls as h/d³ on flat ground; a real low beam
+/// throws most of its light at the horizon)...
+pub const HEADLIGHT_WRAP: f32 = 0.25;
+/// ...with this intensity per lamp, kcd, and this reach, m. Was a point light of 0.08 kcd
+/// hung 1.5 m up, 10 m ahead: a dim blob in the middle distance and nothing near the car.
+pub const HEADLIGHT_KCD: f32 = 14.0;
+const HEADLIGHT_RADIUS_M: f32 = 60.0;
 /// Halogen white, linear RGB.
 const HEADLIGHT_COLOR: [f32; 3] = [1.0, 0.86, 0.68];
+/// Instance tint of the cabin walls (the body shell inside out, so in the paint color): the
+/// inside of the roof and pillars reads as a dark lining, not as bright paint under the
+/// cabin light.
+const CABIN_WALL_TINT: f32 = 0.3;
 /// Below this the car counts as fallen out of the world and is put back at its start, m.
 const FLOOR_Y: f32 = -100.0;
 
@@ -116,6 +131,25 @@ pub fn vehicle_input(input: &InputState) -> VehicleInput {
         brake: input.axis(Action::Brake),
         steer: input.axis(Action::Steer),
         handbrake: input.pressed(Action::Handbrake),
+    }
+}
+
+/// How brightly the car's self-lit parts glow this frame (emissive multipliers, from
+/// [`crate::lighting::car_glow`]): the exterior lamps, and the instruments (dial faces,
+/// needles, ticks, radio display).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CarGlow {
+    pub lamps: f32,
+    pub instruments: f32,
+}
+
+impl Default for CarGlow {
+    /// As built.
+    fn default() -> CarGlow {
+        CarGlow {
+            lamps: 1.0,
+            instruments: 1.0,
+        }
     }
 }
 
@@ -329,55 +363,69 @@ impl Drive {
     /// Appends the car's instances at level of detail 0: body (pop-ups up while the
     /// headlights are on), glass, the lamps in their state, four wheels and, when `cabin`
     /// (the first-person cameras), the cabin walls (the shell inside out), the interior,
-    /// steering wheel and gauge needles. At most
-    /// [`MAX_CAR_INSTANCES`].
+    /// steering wheel and gauge needles, lit by the cabin light. The lamps and the
+    /// instruments glow by `glow`. At most [`MAX_CAR_INSTANCES`].
     pub fn push_instances(
         &self,
         alpha: f32,
         ids: &CarMeshes,
         cabin: bool,
+        glow: CarGlow,
         out: &mut Vec<MeshInstance>,
     ) {
-        let instance = |mesh: MeshId, m: Mat4| MeshInstance {
-            mesh,
-            transform: m.to_cols_array_2d(),
-            color: [1.0; 4],
+        let instance = |mesh: MeshId, m: Mat4| MeshInstance::new(mesh, m.to_cols_array_2d());
+        let inside = |mesh: MeshId, m: Mat4| MeshInstance {
+            glow: glow.instruments,
+            cabin: 1.0,
+            ..instance(mesh, m)
         };
         let lod = &ids.lods[0];
         let on = usize::from(self.headlights);
         let body = self.pose(alpha).matrix();
         out.push(instance(lod.body[on], body));
         out.push(instance(lod.glass, body));
-        out.push(instance(lod.lights[on][usize::from(self.braking())], body));
+        out.push(MeshInstance {
+            glow: glow.lamps,
+            ..instance(lod.lights[on][usize::from(self.braking())], body)
+        });
         for w in self.wheels(alpha) {
             out.push(instance(lod.wheel, w));
         }
         if cabin {
-            out.push(instance(lod.shell_inside, body));
-            out.push(instance(lod.interior, body));
-            out.push(instance(
+            out.push(MeshInstance {
+                color: [CABIN_WALL_TINT, CABIN_WALL_TINT, CABIN_WALL_TINT, 1.0],
+                ..inside(lod.shell_inside, body)
+            });
+            out.push(inside(lod.interior, body));
+            out.push(inside(
                 lod.steering_wheel,
                 body * self.steering_wheel(alpha),
             ));
-            out.push(instance(ids.dial_ticks, body));
+            out.push(inside(ids.dial_ticks, body));
             let needles = self.needles(alpha);
             for (k, n) in needles.iter().enumerate().take(self.layout.dial_count) {
-                out.push(instance(ids.needles[k], body * *n));
+                out.push(inside(ids.needles[k], body * *n));
             }
         }
     }
 
-    /// The headlight pools (two lights, ahead of the left and right headlamps) when the
-    /// headlights are on, else none.
+    /// The headlight beams (two spots, from the left and right headlamps along the car's
+    /// nose, pitched down) when the headlights are on, else none.
     pub fn lights(&self, alpha: f32) -> ([PointLight; 2], usize) {
         let pose = self.pose(alpha);
-        let y = HEADLIGHT_HEIGHT_M - self.spec.cg_height_m;
+        let pitch = HEADLIGHT_PITCH_DEG.to_radians();
+        let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
         let at = |lamp: Vec3| PointLight {
-            position: pose
-                .point(Vec3::new(lamp.x, y, lamp.z - HEADLIGHT_AHEAD_M))
-                .to_array(),
+            position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
             color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
             radius: HEADLIGHT_RADIUS_M,
+            direction: axis.to_array(),
+            cone_cos: [
+                HEADLIGHT_OUTER_DEG.to_radians().cos(),
+                HEADLIGHT_INNER_DEG.to_radians().cos(),
+            ],
+            cone_squash: HEADLIGHT_SQUASH,
+            wrap: HEADLIGHT_WRAP,
         };
         let [l, r] = self.layout.headlamps;
         ([at(l), at(r)], if self.headlights { 2 } else { 0 })
@@ -555,7 +603,7 @@ mod tests {
         let mut input = InputState::default();
         assert_eq!(d.lights(1.0).1, 0);
         let mut out = Vec::new();
-        d.push_instances(0.5, &ids, false, &mut out);
+        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
         // Body (pop-ups down), glass, unlit lamps, four wheels.
         let meshes: Vec<MeshId> = out.iter().map(|i| i.mesh).collect();
         assert_eq!(
@@ -580,21 +628,54 @@ mod tests {
         assert_eq!(n, 2);
         let pose = d.pose(1.0);
         for (l, lamp) in lights.iter().zip(d.layout.headlamps) {
-            // Ahead of its lamp, on the lamp's side, pooled on the road.
+            // Just behind its lamp, aimed down the road ahead and a little down.
             let local = pose.rot.inverse() * (Vec3::from(l.position) - pose.pos);
+            assert!((local - lamp - Vec3::Z * HEADLIGHT_SETBACK_M).length() < 1e-4);
+            let axis = pose.rot.inverse() * Vec3::from(l.direction);
             assert!(
-                (lamp.z - local.z - HEADLIGHT_AHEAD_M).abs() < 1e-4,
-                "{local}"
+                axis.z < -0.99 && axis.y < -0.01 && axis.x.abs() < 1e-5,
+                "{axis}"
             );
-            assert!((local.x - lamp.x).abs() < 1e-4);
+            assert!(l.cone_cos[0] < l.cone_cos[1]);
             assert!(l.color[0] > l.color[2], "warm");
         }
+        // The pool on the road: what the asphalt straight ahead receives (the renderer's
+        // squashed smoothstep cone and wrapped cosine) at the lamp's height, relative to
+        // 10 m out. Dark under the nose, lit from ~5 m, still a fifth as bright at 25 m.
+        let lamp = d.layout.headlamps[0];
+        let h = lamp.y + d.spec.cg_height_m;
+        let beam = |ahead: f32| {
+            let to = Vec3::new(0.0, -h, -ahead).normalize();
+            let axis = Vec3::new(0.0, -HEADLIGHT_PITCH_DEG.to_radians().sin(), -1.0).normalize();
+            let right = axis.cross(Vec3::Y).normalize();
+            let up = right.cross(axis);
+            let (f, u) = (to.dot(axis), to.dot(up) * HEADLIGHT_SQUASH);
+            let off = f / (f * f + u * u).sqrt();
+            let (o, i) = (
+                HEADLIGHT_OUTER_DEG.to_radians().cos(),
+                HEADLIGHT_INNER_DEG.to_radians().cos(),
+            );
+            let c = ((off - o) / (i - o)).clamp(0.0, 1.0);
+            let d2 = ahead * ahead + h * h;
+            let ndl = (h / d2.sqrt() + HEADLIGHT_WRAP) / (1.0 + HEADLIGHT_WRAP);
+            HEADLIGHT_KCD * c * c * (3.0 - 2.0 * c) * ndl / d2
+        };
+        let ten = beam(10.0);
+        assert_eq!(
+            beam(2.0),
+            0.0,
+            "the road under the nose is outside the beam"
+        );
+        assert!(beam(6.0) > 0.3 * ten, "{}", beam(6.0) / ten);
+        assert!(beam(8.0) > ten && beam(8.0) < 3.0 * ten);
+        assert!(beam(25.0) > 0.1 * ten, "{}", beam(25.0) / ten);
+        assert!(beam(25.0) < beam(15.0));
         input.set_just_pressed(Action::Headlights, false);
         d.frame(&input);
         assert!(d.headlights, "holding the button does not toggle again");
 
         out.clear();
-        d.push_instances(0.5, &ids, false, &mut out);
+        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
         assert_eq!(out[0].mesh, lod.body[1], "pop-ups up");
         assert_eq!(out[2].mesh, lod.lights[1][0], "lamps lit");
         // Braking lights the brake lamps.
@@ -607,11 +688,11 @@ mod tests {
         );
         assert!(d.braking());
         out.clear();
-        d.push_instances(0.5, &ids, false, &mut out);
+        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
         assert_eq!(out[2].mesh, lod.lights[1][1]);
         d.headlights = false;
         out.clear();
-        d.push_instances(0.5, &ids, false, &mut out);
+        d.push_instances(0.5, &ids, false, CarGlow::default(), &mut out);
         assert_eq!(out[0].mesh, lod.body[0]);
         assert_eq!(out[2].mesh, lod.lights[0][1]);
     }
@@ -623,7 +704,11 @@ mod tests {
             let ids = ids();
             let lod = ids.lods[0];
             let mut out = Vec::new();
-            d.push_instances(0.5, &ids, true, &mut out);
+            let glow = CarGlow {
+                lamps: 0.5,
+                instruments: 0.25,
+            };
+            d.push_instances(0.5, &ids, true, glow, &mut out);
             let dials = d.layout.dial_count;
             assert_eq!(out.len(), 11 + dials, "{id}");
             assert!(out.len() <= MAX_CAR_INSTANCES);
@@ -634,6 +719,13 @@ mod tests {
             for (k, n) in out[11..].iter().enumerate() {
                 assert_eq!(n.mesh, ids.needles[k]);
             }
+            // The outside is outside the cabin light; the lamps and instruments glow as
+            // asked.
+            assert!(out[..7].iter().all(|i| i.cabin == 0.0));
+            assert!(out[7..].iter().all(|i| i.cabin == 1.0 && i.glow == 0.25));
+            assert_eq!(out[2].glow, 0.5);
+            assert!(out[7].color[0] < 0.5, "dark cabin walls");
+            assert!(out.iter().skip(8).all(|i| i.color == [1.0; 4]));
             // Idling: the speedometer reads zero.
             let n = d.needles(1.0)[0];
             let dial = d.layout.dials[0];

@@ -9,6 +9,12 @@ struct PointLight {
     pos_radius: vec4<f32>,
     // rgb: luminous intensity (kcd, i.e. klux at 1 m), w: 1 / radius².
     color: vec4<f32>,
+    // xyz: spot axis (unit; zero for an omni light), w: cosine off the axis where the cone
+    // ends (below -1 for an omni light).
+    spot: vec4<f32>,
+    // x: 1 / (cosine of full intensity - spot.w), y: vertical squash (1 = round cone),
+    // z: wrap of the surface cosine (0 = Lambert), w: unused.
+    cone: vec4<f32>,
 };
 
 struct Frame {
@@ -58,13 +64,15 @@ struct Frame {
     // (texels), w: shadow normal offset (texels).
     params: vec4<f32>,
     // x: emissive boost (kcd/m² per unit of emissive), y: window emissive scale 0..1,
-    // z: number of point lights in use, w: unused.
+    // z: number of point lights in use, w: emissive cap (post-exposure).
     emissive: vec4<f32>,
     // x: bloom strength (0 = no bloom), y: bloom threshold (post-exposure), z: vignette
     // strength, w: highest post-exposure value fed to bloom.
     post: vec4<f32>,
     // xy: color target size (px), zw: its reciprocal.
     screen: vec4<f32>,
+    // rgb: cabin ambient radiance, scaled per instance by its cabin share.
+    cabin_light: vec4<f32>,
     lights: array<PointLight, 8>,
 };
 
@@ -88,6 +96,8 @@ struct InstanceIn {
     @location(10) n1: vec4<f32>,
     @location(11) n2: vec4<f32>,
     @location(12) color: vec4<f32>,
+    // x: emissive multiplier (glow), y: cabin-light share, zw: unused.
+    @location(13) params: vec4<f32>,
 };
 
 fn instance_model(i: InstanceIn) -> mat4x4<f32> {
