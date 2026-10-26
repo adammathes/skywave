@@ -45,6 +45,7 @@ pub const OCEAN_SKIRT_M: f32 = 3000.0;
 const WATER_SPLIT: u32 = 4;
 const KEY_GROUND: u64 = 0x4752_4F55;
 const KEY_GROUND_FINE: u64 = 0x4752_4646;
+const KEY_STANDS: u64 = 0x5354_4E44;
 
 /// The place's heights with the roads graded in, on the place's terrain grid.
 #[derive(Clone, Debug, PartialEq)]
@@ -353,16 +354,19 @@ fn in_triangle(p: V2, a: V3, b: V3, c: V3) -> Option<f32> {
     (l1 >= eps && l2 >= eps && l3 >= eps).then_some(l1 * a.y + l2 * b.y + l3 * c.y)
 }
 
-/// Ground color of a zone before blending.
-fn zone_color(pal: &Palette, zone: ZoneId) -> Rgb {
+/// Ground color of a zone before blending; `patch` in `[0, 1)` is seeded noise that puts
+/// stands of dark chaparral on the hills' golden grass and varies the open ground.
+fn zone_color(pal: &Palette, zone: ZoneId, patch: f32) -> Rgb {
+    let golden = mix(pal.lawn_dry, pal.sand, 70);
+    let stand = clamp((patch - 0.55) * 5.0, 0.0, 1.0);
     match zone {
         ZoneId::Beach => pal.sand,
         ZoneId::Water => shade(pal.sand, 170),
         ZoneId::Park => pal.lawn,
-        ZoneId::Hills => pal.scrub,
-        ZoneId::Farmland => mix(pal.soil, pal.lawn_dry, 70),
-        ZoneId::Suburb => mix(pal.lawn, pal.lawn_dry, 120),
-        _ => mix(pal.lawn_dry, pal.scrub, 60),
+        ZoneId::Hills => mix(golden, shade(pal.scrub, 175), (stand * 230.0) as u32),
+        ZoneId::Farmland => mix(pal.soil, pal.lawn_dry, (40.0 + 120.0 * patch) as u32),
+        ZoneId::Suburb => mix(pal.lawn, golden, 130),
+        _ => mix(golden, pal.scrub, (40.0 + 100.0 * patch) as u32),
     }
 }
 
@@ -381,7 +385,11 @@ pub fn build(place: &Place, grid: &TerrainGrid, pal: &Palette, seed: u64, out: &
     };
     // Cell colors, then each vertex blends the 4×4 cells around it (16 m).
     let cell_rgb: Vec<[u32; 3]> = (0..cw * ch)
-        .map(|i| zone_color(pal, zone_at(i % cw, i / cw)).map(u32::from))
+        .map(|i| {
+            let p = grid.pos(i % cw, i / cw);
+            let patch = value_noise(seed ^ KEY_STANDS, p.x, p.y, 46.0);
+            zone_color(pal, zone_at(i % cw, i / cw), patch).map(u32::from)
+        })
         .collect();
     let paint = Paint::new(pal.lawn, Pattern::Terrain);
     let wl = grid.water_level;
