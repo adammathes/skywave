@@ -15,6 +15,7 @@ pub mod lighting;
 mod lighttiles;
 pub mod map;
 mod places;
+mod propinst;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -160,6 +161,8 @@ pub struct App {
     map: map::MapImage,
     /// Where the place puts the car: its `PlayerStart` ground point and heading.
     start: ([f32; 3], f32),
+    /// A terrain place's trees and parked cars, drawn as instances near the camera.
+    props: Option<propinst::PropInstances>,
 }
 
 impl App {
@@ -204,6 +207,13 @@ impl App {
         let mut ui = ui::Ui::new();
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         let ground = drive::ground_for(&place);
+        let chunk_size = place.header.chunk_size_m;
+        let mut props = propinst::PropInstances::new(&place, &Palette::socal_1985(), |p| {
+            [
+                world::math::floor(p[0] / chunk_size) as i32,
+                world::math::floor(p[1] / chunk_size) as i32,
+            ]
+        })?;
         let town = match stream {
             None => resident_town(&place),
             Some(budget) => streamed_town(place, budget),
@@ -215,7 +225,19 @@ impl App {
             meshes.push(m.clone());
             MeshId(meshes.len() as u32 - 1)
         });
-        instances.reserve_exact(town.world_capacity - world_instances + drive::MAX_CAR_INSTANCES);
+        if let Some(p) = &mut props {
+            let ids = p
+                .meshes()
+                .iter()
+                .map(|m| {
+                    meshes.push(m.clone());
+                    MeshId(meshes.len() as u32 - 1)
+                })
+                .collect();
+            p.set_ids(ids);
+        }
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&props);
+        instances.reserve_exact(town.world_capacity - world_instances + extra);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
         Ok(App {
@@ -242,6 +264,7 @@ impl App {
             ui,
             map,
             start,
+            props,
         })
     }
 
@@ -422,6 +445,12 @@ impl App {
         for inst in car {
             inst.lights = set;
         }
+        if let Some(props) = &self.props {
+            let stream = self.stream.as_deref();
+            let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
+            let lights = self.lights.lights();
+            props.push(eye, live, lights, lamp_glow, &mut self.instances);
+        }
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),
@@ -434,6 +463,13 @@ impl App {
             hud: self.ui.hud(),
         }
     }
+}
+
+/// Room for the instanced props a frame may draw.
+fn prop_capacity(props: &Option<propinst::PropInstances>) -> usize {
+    props
+        .as_ref()
+        .map_or(0, |p| p.count().min(propinst::MAX_PROP_INSTANCES))
 }
 
 /// Vertical field of view of the free-fly camera, degrees.
@@ -581,8 +617,8 @@ impl App {
         s.streamer = Streamer::new(&s.source, budget);
         // Nothing is drawn yet, so these are empty: room for every part and the car.
         let parts = s.streamer.capacity() * MAX_CHUNK_PARTS;
-        self.instances
-            .reserve_exact(parts + drive::MAX_CAR_INSTANCES);
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props);
+        self.instances.reserve_exact(parts + extra);
         self.roles.reserve_exact(parts);
         self.bounds.reserve_exact(parts);
     }
@@ -597,9 +633,8 @@ impl App {
 
     /// Most instances a frame can draw: reserve them in the renderer at load.
     pub fn max_instances(&self) -> usize {
-        self.instances
-            .capacity()
-            .max(self.world_instances + drive::MAX_CAR_INSTANCES)
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props);
+        self.instances.capacity().max(self.world_instances + extra)
     }
 
     /// Whether the town is streamed.

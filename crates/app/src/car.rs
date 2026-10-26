@@ -440,6 +440,50 @@ impl CarModel {
     }
 }
 
+/// A parked car: `shape` in palette color `paint` at level of detail 1, as one mesh (body,
+/// glass, lamps off and four wheels), its origin on the ground midway between the axles,
+/// nose toward `-z`.
+pub fn parked_mesh(shape: &ShapeSpec, paint: usize) -> Result<Mesh, String> {
+    let car =
+        shape::build_lod(shape, paint, 1).map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
+    let mid = 0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]);
+    let offset = Vec3::new(0.0, 0.0, -mid);
+    let mut out = convert(&car.body, offset, Surface::Body);
+    let mut add = |m: &Mesh| {
+        let base = out.vertices.len() as u32;
+        out.vertices.extend_from_slice(&m.vertices);
+        out.indices.extend(m.indices.iter().map(|i| i + base));
+    };
+    add(&convert(&car.glass, offset, Surface::Glass));
+    let mut lamps = convert(&car.lights, offset, Surface::Plain);
+    for v in &mut lamps.vertices {
+        if let Some(s) = lamp_scale(lamp_group(v.emissive), false, false) {
+            let e = v.emissive;
+            v.emissive = render::emissive([e[0], e[1], e[2]], s);
+        }
+    }
+    add(&lamps);
+    // The right wheel at every hub, turned about `y` on the left.
+    let wheel = convert(&car.wheels[1], Vec3::ZERO, Surface::Plain);
+    for (k, hub) in car.wheel_centers.iter().enumerate() {
+        let left = k % 2 == 0;
+        let at = Vec3::from(*hub) + offset;
+        let mut w = wheel.clone();
+        for v in &mut w.vertices {
+            let (p, n) = (Vec3::from(v.pos), Vec3::from(v.normal));
+            let (p, n) = if left {
+                (Vec3::new(-p.x, p.y, -p.z), Vec3::new(-n.x, n.y, -n.z))
+            } else {
+                (p, n)
+            };
+            v.pos = (p + at).to_array();
+            v.normal = n.to_array();
+        }
+        add(&w);
+    }
+    Ok(out)
+}
+
 /// How a shape mesh's uvs map into the atlas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Surface {
