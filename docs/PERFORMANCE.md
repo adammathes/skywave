@@ -257,9 +257,21 @@ as one figure share its 13 draws per pass, so the draws grow with the figures in
 most 8 × 13 per pass), not the people, and only people within 40 m cast shadows. Those
 numbers are the last frame of a still camera. Since the GPU cuts the test drives the camera
 (as above) and counts the most draws in a frame and the mean shadow triangles: busy, **Deck
-1145 draws, 425k forward, 382k shadow; Medium 1141, 425k, 793k** (at Deck the depth
-pre-pass draws the forward pass's meshes twice; the most draws come in the first frame,
-which draws every cascade). Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1260
+1143 draws, 427k forward, 383k shadow; Medium 1140, 427k, 794k**. Where the draws come
+from, frame by frame (busy):
+
+| Frame | Medium | Deck |
+|---|---|---|
+| Before (main, the last of 4 still frames: far cascade kept) | 530 | 385 |
+| Now, a frame drawing the near cascade(s) only | 529 (forward 315, shadow 205, bloom 9) | 694 (forward 625: 316 shaded + 309 pre-pass; shadow 62; bloom 7) |
+| Now, the frame that also draws the far cascade (the worst) | 1140 (shadow 816) | 1143 (shadow 511) |
+
+So Medium's draws are unchanged: the old count's frame parity skipped the far cascade's
+~600 draws, which it redrew every other frame and now redraws only when the view leaves its
+map (or its casters move, every third frame at Deck). Deck's steady frame gains the 309
+pre-pass draws, depth-only, for the junction's 1705k → 784k shaded fragments (overdraw
+2.18 → 1.00, lavapipe): about 0.9 M fragments of the full forward shader against ~0.3k draws
+and 427k depth-only triangles. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1260
 draws, 465k forward and 420k shadow triangles; Medium 1255 draws, 465k and 870k** (about
 10% over), and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the

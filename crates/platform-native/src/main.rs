@@ -1255,7 +1255,9 @@ mod tests {
     // people live): the most draws in a frame (the first, which draws every cascade; at
     // Deck the depth pre-pass draws the forward pass's meshes twice), forward triangles,
     // and shadow triangles a frame (the far cascade is kept while its map covers the view):
-    // Deck 1145 draws, 425k forward and 382k shadow triangles; Medium 1141, 425k, 793k.
+    // Deck 1143 draws, 427k forward and 383k shadow triangles; Medium 1140, 427k, 794k.
+    // A frame without the far cascade: Deck 694 (main's 385 plus 309 pre-pass draws),
+    // Medium 529 (main's 530).
     const DECK_DRAWS: u32 = 1260;
     const DECK_TRIS: u64 = 465_000;
     const DECK_SHADOW: u64 = 420_000;
