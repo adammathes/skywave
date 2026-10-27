@@ -14,11 +14,12 @@
 //! pixel-snapped origin, so it is always crisp; widths therefore differ from
 //! `font::text_width(text) * scale` by under half a font pixel per glyph.
 //!
-//! Image items ([`HudImage`]) draw the map texture ([`crate::Renderer::upload_map`]) or a
-//! flat shape (a disc, the player arrow) with an arbitrary rotation of their content and an
-//! optional circular or rounded-rectangle mask, anti-aliased in the shader. They are not
-//! pixel-snapped. Everything, images included, goes out in the same single instanced draw:
-//! the HUD bind group holds both the font atlas and the map, and each quad's flags pick one.
+//! Image items ([`HudImage`]) draw the map texture ([`crate::Renderer::upload_map`]), the
+//! stills texture ([`crate::Renderer::upload_stills`]) or a flat shape (a disc, the player
+//! arrow) with an arbitrary rotation of their content and an optional circular or
+//! rounded-rectangle mask, anti-aliased in the shader. They are not pixel-snapped.
+//! Everything, images included, goes out in the same single instanced draw: the HUD bind
+//! group holds the font atlas, the map and the stills, and each quad's flags pick one.
 //!
 //! The frame's items are plain data ([`Hud`]): a slice of [`HudItem`]s whose text lives in
 //! one shared string. [`HudBuilder`] fills both and reuses its buffers frame to frame.
@@ -87,6 +88,10 @@ pub enum HudTexture {
     /// The player arrow: a dart pointing up (toward -y) in the quad, before rotation, in
     /// the item's color (uv unused).
     Arrow,
+    /// The stills texture from [`crate::Renderer::upload_stills`] (pictures side by side:
+    /// `uv` picks one), tinted by the item's color; content rotation is ignored.
+    /// Transparent outside uv 0..1, and everywhere before stills are uploaded.
+    Still,
 }
 
 /// The outline an image quad is cut to. Masks are not rotated with the content.
@@ -108,7 +113,7 @@ pub struct HudImage {
     pub y: f32,
     pub w: f32,
     pub h: f32,
-    /// For [`HudTexture::Map`]: the texture rectangle (0..1) shown in the quad before
+    /// For [`HudTexture::Map`] and [`HudTexture::Still`]: the texture rectangle (0..1) shown in the quad before
     /// rotation: left, top, right, bottom. It may extend past 0..1 (shown transparent).
     pub uv: [f32; 4],
     /// Radians: the content turns clockwise on screen about the quad's center by this
@@ -372,31 +377,34 @@ pub(crate) struct HudQuad {
     /// sRGB RGBA, straight alpha.
     pub color: [u8; 4],
     /// x: content rotation (rad, clockwise), y: map mip level, z: mask corner radius (px),
-    /// w: flags, `kind + 4 * mask` (see [`QUAD_FONT`] and [`MASK_CIRCLE`]).
+    /// w: flags, `kind + 8 * mask` (see [`QUAD_FONT`] and [`MASK_CIRCLE`]).
     pub params: [f32; 4],
 }
 
-/// Quad kinds (low two bits of the flags): sample the font atlas (glyphs and rectangles),
-/// the map, nothing (flat), or draw the arrow shape. Mirrored in shaders/hud.wgsl.
+/// Quad kinds (low three bits of the flags): sample the font atlas (glyphs and
+/// rectangles), the map, nothing (flat), draw the arrow shape, or sample the stills.
+/// Mirrored in shaders/hud.wgsl.
 pub(crate) const QUAD_FONT: u32 = 0;
 pub(crate) const QUAD_MAP: u32 = 1;
 pub(crate) const QUAD_SOLID: u32 = 2;
 pub(crate) const QUAD_ARROW: u32 = 3;
-/// Masks (flags / 4).
+pub(crate) const QUAD_STILL: u32 = 4;
+/// Masks (flags / 8).
 pub(crate) const MASK_CIRCLE: u32 = 1;
 pub(crate) const MASK_ROUNDED: u32 = 2;
 
 fn flags(kind: u32, mask: u32) -> f32 {
-    (kind + 4 * mask) as f32
+    (kind + 8 * mask) as f32
 }
 
 /// Turns `hud` into quads for a target of size `target`, appending to `out` until it holds
-/// `capacity` quads. `map_size` is the map texture's size in texels (for its mip level).
-/// Returns the number of quads that did not fit.
+/// `capacity` quads. `map_size` and `stills_size` are the map's and the stills' textures'
+/// sizes in texels (for their mip levels). Returns the number of quads that did not fit.
 pub(crate) fn build_quads(
     hud: &Hud,
     target: (u32, u32),
     map_size: [u32; 2],
+    stills_size: [u32; 2],
     out: &mut Vec<HudQuad>,
     capacity: usize,
 ) -> u32 {
@@ -442,10 +450,11 @@ pub(crate) fn build_quads(
                 if !(x1 > x0 && y1 > y0 && image.color[3] > 0 && image.rotation.is_finite()) {
                     continue;
                 }
-                let kind = match image.texture {
-                    HudTexture::Map => QUAD_MAP,
-                    HudTexture::Solid => QUAD_SOLID,
-                    HudTexture::Arrow => QUAD_ARROW,
+                let (kind, size) = match image.texture {
+                    HudTexture::Map => (QUAD_MAP, map_size),
+                    HudTexture::Solid => (QUAD_SOLID, map_size),
+                    HudTexture::Arrow => (QUAD_ARROW, map_size),
+                    HudTexture::Still => (QUAD_STILL, stills_size),
                 };
                 let (mask, radius) = match image.mask {
                     HudMask::None => (0, 0.0),
@@ -454,8 +463,8 @@ pub(crate) fn build_quads(
                 };
                 // Texels per target pixel picks the mip level (the full map minifies it).
                 let uv = image.uv;
-                let tx = (uv[2] - uv[0]).abs() * map_size[0] as f32 / (x1 - x0);
-                let ty = (uv[3] - uv[1]).abs() * map_size[1] as f32 / (y1 - y0);
+                let tx = (uv[2] - uv[0]).abs() * size[0] as f32 / (x1 - x0);
+                let ty = (uv[3] - uv[1]).abs() * size[1] as f32 / (y1 - y0);
                 let lod = tx.max(ty).max(1.0).log2();
                 push(HudQuad {
                     rect: [x0, y0, x1, y1],
@@ -638,7 +647,14 @@ mod tests {
         b.text_fmt(0.0, 0.0, 1.0, [255; 4], format_args!("{}\n{}", 1, 2));
         let hud = b.view();
         let mut quads = Vec::new();
-        let dropped = build_quads(&hud, (1920, 1080), [1, 1], &mut quads, MAX_HUD_QUADS);
+        let dropped = build_quads(
+            &hud,
+            (1920, 1080),
+            [1, 1],
+            [1, 1],
+            &mut quads,
+            MAX_HUD_QUADS,
+        );
         assert_eq!(dropped, 0);
         // Rect, 5 glyphs (the space draws nothing), invisible rect skipped, 2 glyphs.
         assert_eq!(quads.len(), 1 + 5 + 2);
@@ -682,6 +698,17 @@ mod tests {
             mask: HudMask::Rounded(10.0),
             ..HudImage::disc(0.0, 0.0, 50.0, [0, 0, 0, 100])
         });
+        // The second of two 320×200 stills at half size: mip 1 of the stills.
+        b.image(HudImage {
+            x: 0.0,
+            y: 0.0,
+            w: 160.0,
+            h: 100.0,
+            uv: [0.5, 0.0, 1.0, 1.0],
+            texture: HudTexture::Still,
+            color: [255; 4],
+            ..HudImage::default()
+        });
         // Invisible or degenerate images are skipped.
         b.image(HudImage::disc(0.0, 0.0, 5.0, [0; 4]));
         b.image(HudImage::disc(0.0, 0.0, 0.0, [255; 4]));
@@ -690,8 +717,18 @@ mod tests {
             ..HudImage::disc(0.0, 0.0, 5.0, [255; 4])
         });
         let mut quads = Vec::new();
-        let dropped = build_quads(&b.view(), (1280, 720), [1024, 1024], &mut quads, 16);
-        assert_eq!((dropped, quads.len()), (0, 4));
+        let dropped = build_quads(
+            &b.view(),
+            (1280, 720),
+            [1024, 1024],
+            [640, 200],
+            &mut quads,
+            16,
+        );
+        assert_eq!((dropped, quads.len()), (0, 5));
+        assert_eq!(quads[4].params[3], flags(QUAD_STILL, 0));
+        assert_eq!(quads[4].uv, [0.5, 0.0, 1.0, 1.0]);
+        assert!((quads[4].params[1] - 1.0).abs() < 1e-5);
         let m = quads[0];
         assert_eq!(m.rect, [10.0, 20.0, 210.0, 220.0]);
         assert_eq!(m.uv, [0.25, 0.25, 0.5, 0.5]);
@@ -707,7 +744,14 @@ mod tests {
         assert_eq!(quads[3].params[3], flags(QUAD_SOLID, MASK_ROUNDED));
         assert_eq!(quads[3].params[1], 0.0);
         quads.clear();
-        build_quads(&b.view(), (2560, 1440), [1024, 1024], &mut quads, 16);
+        build_quads(
+            &b.view(),
+            (2560, 1440),
+            [1024, 1024],
+            [640, 200],
+            &mut quads,
+            16,
+        );
         assert_eq!(quads[0].params[1], 0.0);
         assert_eq!(quads[3].params[2], 20.0);
         b.shift_last(3.0);
@@ -720,7 +764,7 @@ mod tests {
         b.begin(1.0);
         b.text(0.0, 0.0, 1.0, [255; 4], "abcdefghij");
         let mut quads = Vec::with_capacity(4);
-        let dropped = build_quads(&b.view(), (1280, 720), [1, 1], &mut quads, 4);
+        let dropped = build_quads(&b.view(), (1280, 720), [1, 1], [1, 1], &mut quads, 4);
         assert_eq!((quads.len(), dropped), (4, 6));
         assert_eq!(quads.capacity(), 4);
     }

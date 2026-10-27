@@ -11,6 +11,7 @@ VehicleSpec(
     id: "pipit_hatch",
     name: "Pipit Hatch",
     era: Eighties,
+    year: 1981,
     class: Hatch,
 
     mass_kg: 900,

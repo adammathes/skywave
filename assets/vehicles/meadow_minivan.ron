@@ -10,6 +10,7 @@ VehicleSpec(
     id: "meadow_minivan",
     name: "Meadow Minivan",
     era: Eighties,
+    year: 1984,
     class: Van,
 
     mass_kg: 1450,

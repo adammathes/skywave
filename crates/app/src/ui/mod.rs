@@ -83,6 +83,10 @@ pub enum Toast {
     CarReset,
     /// A stream was added to the stations.
     StreamAdded,
+    /// Now in the world with this index ([`crate::scenario::BUILTIN`]).
+    World(usize),
+    /// The scene named a world that is not built in: this is the first.
+    UnknownWorld,
     /// A music folder (`Ui::music_name`) with this many tracks was added to the stations;
     /// `kept`: the browser will remember it next session.
     MusicAdded {
@@ -119,6 +123,10 @@ pub struct Ui {
     vehicle_pick: Option<(usize, usize)>,
     /// The pause menu's "Reset car" was chosen; the app resets the car.
     reset_pick: bool,
+    /// The world the app is: an index into [`crate::scenario::BUILTIN`].
+    scenario: usize,
+    /// The World page picked this world; the platform loads it.
+    world_pick: Option<usize>,
     /// The car being driven, an index into `vehicles::BUILTIN`, and its paint.
     vehicle: usize,
     vehicle_paint: usize,
@@ -201,6 +209,8 @@ impl Ui {
             camera_changed: false,
             vehicle_pick: None,
             reset_pick: false,
+            scenario: 0,
+            world_pick: None,
             vehicle: 0,
             vehicle_paint: 0,
             browse: [0, 0],
@@ -386,6 +396,59 @@ impl Ui {
         self.vehicle_pick.take()
     }
 
+    /// Takes the world the World page picked, once.
+    fn take_world_pick(&mut self) -> Option<usize> {
+        self.world_pick.take()
+    }
+
+    /// The world the app is: an index into [`crate::scenario::BUILTIN`].
+    pub fn scenario(&self) -> usize {
+        self.scenario
+    }
+
+    /// The app is world `index`: the Vehicle page lists its cars and the radio takes its
+    /// preset.
+    pub(crate) fn set_scenario(&mut self, index: usize) {
+        let s = crate::scenario::get(index);
+        self.scenario = crate::scenario::index_of(&s.id).unwrap_or(0);
+        self.radio.set_scenario(&s.id, &s.radio);
+        self.radio.apply(&self.settings.radio);
+    }
+
+    /// The scene asked for a world that is not built in: say so.
+    pub(crate) fn unknown_world(&mut self) {
+        self.show(Toast::UnknownWorld);
+    }
+
+    /// A world was just loaded from the World page: its name shows for
+    /// [`VEHICLE_TOAST_SECONDS`].
+    pub(crate) fn world_loaded(&mut self) {
+        self.toast = Some((Toast::World(self.scenario), VEHICLE_TOAST_SECONDS));
+    }
+
+    /// What the platform told `old` (quit, text entry, the GPU and the panel's refresh,
+    /// forced options, the music picker) and the music folders the session added.
+    pub(crate) fn carry_platform(&mut self, old: &Ui) {
+        self.can_quit = old.can_quit;
+        self.text_entry = old.text_entry;
+        self.auto_quality = old.auto_quality;
+        self.gpu_label = old.gpu_label.clone();
+        self.forced_quality = old.forced_quality;
+        self.panel_hz = old.panel_hz;
+        self.music_picker = old.music_picker;
+        self.music_again = old.music_again;
+        self.music_name = old.music_name.clone();
+        self.radio.carry_files(&old.radio, &self.settings.radio);
+        if let Some(s) = old.forced_ui_scale {
+            self.force_ui_scale(s);
+        }
+    }
+
+    /// Hands over the settings store (to the app of the next world).
+    pub(crate) fn take_store(&mut self) -> Option<Box<dyn SettingsStore>> {
+        self.store.take()
+    }
+
     /// Takes the pause menu's "Reset car", once.
     fn take_reset_pick(&mut self) -> bool {
         std::mem::take(&mut self.reset_pick)
@@ -407,12 +470,14 @@ impl Ui {
     }
 
     /// The Vehicle page opens on the car being driven, in its paint, the car chooser
-    /// focused.
+    /// focused; the World page on the world the app is.
     fn focus_current_vehicle(&mut self) {
         if let Some(menu) = &mut self.menu {
             if menu.page() == Page::Vehicle {
                 self.browse = [self.vehicle, self.vehicle_paint];
                 menu.set_focus(0);
+            } else if menu.page() == Page::Worlds {
+                menu.set_focus(self.scenario);
             }
         }
     }
@@ -526,6 +591,7 @@ impl Ui {
             frame_rate: self.frame_rate(),
             panel_hz: self.panel_hz,
             browse: self.browse,
+            scenario: self.scenario,
         }
     }
 
@@ -602,6 +668,13 @@ impl Ui {
                 Some(menu) if menu.page() == Page::Vehicle && nav == Nav::Confirm => {
                     Effect::Activate(ItemId::Vehicle(self.browse[0]))
                 }
+                // The World page's cards sit side by side: left and right move between them.
+                Some(menu)
+                    if menu.page() == Page::Worlds && matches!(nav, Nav::Left | Nav::Right) =>
+                {
+                    let along = if nav == Nav::Left { Nav::Up } else { Nav::Down };
+                    menu.apply(along, &self.items)
+                }
                 Some(menu) => menu.apply(nav, &self.items),
                 None => Effect::None,
             };
@@ -612,12 +685,15 @@ impl Ui {
 
     fn apply(&mut self, effect: Effect, clock: &mut Clock, mapper: &mut InputMapper) {
         match effect {
-            Effect::Opened(Page::Vehicle) => self.focus_current_vehicle(),
+            Effect::Opened(Page::Vehicle | Page::Worlds) => self.focus_current_vehicle(),
             Effect::None | Effect::Moved | Effect::Opened(_) => {}
             Effect::Toggle(id, on) => self.set_toggle(id, on),
             Effect::Slide(id, v) => self.set_slider(id, v, clock),
-            Effect::Choose(ItemId::VehicleCar, i) => {
-                // Another car: the paint it is driven in, else its first.
+            Effect::Choose(ItemId::VehicleCar, k) => {
+                // The k-th car of this world; another car: the paint it is driven in, else
+                // its first.
+                let lineup = crate::scenario::lineup(self.scenario);
+                let i = lineup.cars.get(k).copied().unwrap_or(self.vehicle);
                 let paint = if i == self.vehicle {
                     self.vehicle_paint
                 } else {
@@ -657,7 +733,7 @@ impl Ui {
                 self.dirty = true;
             }
             Effect::Choose(ItemId::RadioPreset, i) => {
-                radio::choose_preset(&mut self.settings.radio, i);
+                radio::choose_preset(&mut self.settings.radio, self.radio.scenario(), i);
                 self.radio_settings_changed();
             }
             Effect::Choose(ItemId::Quality, i) => {
@@ -832,6 +908,18 @@ impl Ui {
                     0
                 };
                 self.vehicle_pick = Some((i, paint));
+                self.close();
+            }
+            ItemId::World(i) => {
+                // Remembered now, so the next session starts there too; the platform loads
+                // it once the menu is closed.
+                if let Some(&(id, _)) = crate::scenario::BUILTIN.get(i) {
+                    if self.settings.scenario != Some(id) {
+                        self.settings.scenario = Some(id);
+                        self.dirty = true;
+                    }
+                    self.world_pick = Some(i);
+                }
                 self.close();
             }
             ItemId::Quit => {
@@ -1114,6 +1202,7 @@ impl App {
             self.camera.set_mode(self.ui.settings.camera);
         }
         let driving = !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !self.still;
+        self.world_pick = self.ui.take_world_pick().or(self.world_pick);
         if let Some((i, paint)) = self.ui.take_vehicle_pick() {
             self.switch_to(i, paint, true);
         } else if state.just_pressed(Action::VehicleNext) && driving {
@@ -1379,8 +1468,15 @@ impl App {
             self.camera.set_mode(self.ui.settings.camera);
         }
         if !self.car_from_scene {
-            // The saved car, in the scene's paint (not saved) or its saved one.
-            let saved = self.ui.settings.vehicle.and_then(roster::index_of);
+            // The saved car, in the scene's paint (not saved) or its saved one, if this world
+            // has it.
+            let lineup = crate::scenario::lineup(self.ui.scenario);
+            let saved = self
+                .ui
+                .settings
+                .vehicle
+                .and_then(roster::index_of)
+                .filter(|&i| lineup.allows(i));
             let paint = self.paint_from_scene.unwrap_or(self.ui.settings.paint);
             if let Some(i) =
                 saved.filter(|&i| (i, paint) != (self.ui.vehicle, self.ui.vehicle_paint))

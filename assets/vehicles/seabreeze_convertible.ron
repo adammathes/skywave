@@ -12,6 +12,7 @@ VehicleSpec(
     id: "seabreeze_convertible",
     name: "Seabreeze Convertible",
     era: Eighties,
+    year: 1985,
     class: Convertible,
 
     mass_kg: 1250,

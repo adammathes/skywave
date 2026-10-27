@@ -11,6 +11,7 @@ VehicleSpec(
     id: "gannet_gt",
     name: "Gannet GT",
     era: Eighties,
+    year: 1981,
     class: Sports,
 
     mass_kg: 1250,
