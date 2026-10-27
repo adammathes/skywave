@@ -227,7 +227,7 @@ zones with an `occupancy` curve get lots (the coast: strip, commercial, downtown
   its curb dropped along them.
 - **Beach lots** along the beach zone's alleys: a row of stalls each side opening onto the
   alley, wherever a stall's ground is clear of every other road, junction, building,
-  parcel and the water. Where the alley bends, a run whose stall or island comes out
+  parcel (parks and empty lots too) and the water. Where the alley bends, a run whose stall or island comes out
   more than 0.3 m narrower than its width (the inside of the bend) is dropped.
 - Every row is cut into runs of at most `run_max` stalls with a 1.8 m island between runs
   and at both ends, planted (`islands`) with a palm, a shrub or nothing. Light poles (the
@@ -250,7 +250,8 @@ zones with an `occupancy` curve get lots (the coast: strip, commercial, downtown
   (`place::PropKind::ParkedCar`; a lot's car also sets bit 24, `lots::LOT_CAR`). The
   clock says where each car should be (`props::parked_now`, each coming or going at its
   own minute past the hour); `WorldCollider::advance_lot_cars` moves it there only out of
-  sight (beyond `HOLD_M`, 60 m, or outside a 70° cone round the camera's view) and never
+  sight (never within `HOLD_M`, 60 m, whichever way the camera looks, nor within `SEEN_M`,
+  150 m, in the half-plane ahead of it) and never
   onto the player's car, and the app draws, and the collider stops the car on, only the
   cars that are there. A chunk keeps at most `MAX_CARS_PER_CHUNK` (24) cars at its curbs
   and in its driveways, as before, and `MAX_LOT_CARS_PER_CHUNK` (16) in its lots at any

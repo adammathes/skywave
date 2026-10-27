@@ -212,11 +212,15 @@ pub struct LotCar {
     pub present: bool,
 }
 
-/// A lot car within this distance of the eye and inside [`HOLD_COS`] of the way it looks
-/// keeps whether it is there until it is out of sight, m...
+/// A lot car within this distance of the eye keeps whether it is there, whichever way the
+/// eye looks, m.
 pub const HOLD_M: f32 = 60.0;
-/// ...the cosine of the half-angle of that cone (70°: wider than any camera's view).
-pub const HOLD_COS: f32 = 0.342;
+/// Out to this distance a lot car keeps it while inside [`SEEN_COS`] of the way the eye
+/// looks, m...
+pub const SEEN_M: f32 = 150.0;
+/// ...the cosine of the half-angle of that cone (90°: the half-plane ahead, wider than any
+/// camera's view).
+pub const SEEN_COS: f32 = 0.0;
 
 /// The ground under a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -619,7 +623,8 @@ impl WorldCollider {
 
     /// Brings the lots' cars toward where the clock says they are at `seconds_of_day`
     /// ([`props::parked_now`]), without anyone seeing one come or go: a car within
-    /// [`HOLD_M`] of `eye` inside the cone round `forward` stays as it is, and none arrives
+    /// [`HOLD_M`] of `eye`, or within [`SEEN_M`] inside the cone round `forward`, stays as
+    /// it is, and none arrives
     /// where the car `state` (of `spec`) stands. The first call puts them all where the
     /// clock says (but for the car's place). Allocates nothing.
     pub fn advance_lot_cars(
@@ -643,7 +648,7 @@ impl WorldCollider {
             }
             let d = [car.at[0] - eye[0], car.at[2] - eye[2]];
             let dl = sqrt(dot2(d, d));
-            let seen = dl < HOLD_M && (dl < 1.0 || dot2(d, f) > HOLD_COS * dl * fl);
+            let seen = dl < HOLD_M || (dl < SEEN_M && dot2(d, f) > SEEN_COS * dl * fl);
             if !first && seen {
                 continue;
             }
@@ -1051,11 +1056,14 @@ fn lot_patches(
     }
     for lot in lots {
         for r in &lot.ramps {
-            // From the walk's top at the property line down to the lot: two planes.
+            // From the walk's top at its back edge down to the lot: two planes, reaching
+            // 1 cm over the walk so no sliver of open ground lies between them.
             let path = &net.paths[r.edge as usize];
             let top = |p: V2| [p.x, path.y_at(p) + CURB_M, p.y];
             let low = |p: V2| [p.x, grid.height_at(p.x, p.y) + LOT_LIFT_M, p.y];
-            let q = r.q;
+            let mut q = r.q;
+            q[0] = q[0] + (q[0] - q[3]).normalize() * 0.01;
+            q[1] = q[1] + (q[1] - q[2]).normalize() * 0.01;
             let (a, b, c, d) = (top(q[0]), top(q[1]), low(q[2]), low(q[3]));
             out.patch_with(
                 &[q[0], q[1], q[2]],

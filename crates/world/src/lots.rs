@@ -259,8 +259,8 @@ struct Ctx<'a> {
     seed: u64,
     /// Building footprints with their bounds and vertex means.
     fps: Vec<(Vec<V2>, (V2, V2), V2)>,
-    /// `Lot` parcels with their bounds.
-    lots: Vec<(Vec<V2>, (V2, V2))>,
+    /// Every parcel (lots, parks, empty lots) with its bounds.
+    parcels: Vec<(Vec<V2>, (V2, V2))>,
     /// Junction fans and corner walks with their bounds.
     junctions: Vec<(Vec<V2>, (V2, V2))>,
     /// Each edge's centerline's bounds.
@@ -284,10 +284,9 @@ pub fn plan(place: &Place, net: &Network, rules: &LotRules) -> Vec<ParkingLot> {
             (fp, bb, c)
         })
         .collect();
-    let lots = place
+    let parcels = place
         .parcels
         .iter()
-        .filter(|p| p.lot_kind == LotKind::Lot)
         .map(|p| {
             let poly: Vec<V2> = p.polygon.iter().map(|&q| V2::from_array(q)).collect();
             let bb = bounds(&poly);
@@ -314,7 +313,7 @@ pub fn plan(place: &Place, net: &Network, rules: &LotRules) -> Vec<ParkingLot> {
         rules,
         seed: place.header.seed,
         fps,
-        lots,
+        parcels,
         junctions,
         edge_bounds: net.paths.iter().map(|p| bounds(&p.pts)).collect(),
     };
@@ -894,9 +893,9 @@ impl Ctx<'_> {
         if self.fps.iter().any(|(fp, bb, _)| near(fp, *bb, 0.5)) {
             return false;
         }
-        // Off every lot parcel: a lot stops at the property line.
+        // Off every parcel, parks and empty lots too: a lot stops at the property line.
         !self
-            .lots
+            .parcels
             .iter()
             .any(|(poly, bb)| overlaps(*bb, 0.0) && overlap(q, poly))
     }

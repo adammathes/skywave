@@ -107,7 +107,6 @@ fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
         let parcels: Vec<(Vec<V2>, (V2, V2))> = place
             .parcels
             .iter()
-            .filter(|p| p.lot_kind == place::LotKind::Lot)
             .map(|p| {
                 let poly: Vec<V2> = p.polygon.iter().map(|&q| V2::from_array(q)).collect();
                 let bb = bounds(&poly);
@@ -694,7 +693,10 @@ fn lot_cars_never_come_or_go_in_view() {
             }
             let to_car = V2::new(l.at[0], l.at[2]) - p;
             let dist = to_car.length();
-            if dist < world::collide::HOLD_M && to_car.dot(d) > world::collide::HOLD_COS * dist {
+            if dist < world::collide::HOLD_M
+                || (dist < world::collide::SEEN_M
+                    && to_car.dot(d) > world::collide::SEEN_COS * dist)
+            {
                 seen += 1;
             } else {
                 unseen += 1;
