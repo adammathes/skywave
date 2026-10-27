@@ -42,7 +42,7 @@ coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered 
 dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 21:35 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+- Done on `main` (2026-10-27 22:50 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
@@ -80,23 +80,29 @@ dispatching the next session, and updates statuses as PRs open and merge.
   era filter (#35, M8 #1: `VehicleSpec::year`, scenario `years`/`heroes`, integer era weights per
   roster car and per body shape, the Worlds page in the pause menu with raw `.still` atlases,
   `?scenario=` / `--scenario`, music and panel rate carried across a world switch; the second
-  world is a stub on the coast's template until M8 #2 lands).
-- Open PRs: natural map edges (#20, approved; re-siting the strip goldens to the neon storefront
-  run and the junction goldens to a red-light queue, then merges on green); car collisions
-  without damage (#38; review found three blockers, the session is verifying its fixes; the
-  probes re-run on its next push before merge); parking lots (#37, B10, reviewer running);
-  native music folders (#39, NOTES 9c/13, reviewer running). Sessions building: 2001 hero cars
-  part 1 (`m8/heroes-1`, M8 #4); overlay modes (`ui/overlay-modes`, NOTES 12); the Deck: tapes,
-  CDs or an MP3 player for the player's own music (`m3/deck`, NOTES 15); the controls card
-  (`ui/controls-help`, NOTES 16). The owner's board (above) is the queue of record for what
-  comes next.
+  world is a stub on the coast's template until M8 #2 lands); the player's own MP3 folders as
+  stations in the native build (#39: `--music DIR`, else `music` beside the executable, else
+  ~/Music; one station per folder, at most 64 added four a frame; removals stick through
+  `music-ignored.txt`; every track ends through a silent prebuffer tail).
+- Open PRs: natural map edges (#20; goldens re-sited and accepted; the native junction draw gate
+  depended on runner speed, so the session is holding the world still while streaming,
+  re-measuring the gates and siting the junction goldens in budget; merges first, then every
+  other PR refreshes from main); car collisions without damage (#38, head ce84443, CI green,
+  the three blocker fixes being re-probed before merge); parking lots (#37, review sent: beach
+  stalls inside parcels and squeezed on bends, lot cars popping in view, stale goldens); overlay
+  modes (#40, review sent: a long station toast overlaps the FPS number at UI scale 2, hide when
+  unfocused); the controls card (#41, review sent: closing or scrolling the card also drove the
+  car and radio, the start card at TV scale, a horn migration collision, drop the PNGs); the
+  Deck (#42, reviewer pending until the session merges #39 in); 2001 hero cars part 1 (#43,
+  under review). Sessions building: handling feel (`vehicle/handling-feel`, NOTES 17). The
+  owner's board (above) is the queue of record for what comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #20, #37, #38, #39; NPC cars see pedestrians (board order 15, after #38); M8 waves
+- Next: merge #20, then #38, #40, #41, #37, #43, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
