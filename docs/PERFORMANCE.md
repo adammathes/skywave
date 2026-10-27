@@ -98,8 +98,36 @@ cascades and every-other-frame far cascade stay well inside the goldens' toleran
 
 `cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast` streams the
 coast at the native budget (13×13 chunks) and renders it at 1280×800 on wgpu's no-op
-device, printing the renderer's counts per preset. From this container (seed 1, the start
-on the strip, chase camera):
+device, printing the renderer's counts per preset, without traffic and with busy traffic
+(warmed up 20 s, 77 cars live). From this container (seed 1, the start on the strip,
+chase camera, 17:40), 2026-10-27, with NPC traffic (M4 #6):
+
+```
+traffic off: 0 cars
+high, no culling: instances 2829 fwd 2829 shadow [2766, 2766, 2766] (3 cascades) | tris fwd 3238k shadow 9654k a frame | draws 4748
+            high: instances 2829 fwd 838 shadow [80, 404, 1193] (3 cascades) | tris fwd 831k shadow 1874k a frame | draws 1190
+          medium: instances 2829 fwd 838 shadow [80, 404, 1299] (3 cascades) | tris fwd 831k shadow 1287k a frame | draws 659
+            deck: instances 2829 fwd 838 shadow [100, 1084, 0] (2 cascades) | tris fwd 831k shadow 727k a frame | draws 478
+             low: instances 2829 fwd 838 shadow [100, 1057, 0] (2 cascades) | tris fwd 831k shadow 722k a frame | draws 477
+traffic busy: 77 cars
+high, no culling: instances 2898 fwd 2898 shadow [2835, 2835, 2835] (3 cascades) | tris fwd 3379k shadow 10075k a frame | draws 4852
+            high: instances 2898 fwd 838 shadow [82, 406, 1208] (3 cascades) | tris fwd 833k shadow 1913k a frame | draws 1205
+          medium: instances 2898 fwd 838 shadow [82, 406, 1320] (3 cascades) | tris fwd 833k shadow 1317k a frame | draws 664
+            deck: instances 2898 fwd 838 shadow [102, 1105, 0] (2 cascades) | tris fwd 833k shadow 752k a frame | draws 480
+             low: instances 2898 fwd 838 shadow [102, 1080, 0] (2 cascades) | tris fwd 833k shadow 749k a frame | draws 479
+```
+
+**Traffic budget.** Busy traffic adds a few draws (cars of one mesh share one instanced
+draw; 64 meshes in all, level 1 within 80 m, level 2 to 280 m) and a few percent of the
+shadow triangles; most of the pool is out of view by construction (cars appear and vanish
+only out of it). With busy traffic, Deck stays within **500 draws, 880k forward and 800k
+shadow triangles a frame**, Medium within **700 draws, 880k and 1400k** (the benchmark
+asserts these under `SKYWAVE_ENFORCE_BUDGETS`). The traffic sim (step and populate, 96
+cars) takes under 0.5 ms a step in a debug build (`app::npc` and `traffic` budget tests).
+The scene itself had grown since the first measurement (below: 725k forward triangles and
+436 draws at Deck), before traffic, with the detailed cars and props.
+
+The first measurement (same command, no traffic, an earlier `main`):
 
 ```
 high, no culling: instances 2828 fwd 2828 shadow [2765, 2765, 2765] (3 cascades) | tris fwd 2878k shadow 8572k a frame | draws 4452

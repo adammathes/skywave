@@ -42,7 +42,7 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   GPU performance pass (culling, Low/Deck/Medium/High/Ultra presets with Deck auto-pick, native
   `--stats`, `docs/PERFORMANCE.md`); in-game vehicle picker (`V`, Menu › Vehicle) and the credit
   line; art pass (era cabins with backlit dials, detailed exteriors, two-tone paint, colored parked
-  cars with LOD2, richer props); traffic lane graph (M4 #1, `crates/traffic`); reference-sources
+  cars with LOD2, richer props); traffic lane graph (M4 #1, `crates/traffic`); NPC car following (M4 #4); traffic in the game (M4 #6 cars: density setting, instanced NPC cars, headlights, engine voices; `app::npc`); reference-sources
   ADR 0005 and the buildings facade grammar backlog (`docs/backlog/BUILDINGS.md`); CI gates
   stabilised (no single-worst-piece wall-clock assert; one CI run per PR).
 - Open PRs: light collision physics (#7, approved, merging main); reset key + radio dial sweep

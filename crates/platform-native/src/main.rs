@@ -957,14 +957,29 @@ mod tests {
         );
     }
 
-    /// Not a check: prints what culling and each preset leave the GPU on the streamed
-    /// coast at the native budget (instances and triangles per pass, from the renderer's
-    /// stats on wgpu's no-op device) and what culling costs the CPU. Run with
+    /// Prints what culling and each preset leave the GPU on the streamed coast at the
+    /// native budget (instances and triangles per pass, from the renderer's stats on
+    /// wgpu's no-op device) and what culling costs the CPU, without traffic and with busy
+    /// traffic. Run with
     /// `cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast`;
-    /// `docs/PERFORMANCE.md` quotes it.
+    /// `docs/PERFORMANCE.md` quotes it. Under `SKYWAVE_ENFORCE_BUDGETS` it checks the Deck
+    /// and Medium presets with busy traffic against the budget there ([`COAST_BUDGET`]).
     #[test]
     #[ignore = "benchmark; prints numbers"]
     fn culling_on_the_coast() {
+        for traffic in ["off", "busy"] {
+            culling_on_the_coast_with(traffic);
+        }
+    }
+
+    /// Deck and Medium on the coast with busy traffic: at most this many draws, forward
+    /// and shadow triangles a frame (`docs/PERFORMANCE.md`).
+    const COAST_BUDGET: [(Quality, u32, u64, u64); 2] = [
+        (Quality::Deck, 500, 880_000, 800_000),
+        (Quality::Medium, 700, 880_000, 1_400_000),
+    ];
+
+    fn culling_on_the_coast_with(traffic: &str) {
         let limits = render_limits();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::NOOP,
@@ -984,8 +999,8 @@ mod tests {
             ..Default::default()
         }))
         .unwrap();
-        let mut app =
-            App::from_setup(&SceneSetup::from_query("?seed=1&place=coast").unwrap()).unwrap();
+        let query = format!("?seed=1&place=coast&t=17:40&traffic={traffic}");
+        let mut app = App::from_setup(&SceneSetup::from_query(&query).unwrap()).unwrap();
         app.set_stream_budget(app::stream::StreamBudget::NATIVE);
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let size = (1280, 800);
@@ -1001,7 +1016,11 @@ mod tests {
         while !app.stream_idle() {
             app.frame(&mut mapper, 1.0 / 60.0, &clock);
             app.sync_chunks(&mut r);
+            for m in app.take_new_meshes() {
+                r.add_mesh(&m);
+            }
         }
+        eprintln!("traffic {traffic}: {} cars", app.traffic_count());
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
@@ -1047,6 +1066,15 @@ mod tests {
                 shadow_tris += s.shadow_triangles;
             }
             let s = r.stats();
+            let budget = COAST_BUDGET.iter().find(|b| b.0 == q && culling);
+            if let (Some(&(_, draws, fwd, shadow)), "busy") = (budget, traffic) {
+                if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
+                    let sh = shadow_tris / u64::from(FRAMES);
+                    assert!(s.draw_calls <= draws, "{label}: {} draws", s.draw_calls);
+                    assert!(s.triangles <= fwd, "{label}: {} triangles", s.triangles);
+                    assert!(sh <= shadow, "{label}: {sh} shadow triangles");
+                }
+            }
             eprintln!(
                 "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
                  shadow {}k a frame | draws {} | cpu render() avg {:.2} ms best {:.2} ms",

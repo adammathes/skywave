@@ -523,21 +523,7 @@ impl Drive {
     /// coronas while they are lit (headlights on or braking). Returns them and how many.
     pub fn lights(&self, alpha: f32) -> ([PointLight; CAR_LIGHTS], usize) {
         let pose = self.pose(alpha);
-        let pitch = HEADLIGHT_PITCH_DEG.to_radians();
-        let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
-        let at = |lamp: Vec3| PointLight {
-            position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
-            color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
-            radius: HEADLIGHT_RADIUS_M,
-            direction: axis.to_array(),
-            cone_cos: [
-                HEADLIGHT_OUTER_DEG.to_radians().cos(),
-                HEADLIGHT_INNER_DEG.to_radians().cos(),
-            ],
-            cone_squash: HEADLIGHT_SQUASH,
-            wrap: HEADLIGHT_WRAP,
-            corona: HEADLIGHT_CORONA,
-        };
+        let at = |lamp: Vec3| headlight(&pose, lamp);
         let tail_kcd = if self.braking() { BRAKE_KCD } else { TAIL_KCD };
         let tail = |lamp: Vec3| PointLight {
             corona: TAIL_CORONA,
@@ -560,6 +546,26 @@ impl Drive {
             (false, false) => 0,
         };
         (out, n)
+    }
+}
+
+/// The low beam of the head lamp at body point `lamp` of a car at `pose`: a spot from just
+/// behind the lens, aimed [`HEADLIGHT_PITCH_DEG`] below the car's forward axis.
+pub fn headlight(pose: &Pose, lamp: Vec3) -> PointLight {
+    let pitch = HEADLIGHT_PITCH_DEG.to_radians();
+    let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
+    PointLight {
+        position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
+        color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
+        radius: HEADLIGHT_RADIUS_M,
+        direction: axis.to_array(),
+        cone_cos: [
+            HEADLIGHT_OUTER_DEG.to_radians().cos(),
+            HEADLIGHT_INNER_DEG.to_radians().cos(),
+        ],
+        cone_squash: HEADLIGHT_SQUASH,
+        wrap: HEADLIGHT_WRAP,
+        corona: HEADLIGHT_CORONA,
     }
 }
 

@@ -21,6 +21,7 @@ mod input;
 pub mod lighting;
 mod lighttiles;
 pub mod map;
+pub mod npc;
 mod places;
 mod propinst;
 pub mod radio;
@@ -188,6 +189,11 @@ pub struct App {
     start: ([f32; 3], f32),
     /// A terrain place's trees and parked cars, drawn as instances near the camera.
     props: Option<propinst::PropInstances>,
+    /// The place's NPC traffic.
+    npcs: npc::Npcs,
+    /// The scene's traffic density over the setting (`traffic=`; off unless a scene
+    /// says otherwise, so tests and the self-test drive alone).
+    traffic_scene: Option<traffic::Density>,
     /// The sound's view of the game, and what it made of the last frame.
     sound: sound::Sound,
     audio: audio::synth::AudioParams,
@@ -258,6 +264,7 @@ impl App {
             ]
         })?;
         let sound = sound::Sound::new(&place, &drive);
+        let npcs = npc::Npcs::new(&place, seed);
         let town = match stream {
             None => resident_town(&place),
             Some(budget) => streamed_town(place, budget),
@@ -280,7 +287,7 @@ impl App {
                 .collect();
             p.set_ids(ids);
         }
-        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&props);
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&props) + npcs.capacity();
         instances.reserve_exact(town.world_capacity - world_instances + extra);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
@@ -322,6 +329,8 @@ impl App {
             map,
             start,
             props,
+            npcs,
+            traffic_scene: Some(traffic::Density::Off),
             sound,
             audio: audio::synth::AudioParams::default(),
             aspect: 16.0 / 9.0,
@@ -359,6 +368,11 @@ impl App {
         }
         if let Some(s) = setup.ui_scale {
             app.ui.force_ui_scale(s);
+        }
+        // A scene's density applies now; the setting's once the settings are loaded.
+        app.traffic_scene = setup.traffic_density();
+        if let Some(d) = app.traffic_scene {
+            app.apply_traffic(d);
         }
         Ok(app)
     }
@@ -498,6 +512,14 @@ impl App {
     /// Advances real time by `dt_real` seconds, running as many fixed steps as are due.
     /// Pass the returned `alpha` to [`App::scene_view`].
     pub fn update(&mut self, input: &InputState, dt_real: f64) -> Steps {
+        self.advance(input, dt_real, &|| 0.0)
+    }
+
+    /// [`App::update`], timing the traffic sim by `now` (seconds, any origin) for the
+    /// overlay.
+    fn advance(&mut self, input: &InputState, dt_real: f64, now: &dyn Fn() -> f64) -> Steps {
+        let inputs = self.traffic_inputs();
+        self.npcs.warm_up(&inputs);
         if self.still {
             return Steps {
                 count: 0,
@@ -517,6 +539,7 @@ impl App {
         self.drive.frame(input);
         let none = InputState::default();
         let dt = SIM_DT as f32;
+        let mut traffic_s = 0.0;
         for _ in 0..steps.count {
             self.prev = self.curr;
             let car_input = if self.fly {
@@ -527,12 +550,73 @@ impl App {
             };
             self.drive.step(car_input, &self.ground);
             self.sound.note_step(&self.drive.impact);
+            if self.npcs.active() {
+                let t = now();
+                let inp = npc::StepInputs {
+                    player: self.traffic_player(),
+                    clock: self.traffic_clock(),
+                    ..inputs
+                };
+                self.npcs.step(&inp);
+                traffic_s += now() - t;
+            } else {
+                self.npcs.step(&inputs);
+            }
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);
             self.ticks += 1;
         }
+        self.npcs.note_time(traffic_s * 1000.0, steps.count);
         steps
+    }
+
+    /// The traffic's view of the game now: the player's car, the camera, the clock.
+    fn traffic_inputs(&self) -> npc::StepInputs {
+        let (eye, forward, fov) = if self.fly {
+            let c = &self.curr;
+            let (s, co) = c.yaw.sin_cos();
+            (c.pos, Vec3::new(-s, 0.0, -co), FLY_FOV_DEG.to_radians())
+        } else {
+            let pose = self.camera.pose(&self.drive, 1.0);
+            (pose.eye, pose.forward(), pose.fov_y_rad)
+        };
+        npc::StepInputs {
+            player: self.traffic_player(),
+            view: npc::view(eye, forward, fov, self.aspect),
+            clock: self.traffic_clock(),
+        }
+    }
+
+    fn traffic_player(&self) -> traffic::Player {
+        let s = &self.drive.state;
+        npc::player(&self.drive.pose(1.0), s.speed_mps, self.drive.spec.dims_m)
+    }
+
+    fn traffic_clock(&self) -> traffic::Clock {
+        let c = &self.time.clock;
+        npc::clock(c.seconds_of_day, self.time.latitude_deg, c.day_of_year)
+    }
+
+    /// Live NPC cars.
+    pub fn traffic_count(&self) -> usize {
+        self.npcs.count()
+    }
+
+    /// The traffic density from the scene or the setting; the NPC cars' meshes are built
+    /// and queued for [`App::take_new_meshes`] the first time it is on.
+    fn apply_traffic(&mut self, density: traffic::Density) {
+        if density != traffic::Density::Off && !self.npcs.has_meshes() {
+            let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
+            let built = self.npcs.build_meshes(|m| {
+                pending.push(m);
+                next += 1;
+                MeshId(next - 1)
+            });
+            debug_assert!(built.is_ok(), "{built:?}");
+            self.mesh_count = next;
+        }
+        self.npcs.set_density(density);
     }
 
     /// Fingerprint of the simulation state, for determinism checks.
@@ -540,7 +624,7 @@ impl App {
         let c = &self.curr;
         let bits = |v: f32| u64::from(v.to_bits());
         let clock = &self.time.clock;
-        hash64(
+        let h = hash64(
             self.ticks,
             &[
                 bits(c.pos.x),
@@ -553,7 +637,13 @@ impl App {
                 u64::from(clock.day_of_year),
                 u64::from(self.drive.headlights),
             ],
-        )
+        );
+        // The traffic only while it runs, so a scene without it hashes as before.
+        if self.npcs.active() {
+            hash64(h, &[self.npcs.hash()])
+        } else {
+            h
+        }
     }
 
     /// The scene interpolated `alpha` of the way from the previous to the current step.
@@ -593,12 +683,18 @@ impl App {
             lighting::car_glow(&daylight),
             &mut self.instances,
         );
-        // The car's lamps, then every static light the photocell has on; each instance gets
-        // the nearest that reach it, the car's instances those round the car.
+        // The car's lamps, the nearest NPC cars' low beams, then every static light the
+        // photocell has on; each instance gets the nearest that reach it, the car's
+        // instances those round the car.
         let (car_lights, n) = self.drive.lights(alpha);
         let eye = view.inverse().w_axis.truncate();
+        let mut dynamic = [PointLight::omni([0.0; 3], [0.0; 3], 0.0); DYNAMIC_LIGHTS];
+        dynamic[..n].copy_from_slice(&car_lights[..n]);
+        let mut npc_lights = [dynamic[0]; npc::NPC_LIGHTS];
+        let m = self.npcs.lights(alpha, eye, &mut npc_lights);
+        dynamic[n..n + m].copy_from_slice(&npc_lights[..m]);
         self.lights
-            .gather(eye, daylight.streetlights_on, &car_lights[..n]);
+            .gather(eye, daylight.streetlights_on, &dynamic[..n + m]);
         let (world, car) = self.instances.split_at_mut(self.world_instances);
         self.lights.assign(&self.bounds, world);
         let reach = 0.5 * self.drive.layout.dims.iter().fold(0.0f32, |a, &b| a.max(b));
@@ -614,6 +710,14 @@ impl App {
             let rocking = &self.drive.rocking;
             props.push(eye, live, lights, lamp_glow, rocking, &mut self.instances);
         }
+        let npc_glow = lighting::car_glow(&daylight).lamps;
+        self.npcs.push(
+            alpha,
+            eye,
+            self.lights.lights(),
+            npc_glow,
+            &mut self.instances,
+        );
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),
@@ -628,6 +732,9 @@ impl App {
         }
     }
 }
+
+/// Most dynamic lights a frame has: the player's car's, then the traffic's.
+const DYNAMIC_LIGHTS: usize = drive::CAR_LIGHTS + npc::NPC_LIGHTS;
 
 /// Room for the instanced props a frame may draw.
 fn prop_capacity(props: &Option<propinst::PropInstances>) -> usize {
@@ -787,7 +894,7 @@ impl App {
         s.streamer = Streamer::new(&s.source, budget);
         // Nothing is drawn yet, so these are empty: room for every part and the car.
         let parts = s.streamer.capacity() * MAX_CHUNK_PARTS;
-        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props);
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props) + self.npcs.capacity();
         self.instances.reserve_exact(parts + extra);
         self.roles.reserve_exact(parts);
         self.bounds.reserve_exact(parts);
@@ -803,7 +910,7 @@ impl App {
 
     /// Most instances a frame can draw: reserve them in the renderer at load.
     pub fn max_instances(&self) -> usize {
-        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props);
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props) + self.npcs.capacity();
         self.instances.capacity().max(self.world_instances + extra)
     }
 
@@ -1333,9 +1440,9 @@ mod tests {
 
     #[test]
     fn a_scene_setup_places_the_car_and_freezes_the_clock() {
-        // The default setup is the normal start.
+        // The default setup is the normal start (with traffic, which `App::new` leaves off).
         let mut normal = App::new(Seed(1));
-        let mut same = App::from_setup(&SceneSetup::default()).unwrap();
+        let mut same = App::from_setup(&SceneSetup::from_query("traffic=off").unwrap()).unwrap();
         assert_eq!(same.state_hash(), normal.state_hash());
         assert_eq!(
             same.scene_view(1.0, 1.5).camera.view,
@@ -1343,7 +1450,7 @@ mod tests {
         );
 
         let setup = SceneSetup::from_query(
-            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0",
+            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0&traffic=off",
         )
         .unwrap();
         let mut app = App::from_setup(&setup).unwrap();

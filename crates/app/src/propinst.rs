@@ -341,8 +341,11 @@ impl PropInstances {
                 } else {
                     LightSet::EMPTY
                 };
+                // A parked car's lamps (built lit for the traffic) are off.
                 let glow = if e.mesh == self.lamp_mesh {
                     lamp_glow
+                } else if e.car {
+                    0.0
                 } else {
                     1.0
                 };
