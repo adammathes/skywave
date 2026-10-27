@@ -212,6 +212,8 @@ pub struct Drive {
     pub input: VehicleInput,
     /// What the collider did in the last step (for the sound).
     pub impact: world::Impact,
+    /// Parked cars this car has knocked, swaying until they settle (for drawing).
+    pub rocking: world::collide::Rocking,
     pub headlights: bool,
     /// Held this frame (for the audio task).
     pub horn: bool,
@@ -258,6 +260,7 @@ impl Drive {
             assists: Assists::default(),
             input: VehicleInput::default(),
             impact: world::Impact::default(),
+            rocking: world::collide::Rocking::default(),
             headlights: false,
             horn: false,
             roll: [0.0; 4],
@@ -290,6 +293,8 @@ impl Drive {
         self.input = input;
         vehicle::step(&self.spec, &mut self.state, &input, &self.assists, ground);
         self.impact = world::resolve(&mut self.state, &self.spec, ground);
+        self.rocking.note(&self.impact, ground);
+        self.rocking.step();
         for i in 0..4 {
             let r = self.roll[i] + self.state.wheels[i].spin * DT;
             let wrap = if r >= TAU {

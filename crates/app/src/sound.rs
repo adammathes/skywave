@@ -63,9 +63,14 @@ impl ZoneGrid {
 pub struct Sound {
     profile: EngineProfile,
     zones: ZoneGrid,
+    /// Half the car's width, m: how far out a bump counts as fully on one side.
+    half_width: f32,
     curb_kicks: u32,
+    curb_speed: f32,
+    curb_side: f32,
     hits: u32,
     hit_speed: f32,
+    hit_side: f32,
     in_contact: bool,
     kicking: bool,
 }
@@ -76,24 +81,33 @@ impl Sound {
         Sound {
             profile: EngineProfile::from_name(&drive.spec.feel.engine_sound),
             zones: ZoneGrid::of(place),
+            half_width: 0.5 * drive.spec.dims_m[1],
             curb_kicks: 0,
+            curb_speed: 0.0,
+            curb_side: 0.0,
             hits: 0,
             hit_speed: 0.0,
+            hit_side: 0.0,
             in_contact: false,
             kicking: false,
         }
     }
 
-    /// After every sim step: counts a new wall hit and a new curb kick.
+    /// After every sim step: counts a new wall hit and a new curb kick, each with how hard
+    /// and on which side of the car it was, so the bump plays to scale.
     pub fn note_step(&mut self, impact: &world::Impact) {
-        let contact = impact.contact && impact.speed >= HIT_MIN_MPS;
+        let side = |b: &world::Bump| (b.at[0] / self.half_width).clamp(-1.0, 1.0);
+        let contact = impact.contact && impact.hit.speed >= HIT_MIN_MPS;
         if contact && !self.in_contact {
             self.hits = self.hits.wrapping_add(1);
-            self.hit_speed = impact.speed;
+            self.hit_speed = impact.hit.speed;
+            self.hit_side = side(&impact.hit);
         }
         self.in_contact = impact.contact;
         if impact.curb_kick && !self.kicking {
             self.curb_kicks = self.curb_kicks.wrapping_add(1);
+            self.curb_speed = impact.curb.speed;
+            self.curb_side = side(&impact.curb);
         }
         self.kicking = impact.curb_kick;
     }
@@ -152,8 +166,11 @@ impl Sound {
             speed_mps: s.speed_mps,
             wheels,
             curb_kicks: self.curb_kicks,
+            curb_speed_mps: self.curb_speed,
             hits: self.hits,
             hit_speed_mps: self.hit_speed,
+            curb_side: self.curb_side,
+            hit_side: self.hit_side,
             horn: drive.horn,
             ocean,
             birds: birds * day,
@@ -203,10 +220,17 @@ mod tests {
     use super::*;
 
     fn impact(contact: bool, speed: f32, curb_kick: bool) -> world::Impact {
+        let bump = |speed: f32, x: f32| world::Bump {
+            speed,
+            normal: [0.0, 1.0, 0.0],
+            at: [x, 0.0, -2.0],
+        };
         world::Impact {
             contact,
-            speed,
+            hit: bump(speed, 0.45),
             curb_kick,
+            curb: bump(if curb_kick { 15.0 } else { 0.0 }, -1.2),
+            parked: None,
         }
     }
 
@@ -224,9 +248,13 @@ mod tests {
                 origin: [-200.0, -200.0],
                 cell_m: 200.0,
             },
+            half_width: 0.9,
             curb_kicks: 0,
+            curb_speed: 0.0,
+            curb_side: 0.0,
             hits: 0,
             hit_speed: 0.0,
+            hit_side: 0.0,
             in_contact: false,
             kicking: false,
         }
@@ -238,7 +266,7 @@ mod tests {
         s.note_step(&impact(true, 4.0, false));
         s.note_step(&impact(true, 0.0, false));
         s.note_step(&impact(true, 6.0, false));
-        assert_eq!((s.hits, s.hit_speed), (1, 4.0));
+        assert_eq!((s.hits, s.hit_speed, s.hit_side), (1, 4.0, 0.5));
         s.note_step(&impact(false, 0.0, false));
         s.note_step(&impact(true, 0.2, false));
         assert_eq!(s.hits, 1, "a resting touch is not a hit");
@@ -246,7 +274,7 @@ mod tests {
         s.note_step(&impact(false, 0.0, true));
         s.note_step(&impact(false, 0.0, false));
         s.note_step(&impact(false, 0.0, true));
-        assert_eq!(s.curb_kicks, 2);
+        assert_eq!((s.curb_kicks, s.curb_speed, s.curb_side), (2, 15.0, -1.0));
     }
 
     #[test]

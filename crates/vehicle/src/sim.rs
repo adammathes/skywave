@@ -1051,9 +1051,86 @@ pub fn step(
     state.odometer_m += (abs(state.speed_mps) * DT) as f64;
 }
 
+/// World-space inverse inertia of the body applied to `v`.
+fn inv_inertia(spec: &VehicleSpec, q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+    let i = spec.inertia_box();
+    let b = rotate_inv(q, v);
+    rotate(q, [b[0] / i[0], b[1] / i[1], b[2] / i[2]])
+}
+
+/// How much one N·s along unit `n` at offset `r` from the center of mass (world space)
+/// changes that point's speed along `n`, m/s: the inverse effective mass there.
+pub fn inv_mass_at(spec: &VehicleSpec, state: &VehicleState, r: [f32; 3], n: [f32; 3]) -> f32 {
+    1.0 / spec.mass_kg + dot(n, cross(inv_inertia(spec, state.rot, cross(r, n)), r))
+}
+
+/// A knock from outside the sim (`world::collide`): `impulse`, N·s in world space, at
+/// offset `r` from the center of mass. Changes the body's velocity and spin; the wheels
+/// roll on at the new forward speed (a hit scrubs the tires), so they do not drive the car
+/// back into what it hit or hold it there.
+pub fn knock(spec: &VehicleSpec, state: &mut VehicleState, r: [f32; 3], impulse: [f32; 3]) {
+    let dv = scale(impulse, 1.0 / spec.mass_kg);
+    state.vel = add(state.vel, dv);
+    let dw = inv_inertia(spec, state.rot, cross(r, impulse));
+    state.ang_vel = add(state.ang_vel, dw);
+    let fwd = rotate(state.rot, [0.0, 0.0, -1.0]);
+    let d_spin = dot(dv, fwd) / WHEEL_RADIUS_M;
+    for w in &mut state.wheels {
+        w.spin += d_spin;
+    }
+}
+
+/// A parked car's sway, Hz, and its damping ratio: a knock dies away in about a second.
+const ROCK_HZ: f32 = 1.4;
+const ROCK_DAMPING: f32 = 0.35;
+/// Tilt rate a parked car picks up per m/s of the hit that knocks it, rad/s, and its cap.
+const ROCK_PER_MPS: f32 = 0.05;
+const ROCK_MAX_RATE: f32 = 0.5;
+
+/// A parked car rocking on its springs after a knock: its tilt toward world `+x` and `+z`,
+/// rad, and the tilt rates, rad/s. One damped spring per axis; the car never moves along
+/// the ground. `Default` is at rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct Rock {
+    pub tilt: [f32; 2],
+    pub rate: [f32; 2],
+}
+
+impl Rock {
+    /// Knocked toward the unit ground-plane direction `push` (`[x, z]`) by a hit closing
+    /// at `speed`, m/s: the body leans that way.
+    pub fn knock(&mut self, push: [f32; 2], speed: f32) {
+        let mut kick = ROCK_PER_MPS * speed;
+        if kick > ROCK_MAX_RATE {
+            kick = ROCK_MAX_RATE;
+        }
+        for a in 0..2 {
+            self.rate[a] = clamp_abs(self.rate[a] + push[a] * kick, ROCK_MAX_RATE);
+        }
+    }
+
+    /// One [`DT`] step of the springs (semi-implicit Euler).
+    pub fn step(&mut self) {
+        let w = 2.0 * crate::math::PI * ROCK_HZ;
+        for a in 0..2 {
+            let acc = -w * w * self.tilt[a] - 2.0 * ROCK_DAMPING * w * self.rate[a];
+            self.rate[a] += acc * DT;
+            self.tilt[a] += self.rate[a] * DT;
+        }
+    }
+
+    /// Still enough to stop drawing it tilted.
+    pub fn settled(&self) -> bool {
+        let still = |a: usize| abs(self.tilt[a]) < 1e-4 && abs(self.rate[a]) < 1e-3;
+        still(0) && still(1)
+    }
+}
+
 /// Compile-time proof that the sim's state types are plain data (no heap, no drop glue).
 const _: () = {
     const fn copy<T: Copy>() {}
+    copy::<Rock>();
     copy::<VehicleState>();
     copy::<WheelState>();
     copy::<VehicleInput>();
@@ -1227,5 +1304,67 @@ mod tests {
         // One second of semi-implicit Euler at 120 Hz, slowed only by a whisker of drag.
         assert!(abs(s.vel[1] + GRAVITY) < 0.05, "vy {}", s.vel[1]);
         assert!(abs(s.pos[1] - (100.0 + spec.cg_height_m - 4.9)) < 0.1);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn knocks_move_the_body_and_the_wheels_follow() {
+        let spec = corsair();
+        let mut s = VehicleState::spawn(&spec, [0.0; 3], 0.0);
+        s.vel = [0.0, 0.0, -10.0];
+        for w in &mut s.wheels {
+            w.spin = 10.0 / WHEEL_RADIUS_M;
+        }
+        // Square on the nose, through the center of mass: straight back, no spin.
+        let nose = [0.0, 0.0, -2.0];
+        let back = [0.0, 0.0, 1.0];
+        let j = 10.5 / inv_mass_at(&spec, &s, nose, back);
+        knock(&spec, &mut s, nose, scale(back, j));
+        assert!(abs(s.vel[2] - 0.5) < 1e-4, "{:?}", s.vel);
+        assert_eq!(s.ang_vel, ZERO);
+        for w in &s.wheels {
+            assert!(
+                abs(w.spin * WHEEL_RADIUS_M + 0.5) < 1e-4,
+                "rolls back with the car"
+            );
+        }
+        // On the right front corner, pushed left: the nose swings left, a positive yaw.
+        let mut s = VehicleState::spawn(&spec, [0.0; 3], 0.0);
+        let corner = [0.9, 0.0, -2.0];
+        knock(&spec, &mut s, corner, [-1000.0, 0.0, 0.0]);
+        assert!(s.ang_vel[1] > 0.0 && s.vel[0] < 0.0, "{:?}", s.ang_vel);
+        // The point's speed change matches its inverse effective mass.
+        let k = inv_mass_at(
+            &spec,
+            &VehicleState::spawn(&spec, [0.0; 3], 0.0),
+            corner,
+            [-1.0, 0.0, 0.0],
+        );
+        let v = add(s.vel, cross(s.ang_vel, corner));
+        assert!(abs(-v[0] - 1000.0 * k) < 1e-5);
+    }
+
+    #[test]
+    fn a_knocked_parked_car_rocks_and_settles() {
+        let mut r = Rock::default();
+        assert!(r.settled());
+        r.knock([1.0, 0.0], 8.0);
+        let mut peak: f32 = 0.0;
+        let mut back = false;
+        for i in 0..240 {
+            r.step();
+            peak = peak.max(r.tilt[0]);
+            back |= r.tilt[0] < 0.0;
+            if i == 180 {
+                assert!(abs(r.tilt[0]) < 0.1 * peak, "still rocking at 1.5 s: {r:?}");
+            }
+        }
+        assert!(peak > 0.01 && peak < 0.07, "leans {peak} rad");
+        assert!(back, "sways back past level");
+        assert_eq!(r.tilt[1], 0.0);
+        for _ in 0..240 {
+            r.step();
+        }
+        assert!(r.settled(), "{r:?}");
     }
 }

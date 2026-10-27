@@ -369,6 +369,73 @@ fn walls_stop_the_car() {
 }
 
 #[test]
+fn head_on_at_ten_meters_per_second_bumps_and_rocks() {
+    let (_, c) = town();
+    let (_, wall) = open_wall(&c, 6.0, 14.0);
+    let mid = add(wall.a, sub(wall.b, wall.a), 0.5);
+    let v = 10.0;
+    for spec in cars() {
+        let start = add(mid, wall.n, 3.0 + 0.5 * spec.dims_m[0]);
+        let y = c.level_at(start).0;
+        let heading = heading_of([-wall.n[0], -wall.n[1]]);
+        let mut s = launched(&spec, [start[0], y, start[1]], heading, v);
+        let mut hit: Option<(usize, Impact, f32)> = None;
+        let mut after = [0.0f32; 2];
+        let mut nose_dip: f32 = 0.0;
+        let mut worst_behind: f32 = f32::MIN;
+        for i in 0..3 * STEPS_PER_S {
+            let inp = if hit.is_none() {
+                cruise(&s, v)
+            } else {
+                VehicleInput::default()
+            };
+            let pre = hspeed(&s);
+            let impact = tick(&spec, &mut s, inp, &c);
+            assert_finite(&s);
+            worst_behind = worst_behind.max(behind_and_gap(&s, &spec, &wall).0);
+            if impact.hit.speed > 0.0 && hit.is_none() {
+                hit = Some((i, impact, pre));
+                after = [hspeed(&s), dot(xz(s.vel), wall.n)];
+            }
+            if hit.is_some() {
+                nose_dip = nose_dip.min(s.forward()[1]);
+            }
+        }
+        let (_, impact, before) = hit.expect("never reached the wall");
+        let bump = impact.hit;
+        println!(
+            "{:15} head-on at {before:.1} m/s: closing {:.2} m/s at {:.2?}, {:.2} m/s after ({:+.2} off the wall), nose dips {:.1} deg",
+            spec.id,
+            bump.speed,
+            bump.at,
+            after[0],
+            after[1],
+            -nose_dip.asin().to_degrees()
+        );
+        assert!(worst_behind < 0.02, "{} passed the wall plane", spec.id);
+        assert!(bump.speed > 0.9 * v, "closing {}", bump.speed);
+        assert!(after[0] < 0.1 * before, "{} kept {} m/s", spec.id, after[0]);
+        assert!(after[1] > 0.1, "{} not nudged back: {}", spec.id, after[1]);
+        assert!(
+            (bump.normal[0] - wall.n[0]).abs() < 1e-3 && (bump.normal[2] - wall.n[1]).abs() < 1e-3,
+            "normal {:?}",
+            bump.normal
+        );
+        assert!(
+            bump.at[2] < -0.4 * spec.dims_m[0],
+            "not the nose: {:?}",
+            bump.at
+        );
+        assert!(nose_dip < -0.005, "{} springs did not rock", spec.id);
+        assert!(
+            s.up()[1] > 0.9999 && hspeed(&s) < 0.05,
+            "{} did not settle",
+            spec.id
+        );
+    }
+}
+
+#[test]
 fn glancing_hit_yaws_away_and_keeps_speed() {
     let (_, c) = town();
     let angle = 20.0f32.to_radians();
@@ -436,17 +503,24 @@ fn glancing_hit_yaws_away_and_keeps_speed() {
         assert!(hit_at.is_some(), "{} missed the wall", spec.id);
         let kept = hspeed(&s) / before;
         let into = -dot(forward2(&s), wall.n);
+        let travel = -dot(norm(xz(s.vel)), wall.n);
         println!(
-            "{:15} glancing 20 deg at 40 mph: kept {:.0}% of {before:.1} m/s, heading into the wall {:.1} deg (was 20), yaw rate {:+.2} rad/s",
+            "{:15} glancing 20 deg at 40 mph: kept {:.0}% of {before:.1} m/s, heading into the wall {:.1} deg, travel {:.1} deg (were 20), yaw rate {:+.2} rad/s",
             spec.id,
             kept * 100.0,
             into.asin().to_degrees(),
+            travel.asin().to_degrees(),
             s.ang_vel[1]
         );
-        assert!(kept >= 0.3, "{} kept {kept}", spec.id);
+        assert!(kept >= 0.5, "{} kept {kept}: stopped", spec.id);
         assert!(
             into < angle.sin() * 0.5,
             "{} did not yaw away: {into}",
+            spec.id
+        );
+        assert!(
+            travel <= 0.0,
+            "{} still heading into the wall: {travel}",
             spec.id
         );
         assert!(s.up()[1] > 0.8);
@@ -507,24 +581,26 @@ fn curb_run(
 fn slow_cars_mount_the_curb() {
     let (place, c) = town();
     let (start, d, _) = curb_run(&place, &c, 35.0f32.to_radians(), 7.0, 14.0, false);
-    let v = 20.0 * MPH;
-    for spec in cars() {
+    for (spec, v) in cars()
+        .into_iter()
+        .flat_map(|s| [(s.clone(), 3.0), (s, 20.0 * MPH)])
+    {
         let mut s = launched(&spec, [start[0], 0.0, start[1]], heading_of(d), v);
         let mut peak_vy: f32 = 0.0;
         let mut braking = false;
-        for _ in 0..5 * STEPS_PER_S {
+        for _ in 0..8 * STEPS_PER_S {
             let on_top = s.wheels.iter().all(|w| w.grounded && w.contact[1] > 0.1);
             braking |= on_top;
             let inp = if braking { stop(&s) } else { cruise(&s, v) };
             let impact = tick(&spec, &mut s, inp, &c);
             assert_finite(&s);
             assert!(!impact.contact, "{} hit something", spec.id);
-            assert!(!impact.curb_kick, "{} kicked at 20 mph", spec.id);
+            assert!(!impact.curb_kick, "{} kicked at {v} m/s", spec.id);
             peak_vy = peak_vy.max(s.vel[1]);
         }
         let ys: Vec<f32> = s.wheels.iter().map(|w| w.contact[1]).collect();
         println!(
-            "{:15} curb at 20 mph: peak vy {peak_vy:.2} m/s, wheels rest at {ys:.3?}, speed {:.3}",
+            "{:15} curb at {v:.1} m/s: peak vy {peak_vy:.2} m/s, wheels rest at {ys:.3?}, speed {:.3}",
             spec.id,
             hspeed(&s)
         );
@@ -544,10 +620,13 @@ fn slow_cars_mount_the_curb() {
 fn fast_cars_bump_over_the_curb() {
     let (place, c) = town();
     let (start, d, _) = curb_run(&place, &c, 35.0f32.to_radians(), 7.0, 45.0, true);
-    let v = 45.0 * MPH;
-    for spec in cars() {
+    for (spec, v) in cars()
+        .into_iter()
+        .flat_map(|s| [(s.clone(), 15.0), (s, 45.0 * MPH)])
+    {
         let mut s = launched(&spec, [start[0], 0.0, start[1]], heading_of(d), v);
         let mut kicked_at = None;
+        let mut bump = world::Bump::default();
         let mut peak_vy: f32 = 0.0;
         for i in 0..4 * STEPS_PER_S {
             let inp = if kicked_at.is_some() {
@@ -560,6 +639,7 @@ fn fast_cars_bump_over_the_curb() {
             assert!(!impact.contact, "{} hit something", spec.id);
             if impact.curb_kick && kicked_at.is_none() {
                 kicked_at = Some(i);
+                bump = impact.curb;
             }
             if let Some(k) = kicked_at {
                 if i < k + STEPS_PER_S / 2 {
@@ -568,13 +648,17 @@ fn fast_cars_bump_over_the_curb() {
             }
         }
         println!(
-            "{:15} curb at 45 mph: peak vy {peak_vy:.2} m/s, final vy {:+.3} m/s, up.y {:.4}, speed {:.2}",
+            "{:15} curb at {v:.1} m/s: bump {:.1} m/s at {:.2?}, peak vy {peak_vy:.2} m/s, final vy {:+.3} m/s, up.y {:.4}, speed {:.2}",
             spec.id,
+            bump.speed,
+            bump.at,
             s.vel[1],
             s.up()[1],
             hspeed(&s)
         );
         assert!(kicked_at.is_some(), "{} was not kicked", spec.id);
+        assert!(bump.speed > world::collide::CURB_CLIMB_MPS && bump.normal == [0.0, 1.0, 0.0]);
+        assert!(bump.at[2] < 0.0, "a front wheel hits first: {:?}", bump.at);
         assert!(peak_vy > 0.5, "{} peak vy {peak_vy}", spec.id);
         assert!(s.vel[1].abs() < 0.05, "{} still bouncing", spec.id);
         assert!(s.wheels.iter().all(|w| w.grounded));
@@ -692,6 +776,95 @@ fn lamp_posts_stop_the_car() {
 }
 
 #[test]
+fn parked_cars_rock_and_stay_put() {
+    let (_, c) = town();
+    let v = 5.0;
+    // A parked car approached square on a side or an end across level, open ground.
+    let (i, d, extent) = c
+        .boxes
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| matches!(b.kind, PropKind::ParkedCar { .. }))
+        .find_map(|(i, b)| {
+            let side = [-b.u[1], b.u[0]];
+            let faces = [
+                (side, b.half[1]),
+                ([-side[0], -side[1]], b.half[1]),
+                (b.u, b.half[0]),
+                ([-b.u[0], -b.u[1]], b.half[0]),
+            ];
+            faces.into_iter().find_map(|(n, e)| {
+                let (from, to) = (add(b.c, n, e + 6.5), add(b.c, n, e + 0.3));
+                let lv = levels(&c, from, to, 1.0);
+                let y0 = lv[1][0];
+                let level = lv.iter().all(|l| l.iter().all(|&y| y == y0));
+                let walls = c
+                    .walls
+                    .iter()
+                    .all(|w| seg_seg_dist(from, to, w.a, w.b) > 1.4);
+                let posts = c.posts.iter().all(|p| seg_dist(p.c, from, to) > 1.4 + p.r);
+                let boxes = c
+                    .boxes
+                    .iter()
+                    .enumerate()
+                    .all(|(k, x)| k == i || seg_dist(x.c, from, to) > 3.8);
+                (level && walls && posts && boxes).then_some((i, [-n[0], -n[1]], e))
+            })
+        })
+        .expect("no open parked car");
+    let parked = c.boxes[i];
+    for spec in cars() {
+        let start = add(parked.c, d, -(extent + 0.5 * spec.dims_m[0] + 3.0));
+        let y = c.level_at(start).0;
+        let mut s = launched(&spec, [start[0], y, start[1]], heading_of(d), v);
+        let mut rocking = world::collide::Rocking::default();
+        let mut knocked = None;
+        let mut peak: f32 = 0.0;
+        let mut closest = f32::MAX;
+        let before = allocations();
+        for k in 0..4 * STEPS_PER_S {
+            let inp = if knocked.is_some() {
+                stop(&s)
+            } else {
+                cruise(&s, v)
+            };
+            let impact = tick(&spec, &mut s, inp, &c);
+            assert_finite(&s);
+            rocking.note(&impact, &c);
+            rocking.step();
+            if impact.parked.is_some() && knocked.is_none() {
+                assert_eq!(impact.parked, Some(i as u32), "{} hit another box", spec.id);
+                knocked = Some(k);
+            }
+            if let Some(t) = rocking.tilt_at(parked.c) {
+                peak = peak.max(t[0].abs().max(t[1].abs()));
+                // Toward the way the player was going.
+                if knocked == Some(k) {
+                    assert!(t[0] * d[0] + t[1] * d[1] > 0.0, "{t:?}");
+                }
+            }
+            let ahead = dot(sub(parked.c, xz(s.pos)), forward2(&s));
+            closest = closest.min(ahead - 0.5 * spec.dims_m[0] - extent);
+        }
+        assert_eq!(allocations() - before, 0, "{} allocated", spec.id);
+        println!(
+            "{:15} parked car at {v} m/s: sways {:.1} deg, nose stops {closest:+.3} m from its side, settled {}",
+            spec.id,
+            peak.to_degrees(),
+            rocking.tilt_at(parked.c).is_none()
+        );
+        assert!(knocked.is_some(), "{} missed the parked car", spec.id);
+        assert!(peak > 0.005, "{} barely rocked it", spec.id);
+        assert!(closest > -0.05, "{} drove into it", spec.id);
+        assert!(
+            rocking.tilt_at(parked.c).is_none(),
+            "still rocking after 4 s"
+        );
+        assert_eq!(c.boxes[i], parked, "it stays where it was");
+    }
+}
+
+#[test]
 fn walls_hold_at_seventy_meters_per_second() {
     let (_, c) = town();
     let (_, wall) = open_wall(&c, 6.0, 14.0);
@@ -801,7 +974,7 @@ fn scripted(
         } else {
             input(0.0, 0.6)
         };
-        hit = hit.max(tick(spec, &mut s, inp, c).speed);
+        hit = hit.max(tick(spec, &mut s, inp, c).hit.speed);
         if mounted_at == 0.0 && s.wheels.iter().all(|w| w.grounded && w.contact[1] > 0.1) {
             mounted_at = hspeed(&s);
         }

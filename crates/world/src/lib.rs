@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 
 use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
-pub use collide::{resolve, Impact, WorldCollider};
+pub use collide::{resolve, Bump, Impact, WorldCollider};
 pub use mesh::terrain::TerrainGrid;
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;

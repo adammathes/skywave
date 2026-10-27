@@ -481,7 +481,8 @@ impl App {
             let stream = self.stream.as_deref();
             let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
             let lights = self.lights.lights();
-            props.push(eye, live, lights, lamp_glow, &mut self.instances);
+            let rocking = &self.drive.rocking;
+            props.push(eye, live, lights, lamp_glow, rocking, &mut self.instances);
         }
         SceneView {
             camera: Camera {
