@@ -27,7 +27,6 @@ pub mod npc;
 pub mod pacing;
 mod peds;
 mod places;
-mod png;
 pub mod preview;
 mod propinst;
 pub mod radio;
@@ -292,14 +291,14 @@ impl App {
         let ground = drive::ground_in(&place, grammar);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
-        let mut props = propinst::PropInstances::new(&place, &palette, &lineup.weights, |p| {
+        let mut props = propinst::PropInstances::new(&place, &palette, &lineup.shapes, |p| {
             [
                 world::math::floor(p[0] / chunk_size) as i32,
                 world::math::floor(p[1] / chunk_size) as i32,
             ]
         })?;
         let sound = sound::Sound::new(&place, &drive);
-        let npcs = npc::Npcs::new(&place, seed, &lineup.weights);
+        let npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         let town = match stream {
             None => resident_town(&place, &palette, grammar),
             Some(budget) => streamed_town(place, budget, palette, grammar),

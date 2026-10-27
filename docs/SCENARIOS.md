@@ -22,15 +22,16 @@ Scenario(
 ```
 Validation: years in order and the year within them, a known region, grammar, palette and preset, a
 default car no newer than the years, heroes that are built-in cars. The era filter and its weights are in
-`docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.png` (under 60 KB,
-committed; rendered with `tools/screenshot` and cropped clear of the HUD, see `assets/stills/README.md`).
+`docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
+64,768 bytes, committed; rendered with `tools/screenshot`, cropped clear of the HUD and quantized, see
+`assets/stills/README.md`), laid out in an atlas four to a row for the World page.
 
 **Switching worlds.** The pause menu's World page (`docs/CONTROLS_INPUT.md`) shows a card per scenario;
 picking one saves it as the `scenario` setting and the platform reloads the game in it: the session's scene
 moved to that world's procedural place, its start and default time (`SceneSetup::for_world`), the settings
 kept, the radio off; the old app and renderer are dropped whole. A session starts in the world last picked
 unless its scene names a place or a world (`?scenario=<id>` on the web, `--scenario <id>` natively; an id
-that is not built in starts the first world and says so). There is no title screen yet: the World page is
+that is not built in starts the first world and says so). There is no title screen yet: the World page (Pause › Worlds) is
 reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
 ## Launch scenario
@@ -78,7 +79,7 @@ crew garage (a warehouse with the hero cars parked and a lit sign), a taco stand
 "Change worlds": a World page listing every scenario as a card (title, year, a still, the cars and
 stations it ships with); picking one reloads the place and persists; `?scenario=` on the web. Built (see
 the format above), in the pause menu. Until the basin's template, grammar, palette and preset land,
-`la_basin_2001` is a stub on the coast's, marked "coming" on its card.
+`inland_basin_2001` is a stub on the coast's, marked "coming" on its card.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

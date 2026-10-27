@@ -32,8 +32,9 @@ VehicleSpec(
 its era (`app::scenario`, format in `docs/SCENARIOS.md`): a car newer than the scenario's last year
 (`years.1`) never appears in it, on the road, parked or on the Vehicle page. The rest are weighted, in
 integer thousandths so every platform picks the same: 1 for a car within the scenario's `years`, else
-`0.5^((years.1 - year) / 8)` (half every eight years older than the world), at least 0.05 for a car the
-scenario lists in `heroes` (and never quite 0). Traffic draws a new car's shape by these weights from its
+`0.5^((years.0 - year) / 8)` (half every eight years older than the world's first year, so no step at its edge), at least 0.05 for a car the
+scenario lists in `heroes` (and never quite 0). The weights are kept per car and per body shape (`Lineup::shapes`, keyed by the spec's `shape`, since the
+shape list and the roster are not in the same order). Traffic draws a new car's shape by these weights from its
 seeded generator; a parked car multiplies its class list's weights (`propinst::PARKED`) by them. Equal
 weights are reduced by their common divisor before a pick, so a world whose cars all fall in its years
 picks exactly as before weights existed: the twenty-car 1979–1987 roster in the 1984 coast changes no hash

@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn scenario_names_the_world_and_its_place() {
-        let s = SceneSetup::from_query("?scenario=la_basin_2001&seed=3").unwrap();
+        let s = SceneSetup::from_query("?scenario=inland_basin_2001&seed=3").unwrap();
         assert_eq!(
             (s.scenario, s.place, s.place_given),
             (1, PlaceKey::Coast, true)
@@ -333,11 +333,11 @@ mod tests {
             (s.scenario, s.place, s.unknown_scenario),
             (0, PlaceKey::Coast, true)
         );
-        let s = SceneSetup::from_query("?scenario=la_basin_2001&place=town").unwrap();
+        let s = SceneSetup::from_query("?scenario=inland_basin_2001&place=town").unwrap();
         assert_eq!((s.scenario, s.place), (1, PlaceKey::TestTown));
         // The world picked last, unless the scene names one or a place.
         let picked = crate::settings::Settings {
-            scenario: Some("la_basin_2001"),
+            scenario: Some("inland_basin_2001"),
             ..Default::default()
         };
         let json = picked.to_json(&crate::input::Bindings::default());

@@ -426,13 +426,19 @@ impl Ui {
         self.toast = Some((Toast::World(self.scenario), VEHICLE_TOAST_SECONDS));
     }
 
-    /// What the platform told `old` (quit, text entry, the GPU, forced options).
+    /// What the platform told `old` (quit, text entry, the GPU and the panel's refresh,
+    /// forced options, the music picker) and the music folders the session added.
     pub(crate) fn carry_platform(&mut self, old: &Ui) {
         self.can_quit = old.can_quit;
         self.text_entry = old.text_entry;
         self.auto_quality = old.auto_quality;
         self.gpu_label = old.gpu_label.clone();
         self.forced_quality = old.forced_quality;
+        self.panel_hz = old.panel_hz;
+        self.music_picker = old.music_picker;
+        self.music_again = old.music_again;
+        self.music_name = old.music_name.clone();
+        self.radio.carry_files(&old.radio, &self.settings.radio);
         if let Some(s) = old.forced_ui_scale {
             self.force_ui_scale(s);
         }

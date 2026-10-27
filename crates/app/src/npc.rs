@@ -155,7 +155,7 @@ pub struct StepInputs {
 
 impl Npcs {
     /// The lane graph and an empty pool for `place`, seeded by `seed`, its cars picked by
-    /// the world's era weights `era` (per built-in shape: [`crate::scenario::Lineup`]'s;
+    /// the world's era weights `era` (per built-in shape: [`crate::scenario::Lineup::shapes`];
     /// reduced, so a world whose cars all weigh alike picks as an unweighted pool).
     pub fn new(place: &Place, seed: Seed, era: &[u32]) -> Npcs {
         let graph = LaneGraph::new(place);
@@ -665,46 +665,63 @@ mod tests {
     }
 
     /// `(cars of shape `shape`, cars)` over two minutes of busy traffic in the test town
-    /// with the era weights `era`, counted every step, and the pool's hash at the end.
+    /// with the era weights `era` (per shape), counted every step, and the pool's hash at
+    /// the end.
     fn census(era: &[u32], shape: usize) -> (usize, usize, u64) {
+        let (per, all, hash) = census_all(era);
+        (per[shape], all, hash)
+    }
+
+    /// Cars of each shape, cars, and the hash, as [`census`].
+    fn census_all(era: &[u32]) -> (Vec<usize>, usize, u64) {
         let app = app("place=town&t=12:00&still=1&stream=0");
         let place = place::Place::test_grid();
         let mut npcs = Npcs::new(&place, Seed(1), era);
         npcs.set_density(Density::Busy);
         let inputs = app.traffic_inputs();
         npcs.warm_up_unseen(&inputs);
-        let (mut of_shape, mut all) = (0, 0);
+        let (mut per, mut all) = (vec![0; vehicles::BUILTIN_SHAPES.len()], 0);
         for _ in 0..120 * skywave_core::SIM_HZ {
             npcs.step(&inputs);
             all += npcs.cars().len();
-            of_shape += npcs
-                .cars()
-                .iter()
-                .filter(|c| usize::from(c.shape) == shape)
-                .count();
+            for c in npcs.cars() {
+                per[usize::from(c.shape)] += 1;
+            }
         }
-        (of_shape, all, npcs.traffic.hash())
+        (per, all, npcs.traffic.hash())
+    }
+
+    #[test]
+    fn a_world_cut_inside_the_roster_drives_only_its_cars() {
+        // Years (1979, 1983): every traffic shape of an allowed car drives, every shape of
+        // a newer car never does.
+        let l = crate::scenario::lineup_with(0, Some((1979, 1983)), |_| None);
+        let (per, all, _) = census_all(&l.shapes);
+        for (k, (file, _)) in vehicles::BUILTIN_SHAPES.iter().enumerate() {
+            let drives = k < vehicles::TRAFFIC_SHAPES && l.shapes[k] > 0;
+            assert_eq!(per[k] > 0, drives, "{file}: {} of {all}", per[k]);
+        }
     }
 
     #[test]
     fn the_1984_world_drives_as_before_and_never_a_2001_car() {
-        let k = vehicles::BUILTIN
+        let k = vehicles::BUILTIN_SHAPES
             .iter()
-            .position(|b| b.0 == "halcyon_turbo")
+            .position(|b| b.0 == "halcyon_turbo.shape.ron")
             .unwrap();
         // The 1984 world's weights are all alike: the same traffic as an unweighted pool.
-        let (n84, all, hash84) = census(&crate::scenario::lineup(0).weights, k);
+        let (n84, all, hash84) = census(&crate::scenario::lineup(0).shapes, k);
         let (n, _, unweighted) = census(&[], k);
         assert_eq!((hash84, n84), (unweighted, n));
         assert!(n84 > 0 && all > 1000);
         // The Halcyon dated 2001 never drives in 1984, and does in 2001.
         let (n, all, _) = census(
-            &crate::scenario::lineup_with_2001_car(0, "halcyon_turbo").weights,
+            &crate::scenario::lineup_with_2001_car(0, "halcyon_turbo").shapes,
             k,
         );
         assert_eq!(n, 0, "of {all}");
         let (n, _, _) = census(
-            &crate::scenario::lineup_with_2001_car(1, "halcyon_turbo").weights,
+            &crate::scenario::lineup_with_2001_car(1, "halcyon_turbo").shapes,
             k,
         );
         assert!(n > 0);

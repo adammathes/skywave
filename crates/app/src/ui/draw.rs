@@ -101,6 +101,8 @@ const SWATCH_GAP: f32 = 8.0;
 /// The World page: room for its cards, the gap between them, their padding, the lines of
 /// text under the still, and a card's backdrop.
 const CARDS_H: f32 = 360.0;
+/// Cards on one page of the World page (more page with left and right).
+pub(super) const CARDS_PER_PAGE: usize = 3;
 const CARD_GAP: f32 = 20.0;
 const CARD_PAD: f32 = 12.0;
 const CARD_LINES: usize = 4;
@@ -339,45 +341,68 @@ impl Ui {
         );
     }
 
-    /// The World page: one card per world side by side in `[x, y, w, h]` (its still, title,
-    /// kind and year, cars and stations), the focused one framed, the one the app is
-    /// marked "here", a stub's still greyed and marked "coming".
+    /// The World page: cards for the worlds side by side in `[x, y, w, h]` (each its still,
+    /// title, kind and year, cars and stations), the focused one framed, the one the app is
+    /// marked "here", a stub's still greyed and marked "coming". Up to [`CARDS_PER_PAGE`]
+    /// a page, the page with the focus shown and "< 1 / 2 >" under them when there are
+    /// more; past a UI scale of 1.5 one a page, its text beside the still.
     fn draw_cards(&self, hud: &mut HudBuilder, area: [f32; 4], focus: usize) {
-        let [x, y, w, h] = area;
+        let [x, y, w, mut h] = area;
         let n = self.items.len().max(1);
-        let all = crate::scenario::BUILTIN.len() as f32;
-        let cw = (w - CARD_GAP * (n - 1) as f32) / n as f32;
+        let side = self.settings.ui_scale > 1.5;
+        let per = if side { 1 } else { n.min(CARDS_PER_PAGE) };
+        let (page, pages) = (focus / per, n.div_ceil(per));
+        if pages > 1 {
+            h -= LINE_H + 6.0;
+            let args = format_args!("< {} / {} >", page + 1, pages);
+            text_center(hud, x + 0.5 * w, y + h + 6.0, S, DIM, args);
+        }
+        let cw = (w - CARD_GAP * (per - 1) as f32) / per as f32;
         let (still_w, still_h) = crate::scenario::STILL_SIZE;
         let aspect = still_w as f32 / still_h as f32;
         let text_h = CARD_LINES as f32 * LINE_H + 10.0;
-        let sh = ((cw - 2.0 * CARD_PAD) / aspect)
-            .min(h - text_h - 2.0 * CARD_PAD)
-            .max(0.0);
-        let sw = sh * aspect;
-        for (i, item) in self.items.iter().enumerate() {
+        let (sw, sh) = if side {
+            let sh = (h - 2.0 * CARD_PAD).min(0.5 * cw / aspect).max(0.0);
+            (sh * aspect, sh)
+        } else {
+            let sh = ((cw - 2.0 * CARD_PAD) / aspect)
+                .min(h - text_h - 2.0 * CARD_PAD)
+                .max(0.0);
+            (sh * aspect, sh)
+        };
+        let first = page * per;
+        for (slot, item) in self.items.iter().enumerate().skip(first).take(per) {
             let ItemId::World(k) = item.id else { continue };
             let s = crate::scenario::get(k);
-            let cx = x + i as f32 * (cw + CARD_GAP);
-            if i == focus {
+            let cx = x + (slot - first) as f32 * (cw + CARD_GAP);
+            if slot == focus {
                 hud.rect(cx - 4.0, y - 4.0, cw + 8.0, h + 8.0, ACCENT);
             }
             hud.rect(cx, y, cw, h, CARD);
-            let sy = y + CARD_PAD;
+            let (ix, iy) = if side {
+                (cx + CARD_PAD, y + 0.5 * (h - sh))
+            } else {
+                (cx + 0.5 * (cw - sw), y + CARD_PAD)
+            };
             if sh >= 24.0 {
                 hud.image(HudImage {
-                    x: cx + 0.5 * (cw - sw),
-                    y: sy,
+                    x: ix,
+                    y: iy,
                     w: sw,
                     h: sh,
-                    uv: [k as f32 / all, 0.0, (k + 1) as f32 / all, 1.0],
+                    uv: crate::scenario::still_uv(k),
                     texture: render::HudTexture::Still,
                     mask: render::HudMask::Rounded(4.0),
                     color: if s.stub { STUB_TINT } else { [255; 4] },
                     ..HudImage::default()
                 });
             }
-            let (tx, right) = (cx + CARD_PAD, cx + cw - CARD_PAD);
-            let ty = sy + sh + 10.0;
+            let (tx, ty) = if side {
+                (ix + sw + CARD_PAD, y + 0.5 * (h - text_h) + 5.0)
+            } else {
+                (cx + CARD_PAD, iy + sh + 10.0)
+            };
+            let right = cx + cw - CARD_PAD;
             hud.text(tx, ty, S, if s.stub { DIM } else { TEXT }, &s.title);
             let line = |k: usize| ty + k as f32 * LINE_H;
             hud.text_fmt(tx, line(1), S, DIM, format_args!("{}, {}", s.kind, s.year));
@@ -1210,9 +1235,11 @@ impl Display for ToastText<'_> {
                 let s = crate::scenario::get(i);
                 write!(f, "{}, {}", s.title, s.year)
             }
-            Toast::UnknownWorld => {
-                write!(f, "No such world: {}", crate::scenario::get(0).title)
-            }
+            Toast::UnknownWorld => write!(
+                f,
+                "No such world; starting in {}",
+                crate::scenario::get(0).title
+            ),
         }
     }
 }

@@ -20,7 +20,8 @@
 //!
 //! The era filter: a car newer than `years.1` never appears in the world, on the road,
 //! parked or on the Vehicle page. A car of `years` weighs 1; an older one
-//! `0.5^((years.1 - year) / 8)`, at least 0.05 for a hero. Weights are integers in
+//! `0.5^((years.0 - year) / 8)`, at least 0.05 for a hero. Weights are kept per roster car
+//! and per body shape ([`Lineup::shapes`], what traffic and parked cars pick from). Weights are integers in
 //! thousandths ([`era_weight`]), computed without floating point, so every platform picks
 //! the same cars; a pick between cars of equal weight is the same pick as before weights
 //! existed ([`reduced`]).
@@ -61,8 +62,8 @@ pub const BUILTIN: [(&str, &str); 2] = [
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
     ),
     (
-        "la_basin_2001",
-        include_str!("../../../assets/scenarios/la_basin_2001.ron"),
+        "inland_basin_2001",
+        include_str!("../../../assets/scenarios/inland_basin_2001.ron"),
     ),
 ];
 
@@ -154,7 +155,7 @@ const EIGHTHS: [u32; 8] = [1000, 917, 841, 771, 707, 648, 595, 545];
 
 /// The pick weight of a car of model `year` in a world of `years`, in thousandths: 0 when
 /// it is newer than the world, [`WEIGHT_ONE`] within its years, else halving every eight
-/// years older than its last year, at least [`HERO_FLOOR`] for a `hero` and 1 for any.
+/// years older than its first year, at least [`HERO_FLOOR`] for a `hero` and 1 for any.
 pub fn era_weight(year: u16, years: (u16, u16), hero: bool) -> u32 {
     if year > years.1 {
         return 0;
@@ -162,7 +163,7 @@ pub fn era_weight(year: u16, years: (u16, u16), hero: bool) -> u32 {
     if year >= years.0 {
         return WEIGHT_ONE;
     }
-    let age = u32::from(years.1 - year);
+    let age = u32::from(years.0 - year);
     let w = EIGHTHS[(age % 8) as usize]
         .checked_shr(age / 8)
         .unwrap_or(0);
@@ -189,28 +190,54 @@ fn gcd(a: u32, b: u32) -> u32 {
     }
 }
 
+/// One car of a roster a [`Lineup`] is made from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RosterCar<'a> {
+    pub id: &'a str,
+    pub name: &'static str,
+    pub year: u16,
+    /// Its body: a `VehicleSpec::shape` file name.
+    pub shape: &'a str,
+}
+
 /// The cars a world shows: the roster indices it allows, in roster order, their names (for
-/// the Vehicle page's chooser) and every roster car's [`era_weight`] (0 for the ones it
-/// does not allow).
+/// the Vehicle page's chooser), every roster car's [`era_weight`] (0 for the ones it does
+/// not allow), and the same weights per built-in body shape, in
+/// [`vehicles::BUILTIN_SHAPES`] order (the heaviest car of that shape's; 0 for a shape no
+/// allowed car has), which is what traffic and parked cars index.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lineup {
     pub cars: Vec<usize>,
     pub names: Vec<&'static str>,
     pub weights: Vec<u32>,
+    pub shapes: Vec<u32>,
 }
 
 impl Lineup {
-    /// The lineup of `s` from a roster of `(id, name, year)`.
-    pub fn new(s: &Scenario, roster: &[(&str, &'static str, u16)]) -> Lineup {
+    /// The lineup of `s` from `roster`.
+    pub fn new(s: &Scenario, roster: &[RosterCar]) -> Lineup {
         let weights: Vec<u32> = roster
             .iter()
-            .map(|&(id, _, year)| era_weight(year, s.years, s.heroes.iter().any(|h| h == id)))
+            .map(|c| era_weight(c.year, s.years, s.heroes.iter().any(|h| h == c.id)))
             .collect();
         let cars: Vec<usize> = (0..roster.len()).filter(|&i| weights[i] > 0).collect();
+        let shapes = vehicles::BUILTIN_SHAPES
+            .iter()
+            .map(|(file, _)| {
+                roster
+                    .iter()
+                    .zip(&weights)
+                    .filter(|(c, _)| c.shape == *file)
+                    .map(|(_, &w)| w)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
         Lineup {
-            names: cars.iter().map(|&i| roster[i].1).collect(),
+            names: cars.iter().map(|&i| roster[i].name).collect(),
             cars,
             weights,
+            shapes,
         }
     }
 
@@ -240,73 +267,149 @@ impl Lineup {
 pub fn lineup(index: usize) -> &'static Lineup {
     static LINEUPS: OnceLock<Vec<Lineup>> = OnceLock::new();
     let all = LINEUPS.get_or_init(|| {
-        let names = crate::ui::roster::names();
-        let roster: Vec<(&str, &'static str, u16)> = vehicles::BUILTIN
-            .iter()
-            .enumerate()
-            .map(|(i, &(id, _))| {
-                let year = vehicles::builtin_spec(id).map_or(u16::MAX, |s| s.year);
-                (id, names[i], year)
-            })
-            .collect();
-        all().iter().map(|s| Lineup::new(s, &roster)).collect()
+        let roster = builtin_roster(|_| None);
+        let cars: Vec<RosterCar> = roster.iter().map(OwnedCar::as_car).collect();
+        all().iter().map(|s| Lineup::new(s, &cars)).collect()
     });
     &all[index.min(all.len() - 1)]
+}
+
+/// A built-in car as a [`RosterCar`], its strings owned.
+pub(crate) struct OwnedCar {
+    id: &'static str,
+    name: &'static str,
+    year: u16,
+    shape: String,
+}
+
+impl OwnedCar {
+    fn as_car(&self) -> RosterCar<'_> {
+        RosterCar {
+            id: self.id,
+            name: self.name,
+            year: self.year,
+            shape: &self.shape,
+        }
+    }
+}
+
+/// The built-in cars in [`vehicles::BUILTIN`] order, `year_of` overriding a car's year
+/// (tests date one differently).
+fn builtin_roster(year_of: impl Fn(&str) -> Option<u16>) -> Vec<OwnedCar> {
+    let names = crate::ui::roster::names();
+    vehicles::BUILTIN
+        .iter()
+        .enumerate()
+        .map(|(i, &(id, _))| {
+            let spec = vehicles::builtin_spec(id).ok();
+            let year = spec.as_ref().map_or(u16::MAX, |s| s.year);
+            OwnedCar {
+                id,
+                name: names[i],
+                year: year_of(id).unwrap_or(year),
+                shape: spec.map(|s| s.shape).unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// A world of `scenario`'s with these `years`, over the built-in cars with `years_of`
+/// overriding some cars' years: for tests of what a world shows.
+#[cfg(test)]
+pub(crate) fn lineup_with(
+    scenario: usize,
+    years: Option<(u16, u16)>,
+    year_of: impl Fn(&str) -> Option<u16>,
+) -> Lineup {
+    let mut s = get(scenario).clone();
+    s.years = years.unwrap_or(s.years);
+    let roster = builtin_roster(year_of);
+    let cars: Vec<RosterCar> = roster.iter().map(OwnedCar::as_car).collect();
+    Lineup::new(&s, &cars)
 }
 
 /// Scenario `index`'s lineup of the built-in cars with car `id` re-dated to 2001: a 2001 car
 /// in the place of a built-in one, for tests of what a world never shows.
 #[cfg(test)]
 pub(crate) fn lineup_with_2001_car(index: usize, id: &str) -> Lineup {
-    let roster: Vec<(&str, &'static str, u16)> = vehicles::BUILTIN
-        .iter()
-        .map(|&(car, _)| {
-            let year = vehicles::builtin_spec(car).unwrap().year;
-            (car, car, if car == id { 2001 } else { year })
-        })
-        .collect();
-    Lineup::new(get(index), &roster)
+    lineup_with(index, None, |car| (car == id).then_some(2001))
 }
 
 /// Width and height of a scenario's still, texels.
 pub const STILL_SIZE: (u32, u32) = (320, 200);
+/// Stills per row of the atlas [`stills`] lays out.
+pub const STILLS_PER_ROW: u32 = 4;
 
-/// Each scenario's still for the World page (`assets/stills/<id>.png`, rendered with
-/// `tools/screenshot`), in [`BUILTIN`] order.
+/// Each scenario's still for the World page (`assets/stills/<id>.still`, rendered with
+/// `tools/screenshot`), in [`BUILTIN`] order: a 256-color palette (768 bytes of sRGB) and
+/// then one palette index per texel, row-major from the top-left.
 const STILLS: [(&str, &[u8]); 2] = [
     (
         "socal_beach_1984",
-        include_bytes!("../../../assets/stills/socal_beach_1984.png"),
+        include_bytes!("../../../assets/stills/socal_beach_1984.still"),
     ),
     (
-        "la_basin_2001",
-        include_bytes!("../../../assets/stills/la_basin_2001.png"),
+        "inland_basin_2001",
+        include_bytes!("../../../assets/stills/inland_basin_2001.still"),
     ),
 ];
 
-/// Every scenario's still side by side in [`BUILTIN`] order (still `i` spans u from
-/// `i / n` to `(i + 1) / n`), decoded once, for `render::Renderer::upload_stills`. A still
-/// that does not decode (never a built-in one, which its test decodes) is grey.
-pub fn stills() -> &'static crate::png::Image {
-    static STILLS_IMAGE: OnceLock<crate::png::Image> = OnceLock::new();
+/// An RGBA8 picture, row-major from the top-left.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Image {
+    pub w: u32,
+    pub h: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// Texels of the atlas of `n` stills: rows of up to [`STILLS_PER_ROW`].
+pub fn atlas_size(n: u32) -> (u32, u32) {
+    let cols = n.clamp(1, STILLS_PER_ROW);
+    (
+        cols * STILL_SIZE.0,
+        n.max(1).div_ceil(STILLS_PER_ROW) * STILL_SIZE.1,
+    )
+}
+
+/// Where scenario `index`'s still is in [`stills`]: u0, v0, u1, v1.
+pub fn still_uv(index: usize) -> [f32; 4] {
+    let (w, h) = atlas_size(BUILTIN.len() as u32);
+    let (col, row) = (index as u32 % STILLS_PER_ROW, index as u32 / STILLS_PER_ROW);
+    let (x, y) = (col * STILL_SIZE.0, row * STILL_SIZE.1);
+    [
+        x as f32 / w as f32,
+        y as f32 / h as f32,
+        (x + STILL_SIZE.0) as f32 / w as f32,
+        (y + STILL_SIZE.1) as f32 / h as f32,
+    ]
+}
+
+/// Every scenario's still in an atlas ([`atlas_size`], [`still_uv`]), read once, for
+/// `render::Renderer::upload_stills`. A still of the wrong size (never a built-in one,
+/// which a test reads) is grey.
+pub fn stills() -> &'static Image {
+    static STILLS_IMAGE: OnceLock<Image> = OnceLock::new();
     STILLS_IMAGE.get_or_init(|| {
-        let (w, h) = STILL_SIZE;
-        let n = BUILTIN.len() as u32;
-        let mut rgba = vec![96u8; (w * n * h * 4) as usize];
+        let (sw, sh) = (STILL_SIZE.0 as usize, STILL_SIZE.1 as usize);
+        let (w, h) = atlas_size(BUILTIN.len() as u32);
+        let mut rgba = vec![96u8; (w * h * 4) as usize];
         for (k, (id, _)) in BUILTIN.iter().enumerate() {
-            let still = STILLS
-                .iter()
-                .find(|s| s.0 == *id)
-                .and_then(|s| crate::png::decode(s.1).ok())
-                .filter(|img| (img.w, img.h) == STILL_SIZE);
-            let Some(still) = still else { continue };
-            for y in 0..h as usize {
-                let row = (w * 4) as usize;
-                let to = (y * n as usize + k) * row;
-                rgba[to..to + row].copy_from_slice(&still.rgba[y * row..(y + 1) * row]);
+            let Some((_, bytes)) = STILLS.iter().find(|s| s.0 == *id) else {
+                continue;
+            };
+            if bytes.len() != 768 + sw * sh {
+                continue;
+            }
+            let (palette, texels) = bytes.split_at(768);
+            let [u, v, _, _] = still_uv(k);
+            let (x0, y0) = ((u * w as f32) as usize, (v * h as f32) as usize);
+            for (i, &t) in texels.iter().enumerate() {
+                let at = (((y0 + i / sw) * w as usize) + x0 + i % sw) * 4;
+                let c = &palette[usize::from(t) * 3..usize::from(t) * 3 + 3];
+                rgba[at..at + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
             }
         }
-        crate::png::Image { w: w * n, h, rgba }
+        Image { w, h, rgba }
     })
 }
 
@@ -329,16 +432,6 @@ pub fn station_count(s: &Scenario) -> usize {
 mod tests {
     use super::*;
 
-    /// A roster of the built-in cars plus a test-only 2001 car at the end.
-    fn with_2001_car() -> Vec<(&'static str, &'static str, u16)> {
-        let mut r: Vec<_> = vehicles::BUILTIN
-            .iter()
-            .map(|&(id, _)| (id, id, vehicles::builtin_spec(id).unwrap().year))
-            .collect();
-        r.push(("test_tuner_2001", "Test Tuner", 2001));
-        r
-    }
-
     #[test]
     fn the_scenario_files_parse_with_distinct_ids() {
         let all = all();
@@ -358,7 +451,7 @@ mod tests {
         let basin = &all[1];
         assert_eq!(
             (basin.id.as_str(), basin.years, basin.stub),
-            ("la_basin_2001", (1965, 2001), true)
+            ("inland_basin_2001", (1965, 2001), true)
         );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(get(99).id, basin.id);
@@ -391,12 +484,11 @@ mod tests {
 
     #[test]
     fn weights_fall_off_with_age() {
-        let y = (1995, 2001);
+        let y = (2001, 2001);
         assert_eq!(era_weight(2002, y, false), 0, "newer than the world");
         assert_eq!(era_weight(2002, y, true), 0, "even a hero");
         assert_eq!(era_weight(2001, y, false), WEIGHT_ONE);
-        assert_eq!(era_weight(1995, y, false), WEIGHT_ONE);
-        // 1993: eight years older than 2001, half.
+        // 1993: eight years older than the world, half.
         assert_eq!(era_weight(1993, y, false), 500);
         assert_eq!(era_weight(1985, y, false), 250);
         // 1984: 17 years, 0.5^(17/8) = 0.229.
@@ -408,7 +500,7 @@ mod tests {
         assert_eq!(era_weight(1950, y, true), HERO_FLOOR);
         assert_eq!(era_weight(1900, y, false), 1, "never quite gone");
         // The same in floating point, for the docs' formula.
-        for year in 1900..1995u16 {
+        for year in 1900..2001u16 {
             let f = 0.5f64.powf(f64::from(2001 - year) / 8.0) * 1000.0;
             let w = era_weight(year, y, false);
             assert!(
@@ -416,6 +508,11 @@ mod tests {
                 "{year}: {w} vs {f}"
             );
         }
+        // Measured from the world's first year: no step down at its edge.
+        let y = (1995, 2001);
+        assert_eq!(era_weight(1995, y, false), WEIGHT_ONE);
+        assert_eq!(era_weight(1994, y, false), 917);
+        assert_eq!(era_weight(1987, y, false), 500);
         let mut w = [WEIGHT_ONE, WEIGHT_ONE, 0, WEIGHT_ONE];
         reduced(&mut w);
         assert_eq!(w, [1, 1, 0, 1]);
@@ -444,59 +541,86 @@ mod tests {
 
     #[test]
     fn a_2001_car_never_lists_in_1984() {
-        let roster = with_2001_car();
-        let last = roster.len() - 1;
-        let l84 = Lineup::new(get(0), &roster);
-        assert!(!l84.allows(last));
-        assert_eq!(l84.position(last), None);
-        assert!(!l84.names.contains(&"Test Tuner"));
-        assert_eq!(l84.weights[last], 0);
-        // Adding it changes nothing else in 1984.
-        assert_eq!(l84.cars, lineup(0).cars);
-        assert_eq!(&l84.weights[..last], &lineup(0).weights[..]);
+        let k = vehicles::BUILTIN
+            .iter()
+            .position(|b| b.0 == "halcyon_turbo")
+            .unwrap();
+        let l84 = lineup_with_2001_car(0, "halcyon_turbo");
+        assert!(!l84.allows(k));
+        assert_eq!(l84.position(k), None);
+        assert!(!l84.names.contains(&crate::ui::roster::names()[k]));
+        assert_eq!(l84.weights[k], 0);
         let mut next = 0;
-        for _ in 0..2 * roster.len() {
+        for _ in 0..2 * vehicles::BUILTIN.len() {
             next = l84.next_after(next);
-            assert_ne!(next, last);
+            assert_ne!(next, k);
         }
-        let l01 = Lineup::new(get(1), &roster);
-        assert!(l01.allows(last));
-        assert_eq!(l01.names.last(), Some(&"Test Tuner"));
-        assert_eq!(l01.next_after(last - 1), last);
-        assert_eq!(l01.next_after(last), 0, "wraps");
+        let l01 = lineup_with_2001_car(1, "halcyon_turbo");
+        assert!(l01.allows(k));
+        assert_eq!(l01.next_after(k - 1), k);
+        assert_eq!(l01.next_after(vehicles::BUILTIN.len() - 1), 0, "wraps");
+    }
+
+    #[test]
+    fn shape_weights_follow_each_shapes_own_car() {
+        // A world cut inside the roster's years: every shape weighs what its car does,
+        // whatever order the shapes and the cars are listed in.
+        let l = lineup_with(0, Some((1979, 1983)), |_| None);
+        for (k, (file, _)) in vehicles::BUILTIN_SHAPES.iter().enumerate() {
+            let i = vehicles::BUILTIN
+                .iter()
+                .position(|(id, _)| vehicles::builtin_spec(id).unwrap().shape == *file)
+                .unwrap();
+            let year = vehicles::builtin_spec(vehicles::BUILTIN[i].0).unwrap().year;
+            assert_eq!(l.shapes[k], l.weights[i], "{file}");
+            assert_eq!(l.shapes[k] > 0, year <= 1983, "{file}: {year}");
+        }
+        assert!(l.shapes.contains(&0) && l.shapes.iter().any(|&w| w > 0));
     }
 
     #[test]
     fn every_scenario_has_its_still() {
         assert_eq!(STILLS.len(), BUILTIN.len());
-        for (k, (id, png)) in STILLS.iter().enumerate() {
+        let all = stills();
+        assert_eq!((all.w, all.h), atlas_size(BUILTIN.len() as u32));
+        // `h = h * 31 + byte` mod 2^61 over each still's RGBA, as Pillow reads the
+        // quantized frame the file was written from.
+        let expected = [2_138_132_481_716_855_108u128, 2_229_843_925_750_921_464];
+        for (k, ((id, bytes), want)) in STILLS.iter().zip(expected).enumerate() {
             assert_eq!(*id, BUILTIN[k].0);
-            assert!(png.len() < 60 * 1024, "{id}: {} bytes", png.len());
-            let img = crate::png::decode(png).unwrap();
-            assert_eq!((img.w, img.h), STILL_SIZE, "{id}");
-            // Packed side by side: the still's middle texel is where its slot is.
-            let all = stills();
-            let (w, h) = STILL_SIZE;
-            let (x, y) = (w / 2, h / 2);
-            let at = ((y * all.w + k as u32 * w + x) * 4) as usize;
-            let own = ((y * w + x) * 4) as usize;
-            assert_eq!(all.rgba[at..at + 4], img.rgba[own..own + 4], "{id}");
+            let [u, v, u1, v1] = still_uv(k);
+            let (x0, y0) = ((u * all.w as f32) as u32, (v * all.h as f32) as u32);
+            assert_eq!(
+                (
+                    ((u1 - u) * all.w as f32) as u32,
+                    ((v1 - v) * all.h as f32) as u32
+                ),
+                STILL_SIZE
+            );
+            let mut h = 0u128;
+            for y in y0..y0 + STILL_SIZE.1 {
+                let row = ((y * all.w + x0) * 4) as usize;
+                for &b in &all.rgba[row..row + (STILL_SIZE.0 * 4) as usize] {
+                    h = (h * 31 + u128::from(b)) % (1 << 61);
+                }
+            }
+            assert_eq!(h, want, "{id}");
+            assert_eq!(bytes.len(), 768 + 320 * 200);
         }
-        assert_eq!((stills().w, stills().h), (STILL_SIZE.0 * 2, STILL_SIZE.1));
     }
 
     #[test]
-    fn the_stills_decode_as_an_image_library_reads_them() {
-        // `h = h * 31 + byte` mod 2^61 over the RGBA bytes, as Pillow decodes the files.
-        let expected = [2_138_132_481_716_855_108u128, 2_229_843_925_750_921_464];
-        for ((id, png), want) in STILLS.iter().zip(expected) {
-            let img = crate::png::decode(png).unwrap();
-            let h = img
-                .rgba
-                .iter()
-                .fold(0u128, |h, &b| (h * 31 + u128::from(b)) % (1 << 61));
-            assert_eq!(h, want, "{id}");
+    fn the_stills_atlas_fits_a_dozen_worlds() {
+        for n in 1..=12 {
+            let (w, h) = atlas_size(n);
+            assert!(
+                w <= render::MAX_MAP_SIZE && h <= render::MAX_MAP_SIZE,
+                "{n}: {w}x{h}"
+            );
+            assert!(w * h >= n * STILL_SIZE.0 * STILL_SIZE.1);
         }
+        assert_eq!(atlas_size(2), (640, 200));
+        assert_eq!(atlas_size(5), (1280, 400));
     }
 
     #[test]

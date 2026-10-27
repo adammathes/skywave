@@ -35,7 +35,7 @@ Pause close it (Pause does not open the menu over it). The wheel is read raw as 
 heading, at rest unless it was rolling under 5 m/s, odometer from zero, camera and headlights kept; the new
 car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the car the next session starts in
 unless the scene names one (`car=`, with `paint=`). It is unbound on the pad by default: the pad path is the
-pause menu's Vehicle page (Resume · Reset car · Vehicle › · Settings › · World ›): Car (left/right through
+pause menu's Vehicle page (Resume · Reset car · Vehicle › · Settings › · Worlds ›): Car (left/right through
 every car the world has, all twenty on the coast, wrapping;
 the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car turning on a
 turntable beside the panel and its stat strip and specs (class, era, peak power and torque, drive and
@@ -44,7 +44,8 @@ paint; another car starts in its first paint. Select on any row swaps the car sh
 the same way, and closes the menu; the car and paint become the `vehicle` and `paint` settings. At a UI scale
 over 1.5 there is no room for the turntable and the specs shorten to what fits.
 
-The pause menu's World page shows one card per world (`docs/SCENARIOS.md`) side by side: its still, its
+The pause menu's World page (Worlds ›) shows a card per world (`docs/SCENARIOS.md`), three a page side by
+side (one a page, its text beside the still, past a UI scale of 1.5; "< 1 / 2 >" under them when they page): its still, its
 title, the kind of place and year, and how many cars and radio stations it has; the world the game is in
 says "here", a world still being built is greyed and says "coming" but can be picked. Left/right (and
 up/down) move between the cards, wrapping, and it opens on the current world. Select closes the menu and

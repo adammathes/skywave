@@ -230,6 +230,16 @@ impl CarRadio {
         }
     }
 
+    /// The music folders `old` has on its dial, on this one too (a world loaded after
+    /// them: the platform delivers folders only when they are picked or at start-up).
+    pub fn carry_files(&mut self, old: &CarRadio, s: &RadioSettings) {
+        for (id, path) in &old.paths {
+            if let Some(station) = old.files.iter().find(|c| &c.id == id) {
+                self.add_files(path, station.clone(), s);
+            }
+        }
+    }
+
     /// The music folders on the dial (on or off).
     pub fn files(&self) -> &[Channel] {
         &self.files
@@ -614,7 +624,7 @@ mod tests {
         r.apply(&s);
         assert_eq!(r.preset_index(), 1);
         // Another world starts on its own preset, and a pick there is its own.
-        r.set_scenario("la_basin_2001", "1986_north_shore");
+        r.set_scenario("inland_basin_2001", "1986_north_shore");
         r.apply(&s);
         assert_eq!(r.preset_index(), 2);
         choose_preset(&mut s, r.scenario(), 0);
@@ -626,7 +636,7 @@ mod tests {
         );
         choose_preset(&mut s, r.scenario(), 2);
         assert!(
-            !s.presets.contains_key("la_basin_2001"),
+            !s.presets.contains_key("inland_basin_2001"),
             "its own is no entry"
         );
         r.set_scenario(SCENARIO, SCENARIO_PRESET);

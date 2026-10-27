@@ -777,7 +777,7 @@ mod tests {
             debug_overlay: true,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
-            scenario: Some("la_basin_2001"),
+            scenario: Some("inland_basin_2001"),
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,

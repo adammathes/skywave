@@ -2,12 +2,12 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Reset car · Vehicle › · Settings › · World › · Quit (native only)
+//! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Quit (native only)
 //! Vehicle:   Car (left/right through every built-in car this world has) · Paint (its
 //!            palette) · Drive this car; a turntable preview and the car's specs beside
 //!            them, and Select on any row swaps the car in where you are
-//! Worlds:    one card per scenario, side by side (still, title, kind and year, car and
-//!            station counts; "coming" on a stub); Select loads that world
+//! Worlds:    one card per scenario, side by side, three a page (still, title, kind and
+//!            year, car and station counts; "coming" on a stub); Select loads that world
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
 //! Drive:     Handling (Arcade / Light / Off) · Headlights (Auto / Manual)
 //! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
@@ -293,7 +293,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             let (id, w) = open(Page::Settings);
             add(id, "Settings", w);
             let (id, w) = open(Page::Worlds);
-            add(id, "World", w);
+            add(id, "Worlds", w);
             if ctx.can_quit {
                 add(ItemId::Quit, "Quit", Widget::Action);
             }
@@ -770,7 +770,7 @@ mod tests {
         build(Page::Worlds, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(ids, [ItemId::World(0), ItemId::World(1)]);
-        assert_eq!(items[1].label, "Basin City");
+        assert_eq!(items[1].label, "Inland Basin");
         assert!(items.iter().all(|i| i.widget == Widget::Action));
         build(Page::Vehicle, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
