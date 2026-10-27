@@ -1020,15 +1020,18 @@ impl Ui {
         );
         let mut y = y + 11.0 * line;
         if r.gpu_timing {
-            let ms = |p: usize| r.gpu_us[p] as f32 / 1000.0;
-            let total: u32 = r.gpu_us.iter().sum();
+            // Medians over the last 64 frames read back; the parts (each cascade; the
+            // depth pre-pass, meshes and sky) where timestamps work inside passes.
+            let ms = |p: usize| r.gpu_median_us[p] as f32 / 1000.0;
+            let part = |k: usize| r.gpu_median_part_us[k] as f32 / 1000.0;
+            let total: u32 = r.gpu_median_us.iter().sum();
             hud.text_fmt(
                 sx,
                 y,
                 s,
                 TEXT,
                 format_args!(
-                    "gpu {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}",
+                    "gpu med {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}{}",
                     total as f32 / 1000.0,
                     ms(0),
                     ms(1),
@@ -1036,12 +1039,32 @@ impl Ui {
                     ms(3),
                     ms(4),
                     ms(5),
+                    GpuParts(
+                        r.gpu_parts
+                            .then(|| { [part(0), part(1), part(2), part(3), part(4), part(6)] })
+                    ),
                 ),
             );
             y += line;
         }
         if !self.gpu_label.is_empty() {
             hud.text(sx, y, s, DIM, &self.gpu_label);
+        }
+    }
+}
+
+/// The F3 overlay's GPU parts: the cascades, then the forward pass's depth pre-pass,
+/// meshes and sky, ms.
+struct GpuParts(Option<[f32; 6]>);
+
+impl Display for GpuParts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some([c0, c1, c2, z, m, sky]) => write!(
+                f,
+                " | c {c0:.2}/{c1:.2}/{c2:.2} z {z:.2} m {m:.2} sky {sky:.2}"
+            ),
+            None => Ok(()),
         }
     }
 }
