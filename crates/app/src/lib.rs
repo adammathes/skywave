@@ -193,7 +193,20 @@ pub struct App {
     aspect: f32,
     /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
     target: Option<(u32, u32)>,
+    /// Seconds the deep-water toast has left, and the car's water resets it has shown.
+    water_toast: f32,
+    water_resets_seen: u32,
+    /// The ui's HUD with the deep-water toast over it, on the frames that show it.
+    overlay: render::HudBuilder,
 }
+
+/// Seconds the deep-water toast stays up.
+const WATER_TOAST_S: f32 = 2.5;
+/// What it says.
+const WATER_TOAST: &str = "Deep water: resetting";
+/// Its color (the ui's accent) and its drop shadow.
+const TOAST_RGBA: [u8; 4] = [255, 178, 62, 255];
+const TOAST_SHADOW: [u8; 4] = [0, 0, 0, 170];
 
 /// A car whose meshes the renderer has (or will have, once drained).
 #[derive(Clone, Copy, Debug)]
@@ -322,6 +335,9 @@ impl App {
             audio: audio::synth::AudioParams::default(),
             aspect: 16.0 / 9.0,
             target: None,
+            water_toast: 0.0,
+            water_resets_seen: 0,
+            overlay: render::HudBuilder::new(),
         })
     }
 
@@ -513,7 +529,17 @@ impl App {
             self.time.step(input, SIM_DT);
             self.ticks += 1;
         }
+        if self.drive.water_resets != self.water_resets_seen {
+            self.water_resets_seen = self.drive.water_resets;
+            self.water_toast = WATER_TOAST_S;
+        }
+        self.water_toast = (self.water_toast - dt_real as f32).max(0.0);
         steps
+    }
+
+    /// Whether the deep-water toast is up.
+    pub fn water_toast(&self) -> bool {
+        self.water_toast > 0.0
     }
 
     /// Fingerprint of the simulation state, for determinism checks.
@@ -603,7 +629,22 @@ impl App {
             sky: self.ui.video_sky(lighting::sky(&daylight)),
             instances: &self.instances,
             lights: self.lights.lights(),
-            hud: self.ui.hud(),
+            hud: if self.water_toast > 0.0 {
+                let hud = self.ui.hud();
+                let o = &mut self.overlay;
+                o.begin(hud.ui_scale);
+                o.extend(&hud);
+                // Centered a third of the way down.
+                let [w, h] = o.size();
+                let scale = 2.0;
+                let x = 0.5 * (w - render::font::text_width(WATER_TOAST) as f32 * scale);
+                let y = h / 3.0;
+                o.text(x + scale, y + scale, scale, TOAST_SHADOW, WATER_TOAST);
+                o.text(x, y, scale, TOAST_RGBA, WATER_TOAST);
+                o.view()
+            } else {
+                self.ui.hud()
+            },
             quality: self.ui.render_quality(),
         }
     }
@@ -1645,5 +1686,36 @@ mod tests {
         let ahead = Vec3::new(-heading.sin(), 0.0, -heading.cos());
         assert!(moved.dot(ahead) > 10.0, "{moved}");
         assert!((now.y - y).abs() < 1.0, "car at {now}, ground {y}");
+    }
+
+    #[test]
+    fn deep_water_resets_the_car_with_a_toast() {
+        // On the sand by the pier facing the sea; full throttle until the water resets it.
+        let query = "?seed=1&place=coast&pos=440,940&yaw=270&stream=1";
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        let mut input = InputState::default();
+        input.set(Action::Throttle, 1.0);
+        let mut frames = 0;
+        while !app.water_toast() {
+            app.update(&input, 1.0 / 30.0);
+            frames += 1;
+            assert!(frames < 30 * 20, "no reset");
+        }
+        let has_toast = |app: &mut App| {
+            let view = app.scene_view(1.0, 16.0 / 9.0);
+            let hud = view.hud;
+            hud.items.iter().any(|i| match *i {
+                render::HudItem::Text { text, .. } => hud.str(text) == WATER_TOAST,
+                _ => false,
+            })
+        };
+        assert!(has_toast(&mut app));
+        // Back at the scene's start point, and the toast goes after its time.
+        let pos = app.drive.pose(1.0).pos;
+        assert!((pos.x - 440.0).abs() < 1e-3 && (pos.z - 940.0).abs() < 1e-3);
+        for _ in 0..(WATER_TOAST_S * 30.0) as usize + 2 {
+            app.update(&InputState::default(), 1.0 / 30.0);
+        }
+        assert!(!app.water_toast() && !has_toast(&mut app));
     }
 }

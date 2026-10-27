@@ -26,9 +26,9 @@
 //! posts and boxes with an impulse and a damping pulse (bump and stop, never bounce), and
 //! kicks the body when a wheel hits a curb fast.
 //!
-//! Water: for now the car rolls on the sea floor under it. A water body would be a patch
-//! with its own [`Surface`] kind (a slow drag region with a reset); the probe and the patch
-//! table already carry the surface kind for it.
+//! Water: the car rolls on the sea floor under it; [`WorldCollider::water_depth`] says how
+//! deep a point is under the surface, and the driver's side (`app::drive`) drags a car
+//! that wades in deep and puts it back at its start.
 //!
 //! Queries allocate nothing and use only IEEE arithmetic in a fixed order, so the same
 //! inputs give bit-identical results everywhere.
@@ -626,6 +626,19 @@ impl WorldCollider {
             Under::Patch(i) => self.patches[i as usize].surface,
             Under::Open => Surface::Grass,
         }
+    }
+
+    /// How far a point at height `y` over ground point `p` (`[x, z]`) is under the water:
+    /// 0 above the surface, on dry land (the open ground there above the water level) and
+    /// on places without terrain.
+    pub fn water_depth(&self, p: [f32; 2], y: f32) -> f32 {
+        let Some(g) = &self.terrain else {
+            return 0.0;
+        };
+        if g.height_at(p[0], p[1]) >= g.water_level {
+            return 0.0;
+        }
+        (g.water_level - y).max(0.0)
     }
 
     /// Height and surface of the ground at `[x, z]` seen from above everything, steps

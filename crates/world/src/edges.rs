@@ -39,8 +39,8 @@ const KEY: u64 = 0x4544_4745;
 /// The wall of a land `kind`; `None` for water and open sides.
 pub fn wall(kind: EdgeKind) -> Option<Wall> {
     let (height_m, ramp_m) = match kind {
-        EdgeKind::Mountains => ((90.0, 140.0), 96.0),
-        EdgeKind::Hills | EdgeKind::HighwayLoop => ((55.0, 85.0), 60.0),
+        EdgeKind::Mountains => ((90.0, 140.0), 80.0),
+        EdgeKind::Hills | EdgeKind::HighwayLoop => ((55.0, 85.0), 48.0),
         // A wooded bluff, and a rail embankment.
         EdgeKind::Forest => ((20.0, 30.0), 24.0),
         EdgeKind::RailYards => ((7.0, 9.0), 9.0),

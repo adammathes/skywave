@@ -87,6 +87,15 @@ const CABIN_WALL_TINT: f32 = 0.3;
 pub const KEEP_SPEED_MPS: f32 = 5.0;
 /// Below this the car counts as fallen out of the world and is put back at its start, m.
 const FLOOR_Y: f32 = -100.0;
+/// Water: the car wades through water up to this deep at its wheels' contact with the
+/// ground (about the hubs), m...
+pub const WADE_M: f32 = 0.3;
+/// ...and deeper drags it to a stop, this much more per second for every meter past
+/// that, 1/s...
+const WATER_DRAG: f32 = 6.0;
+/// ...and after this long deeper than this, s and m, the car is put back at its start.
+pub const DEEP_RESET_S: f32 = 1.5;
+pub const DEEP_M: f32 = 0.6;
 
 /// A rigid transform: body origin (the center of mass) and body-to-world rotation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -226,6 +235,10 @@ pub struct Drive {
     rest_compression: f32,
     start_ground: [f32; 3],
     start_heading: f32,
+    /// Seconds the car has been in deep water without a break.
+    deep_s: f32,
+    /// Times deep water has put the car back at its start (the app toasts each).
+    pub water_resets: u32,
 }
 
 impl Drive {
@@ -267,6 +280,8 @@ impl Drive {
             prev_roll: [0.0; 4],
             start_ground: ground,
             start_heading: heading_rad,
+            deep_s: 0.0,
+            water_resets: 0,
         }
     }
 
@@ -276,6 +291,39 @@ impl Drive {
         self.prev = self.state;
         self.roll = [0.0; 4];
         self.prev_roll = [0.0; 4];
+        self.deep_s = 0.0;
+    }
+
+    /// How deep the water is at the car's wheels' contact with the ground, m.
+    pub fn water_depth(&self, ground: &DriveGround) -> f32 {
+        let s = &self.state;
+        let contact = s.pos[1] - self.spec.cg_height_m;
+        ground.water_depth([s.pos[0], s.pos[2]], contact)
+    }
+
+    /// Water past [`WADE_M`] drags the car to a stop; after [`DEEP_RESET_S`] deeper than
+    /// [`DEEP_M`] it goes back to its start.
+    fn wade(&mut self, ground: &DriveGround) {
+        let depth = self.water_depth(ground);
+        if depth > WADE_M {
+            let keep = 1.0 / (1.0 + WATER_DRAG * (depth - WADE_M) * DT);
+            let s = &mut self.state;
+            s.vel[0] *= keep;
+            s.vel[2] *= keep;
+            s.speed_mps *= keep;
+            for w in &mut s.wheels {
+                w.spin *= keep;
+            }
+        }
+        self.deep_s = if depth > DEEP_M {
+            self.deep_s + DT
+        } else {
+            0.0
+        };
+        if self.deep_s >= DEEP_RESET_S {
+            self.respawn();
+            self.water_resets += 1;
+        }
     }
 
     /// Swaps in the car `spec` (with its body `layout`) where this one is: on the ground
@@ -294,6 +342,7 @@ impl Drive {
         next.headlights = self.headlights;
         next.start_ground = self.start_ground;
         next.start_heading = self.start_heading;
+        next.water_resets = self.water_resets;
         let speed = self.state.speed_mps;
         if speed.abs() < KEEP_SPEED_MPS {
             next.state.vel = self.state.vel;
@@ -344,7 +393,9 @@ impl Drive {
             .all(|v| v.is_finite());
         if !finite || s.pos[1] < FLOOR_Y {
             self.respawn();
+            return;
         }
+        self.wade(ground);
     }
 
     /// Spring compression with the car at rest on level ground, m.
@@ -905,5 +956,108 @@ mod tests {
         d.step(VehicleInput::default(), &flat());
         assert_eq!(d.state, d.prev);
         assert_eq!(d.pose(1.0).pos, Vec3::new(-92.0, d.spec.cg_height_m, 4.9));
+    }
+
+    /// The coast's walls turn the car: from the foot of each land side's band, at full
+    /// throttle straight at the side for 30 s, at rest or already at 45 m/s, every car stays
+    /// well short of the crest.
+    #[test]
+    fn the_coast_walls_turn_the_car() {
+        use place::{EAST, NORTH, SOUTH};
+        let place = crate::places::build(crate::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+        let ground = ground_for(&place);
+        let ext = place.header.extent_m();
+        let bands = place.terrain.edges.map(world::edges::band_m);
+        for id in [DEFAULT_VEHICLE, "palisade_wagon"] {
+            let runs = [NORTH, EAST, SOUTH]
+                .into_iter()
+                .flat_map(|s| [(s, 0.35), (s, 0.65)])
+                .flat_map(|(s, f)| [(s, f, 0.0), (s, f, 45.0)]);
+            for (side, f, speed) in runs {
+                // At the band's foot, facing out.
+                let (p, heading) = match side {
+                    NORTH => ([f * ext[0], bands[NORTH] + 2.0], 0.0),
+                    SOUTH => ([f * ext[0], ext[1] - bands[SOUTH] - 2.0], PI),
+                    _ => ([ext[0] - bands[EAST] - 2.0, f * ext[1]], -FRAC_PI_2),
+                };
+                let (y, _) = ground.level_at(p);
+                let mut d = Drive::new(id).unwrap();
+                let (spec, layout) = (d.spec.clone(), d.layout.clone());
+                d = Drive::with_layout(spec, layout, [p[0], y, p[1]], heading);
+                let (sin, cos) = heading.sin_cos();
+                d.state.vel = [-sin * speed, 0.0, -cos * speed];
+                d.state.speed_mps = speed;
+                for w in &mut d.state.wheels {
+                    w.spin = speed / vehicle::sim::WHEEL_RADIUS_M;
+                }
+                let input = VehicleInput {
+                    throttle: 1.0,
+                    ..VehicleInput::default()
+                };
+                let mut closest = f32::INFINITY;
+                for _ in 0..(30.0 / DT) as usize {
+                    d.step(input, &ground);
+                    let q = d.state.pos;
+                    let inside = world::edges::inside([q[0], q[2]], ext)[side];
+                    closest = closest.min(inside);
+                }
+                eprintln!("{id} at {speed} m/s toward side {side} at {f}: {closest:.1} m from it");
+                assert!(closest > 30.0, "{id} reached {closest} m from side {side}");
+            }
+        }
+    }
+
+    /// Off the beach into the sea at full throttle: the car wades in a little, stalls, and
+    /// after [`DEEP_RESET_S`] in deep water goes back to its start, once.
+    #[test]
+    fn deep_water_stalls_the_car_and_puts_it_back() {
+        let place = crate::places::build(crate::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+        let ground = ground_for(&place);
+        // On the sand north of the pier, facing the sea (west).
+        let p = [440.0, 940.0];
+        let (y, _) = ground.level_at(p);
+        assert!(y > place.terrain.water_level, "start on dry sand");
+        let mut d = Drive::new(DEFAULT_VEHICLE).unwrap();
+        let (spec, layout) = (d.spec.clone(), d.layout.clone());
+        d = Drive::with_layout(spec, layout, [p[0], y, p[1]], FRAC_PI_2);
+        let input = VehicleInput {
+            throttle: 1.0,
+            ..VehicleInput::default()
+        };
+        let (mut furthest, mut wet) = (f32::INFINITY, 0usize);
+        let mut steps = 0;
+        while d.water_resets == 0 {
+            d.step(input, &ground);
+            if d.water_resets == 0 {
+                furthest = furthest.min(d.state.pos[0]);
+                wet += usize::from(d.water_depth(&ground) > WADE_M);
+            }
+            steps += 1;
+            assert!(
+                steps < (20.0 / DT) as usize,
+                "never reset; at {:?}",
+                d.state.pos
+            );
+        }
+        // Where the water starts, along the drive.
+        let mut shore = p[0];
+        while ground.water_depth([shore, p[1]], ground.level_at([shore, p[1]]).0) == 0.0 {
+            shore -= 0.5;
+        }
+        eprintln!(
+            "reset after {:.1} s, {:.1} s wet, {:.1} m past the waterline",
+            steps as f32 * DT,
+            wet as f32 * DT,
+            shore - furthest
+        );
+        assert!(
+            shore - furthest < 30.0,
+            "drove {} m into the sea",
+            shore - furthest
+        );
+        assert!(wet as f32 * DT >= DEEP_RESET_S);
+        // Back at the start, at rest.
+        assert_eq!(d.pose(1.0).pos.x, p[0]);
+        assert!(d.state.speed_mps.abs() < 1e-3);
     }
 }

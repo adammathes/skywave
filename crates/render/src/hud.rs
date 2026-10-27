@@ -269,6 +269,23 @@ impl HudBuilder {
         });
     }
 
+    /// Appends everything `hud` draws, in order (its text copied into this builder), so a
+    /// frame can lay more over a HUD built elsewhere.
+    pub fn extend(&mut self, hud: &Hud<'_>) {
+        for &item in hud.items {
+            match item {
+                HudItem::Text {
+                    x,
+                    y,
+                    scale,
+                    color,
+                    text,
+                } => self.text(x, y, scale, color, hud.str(text)),
+                other => self.items.push(other),
+            }
+        }
+    }
+
     /// The text of the last item, if it is text (for measuring what was just written).
     pub fn last_text(&self) -> &str {
         match self.items.last() {
@@ -553,6 +570,28 @@ mod tests {
         assert_eq!(levels[1].2, [128, 128, 128, 255]);
         assert!(mip_chain(1, 1, &[1, 2, 3, 4]).is_empty());
         assert_eq!(mip_chain(1024, 1024, &vec![0; 1024 * 1024 * 4]).len(), 10);
+    }
+
+    #[test]
+    fn extend_copies_another_hud_in_order() {
+        let mut a = HudBuilder::new();
+        a.begin(1.0);
+        a.rect(1.0, 2.0, 3.0, 4.0, [1, 2, 3, 4]);
+        a.text(5.0, 6.0, 2.0, [9; 4], "hello");
+        let mut b = HudBuilder::new();
+        b.begin(1.0);
+        b.text(0.0, 0.0, 1.0, [7; 4], "first");
+        b.extend(&a.view());
+        let v = b.view();
+        assert_eq!(v.items.len(), 3);
+        assert_eq!(v.items[1], a.view().items[0]);
+        match v.items[2] {
+            HudItem::Text { x, text, .. } => {
+                assert_eq!(x, 5.0);
+                assert_eq!(v.str(text), "hello");
+            }
+            _ => panic!("not text"),
+        }
     }
 
     fn close(a: [f32; 2], b: [f32; 2]) -> bool {
