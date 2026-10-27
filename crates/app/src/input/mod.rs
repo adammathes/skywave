@@ -37,9 +37,19 @@ pub enum Action {
     /// `invert` flips it.
     LookY,
     LookBack,
+    /// Next station; on the deck, the next track.
     RadioNext,
+    /// Previous station; on the deck, the previous track (or the start of this one).
     RadioPrev,
+    /// The radio's power; on the deck, play/pause.
     RadioOff,
+    /// Switch between the radio and the deck (tape, CD or MP3 player by era).
+    DeckSource,
+    /// The deck's next mode: Normal, Shuffle, Continuous.
+    DeckMode,
+    /// The deck's next / previous album (tape or disc).
+    AlbumNext,
+    AlbumPrev,
     Headlights,
     /// High beams on/off with the headlights on; with them off, headlights on with high beams.
     HighBeams,
@@ -86,7 +96,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 36;
+    pub const COUNT: usize = 40;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -99,6 +109,10 @@ impl Action {
         Action::RadioNext,
         Action::RadioPrev,
         Action::RadioOff,
+        Action::DeckSource,
+        Action::DeckMode,
+        Action::AlbumNext,
+        Action::AlbumPrev,
         Action::Headlights,
         Action::HighBeams,
         Action::Horn,
@@ -209,6 +223,10 @@ impl Action {
             Action::RadioNext => "RadioNext",
             Action::RadioPrev => "RadioPrev",
             Action::RadioOff => "RadioOff",
+            Action::DeckSource => "DeckSource",
+            Action::DeckMode => "DeckMode",
+            Action::AlbumNext => "AlbumNext",
+            Action::AlbumPrev => "AlbumPrev",
             Action::Headlights => "Headlights",
             Action::HighBeams => "HighBeams",
             Action::Horn => "Horn",

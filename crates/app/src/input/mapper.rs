@@ -2,7 +2,7 @@
 
 use super::bindings::{Binding, Bindings, LONG_PRESS_S};
 use super::raw::{DeviceKind, MouseAxis, RawInput};
-use super::{Action, InputState};
+use super::{Action, Context, InputState};
 
 /// Mouse look: one unit of `LookX`/`LookY` per this many pixels of motion between samples
 /// (50 px in one frame is full deflection), before sensitivity.
@@ -37,6 +37,10 @@ pub struct InputMapper {
     /// Used as some binding's `hold`, or by a `long` binding; such an input fires its own
     /// actions on release, and only if no chord (or long press) was used while it was down.
     modifier: [bool; RawInput::COUNT],
+    /// Per context ([`Context`]): some action of that context makes the input a modifier,
+    /// so that context's other actions on it act on release. Another context's (the
+    /// menu's, on a d-pad direction a driving action holds long) still act on press.
+    deferred: [[bool; RawInput::COUNT]; 3],
     chord_used: [bool; RawInput::COUNT],
     /// Some `long` binding reads this input.
     long: [bool; RawInput::COUNT],
@@ -71,6 +75,7 @@ impl InputMapper {
             value: [0.0; RawInput::COUNT],
             pressed_edge: [false; RawInput::COUNT],
             modifier: [false; RawInput::COUNT],
+            deferred: [[false; RawInput::COUNT]; 3],
             chord_used: [false; RawInput::COUNT],
             long: [false; RawInput::COUNT],
             held_s: [0.0; RawInput::COUNT],
@@ -99,15 +104,19 @@ impl InputMapper {
 
     fn index_modifiers(&mut self) {
         self.modifier = [false; RawInput::COUNT];
+        self.deferred = [[false; RawInput::COUNT]; 3];
         self.long = [false; RawInput::COUNT];
         for device in DeviceKind::ALL {
             for action in Action::ALL {
+                let ctx = context_slot(action.context());
                 for b in self.bindings.get(device, action) {
                     if let Some(i) = b.hold.and_then(RawInput::slot) {
                         self.modifier[i] = true;
+                        self.deferred[ctx][i] = true;
                     }
                     if let Some(i) = b.raw.slot().filter(|_| b.long && !b.raw.is_analog()) {
                         self.modifier[i] = true;
+                        self.deferred[ctx][i] = true;
                         self.long[i] = true;
                     }
                 }
@@ -294,7 +303,8 @@ impl InputMapper {
                 let mut digital = 0.0f32;
                 let mut analog = 0.0f32;
                 for b in self.bindings.get(device, action) {
-                    let Some((v, e)) = self.read_binding(b, &captured) else {
+                    let ctx = context_slot(action.context());
+                    let Some((v, e)) = self.read_binding(b, ctx, &captured) else {
                         continue;
                     };
                     edge |= e;
@@ -353,7 +363,12 @@ impl InputMapper {
 
     /// The signed value and press edge of one binding now, or `None` while it is inactive
     /// (its chord's hold is up, or a chord has taken its input over).
-    fn read_binding(&self, b: &Binding, captured: &[bool; RawInput::COUNT]) -> Option<(f32, bool)> {
+    fn read_binding(
+        &self,
+        b: &Binding,
+        ctx: usize,
+        captured: &[bool; RawInput::COUNT],
+    ) -> Option<(f32, bool)> {
         let i = b.raw.slot()?;
         match b.hold {
             Some(h) if !self.is_held(h) => return None,
@@ -369,12 +384,20 @@ impl InputMapper {
         }
         let (down, edge) = if b.long {
             (self.long_edge[i], self.long_edge[i])
-        } else if self.modifier[i] && b.hold.is_none() {
+        } else if self.deferred[ctx][i] && b.hold.is_none() {
             (self.tap[i], self.tap[i])
         } else {
             (self.held[i], self.pressed_edge[i])
         };
         Some((b.read(if down { 1.0 } else { 0.0 }), edge))
+    }
+}
+
+fn context_slot(c: Context) -> usize {
+    match c {
+        Context::Drive => 0,
+        Context::Menu => 1,
+        Context::Fly => 2,
     }
 }
 

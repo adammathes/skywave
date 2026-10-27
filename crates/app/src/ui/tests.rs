@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use super::*;
 use crate::input::{Key, PadAxis, PadButton};
+use audio::deck::Source;
 use skywave_core::{Seed, SIM_DT};
 
 const DT: f64 = 1.0 / 60.0;
@@ -1802,6 +1803,39 @@ fn still_scenes_keep_the_radio_off() {
     assert!(app.ui().radio().toast().is_none());
 }
 
+/// A folder of `files` (paths in it), each two minutes long, untagged.
+fn music(id: &str, name: &str, files: &[&str]) -> audio::deck::Folder {
+    audio::deck::Folder {
+        id: id.into(),
+        name: name.into(),
+        mixtape: false,
+        files: files
+            .iter()
+            .map(|p| audio::deck::FileInfo {
+                key: format!("{id}/{p}"),
+                path: p.to_string(),
+                probe: audio::music::Probe {
+                    secs: Some(120.0),
+                    ..audio::music::Probe::default()
+                },
+            })
+            .collect(),
+    }
+}
+
+/// Two albums by two artists, as a music app exports them.
+fn library() -> audio::deck::Folder {
+    music(
+        "h1",
+        "Music",
+        &[
+            "Night Shift/Coastline/01 Sunset Drive.mp3",
+            "Night Shift/Coastline/02 Palm Shadows.mp3",
+            "Tidewater/Harbor Lights/01 Pier.mp3",
+        ],
+    )
+}
+
 #[test]
 fn music_folders_are_picked_from_the_audio_page() {
     let mut h = Harness::new();
@@ -1821,66 +1855,304 @@ fn music_folders_are_picked_from_the_audio_page() {
     h.pad(PadButton::South);
     assert!(h.app.take_music_request());
     assert!(!h.app.take_music_request());
-    let rows = h.app.ui().radio().rows().len();
-    let track = |i: usize| audio::Track {
-        key: format!("0/{i}"),
-        label: format!("Song {i}"),
-        secs: 200.0,
-    };
-    h.app
-        .add_music_folder("r1", "Yacht", vec![track(0), track(1)], true, true);
+    let stations = h.app.radio().channels().len();
+    h.app.add_music_folder(library(), true, true);
     assert_eq!(
         h.app.ui().toast(),
         Some(Toast::MusicAdded {
-            tracks: 2,
+            tracks: 3,
             kept: true
         })
     );
     h.frame();
-    assert!(h.hud_text().contains("Yacht: 2 tracks on the dial"));
-    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    assert!(h.hud_text().contains("Music: 3 tracks in the library"));
+    assert_eq!(h.app.radio().channels().len(), stations, "not on the dial");
+    assert_eq!(h.app.deck().library().albums.len(), 2);
     h.app
-        .add_music_folder("r1", "Yacht", vec![track(0)], false, true);
+        .add_music_folder(music("h1", "Music", &["A/B/01 x.mp3"]), false, true);
     h.app
-        .add_music_folder("r2", "Empty", Vec::new(), true, false);
+        .add_music_folder(music("h2", "Empty", &[]), true, false);
     assert_eq!(h.app.ui().toast(), Some(Toast::MusicEmpty));
     assert_eq!(
-        h.app.ui().radio().rows().len(),
-        rows + 1,
+        h.app.deck().library().tracks.len(),
+        1,
         "replaced; empty left out"
     );
-    let mine = h.app.radio().channels().last().unwrap().clone();
-    assert_eq!((mine.name.as_str(), mine.tracks.len()), ("Yacht", 1));
-    // Another folder of the same name is another station.
-    h.app
-        .add_music_folder("r3", "Yacht", vec![track(0)], true, false);
-    assert_eq!(h.app.ui().radio().rows().len(), rows + 2);
+    // Loose dropped files: a mixtape beside the library.
+    let mut tape = music("d1", "Dropped music", &["x.mp3", "y.mp3"]);
+    tape.mixtape = true;
+    h.app.add_music_folder(tape, true, false);
     h.frame();
     assert!(h.hud_text().contains("(pick it again next time)"));
-    h.pad(PadButton::DpadUp);
-    assert_eq!(label(&h), Some("Add music folder"), "picked again");
-    // Removing one from the Stations page forgets it; "Remove music folders" the rest.
-    h.open(&[ItemId::Open(Page::Stations)]);
-    let remove = h
-        .ui()
-        .items()
+    let albums: Vec<&str> = h
+        .app
+        .deck()
+        .library()
+        .albums
         .iter()
-        .find_map(|i| match i.id {
-            ItemId::RemoveFolder(r) if h.app.ui().radio().rows()[r].id == mine.id => Some(i.id),
-            _ => None,
-        })
-        .unwrap();
-    h.focus_on(remove);
+        .map(|a| a.title.as_str())
+        .collect();
+    assert_eq!(albums, ["B", "Mixtape"]);
+    h.pad(PadButton::DpadUp);
+    assert_eq!(label(&h), Some("Music library"), "picked again");
+    // Removing one from the Library page forgets it; "Remove music folders" the rest.
+    h.open(&[ItemId::Open(Page::Library)]);
+    h.focus_on(ItemId::RemoveFolder(0));
     h.pad(PadButton::South);
-    assert_eq!(h.app.take_forgotten_music(), ["r1"]);
-    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    assert_eq!(h.app.take_forgotten_music(), ["h1"]);
+    assert_eq!(h.app.deck().library().albums.len(), 1);
     h.pad(PadButton::East);
     h.focus_on(ItemId::ClearMusic);
     h.pad(PadButton::South);
     assert_eq!(h.app.take_forgotten_music(), ["*"]);
-    assert_eq!(h.app.ui().radio().rows().len(), rows);
+    assert!(h.app.deck().library().is_empty());
     h.app.music_picker_refused();
     assert_eq!(h.app.ui().toast(), Some(Toast::MusicNeedsKeyboard));
+}
+
+impl Harness {
+    /// `b` held for longer than a long press, then let go.
+    fn hold(&mut self, b: PadButton) {
+        let raw = RawInput::PadButton(b);
+        self.input.press(raw);
+        for _ in 0..70 {
+            self.frame();
+        }
+        self.input.release(raw);
+        self.frame();
+    }
+
+    /// `b` tapped while `hold` is held (a chord).
+    fn chord(&mut self, hold: PadButton, b: PadButton) {
+        self.input.press(RawInput::PadButton(hold));
+        self.frame();
+        self.pad(b);
+        self.input.release(RawInput::PadButton(hold));
+        self.frame();
+    }
+
+    /// The keys of the files the player was asked to play since the last call.
+    fn played(&mut self) -> Vec<String> {
+        self.app
+            .radio_commands()
+            .filter_map(|c| match c {
+                audio::RadioCommand::PlayFile { key, .. } => Some(key),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Tells the deck its latest file started.
+    fn deck_started(&mut self) {
+        let token = self.app.deck().token();
+        self.app.radio_event(audio::PlayerEvent::Started { token });
+    }
+}
+
+#[test]
+fn the_deck_plays_from_the_pad_alone() {
+    let mut h = Harness::new();
+    h.app.add_music_folder(library(), false, true);
+    h.app.radio_commands().for_each(drop);
+    assert_eq!(h.app.source(), Source::Radio);
+    assert!(h.played().is_empty(), "silent until a key");
+    // D-pad down held: the deck (a tape deck in 1984) becomes the source and plays.
+    h.hold(PadButton::DpadDown);
+    assert_eq!(h.app.source(), Source::Deck);
+    assert!(!h.app.radio().is_on());
+    assert_eq!(h.played(), ["h1/Night Shift/Coastline/01 Sunset Drive.mp3"]);
+    h.deck_started();
+    let text = h.app.readout_text();
+    assert_eq!(
+        text, "TAPE >\nNight Shift\nCoastline\nSunset Drive",
+        "{text}"
+    );
+    h.frame();
+    assert!(
+        h.hud_text().contains("TAPE  Night Shift - Coastline"),
+        "the toast"
+    );
+    assert!(h.hud_text().contains("Sunset Drive"), "the readout");
+    // Right and left are tracks; a tap of down pauses and plays.
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.played(), ["h1/Night Shift/Coastline/02 Palm Shadows.mp3"]);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.played(), ["h1/Night Shift/Coastline/01 Sunset Drive.mp3"]);
+    h.pad(PadButton::DpadDown);
+    assert!(!h.app.deck().is_playing());
+    assert!(h.app.readout_text().starts_with("TAPE ||"));
+    h.pad(PadButton::DpadDown);
+    assert!(h.app.deck().is_playing());
+    assert_eq!(h.played().len(), 1);
+    // D-pad down held with right: the next album.
+    h.chord(PadButton::DpadDown, PadButton::DpadRight);
+    assert_eq!(h.played(), ["h1/Tidewater/Harbor Lights/01 Pier.mp3"]);
+    assert!(h.app.deck().is_playing(), "the chord is not also a pause");
+    assert_eq!(h.app.source(), Source::Deck, "nor a source switch");
+    // The Audio page: the mode, and the library as Artist - Album.
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.focus_on(ItemId::DeckMode);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.deck().mode(), audio::deck::Mode::Shuffle);
+    h.open(&[ItemId::Open(Page::Library)]);
+    assert!(
+        h.hud_text().contains("Night Shift - Coastline"),
+        "{}",
+        h.hud_text()
+    );
+    h.focus_on(ItemId::Album(0));
+    h.pad(PadButton::South);
+    assert!(!h.app.menu_open(), "back to the road");
+    assert_eq!(h.played(), ["h1/Night Shift/Coastline/01 Sunset Drive.mp3"]);
+    // Back to the radio from the page: the deck stops, the radio tunes.
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.focus_on(ItemId::Source);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.source(), Source::Radio);
+    assert!(!h.app.deck().is_playing() && h.app.radio().is_on());
+    assert!(h.app.readout_text().starts_with("RADIO"));
+}
+
+#[test]
+fn the_deck_keys_on_the_keyboard_and_the_readout_fades() {
+    let mut h = Harness::new();
+    h.app.add_music_folder(library(), false, true);
+    h.key(Key::Quote);
+    assert_eq!(h.app.source(), Source::Deck);
+    h.deck_started();
+    h.key(Key::KeyP);
+    assert_eq!(h.app.deck().album().unwrap().1.title, "Harbor Lights");
+    h.key(Key::KeyO);
+    assert_eq!(h.app.deck().album().unwrap().1.title, "Coastline");
+    h.key(Key::Semicolon);
+    assert_eq!(h.app.deck().mode(), audio::deck::Mode::Shuffle);
+    h.frame();
+    assert!(h.hud_text().contains("SHUFFLE >"), "{}", h.hud_text());
+    // Six seconds on, it fades; a key brings it back.
+    for _ in 0..(7.5 / DT) as usize {
+        h.frame();
+    }
+    assert!(!h.hud_text().contains("SHUFFLE"), "{}", h.hud_text());
+    h.key(Key::Backslash);
+    assert!(h.hud_text().contains("SHUFFLE ||"), "{}", h.hud_text());
+    // An album key on the radio puts the tape in.
+    h.key(Key::Quote);
+    assert_eq!(h.app.source(), Source::Radio);
+    h.app.radio_commands().for_each(drop);
+    h.key(Key::KeyP);
+    assert_eq!(h.app.source(), Source::Deck);
+    assert_eq!(h.played().len(), 1);
+}
+
+#[test]
+fn the_deck_resumes_next_session_silent_at_the_same_second() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    h.app.add_music_folder(library(), false, true);
+    h.key(Key::Quote);
+    h.key(Key::BracketRight);
+    h.deck_started();
+    for _ in 0..(8.0 / DT) as usize {
+        h.frame();
+    }
+    h.key(Key::Backslash);
+    let saved = store.0.borrow().clone().expect("saved");
+    assert!(saved.contains("\"source\": \"deck\""), "{saved}");
+    assert!(saved.contains("02 Palm Shadows.mp3"), "{saved}");
+    let at = h.app.deck().position_s().floor();
+    assert!((8.0..9.0).contains(&at), "{at}");
+    // Next session: the deck is the source, the track and second are back, nothing plays.
+    let mut next = Harness::with_store(&store);
+    next.app.add_music_folder(library(), false, true);
+    next.frame();
+    assert_eq!(next.app.source(), Source::Deck);
+    assert!(next.played().is_empty());
+    assert_eq!(next.app.deck().position_s(), at);
+    next.key(Key::Backslash);
+    let cmds: Vec<_> = next.app.radio_commands().collect();
+    assert!(
+        matches!(&cmds[..], [audio::RadioCommand::PlayFile { key, start_s, .. }]
+            if key.ends_with("02 Palm Shadows.mp3") && *start_s == at),
+        "{cmds:?}"
+    );
+}
+
+/// Every HUD item's box in virtual units, text measured as drawn on a `target` (whole
+/// target pixels per font pixel).
+fn hud_boxes(hud: &render::Hud, target: (u32, u32)) -> Vec<[f32; 4]> {
+    let layout = render::HudLayout::new(target, hud.ui_scale);
+    hud.items
+        .iter()
+        .map(|item| match *item {
+            render::HudItem::Text {
+                x, y, scale, text, ..
+            } => {
+                let s = layout.font_pixels(scale) as f32 / layout.scale;
+                let t = hud.str(text);
+                let lines = t.split('\n').count() as f32;
+                let w = render::font::text_width(t) as f32 * s;
+                let h = (lines - 1.0) * render::font::LINE_HEIGHT as f32 * s
+                    + render::font::CELL_H as f32 * s;
+                [x, y, w, h]
+            }
+            render::HudItem::Rect { x, y, w, h, .. } => [x, y, w, h],
+            render::HudItem::Image(i) => [i.x, i.y, i.w, i.h],
+        })
+        .collect()
+}
+
+#[test]
+fn the_readout_never_overlaps_the_rest_of_the_hud() {
+    let long = "An Unusually Long Artist Name That Scrolls";
+    for scale in [1.0, 2.0] {
+        for target in [(1280, 800), (1920, 1080)] {
+            for toast in [false, true] {
+                let mut h = Harness::new();
+                h.app.set_target_size(target.0, target.1);
+                h.app.ui.settings.ui_scale = scale;
+                h.app.add_music_folder(
+                    music("h1", "Music", &[&format!("{long}/{long}/01 {long}.mp3")]),
+                    false,
+                    true,
+                );
+                h.key(Key::Quote);
+                if toast {
+                    // The longest status toast, at the bottom left over the minimap.
+                    h.app.ui.show(Toast::MusicAdded {
+                        tracks: 4096,
+                        kept: false,
+                    });
+                }
+                h.frame();
+                let ui = h.app.ui();
+                let (start, end) = ui.readout_span();
+                assert!(end > start, "drawn");
+                let hud = ui.hud();
+                let boxes = hud_boxes(&hud, target);
+                let safe = render::HudLayout::safe_rect(scale);
+                for (i, a) in boxes[start..end].iter().enumerate() {
+                    assert!(
+                        a[0] >= safe[0] - 1.0 && a[0] + a[2] <= safe[0] + safe[2] + 3.0,
+                        "{scale} {target:?}: item {i} leaves the safe area: {a:?}"
+                    );
+                    for (j, b) in boxes.iter().enumerate() {
+                        if (start..end).contains(&j) {
+                            continue;
+                        }
+                        let apart = a[0] + a[2] <= b[0]
+                            || b[0] + b[2] <= a[0]
+                            || a[1] + a[3] <= b[1]
+                            || b[1] + b[3] <= a[1];
+                        assert!(
+                            apart,
+                            "{scale} {target:?} toast {toast}: readout {a:?} overlaps item {j} {b:?}: {:?}",
+                            hud.items[j]
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -1908,12 +2180,12 @@ fn the_dash_shows_the_station_in_the_cockpit() {
     h.frame();
     assert_eq!(
         count(&h),
-        2,
-        "the toast and its shadow, from the chase camera"
+        4,
+        "the toast and the readout, each with its shadow, from the chase camera"
     );
     h.app.set_camera_mode(crate::CameraMode::Cockpit);
     h.frame();
-    assert_eq!(count(&h), 3, "and the dash: {}", h.hud_text());
+    assert_eq!(count(&h), 5, "and the dash: {}", h.hud_text());
     h.key(Key::Backslash);
     assert_eq!(count(&h), 0, "off: nothing on the dash");
 }

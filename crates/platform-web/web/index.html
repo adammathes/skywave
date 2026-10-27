@@ -98,6 +98,7 @@
       <tr><td>Camera</td><td><kbd>C</kbd>, hold right mouse to look</td><td>Top face button (Y), right stick</td></tr>
       <tr><td>Look back</td><td><kbd>Q</kbd></td><td>Right stick click</td></tr>
       <tr><td>Radio</td><td><kbd>[</kbd> <kbd>]</kbd>, off <kbd>\</kbd></td><td>D-pad ← →, off ↓</td></tr>
+      <tr><td>Your music (deck)</td><td><kbd>'</kbd> radio/deck, <kbd>\</kbd> play, <kbd>[</kbd> <kbd>]</kbd> tracks, <kbd>O</kbd> <kbd>P</kbd> albums, <kbd>;</kbd> mode</td><td>Hold ↓ radio/deck, ↓ play, ← → tracks, hold ↓ + ← → albums</td></tr>
       <tr><td>Headlights, high beams, horn</td><td><kbd>L</kbd>, <kbd>K</kbd>, <kbd>H</kbd></td><td>D-pad ↑ (hold for high beams), left stick click</td></tr>
       <tr><td>Next car</td><td><kbd>V</kbd></td><td>Menu › Vehicle</td></tr>
       <tr><td>Map</td><td><kbd>M</kbd>, zoom <kbd>-</kbd> <kbd>=</kbd></td><td>Select / View, zoom shoulders</td></tr>
@@ -231,7 +232,8 @@
   // Car radio player, separate from the sfx sink. The game (crates/audio, platform-web)
   // sends its RadioCommands to window.skywaveRadio.command(kind, url, token, value, name)
   // and polls takeEvent() for what happened ("started|failed|blocked <token>"); report(text)
-  // gets the radio's state. Nothing loads until the game asks for a stream: the only network
+  // gets the radio's state and the corner readout's text (`readout`: badge and status, then
+  // artist, album and song). The deck (the player's own music) uses this player too. Nothing loads until the game asks for a stream: the only network
   // use is the stream URL the player chose. The dial sweep between stations is not played
   // here: the game synthesizes it with its other sounds (the sfx worklet above).
   // Browsers play sound only after a user gesture: a refused play() is reported as blocked
@@ -325,17 +327,23 @@
         else if (kind === "volume") { volume = Math.min(1, Math.max(0, value)); audio.volume = volume; }
       },
       takeEvent() { return events.length ? events.shift() : null; },
-      report(state) { this.state = state; note(`state ${state}`); },
+      readout: "",
+      report(state, readout) {
+        this.state = state;
+        this.readout = readout || "";
+        note(`state ${state}`);
+      },
     };
   })();
 </script>
 <script id="music">
-  // The player's own music as radio stations. Folders come from "Add music folder" in the
+  // The player's own music, the deck's library. Folders come from "Music library" in the
   // game's Audio settings (showDirectoryPicker where the browser has it, else a folder
-  // input) or from dropping files or folders on the page. Each picked or dropped folder is
-  // ONE station of every playable file under it (loose dropped files: one station). The
-  // files stay here: the game takes each folder's id, name, file names, sizes and first
-  // bytes (for tags) with takeFolder(), and plays a file through the radio player by its
+  // input) or from dropping files or folders on the page. Picked or dropped folders join
+  // one library, which the game indexes as Artist > Album from their layout and tags (loose
+  // dropped files: one "Mixtape" album). The files stay here: the game takes each folder's
+  // id, name, files' paths in it, sizes and first bytes (for tags) with takeFolder(), and
+  // plays a file through the radio player by its
   // key ("<folder id>/<path in it>"), so nothing is uploaded or sent anywhere. Picked
   // folders are remembered as handles in IndexedDB (with a stable id) where the browser can
   // store them; when it cannot, or has not granted reading them again, `again` is true and
@@ -361,8 +369,9 @@
       ? 10 + ((h[6] & 0x7f) << 21 | (h[7] & 0x7f) << 14 | (h[8] & 0x7f) << 7 | (h[9] & 0x7f)) + (h[5] & 0x10 ? 10 : 0)
       : 0);
 
-    // One station: folder `id` called `name`, from [{rel, file}].
-    async function add(id, name, list, announce, kept) {
+    // One folder of the library: `id` called `name`, from [{rel, file}]; `mixtape`: loose
+    // dropped files.
+    async function add(id, name, list, announce, kept, mixtape) {
       const entries = list.filter((e) => playable(e.file)).sort((a, b) => a.rel.localeCompare(b.rel)).slice(0, MAX_FILES);
       for (const k of [...files.keys()]) if (k.startsWith(`${id}/`)) files.delete(k);
       const out = [];
@@ -378,9 +387,9 @@
         } catch { /* unreadable: the file name will do */ }
         const key = `${id}/${rel}`;
         files.set(key, file);
-        out.push({ key, name: file.name, size: file.size, head, audio });
+        out.push({ key, rel, size: file.size, head, audio });
       }
-      if (out.length > 0 || announce) ready.push({ path: id, name, announce, kept, files: out });
+      if (out.length > 0 || announce) ready.push({ path: id, name, announce, kept, mixtape: !!mixtape, files: out });
       if (out.length > 0) {
         if (kept) music.again = roots.some((r) => !r.granted);
         else storage((s) => s.setItem(PICKED_KEY, "1"));
@@ -490,7 +499,7 @@
             await add(newId("d"), t.entry.name, out, true, false);
           } else if (t.file) loose.push({ rel: t.file.name, file: t.file });
         }
-        if (loose.length > 0) await add(newId("d"), "Dropped music", loose, true, false);
+        if (loose.length > 0) await add(newId("d"), "Mixtape", loose, true, false, true);
       })();
     });
 
@@ -517,7 +526,7 @@
 
     const music = {
       again: false,
-      // "Add music folder". False when there is no user activation to open a picker from.
+      // "Music library". False when there is no user activation to open a picker from.
       pick() {
         if (navigator.userActivation && !navigator.userActivation.isActive) return false;
         pickNow();

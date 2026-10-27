@@ -8,7 +8,7 @@
 //   node tools/screenshot/shoot.mjs --all                         # every scene in scenes.json
 //   node tools/screenshot/shoot.mjs --all --golden                # -> golden/<name>.png
 //   node tools/screenshot/shoot.mjs --selftest                    # wasm vs native hashes
-//   node tools/screenshot/shoot.mjs --music                       # a dropped MP3 plays
+//   node tools/screenshot/shoot.mjs --music                       # the deck plays a library
 //   node tools/screenshot/shoot.mjs [--url-query "?seed=1"] [--out path.png]   # ad hoc
 //   node tools/screenshot/shoot.mjs ... --size 1280x800          # another viewport (16:10)
 //
@@ -16,15 +16,17 @@
 // `scenes.json` (keys: crates/app/src/scene.rs). `--selftest` opens `?selftest=1`, reads
 // the `{"skywave_selftest": {...}}` console line and compares it with `selftest.json`, the
 // values native tests pin. `--music` drops a short MP3 (silence with an ID3 tag, generated
-// here) on a running game, tunes the radio to the station it becomes and checks that the
-// page's player plays it. Compare captures with goldens using `diff.mjs`.
+// here) on a running game and picks a generated two-album library (Artist/Album/NN
+// Title.mp3) through the folder input, then plays it on the deck (play, next track, next
+// album, mode, pause) and checks the corner readout's text and the page player's log. Compare captures with goldens using `diff.mjs`.
 //
 // Uses an already-installed `playwright` package (global/NODE_PATH or tools/screenshot/
 // node_modules); it does not download browsers.
 
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readPng } from "./png.mjs";
@@ -235,9 +237,10 @@ async function runSelftest() {
   }
 }
 
-/// A `secs`-second MP3: an ID3v2.3 tag (TIT2, TPE1), then silent MPEG-1 Layer III frames
-/// (128 kb/s, 44.1 kHz, mono; all-zero side information decodes to silence).
-function silentMp3(secs, title, artist) {
+/// A `secs`-second MP3: an ID3v2.3 tag (TIT2, TPE1, and TALB and TRCK when given), then
+/// silent MPEG-1 Layer III frames (128 kb/s, 44.1 kHz, mono; all-zero side information
+/// decodes to silence).
+function silentMp3(secs, title, artist, album, track) {
   const frame = (id, text) => {
     const body = Buffer.concat([Buffer.from([0]), Buffer.from(text, "latin1")]);
     const head = Buffer.alloc(10);
@@ -245,7 +248,11 @@ function silentMp3(secs, title, artist) {
     head.writeUInt32BE(body.length, 4);
     return Buffer.concat([head, body]);
   };
-  const frames = Buffer.concat([frame("TIT2", title), frame("TPE1", artist)]);
+  const frames = Buffer.concat([
+    frame("TIT2", title),
+    frame("TPE1", artist),
+    ...(album ? [frame("TALB", album), frame("TRCK", String(track))] : []),
+  ]);
   const n = frames.length;
   const tag = Buffer.concat([
     Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]),
@@ -255,6 +262,25 @@ function silentMp3(secs, title, artist) {
   const audio = Buffer.alloc(count * 417);
   for (let i = 0; i < count; i++) audio.set([0xff, 0xfb, 0x90, 0xc0], i * 417);
   return Buffer.concat([tag, audio]);
+}
+
+/// Writes a two-album library as a music app exports it (`Artist/Album/NN Title.mp3`),
+/// silent MP3s with tags, into a fresh temporary folder; returns its path.
+async function writeLibrary() {
+  const dir = await mkdtemp(join(tmpdir(), "skywave-library-"));
+  const albums = [
+    ["Night Shift", "Coastline", ["Sunset Drive", "Palm Shadows"]],
+    ["Tidewater", "Harbor Lights", ["Pier"]],
+  ];
+  for (const [artist, album, titles] of albums) {
+    const at = join(dir, "Music", artist, album);
+    await mkdir(at, { recursive: true });
+    for (const [i, title] of titles.entries()) {
+      const name = `${String(i + 1).padStart(2, "0")} ${title}.mp3`;
+      await writeFile(join(at, name), silentMp3(30, title, artist, album, i + 1));
+    }
+  }
+  return join(dir, "Music");
 }
 
 async function runMusic() {
@@ -268,36 +294,68 @@ async function runMusic() {
       }),
       n,
     );
+  const press = async (key) => {
+    await page.keyboard.down(key);
+    await frames(2);
+    await page.keyboard.up(key);
+    await frames(2);
+  };
+  const readout = () => page.evaluate(() => window.skywaveRadio.readout);
+  const waitReadout = (re, what) =>
+    page.waitForFunction((src) => new RegExp(src).test(window.skywaveRadio.readout), re.source, {
+      timeout: 120_000,
+      polling: 250,
+    }).catch(async () => {
+      throw new Error(`${what}: the readout says ${JSON.stringify(await readout())}`);
+    });
   try {
-    const mp3 = silentMp3(4, "Test Tone", "Skywave");
+    // A two-album library through the folder picker's input (a synthetic drop cannot carry
+    // folders), then a loose dropped file: a mixtape beside it.
+    await page.setInputFiles("input[type=file]", await writeLibrary());
+    await page.waitForFunction(() => window.skywaveMusic.tracks === 3, null, { timeout: 30_000 });
+    await frames(3);
+    const mp3 = silentMp3(30, "Test Tone", "Skywave");
     await page.evaluate((bytes) => {
       const file = new File([new Uint8Array(bytes)], "01 test tone.mp3", { type: "audio/mpeg" });
       const data = new DataTransfer();
       data.items.add(file);
       window.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
     }, [...mp3]);
-    await page.waitForFunction(() => window.skywaveMusic.tracks === 1, null, { timeout: 30_000 });
-    // The game takes the folder on its next frame; the station is last on the dial, so
-    // "previous" from off tunes it.
+    await page.waitForFunction(() => window.skywaveMusic.tracks === 4, null, { timeout: 30_000 });
     await frames(3);
-    await page.keyboard.down("BracketLeft");
-    await frames(2);
-    await page.keyboard.up("BracketLeft");
-    await page.waitForFunction(() => /^live files_[0-9a-f]{8}$/.test(window.skywaveRadio.state), null, {
+    // ' makes the deck (a tape deck in 1984) the source and plays the library's first
+    // album: Night Shift's, by artist.
+    await press("Quote");
+    await waitReadout(/^TAPE >\nNight Shift\nCoastline\nSunset Drive$/, "play");
+    await page.waitForFunction(() => /^off/.test(window.skywaveRadio.state) && !window.skywaveRadio.audio.paused, null, {
       timeout: 120_000,
       polling: 250,
     });
-    const { state, log, paused } = await page.evaluate(() => ({
-      state: window.skywaveRadio.state,
+    await press("BracketRight");
+    await waitReadout(/^TAPE >\nNight Shift\nCoastline\nPalm Shadows$/, "next");
+    await press("KeyP");
+    await waitReadout(/^TAPE >\nTidewater\nHarbor Lights\nPier$/, "next album");
+    await press("Semicolon");
+    await waitReadout(/^TAPE SHUFFLE >\n/, "mode");
+    await press("Backslash");
+    await waitReadout(/^TAPE SHUFFLE \|\|\n/, "pause");
+    const { log, text } = await page.evaluate(() => ({
       log: window.skywaveRadio.log.join(" | "),
-      paused: window.skywaveRadio.audio.paused,
+      text: window.skywaveRadio.readout,
     }));
-    console.log(`shoot: music: ${state}; player log: ${log}`);
-    if (!/file d[0-9a-f]+\/01 test tone\.mp3 \d+/.test(log)) throw new Error("the player never got the dropped file");
-    if (paused) throw new Error("the player is paused");
+    console.log(`shoot: music: readout ${JSON.stringify(text)}; player log: ${log}`);
+    for (const want of [
+      /file [a-z][0-9a-f]+\/Night Shift\/Coastline\/01 Sunset Drive\.mp3 \d+/,
+      /file [a-z][0-9a-f]+\/Night Shift\/Coastline\/02 Palm Shadows\.mp3 \d+/,
+      /file [a-z][0-9a-f]+\/Tidewater\/Harbor Lights\/01 Pier\.mp3 \d+/,
+      /event started \d+/,
+      /\| stop( \||$)/,
+    ]) {
+      if (!want.test(log)) throw new Error(`the player log lacks ${want}`);
+    }
     // Warnings are expected (no WebGPU adapter on SwiftShader); errors are not.
     if (problems.some((p) => !p.startsWith("console.warning"))) throw new Error("the page logged errors");
-    console.log("shoot: music: the dropped MP3 is a station and plays");
+    console.log("shoot: music: the library plays on the deck: play, next, album, mode, pause");
   } finally {
     for (const p of problems) console.error(`shoot: music: ${p}`);
     await page.close();

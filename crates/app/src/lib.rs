@@ -18,6 +18,7 @@
 pub mod camera;
 pub mod car;
 pub mod daylight;
+pub mod deck;
 pub mod drive;
 mod input;
 pub mod lighting;

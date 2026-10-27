@@ -390,6 +390,10 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioNext => vec![key(Key::BracketRight, Pos)],
             Action::RadioPrev => vec![key(Key::BracketLeft, Pos)],
             Action::RadioOff => vec![key(Key::Backslash, Pos)],
+            Action::DeckSource => vec![key(Key::Quote, Pos)],
+            Action::DeckMode => vec![key(Key::Semicolon, Pos)],
+            Action::AlbumNext => vec![key(Key::KeyP, Pos)],
+            Action::AlbumPrev => vec![key(Key::KeyO, Pos)],
             Action::Headlights => vec![key(Key::KeyL, Pos)],
             Action::HighBeams => vec![key(Key::KeyK, Pos)],
             Action::Horn => vec![key(Key::KeyH, Pos)],
@@ -428,6 +432,17 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioNext => vec![btn(PadButton::DpadRight)],
             Action::RadioPrev => vec![btn(PadButton::DpadLeft)],
             Action::RadioOff => vec![btn(PadButton::DpadDown)],
+            // Held, so a tap stays the power (play/pause on the deck).
+            Action::DeckSource => vec![btn(PadButton::DpadDown).held_long()],
+            // The pad cycles the mode on the pause menu's Audio page.
+            Action::DeckMode => vec![],
+            // D-pad down held with right / left: a whole album.
+            Action::AlbumNext => {
+                vec![btn(PadButton::DpadRight).while_held(RawInput::PadButton(PadButton::DpadDown))]
+            }
+            Action::AlbumPrev => {
+                vec![btn(PadButton::DpadLeft).while_held(RawInput::PadButton(PadButton::DpadDown))]
+            }
             Action::Headlights => vec![btn(PadButton::DpadUp)],
             // Held, so a tap stays the headlights.
             Action::HighBeams => vec![btn(PadButton::DpadUp).held_long()],
@@ -500,7 +515,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 21] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 25] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -556,6 +571,22 @@ mod tests {
                 Action::RadioOff,
                 vec![K(Key::Backslash)],
                 vec![B(PadButton::DpadDown)],
+            ),
+            (
+                Action::DeckSource,
+                vec![K(Key::Quote)],
+                vec![B(PadButton::DpadDown)],
+            ),
+            (Action::DeckMode, vec![K(Key::Semicolon)], vec![]),
+            (
+                Action::AlbumNext,
+                vec![K(Key::KeyP)],
+                vec![B(PadButton::DpadRight)],
+            ),
+            (
+                Action::AlbumPrev,
+                vec![K(Key::KeyO)],
+                vec![B(PadButton::DpadLeft)],
             ),
             (
                 Action::Headlights,

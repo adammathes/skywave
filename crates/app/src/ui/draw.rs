@@ -5,6 +5,7 @@
 
 use core::fmt::{self, Display};
 
+use audio::deck::Source;
 use render::{font, HudBuilder, HudImage};
 
 use crate::daylight::{Clock, Daylight};
@@ -240,7 +241,10 @@ impl Ui {
         } else if self.map.full.open {
             self.draw_full_map(&mut hud, ctx);
         } else {
-            self.draw_driving(&mut hud, ctx);
+            let avoid = self.draw_driving(&mut hud, ctx);
+            let start = hud.len();
+            self.draw_readout(&mut hud, avoid);
+            self.readout_span = (start, hud.len());
         }
         if self.settings.debug_overlay {
             self.draw_overlay(&mut hud, ctx);
@@ -522,8 +526,14 @@ impl Ui {
                     hud.text(px + PAD, ty, S, fg, name);
                 }
                 (ItemId::RemoveFolder(i), _) => {
-                    let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
+                    let name = self.deck.folders().get(i).map_or("?", |f| f.name.as_str());
                     hud.text_fmt(px + PAD, ty, S, fg, format_args!("Remove {name}"));
+                }
+                (ItemId::Album(i), _) => {
+                    if let Some(a) = self.deck.deck().library().albums.get(i) {
+                        let (artist, title) = (&a.artist, &a.title);
+                        hud.text_fmt(px + PAD, ty, S, fg, format_args!("{artist} - {title}"));
+                    }
                 }
                 _ => hud.text(px + PAD, ty, S, fg, item.label),
             }
@@ -668,7 +678,9 @@ impl Ui {
         }
     }
 
-    fn draw_driving(&self, hud: &mut HudBuilder, ctx: &DrawCtx) {
+    /// The driving HUD; returns where the status toast is (its top and how far right it
+    /// reaches), for the readout to keep clear of.
+    fn draw_driving(&self, hud: &mut HudBuilder, ctx: &DrawCtx) -> Option<(f32, f32)> {
         let [sx, sy, sw, sh] = hud.safe_rect();
         // The toast sits above the minimap when there is one.
         let mut toast_y = sy + sh - font::CAP_HEIGHT as f32 * 2.0;
@@ -705,38 +717,37 @@ impl Ui {
             Some(mph) => text_right(hud, x, y, 5.0, TEXT, true, format_args!("{:.0}", mph.abs())),
             None => text_right(hud, x, y, 5.0, TEXT, true, format_args!("--")),
         };
+        let mut avoid = None;
         if let Some(t) = self.toast() {
             let args = ToastText(t, &self.music_name);
             hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
+            avoid = Some((toast_y, sx + width(hud.last_text(), 2.0)));
         }
         if let Some(d) = &ctx.radio_display {
             self.draw_radio_display(hud, d);
         }
-        // The station toast: two lines centered at the top.
-        if let Some(t) = self.radio.toast() {
-            let cx = sx + sw * 0.5;
-            let title = t.title();
-            text_center(
-                hud,
-                cx + 2.0,
-                sy + 2.0,
-                2.0,
-                SHADOW,
-                format_args!("{title}"),
-            );
-            text_center(hud, cx, sy, 2.0, ACCENT, format_args!("{title}"));
-            let detail = t.detail();
-            let y = sy + LINE_H;
-            text_center(
-                hud,
-                cx + 2.0,
-                y + 2.0,
-                2.0,
-                SHADOW,
-                format_args!("{detail}"),
-            );
-            text_center(hud, cx, y, 2.0, TEXT, format_args!("{detail}"));
+        // The source's toast: two lines centered at the top.
+        if self.source() == Source::Deck {
+            if let Some(t) = self.deck.toast() {
+                let detail = t.detail();
+                self.draw_toast(hud, format_args!("{t}"), format_args!("{detail}"));
+            }
+        } else if let Some(t) = self.radio.toast() {
+            let (title, detail) = (t.title(), t.detail());
+            self.draw_toast(hud, format_args!("{title}"), format_args!("{detail}"));
         }
+        avoid
+    }
+
+    /// The source's toast: a bright title over a dim detail, centered at the top.
+    fn draw_toast(&self, hud: &mut HudBuilder, title: fmt::Arguments, detail: fmt::Arguments) {
+        let [sx, sy, sw, _] = hud.safe_rect();
+        let cx = sx + sw * 0.5;
+        let y = sy + LINE_H;
+        text_center(hud, cx + 2.0, sy + 2.0, 2.0, SHADOW, title);
+        text_center(hud, cx, sy, 2.0, ACCENT, title);
+        text_center(hud, cx + 2.0, y + 2.0, 2.0, SHADOW, detail);
+        text_center(hud, cx, y, 2.0, TEXT, detail);
     }
 
     /// The station on the radio's display: the quad's screen box darkened like an unlit
@@ -767,7 +778,7 @@ impl Ui {
         };
         let pad = h * 0.15;
         let chars = ((w - 2.0 * pad) / (font::CELL_W as f32 * drawn)).floor() as usize;
-        let Some(text) = self.radio.dash(chars.max(1)) else {
+        let Some(text) = self.dash(chars.max(1)) else {
             return;
         };
         hud.rect(x0, y0, w, h, [4, 8, 6, 225]);
@@ -1101,7 +1112,7 @@ impl Display for ToastText<'_> {
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
             Toast::MusicAdded { tracks, kept } => {
                 let s = if tracks == 1 { "" } else { "s" };
-                write!(f, "{}: {tracks} track{s} on the dial", self.1)?;
+                write!(f, "{}: {tracks} track{s} in the library", self.1)?;
                 if !kept {
                     f.write_str(" (pick it again next time)")?;
                 }

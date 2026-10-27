@@ -10,13 +10,16 @@
 //! frame the UI draws itself into a [`HudBuilder`] that [`crate::App::scene_view`] hands to
 //! the renderer.
 //!
-//! The UI also owns the car radio ([`CarRadio`]): its settings live with the others, the
-//! station keys act while driving, and its toast and dash text are part of the HUD.
+//! The UI also owns the car's two sources, the radio ([`CarRadio`]) and the deck
+//! ([`CarDeck`], the player's own music): their settings live with the others, the keys
+//! act on the source selected while driving, and their toasts, the corner readout
+//! (`readout.rs`) and the dash text are part of the HUD.
 
 mod draw;
 mod menu;
 mod names;
 mod pages;
+mod readout;
 pub mod roster;
 
 pub use menu::{Effect, Item, MenuInput, MenuNav, Nav, Repeat, Unit, Widget};
@@ -24,6 +27,7 @@ pub use pages::{ItemId, Page};
 
 use crate::camera::CameraMode;
 use crate::daylight::{Clock, CLOCK_SPEEDS, DAY_SECONDS};
+use crate::deck::CarDeck;
 use crate::input::{
     Action, AxisOptions, Binding, Bindings, Conflict, DeviceKind, InputMapper, InputState, PadAxis,
     PadButton, RawInput, Sign,
@@ -35,6 +39,7 @@ use crate::map::MapPoi;
 use crate::radio::{self, CarRadio};
 use crate::settings::{FrameRate, GpuInfo, Handling, Quality, Settings, SettingsStore};
 use crate::App;
+use audio::deck::Source;
 use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
 use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 
@@ -83,7 +88,7 @@ pub enum Toast {
     CarReset,
     /// A stream was added to the stations.
     StreamAdded,
-    /// A music folder (`Ui::music_name`) with this many tracks was added to the stations;
+    /// A music folder (`Ui::music_name`) with this many tracks was added to the library;
     /// `kept`: the browser will remember it next session.
     MusicAdded {
         tracks: usize,
@@ -152,9 +157,18 @@ pub struct Ui {
     /// A UI scale the scene asked for, kept over whatever the store loads.
     forced_ui_scale: Option<f32>,
     radio: CarRadio,
+    deck: CarDeck,
+    /// Seconds since the corner readout last had something new (a transport key, a track
+    /// or station change): it shows, then fades.
+    readout_s: f32,
+    /// What the readout last showed: the source, the deck's change count, the radio's
+    /// station and power (a change shows it again); `None` before the first frame.
+    readout_seen: Option<(Source, u32, Option<usize>, bool)>,
+    /// The HUD items the readout drew last frame, `start..end`.
+    readout_span: (usize, usize),
     /// The platform can ask the user for a line of text (the "Add stream URL" item).
     text_entry: bool,
-    /// The platform can ask the user for a music folder (the "Add music folder" item).
+    /// The platform can ask the user for a music folder (the "Music library" item).
     music_picker: bool,
     /// Folders picked last session could not be kept: the item says to pick them again.
     music_again: bool,
@@ -225,6 +239,10 @@ impl Ui {
             map: MapHud::default(),
             forced_ui_scale: None,
             radio: CarRadio::new(),
+            deck: CarDeck::default(),
+            readout_s: readout::HIDDEN_S,
+            readout_seen: None,
+            readout_span: (0, 0),
             text_entry: false,
             music_picker: false,
             music_again: false,
@@ -359,6 +377,11 @@ impl Ui {
         self.toast.map(|(t, _)| t)
     }
 
+    /// The HUD items the corner readout drew last frame, `start..end`.
+    pub fn readout_span(&self) -> (usize, usize) {
+        self.readout_span
+    }
+
     pub fn hud(&self) -> Hud<'_> {
         self.hud.view()
     }
@@ -483,6 +506,7 @@ impl Ui {
         self.dirty = false;
         self.radio.set_gain(self.radio_gain());
         self.radio.apply(&self.settings.radio);
+        self.deck.reload(&self.settings.radio.deck);
     }
 
     /// Writes the settings document if anything changed since the last save.
@@ -519,6 +543,7 @@ impl Ui {
             clock,
             can_quit: self.can_quit,
             radio: &self.radio,
+            deck: &self.deck,
             text_entry: self.text_entry,
             music_picker: self.music_picker,
             music_again: self.music_again,
@@ -674,6 +699,17 @@ impl Ui {
                 let offered = FrameRate::offered(self.panel_hz);
                 self.settings.frame_rate = offered[i.min(offered.len() - 1)];
                 self.dirty = true;
+            }
+            Effect::Choose(ItemId::Source, i) => {
+                let to = if i == 0 { Source::Radio } else { Source::Deck };
+                if to != self.settings.radio.deck.source {
+                    self.switch_source();
+                }
+            }
+            Effect::Choose(ItemId::DeckMode, i) => {
+                let mode = audio::deck::Mode::ALL[i.min(2)];
+                self.deck.set_mode(mode);
+                self.readout_s = 0.0;
             }
             Effect::Choose(ItemId::BackgroundRadio, i) => {
                 self.settings.mute_radio_unfocused = i == 1;
@@ -859,39 +895,32 @@ impl Ui {
             }
             ItemId::KeepExisting | ItemId::UseNew => self.settle_conflict(id == ItemId::UseNew),
             ItemId::AddStream => self.radio.request_url(),
-            ItemId::AddMusic => self.radio.request_music(),
+            ItemId::AddMusic => self.deck.request_music(),
             ItemId::ClearMusic => {
-                let ids: Vec<String> = self.radio.files().iter().map(|c| c.id.clone()).collect();
-                for id in &ids {
-                    self.forget_station(id);
-                }
-                self.radio.clear_files(&self.settings.radio);
+                self.deck.clear();
                 self.music_again = false;
-                self.radio_settings_changed();
                 self.show(Toast::MusicRemoved);
             }
             ItemId::RemoveFolder(i) => {
-                if let Some(row) = self.radio.rows().get(i) {
-                    let id = row.id.clone();
-                    self.forget_station(&id);
-                    self.radio.remove_files(&id, &self.settings.radio);
-                    self.radio_settings_changed();
+                if let Some(id) = self.deck.folders().get(i).map(|f| f.id.clone()) {
+                    self.deck.remove_folder(&id);
                     self.show(Toast::MusicRemoved);
                 }
+            }
+            ItemId::Album(a) => {
+                // Back to the road with the tape in.
+                if self.settings.radio.deck.source != Source::Deck {
+                    self.switch_source();
+                }
+                self.deck.pick_album(a);
+                self.readout_s = 0.0;
+                self.close();
             }
             ItemId::ClearStreams => {
                 self.settings.radio.clear_custom();
                 self.radio_settings_changed();
             }
             _ => {}
-        }
-    }
-
-    /// Drops what the settings keep about station `id` (switched off, last tuned).
-    fn forget_station(&mut self, id: &str) {
-        self.settings.radio.set_enabled(id, true);
-        if self.settings.radio.last_station.as_deref() == Some(id) {
-            self.settings.radio.last_station = None;
         }
     }
 
@@ -903,24 +932,74 @@ impl Ui {
         self.dirty = true;
     }
 
-    /// One frame of the radio (never in a still scene): it starts from the settings on
-    /// the first, takes the station keys when `keys` (driving, no menu or map up), runs its
-    /// tuning phase, and saves the power and station when they change.
+    /// One frame of the radio and the deck (never in a still scene): they start from the
+    /// settings on the first (silent), take the keys when `keys` (driving, no menu or map
+    /// up: the source key, then the transport keys on the source selected), run their
+    /// clocks, and save the power, station and the deck's place when they change.
     fn radio_frame(&mut self, s: &InputState, dt: f32, keys: bool) {
         self.radio.set_gain(self.radio_gain());
         self.radio.start(&self.settings.radio);
+        self.deck.start(&self.settings.radio.deck);
         if keys {
-            self.radio.press(s);
+            let woke = if s.just_pressed(Action::DeckSource) {
+                self.switch_source();
+                true
+            } else if self.settings.radio.deck.source == Source::Deck {
+                self.deck.press(s)
+            } else if s.just_pressed(Action::AlbumNext) || s.just_pressed(Action::AlbumPrev) {
+                // An album key on the radio puts the tape in: the deck becomes the source,
+                // on that album.
+                self.settings.radio.deck.source = Source::Deck;
+                self.radio.off();
+                self.dirty = true;
+                self.deck.press(s)
+            } else {
+                self.radio.press(s)
+            };
+            if woke || readout::any_audio_key(s) {
+                self.readout_s = 0.0;
+            }
         }
         self.radio.tick(dt);
-        if self.radio.store(&mut self.settings.radio) {
+        self.deck.tick(dt);
+        self.note_readout(dt);
+        let stored = self.radio.store(&mut self.settings.radio);
+        if self.deck.store(&mut self.settings.radio.deck) || stored {
             self.dirty = true;
             self.save_if_dirty();
         }
     }
 
+    /// Radio to deck or back: the one playing stops, the other starts (the deck plays
+    /// where it was, the radio tunes its last station), and the choice is saved.
+    fn switch_source(&mut self) {
+        let d = &mut self.settings.radio.deck;
+        d.source = match d.source {
+            Source::Radio => Source::Deck,
+            Source::Deck => Source::Radio,
+        };
+        if d.source == Source::Deck {
+            self.radio.off();
+            self.deck.select();
+        } else {
+            self.deck.deselect();
+            self.radio.power_on();
+        }
+        self.readout_s = 0.0;
+        self.dirty = true;
+    }
+
     pub fn radio(&self) -> &CarRadio {
         &self.radio
+    }
+
+    pub fn deck(&self) -> &CarDeck {
+        &self.deck
+    }
+
+    /// The source selected (radio or deck).
+    pub fn source(&self) -> Source {
+        self.settings.radio.deck.source
     }
 
     /// The master volume scales the radio too, and mute silences it (and so does the
@@ -1184,14 +1263,21 @@ impl App {
             &self.ui.settings,
             self.ui.is_open() || !self.ui.focused,
         );
-        // The engine and the world duck under a station that is playing; the dial sweeps
-        // between stations at the radio's volume.
+        // The engine and the world duck under a station or a track that is playing; the
+        // dial sweeps between stations, and the deck clicks, at the radio's volume.
         let radio = self.ui.radio.radio();
-        if radio.is_live() {
+        let deck = self.ui.deck.deck();
+        if radio.is_live() || deck.is_live() {
             self.audio.radio = self.ui.settings.radio.volume;
         }
         self.audio.tunes = radio.tunes();
         self.audio.tune_volume = self.ui.settings.radio.volume;
+        self.audio.deck_clicks = deck.clicks();
+        self.audio.deck_kind = match self.ui.deck.kind() {
+            audio::deck::Kind::Tape => 0,
+            audio::deck::Kind::Cd => 1,
+            audio::deck::Kind::Mp3 => 2,
+        };
         // The listener is the camera, moving with the car.
         let velocity = glam::Vec3::from(self.drive.state.vel);
         let (eye, forward) = if self.fly {
@@ -1268,15 +1354,35 @@ impl App {
         self.target = Some((width.max(1), height.max(1)));
     }
 
-    /// The radio's commands for the platform's player since the last call (see
-    /// [`audio::RadioCommand`]). Call once a frame, after [`App::frame`].
-    pub fn radio_commands(&mut self) -> std::vec::Drain<'_, audio::RadioCommand> {
-        self.ui.radio.commands()
+    /// The radio's and the deck's commands for the platform's one player since the last
+    /// call, in order (see [`audio::RadioCommand`]). Call once a frame, after
+    /// [`App::frame`].
+    pub fn radio_commands(&mut self) -> impl Iterator<Item = audio::RadioCommand> + '_ {
+        let ui = &mut self.ui;
+        ui.radio.commands().chain(ui.deck.commands())
     }
 
-    /// A report from the platform's player.
+    /// A report from the platform's player (to the radio and the deck: each takes only its
+    /// own, by token).
     pub fn radio_event(&mut self, event: audio::PlayerEvent) {
         self.ui.radio.on_event(event);
+        self.ui.deck.on_event(event);
+    }
+
+    /// The deck: its library, transport and place.
+    pub fn deck(&self) -> &audio::deck::Deck {
+        self.ui.deck.deck()
+    }
+
+    /// The source selected.
+    pub fn source(&self) -> Source {
+        self.ui.source()
+    }
+
+    /// The corner readout as text (badge and status, then its lines), for the platform's
+    /// debugging and tests; empty while it is hidden.
+    pub fn readout_text(&self) -> String {
+        self.ui.readout_text()
     }
 
     /// The radio's state, station list and volume.
@@ -1312,45 +1418,46 @@ impl App {
         }
     }
 
-    /// The platform can ask the user for music folders: the Audio page offers "Add music
-    /// folder" ("Pick music folder again" with `again`, when the folders picked last
+    /// The platform can ask the user for music folders: the Audio page offers "Music
+    /// library" ("Pick music folder again" with `again`, when the folders picked last
     /// session could not be kept), and [`App::take_music_request`] says when it was chosen.
     pub fn set_music_picker(&mut self, on: bool, again: bool) {
         self.ui.music_picker = on;
         self.ui.music_again = on && again;
     }
 
-    /// True once after the user chose "Add music folder": ask for one and pass each
-    /// folder of it to [`App::add_music_folder`].
+    /// True once after the user chose "Music library": ask for a folder and pass it to
+    /// [`App::add_music_folder`].
     pub fn take_music_request(&mut self) -> bool {
-        self.ui.radio.take_music_request()
+        self.ui.deck.take_music_request()
     }
 
-    /// Puts the music folder the user picked or dropped on the dial as one station called
-    /// `name` of these tracks (every playable file under it; `audio::music` reads them).
-    /// `path` is the platform's stable name for the folder: the station's id comes from it,
-    /// and a folder with the same path replaces the old one. `announce` says so in a toast
-    /// (a folder the user just picked, not one remembered from last session), `kept`
-    /// whether the platform will remember it next session. A folder without music says so
-    /// when announced.
+    /// Puts the music folder the user picked or dropped (or a drop of loose files, a
+    /// mixtape) in the deck's library, indexed as Artist › Album by `audio::deck`. Its `id`
+    /// is the platform's stable name for it: a folder with the same id replaces the old one.
+    /// `announce` says so in a toast (a folder the user just picked, not one remembered from
+    /// last session), `kept` whether the platform will remember it next session. A folder
+    /// without music says so when announced.
     pub fn add_music_folder(
         &mut self,
-        path: &str,
-        name: &str,
-        tracks: Vec<audio::Track>,
+        mut folder: audio::deck::Folder,
         announce: bool,
         kept: bool,
     ) {
         let ui = &mut self.ui;
-        let Some(station) = audio::Channel::files(path, name, tracks) else {
+        folder.name = audio::music::ascii(&folder.name);
+        if folder.name.is_empty() {
+            folder.name = "My music".to_string();
+        }
+        if folder.files.is_empty() {
             if announce {
                 ui.show(Toast::MusicEmpty);
             }
             return;
-        };
-        let n = station.tracks.len();
-        ui.music_name = station.name.clone();
-        ui.radio.add_files(path, station, &ui.settings.radio);
+        }
+        let n = folder.files.len().min(audio::music::MAX_TRACKS);
+        ui.music_name = folder.name.clone();
+        ui.deck.add_folder(folder);
         ui.music_again = false;
         if announce {
             ui.show(Toast::MusicAdded { tracks: n, kept });
@@ -1366,7 +1473,7 @@ impl App {
     /// The paths of the music folders the user removed since the last call, for the
     /// platform to forget ("*": forget them all, remembered ones too).
     pub fn take_forgotten_music(&mut self) -> Vec<String> {
-        self.ui.radio.take_forgotten()
+        self.ui.deck.take_forgotten()
     }
 
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next

@@ -1,26 +1,26 @@
-//! The player's own music as stations: a folder of files (or one drop of them) becomes a
-//! station on the dial next to the stream presets.
+//! The player's own music: what [`probe`] reads from the start of each file, and the
+//! seeded shuffle the deck's Shuffle and Continuous modes play ([`crate::deck`]).
 //!
 //! The platform finds the files and reads the first [`HEAD_BYTES`] of each; [`probe`]
-//! takes the title and artist from an ID3v2 tag (`TIT2`/`TPE1`, or `TT2`/`TP1` in v2.2) and
-//! the length from the first MPEG audio frame (its Xing/Info frame count, else the
-//! constant bitrate and the file size). Other formats (AAC, Ogg, FLAC, WAV: whatever the
-//! platform decodes) get the file name and [`NOMINAL_TRACK_S`].
+//! takes the title, artist, album artist, album, track and disc numbers and year from an
+//! ID3v2 tag (`TIT2` `TPE1` `TPE2` `TALB` `TRCK` `TPOS` `TYER`/`TDRC`, or their three-letter
+//! v2.2 ids) and the length from the first MPEG audio frame (its Xing/Info frame count, else
+//! the constant bitrate and the file size). Other formats (AAC, Ogg, FLAC, WAV: whatever
+//! the platform decodes) get their names from the folder layout and [`NOMINAL_TRACK_S`].
 //!
-//! A station plays its tracks in a seeded shuffle that is "already playing": its position is
-//! the radio's running clock plus a per-station offset, modulo the playlist's length, so
-//! tuning back to a station lands where it would be had it played all along ([`Playlist`]).
-//! Everything here is plain integer and float arithmetic: the same files give the same
-//! order and position everywhere.
+//! A [`Playlist`] is "already playing": its position is a running clock plus a seeded
+//! offset, modulo the playlist's length, so tuning in lands where it would be had it played
+//! all along. Everything here is plain integer and float arithmetic: the same files give
+//! the same order and position everywhere.
 
 /// Bytes of each file the platform reads for [`probe`]: enough for an ID3v2 tag without
 /// cover art in front of the text frames, and the first audio frame.
 pub const HEAD_BYTES: usize = 64 * 1024;
 /// Length assumed for a track whose length [`probe`] cannot tell, s.
 pub const NOMINAL_TRACK_S: f32 = 240.0;
-/// Longest label kept for the dash, characters.
+/// Longest name kept for the HUD (artist, album or title), characters.
 pub const MAX_LABEL: usize = 96;
-/// Most tracks a station keeps (the rest of a huge folder is left out).
+/// Most tracks a library keeps (the rest of a huge folder is left out).
 pub const MAX_TRACKS: usize = 4096;
 
 /// What [`probe`] found in the start of a file.
@@ -28,79 +28,45 @@ pub const MAX_TRACKS: usize = 4096;
 pub struct Probe {
     pub title: Option<String>,
     pub artist: Option<String>,
+    /// `TPE2`: the album's artist, where a compilation's tracks each name their own.
+    pub album_artist: Option<String>,
+    pub album: Option<String>,
+    /// `TRCK` and `TPOS`: the number before any "/total".
+    pub track: Option<u32>,
+    pub disc: Option<u32>,
+    /// `TYER`, or the year of `TDRC`.
+    pub year: Option<u16>,
     /// The length, when the file is MPEG audio with a readable first frame.
     pub secs: Option<f32>,
 }
 
-/// One track of a station.
+/// One track of the player's library.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Track {
     /// What the platform plays it by (a path, or an index into the page's file list).
     pub key: String,
-    /// What the dash shows: "Artist - Title", the title, or the file name; printable ASCII.
+    /// The track's artist and title as the HUD shows them: printable ASCII, never empty.
+    pub artist: String,
+    pub title: String,
+    /// "Artist - Title", for the dash.
     pub label: String,
     /// Its length, s (positive).
     pub secs: f32,
 }
 
-impl Track {
-    /// The track of file `file_name` (its key `key`) from what [`probe`] read of it.
-    pub fn new(key: String, file_name: &str, probe: &Probe) -> Track {
-        let stem = file_name.rsplit(['/', '\\']).next().unwrap_or(file_name);
-        let stem = stem.rsplit_once('.').map_or(stem, |(s, _)| s);
-        let label = match (&probe.artist, &probe.title) {
-            (Some(a), Some(t)) => format!("{a} - {t}"),
-            (None, Some(t)) => t.clone(),
-            _ => stem.to_string(),
-        };
-        let mut label = ascii(&label);
-        if label.is_empty() {
-            label = ascii(stem);
-        }
-        if label.is_empty() {
-            label = "Track".to_string();
-        }
-        let secs = probe
-            .secs
-            .filter(|s| s.is_finite() && *s >= 1.0)
-            .unwrap_or(NOMINAL_TRACK_S);
-        Track { key, label, secs }
-    }
-}
-
-/// The id of the station made from the folder at `path` (relative to what the user picked
-/// or dropped, the picked folder's name first): `files_` and a hash of the path, so the
-/// dial, the on/off switches and the last station survive a new session, and two folders
-/// with the same name ("Disc 1") stay two stations.
-pub fn station_id(path: &str) -> String {
-    format!("files_{:08x}", fnv1a(path.as_bytes()) as u32)
-}
-
-/// A folder name as the dash shows it: printable ASCII, at most `max` characters, never
-/// empty.
-pub fn station_name(name: &str, max: usize) -> String {
-    let mut s: String = ascii(name).chars().take(max).collect();
-    s.truncate(s.trim_end().len());
-    if s.is_empty() {
-        s = "My music".to_string();
-    }
-    s
-}
-
-/// A files station's tracks in their seeded shuffle, and where in them the station is at a
-/// given time.
+/// Tracks in a seeded shuffle, and where in them a broadcast of them is at a given time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Playlist {
     /// Track indices in play order.
     pub order: Vec<u32>,
-    /// Where the station's clock starts, s into the playlist.
+    /// Where the clock starts, s into the playlist.
     pub offset_s: f64,
     /// The whole playlist's length, s.
     pub total_s: f64,
 }
 
 impl Playlist {
-    /// The shuffle of `tracks` seeded by `seed` (the station's id hashed).
+    /// The shuffle of `tracks` seeded by `seed`.
     pub fn new(tracks: &[Track], seed: u64) -> Playlist {
         let mut rng = seed ^ 0x9e37_79b9_7f4a_7c15;
         let mut order: Vec<u32> = (0..tracks.len() as u32).collect();
@@ -122,8 +88,8 @@ impl Playlist {
         }
     }
 
-    /// Where the station is at `clock_s` of the radio's clock: the place in [`Self::order`]
-    /// and the seconds into that track.
+    /// Where the broadcast is at `clock_s`: the place in [`Self::order`] and the seconds
+    /// into that track.
     pub fn at(&self, tracks: &[Track], clock_s: f64) -> (usize, f32) {
         if self.order.is_empty() || self.total_s <= 0.0 {
             return (0, 0.0);
@@ -138,11 +104,20 @@ impl Playlist {
         }
         (self.order.len() - 1, 0.0)
     }
+
+    /// Where the place `i` in [`Self::order`] starts, s into the playlist.
+    pub fn start_of(&self, tracks: &[Track], i: usize) -> f64 {
+        self.order
+            .iter()
+            .take(i)
+            .map(|&k| f64::from(tracks[k as usize].secs))
+            .sum()
+    }
 }
 
-/// The station seed of `id`.
-pub fn seed(id: &str) -> u64 {
-    fnv1a(id.as_bytes())
+/// A seed from `bytes` (FNV-1a).
+pub fn seed(bytes: &[u8]) -> u64 {
+    fnv1a(bytes)
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -161,7 +136,7 @@ fn splitmix(state: &mut u64) -> u64 {
 
 /// Printable ASCII for the HUD font: Latin-1 letters lose their accents, other characters
 /// are dropped, runs of spaces collapse, at most [`MAX_LABEL`] characters.
-fn ascii(s: &str) -> String {
+pub fn ascii(s: &str) -> String {
     // U+00C0..=U+00FF without their accents ('_' for the few with no plain letter).
     const FOLD: &[u8; 64] = b"AAAAAAACEEEEIIIIDNOOOOO_OUUUUY_saaaaaaaceeeeiiiidnooooo_ouuuuy_y";
     let mut out = String::new();
@@ -254,6 +229,11 @@ pub fn probe(head: &[u8], audio: &[u8], file_len: u64) -> Probe {
                 _ if unsynced || frame_unsynced => {}
                 b"TIT2" | b"TT2" => p.title = text_frame(data),
                 b"TPE1" | b"TP1" => p.artist = text_frame(data),
+                b"TPE2" | b"TP2" => p.album_artist = text_frame(data),
+                b"TALB" | b"TAL" => p.album = text_frame(data),
+                b"TRCK" | b"TRK" => p.track = text_frame(data).and_then(|t| number(&t)),
+                b"TPOS" | b"TPA" => p.disc = text_frame(data).and_then(|t| number(&t)),
+                b"TYER" | b"TYE" | b"TDRC" => p.year = text_frame(data).and_then(|t| year(&t)),
                 _ => {}
             }
             at = body + len;
@@ -265,6 +245,27 @@ pub fn probe(head: &[u8], audio: &[u8], file_len: u64) -> Probe {
         mpeg_secs(audio, 0, file_len.saturating_sub(audio_at as u64))
     };
     p
+}
+
+/// The leading number of "3", "03/12" or "1-03": its first run of digits (at most 9999).
+pub fn number(s: &str) -> Option<u32> {
+    let digits: String = s
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .take(4)
+        .collect();
+    digits.parse().ok()
+}
+
+/// The year of "1983" or "1983-05-01".
+fn year(s: &str) -> Option<u16> {
+    let y = s.trim().get(..4)?;
+    y.bytes()
+        .all(|b| b.is_ascii_digit())
+        .then(|| y.parse().ok())
+        .flatten()
+        .filter(|y| (1000..=9999).contains(y))
 }
 
 fn syncsafe(b: &[u8]) -> u32 {
@@ -565,40 +566,36 @@ mod tests {
     }
 
     #[test]
-    fn labels_are_ascii_and_fall_back_to_the_file_name() {
-        let p = |artist: Option<&str>, title: Option<&str>| Probe {
-            artist: artist.map(str::to_string),
-            title: title.map(str::to_string),
-            secs: Some(200.0),
-        };
-        let t = Track::new(
-            "0".into(),
-            "a/01 Song.mp3",
-            &p(Some("Band"), Some("Caf\u{e9}  \u{2018}Noir\u{2019}")),
+    fn reads_the_album_frames() {
+        let tag = id3(
+            3,
+            &[
+                (b"TPE2", b"\0Various"),
+                (b"TALB", b"\0Night Drive"),
+                (b"TRCK", b"\x0003/12"),
+                (b"TPOS", b"\x002/2"),
+                (b"TYER", b"\x001983"),
+            ],
         );
-        assert_eq!(t.label, "Band - Cafe 'Noir'");
-        assert_eq!(t.secs, 200.0);
-        assert_eq!(
-            Track::new("0".into(), "a/01 Song.mp3", &p(None, Some("Only"))).label,
-            "Only"
-        );
-        assert_eq!(
-            Track::new("0".into(), "dir\\01 Song.mp3", &p(Some("Band"), None)).label,
-            "01 Song"
-        );
-        let t = Track::new("0".into(), "\u{65e5}\u{672c}.ogg", &Probe::default());
-        assert_eq!((t.label.as_str(), t.secs), ("Track", NOMINAL_TRACK_S));
-        assert!(
-            Track::new("0".into(), &"x".repeat(500), &Probe::default())
-                .label
-                .len()
-                <= MAX_LABEL
-        );
-        assert_eq!(station_name("  Yacht \u{2014} Rock  ", 48), "Yacht - Rock");
-        assert_eq!(station_name("\u{65e5}", 48), "My music");
-        assert_eq!(station_id("Yacht Rock"), station_id("Yacht Rock"));
-        assert_ne!(station_id("Yacht Rock"), station_id("New Wave"));
-        assert!(station_id("x").starts_with("files_") && station_id("x").len() == 14);
+        let p = probe(&tag, &[], 0);
+        assert_eq!(p.album_artist.as_deref(), Some("Various"));
+        assert_eq!(p.album.as_deref(), Some("Night Drive"));
+        assert_eq!((p.track, p.disc, p.year), (Some(3), Some(2), Some(1983)));
+        let tag = id3(4, &[(b"TDRC", b"\x031986-05-01"), (b"TRCK", b"\0x")]);
+        let p = probe(&tag, &[], 0);
+        assert_eq!((p.year, p.track), (Some(1986), None));
+        assert_eq!(probe(&id3(4, &[(b"TDRC", b"\086")]), &[], 0).year, None);
+        assert_eq!(number(" 7"), Some(7));
+        assert_eq!(number("1-03"), Some(1));
+        assert_eq!(number("123456"), Some(1234));
+    }
+
+    #[test]
+    fn names_are_printable_ascii() {
+        assert_eq!(ascii("Caf\u{e9}  \u{2018}Noir\u{2019}"), "Cafe 'Noir'");
+        assert_eq!(ascii("Yacht \u{2014} Rock "), "Yacht - Rock");
+        assert_eq!(ascii("\u{65e5}\u{672c}"), "");
+        assert!(ascii(&"x".repeat(500)).len() <= MAX_LABEL);
     }
 
     fn tracks(secs: &[f32]) -> Vec<Track> {
@@ -606,7 +603,9 @@ mod tests {
             .enumerate()
             .map(|(i, &s)| Track {
                 key: i.to_string(),
-                label: format!("T{i}"),
+                artist: "A".into(),
+                title: format!("T{i}"),
+                label: format!("A - T{i}"),
                 secs: s,
             })
             .collect()
@@ -615,13 +614,13 @@ mod tests {
     #[test]
     fn the_shuffle_is_seeded_and_covers_every_track() {
         let t = tracks(&[100.0; 50]);
-        let a = Playlist::new(&t, seed("files_1"));
+        let a = Playlist::new(&t, seed(b"files_1"));
         assert_eq!(
             a,
-            Playlist::new(&t, seed("files_1")),
+            Playlist::new(&t, seed(b"files_1")),
             "same seed, same order"
         );
-        assert_ne!(a.order, Playlist::new(&t, seed("files_2")).order);
+        assert_ne!(a.order, Playlist::new(&t, seed(b"files_2")).order);
         let mut sorted = a.order.clone();
         sorted.sort();
         assert_eq!(sorted, (0..50).collect::<Vec<u32>>());
@@ -648,5 +647,6 @@ mod tests {
         assert_eq!(p.at(&t, 0.0), (2, 0.0));
         assert_eq!(p.at(&t, 60.0), (0, 10.0));
         assert_eq!(Playlist::new(&[], 1).at(&[], 5.0), (0, 0.0));
+        assert_eq!(p.start_of(&t, 2), 300.0);
     }
 }
