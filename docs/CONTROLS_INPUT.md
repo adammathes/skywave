@@ -34,7 +34,7 @@ Pause close it (Pause does not open the menu over it). The wheel is read raw as 
 heading, at rest unless it was rolling under 5 m/s, odometer from zero, camera and headlights kept; the new
 car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the car the next session starts in
 unless the scene names one (`car=`, with `paint=`). It is unbound on the pad by default: the pad path is the
-pause menu's Vehicle page (Resume · Vehicle › · Settings ›): Car (left/right through all twelve, wrapping;
+pause menu's Vehicle page (Resume · Vehicle › · Settings ›): Car (left/right through all twenty, wrapping;
 the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car turning on a
 turntable beside the panel and its stat strip and specs (class, era, peak power and torque, drive and
 gearbox, 0–60 mph and top speed, measured with the sim) under the rows. It opens on the car driven, in its

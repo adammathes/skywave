@@ -31,7 +31,8 @@ pub struct CustomStream {
 pub struct RadioSettings {
     /// 0 to 1.
     pub volume: f32,
-    /// The radio was on when the last session ended: it comes back on.
+    /// The radio was on when the last session ended. Saved for the record; a session
+    /// always starts with the radio off.
     pub on: bool,
     /// Id of the station last tuned.
     pub last_station: Option<String>,
@@ -107,19 +108,21 @@ impl RadioSettings {
     }
 
     /// The dial: `preset`'s enabled stream stations in file order, then the user's
-    /// enabled streams.
-    pub fn channels(&self, preset: &RadioPreset) -> Vec<Channel> {
+    /// enabled streams, then their enabled music folders (`files`, in the order given).
+    pub fn channels(&self, preset: &RadioPreset, files: &[Channel]) -> Vec<Channel> {
         let custom = self.custom.iter().map(|c| Channel {
             id: c.id.clone(),
             name: c.name.clone(),
             format: "added stream".to_string(),
             urls: vec![c.url.clone()],
+            tracks: Vec::new(),
         });
         preset
             .stations
             .iter()
             .filter_map(Channel::from_station)
             .chain(custom)
+            .chain(files.iter().cloned())
             .filter(|c| self.is_enabled(&c.id))
             .collect()
     }
@@ -222,7 +225,10 @@ mod tests {
     fn the_dial_is_enabled_streams_then_added_ones() {
         let mut s = RadioSettings::default();
         let ids = |s: &RadioSettings| -> Vec<String> {
-            s.channels(&preset()).into_iter().map(|c| c.id).collect()
+            s.channels(&preset(), &[])
+                .into_iter()
+                .map(|c| c.id)
+                .collect()
         };
         assert_eq!(
             ids(&s),

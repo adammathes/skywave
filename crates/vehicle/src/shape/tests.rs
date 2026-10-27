@@ -9,10 +9,10 @@ use crate::VehicleSpec;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
-const CORSAIR: &str = include_str!("../../../../assets/vehicles/corsair_gtx.shape.ron");
-const PALISADE: &str = include_str!("../../../../assets/vehicles/palisade_wagon.shape.ron");
-const CORSAIR_SPEC: &str = include_str!("../../../../assets/vehicles/corsair_gtx.ron");
-const PALISADE_SPEC: &str = include_str!("../../../../assets/vehicles/palisade_wagon.ron");
+const GANNET: &str = include_str!("../../../../assets/vehicles/gannet_gt.shape.ron");
+const HOMESTEAD: &str = include_str!("../../../../assets/vehicles/homestead_wagon.shape.ron");
+const GANNET_SPEC: &str = include_str!("../../../../assets/vehicles/gannet_gt.ron");
+const HOMESTEAD_SPEC: &str = include_str!("../../../../assets/vehicles/homestead_wagon.ron");
 const SEABREEZE: &str = include_str!("../../../../assets/vehicles/seabreeze_convertible.shape.ron");
 const REGENT: &str = include_str!("../../../../assets/vehicles/regent_coupe_cabrio.shape.ron");
 const SEABREEZE_SPEC: &str = include_str!("../../../../assets/vehicles/seabreeze_convertible.ron");
@@ -33,7 +33,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 8] = [
+const ROSTER: [(&str, &str); 16] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -42,6 +42,14 @@ const ROSTER: [(&str, &str); 8] = [
     car!("buckboard_pickup"),
     car!("drayman_van"),
     car!("burro_4x4"),
+    car!("basilisk_v12"),
+    car!("basilisk_roadster"),
+    car!("avocet_v8"),
+    car!("avocet_spider"),
+    car!("longbow_coupe"),
+    car!("longbow_convertible"),
+    car!("appaloosa_gt"),
+    car!("appaloosa_convertible"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -50,8 +58,8 @@ const WEDGE: &str = ROSTER[1].0;
 /// Every built-in shape with its vehicle spec: the first four cars, then the roster.
 fn pairs() -> Vec<(&'static str, &'static str)> {
     let mut v = alloc::vec![
-        (CORSAIR, CORSAIR_SPEC),
-        (PALISADE, PALISADE_SPEC),
+        (GANNET, GANNET_SPEC),
+        (HOMESTEAD, HOMESTEAD_SPEC),
         (SEABREEZE, SEABREEZE_SPEC),
         (REGENT, REGENT_SPEC),
     ];
@@ -63,8 +71,16 @@ fn shapes() -> Vec<ShapeSpec> {
     pairs().iter().map(|p| load(p.0)).collect()
 }
 
-fn convertibles() -> [ShapeSpec; 2] {
-    [load(SEABREEZE), load(REGENT)]
+/// Every built-in convertible, top down.
+fn convertibles() -> Vec<ShapeSpec> {
+    shapes()
+        .into_iter()
+        .filter(|s| s.roof.convertible())
+        .map(|mut s| {
+            s.roof.kind = RoofKind::Convertible { top: Top::Down };
+            s
+        })
+        .collect()
 }
 
 /// `spec` with its convertible top raised.
@@ -348,7 +364,7 @@ fn convertibles_have_no_roof_over_the_cabin() {
             );
         }
         // A hardtop's roof does count.
-        let hard = load(PALISADE);
+        let hard = load(HOMESTEAD);
         let car = build(&hard, 0).unwrap();
         assert!(over_the_cabin(&hard, &car.body, 0.02) > 50);
     }
@@ -484,7 +500,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 12] = [
+    let expected: [u64; 20] = [
         0xd8c8_d201_ca40_efe2,
         0xedbe_0c75_ff0b_96c9,
         0x0cc6_c3d4_6210_49af,
@@ -497,8 +513,16 @@ fn builds_are_deterministic() {
         0x20d6_8a6d_7a68_c29d,
         0xcb4f_4a0e_9805_3593,
         0x5b64_028a_975b_f878,
+        0xc1a9_77c6_c729_9fb8,
+        0xc6b4_c9c7_6959_b436,
+        0x274e_ddfe_b94f_59e2,
+        0x70cd_675e_755b_b51f,
+        0x9b3c_4ea0_58dc_12b5,
+        0xba3c_37a1_d8c9_574a,
+        0xb634_e87c_d647_169d,
+        0x68c4_40f9_4786_c5e6,
     ];
-    let mut got = [0u64; 12];
+    let mut got = [0u64; 20];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -596,7 +620,7 @@ fn a_t_top_puts_glass_in_the_roof() {
 
 #[test]
 fn palette_choice_only_changes_paint() {
-    let spec = load(CORSAIR);
+    let spec = load(GANNET);
     let a = build(&spec, 0).unwrap();
     let b = build(&spec, 1).unwrap();
     assert_eq!(a.body.positions.len(), b.body.positions.len());
@@ -608,7 +632,7 @@ fn palette_choice_only_changes_paint() {
 
 #[test]
 fn popups_raise() {
-    let spec = load(CORSAIR);
+    let spec = load(GANNET);
     let down = build(&spec, 0).unwrap();
     let up = build_with(
         &spec,
@@ -642,75 +666,75 @@ fn rejects(text: &str, f: impl FnOnce(&mut ShapeSpec), expected: ShapeError) {
 #[test]
 fn validate_rejects_bad_curves() {
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.plan.swap(2, 3),
         ShapeError::PlanNotIncreasing { index: 3 },
     );
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.plan[1].0 = 0.0,
         ShapeError::PlanNotIncreasing { index: 1 },
     );
-    rejects(CORSAIR, |s| s.plan[0].0 = 0.05, ShapeError::PlanSpan);
+    rejects(GANNET, |s| s.plan[0].0 = 0.05, ShapeError::PlanSpan);
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.plan[2].1 = 0.0,
         ShapeError::NonPositiveWidth { index: 2 },
     );
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.side[3].0 = 0.3,
         ShapeError::SideTopNotIncreasing { index: 3 },
     );
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.side[13].0 = 3.9,
         ShapeError::SideBottomNotDecreasing { index: 13 },
     );
-    rejects(CORSAIR, |s| s.side[0].0 = 0.01, ShapeError::SideNotAtNose);
-    rejects(CORSAIR, |s| s.side.truncate(4), ShapeError::SidePointCount);
-    rejects(CORSAIR, |s| s.side[11].1 = 1.5, ShapeError::SideInverted);
+    rejects(GANNET, |s| s.side[0].0 = 0.01, ShapeError::SideNotAtNose);
+    rejects(GANNET, |s| s.side.truncate(4), ShapeError::SidePointCount);
+    rejects(GANNET, |s| s.side[11].1 = 1.5, ShapeError::SideInverted);
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.belt.push((1.0, 0.8)),
         ShapeError::BeltNotIncreasing { index: 2 },
     );
-    rejects(CORSAIR, |s| s.side[4].1 = f32::NAN, ShapeError::NonFinite);
+    rejects(GANNET, |s| s.side[4].1 = f32::NAN, ShapeError::NonFinite);
 }
 
 #[test]
 fn validate_rejects_bad_parts() {
-    rejects(CORSAIR, |s| s.seams.doors = 3, ShapeError::DoorCount);
+    rejects(GANNET, |s| s.seams.doors = 3, ShapeError::DoorCount);
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.palette[2] = "red".to_string(),
         ShapeError::BadColor { index: 2 },
     );
-    rejects(CORSAIR, |s| s.palette.clear(), ShapeError::EmptyPalette);
+    rejects(GANNET, |s| s.palette.clear(), ShapeError::EmptyPalette);
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.glass.windshield = (2.0, 1.5),
         ShapeError::GlassRange,
     );
     rejects(
-        PALISADE,
+        HOMESTEAD,
         |s| s.glass.side[1].0 = 2.5,
         ShapeError::SideWindow { index: 1 },
     );
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.wheels.front_x = 0.2,
         ShapeError::WheelPlacement,
     );
-    rejects(CORSAIR, |s| s.wheels.track = 1.9, ShapeError::TrackTooWide);
+    rejects(GANNET, |s| s.wheels.track = 1.9, ShapeError::TrackTooWide);
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.section.shoulder = 1.2,
         ShapeError::SectionOutOfRange,
     );
-    rejects(CORSAIR, |s| s.interior.seat.0 = 1.9, ShapeError::Interior);
+    rejects(GANNET, |s| s.interior.seat.0 = 1.9, ShapeError::Interior);
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.seams.creases.push((0.0, 0.5, 0.1, 0.5)),
         ShapeError::Crease { index: 1 },
     );
@@ -726,7 +750,7 @@ fn validate_rejects_bad_parts() {
     );
     // A hardtop's roof line cannot be declared open.
     rejects(
-        PALISADE,
+        HOMESTEAD,
         |s| s.roof.kind = RoofKind::Convertible { top: Top::Down },
         ShapeError::OpenTop,
     );
@@ -736,18 +760,18 @@ fn validate_rejects_bad_parts() {
         ShapeError::ColorDetail,
     );
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.palette[0] = "#ffffff/".to_string(),
         ShapeError::BadColor { index: 0 },
     );
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.interior.insert = "red".to_string(),
         ShapeError::Interior,
     );
     // A bed needs a top at the belt behind the cab, a meter of it, and a hardtop.
     rejects(
-        CORSAIR,
+        GANNET,
         |s| s.details.push(Detail::PickupBed),
         ShapeError::Bed,
     );
@@ -761,7 +785,7 @@ fn validate_rejects_bad_parts() {
 
 #[test]
 fn two_tone_paint_splits_at_the_crease() {
-    for (text, k) in [(CORSAIR, 6), (REGENT, 0), (PALISADE, 0)] {
+    for (text, k) in [(GANNET, 6), (REGENT, 0), (HOMESTEAD, 0)] {
         let spec = load(text);
         let (upper, lower) = parse_paint(&spec.palette[k]).unwrap();
         let (upper, lower) = (rgb(upper), rgb(lower.unwrap()));
@@ -791,7 +815,7 @@ fn two_tone_paint_splits_at_the_crease() {
 
 #[test]
 fn era_paint_overrides_the_palette() {
-    let spec = load(PALISADE);
+    let spec = load(HOMESTEAD);
     let total: u32 = ERA_1980S_PAINT.iter().map(|p| p.1).sum();
     for &(paint, _) in &ERA_1980S_PAINT {
         assert!(parse_paint(paint).is_some(), "{paint}");
@@ -890,7 +914,14 @@ fn every_option_builds() {
         TailLights::Round,
     ];
     let spoilers = [Spoiler::None, Spoiler::Lip, Spoiler::Wing];
-    let rims = [Rims::Steel, Rims::Alloy5, Rims::Mesh, Rims::Turbine];
+    let rims = [
+        Rims::Steel,
+        Rims::Alloy5,
+        Rims::Mesh,
+        Rims::Turbine,
+        Rims::Dish,
+        Rims::Slotted,
+    ];
     let details = [
         Detail::Louvers,
         Detail::HoodScoop,
@@ -911,8 +942,12 @@ fn every_option_builds() {
         Detail::TTop,
         Detail::SpareTire,
         Detail::CorneringLamps,
+        Detail::SideStrakes,
+        Detail::NacaDucts,
+        Detail::EngineLouvers,
     ];
-    for base in shapes() {
+    // Each shape starts the option lists somewhere else, so every rim and detail is built.
+    for (i, base) in shapes().into_iter().enumerate() {
         for k in 0..5 {
             let mut s = base.clone();
             s.front.lights = heads[k % heads.len()];
@@ -921,7 +956,7 @@ fn every_option_builds() {
             s.rear.lights = tails[k % tails.len()];
             s.rear.spoiler = spoilers[k % spoilers.len()];
             s.rear.bumper = bumpers[(k + 1) % bumpers.len()];
-            s.parts.rims = rims[k % rims.len()];
+            s.parts.rims = rims[(i + k) % rims.len()];
             s.parts.hubcaps = k == 4;
             s.parts.whitewalls = k % 2 == 1;
             s.interior.manual = k % 2 == 0;
@@ -949,7 +984,13 @@ fn every_option_builds() {
             s.parts.wipers = k as u8 % 4;
             s.seams.doors = if k % 2 == 0 { 4 } else { 2 };
             s.seams.creases.truncate(k % 2);
-            s.details = details.iter().copied().skip(k * 3).take(4).collect();
+            s.details = details
+                .iter()
+                .copied()
+                .cycle()
+                .skip((i + k * 3) % details.len())
+                .take(4)
+                .collect();
             for lod in 0..3 {
                 for popups_up in [false, true] {
                     let opts = BuildOptions {

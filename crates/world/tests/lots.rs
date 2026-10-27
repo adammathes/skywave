@@ -22,7 +22,7 @@ use world::{resolve, WorldCollider};
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
+const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
 const STEPS_PER_S: usize = 120;
 
 fn grammar() -> world::Grammar {
@@ -312,7 +312,7 @@ fn lots_fill_and_empty_by_zone_and_hour() {
 }
 
 fn spec() -> VehicleSpec {
-    let s: VehicleSpec = ron::from_str(CORSAIR).expect("spec parses");
+    let s: VehicleSpec = ron::from_str(GANNET).expect("spec parses");
     s.validate().expect("spec validates");
     s
 }

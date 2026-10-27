@@ -1,0 +1,45 @@
+// Avocet Spider: the Avocet V8 with its roof off.
+//
+// Intent: the coupe in the open air. A little heavier (bracing where the roof was), a
+// little more drag, the same engine and chassis: a hair slower everywhere, and it still
+// feels like the Avocet.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "avocet_spider",
+    name: "Avocet Spider",
+    era: Eighties,
+    class: Convertible,
+
+    mass_kg: 1340,
+    dims_m: (4.23, 1.72, 1.11),    // length, width, height
+    wheelbase_m: 2.34,
+    track_m: 1.46,
+    cg_height_m: 0.43,
+    cg_fore_aft: 0.58,             // 42% front: the engine is behind the seats
+
+    engine: Engine(
+        idle_rpm: 950,
+        redline_rpm: 7700,
+        torque_nm: [(1000, 210), (3000, 272), (5000, 300), (7000, 286), (7700, 250)],
+    ),
+    gears: [3.2, 2.1, 1.5, 1.12, 0.88],
+    final_drive: 3.8,
+    reverse: 3.0,
+    shift_ms: 230,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.28, grip_long: 1.3, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 34000, damper: 3400, travel_m: 0.15, antiroll: 0.45),
+    steering: Steer(max_deg: 31, speed_sens: 0.6, return_rate: 12.0),
+    brakes: Brakes(max_nm: 3500, bias_front: 0.58, abs: false, handbrake_nm: 3000),
+    aero: Aero(cd: 0.4, frontal_m2: 1.75, downforce_coef: 0.03),
+    feel: Feel(oversteer_bias: 0.2, body_roll: 0.28, engine_sound: "v8_flatplane", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 180, mph), Tach(0, 10000)],
+        radio: "digital_green",
+    ),
+    shape: "avocet_spider.shape.ron",
+)
