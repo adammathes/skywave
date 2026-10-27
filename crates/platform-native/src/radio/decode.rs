@@ -41,8 +41,17 @@ impl Mp3 {
     /// Takes the next bytes of the stream and appends what they decode to `out`.
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<f32>) {
         self.input.extend_from_slice(bytes);
+        self.decode(LOOKAHEAD, out);
+    }
+
+    /// Decodes what is left (a file ended).
+    pub fn finish(&mut self, out: &mut Vec<f32>) {
+        self.decode(0, out);
+    }
+
+    fn decode(&mut self, keep: usize, out: &mut Vec<f32>) {
         let mut at = 0;
-        while self.input.len() - at > LOOKAHEAD {
+        while self.input.len() - at > keep {
             let (used, result) = self.decoder.decode(&self.input[at..], &mut self.pcm);
             at += used;
             match result {
