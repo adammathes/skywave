@@ -213,7 +213,7 @@ camera (people are not in the app yet). Coast, seed 1, noon, busy:
 
 | Scenario | Result |
 |---|---|
-| 60 mph through a signalized four-way against the light (a straight two-lane arterial on the north side; the line reached 4–9 s into the red, the cross traffic on its green) | at 26.0 m/s on the line; 3 NPC cars within 15 m in the junction, none overlapping the player's footprint at any step (least centre gap less both half lengths 2.9 m); none needed to brake |
+| 60 mph through a signalized four-way against the light (a straight two-lane arterial on the north side; the line reached 4–9 s into the red, the cross traffic on its green) | at 26.0 m/s on the line; 3 NPC cars (already turning) within 15 m in the junction, none overlapping the player's footprint at any step (least centre gap less both half lengths 2.9 m); the cross queue's head car held 3.5 s on its green at the line until the player had cleared, then went (asserted) |
 | Stopped on a downtown crosswalk for a minute (the crossing people use most), people crossing round it | 0 person-steps inside the car, 6 people within 5 m, 0 NPC car overlaps over 85 s |
 | Nosed at 1.5 m/s into the people on a downtown corner during the walk phase, until the curb and the signal pole stop it | 0 person-steps inside; 3 people within 5 m, 1 stepped aside, 1 hopped |
 | Reversing into a queue at a red (the car behind 7.3 m back) | **fails, test ignored**: 915 car-steps overlapping from 1.6 s in. The player's car does not collide with NPC cars and a stopped queue has nowhere to go, so the player backs into it |

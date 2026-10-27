@@ -213,9 +213,10 @@ fn run_up(app: &mut App, lane: u32, ticks: u32, mut each: impl FnMut(&App)) {
 }
 
 /// The player takes a busy signalized junction at 60 mph against the light, some 4–9 s
-/// into its red, while the cross traffic has its green. Every NPC car brakes or is
-/// missed: none ever overlaps the player's footprint. There is no damage to check:
-/// nothing in the game has a damage state.
+/// into its red, while the cross traffic has its green. Every NPC car yields or is
+/// missed: none ever overlaps the player's footprint, and a cross-traffic car at the head
+/// of its queue holds on its green until the player has cleared the junction, then goes.
+/// There is no damage to check: nothing in the game has a damage state.
 #[test]
 fn sixty_through_a_red_light_touches_no_car() {
     let g = &coast().lanes;
@@ -270,13 +271,37 @@ fn sixty_through_a_red_light_touches_no_car() {
     let mut near = std::collections::BTreeMap::new();
     let mut least = f32::INFINITY;
     let mut first_overlap = None;
-    run_up(&mut app, lane, arrive + 6 * 120, |app| {
+    let (node, phase) = (
+        g.lanes[lane as usize].end_node,
+        g.lanes[lane as usize].phase,
+    );
+    // Per cross-traffic car at its stop line on a green: steps it stood there while the
+    // player came through, and whether it moved off once the player had cleared.
+    let mut held = std::collections::BTreeMap::new();
+    run_up(&mut app, lane, arrive + 10 * 120, |app| {
         tick += 1;
         let p = app.traffic_player();
         let me = Rect::player(&p);
         let s = along(g, lane, p.pos);
         if crossed_on.is_none() && s + half_len >= len {
             crossed_on = Some((app.npcs.signals.tick, app.drive.state.speed_mps));
+        }
+        // Cross traffic held at its line on a green while the player comes through,
+        // until the player has cleared the junction.
+        let clear = s - half_len > len + 15.0;
+        for c in app.npcs.cars() {
+            let Some(cl) = g.lanes.get(c.seg as usize) else {
+                continue;
+            };
+            let green = g.light(c.seg, app.npcs.signals.tick) == Some(traffic::Light::Green);
+            if cl.end_node == node && cl.phase != phase && green && cl.length_m - c.s < 3.0 {
+                let w = held.entry(c.id).or_insert((0u32, false));
+                if !clear && c.speed < 0.5 {
+                    w.0 += 1;
+                } else if clear && c.speed > 1.0 {
+                    w.1 = true;
+                }
+            }
         }
         for c in app.npcs.cars() {
             let r = Rect::car(c);
@@ -300,9 +325,15 @@ fn sixty_through_a_red_light_touches_no_car() {
         .values()
         .filter(|&&(lo, hi)| lo < hi - 2.0 || lo < 0.5)
         .count();
+    // Yielded: stood a second or more on its green for the player, then went.
+    let yielded = held
+        .values()
+        .filter(|&&(stood, went)| stood >= 120 && went)
+        .count();
     eprintln!(
         "60 mph through a red: waited {:.1} s, line at {speed:.1} m/s, {} cars near in the \
-         junction ({braked} braked or stood), least rough gap {least:.1} m, {overlaps} \
+         junction ({braked} braked or stood), {yielded} held on a green at the line until the \
+         player had passed ({held:?}), least rough gap {least:.1} m, {overlaps} \
          overlapping car-steps (first {first_overlap:?})",
         waited as f32 / 120.0,
         near.len()
@@ -310,6 +341,10 @@ fn sixty_through_a_red_light_touches_no_car() {
     assert!(red(tick), "the player ran the red");
     assert!(speed > MPH_60 - 1.0, "{speed} m/s");
     assert!(!near.is_empty(), "the junction had traffic");
+    assert!(
+        yielded > 0,
+        "no cross traffic yielded to the player: {held:?}"
+    );
     assert_eq!(overlaps, 0, "first: {first_overlap:?}");
     assert!(app.drive.state.upset_s == 0.0);
 }
