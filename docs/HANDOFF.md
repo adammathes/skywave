@@ -49,7 +49,8 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
     re-uploaded if the renderer is rebuilt but the `App` is kept.
 - Known red: the two cockpit goldens (`strip-golden-cockpit`, `strip-night-cockpit`) predate the
   commit that widened the cockpit view and need regenerating in their own commit.
-- Owner feedback not yet acted on: `docs/backlog/ART.md` (more polygons and color in interiors,
+- Owner feedback not yet acted on: `docs/backlog/NOTES.md` (reset key, radio tuning sound, natural map
+  edges, life and real buildings, mobile, light physics); `docs/backlog/ART.md` (more polygons and color in interiors,
   cars, NPC cars, props); Safari untested after the fallback work; the owner's Deck `--stats`
   output is wanted (`docs/PERFORMANCE.md` says what to run); native radio playback.
 - Next: M3 remainder (local music files, native streams, ambience by zone), M4 (traffic,
