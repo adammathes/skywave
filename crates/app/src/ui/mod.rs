@@ -152,6 +152,8 @@ pub struct Ui {
     /// CPU time the platform spent recording and submitting the last frame, ms (0:
     /// not measured).
     cpu_submit_ms: f32,
+    /// Live NPC cars and the traffic sim's time per step (ms), for the overlay.
+    pub(crate) traffic: (usize, f32),
     /// Adapter and backend, for the overlay.
     gpu_label: String,
 }
@@ -199,6 +201,7 @@ impl Ui {
             auto_quality: Quality::Medium,
             forced_quality: None,
             cpu_submit_ms: 0.0,
+            traffic: (0, 0.0),
             gpu_label: String::new(),
         }
     }
@@ -274,6 +277,12 @@ impl Ui {
         let full = &mut self.map.full;
         full.zoom_by(octaves, &geom, rect);
         full.pan(dir, dt, &geom, rect);
+    }
+
+    /// The settings, to change in tests as the menu would.
+    #[cfg(test)]
+    pub(crate) fn settings_mut(&mut self) -> &mut Settings {
+        &mut self.settings
     }
 
     pub fn settings(&self) -> &Settings {
@@ -573,6 +582,11 @@ impl Ui {
             }
             Effect::Choose(ItemId::MinimapZoom, i) => {
                 self.settings.minimap_range_m = MINIMAP_RANGES_M[i.min(MINIMAP_RANGES_M.len() - 1)];
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::Traffic, i) => {
+                self.settings.traffic =
+                    crate::npc::DENSITIES[i.min(crate::npc::DENSITIES.len() - 1)];
                 self.dirty = true;
             }
             Effect::Choose(ItemId::Handling, i) => {
@@ -1027,9 +1041,9 @@ impl App {
         } else if was_open || self.ui.full_map_open() {
             // The press that closed the menu (Space on Resume) is not also a drive input,
             // and the full map takes the sticks and keys: the car coasts under it.
-            self.update(&InputState::default(), dt)
+            self.advance(&InputState::default(), dt, now_seconds)
         } else {
-            self.update(&state, dt)
+            self.advance(&state, dt, now_seconds)
         };
         self.alpha = steps.alpha;
         if std::mem::take(&mut self.camera_cycled) {
@@ -1083,6 +1097,17 @@ impl App {
         }
         self.audio.tunes = radio.tunes();
         self.audio.tune_volume = self.ui.settings.radio.volume;
+        // The listener is the camera, moving with the car.
+        let velocity = glam::Vec3::from(self.drive.state.vel);
+        let (eye, forward) = if self.fly {
+            let (s, c) = self.curr.yaw.sin_cos();
+            (self.curr.pos, glam::Vec3::new(-s, 0.0, -c))
+        } else {
+            let pose = self.camera.pose(&self.drive, steps.alpha);
+            (pose.eye, pose.forward())
+        };
+        self.audio.traffic = self.npcs.voices(steps.alpha, eye, forward, velocity);
+        self.ui.traffic = (self.npcs.count(), self.npcs.step_ms());
         steps
     }
 
@@ -1211,10 +1236,13 @@ impl App {
         }
         self.apply_clock_speed();
         self.apply_settings();
+        // Loading: traffic the saved setting switched on warms up before the first frame.
+        self.finish_warm_up();
     }
 
     /// The handling preset drives the car's assists; the camera settings reach the rig.
     fn apply_settings(&mut self) {
+        self.apply_traffic(self.traffic_scene.unwrap_or(self.ui.settings.traffic));
         let s = &self.ui.settings;
         self.drive.assists = s.handling.assists();
         self.camera.prefs = crate::camera::CameraPrefs {

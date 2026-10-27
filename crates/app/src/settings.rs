@@ -9,7 +9,7 @@
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
 //!              "quality": "auto" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
-//!   "world": { "clock_speed": 10.0 },
+//!   "world": { "clock_speed": 10.0, "traffic": "normal" },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false },
 //!   "radio": { "volume": 0.8, "on": false, "last_station": null, "disabled": [],
 //!              "custom": [], "presets": {} },
@@ -29,6 +29,7 @@ use crate::camera::{CameraMode, TUNING};
 use crate::daylight::CLOCK_SPEEDS;
 use crate::input::Bindings;
 use crate::map::view::{DEFAULT_MINIMAP_RANGE, MINIMAP_RANGES_M};
+use crate::npc::{density_from_name, density_name};
 use crate::vehicles::BUILTIN;
 
 /// The settings format version written by [`Settings::to_json`].
@@ -251,6 +252,8 @@ pub struct Settings {
     pub debug_overlay: bool,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
     pub clock_speed: f32,
+    /// NPC traffic density (a scene's `traffic=` overrides it for the session).
+    pub traffic: traffic::Density,
     /// The minimap at the bottom left.
     pub minimap: bool,
     /// The minimap turns with the car (its forward up); off is north-up.
@@ -284,6 +287,7 @@ impl Default for Settings {
             quality: None,
             debug_overlay: false,
             clock_speed: 10.0,
+            traffic: traffic::Density::Normal,
             minimap: true,
             minimap_rotate: true,
             minimap_range_m: MINIMAP_RANGES_M[DEFAULT_MINIMAP_RANGE],
@@ -408,12 +412,16 @@ impl Default for HudSection {
 #[serde(default)]
 struct World {
     clock_speed: f32,
+    /// A traffic density name (`crate::npc::density_name`).
+    traffic: String,
 }
 
 impl Default for World {
     fn default() -> World {
+        let s = Settings::default();
         World {
-            clock_speed: Settings::default().clock_speed,
+            clock_speed: s.clock_speed,
+            traffic: density_name(s.traffic).to_owned(),
         }
     }
 }
@@ -528,7 +536,10 @@ impl Settings {
                 minimap_rotate: self.minimap_rotate,
                 minimap_range_m: self.minimap_range_m,
             },
-            "world": World { clock_speed: self.clock_speed },
+            "world": World {
+                clock_speed: self.clock_speed,
+                traffic: density_name(self.traffic).to_owned(),
+            },
             "audio": Audio {
                 master: self.master_volume,
                 engine: self.engine_volume,
@@ -581,6 +592,7 @@ impl Settings {
             quality: Quality::from_name(&video.quality),
             debug_overlay: video.debug_overlay,
             clock_speed: world.clock_speed,
+            traffic: density_from_name(&world.traffic).unwrap_or(d.traffic),
             minimap: hud.minimap,
             minimap_rotate: hud.minimap_rotate,
             minimap_range_m: hud.minimap_range_m,
@@ -618,6 +630,7 @@ mod tests {
             quality: Some(Quality::Low),
             debug_overlay: true,
             clock_speed: 60.0,
+            traffic: traffic::Density::Busy,
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,
@@ -687,6 +700,14 @@ mod tests {
         assert_eq!(b, None);
         let (s, _) = Settings::from_json(r#"{ "video": { "ui_scale": "big" } }"#);
         assert_eq!(s, Settings::default());
+        let (s, _) = Settings::from_json(r#"{ "world": { "traffic": "jam" } }"#);
+        assert_eq!(
+            s.traffic,
+            traffic::Density::Normal,
+            "unknown density: the default"
+        );
+        let (s, _) = Settings::from_json(r#"{ "world": { "traffic": "off" } }"#);
+        assert_eq!(s.traffic, traffic::Density::Off);
         let (s, _) = Settings::from_json(
             r#"{ "drive": { "handling": "rails" }, "camera": { "mode": "drone" } }"#,
         );

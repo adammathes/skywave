@@ -503,14 +503,31 @@ impl CarModel {
 }
 
 /// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
-/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps off and four wheels), its origin on the ground
-/// midway between the axles, nose toward `-z`.
+/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps and four wheels), its origin
+/// on the ground midway between the axles, nose toward `-z`. The lamps are built lit (head
+/// lamps as the shape has them, tail lamps at [`TAIL_GLOW`]): an instance's `glow` switches
+/// them, 0 for a parked car, the lamp glow for an NPC car driving with its lights on.
 pub fn parked_mesh(
     shape: &ShapeSpec,
     paint: usize,
     era: Option<&'static str>,
     lod: u8,
 ) -> Result<Mesh, String> {
+    parked_mesh_and_lamps(shape, paint, era, lod).map(|(m, _)| m)
+}
+
+/// The head lamps' centers of `shape`'s [`parked_mesh`], left and right, in its frame.
+pub fn parked_headlamps(shape: &ShapeSpec) -> Result<[Vec3; 2], String> {
+    parked_mesh_and_lamps(shape, 0, None, 2).map(|(_, h)| h)
+}
+
+/// [`parked_mesh`] and its head lamps' centers, left and right, in the mesh's frame.
+fn parked_mesh_and_lamps(
+    shape: &ShapeSpec,
+    paint: usize,
+    era: Option<&'static str>,
+    lod: u8,
+) -> Result<(Mesh, [Vec3; 2]), String> {
     let car = shape::build_with(
         shape,
         &BuildOptions {
@@ -530,9 +547,10 @@ pub fn parked_mesh(
         out.indices.extend(m.indices.iter().map(|i| i + base));
     };
     add(&convert(&car.glass, offset, Surface::Glass));
+    let heads = lamp_centers(&car.lights, LampGroup::Head).map(|p| p + offset);
     let mut lamps = convert(&car.lights, offset, Surface::Plain);
     for v in &mut lamps.vertices {
-        if let Some(s) = lamp_scale(lamp_group(v.emissive), false, false) {
+        if let Some(s) = lamp_scale(lamp_group(v.emissive), true, false) {
             let e = v.emissive;
             v.emissive = render::emissive([e[0], e[1], e[2]], s);
         }
@@ -556,7 +574,7 @@ pub fn parked_mesh(
         }
         add(&w);
     }
-    Ok(out)
+    Ok((out, heads))
 }
 
 /// How a shape mesh's uvs map into the atlas.

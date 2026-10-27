@@ -27,6 +27,10 @@
 //! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
 //! - `stream=0`: build the whole place at load instead of streaming it round the camera
 //!   (`stream=1`, the default; see `app::stream`). The screenshot goldens use it.
+//! - `traffic=off|low|normal|busy`: NPC traffic density for this session, over the saved
+//!   setting (default: the setting, but `off` in a `still=1` scene, so the screenshot
+//!   goldens draw no traffic unless they ask). Traffic runs a while before the first
+//!   frame (`app::npc::WARMUP_S`), so even a still scene has cars on the streets.
 
 use crate::camera::CameraMode;
 use crate::drive::DEFAULT_VEHICLE;
@@ -80,6 +84,8 @@ pub struct SceneSetup {
     pub ui_scale: Option<f32>,
     /// Stream the place round the camera (else build it all at load).
     pub stream: bool,
+    /// Traffic density over the setting, or `None` for the setting.
+    pub traffic: Option<traffic::Density>,
 }
 
 impl Default for SceneSetup {
@@ -100,6 +106,7 @@ impl Default for SceneSetup {
             map: false,
             ui_scale: None,
             stream: true,
+            traffic: None,
         }
     }
 }
@@ -118,10 +125,16 @@ impl SceneSetup {
         Ok(setup)
     }
 
+    /// The traffic density the scene asks for: its `traffic=`, else off in a still scene,
+    /// else `None` (the setting).
+    pub fn traffic_density(&self) -> Option<traffic::Density> {
+        self.traffic.or(self.still.then_some(traffic::Density::Off))
+    }
+
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 14] = [
+    pub const KEYS: [&'static str; 15] = [
         "seed", "place", "car", "paint", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map",
-        "ui", "stream",
+        "ui", "stream", "traffic",
     ];
 
     /// Sets one key (see the module docs).
@@ -158,6 +171,7 @@ impl SceneSetup {
             "still" => self.still = parse_switch(value).ok_or_else(bad)?,
             "map" => self.map = parse_switch(value).ok_or_else(bad)?,
             "stream" => self.stream = parse_switch(value).ok_or_else(bad)?,
+            "traffic" => self.traffic = Some(crate::npc::density_from_name(value).ok_or_else(bad)?),
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;
                 if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {
@@ -203,10 +217,15 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&place=coast&car=palisade_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0",
+            "?seed=7&place=coast&car=palisade_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
         )
         .unwrap();
         assert!(s.map && !s.stream);
+        assert_eq!(s.traffic, Some(traffic::Density::Busy));
+        assert_eq!(s.traffic_density(), Some(traffic::Density::Busy));
+        assert_eq!(SceneSetup::default().traffic_density(), None, "the setting");
+        let still = SceneSetup::from_query("still=1").unwrap();
+        assert_eq!(still.traffic_density(), Some(traffic::Density::Off));
         assert!(SceneSetup::default().stream, "streamed by default");
         assert_eq!(s.ui_scale, Some(1.5));
         assert_eq!(s.seed, 7);
@@ -247,6 +266,7 @@ mod tests {
             "ui=3",
             "ui=big",
             "stream=2",
+            "traffic=jam",
             "place=moon",
         ] {
             assert!(SceneSetup::from_query(q).is_err(), "{q}");

@@ -1088,12 +1088,13 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
         again.app.meshes().len() + wagon_meshes
     );
     // ...unless the scene names a car.
-    let setup = crate::SceneSetup::from_query("car=seabreeze_convertible&stream=0").unwrap();
+    let setup =
+        crate::SceneSetup::from_query("car=seabreeze_convertible&stream=0&traffic=off").unwrap();
     let mut scene = App::from_setup(&setup).unwrap();
     scene.set_settings_store(Box::new(store.clone()));
     assert_eq!(scene.drive.spec.id, "seabreeze_convertible");
     assert_eq!(scene.take_new_meshes().count(), 0);
-    let setup = crate::SceneSetup::from_query("car=corsair_gtx&stream=0").unwrap();
+    let setup = crate::SceneSetup::from_query("car=corsair_gtx&stream=0&traffic=off").unwrap();
     let mut scene = App::from_setup(&setup).unwrap();
     scene.set_settings_store(Box::new(store.clone()));
     assert_eq!(scene.drive.spec.id, "corsair_gtx");
