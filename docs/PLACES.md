@@ -55,12 +55,12 @@ The skeleton is era-neutral. `Era` selects the detailing palette: building `Styl
 
 ## Place compiler (future, M6) — sketch
 Offline CLI `placec --bbox <lat,lon,lat,lon> --era 1985 --out place.skw`, separate binary, may use `std`, network and large deps.
-- Roads, footprints, land use, water: OpenStreetMap (ODbL) or Overture Maps (ODbL for transportation/buildings derived from OSM, CDLA-Permissive for some themes). Heights: OSM `building:levels`, Overture height, or estimate from footprint area + zone.
-- Elevation: USGS 3DEP (public domain) for the US, Copernicus DEM elsewhere.
+- Sources: `docs/adr/0005-reference-sources.md` (public domain only for shipped data; OpenStreetMap and other ODbL data are out). Roads: US Census TIGER/Line, filtered by the earliest vintage for old eras. Footprints and heights: FEMA USA Structures or a city layer with a compatible license, else procedural parcels on the real roads. Land use: NLCD/GIRAS. Water: NHD, NOAA shoreline.
+- Elevation: USGS 3DEP and NOAA coastal DEMs (public domain). US only for now.
 - Style tags: heuristics from footprint shape, use tags and era; optionally photo-derived palettes (any photo analysis happens offline, outputs only numbers; no imagery is shipped).
 - Output: a skeleton Place. The runtime detailing pass does the rest.
-- Licensing: a compiled Place file derived from OSM carries ODbL as a data file and is distributed separately from the BSD code, never embedded in the binary. Document provenance in the header.
-- Era approximation is honest: street layout is today's; buildings newer than the era are dropped and backfilled; signage and props come from the era layer.
+- Licensing: a compiled Place is public domain data plus our code's output, so it may ship in the repo or the binary. The provenance header lists every source and its retrieval date.
+- Era approximation is honest: street layout is the earliest TIGER vintage's (about 1990); buildings newer than the era are dropped and backfilled; signage and props come from the era layer.
 
 ## Acceptance tests
 - Round-trip: encode → decode → identical bytes for procedural seeds 1..8.

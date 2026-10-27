@@ -44,7 +44,7 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 **Gate (ship):** would you send the link to a friend?
 
 ## M6 — Place compiler v1
-- `tools/placec`: bbox + era → Place skeleton from OSM/Overture + USGS elevation; style heuristics; era backfill; provenance header. First target: a real California beach town, compared side-by-side with the procedural one.
+- `tools/placec`: bbox + era → Place skeleton from public-domain sources (TIGER roads, USGS 3DEP elevation, FEMA/city footprints; `docs/adr/0005-reference-sources.md`); style heuristics; era backfill; provenance header. First target: a real California beach town, compared side-by-side with the procedural one.
 **Gate:** does the real place beat the generated one? What does the generator need to learn from it?
 
 ## M7+ — Breadth (each its own gate)
