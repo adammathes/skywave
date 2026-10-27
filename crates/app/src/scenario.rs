@@ -486,6 +486,20 @@ mod tests {
     }
 
     #[test]
+    fn the_stills_decode_as_an_image_library_reads_them() {
+        // `h = h * 31 + byte` mod 2^61 over the RGBA bytes, as Pillow decodes the files.
+        let expected = [2_138_132_481_716_855_108u128, 2_229_843_925_750_921_464];
+        for ((id, png), want) in STILLS.iter().zip(expected) {
+            let img = crate::png::decode(png).unwrap();
+            let h = img
+                .rgba
+                .iter()
+                .fold(0u128, |h, &b| (h * 31 + u128::from(b)) % (1 << 61));
+            assert_eq!(h, want, "{id}");
+        }
+    }
+
+    #[test]
     fn station_counts_come_from_the_preset() {
         assert_eq!(station_counts()[0], station_count(get(0)));
         assert!(station_count(get(0)) > 0);

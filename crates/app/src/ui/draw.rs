@@ -379,26 +379,20 @@ impl Ui {
             let (tx, right) = (cx + CARD_PAD, cx + cw - CARD_PAD);
             let ty = sy + sh + 10.0;
             hud.text(tx, ty, S, if s.stub { DIM } else { TEXT }, &s.title);
-            if k == self.scenario {
-                text_right(hud, right, ty, S, GOOD, false, format_args!("here"));
-            }
             let line = |k: usize| ty + k as f32 * LINE_H;
             hud.text_fmt(tx, line(1), S, DIM, format_args!("{}, {}", s.kind, s.year));
-            if s.stub {
-                text_right(
-                    hud,
-                    right,
-                    line(1),
-                    S,
-                    ACCENT,
-                    false,
-                    format_args!("coming"),
-                );
-            }
             let cars = crate::scenario::lineup(k).cars.len();
             let stations = crate::scenario::station_counts()[k];
             hud.text_fmt(tx, line(2), S, DIM, format_args!("{cars} cars"));
             hud.text_fmt(tx, line(3), S, DIM, format_args!("{stations} stations"));
+            // Beside the short lines, clear of the longer ones at any UI scale.
+            if k == self.scenario {
+                text_right(hud, right, line(2), S, GOOD, false, format_args!("here"));
+            }
+            if s.stub {
+                let at = line(3);
+                text_right(hud, right, at, S, ACCENT, false, format_args!("coming"));
+            }
         }
     }
 
