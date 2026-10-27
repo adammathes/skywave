@@ -10,12 +10,9 @@ use world::procgen::build_place;
 use world::template::RegionTemplate;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
-const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 
 fn grammar() -> world::Grammar {
-    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
-    g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
-    g
+    ron::from_str(GRAMMAR).expect("parse grammar")
 }
 
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
@@ -34,14 +31,14 @@ fn template() -> RegionTemplate {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0xFD3E_DB01_541F_39A2,
-    0x79A5_1B28_B578_8504,
-    0xE4A9_4AF9_4D05_CF2C,
-    0x0AFA_AF14_9F21_E6F6,
-    0x1A05_BAB9_FA31_A1DE,
-    0x5C59_681C_D62A_721F,
-    0xC15A_0066_A11D_E423,
-    0x0637_E446_D186_2528,
+    0x722C_7F23_18FD_869C,
+    0x3BA5_2A8B_484A_D998,
+    0xCCDD_6CA3_EEA9_0320,
+    0x90DD_E129_3147_2601,
+    0x216B_EFEE_BEC3_5FF3,
+    0x66D2_F8CC_6ADC_2030,
+    0x928E_AEA7_4F64_B7D7,
+    0x941A_13A0_BE1A_BA54,
 ];
 
 #[test]

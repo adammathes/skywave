@@ -16,12 +16,9 @@ use world::template::RegionTemplate;
 use world::WorldCollider;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
-const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 
 fn grammar() -> world::Grammar {
-    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
-    g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
-    g
+    ron::from_str(GRAMMAR).expect("parse grammar")
 }
 
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
@@ -405,10 +402,10 @@ fn lights_are_the_lamps_signs_and_shops() {
 /// with `cargo test -p world --test detail -- --nocapture` (it prints the table), check the
 /// coast screenshots, and commit the new values in their own commit saying why they moved.
 const GOLDEN: [u64; 4] = [
-    0xEB8B_4BF9_289E_F9F5,
-    0x8156_7858_5420_7AD2,
-    0xA6F1_735B_368E_4E16,
-    0x2C50_D5DA_3892_EB22,
+    0xD076_2858_2B1E_534B,
+    0xAE61_F718_5EC2_E30A,
+    0xDE5A_B800_697F_F427,
+    0x4D55_2B04_6328_2BD8,
 ];
 
 /// The detail is deterministic, valid and pinned.

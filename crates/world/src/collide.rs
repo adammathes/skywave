@@ -942,7 +942,8 @@ fn props_of(
     for (i, b) in place.buildings.iter().enumerate() {
         let env = lookup.facade_envs(i);
         let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-        let plan = buildings::plan_building(b, &env, door_pick, grammar);
+        let zone = crate::building_zone(place, b);
+        let plan = buildings::plan_building(b, zone, &env, door_pick, grammar);
         if b.style == place::StyleTag::StripMall {
             let fp = ground::to_v2(&b.footprint);
             let c = ground::centroid(&fp);
@@ -955,6 +956,7 @@ fn props_of(
                     plan.frontage,
                     blk,
                     &pal,
+                    grammar.lots.stall_w,
                     seed ^ i as u64,
                     &mut scratch,
                     &mut out,
