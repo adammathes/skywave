@@ -2043,6 +2043,12 @@ fn the_deck_keys_on_the_keyboard_and_the_readout_fades() {
     h.key(Key::KeyP);
     assert_eq!(h.app.source(), Source::Deck);
     assert_eq!(h.played().len(), 1);
+    // With no music they do nothing: the station plays on.
+    let mut h = Harness::new();
+    h.key(Key::BracketRight);
+    h.key(Key::KeyO);
+    assert_eq!(h.app.source(), Source::Radio);
+    assert!(h.app.radio().is_on());
 }
 
 #[test]

@@ -37,7 +37,7 @@ const GAP: f32 = 6.0;
 const BADGE: [u8; 4] = [255, 178, 62, 255];
 const ON_BADGE: [u8; 4] = [26, 18, 8, 255];
 const BRIGHT: [u8; 4] = [238, 234, 222, 255];
-const DIM: [u8; 4] = [170, 176, 192, 255];
+const DIM: [u8; 4] = [196, 202, 214, 255];
 const SHADOW: [u8; 4] = [0, 0, 0, 170];
 
 /// The transport and source keys: any of them shows the readout again.

@@ -311,7 +311,8 @@ async function runMusic() {
   try {
     // A two-album library through the folder picker's input (a synthetic drop cannot carry
     // folders), then a loose dropped file: a mixtape beside it.
-    await page.setInputFiles("input[type=file]", await writeLibrary());
+    const library = await writeLibrary();
+    await page.setInputFiles("input[type=file]", library);
     await page.waitForFunction(() => window.skywaveMusic.tracks === 3, null, { timeout: 30_000 });
     await frames(3);
     const mp3 = silentMp3(30, "Test Tone", "Skywave");
@@ -322,6 +323,10 @@ async function runMusic() {
       window.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
     }, [...mp3]);
     await page.waitForFunction(() => window.skywaveMusic.tracks === 4, null, { timeout: 30_000 });
+    // The same folder picked again replaces itself.
+    await page.setInputFiles("input[type=file]", library);
+    await frames(10);
+    if ((await page.evaluate(() => window.skywaveMusic.tracks)) !== 4) throw new Error("a second pick doubled the library");
     await frames(3);
     // ' makes the deck (a tape deck in 1984) the source and plays the library's first
     // album: Night Shift's, by artist.

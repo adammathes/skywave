@@ -112,9 +112,25 @@ impl CarDeck {
 
     /// Puts folder `folder` in the library (replacing the one with its id).
     pub fn add_folder(&mut self, folder: Folder) {
-        self.folders.retain(|f| f.id != folder.id);
-        self.folders.push(folder);
+        self.add_folders(vec![folder]);
+    }
+
+    /// Puts `folders` in the library (each replacing the one with its id) and indexes it
+    /// once. Folders past the library's [`audio::music::MAX_TRACKS`] are left out (their
+    /// tracks would be): returns how many went in.
+    pub fn add_folders(&mut self, folders: Vec<Folder>) -> usize {
+        let mut added = 0;
+        for folder in folders {
+            self.folders.retain(|f| f.id != folder.id);
+            let tracks: usize = self.folders.iter().map(|f| f.files.len()).sum();
+            if tracks >= audio::music::MAX_TRACKS {
+                continue;
+            }
+            self.folders.push(folder);
+            added += 1;
+        }
         self.rebuild();
+        added
     }
 
     /// Takes folder `id` out of the library for good: the platform forgets it.
@@ -428,6 +444,29 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_batch_indexes_once_and_stops_at_the_track_cap() {
+        let big = |id: &str, n: usize| Folder {
+            id: id.into(),
+            name: id.into(),
+            mixtape: false,
+            files: (0..n)
+                .map(|i| FileInfo {
+                    key: format!("{id}/{i}"),
+                    path: format!("{id}/Album/{i:04} t.mp3"),
+                    probe: Probe::default(),
+                })
+                .collect(),
+        };
+        let mut d = CarDeck::default();
+        let n = audio::music::MAX_TRACKS / 2;
+        let added = d.add_folders(vec![big("a", n), big("b", n), big("c", 5), big("a", n)]);
+        assert_eq!(added, 3, "a twice (replaced), b; c is past the cap");
+        let ids: Vec<&str> = d.folders().iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, ["b", "a"]);
+        assert_eq!(d.deck().library().tracks.len(), audio::music::MAX_TRACKS);
     }
 
     #[test]

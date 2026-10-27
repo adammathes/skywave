@@ -343,6 +343,15 @@
     let roots = []; // remembered folders: { id, handle, granted, asked }
     const storage = (fn) => { try { return fn(localStorage); } catch { return null; } };
     const newId = (p) => p + Math.random().toString(16).slice(2, 10);
+    // A folder without a handle (the folder input, a dropped folder or loose files) is the
+    // same folder when its name and files (paths and sizes) are: picked again, it replaces
+    // itself rather than doubling every album.
+    const sameId = (p, name, list) => {
+      let h = 0x811c9dc5;
+      const text = name + "\n" + list.map((e) => `${e.rel}:${e.file.size}`).sort().join("\n");
+      for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+      return p + h.toString(16).padStart(8, "0");
+    };
 
     // Where the audio starts after an ID3v2 tag (audio::music::audio_start).
     const audioStart = (h) => (h.length >= 10 && h[0] === 0x49 && h[1] === 0x44 && h[2] === 0x33
@@ -449,7 +458,8 @@
         return { rel: p.includes("/") ? p.slice(p.indexOf("/") + 1) : p, file: f, top: p.split("/")[0] };
       });
       input.value = "";
-      add(newId("p"), (list[0] && list[0].top) || "My music", list, true, false);
+      const name = (list[0] && list[0].top) || "My music";
+      add(sameId("p", name, list), name, list, true, false);
     });
 
     window.addEventListener("dragover", (e) => {
@@ -476,10 +486,10 @@
           else if (t.entry && t.entry.isDirectory) {
             const out = [];
             await walkEntry(t.entry, "", out, 0);
-            await add(newId("d"), t.entry.name, out, true, false);
+            await add(sameId("d", t.entry.name, out), t.entry.name, out, true, false);
           } else if (t.file) loose.push({ rel: t.file.name, file: t.file });
         }
-        if (loose.length > 0) await add(newId("d"), "Mixtape", loose, true, false, true);
+        if (loose.length > 0) await add(sameId("d", "Mixtape", loose), "Mixtape", loose, true, false, true);
       })();
     });
 

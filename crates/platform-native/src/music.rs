@@ -95,6 +95,10 @@ pub fn scan(root: &Path, ignored: &[String]) -> Vec<Folder> {
         collect(&dir, 0, &mut paths);
         let name = dir.file_name().map(|n| n.to_string_lossy().into_owned());
         out.extend(folder(root, &dir, name.unwrap_or_default(), &paths));
+        if out.iter().map(|f| f.files.len()).sum::<usize>() >= MAX_TRACKS {
+            log::warn!("music: more than {MAX_TRACKS} tracks; the rest are left out");
+            return out;
+        }
     }
     if out.len() < MAX_FOLDERS && wanted(root) {
         let name = root.file_name().map(|n| n.to_string_lossy().into_owned());

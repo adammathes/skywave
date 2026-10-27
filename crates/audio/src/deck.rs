@@ -199,6 +199,22 @@ impl Library {
                 });
             }
         }
+        // A folder's untagged files join its album when its tagged files name only one (a
+        // partly tagged album stays one album).
+        let untagged: Vec<(usize, String, String)> = groups
+            .keys()
+            .filter(|(_, _, album)| album.is_empty())
+            .cloned()
+            .collect();
+        for key in untagged {
+            let mut tagged = groups
+                .keys()
+                .filter(|(f, d, a)| *f == key.0 && *d == key.1 && !a.is_empty());
+            if let (Some(only), None) = (tagged.next().cloned(), tagged.next()) {
+                let moved = groups.remove(&key).unwrap_or_default();
+                groups.entry(only).or_default().extend(moved);
+            }
+        }
         let mut albums: Vec<(Album, Vec<Track>, String)> = Vec::new();
         for ((fi, dir, _), mut entries) in groups {
             let folder = &folders[fi];
@@ -206,29 +222,33 @@ impl Library {
                 let k = |e: &Entry| (e.file.probe.disc.unwrap_or(0), e.no.unwrap_or(u32::MAX));
                 k(a).cmp(&k(b)).then_with(|| a.file.path.cmp(&b.file.path))
             });
-            let first = &entries[0].file.probe;
             let dirs: Vec<&str> = dir.split('/').filter(|d| !d.is_empty()).collect();
             let (artist, title) = if folder.mixtape {
                 (VARIOUS.to_string(), MIXTAPE.to_string())
             } else {
                 let folder_artist = (dirs.len() >= 2).then(|| dirs[dirs.len() - 2]);
                 let folder_album = dirs.last().copied().unwrap_or(&folder.name);
-                let shared = first.artist.as_ref().filter(|a| {
+                // Tags from whichever files have them (a partly tagged album).
+                let tag = |f: fn(&Probe) -> Option<&String>| {
                     entries
                         .iter()
-                        .all(|e| e.file.probe.artist.as_ref() == Some(*a))
+                        .find_map(|e| f(&e.file.probe).map(String::as_str))
+                };
+                let first_artist = tag(|p| p.artist.as_ref());
+                let shared = first_artist.filter(|a| {
+                    entries
+                        .iter()
+                        .filter_map(|e| e.file.probe.artist.as_deref())
+                        .all(|b| b == *a)
                 });
-                let any_artist = entries.iter().any(|e| e.file.probe.artist.is_some());
-                let artist = first
-                    .album_artist
-                    .as_deref()
-                    .or(shared.map(String::as_str))
+                let artist = tag(|p| p.album_artist.as_ref())
+                    .or(shared)
                     .or(folder_artist)
-                    .or(any_artist.then_some(VARIOUS));
+                    .or(first_artist.map(|_| VARIOUS));
                 (
                     named(artist, UNKNOWN_ARTIST),
                     named(
-                        first.album.as_deref().or(Some(folder_album)),
+                        tag(|p| p.album.as_ref()).or(Some(folder_album)),
                         "Unknown Album",
                     ),
                 )
@@ -938,6 +958,14 @@ mod tests {
                 "Cal Moon"
             ]
         );
+        // A partly tagged album stays one album, its untagged track in its place.
+        let part = Library::build(&[folder(vec![
+            file("Art/Alb/01 One.mp3", tag("Art", "Alb", "One", 1)),
+            file("Art/Alb/02 Two.mp3", Probe::default()),
+            file("Art/Alb/03 Three.mp3", tag("Art", "Alb", "Three", 3)),
+        ])]);
+        assert_eq!(part.albums.len(), 1, "{:?}", part.albums);
+        assert_eq!(titles(&part), ["Art One", "Art Two", "Art Three"]);
         // A folder whose files name two albums is two albums.
         let two = Library::build(&[folder(vec![
             file("dump/a.mp3", tag("X", "One", "a", 1)),

@@ -1056,7 +1056,9 @@ impl Ui {
                 true
             } else if self.settings.radio.deck.source == Source::Deck {
                 self.deck.press(s)
-            } else if s.just_pressed(Action::AlbumNext) || s.just_pressed(Action::AlbumPrev) {
+            } else if (s.just_pressed(Action::AlbumNext) || s.just_pressed(Action::AlbumPrev))
+                && !self.deck.deck().library().is_empty()
+            {
                 // An album key on the radio puts the tape in: the deck becomes the source,
                 // on that album.
                 self.settings.radio.deck.source = Source::Deck;
@@ -1584,6 +1586,27 @@ impl App {
         ui.music_again = false;
         if announce {
             ui.show(Toast::MusicAdded { tracks: n, kept });
+        }
+    }
+
+    /// Puts every folder of a scan in the library at once (each kept, none announced),
+    /// indexing it once: the native music folder's. Folders past the library's track cap
+    /// are left out.
+    pub fn add_music_folders(&mut self, folders: Vec<audio::deck::Folder>) {
+        let folders: Vec<audio::deck::Folder> = folders
+            .into_iter()
+            .filter(|f| !f.files.is_empty())
+            .map(|mut f| {
+                f.name = audio::music::ascii(&f.name);
+                if f.name.is_empty() {
+                    f.name = "My music".to_string();
+                }
+                f
+            })
+            .collect();
+        if !folders.is_empty() {
+            self.ui.deck.add_folders(folders);
+            self.ui.music_again = false;
         }
     }
 

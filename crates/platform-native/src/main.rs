@@ -79,9 +79,6 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 /// same figure the web build uses.
 const PIXELS_PER_NOTCH: f64 = 100.0;
 
-/// Music folders put on the dial per frame at most (each rebuilds the dial's channels).
-const MUSIC_FOLDERS_PER_FRAME: usize = 4;
-
 /// Frames left out of the `--frames` summary while the town streams in and caches warm.
 const SUMMARY_WARMUP_FRAMES: usize = 60;
 
@@ -828,11 +825,13 @@ impl Shell {
             self.app.radio_event(event);
         }
         if let Some(found) = &self.music {
-            // A few a frame, so a big library never stalls one. Kept: the same folder is
-            // scanned again next session.
-            for f in found.try_iter().take(MUSIC_FOLDERS_PER_FRAME) {
-                self.music_paths.push(f.id.clone());
-                self.app.add_music_folder(f, false, true);
+            // The scan arrives at once: the library is indexed once. Kept: the same folder
+            // is scanned again next session.
+            let folders: Vec<audio::deck::Folder> = found.try_iter().collect();
+            if !folders.is_empty() {
+                self.music_paths
+                    .extend(folders.iter().map(|f| f.id.clone()));
+                self.app.add_music_folders(folders);
             }
         }
         let forgotten = self.app.take_forgotten_music();
