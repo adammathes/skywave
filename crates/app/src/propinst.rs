@@ -611,7 +611,11 @@ mod tests {
         // The pedestrian figures' meshes have their own budget (`peds`).
         let built = built - crate::peds::VARIANTS * traffic::figure::PARTS;
         eprintln!("traffic: {built} more meshes, {npc} bytes");
-        assert!(cars.len() + built <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
+        // Plus each traffic shape's brake lamp overlay at both levels.
+        assert!(
+            cars.len() + built
+                <= parking * (OWN_PAINTS + ERA_PAINTS) * 2 + vehicles::TRAFFIC_SHAPES * 2
+        );
         assert!(
             bytes + npc <= PARKED_MESH_BYTES_MAX,
             "{bytes} bytes of parked cars and {npc} of traffic"

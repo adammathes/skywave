@@ -109,6 +109,8 @@ const SOUND_MPS: f32 = 343.0;
 const TWILIGHT_S: f32 = 1500.0;
 /// Light-culling half size round a car and the height of its middle, m.
 const CAR_HALF_M: f32 = 2.8;
+/// Marks a car slot in the draw order as its brake lamps' overlay.
+const BRAKE_SLOT: u16 = 0x8000;
 
 /// A car's pose at the start of the step, to interpolate from.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -131,6 +133,8 @@ pub struct Npcs {
     prev: Vec<Snap>,
     /// Mesh ids, `(shape * PAINTS + paint) * 2 + lod - 1`, once found or built.
     ids: Vec<MeshId>,
+    /// Brake lamp overlay mesh ids ([`car::brake_overlay_mesh`]), `shape * 2 + lod - 1`.
+    brakes: Vec<MeshId>,
     /// Bytes of the meshes built for the traffic alone (not shared with parked cars).
     built_bytes: usize,
     /// Per shape, its head lamps' centers in the mesh's frame.
@@ -179,9 +183,11 @@ impl Npcs {
             density: Density::Off,
             prev: Vec::with_capacity(cap),
             ids: Vec::new(),
+            brakes: Vec::new(),
             built_bytes: 0,
             heads: Vec::new(),
-            order: Vec::with_capacity(cap),
+            // A car and its brake lamps.
+            order: Vec::with_capacity(2 * cap),
             step_ms: 0.0,
             warm: 0,
             preroll: 0,
@@ -209,9 +215,19 @@ impl Npcs {
             .collect::<Result<_, _>>()?;
         let mut ids = Vec::with_capacity(shapes.len() * PAINTS * 2);
         let mut heads = Vec::with_capacity(shapes.len());
+        let mut brakes = Vec::with_capacity(shapes.len() * 2);
         let mut bytes = 0;
+        let size = |m: &Mesh| {
+            m.vertices.len() * core::mem::size_of::<render::Vertex>()
+                + m.indices.len() * core::mem::size_of::<u32>()
+        };
         for (k, sh) in shapes.iter().enumerate() {
             heads.push(car::parked_headlamps(sh)?);
+            for lod in [1, 2] {
+                let m = car::brake_overlay_mesh(sh, lod)?;
+                bytes += size(&m);
+                brakes.push(register(m));
+            }
             let (_, era) = crate::propinst::place_paints(self.place_seed, k, sh.palette.len());
             for &e in &era {
                 if let Some(pair) = parked.and_then(|p| p.car_ids(k, e)) {
@@ -220,13 +236,13 @@ impl Npcs {
                 }
                 for lod in [1, 2] {
                     let m = car::parked_mesh(sh, 0, Some(shape::ERA_1980S_PAINT[e].0), lod)?;
-                    bytes += m.vertices.len() * core::mem::size_of::<render::Vertex>()
-                        + m.indices.len() * core::mem::size_of::<u32>();
+                    bytes += size(&m);
                     ids.push(register(m));
                 }
             }
         }
         self.ids = ids;
+        self.brakes = brakes;
         self.heads = heads;
         self.built_bytes = bytes;
         self.crowd.build_meshes(register);
@@ -238,9 +254,10 @@ impl Npcs {
         self.built_bytes
     }
 
-    /// Most instances a frame draws: every car the pool holds and every person's parts.
+    /// Most instances a frame draws: every car the pool holds and its brake lamps, and
+    /// every person's parts.
     pub fn capacity(&self) -> usize {
-        self.traffic.budget.cars + self.crowd.capacity()
+        2 * self.traffic.budget.cars + self.crowd.capacity()
     }
 
     pub fn density(&self) -> Density {
@@ -420,7 +437,8 @@ impl Npcs {
 
     /// Appends an instance for every car within [`DRAW_RADIUS_M`] of `eye`, `alpha` of the
     /// way through the step, in mesh order, lit by the frame's `lights` when close;
-    /// lamps glow by `lamp_glow` on cars with their lights on. Returns how many.
+    /// lamps glow by `lamp_glow` on cars with their lights on, and a braking car adds its
+    /// brake lamps' overlay glowing by `lamp_glow`, day or night. Returns how many.
     pub fn push(
         &mut self,
         alpha: f32,
@@ -441,13 +459,19 @@ impl Npcs {
         for (i, c) in self.traffic.cars().iter().enumerate() {
             let d2 = Vec3::from(c.pos).distance_squared(eye);
             if d2 <= draw2 {
-                let mesh = self.ids[Self::mesh_index(c, d2 > near2)];
+                let far = d2 > near2;
+                let mesh = self.ids[Self::mesh_index(c, far)];
                 order.push((mesh.0, i as u16));
+                if c.braking {
+                    let brake = self.brakes[usize::from(c.shape) * 2 + usize::from(far)];
+                    order.push((brake.0, i as u16 | BRAKE_SLOT));
+                }
             }
         }
         order.sort_unstable();
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
-        for &(mesh, i) in &order {
+        for &(mesh, slot) in &order {
+            let i = slot & !BRAKE_SLOT;
             let c = &self.traffic.cars()[usize::from(i)];
             let (pos, heading) = self.pose(usize::from(i), alpha);
             let transform = Mat4::from_rotation_translation(Quat::from_rotation_y(heading), pos);
@@ -457,9 +481,11 @@ impl Npcs {
             } else {
                 LightSet::EMPTY
             };
+            let brake = slot & BRAKE_SLOT != 0;
             out.push(MeshInstance {
                 lights,
-                glow: if c.lights { lamp_glow } else { 0.0 },
+                glow: if c.lights || brake { lamp_glow } else { 0.0 },
+                casts_shadow: !brake,
                 ..MeshInstance::new(MeshId(mesh), transform.to_cols_array_2d())
             });
         }
@@ -811,6 +837,47 @@ mod tests {
             .iter()
             .filter(|i| ids.contains(&i.mesh))
             .all(|i| i.glow == 0.0));
+    }
+
+    /// At noon the cars braking or queued at the junction add their brake lamps' overlay,
+    /// one per braking car in reach, glowing (lights off or not) and casting no shadow;
+    /// cruising cars add none.
+    #[test]
+    fn braking_cars_light_their_brake_lamps_by_day() {
+        let mut app = app(&format!("{JUNCTION}&t=12:00&traffic=busy&still=1&stream=1"));
+        app.update(&InputState::default(), 0.0);
+        let eye = app.camera.pose(&app.drive, 1.0).eye;
+        let braking = app
+            .npcs
+            .cars()
+            .iter()
+            .filter(|c| c.braking && Vec3::from(c.pos).distance(eye) <= DRAW_RADIUS_M)
+            .count();
+        assert!(braking > 0, "someone waits at the light");
+        let brakes = app.npcs.brakes.clone();
+        // Every traffic shape has its overlay at both levels, and it has lenses.
+        assert_eq!(brakes.len(), crate::vehicles::TRAFFIC_SHAPES * 2);
+        for (k, (_, text)) in crate::vehicles::BUILTIN_SHAPES[..crate::vehicles::TRAFFIC_SHAPES]
+            .iter()
+            .enumerate()
+        {
+            let sh = crate::vehicles::load_shape(text).unwrap();
+            for lod in [1, 2] {
+                let m = car::brake_overlay_mesh(&sh, lod).unwrap();
+                assert!(
+                    !m.indices.is_empty(),
+                    "shape {k} level {lod} has no tail lenses"
+                );
+            }
+        }
+        let view = app.scene_view(1.0, 16.0 / 9.0);
+        let overlays: Vec<_> = view
+            .instances
+            .iter()
+            .filter(|i| brakes.contains(&i.mesh))
+            .collect();
+        assert_eq!(overlays.len(), braking);
+        assert!(overlays.iter().all(|i| i.glow > 10.0 && !i.casts_shadow));
     }
 
     /// The traffic is heard: the nearest moving cars, louder near, pitched up approaching.

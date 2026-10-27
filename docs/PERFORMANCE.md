@@ -351,7 +351,11 @@ Cars of one mesh share one instanced draw, so four cars cost eight draws at Deck
 level-1 meshes in the forward pass and the cascades), about 3.5k triangles each forward and
 again per cascade. A person is 13 part instances of about 1k triangles in all; people drawn
 as one figure share its 13 draws per pass, so the draws grow with the figures in view (at
-most 8 × 13 per pass), not the people, and only people within 40 m cast shadows. Those
+most 8 × 13 per pass), not the people, and only people within 40 m cast shadows. A braking
+car adds its shape's brake lamp overlay (about a hundred triangles, forward pass only, no
+shadow, one instanced draw per shape and level in view); with them the busy junction
+measures Deck 1132 draws, 681 in the median frame, 428k forward, 671k shadow, and Medium
+1118, 503, 428k, 1200k: the same as without, within a frame's noise. Those
 numbers are the last frame of a still camera, with the simulation stopped (`still=1`).
 Since the GPU cuts the test drives the camera over 8 frames with the world running and
 counts the most draws in a frame, the median frame's after the first, and the mean
