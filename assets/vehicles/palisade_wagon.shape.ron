@@ -3,8 +3,8 @@
 // Intent: long and square. A tall flat nose with a wide chrome grille between two pairs
 // of square sealed-beam lamps, a long flat hood, an upright windshield, a roof that runs
 // all the way back over the cargo bay to a near-vertical tailgate, four doors, wood-grain
-// side panels with a light surround, chrome bumpers and belt molding, a roof rack and big
-// chrome wheel covers. Generic period cues only.
+// side panels with a light surround, chrome bumpers and belt molding, a roof rack and
+// wire-spoke wheels on whitewalls. Generic period cues only.
 //
 // Units are meters; x runs rearward from the nose, y up from the ground. Layout:
 // docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
@@ -29,10 +29,10 @@ ShapeSpec(
     front: Front(lights: Quad, grille: Wide, bumper: Chrome, bumper_y: (0.30, 0.46)),
     rear: Rear(lights: Dual, spoiler: None, bumper: Chrome, bumper_y: (0.30, 0.45)),
     seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.86, creases: [(0.15, 0.70, 5.10, 0.72)]),
-    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Mesh, hubcaps: false, whitewalls: true),
     details: [WoodPanel, ChromeTrim, RoofRack, Badge(Bar)],
-    // Champagne, maroon, forest green, powder blue, cream, chocolate, tan over brown.
-    palette: ["#c7b89a", "#6b2d26", "#3d4a3c", "#8aa0b0", "#e8e3d3", "#5a4632", "#cdb894/#6a4e36"],
+    // Tan over brown, champagne, maroon, forest green, powder blue, cream, chocolate.
+    palette: ["#cdb894/#6a4e36", "#c7b89a", "#6b2d26", "#3d4a3c", "#8aa0b0", "#e8e3d3", "#5a4632"],
     accent: "#8a6a48",
     interior: InteriorShape(
         dash_height: 0.96,

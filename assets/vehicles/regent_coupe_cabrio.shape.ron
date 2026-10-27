@@ -35,9 +35,9 @@ ShapeSpec(
     // VinylRoof on a convertible: the conversion shop's padded boot.
     details: [ChromeTrim, VinylRoof, CorneringLamps, Badge(Circle)],
     roof: Roof(kind: Convertible(top: Down)),
-    // Dark red, ivory, midnight blue, smoke gray, silver over midnight blue, champagne over
-    // brown.
-    palette: ["#6e1a22", "#e8e1cf", "#23283a", "#6b6a68", "#c8c9c9/#23283a", "#d9c8a4/#5a3c2c"],
+    // Ivory over dark red, dark red, ivory, midnight blue, smoke gray, silver over midnight
+    // blue, champagne over brown.
+    palette: ["#e8e1cf/#6e1a22", "#6e1a22", "#e8e1cf", "#23283a", "#6b6a68", "#c8c9c9/#23283a", "#d9c8a4/#5a3c2c"],
     // The padded boot and the top: ivory vinyl.
     accent: "#ddd4c0",
     interior: InteriorShape(

@@ -111,7 +111,12 @@ impl<'a, 'b> Parts<'a, 'b> {
                 Detail::WoodPanel => self.wood_panel(false),
                 Detail::WoodApplique => self.wood_panel(true),
                 Detail::CorneringLamps => self.cornering_lamps(),
-                Detail::ChromeTrim | Detail::BlackTrim if self.lod0() => self.rocker_trim(),
+                Detail::ChromeTrim | Detail::BlackTrim if self.lod0() => {
+                    self.rocker_trim();
+                    if d == Detail::ChromeTrim {
+                        self.side_molding();
+                    }
+                }
                 Detail::VinylRoof if hardtop => self.vinyl_roof(),
                 Detail::RallyStripes if self.lod0() => self.rally_stripes(),
                 Detail::MudFlaps => self.mud_flaps(),
@@ -197,7 +202,12 @@ impl<'a, 'b> Parts<'a, 'b> {
         if self.lod0() {
             // Rubber strip along chrome bumpers, guards on big ones.
             if kind == Bumper::Chrome {
-                let strip = [(0.02, -0.012), (0.036, -0.01), (0.036, 0.01), (0.02, 0.012)];
+                let strip = [
+                    (0.02, -0.016),
+                    (0.046, -0.013),
+                    (0.046, 0.013),
+                    (0.02, 0.016),
+                ];
                 self.body.sweep(
                     &path[1..path.len() - 1],
                     &us[1..us.len() - 1],
@@ -216,13 +226,29 @@ impl<'a, 'b> Parts<'a, 'b> {
                         self.m.rubber,
                     );
                 }
+            } else if kind == Bumper::Rubber && !self.b.has(Detail::ChromeTrim) {
+                // A lighter gray rub strip along a black rubber bumper.
+                let strip = [
+                    (0.024, -0.014),
+                    (0.042, -0.011),
+                    (0.042, 0.011),
+                    (0.024, 0.014),
+                ];
+                self.body.sweep(
+                    &path[1..path.len() - 1],
+                    &us[1..us.len() - 1],
+                    &vs[1..vs.len() - 1],
+                    &strip,
+                    true,
+                    self.m.steel.shade(1.6),
+                );
             } else if self.b.has(Detail::ChromeTrim) {
                 // A bright strip along a painted or rubber bumper.
                 let strip = [
-                    (0.024, -0.014),
-                    (0.037, -0.011),
-                    (0.037, 0.011),
-                    (0.024, 0.014),
+                    (0.024, -0.016),
+                    (0.045, -0.013),
+                    (0.045, 0.013),
+                    (0.024, 0.016),
                 ];
                 self.body.sweep(
                     &path[1..path.len() - 1],
@@ -297,6 +323,24 @@ impl<'a, 'b> Parts<'a, 'b> {
                     [0.0, 0.0, dir],
                 );
             }
+        }
+    }
+
+    /// A bright surround standing proud of a face round `x0..x1`, `y0..y1`: four bars `w`
+    /// wide.
+    #[allow(clippy::too_many_arguments)]
+    fn surround(&mut self, band_s: f32, dir: f32, x0: f32, x1: f32, y0: f32, y1: f32, w: f32) {
+        let az = band_s - self.b.axle[0];
+        let (za, zb) = (az - dir * 0.004, az + dir * 0.026);
+        let (za, zb) = (za.min(zb), za.max(zb));
+        let m = self.m.chrome;
+        for (a, b) in [
+            ([x0 - w, y1], [x1 + w, y1 + w]),
+            ([x0 - w, y0 - w], [x1 + w, y0]),
+            ([x0 - w, y0], [x0, y1]),
+            ([x1, y0], [x1 + w, y1]),
+        ] {
+            self.body.aabb([a[0], a[1], za], [b[0], b[1], zb], m);
         }
     }
 
@@ -714,6 +758,17 @@ impl<'a, 'b> Parts<'a, 'b> {
                     self.lamp_rect(band.s, band.dir, a, b, ly0, ly1, lens, None);
                     self.facets(band.s, band.dir, a, b, ly0, ly1, lens);
                 }
+                // A bright surround and dividers between the lenses.
+                self.surround(band.s, band.dir, -half, half, ly0, ly1, 0.016);
+                let az = band.s - self.b.axle[0];
+                for &(a, _, _) in pieces[1..].iter() {
+                    let z = az + band.dir * 0.022;
+                    self.body.aabb(
+                        [a - 0.006, ly0, z.min(az)],
+                        [a + 0.006, ly1, z.max(az)],
+                        m.chrome,
+                    );
+                }
                 if let Some(bz) = bezel {
                     let az = band.s - self.b.axle[0];
                     self.body.aabb(
@@ -745,6 +800,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                     let top = y1 - 0.01;
                     self.lamp_rect(band.s, band.dir, x0, x1, top - hh, top, m.tail, bezel);
                     self.facets(band.s, band.dir, x0, x1, top - hh, top, m.tail);
+                    self.surround(band.s, band.dir, x0, x1, top - 2.0 * hh - gap, top, 0.014);
                     let mid = top - hh - gap;
                     self.lamp_rect(
                         band.s,
@@ -789,6 +845,9 @@ impl<'a, 'b> Parts<'a, 'b> {
                         );
                         self.facets(band.s, band.dir, x0, x1, yc - h * 0.5, yc + h * 0.5, lens);
                     }
+                    let (a, b) = (half - 3.0 * w - 0.03, half);
+                    let (x0, x1) = if sx > 0.0 { (a, b) } else { (-b, -a) };
+                    self.surround(band.s, band.dir, x0, x1, yc - h * 0.5, yc + h * 0.5, 0.014);
                 }
             }
             TailLights::Round => {
@@ -1601,6 +1660,33 @@ impl<'a, 'b> Parts<'a, 'b> {
         }
     }
 
+    /// A bright molding along the first crease (or partway up the side), clear of the
+    /// arches and the wood.
+    fn side_molding(&mut self) {
+        if self.b.has(Detail::WoodPanel) {
+            return;
+        }
+        let l = self.b.length;
+        let spans = self.side_spans(0.08, l - 0.08);
+        for sx in [-1.0f32, 1.0] {
+            for &(a, c) in &spans {
+                let (ya, yc) = (self.b.split_y(a) - 0.02, self.b.split_y(c) - 0.02);
+                if ya < self.arch_floor(a, 0.02) || yc < self.arch_floor(c, 0.02) {
+                    continue;
+                }
+                self.side_patch(
+                    sx,
+                    a,
+                    c,
+                    [ya, yc],
+                    [ya + 0.014, yc + 0.014],
+                    0.005,
+                    self.m.chrome,
+                );
+            }
+        }
+    }
+
     fn rocker_trim(&mut self) {
         let l = self.b.length;
         let spans = self.side_spans(0.1, l - 0.1);
@@ -1724,6 +1810,33 @@ impl<'a, 'b> Parts<'a, 'b> {
         }
     }
 
+    /// A trunk lock and a short bright name plate (no lettering) on the tail panel's left,
+    /// over the lamps' line: what the chase camera sees of the car's identity.
+    fn deck_badge(&mut self) {
+        let band = self.band(false);
+        let az = band.s - self.b.axle[0] + band.dir * 0.012;
+        let y = band.y0 + 0.03;
+        let x = -self.face_half(band.s, y) * 0.55;
+        for k in 0..4 {
+            let x0 = x - 0.075 + k as f32 * 0.04;
+            self.body.aabb(
+                [x0, y - 0.008, az - 0.004],
+                [x0 + 0.03, y + 0.008 + 0.004 * (k % 2) as f32, az + 0.006],
+                self.m.chrome,
+            );
+        }
+        let lock = [0.0, band.y0 + 0.02, az];
+        self.body.cylinder(
+            sub(lock, [0.0, 0.0, band.dir * 0.006]),
+            add(lock, [0.0, 0.0, band.dir * 0.008]),
+            0.016,
+            12,
+            true,
+            false,
+            self.m.chrome,
+        );
+    }
+
     fn badge(&mut self, shape: BadgeShape, front: bool) {
         let band = self.band(front);
         // Front: top center of the nose. Rear: lower right of the tail panel.
@@ -1739,7 +1852,10 @@ impl<'a, 'b> Parts<'a, 'b> {
         let n = [0.0, 0.0, band.dir];
         let c = [x, y, az];
         let m = self.m.chrome;
-        let r = 0.035;
+        let r = 0.05;
+        if !front {
+            self.deck_badge();
+        }
         match shape {
             BadgeShape::Circle => {
                 self.body
@@ -1767,28 +1883,24 @@ impl<'a, 'b> Parts<'a, 'b> {
             }
             BadgeShape::Bar => {
                 self.body.aabb(
-                    [-0.09, y - 0.008, az - 0.006],
-                    [0.09, y + 0.008, az + 0.006],
+                    [x - 0.11, y - 0.011, az - 0.006],
+                    [x + 0.11, y + 0.011, az + 0.008],
                     m,
+                );
+                self.body.aabb(
+                    [x - 0.1, y - 0.005, az + 0.008],
+                    [x + 0.1, y + 0.005, az + 0.0095],
+                    self.m.accent,
                 );
             }
             BadgeShape::Chevron => {
-                self.body.beam(
-                    [-0.05, y + 0.02, az],
-                    [0.0, y - 0.015, az],
-                    n,
-                    0.006,
-                    0.01,
-                    m,
-                );
-                self.body.beam(
-                    [0.0, y - 0.015, az],
-                    [0.05, y + 0.02, az],
-                    n,
-                    0.006,
-                    0.01,
-                    m,
-                );
+                for (a, b) in [
+                    ([x - 0.07, y + 0.028], [x, y - 0.02]),
+                    ([x, y - 0.02], [x + 0.07, y + 0.028]),
+                ] {
+                    self.body
+                        .beam([a[0], a[1], az], [b[0], b[1], az], n, 0.008, 0.012, m);
+                }
             }
         }
     }

@@ -153,7 +153,8 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
         (-1.0, rr),
         m.rim,
     );
-    s.disc([-0.03, 0.0, 0.0], AXIS, rr, 12, m.chassis);
+    // A dark back plate so the spokes stand out.
+    s.disc([-0.03, 0.0, 0.0], AXIS, rr, 12, m.liner);
     // Brake drum or disc behind the spokes.
     s.cylinder(
         [-0.03, 0.0, 0.0],

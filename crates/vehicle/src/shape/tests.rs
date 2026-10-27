@@ -615,7 +615,7 @@ fn validate_rejects_bad_parts() {
 
 #[test]
 fn two_tone_paint_splits_at_the_crease() {
-    for (text, k) in [(CORSAIR, 6), (REGENT, 4)] {
+    for (text, k) in [(CORSAIR, 6), (REGENT, 0), (PALISADE, 0)] {
         let spec = load(text);
         let (upper, lower) = parse_paint(&spec.palette[k]).unwrap();
         let (upper, lower) = (rgb(upper), rgb(lower.unwrap()));
@@ -665,7 +665,8 @@ fn era_paint_overrides_the_palette() {
     };
     let own = build_with(&spec, &opts(None)).unwrap();
     let era = build_with(&spec, &opts(Some(era_1980s_paint(20)))).unwrap();
-    assert_eq!(own.body.positions.len(), era.body.positions.len());
+    // Same geometry (a two-tone welds into a few more vertices, never more triangles).
+    assert_eq!(own.body.triangle_count(), era.body.triangle_count());
     assert_ne!(own.body.colors, era.body.colors);
     assert_eq!(own.interior, era.interior);
     assert_eq!(

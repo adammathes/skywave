@@ -17,11 +17,11 @@ use super::Materials;
 use alloc::vec::Vec;
 
 /// Half-width of a seam groove, m.
-pub const SEAM_HALF: f32 = 0.005;
+pub const SEAM_HALF: f32 = 0.007;
 /// Seam depth, m.
-pub const SEAM_DEPTH: f32 = 0.006;
+pub const SEAM_DEPTH: f32 = 0.012;
 /// How far the hood and trunk feature lines stand up, m.
-const LINE_RISE: f32 = 0.008;
+const LINE_RISE: f32 = 0.016;
 /// Width of the windshield frame on the top surface, m.
 const FRAME_W: f32 = 0.055;
 
