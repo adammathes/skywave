@@ -5,6 +5,12 @@
 //! facade, where the storefront and door go), then *built* from the plan. The plan is pure
 //! data, so tests can check the mesh against it.
 //!
+//! A street front is three bands: a base (the ground floor, a run of bays between piers:
+//! storefronts of bulkhead, display glass, transom and sign band; lobbies, garages, stair
+//! doors, blank wall), a body (windows of one kind per building on the bay grid, so they
+//! line up over the piers) and a top (parapet, cornice or stepped parapet). The grammar
+//! says which, how big and how often.
+//!
 //! Styles with a look of their own: dingbats (an open carport on posts under the flats),
 //! bungalows (a porch on tapered piers, low gables), ranches (wide windows, a brick
 //! wainscot, low hips), 70s tract houses (two-tone with a belt), motels (a door and window
@@ -22,10 +28,10 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use place::{Building, BuildingUse, Roof, StyleTag};
+use place::{Building, BuildingUse, Roof, StyleTag, ZoneId};
 use skywave_core::{Rng, Seed};
 
-use crate::grammar::{Grammar, SignRules, StyleRules};
+use crate::grammar::{pick, Base, Grammar, GroundBays, SignRules, StyleRules};
 use crate::math::{abs, clamp, floor, offset_polygon, V2, V3};
 use crate::mesh::{
     boxf, face, frustum, lathe, polygon_cap, quad, rect, ring_band, tri, Frame, Glow, Paint,
@@ -39,8 +45,15 @@ use crate::LOT_Y;
 pub const WINDOW_INSET_M: f32 = 0.15;
 /// Depth of the storefront recess.
 const STOREFRONT_INSET_M: f32 = 0.25;
-/// Triangle budget per building; window bays widen until the estimate fits.
-pub const BUILDING_TRIANGLE_BUDGET: usize = 2000;
+/// Triangle ceiling per building (`docs/backlog/ART.md`): the budget of a building whose
+/// street front has a base band. Window bays widen until the estimate fits.
+pub const BUILDING_TRIANGLE_BUDGET: usize = 3500;
+/// The planner's target for a building without a base band.
+pub const PLAIN_TRIANGLE_TARGET: usize = 2000;
+/// Base bays a street front may have at most.
+pub const MAX_BAYS: usize = 12;
+/// Rng key for the facade choices made at planning.
+const KEY_FACADE: u64 = 0x4641_4344;
 /// Share of windows lit (emissive), out of 256.
 const LIT_WINDOWS_256: u32 = 102;
 /// Estimated triangles per window (glass, reveals, sill, surrounding wall pieces).
@@ -52,7 +65,8 @@ const KEY_BUILDING: u64 = 0x4255_494C;
 /// Towers of at least [`STEP_BACK_MIN_FLOORS`] step back above this many floors.
 pub const STEP_BACK_FLOORS: u8 = 6;
 pub const STEP_BACK_MIN_FLOORS: u8 = 8;
-/// Share of the triangle budget a stepped-back tower's base may use.
+/// Share of the plain target a stepped-back tower's base may use (a base band adds what it
+/// costs).
 const BASE_BUDGET: usize = 1300;
 
 /// What is in front of one facade (footprint edge `i`, from vertex `i` to `i + 1`).
@@ -74,9 +88,11 @@ pub struct FacadePlan {
     pub len: f32,
     /// Window bays across the facade (0: blank wall).
     pub columns: u32,
-    /// Floors with a row of windows (the storefront floor has none).
+    /// Floors with a row of windows (the base band's floor has none).
     pub window_rows: u32,
-    /// The ground floor is a storefront.
+    /// The ground floor is a base band of bays (the street front only).
+    pub base: Option<BasePlan>,
+    /// The base band has a storefront bay.
     pub storefront: bool,
     /// Ground-floor bay replaced by the entrance door.
     pub door: Option<u32>,
@@ -92,13 +108,98 @@ impl FacadePlan {
     /// Window insets this facade gets.
     pub fn windows(&self) -> u32 {
         let openings = u32::from(self.door.is_some()) + u32::from(self.garage.is_some());
-        let ground = if !self.storefront && !self.carport && self.window_rows > 0 {
+        let ground = if self.base.is_none() && !self.carport && self.window_rows > 0 {
             openings
         } else {
             0
         };
         self.columns * self.window_rows - ground
     }
+}
+
+/// What a base bay is.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BayKind {
+    Storefront = 0,
+    Lobby = 1,
+    Garage = 2,
+    Wall = 3,
+    /// The door to the stairs of the flats above.
+    Door = 4,
+}
+
+impl BayKind {
+    /// In [`GroundBays`] field order.
+    const ALL: [BayKind; 5] = [
+        BayKind::Storefront,
+        BayKind::Lobby,
+        BayKind::Garage,
+        BayKind::Wall,
+        BayKind::Door,
+    ];
+}
+
+/// The base band of a street front: bays between piers, pier centres evenly spaced.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BasePlan {
+    /// Bays across the facade; the window columns above are a whole number per bay.
+    pub bays: u32,
+    pub kinds: [BayKind; MAX_BAYS],
+    /// Where each storefront bay's entry is: 0 at the left, 1 centred, 2 at the right.
+    pub entries: [u8; MAX_BAYS],
+    pub pier_w: f32,
+    pub bulkhead_h: f32,
+    /// Top of the display glass above the base's floor.
+    pub glass_top: f32,
+    pub transom_h: f32,
+    /// The transoms are glazed (else panelled over).
+    pub transom_glass: bool,
+    /// How far the storefront entries sit back; 0 for flush.
+    pub recess: f32,
+    /// Storefront entry `(width, height)`.
+    pub entry: (f32, f32),
+}
+
+impl BasePlan {
+    pub fn kinds(&self) -> &[BayKind] {
+        &self.kinds[..self.bays as usize]
+    }
+}
+
+/// The kind of window on a building's upper floors, in [`crate::grammar::WindowKinds`]
+/// field order.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowKind {
+    Punched = 0,
+    Paired = 1,
+    Ribbon = 2,
+    Bay = 3,
+    Picture = 4,
+}
+
+impl WindowKind {
+    const ALL: [WindowKind; 5] = [
+        WindowKind::Punched,
+        WindowKind::Paired,
+        WindowKind::Ribbon,
+        WindowKind::Bay,
+        WindowKind::Picture,
+    ];
+}
+
+/// The kind of top on a flat roof, in [`crate::grammar::TopKinds`] field order.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TopKind {
+    Parapet = 0,
+    Cornice = 1,
+    Stepped = 2,
+}
+
+impl TopKind {
+    const ALL: [TopKind; 3] = [TopKind::Parapet, TopKind::Cornice, TopKind::Stepped];
 }
 
 /// Everything needed to build a building, decided up front.
@@ -119,6 +220,8 @@ pub struct BuildingPlan {
     pub window_h: f32,
     pub door_w: f32,
     pub door_h: f32,
+    pub window_kind: WindowKind,
+    pub top_kind: TopKind,
     /// The part of a tall building stepped back above [`STEP_BACK_FLOORS`]; this plan is
     /// then the base.
     pub tower: Option<Box<TowerPlan>>,
@@ -208,22 +311,25 @@ fn parapet(b: &Building, rules: &StyleRules) -> f32 {
     rules.top.parapet_h.of(b.usage)
 }
 
-/// Decides floors, the window grid of every facade, and the storefront and door, by the
-/// grammar's rules for the building's style. `door_pick` chooses the door bay on houses (any number; it is reduced modulo the bays).
+/// Decides floors, the window grid of every facade, the street front's base band and door,
+/// the window and top kinds, by the grammar's rules for the building's style in `zone`
+/// (the zone under its footprint's centroid). `door_pick` chooses the door bay on houses
+/// (any number; it is reduced modulo the bays) and seeds the other choices.
 /// Brick, Deco and stucco towers of [`STEP_BACK_MIN_FLOORS`] or more step back above
 /// [`STEP_BACK_FLOORS`]: the plan is the base's, with the tower's in
 /// [`BuildingPlan::tower`].
 pub fn plan_building(
     b: &Building,
+    zone: ZoneId,
     env: &[FacadeEnv],
     door_pick: u32,
     grammar: &Grammar,
 ) -> BuildingPlan {
-    let rules = grammar.style(b.style);
+    let rules = grammar.style(b.style, zone);
     if let Some(split) = step_back(b, env, door_pick, rules) {
         return split;
     }
-    plan_one(b, env, door_pick, BUILDING_TRIANGLE_BUDGET, rules)
+    plan_one(b, env, door_pick, PLAIN_TRIANGLE_TARGET, rules, true)
 }
 
 /// The base and tower of a building that steps back, if it does.
@@ -249,7 +355,7 @@ fn step_back(
     if short - 2.0 * inset < 8.0 {
         return None;
     }
-    let full = plan_one(b, env, door_pick, BUILDING_TRIANGLE_BUDGET, rules);
+    let full = plan_one(b, env, door_pick, PLAIN_TRIANGLE_TARGET, rules, true);
     let k = usize::from(STEP_BACK_FLOORS);
     let base_roof = full.floor_y[k];
     let base_b = Building {
@@ -257,7 +363,7 @@ fn step_back(
         floors: STEP_BACK_FLOORS,
         ..b.clone()
     };
-    let mut base = plan_one(&base_b, env, door_pick, BASE_BUDGET, rules);
+    let mut base = plan_one(&base_b, env, door_pick, BASE_BUDGET, rules, true);
     let tower_fp = offset_polygon(&fp, |_| -inset);
     let tower_b = Building {
         footprint: tower_fp.iter().map(|p| [p.x, p.y]).collect(),
@@ -276,9 +382,11 @@ fn step_back(
         })
         .collect();
     // Both estimates count the generous fixed share; one is enough for the pair.
-    let used = estimate(&base_b, &base.facades, base.floors());
-    let budget = (BUILDING_TRIANGLE_BUDGET + TRIS_FIXED / 2).saturating_sub(used);
-    let mut plan = plan_one(&tower_b, &tower_env, door_pick, budget, rules);
+    let used = estimate(&base_b, &base, &base.facades, base.floors());
+    let band = base.facades.iter().map(base_tris).sum::<usize>();
+    let total = (PLAIN_TRIANGLE_TARGET + band).min(BUILDING_TRIANGLE_BUDGET);
+    let left = (total + TRIS_FIXED / 2).saturating_sub(used);
+    let mut plan = plan_one(&tower_b, &tower_env, door_pick, left, rules, false);
     // The tower has no entrance of its own.
     for f in &mut plan.facades {
         f.door = None;
@@ -297,24 +405,143 @@ fn step_back(
     Some(base)
 }
 
-/// Triangles per window inset by style.
-fn tris_per_window(b: &Building) -> usize {
-    match b.style {
-        StyleTag::Glass | StyleTag::Warehouse => 8,
-        StyleTag::Motel => 34,
+/// Triangles per window inset by style and kind.
+fn tris_per_window(b: &Building, kind: WindowKind) -> usize {
+    match (b.style, kind) {
+        (StyleTag::Glass | StyleTag::Warehouse, _) => 8,
+        (StyleTag::Motel, _) => 34,
+        (_, WindowKind::Paired) => TRIS_PER_WINDOW + 2,
+        (_, WindowKind::Bay) => 34,
         _ => TRIS_PER_WINDOW,
     }
 }
 
+/// Triangles of a base band: piers, the belt course, and each bay (a storefront's sign
+/// lettering and striped awning are most of it).
+fn base_tris(f: &FacadePlan) -> usize {
+    let Some(bp) = &f.base else {
+        return 0;
+    };
+    let span = f.len / bp.bays as f32;
+    let kinds = bp.kinds();
+    // A lettered sign over each run of storefronts, up to ~210.
+    let runs = (0..kinds.len())
+        .filter(|&k| {
+            kinds[k] == BayKind::Storefront && (k == 0 || kinds[k - 1] != BayKind::Storefront)
+        })
+        .count();
+    let bays: usize = kinds
+        .iter()
+        .map(|k| match k {
+            // Glass, frames and entry ~60; a striped awning ~14 a meter.
+            BayKind::Storefront => 70 + (span * 14.0) as usize,
+            BayKind::Lobby => 40,
+            BayKind::Garage => 30,
+            BayKind::Wall => 4,
+            BayKind::Door => 36,
+        })
+        .sum();
+    bays + 210 * runs + 8 * (bp.bays as usize + 1) + 16
+}
+
 /// The triangle estimate of a plan.
-fn estimate(b: &Building, fs: &[FacadePlan], floors: usize) -> usize {
+fn estimate(b: &Building, plan: &BuildingPlan, fs: &[FacadePlan], floors: usize) -> usize {
+    estimate_parts(b, plan.window_kind, plan.top_kind, fs, floors)
+}
+
+fn estimate_parts(
+    b: &Building,
+    window_kind: WindowKind,
+    top_kind: TopKind,
+    fs: &[FacadePlan],
+    floors: usize,
+) -> usize {
     let per_floor = if b.style == StyleTag::Brick { 64 } else { 40 };
-    let per_window = tris_per_window(b);
+    let top = match top_kind {
+        TopKind::Parapet => 0,
+        TopKind::Cornice => 12 * b.footprint.len(),
+        TopKind::Stepped => 36,
+    };
+    let per_window = tris_per_window(b, window_kind);
     TRIS_FIXED
+        + top
         + floors * per_floor
         + fs.iter()
-            .map(|f| f.windows() as usize * per_window + 24)
+            .map(|f| f.windows() as usize * per_window + 24 + base_tris(f))
             .sum::<usize>()
+}
+
+/// The base band of a street front `len` long, from the grammar's `base` with `ground`
+/// the bay weights for the building's use.
+fn plan_base(base: &Base, ground: GroundBays, len: f32, floors: usize, rng: &mut Rng) -> BasePlan {
+    let draw = |rng: &mut Rng, (lo, hi): (f32, f32)| rng.range_f32(lo, hi);
+    let width = draw(rng, base.front_bay_w);
+    let bays = ((len / width + 0.5) as u32).clamp(1, MAX_BAYS as u32);
+    let s = &base.storefront;
+    let weights = [
+        ground.storefront,
+        ground.lobby,
+        ground.garage,
+        ground.wall,
+        ground.door,
+    ];
+    let mut kinds = [BayKind::Wall; MAX_BAYS];
+    let mut entries = [1; MAX_BAYS];
+    for k in 0..bays as usize {
+        kinds[k] = BayKind::ALL[pick(&weights, rng.next_u32()).unwrap_or(3)];
+        if rng.range(0, 256) < s.side_entry_256 {
+            entries[k] = if rng.range(0, 2) == 0 { 0 } else { 2 };
+        }
+    }
+    // One lobby at most, in the middle; one stair door at most, and none without flats
+    // over the shops. What they displace becomes a storefront (or wall).
+    let filler = if ground.storefront > 0 {
+        BayKind::Storefront
+    } else {
+        BayKind::Wall
+    };
+    let mid = bays as usize / 2;
+    let (mut lobby, mut door) = (None, false);
+    for (k, kind) in kinds[..bays as usize].iter_mut().enumerate() {
+        match *kind {
+            BayKind::Lobby if lobby.is_some() => *kind = filler,
+            BayKind::Lobby => lobby = Some(k),
+            BayKind::Door if door || floors < 2 => *kind = filler,
+            BayKind::Door => door = true,
+            _ => {}
+        }
+    }
+    if let Some(k) = lobby {
+        kinds.swap(k, mid);
+    }
+    // A front with no way in gets one in the middle: the likeliest entrance.
+    let entrance = |k: &BayKind| *k != BayKind::Wall;
+    if !kinds[..bays as usize].iter().any(entrance) {
+        let order = [
+            (ground.lobby, BayKind::Lobby),
+            (ground.storefront, BayKind::Storefront),
+            (ground.garage, BayKind::Garage),
+            (if floors > 1 { ground.door } else { 0 }, BayKind::Door),
+        ];
+        // The heaviest weight; the first listed on a tie.
+        let best = order.iter().rev().filter(|o| o.0 > 0).max_by_key(|o| o.0);
+        if let Some(&(_, k)) = best {
+            kinds[mid] = k;
+        }
+    }
+    let recessed = rng.range(0, 256) < s.recessed_256;
+    BasePlan {
+        bays,
+        kinds,
+        entries,
+        pier_w: draw(rng, base.pier_w),
+        bulkhead_h: draw(rng, s.bulkhead_h),
+        glass_top: draw(rng, s.glass_top),
+        transom_h: draw(rng, s.transom_h),
+        transom_glass: rng.range(0, 256) < s.transom_glass_256,
+        recess: if recessed { draw(rng, s.recess) } else { 0.0 },
+        entry: s.entry,
+    }
 }
 
 /// Whether the outward side of footprint edge `i` faces another part of the same
@@ -338,13 +565,15 @@ fn faces_court(fp: &[V2], i: usize) -> bool {
     })
 }
 
-/// [`plan_building`] for one block of walls within `budget` triangles.
+/// [`plan_building`] for one block of walls within `budget` triangles (plus what a base
+/// band costs, if `banded` lets its street front have one; a stepped-back tower's does not).
 fn plan_one(
     b: &Building,
     env: &[FacadeEnv],
     door_pick: u32,
     budget: usize,
     rules: &StyleRules,
+    banded: bool,
 ) -> BuildingPlan {
     let fp = &b.footprint;
     let n = fp.len();
@@ -378,6 +607,10 @@ fn plan_one(
     let window_w = clamp(bay * win.w_share, win.w.0, win.w.1);
     let window_h = (upper_h - win.head).min(win.h_max);
     let (door_w, door_h) = rules.base.door.of(b.usage);
+    let mut rng = Rng::new(Seed(u64::from(door_pick)), &[KEY_FACADE]);
+    let window_kind =
+        WindowKind::ALL[pick(&rules.body.kinds.of(b.usage).weights(), rng.next_u32()).unwrap_or(0)];
+    let top_kind = TopKind::ALL[pick(&rules.top.kinds.weights(), rng.next_u32()).unwrap_or(0)];
 
     let len = |i: usize| (V2::from_array(fp[(i + 1) % n]) - V2::from_array(fp[i])).length();
     // The frontage: the open facade facing the parcel's frontage road, else the one closest
@@ -392,10 +625,22 @@ fn plan_one(
             frontage = i;
         }
     }
-    let storefront_use = b.usage == BuildingUse::Commercial && b.style != StyleTag::StripMall;
-
     let blank =
         matches!(b.style, StyleTag::StripMall | StyleTag::Barn) || b.usage == BuildingUse::Parking;
+    // Styles that draw their own ground floor (carports, roll-up doors, curtain walls,
+    // motel rooms) never get a base band.
+    let own_openings = matches!(
+        b.style,
+        StyleTag::Dingbat | StyleTag::Warehouse | StyleTag::Glass | StyleTag::Motel
+    );
+    let ground = rules.base.ground.of(b.usage);
+    let base = (banded
+        && !blank
+        && !own_openings
+        && ground.total() > 0
+        && !env[frontage].blocked
+        && len(frontage) >= 4.0)
+        .then(|| plan_base(&rules.base, ground, len(frontage), floors, &mut rng));
     let fpv: Vec<V2> = fp.iter().map(|&p| V2::from_array(p)).collect();
     let courts: Vec<bool> = (0..n)
         .map(|i| b.style == StyleTag::Motel && faces_court(&fpv, i))
@@ -405,6 +650,9 @@ fn plan_one(
         let l = len(i);
         if env[i].blocked || l < 2.4 || blank {
             0
+        } else if let (true, Some(bp)) = (i == frontage, &base) {
+            // Whole window bays per base bay, so the windows line up over the piers.
+            bp.bays * (floor(l / bp.bays as f32 / bay) as u32).max(1)
         } else {
             (floor((l - 0.8) / bay) as u32).max(1)
         }
@@ -413,18 +661,14 @@ fn plan_one(
         (0..n)
             .map(|i| {
                 let columns = columns_for(i, bays[i]);
-                let storefront = i == frontage && storefront_use && len(i) >= 4.0;
+                let base = if i == frontage { base } else { None };
                 let carport = b.style == StyleTag::Dingbat && floors > 1;
                 let window_rows = match (columns, b.style) {
                     (0, _) => 0,
                     (_, StyleTag::Warehouse) => 1,
-                    _ => floors as u32 - u32::from(storefront) - u32::from(carport),
+                    _ => floors as u32 - u32::from(base.is_some()) - u32::from(carport),
                 };
-                let own_openings = matches!(
-                    b.style,
-                    StyleTag::Dingbat | StyleTag::Warehouse | StyleTag::Glass | StyleTag::Motel
-                );
-                let front = i == frontage && !storefront && columns > 0 && !own_openings;
+                let front = i == frontage && base.is_none() && columns > 0 && !own_openings;
                 // Houses with room for it get an attached garage at one end of the front.
                 let garage =
                     if front && residential && columns >= 2 && len(i) / columns as f32 >= 3.3 {
@@ -448,10 +692,12 @@ fn plan_one(
                     && columns > 0
                     && floors > 1
                     && (courts[i] || (!any_court && i == frontage));
+                let storefront = base.is_some_and(|bp| bp.kinds().contains(&BayKind::Storefront));
                 FacadePlan {
                     len: len(i),
                     columns,
                     window_rows,
+                    base,
                     storefront,
                     door,
                     garage,
@@ -472,9 +718,14 @@ fn plan_one(
             }
         })
         .collect();
+    let est = |fs: &[FacadePlan]| estimate_parts(b, window_kind, top_kind, fs, floors);
     let mut facades = make(&bays);
+    // A base band raises the budget by what it costs, up to the ceiling: the windows get
+    // no more than they would without it.
+    let band = base_tris(&facades[frontage]);
+    let budget = (budget + band).min(budget + BUILDING_TRIANGLE_BUDGET - PLAIN_TRIANGLE_TARGET);
     let mut round = 0;
-    while estimate(b, &facades, floors) > budget && round < 40 {
+    while est(&facades) > budget && round < 40 {
         for (i, b) in bays.iter_mut().enumerate() {
             if round < 6 && env[i].road_dist < 25.0 {
                 continue;
@@ -486,7 +737,7 @@ fn plan_one(
     }
     // Still over (tall towers on many-sided lots): blank the facades least seen, farthest
     // from a road and shortest first, never the frontage.
-    if estimate(b, &facades, floors) > budget {
+    if est(&facades) > budget {
         let mut order: Vec<usize> = (0..n).filter(|&i| i != frontage).collect();
         order.sort_by(|&a, &c| {
             let key = |i: usize| (env[i].road_dist.min(1e6), -len(i));
@@ -494,7 +745,7 @@ fn plan_one(
             kc.0.total_cmp(&ka.0).then(kc.1.total_cmp(&ka.1))
         });
         for i in order {
-            if estimate(b, &facades, floors) <= budget {
+            if est(&facades) <= budget {
                 break;
             }
             let f = &mut facades[i];
@@ -505,6 +756,7 @@ fn plan_one(
             f.walkway = false;
         }
     }
+    // The base band itself never blanks; the frontage keeps it whatever its windows do.
     BuildingPlan {
         plinth_top,
         roof_y,
@@ -516,6 +768,8 @@ fn plan_one(
         window_h: window_h.max(rules.body.window_h_min),
         door_w,
         door_h,
+        window_kind,
+        top_kind,
         tower: None,
         signage: None,
         rules: *rules,
@@ -916,6 +1170,7 @@ pub fn build_on(
     }
     polygon_cap(m, &inner, plan.roof_y, true, look.roof);
 
+    top_details(m, plan, &fp, &look);
     style_details(m, b, plan, &fp, &look);
     house_details(m, b, plan, &fp, &look);
     if let Some(t) = &plan.tower {
@@ -1731,18 +1986,12 @@ fn facade(
             }
             continue;
         }
-        if k == 0 && fp.storefront {
-            storefront(
-                m,
-                f,
-                len,
-                y0,
-                y1,
-                look,
-                rng,
-                b.usage != BuildingUse::Residential,
-            );
-            continue;
+        if k == 0 {
+            if let Some(bp) = &fp.base {
+                let signs = b.usage != BuildingUse::Residential;
+                base_band(m, f, plan, fp, bp, y0, y1, look, rng, signs);
+                continue;
+            }
         }
         if fp.columns == 0 {
             rect(m, f, 0.0, y0, len, y1, 0.0, false, look.wall);
@@ -1752,6 +2001,12 @@ fn facade(
         let sill = plan.sill(k);
         let head = (sill + plan.window_h).min(y1 - 0.25);
         let door_floor = k == 0 && fp.door.is_some();
+        // Bay windows and ribbons are upper-floor kinds; a floor with doors is punched.
+        let kind = match plan.window_kind {
+            WindowKind::Bay if k == 0 => WindowKind::Punched,
+            _ if door_floor => WindowKind::Punched,
+            kind => kind,
+        };
         if !door_floor {
             // Wall bands below and above the window row; piers between windows.
             rect(m, f, 0.0, y0, len, sill, 0.0, false, look.wall);
@@ -1762,67 +2017,453 @@ fn facade(
             let cx = (c as f32 + 0.5) * bay;
             let is_door = door_floor && fp.door == Some(c);
             let is_garage = door_floor && fp.garage == Some(c);
-            let w = if is_garage {
-                bay - 0.6
-            } else if is_door {
-                plan.door_w
-            } else {
-                plan.window_w
+            if is_garage || is_door {
+                let w = if is_garage { bay - 0.6 } else { plan.door_w }.min(bay - 0.5);
+                let (x0, x1) = (cx - w * 0.5, cx + w * 0.5);
+                rect(m, f, x, y0, x0, y1, 0.0, false, look.wall);
+                let top = if is_garage {
+                    let top = (y0 + 2.1).min(y1 - 0.2);
+                    garage_door(m, f, x0, x1, y0, top, look);
+                    top
+                } else {
+                    let top = (y0 + plan.door_h).min(y1 - 0.2);
+                    let residential = b.usage == BuildingUse::Residential;
+                    door(m, f, x0, x1, y0, top, plan, residential, look);
+                    top
+                };
+                rect(m, f, x0, top, x1, y1, 0.0, false, look.wall);
+                x = x1;
+                continue;
             }
-            .min(bay - 0.5);
-            let (x0, x1) = (cx - w * 0.5, cx + w * 0.5);
+            let lit = rng.range(0, 256) < LIT_WINDOWS_256;
+            // Panes differ in how much sky they reflect.
+            let sky = rng.range(0, 90);
+            let pane = look.glass.with_rgb(mix(look.glass.rgb(), look.sky, sky));
+            let pane = if lit {
+                pane.glowing(look.lit.rgb_emissive(), Glow::Window)
+            } else {
+                pane
+            };
+            let (x0, x1) = opening(kind, c, fp.columns, bay, len, plan.window_w);
+            // A ribbon's panes meet at mullions; other windows have wall between.
+            let between = if kind == WindowKind::Ribbon && c > 0 {
+                look.frame
+            } else {
+                look.wall
+            };
             if door_floor {
                 rect(m, f, x, y0, x0, y1, 0.0, false, look.wall);
+                rect(m, f, x0, y0, x1, sill, 0.0, false, look.wall);
+                rect(m, f, x0, head, x1, y1, 0.0, false, look.wall);
             } else {
-                rect(m, f, x, sill, x0, head, 0.0, false, look.wall);
+                rect(m, f, x, sill, x0, head, 0.0, false, between);
             }
-            if is_garage {
-                let top = (y0 + 2.1).min(y1 - 0.2);
-                garage_door(m, f, x0, x1, y0, top, look);
-                rect(m, f, x0, top, x1, y1, 0.0, false, look.wall);
-            } else if is_door {
-                let top = (y0 + plan.door_h).min(y1 - 0.2);
-                door(m, f, x0, x1, y0, top, plan, b, look);
-                rect(m, f, x0, top, x1, y1, 0.0, false, look.wall);
+            if kind == WindowKind::Bay {
+                oriel(m, f, x0, sill, x1, head, pane, look);
             } else {
-                if door_floor {
-                    rect(m, f, x0, y0, x1, sill, 0.0, false, look.wall);
-                    rect(m, f, x0, head, x1, y1, 0.0, false, look.wall);
-                }
-                let lit = rng.range(0, 256) < LIT_WINDOWS_256;
-                // Panes differ in how much sky they reflect.
-                let sky = rng.range(0, 90);
-                let pane = look.glass.with_rgb(mix(look.glass.rgb(), look.sky, sky));
-                let pane = if lit {
-                    pane.glowing(look.lit.rgb_emissive(), Glow::Window)
-                } else {
-                    pane
-                };
                 window(m, f, x0, sill, x1, head, pane, k == 0, look);
-                if b.style == StyleTag::Brick {
-                    // Soldier-course lintel in the trim color.
-                    rect(
-                        m,
-                        f,
-                        x0 - 0.06,
-                        head,
-                        x1 + 0.06,
-                        (head + 0.2).min(y1),
-                        0.012,
-                        false,
-                        look.sill,
-                    );
-                }
-                stats.windows += 1;
-                stats.lit_windows += u32::from(lit);
+            }
+            if kind == WindowKind::Paired {
+                // The pier between the pair, flush with the wall.
+                let cx = (x0 + x1) * 0.5;
+                rect(
+                    m,
+                    f,
+                    cx - 0.09,
+                    sill,
+                    cx + 0.09,
+                    head,
+                    0.0,
+                    false,
+                    look.wall,
+                );
+            }
+            if b.style == StyleTag::Brick {
+                // Soldier-course lintel in the trim color.
+                rect(
+                    m,
+                    f,
+                    x0 - 0.06,
+                    head,
+                    x1 + 0.06,
+                    (head + 0.2).min(y1),
+                    0.012,
+                    false,
+                    look.sill,
+                );
             }
             x = x1;
+            stats.windows += 1;
+            stats.lit_windows += u32::from(lit);
         }
         if door_floor {
             rect(m, f, x, y0, len, y1, 0.0, false, look.wall);
         } else {
             rect(m, f, x, sill, len, head, 0.0, false, look.wall);
         }
+    }
+}
+
+/// The opening `(x0, x1)` of window column `c` of `columns`, each `bay` wide on a facade
+/// `len` long, for windows `w` wide.
+fn opening(kind: WindowKind, c: u32, columns: u32, bay: f32, len: f32, w: f32) -> (f32, f32) {
+    let cx = (c as f32 + 0.5) * bay;
+    let one = |w: f32| {
+        let w = w.min(bay - 0.5);
+        (cx - w * 0.5, cx + w * 0.5)
+    };
+    match kind {
+        WindowKind::Punched | WindowKind::Bay => one(w),
+        WindowKind::Picture => one(w * 1.7),
+        // Two narrow windows in one opening, a pier between them.
+        WindowKind::Paired => one(w * 1.24 + 0.18),
+        WindowKind::Ribbon => {
+            // Edge to edge but for the facade's ends, a mullion on every column line.
+            let x0 = if c == 0 { 0.45 } else { c as f32 * bay + 0.05 };
+            let x1 = if c + 1 == columns {
+                len - 0.45
+            } else {
+                (c + 1) as f32 * bay - 0.05
+            };
+            (x0, x1.max(x0 + 0.3))
+        }
+    }
+}
+
+/// A projecting bay window over an opening: a glazed box on a panelled sill with a roof.
+#[allow(clippy::too_many_arguments)]
+fn oriel(
+    m: &mut WorldMesh,
+    f: &Frame,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    glass: Paint,
+    look: &Look,
+) {
+    let (out, d) = (0.15, 0.5);
+    let (a, c) = (x0 - out, x1 + out);
+    boxf(
+        m,
+        f,
+        [a, y0 - 0.35, 0.0],
+        [c, y0, d],
+        face::ALL & !face::NEG_Z,
+        look.trim,
+    );
+    boxf(
+        m,
+        f,
+        [a - 0.05, y1, 0.0],
+        [c + 0.05, y1 + 0.2, d + 0.06],
+        face::ALL & !face::NEG_Z,
+        look.trim,
+    );
+    rect(m, f, a, y0, c, y1, d, false, glass);
+    quad(
+        m,
+        [
+            f.p(a, y0, 0.0),
+            f.p(a, y0, d),
+            f.p(a, y1, d),
+            f.p(a, y1, 0.0),
+        ],
+        -f.x,
+        glass,
+    );
+    quad(
+        m,
+        [
+            f.p(c, y0, d),
+            f.p(c, y0, 0.0),
+            f.p(c, y1, 0.0),
+            f.p(c, y1, d),
+        ],
+        f.x,
+        glass,
+    );
+    // The opening behind it, in shadow.
+    rect(m, f, x0, y0, x1, y1, 0.0, false, look.reveal);
+}
+
+/// The base band of a street front: piers on the bay lines, a belt course over it, and each
+/// bay's infill.
+#[allow(clippy::too_many_arguments)]
+fn base_band(
+    m: &mut WorldMesh,
+    f: &Frame,
+    plan: &BuildingPlan,
+    fp: &FacadePlan,
+    bp: &BasePlan,
+    y0: f32,
+    y1: f32,
+    look: &Look,
+    rng: &mut Rng,
+    signs: bool,
+) {
+    let len = fp.len;
+    let span = len / bp.bays as f32;
+    let pw = bp.pier_w;
+    let pier = |j: u32| {
+        let x = j as f32 * span;
+        if j == 0 {
+            (0.0, pw)
+        } else if j == bp.bays {
+            (len - pw, len)
+        } else {
+            (x - pw * 0.5, x + pw * 0.5)
+        }
+    };
+    // The piers' narrow returns in flat shade: a patterned face would be cut per tile.
+    let side = Paint::new(shade(look.wall.rgb(), 215), Pattern::Plain);
+    for j in 0..=bp.bays {
+        let (a, c) = pier(j);
+        rect(m, f, a, y0, c, y1, 0.08, false, look.wall);
+        boxf(
+            m,
+            f,
+            [a, y0, 0.0],
+            [c, y1, 0.08],
+            face::NEG_X | face::POS_X,
+            side,
+        );
+    }
+    if plan.floors() > 1 {
+        // The belt course that caps the base.
+        boxf(
+            m,
+            f,
+            [0.0, y1 - 0.22, 0.0],
+            [len, y1, 0.16],
+            face::POS_Y | face::NEG_Y | face::POS_Z,
+            look.trim,
+        );
+    }
+    let kinds = bp.kinds();
+    for (k, &kind) in kinds.iter().enumerate() {
+        let (x0, x1) = (pier(k as u32).1, pier(k as u32 + 1).0);
+        match kind {
+            BayKind::Storefront => {
+                storefront_bay(m, f, x0, x1, y0, y1, bp, bp.entries[k], look, signs);
+                // One awning and one sign band over each run of storefront bays: one
+                // business.
+                let last = k + 1 == kinds.len() || kinds[k + 1] != BayKind::Storefront;
+                let first = (0..=k)
+                    .rev()
+                    .take_while(|&j| kinds[j] == BayKind::Storefront)
+                    .last()
+                    .unwrap_or(k);
+                let (_, tt) = storefront_heights(bp, y0, y1, signs);
+                let (sy0, sy1) = (tt + 0.12, (tt + 0.92).min(y1 - 0.12));
+                let sx0 = pier(first as u32).1;
+                if last {
+                    storefront_awning(m, f, sx0, x1, tt, look);
+                }
+                if signs && last && sy1 - sy0 > 0.35 {
+                    sign_band(m, f, sx0 + 0.1, x1 - 0.1, sy0, sy1, look, rng);
+                }
+            }
+            BayKind::Wall => rect(m, f, x0, y0, x1, y1, 0.0, false, look.wall),
+            BayKind::Lobby | BayKind::Door | BayKind::Garage => {
+                let (w, h) = match kind {
+                    BayKind::Lobby => (plan.door_w, plan.door_h),
+                    BayKind::Door => plan.rules.base.door.residential,
+                    _ => ((x1 - x0 - 0.8).min(4.2), 3.0),
+                };
+                let w = w.min(x1 - x0 - 0.6);
+                let (a, c) = ((x0 + x1 - w) * 0.5, (x0 + x1 + w) * 0.5);
+                let top = (y0 + h).min(y1 - 0.6);
+                rect(m, f, x0, y0, a, y1, 0.0, false, look.wall);
+                rect(m, f, c, y0, x1, y1, 0.0, false, look.wall);
+                rect(m, f, a, top, c, y1, 0.0, false, look.wall);
+                match kind {
+                    BayKind::Garage => roll_door(m, f, a, c, y0, top, look),
+                    _ => door(m, f, a, c, y0, top, plan, kind == BayKind::Door, look),
+                }
+            }
+        }
+    }
+}
+
+/// The tops of a storefront's display glass and transom from `y0` to `y1`: on a low ground
+/// floor the glass and then the transom give way to the sign band, the glass never below
+/// the entry.
+fn storefront_heights(bp: &BasePlan, y0: f32, y1: f32, signs: bool) -> (f32, f32) {
+    let gt = (y0 + bp.glass_top)
+        .min(y1 - if signs { 1.1 } else { 0.6 })
+        .max(y0 + bp.entry.1 + 0.05);
+    let tt = (gt + 0.1 + bp.transom_h)
+        .min(y1 - if signs { 0.75 } else { 0.2 })
+        .max(gt + 0.1);
+    (gt, tt)
+}
+
+/// One storefront bay between piers, bottom up: bulkhead, display glass with mullions,
+/// transom (the awning and sign band over a run of them are [`base_band`]'s); the entry
+/// flush or recessed.
+#[allow(clippy::too_many_arguments)]
+fn storefront_bay(
+    m: &mut WorldMesh,
+    f: &Frame,
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    bp: &BasePlan,
+    entry: u8,
+    look: &Look,
+    signs: bool,
+) {
+    // The glass line sits back of the piers' face.
+    let g = 0.12;
+    let (gt, tt) = storefront_heights(bp, y0, y1, signs);
+    let bh = bp.bulkhead_h.min(gt - y0 - 1.6).max(0.2);
+    rect(m, f, x0, tt, x1, y1, 0.0, false, look.wall);
+    // Shallow returns in flat shade, uncut by the wall pattern's tiles, with a floor from
+    // the wall line to the glass line.
+    let reveal = Paint::new(look.reveal.rgb(), Pattern::Plain);
+    inset(m, f, x0, y0, x1, tt, g, true, reveal);
+    let ew = bp.entry.0.min((x1 - x0) * 0.45);
+    let ex0 = match entry {
+        0 => x0 + 0.3,
+        2 => x1 - 0.3 - ew,
+        _ => (x0 + x1 - ew) * 0.5,
+    };
+    let ex1 = ex0 + ew;
+    let dt = (y0 + bp.entry.1).min(gt - 0.05);
+    let bulkhead = look.plinth;
+    // Each bulkhead closed on its side toward the entry (the reveal hides the other end).
+    for (a, c, side) in [(x0, ex0, face::POS_X), (ex1, x1, face::NEG_X)] {
+        if c - a < 0.05 {
+            continue;
+        }
+        boxf(
+            m,
+            f,
+            [a, y0, -g],
+            [c, y0 + bh, -g + 0.06],
+            face::POS_Y | face::POS_Z | side,
+            bulkhead,
+        );
+        rect(m, f, a, y0 + bh, c, gt, -g, false, look.shop_glass);
+        // Thin mullions every pane, and one at each edge of the entry.
+        let lights = (((c - a) / 2.2) as u32).max(1);
+        for q in 1..=lights {
+            let xm = if q == lights {
+                if c == x1 {
+                    break;
+                }
+                c
+            } else {
+                a + (c - a) * q as f32 / lights as f32
+            };
+            rect(
+                m,
+                f,
+                xm - 0.04,
+                y0 + bh,
+                xm + 0.04,
+                gt,
+                -g + 0.03,
+                false,
+                look.frame,
+            );
+        }
+    }
+    // The transom bar and the transom: prism glass, or panelled over in a remodel.
+    rect(m, f, x0, gt, x1, gt + 0.1, -g + 0.03, false, look.frame);
+    let transom = if bp.transom_glass {
+        look.shop_glass
+            .with_rgb(mix(look.shop_glass.rgb(), look.sky, 110))
+    } else {
+        look.trim
+    };
+    rect(m, f, x0, gt + 0.1, x1, tt, -g, false, transom);
+    // The entry: a door in the glass line, or at the back of a recess lined with glass.
+    let back = -g - bp.recess;
+    if bp.recess > 0.0 {
+        for (x, n) in [(ex0, f.x), (ex1, -f.x)] {
+            quad(
+                m,
+                [
+                    f.p(x, y0, -g),
+                    f.p(x, y0, back),
+                    f.p(x, gt, back),
+                    f.p(x, gt, -g),
+                ],
+                n,
+                look.shop_glass,
+            );
+        }
+        quad(
+            m,
+            [
+                f.p(ex0, gt, -g),
+                f.p(ex1, gt, -g),
+                f.p(ex1, gt, back),
+                f.p(ex0, gt, back),
+            ],
+            -f.y,
+            look.trim,
+        );
+        quad(
+            m,
+            [
+                f.p(ex0, y0 + 0.01, back),
+                f.p(ex1, y0 + 0.01, back),
+                f.p(ex1, y0 + 0.01, -g),
+                f.p(ex0, y0 + 0.01, -g),
+            ],
+            f.y,
+            bulkhead,
+        );
+    }
+    rect(m, f, ex0, dt, ex1, gt, back, false, look.shop_glass);
+    rect(m, f, ex0, y0, ex1, dt, back, false, look.frame);
+    rect(
+        m,
+        f,
+        ex0 + 0.1,
+        y0 + 0.12,
+        ex1 - 0.1,
+        dt - 0.1,
+        back + 0.01,
+        false,
+        look.shop_glass,
+    );
+    // Stoop in front of the door when the plinth is high.
+    if y0 - LOT_Y > 0.05 {
+        boxf(
+            m,
+            f,
+            [ex0 - 0.2, LOT_Y - 0.05, 0.0],
+            [ex1 + 0.2, y0, 0.6],
+            face::NO_BOTTOM & !face::NEG_Z,
+            look.plinth,
+        );
+    }
+}
+
+/// The awning over a run of storefronts from `x0` to `x1`, hung from the transoms' top
+/// `tt`, clear of heads at its valance.
+fn storefront_awning(m: &mut WorldMesh, f: &Frame, x0: f32, x1: f32, tt: f32, look: &Look) {
+    let (ax0, ax1) = (x0 - 0.05, x1 + 0.05);
+    match look.signage.map_or(0, |s| s.awning) {
+        0 => awning(m, f, ax0, ax1, tt, 1.4, 0.6, look),
+        1 => {
+            let solid = Look {
+                awning: [look.awning[0], look.awning[0]],
+                ..*look
+            };
+            awning(m, f, ax0, ax1, tt, 1.1, 0.45, &solid);
+        }
+        2 => {
+            // A flat canopy with a fascia in the trim color.
+            let (lo, hi) = ([ax0, tt - 0.05, 0.0], [ax1, tt + 0.23, 1.7]);
+            boxf(m, f, lo, hi, face::ALL & !face::NEG_Z, look.trim);
+        }
+        _ => {}
     }
 }
 
@@ -1950,12 +2591,11 @@ fn door(
     y0: f32,
     y1: f32,
     plan: &BuildingPlan,
-    b: &Building,
+    residential: bool,
     look: &Look,
 ) {
     let d = 0.18;
     inset(m, f, x0, y0, x1, y1, d, false, look.reveal);
-    let residential = b.usage == BuildingUse::Residential;
     if residential {
         rect(m, f, x0, y0, x1, y1, -d, false, look.door);
         // Small window in the door.
@@ -2018,155 +2658,6 @@ fn door(
     );
 }
 
-/// Ground-floor shopfront: recessed glazing with mullions and a door, an awning, and a
-/// sign band with glowing letters above.
-#[allow(clippy::too_many_arguments)]
-fn storefront(
-    m: &mut WorldMesh,
-    f: &Frame,
-    len: f32,
-    y0: f32,
-    y1: f32,
-    look: &Look,
-    rng: &mut Rng,
-    signs: bool,
-) {
-    let margin = 0.5;
-    let (x0, x1) = (margin, len - margin);
-    let glass_top = (y0 + 2.6).min(y1 - 0.9);
-    let d = STOREFRONT_INSET_M;
-    // Piers and the wall above the opening.
-    rect(m, f, 0.0, y0, x0, y1, 0.0, false, look.wall);
-    rect(m, f, x1, y0, len, y1, 0.0, false, look.wall);
-    rect(m, f, x0, glass_top, x1, y1, 0.0, false, look.wall);
-    inset(m, f, x0, y0, x1, glass_top, d, true, look.reveal);
-    // Door near one end (or the middle on narrow fronts), glass elsewhere.
-    let door_w = 1.1;
-    let door_x = if x1 - x0 < 5.0 {
-        (x0 + x1 - door_w) * 0.5
-    } else if rng.range(0, 2) == 0 {
-        x0 + 0.9
-    } else {
-        x1 - 0.9 - door_w
-    };
-    let door_top = (y0 + 2.25).min(glass_top);
-    let back = -d;
-    rect(
-        m,
-        f,
-        x0,
-        y0,
-        door_x,
-        glass_top,
-        back,
-        false,
-        look.shop_glass,
-    );
-    rect(
-        m,
-        f,
-        door_x + door_w,
-        y0,
-        x1,
-        glass_top,
-        back,
-        false,
-        look.shop_glass,
-    );
-    rect(
-        m,
-        f,
-        door_x,
-        door_top,
-        door_x + door_w,
-        glass_top,
-        back,
-        false,
-        look.shop_glass,
-    );
-    rect(
-        m,
-        f,
-        door_x,
-        y0,
-        door_x + door_w,
-        door_top,
-        back,
-        false,
-        look.frame,
-    );
-    rect(
-        m,
-        f,
-        door_x + 0.1,
-        y0 + 0.12,
-        door_x + door_w - 0.1,
-        door_top - 0.1,
-        back + 0.01,
-        false,
-        look.shop_glass,
-    );
-    // Mullions every ~2 m, skipping the door, and a transom bar.
-    let panes = ((x1 - x0) / 2.0) as u32;
-    for k in 1..panes {
-        let xm = x0 + (x1 - x0) * k as f32 / panes as f32;
-        if xm > door_x - 0.2 && xm < door_x + door_w + 0.2 {
-            continue;
-        }
-        boxf(
-            m,
-            f,
-            [xm - 0.05, y0, back],
-            [xm + 0.05, glass_top, back + 0.12],
-            face::NEG_X | face::POS_X | face::POS_Z,
-            look.frame,
-        );
-    }
-    boxf(
-        m,
-        f,
-        [x0, door_top, back],
-        [x1, door_top + 0.08, back + 0.1],
-        face::POS_Y | face::NEG_Y | face::POS_Z,
-        look.frame,
-    );
-    // Stoop in front of the door when the plinth is high.
-    if y0 - LOT_Y > 0.05 {
-        boxf(
-            m,
-            f,
-            [door_x - 0.2, LOT_Y - 0.05, 0.0],
-            [door_x + door_w + 0.2, y0, 0.6],
-            face::NO_BOTTOM & !face::NEG_Z,
-            look.plinth,
-        );
-    }
-    match look.signage.map_or(0, |s| s.awning) {
-        0 => awning(m, f, x0 - 0.2, x1 + 0.2, glass_top + 0.15, 1.4, 0.6, look),
-        1 => {
-            let solid = Look {
-                awning: [look.awning[0], look.awning[0]],
-                ..*look
-            };
-            awning(m, f, x0 - 0.2, x1 + 0.2, glass_top + 0.2, 1.1, 0.45, &solid);
-        }
-        2 => {
-            // A flat canopy with a fascia in the trim color.
-            let y = glass_top + 0.2;
-            let (lo, hi) = ([x0 - 0.3, y, 0.0], [x1 + 0.3, y + 0.28, 1.7]);
-            boxf(m, f, lo, hi, face::ALL & !face::NEG_Z, look.trim);
-        }
-        _ => {}
-    }
-    if signs {
-        let sy0 = glass_top + 0.4;
-        let sy1 = (sy0 + 0.8).min(y1 - 0.15);
-        if sy1 - sy0 > 0.35 {
-            sign_band(m, f, 0.8, len - 0.8, sy0, sy1, look, rng);
-        }
-    }
-}
-
 /// A striped, double-sided sloped awning from `y` at the wall out to `depth`, dropping by
 /// `drop`, with a valance.
 #[allow(clippy::too_many_arguments)]
@@ -2180,7 +2671,12 @@ fn awning(
     drop: f32,
     look: &Look,
 ) {
-    let stripes = (((x1 - x0) / 0.55) as u32).max(1);
+    // A one-color awning is one panel; stripes are geometry.
+    let stripes = if look.awning[0] == look.awning[1] {
+        1
+    } else {
+        (((x1 - x0) / 0.55) as u32).max(1)
+    };
     let w = (x1 - x0) / stripes as f32;
     let (yf, val) = (y - drop, 0.28);
     for k in 0..stripes {
@@ -2484,7 +2980,54 @@ fn storefront_unit(
     }
 }
 
-/// Cornices, belt courses, speed lines, stepped parapets and fins by style.
+/// Height of a stepped parapet's three steps.
+const STEPS_H: f32 = 2.4;
+
+/// The top of a flat roof: nothing more than the coping, a cornice all round, or a
+/// parapet stepped up over the middle of the street front.
+fn top_details(m: &mut WorldMesh, plan: &BuildingPlan, fp: &[V2], look: &Look) {
+    match plan.top_kind {
+        TopKind::Parapet => {}
+        TopKind::Cornice => {
+            let d = plan.rules.top.cornice_d;
+            ring_band(
+                m,
+                fp,
+                d,
+                plan.roof_y - 0.2,
+                plan.roof_y + 0.18,
+                look.sill,
+                Some(look.sill),
+                Some(look.sill),
+            );
+        }
+        TopKind::Stepped => {
+            let n = fp.len();
+            let i = plan.frontage;
+            let (a, c) = (fp[i], fp[(i + 1) % n]);
+            let len = (c - a).length();
+            let f = Frame::upright(a.at(0.0), (c - a).normalize());
+            let mid = len * 0.5;
+            let mut y = plan.top;
+            for (k, frac) in [0.55f32, 0.32, 0.14].iter().enumerate() {
+                let half = len * frac * 0.5;
+                let rise = 0.7 + 0.1 * k as f32;
+                let paint = if k == 2 { look.trim } else { look.wall };
+                boxf(
+                    m,
+                    &f,
+                    [mid - half, y, -0.5],
+                    [mid + half, y + rise, 0.0],
+                    face::NO_BOTTOM,
+                    paint,
+                );
+                y += rise;
+            }
+        }
+    }
+}
+
+/// Belt courses, speed lines and fins by style.
 fn style_details(m: &mut WorldMesh, b: &Building, plan: &BuildingPlan, fp: &[V2], look: &Look) {
     let n = fp.len();
     match b.style {
@@ -2502,16 +3045,6 @@ fn style_details(m: &mut WorldMesh, b: &Building, plan: &BuildingPlan, fp: &[V2]
         }
         StyleTag::StuccoBox => {}
         StyleTag::Brick => {
-            ring_band(
-                m,
-                fp,
-                0.24,
-                plan.roof_y - 0.2,
-                plan.roof_y + 0.18,
-                look.sill,
-                Some(look.sill),
-                Some(look.sill),
-            );
             for k in 1..plan.floors() {
                 let y = plan.floor_y[k];
                 ring_band(
@@ -2544,27 +3077,17 @@ fn style_details(m: &mut WorldMesh, b: &Building, plan: &BuildingPlan, fp: &[V2]
                     Some(look.trim),
                 );
             }
-            // Stepped parapet centered on the frontage.
             let i = plan.frontage;
             let (a, c) = (fp[i], fp[(i + 1) % n]);
             let len = (c - a).length();
             let f = Frame::upright(a.at(0.0), (c - a).normalize());
             let mid = len * 0.5;
-            let mut y = plan.top;
-            for (k, frac) in [0.55f32, 0.32, 0.14].iter().enumerate() {
-                let half = len * frac * 0.5;
-                let rise = 0.7 + 0.1 * k as f32;
-                let paint = if k == 2 { look.trim } else { look.wall };
-                boxf(
-                    m,
-                    &f,
-                    [mid - half, y, -0.5],
-                    [mid + half, y + rise, 0.0],
-                    face::NO_BOTTOM,
-                    paint,
-                );
-                y += rise;
-            }
+            let y = plan.top
+                + if plan.top_kind == TopKind::Stepped {
+                    STEPS_H
+                } else {
+                    0.0
+                };
             // A fin up the middle of taller fronts.
             if plan.floors() >= 2 && len > 8.0 {
                 boxf(
@@ -2983,7 +3506,7 @@ mod tests {
     #[test]
     fn window_insets_match_the_floor_grid() {
         let b = house(2);
-        let plan = plan_building(&b, &env(4), 1, &crate::grammar::coast_80s());
+        let plan = plan_building(&b, ZoneId::Strip, &env(4), 1, &crate::grammar::coast_80s());
         // The 12 m street front gets 3 bays of 3.6 m; the sides and back, with no road
         // within 30 m, get 1.5x wider bays: 1 on the 9 m sides, 2 on the 12 m back.
         let cols: Vec<u32> = plan.facades.iter().map(|f| f.columns).collect();
@@ -3015,7 +3538,7 @@ mod tests {
         b.usage = BuildingUse::Commercial;
         b.style = StyleTag::Brick;
         b.height_m = 3.0 * 3.7 + 1.4;
-        let plan = plan_building(&b, &env(4), 0, &crate::grammar::coast_80s());
+        let plan = plan_building(&b, ZoneId::Strip, &env(4), 0, &crate::grammar::coast_80s());
         let front = plan.facades[plan.frontage];
         assert!(front.storefront);
         assert_eq!(front.window_rows, 2);
@@ -3039,7 +3562,7 @@ mod tests {
             built_year: None,
             usage: BuildingUse::Office,
         };
-        let plan = plan_building(&b, &env(4), 0, &crate::grammar::coast_80s());
+        let plan = plan_building(&b, ZoneId::Strip, &env(4), 0, &crate::grammar::coast_80s());
         let mut m = WorldMesh::default();
         let stats = build(&mut m, &b, &plan, &Palette::socal_1985(), 5, 2);
         assert_eq!(stats.windows, plan.windows());
@@ -3081,7 +3604,7 @@ mod tests {
                 built_year: None,
                 usage,
             };
-            let plan = plan_building(&b, &env(4), 3, &crate::grammar::coast_80s());
+            let plan = plan_building(&b, ZoneId::Strip, &env(4), 3, &crate::grammar::coast_80s());
             let mut m = WorldMesh::default();
             let stats = build(&mut m, &b, &plan, &Palette::socal_1985(), 5, 9);
             assert_eq!(stats.windows, plan.windows(), "{style:?}");
@@ -3104,9 +3627,162 @@ mod tests {
             built_year: None,
             usage: BuildingUse::Office,
         };
-        let plan = plan_building(&tall, &env(4), 0, &crate::grammar::coast_80s());
+        let plan = plan_building(
+            &tall,
+            ZoneId::Strip,
+            &env(4),
+            0,
+            &crate::grammar::coast_80s(),
+        );
         let t = plan.tower.as_ref().expect("a tower");
         assert_eq!(plan.floors() + t.plan.floors(), 12);
+    }
+
+    /// A commercial front `w` long and `d` deep, `floors` high.
+    fn shop(style: StyleTag, usage: BuildingUse, floors: u8, w: f32, d: f32) -> Building {
+        Building {
+            footprint: alloc::vec![[0.0, 0.0], [0.0, d], [w, d], [w, 0.0]],
+            height_m: f32::from(floors) * 3.6 + 1.6,
+            floors,
+            roof: Roof::Flat,
+            style,
+            built_year: None,
+            usage,
+        }
+    }
+
+    #[test]
+    fn upper_windows_line_up_over_the_piers() {
+        let g = crate::grammar::coast_80s();
+        let mut checked = 0;
+        for pick in 0..64 {
+            for style in [StyleTag::StuccoBox, StyleTag::Brick, StyleTag::Deco] {
+                let b = shop(
+                    style,
+                    BuildingUse::Commercial,
+                    3,
+                    14.0 + pick as f32 * 0.5,
+                    12.0,
+                );
+                let plan = plan_building(&b, ZoneId::Strip, &env(4), pick, &g);
+                let f = &plan.facades[plan.frontage];
+                let bp = f.base.expect("a commercial front has a base band");
+                assert!(bp.bays >= 1 && bp.bays as usize <= MAX_BAYS);
+                // Whole window bays per base bay: every pier line is a column line, and
+                // no window crosses one.
+                assert_eq!(f.columns % bp.bays, 0, "{style:?}");
+                let per = f.columns / bp.bays;
+                let (span, col) = (f.len / bp.bays as f32, f.len / f.columns as f32);
+                for c in 0..f.columns {
+                    let (x0, x1) =
+                        opening(plan.window_kind, c, f.columns, col, f.len, plan.window_w);
+                    let bay = c / per;
+                    let (p0, p1) = (bay as f32 * span, (bay + 1) as f32 * span);
+                    assert!(x0 >= p0 - 1e-3 && x1 <= p1 + 1e-3, "{style:?} column {c}");
+                }
+                assert_eq!(f.window_rows, 2);
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 192);
+    }
+
+    #[test]
+    fn base_bays_follow_the_rules() {
+        let g = crate::grammar::coast_80s();
+        let (mut lobbies, mut doors, mut recessed, mut flush) = (0, 0, 0, 0);
+        for pick in 0..200 {
+            for (style, usage, floors) in [
+                (StyleTag::StuccoBox, BuildingUse::Office, 4u8),
+                (StyleTag::Deco, BuildingUse::Office, 1),
+                (StyleTag::Brick, BuildingUse::Commercial, 3),
+                (StyleTag::StuccoBox, BuildingUse::Commercial, 1),
+            ] {
+                let b = shop(style, usage, floors, 40.0, 20.0);
+                let plan = plan_building(&b, ZoneId::Downtown, &env(4), pick, &g);
+                let bp = plan.facades[plan.frontage].base.expect("base");
+                let k = bp.kinds();
+                let count = |kind| k.iter().filter(|&&x| x == kind).count();
+                assert!(count(BayKind::Lobby) <= 1);
+                assert!(count(BayKind::Door) <= usize::from(floors > 1));
+                if count(BayKind::Lobby) == 1 {
+                    assert_eq!(k[k.len() / 2], BayKind::Lobby);
+                    lobbies += 1;
+                }
+                doors += count(BayKind::Door);
+                assert!(k.iter().any(|&x| x != BayKind::Wall), "no way in");
+                let s = &g.style(style, ZoneId::Downtown).base.storefront;
+                assert!(bp.bulkhead_h >= s.bulkhead_h.0 && bp.bulkhead_h <= s.bulkhead_h.1);
+                if bp.recess > 0.0 {
+                    recessed += 1;
+                } else {
+                    flush += 1;
+                }
+                if style == StyleTag::Brick {
+                    continue;
+                }
+                // Residential and pitched buildings have no base band.
+                let mut house = b.clone();
+                house.usage = BuildingUse::Residential;
+                let plan = plan_building(&house, ZoneId::Downtown, &env(4), pick, &g);
+                assert!(plan.facades.iter().all(|f| f.base.is_none()));
+            }
+        }
+        assert!(lobbies > 50 && doors > 50 && recessed > 50 && flush > 50);
+        // Industrial brick: loading doors, never a shop.
+        let b = shop(StyleTag::Brick, BuildingUse::Industrial, 2, 30.0, 20.0);
+        for pick in 0..50 {
+            let plan = plan_building(&b, ZoneId::Industrial, &env(4), pick, &g);
+            let bp = plan.facades[plan.frontage].base.expect("base");
+            assert!(!bp.kinds().contains(&BayKind::Storefront));
+            assert!(!plan.facades[plan.frontage].storefront);
+        }
+    }
+
+    #[test]
+    fn banded_buildings_stay_within_the_ceiling() {
+        let g = crate::grammar::coast_80s();
+        let mut worst = 0;
+        for pick in 0..40u32 {
+            for (style, usage, floors, w, d) in [
+                (
+                    StyleTag::StuccoBox,
+                    BuildingUse::Commercial,
+                    2u8,
+                    48.0f32,
+                    20.0f32,
+                ),
+                (StyleTag::Brick, BuildingUse::Commercial, 4, 40.0, 30.0),
+                (StyleTag::Deco, BuildingUse::Office, 7, 36.0, 30.0),
+                (StyleTag::Deco, BuildingUse::Office, 12, 32.0, 30.0),
+                (StyleTag::Brick, BuildingUse::Office, 12, 22.0, 40.0),
+                (StyleTag::StuccoBox, BuildingUse::Hotel, 9, 25.0, 25.0),
+            ] {
+                let b = shop(style, usage, floors, w, d);
+                let mut plan = plan_building(&b, ZoneId::Downtown, &env(4), pick, &g);
+                plan.signage = Some(signage(u64::from(pick), pick, &g.signs));
+                let mut m = WorldMesh::default();
+                let stats = build(&mut m, &b, &plan, &Palette::socal_1985(), 5, pick);
+                assert_eq!(stats.windows, plan.windows(), "{style:?}");
+                assert!(
+                    stats.triangles <= BUILDING_TRIANGLE_BUDGET,
+                    "{style:?} {floors}: {}",
+                    stats.triangles
+                );
+                worst = worst.max(stats.triangles);
+                // Without a base band the plain target holds.
+                let mut plain = b.clone();
+                plain.style = StyleTag::Glass;
+                let plan = plan_building(&plain, ZoneId::Downtown, &env(4), pick, &g);
+                let stats = build(&mut m, &plain, &plan, &Palette::socal_1985(), 5, pick);
+                assert!(
+                    stats.triangles <= PLAIN_TRIANGLE_TARGET,
+                    "{}",
+                    stats.triangles
+                );
+            }
+        }
+        std::println!("worst banded building: {worst} triangles");
     }
 
     #[test]
@@ -3114,7 +3790,7 @@ mod tests {
         let b = house(1);
         let mut e = env(4);
         e[0].blocked = true;
-        let plan = plan_building(&b, &e, 0, &crate::grammar::coast_80s());
+        let plan = plan_building(&b, ZoneId::Strip, &e, 0, &crate::grammar::coast_80s());
         assert_eq!(plan.facades[0].columns, 0);
         assert_eq!(plan.facades[0].windows(), 0);
     }
