@@ -103,9 +103,10 @@ pub enum Quality {
     Low,
     /// The Steam Deck at 1280×800 and 90 Hz: two 1536² cascades, full resolution.
     Deck,
-    /// The default: three 1536² cascades, the far one drawn every other frame.
+    /// The default: three 1536² cascades, the far one drawn every other frame, all five
+    /// bloom levels (the fifth is a few hundred pixels and carries the wide night halos).
     Medium,
-    /// Desktop GPUs: three 2048² cascades every frame, five bloom levels.
+    /// Desktop GPUs: three 2048² cascades every frame, every caster.
     High,
     /// Big desktop GPUs: three 3072² cascades where the device allows.
     Ultra,
@@ -150,7 +151,7 @@ impl Quality {
             match self {
                 Quality::Low => (1024, 2, 4, false, 2, 3.0),
                 Quality::Deck => (1536, 2, 4, true, 2, 2.0),
-                Quality::Medium => (1536, 3, 4, true, 2, 2.0),
+                Quality::Medium => (1536, 3, 5, true, 2, 2.0),
                 Quality::High => (2048, 3, 5, true, 1, 0.0),
                 Quality::Ultra => (3072, 3, 5, true, 1, 0.0),
             };

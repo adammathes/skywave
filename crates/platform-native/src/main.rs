@@ -1025,6 +1025,10 @@ mod tests {
             r.set_culling(culling);
             let mut best = f64::INFINITY;
             let mut total = 0.0;
+            // Shadow work alternates when the far cascade is kept: the most per cascade
+            // over the run, and the mean triangles a frame.
+            let mut shadow_max = [0; 3];
+            let mut shadow_tris = 0u64;
             const FRAMES: u32 = 40;
             for _ in 0..FRAMES {
                 let t = Instant::now();
@@ -1032,18 +1036,22 @@ mod tests {
                 let dt = t.elapsed().as_secs_f64();
                 best = best.min(dt);
                 total += dt;
+                let s = r.stats();
+                for (m, n) in shadow_max.iter_mut().zip(s.shadow_instances) {
+                    *m = (*m).max(n);
+                }
+                shadow_tris += s.shadow_triangles;
             }
             let s = r.stats();
             eprintln!(
-                "{label:>16}: instances {} fwd {} shadow {:?} ({}/{} drawn) | tris fwd {}k shadow {}k | \
-                 draws {} | cpu render() avg {:.2} ms best {:.2} ms",
+                "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
+                 shadow {}k a frame | draws {} | cpu render() avg {:.2} ms best {:.2} ms",
                 s.instances,
                 s.instances_drawn,
-                s.shadow_instances,
-                s.cascades_drawn,
+                shadow_max,
                 s.cascades,
                 s.triangles / 1000,
-                s.shadow_triangles / 1000,
+                shadow_tris / u64::from(FRAMES) / 1000,
                 s.draw_calls,
                 total / f64::from(FRAMES) * 1000.0,
                 best * 1000.0,
