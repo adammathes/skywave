@@ -87,6 +87,9 @@ const CABIN_WALL_TINT: f32 = 0.3;
 pub const KEEP_SPEED_MPS: f32 = 5.0;
 /// Below this the car counts as fallen out of the world and is put back at its start, m.
 const FLOOR_Y: f32 = -100.0;
+/// A reset looks this far for a lane; with none that close the car goes back to its
+/// start, m.
+pub const RESET_RANGE_M: f32 = 200.0;
 
 /// A rigid transform: body origin (the center of mass) and body-to-world rotation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -215,6 +218,8 @@ pub struct Drive {
     pub input: VehicleInput,
     /// What the collider did in the last step (for the sound).
     pub impact: world::Impact,
+    /// Parked cars this car has knocked, swaying until they settle (for drawing).
+    pub rocking: world::collide::Rocking,
     pub headlights: bool,
     /// Held this frame (for the audio task).
     pub horn: bool,
@@ -261,6 +266,7 @@ impl Drive {
             assists: Assists::default(),
             input: VehicleInput::default(),
             impact: world::Impact::default(),
+            rocking: world::collide::Rocking::default(),
             headlights: false,
             horn: false,
             roll: [0.0; 4],
@@ -276,6 +282,31 @@ impl Drive {
         self.prev = self.state;
         self.roll = [0.0; 4];
         self.prev_roll = [0.0; 4];
+    }
+
+    /// The `Reset` action: at rest and upright on the centerline of the nearest of `lanes`
+    /// (on the ground under it, the deck it is on), heading along it the way it drives; at
+    /// the start when no lane is within [`RESET_RANGE_M`]. The odometer, headlights and
+    /// assists stay.
+    pub fn reset(&mut self, lanes: &world::lanes::LaneLines, ground: &DriveGround) {
+        let odometer = self.state.odometer_m;
+        let p = self.state.pos;
+        // The ground point under the body, for which level of a bridge it is on.
+        let foot = [p[0], p[1] - self.spec.cg_height_m, p[2]];
+        match lanes.nearest(foot, RESET_RANGE_M) {
+            Some(h) => {
+                let [x, y, z] = h.pos;
+                let (y, _) = ground.level_from([x, z], y + 0.5);
+                let heading = (-h.dir[0]).atan2(-h.dir[1]);
+                self.state = VehicleState::spawn(&self.spec, [x, y, z], heading);
+                self.prev = self.state;
+                self.roll = [0.0; 4];
+                self.prev_roll = [0.0; 4];
+            }
+            None => self.respawn(),
+        }
+        self.state.odometer_m = odometer;
+        self.prev.odometer_m = odometer;
     }
 
     /// Swaps in the car `spec` (with its body `layout`) where this one is: on the ground
@@ -321,6 +352,8 @@ impl Drive {
         self.input = input;
         vehicle::step(&self.spec, &mut self.state, &input, &self.assists, ground);
         self.impact = world::resolve(&mut self.state, &self.spec, ground);
+        self.rocking.note(&self.impact, ground);
+        self.rocking.step();
         for i in 0..4 {
             let r = self.roll[i] + self.state.wheels[i].spin * DT;
             let wrap = if r >= TAU {

@@ -86,7 +86,6 @@ impl RadioGlue {
             RadioCommand::Play { url, token } => ("play", url.as_str(), *token, 0.0),
             RadioCommand::Stop => ("stop", "", 0, 0.0),
             RadioCommand::Volume(v) => ("volume", "", 0, *v),
-            RadioCommand::TuneNoise { seconds } => ("noise", "", 0, *seconds),
         };
         let args = js_sys::Array::of5(
             &JsValue::from_str(kind),

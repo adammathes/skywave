@@ -1,7 +1,8 @@
 //! The synthesized sounds (`docs/AUDIO_RADIO.md`, "Engine and world sound"): no recorded
 //! audio anywhere. [`engine`] is the car's engine, [`world`] everything else the car and the
-//! place make. Both read one [`AudioParams`], a plain struct the app fills every frame from
-//! the car's sim state, the collider and the place.
+//! place make, [`tune`] the radio's dial between stations. All read one [`AudioParams`], a
+//! plain struct the app fills every frame from the car's sim state, the collider, the place
+//! and the radio.
 //!
 //! Events (a curb kick, a wall hit) are counters rather than flags, so a sink that skips a
 //! parameter update (the native audio thread reads them without waiting) never loses one,
@@ -9,9 +10,11 @@
 
 pub mod dsp;
 pub mod engine;
+pub mod tune;
 pub mod world;
 
 pub use engine::{EngineProfile, EngineSynth};
+pub use tune::TuneSynth;
 pub use world::WorldSynth;
 
 /// What a tire rolls on (the collider's surfaces).
@@ -86,16 +89,26 @@ pub struct AudioParams {
     pub speed_mps: f32,
     /// Front-left, front-right, rear-left, rear-right.
     pub wheels: [WheelParams; 4],
-    /// Counts every curb kick so far.
+    /// Counts every curb kick so far, and how fast the latest wheel hit its curb, m/s.
     pub curb_kicks: u32,
+    pub curb_speed_mps: f32,
     /// Counts every wall, post or box hit so far, and how hard the latest was, m/s.
     pub hits: u32,
     pub hit_speed_mps: f32,
+    /// Which side of the car the latest curb kick and hit were on, `[-1, 1]` (left to
+    /// right): the bump leans that way in the stereo image.
+    pub curb_side: f32,
+    pub hit_side: f32,
     pub horn: bool,
     /// Ambience amounts, `[0, 1]`: ocean wash near beach and water, birds by day in
     /// residential streets and parks.
     pub ocean: f32,
     pub birds: f32,
+    /// Counts every tune of the radio so far ([`crate::Radio::tunes`]): each new one plays
+    /// the dial sweep between stations...
+    pub tunes: u32,
+    /// ...at this level, `[0, 1]`: the radio volume setting.
+    pub tune_volume: f32,
 }
 
 impl Default for AudioParams {
@@ -118,11 +131,16 @@ impl Default for AudioParams {
             speed_mps: 0.0,
             wheels: [wheel; 4],
             curb_kicks: 0,
+            curb_speed_mps: 0.0,
             hits: 0,
             hit_speed_mps: 0.0,
+            curb_side: 0.0,
+            hit_side: 0.0,
             horn: false,
             ocean: 0.0,
             birds: 0.0,
+            tunes: 0,
+            tune_volume: 1.0,
         }
     }
 }
@@ -158,9 +176,13 @@ impl AudioParams {
             },
             speed_mps: clamp(fin(self.speed_mps, 0.0), -150.0, 150.0),
             wheels,
+            curb_speed_mps: clamp(self.curb_speed_mps, 0.0, 100.0),
             hit_speed_mps: clamp(self.hit_speed_mps, 0.0, 100.0),
+            curb_side: clamp(fin(self.curb_side, 0.0), -1.0, 1.0),
+            hit_side: clamp(fin(self.hit_side, 0.0), -1.0, 1.0),
             ocean: unit(self.ocean),
             birds: unit(self.birds),
+            tune_volume: unit(self.tune_volume),
             ..*self
         }
     }

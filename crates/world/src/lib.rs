@@ -19,6 +19,7 @@ extern crate std;
 pub mod buildings;
 pub mod collide;
 pub mod ground;
+pub mod lanes;
 pub mod math;
 pub mod mesh;
 pub mod palette;
@@ -32,7 +33,7 @@ use alloc::vec::Vec;
 
 use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
-pub use collide::{resolve, Impact, WorldCollider};
+pub use collide::{resolve, Bump, Impact, WorldCollider};
 pub use mesh::terrain::TerrainGrid;
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;

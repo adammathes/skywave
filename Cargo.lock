@@ -1927,6 +1927,7 @@ name = "shape-preview"
 version = "0.1.0"
 dependencies = [
  "ron",
+ "traffic",
  "vehicle",
 ]
 
@@ -2159,6 +2160,7 @@ dependencies = [
  "place",
  "ron",
  "skywave-core",
+ "vehicle",
  "world",
 ]
 

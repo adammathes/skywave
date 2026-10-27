@@ -1,6 +1,6 @@
 //! Raw events in, one [`InputState`] per frame out.
 
-use super::bindings::{Binding, Bindings};
+use super::bindings::{Binding, Bindings, LONG_PRESS_S};
 use super::raw::{DeviceKind, MouseAxis, RawInput};
 use super::{Action, InputState};
 
@@ -34,10 +34,17 @@ pub struct InputMapper {
     value: [f32; RawInput::COUNT],
     /// Pressed at least once since the last sample.
     pressed_edge: [bool; RawInput::COUNT],
-    /// Used as some binding's `hold`; such an input fires its own actions on release, and
-    /// only if no chord was used while it was down.
+    /// Used as some binding's `hold`, or by a `long` binding; such an input fires its own
+    /// actions on release, and only if no chord (or long press) was used while it was down.
     modifier: [bool; RawInput::COUNT],
     chord_used: [bool; RawInput::COUNT],
+    /// Some `long` binding reads this input.
+    long: [bool; RawInput::COUNT],
+    /// Seconds each input has been held, counted at samples.
+    held_s: [f32; RawInput::COUNT],
+    /// Released since the last sample after [`LONG_PRESS_S`] held without using a chord:
+    /// its `long` bindings fire (and its other actions do not).
+    long_edge: [bool; RawInput::COUNT],
     /// Released since the last sample without using a chord.
     tap: [bool; RawInput::COUNT],
     /// Keyboard-ramped value of each analog action, per device.
@@ -65,6 +72,9 @@ impl InputMapper {
             pressed_edge: [false; RawInput::COUNT],
             modifier: [false; RawInput::COUNT],
             chord_used: [false; RawInput::COUNT],
+            long: [false; RawInput::COUNT],
+            held_s: [0.0; RawInput::COUNT],
+            long_edge: [false; RawInput::COUNT],
             tap: [false; RawInput::COUNT],
             ramp: [[0.0; Action::ANALOG.len()]; DeviceKind::COUNT],
             was_pressed: [false; Action::COUNT],
@@ -89,11 +99,16 @@ impl InputMapper {
 
     fn index_modifiers(&mut self) {
         self.modifier = [false; RawInput::COUNT];
+        self.long = [false; RawInput::COUNT];
         for device in DeviceKind::ALL {
             for action in Action::ALL {
                 for b in self.bindings.get(device, action) {
                     if let Some(i) = b.hold.and_then(RawInput::slot) {
                         self.modifier[i] = true;
+                    }
+                    if let Some(i) = b.raw.slot().filter(|_| b.long && !b.raw.is_analog()) {
+                        self.modifier[i] = true;
+                        self.long[i] = true;
                     }
                 }
             }
@@ -112,6 +127,7 @@ impl InputMapper {
             return;
         }
         self.held[i] = true;
+        self.held_s[i] = 0.0;
         self.pressed_edge[i] = true;
         self.chord_used[i] = false;
         self.note_chord_use(raw);
@@ -126,7 +142,11 @@ impl InputMapper {
         }
         self.held[i] = false;
         if self.modifier[i] && !self.chord_used[i] {
-            self.tap[i] = true;
+            if self.long[i] && self.held_s[i] >= LONG_PRESS_S {
+                self.long_edge[i] = true;
+            } else {
+                self.tap[i] = true;
+            }
         }
     }
 
@@ -227,6 +247,7 @@ impl InputMapper {
         self.value = [0.0; RawInput::COUNT];
         self.pressed_edge = [false; RawInput::COUNT];
         self.tap = [false; RawInput::COUNT];
+        self.long_edge = [false; RawInput::COUNT];
         self.ramp = [[0.0; Action::ANALOG.len()]; DeviceKind::COUNT];
     }
 
@@ -239,6 +260,13 @@ impl InputMapper {
     /// ramps by `dt` seconds. Call once per frame, before the simulation steps.
     pub fn sample(&mut self, dt: f32) -> &InputState {
         let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
+
+        // How long each input has been held, for long presses (which act on release).
+        for i in 0..RawInput::COUNT {
+            if self.held[i] {
+                self.held_s[i] += dt;
+            }
+        }
 
         // Inputs taken over by a chord whose hold is down, and holds whose chord is in use
         // (the stick may already be deflected when the hold goes down).
@@ -310,6 +338,7 @@ impl InputMapper {
         }
         self.pressed_edge = [false; RawInput::COUNT];
         self.tap = [false; RawInput::COUNT];
+        self.long_edge = [false; RawInput::COUNT];
         for raw in [
             RawInput::MouseAxis(MouseAxis::X),
             RawInput::MouseAxis(MouseAxis::Y),
@@ -338,7 +367,9 @@ impl InputMapper {
             };
             return Some((b.read(self.value[i] * scale), false));
         }
-        let (down, edge) = if self.modifier[i] && b.hold.is_none() {
+        let (down, edge) = if b.long {
+            (self.long_edge[i], self.long_edge[i])
+        } else if self.modifier[i] && b.hold.is_none() {
             (self.tap[i], self.tap[i])
         } else {
             (self.held[i], self.pressed_edge[i])
@@ -739,6 +770,47 @@ mod tests {
         m.release(btn(PadButton::Select));
         assert!(m.sample(0.01).just_pressed(Action::MapToggle));
         assert!(!m.sample(0.01).just_pressed(Action::MapToggle));
+    }
+
+    #[test]
+    fn holding_select_resets_on_release_and_a_tap_or_a_scrub_does_not() {
+        let mut m = InputMapper::default();
+        let select = btn(PadButton::Select);
+        let reset = |m: &mut InputMapper, dt| {
+            let s = m.sample(dt);
+            (
+                s.just_pressed(Action::Reset),
+                s.just_pressed(Action::MapToggle),
+            )
+        };
+        let hold = |m: &mut InputMapper, frames: usize| {
+            for _ in 0..frames {
+                assert_eq!(reset(m, 1.0 / 60.0), (false, false));
+            }
+        };
+        // A tap, or anything short of a second: the map, no reset.
+        m.press(select);
+        hold(&mut m, 55);
+        m.release(select);
+        assert_eq!(reset(&mut m, 0.01), (false, true));
+        // A second and more: nothing while held, the reset once on release, no map.
+        m.press(select);
+        hold(&mut m, 62);
+        m.release(select);
+        assert_eq!(reset(&mut m, 0.01), (true, false));
+        assert_eq!(reset(&mut m, 0.01), (false, false));
+        // Scrubbing time with Select held is not a long press, however late the stick
+        // moves.
+        m.press(select);
+        hold(&mut m, 72);
+        m.axis(pad(PadAxis::RightX), 0.8);
+        m.sample(1.0 / 60.0);
+        m.axis(pad(PadAxis::RightX), 0.0);
+        m.release(select);
+        assert_eq!(reset(&mut m, 0.01), (false, false));
+        // The keyboard's R resets at once.
+        m.press(key(Key::KeyR));
+        assert!(m.sample(0.01).just_pressed(Action::Reset));
     }
 
     #[test]

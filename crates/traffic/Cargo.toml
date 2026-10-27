@@ -10,6 +10,8 @@ rust-version.workspace = true
 [dependencies]
 skywave-core.workspace = true
 place.workspace = true
+# The part meshes are `vehicle::shape::MeshData`, the type the renderer already takes.
+vehicle.workspace = true
 
 [dev-dependencies]
 # The coast tests build the real place from assets/regions/.

@@ -7,11 +7,12 @@
 //! `f32` stereo from [`mixer::Mixer::render`].
 //!
 //! Radio, platform-neutral: the station model and the preset files ([`station`]), the
-//! switching state machine with its tune-noise phase ([`radio`]), and the user's radio
+//! switching state machine with its tuning phase ([`radio`]), and the user's radio
 //! settings ([`settings`]). The crate plays no stream itself. [`Radio`] turns presses
 //! (next, previous, off) and player reports ([`PlayerEvent`]) into [`RadioCommand`]s
-//! (`Play { url }`, `Stop`, `Volume`, `TuneNoise`) that the platform carries out: an
-//! `<audio>` element on the web, a decoder and sink natively.
+//! (`Play { url }`, `Stop`, `Volume`) that the platform carries out: an `<audio>` element
+//! on the web, a decoder and sink natively. The dial sweep between stations is one of the
+//! synthesized sounds ([`synth::tune`]), played by the mixer like the rest.
 //!
 //! No recorded audio ships with the game: presets are facts (names, stream URLs,
 //! homepages) and the date their terms were checked.
