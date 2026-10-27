@@ -14,15 +14,15 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
 }
 
 /// The vehicle specs compiled into the game, as `(id, RON text)`: the 1980s roster, in the
-/// order the Vehicle page lists it.
-pub const BUILTIN: [(&str, &str); 12] = [
+/// order the Vehicle page lists it (the everyday cars, then the sports cars).
+pub const BUILTIN: [(&str, &str); 20] = [
     (
-        "corsair_gtx",
-        include_str!("../../../assets/vehicles/corsair_gtx.ron"),
+        "gannet_gt",
+        include_str!("../../../assets/vehicles/gannet_gt.ron"),
     ),
     (
-        "palisade_wagon",
-        include_str!("../../../assets/vehicles/palisade_wagon.ron"),
+        "homestead_wagon",
+        include_str!("../../../assets/vehicles/homestead_wagon.ron"),
     ),
     (
         "seabreeze_convertible",
@@ -64,7 +64,54 @@ pub const BUILTIN: [(&str, &str); 12] = [
         "burro_4x4",
         include_str!("../../../assets/vehicles/burro_4x4.ron"),
     ),
+    (
+        "basilisk_v12",
+        include_str!("../../../assets/vehicles/basilisk_v12.ron"),
+    ),
+    (
+        "basilisk_roadster",
+        include_str!("../../../assets/vehicles/basilisk_roadster.ron"),
+    ),
+    (
+        "avocet_v8",
+        include_str!("../../../assets/vehicles/avocet_v8.ron"),
+    ),
+    (
+        "avocet_spider",
+        include_str!("../../../assets/vehicles/avocet_spider.ron"),
+    ),
+    (
+        "longbow_coupe",
+        include_str!("../../../assets/vehicles/longbow_coupe.ron"),
+    ),
+    (
+        "longbow_convertible",
+        include_str!("../../../assets/vehicles/longbow_convertible.ron"),
+    ),
+    (
+        "appaloosa_gt",
+        include_str!("../../../assets/vehicles/appaloosa_gt.ron"),
+    ),
+    (
+        "appaloosa_convertible",
+        include_str!("../../../assets/vehicles/appaloosa_convertible.ron"),
+    ),
 ];
+
+/// Built-in vehicle ids that were renamed, `(old, new)`: a saved setting or a scene URL
+/// naming the old id gets the car under its new one.
+pub const RENAMED: [(&str, &str); 2] = [
+    ("corsair_gtx", "gannet_gt"),
+    ("palisade_wagon", "homestead_wagon"),
+];
+
+/// `id`, or the id it was renamed to.
+pub fn current_id(id: &str) -> &str {
+    RENAMED
+        .iter()
+        .find(|(old, _)| *old == id)
+        .map_or(id, |(_, new)| new)
+}
 
 /// Loads the built-in spec with this id.
 pub fn builtin_spec(id: &str) -> Result<VehicleSpec, String> {
@@ -85,15 +132,17 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 }
 
 /// The car body shapes compiled into the game, as `(file name, RON text)`; a
-/// `VehicleSpec::shape` names one.
-pub const BUILTIN_SHAPES: [(&str, &str); 12] = [
+/// `VehicleSpec::shape` names one. The first [`TRAFFIC_SHAPES`] are the everyday cars NPC
+/// traffic drives; new shapes go at the end, so the place's parked-car paints (seeded by
+/// index) keep theirs.
+pub const BUILTIN_SHAPES: [(&str, &str); 20] = [
     (
-        "corsair_gtx.shape.ron",
-        include_str!("../../../assets/vehicles/corsair_gtx.shape.ron"),
+        "gannet_gt.shape.ron",
+        include_str!("../../../assets/vehicles/gannet_gt.shape.ron"),
     ),
     (
-        "palisade_wagon.shape.ron",
-        include_str!("../../../assets/vehicles/palisade_wagon.shape.ron"),
+        "homestead_wagon.shape.ron",
+        include_str!("../../../assets/vehicles/homestead_wagon.shape.ron"),
     ),
     (
         "seabreeze_convertible.shape.ron",
@@ -135,7 +184,44 @@ pub const BUILTIN_SHAPES: [(&str, &str); 12] = [
         "burro_4x4.shape.ron",
         include_str!("../../../assets/vehicles/burro_4x4.shape.ron"),
     ),
+    (
+        "longbow_coupe.shape.ron",
+        include_str!("../../../assets/vehicles/longbow_coupe.shape.ron"),
+    ),
+    (
+        "appaloosa_gt.shape.ron",
+        include_str!("../../../assets/vehicles/appaloosa_gt.shape.ron"),
+    ),
+    (
+        "basilisk_v12.shape.ron",
+        include_str!("../../../assets/vehicles/basilisk_v12.shape.ron"),
+    ),
+    (
+        "basilisk_roadster.shape.ron",
+        include_str!("../../../assets/vehicles/basilisk_roadster.shape.ron"),
+    ),
+    (
+        "avocet_v8.shape.ron",
+        include_str!("../../../assets/vehicles/avocet_v8.shape.ron"),
+    ),
+    (
+        "avocet_spider.shape.ron",
+        include_str!("../../../assets/vehicles/avocet_spider.shape.ron"),
+    ),
+    (
+        "longbow_convertible.shape.ron",
+        include_str!("../../../assets/vehicles/longbow_convertible.shape.ron"),
+    ),
+    (
+        "appaloosa_convertible.shape.ron",
+        include_str!("../../../assets/vehicles/appaloosa_convertible.shape.ron"),
+    ),
 ];
+
+/// How many of [`BUILTIN_SHAPES`], from the first, NPC traffic draws from: the twelve
+/// everyday cars and the two common sports cars. The exotics and the new convertibles are
+/// the player's to drive.
+pub const TRAFFIC_SHAPES: usize = 14;
 
 /// Loads the built-in shape `spec.shape` names.
 pub fn builtin_shape(spec: &VehicleSpec) -> Result<ShapeSpec, String> {
@@ -151,8 +237,8 @@ mod tests {
     use super::*;
     use vehicle::{Drive, Era, VehicleClass};
 
-    const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
-    const PALISADE: &str = include_str!("../../../assets/vehicles/palisade_wagon.ron");
+    const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
+    const HOMESTEAD: &str = include_str!("../../../assets/vehicles/homestead_wagon.ron");
 
     /// Peak full-throttle power between idle and redline, W, sampled every 10 rpm.
     fn peak_power_w(spec: &VehicleSpec) -> f32 {
@@ -176,8 +262,8 @@ mod tests {
     #[test]
     fn both_specs_load_and_validate() {
         for (text, id, shape) in [
-            (CORSAIR, "corsair_gtx", "corsair_gtx.shape.ron"),
-            (PALISADE, "palisade_wagon", "palisade_wagon.shape.ron"),
+            (GANNET, "gannet_gt", "gannet_gt.shape.ron"),
+            (HOMESTEAD, "homestead_wagon", "homestead_wagon.shape.ron"),
         ] {
             let spec = load_spec(text).unwrap();
             assert_eq!(spec.validate(), Ok(()));
@@ -189,8 +275,8 @@ mod tests {
 
     #[test]
     fn specs_match_the_roster() {
-        let sports = load_spec(CORSAIR).unwrap();
-        let wagon = load_spec(PALISADE).unwrap();
+        let sports = load_spec(GANNET).unwrap();
+        let wagon = load_spec(HOMESTEAD).unwrap();
 
         assert_eq!(sports.class, VehicleClass::Sports);
         assert_eq!(sports.drive, Drive::Rear);
@@ -208,8 +294,8 @@ mod tests {
 
     #[test]
     fn sports_car_and_wagon_feel_different() {
-        let sports = load_spec(CORSAIR).unwrap();
-        let wagon = load_spec(PALISADE).unwrap();
+        let sports = load_spec(GANNET).unwrap();
+        let wagon = load_spec(HOMESTEAD).unwrap();
 
         let ptw = |s: &VehicleSpec| peak_power_w(s) / s.mass_kg;
         assert!(ptw(&sports) > 1.5 * ptw(&wagon));
@@ -255,13 +341,33 @@ mod tests {
     }
 
     #[test]
+    fn the_sports_cars_have_open_versions() {
+        for (closed, open) in [
+            ("avocet_v8", "avocet_spider"),
+            ("basilisk_v12", "basilisk_roadster"),
+            ("longbow_coupe", "longbow_convertible"),
+            ("appaloosa_gt", "appaloosa_convertible"),
+        ] {
+            let (c, o) = (builtin_spec(closed).unwrap(), builtin_spec(open).unwrap());
+            assert!(!builtin_shape(&c).unwrap().roof.convertible(), "{closed}");
+            assert!(builtin_shape(&o).unwrap().roof.convertible(), "{open}");
+            assert_eq!(o.class, VehicleClass::Convertible);
+            // The same car with its roof off: the chassis and engine, a little heavier.
+            assert_eq!(c.engine.torque_nm, o.engine.torque_nm, "{open}");
+            assert_eq!(c.gears, o.gears, "{open}");
+            assert_eq!((c.wheelbase_m, c.track_m), (o.wheelbase_m, o.track_m));
+            assert!(o.mass_kg > c.mass_kg && o.aero.cd > c.aero.cd, "{open}");
+        }
+    }
+
+    #[test]
     fn the_roster_covers_the_eras_body_styles() {
         use VehicleClass::*;
         let specs: Vec<VehicleSpec> = BUILTIN
             .iter()
             .map(|(id, _)| builtin_spec(id).unwrap())
             .collect();
-        assert_eq!(specs.len(), 12);
+        assert_eq!(specs.len(), 20);
         for class in [
             Sports,
             Coupe,
@@ -300,7 +406,7 @@ mod tests {
             let spec = builtin_spec(id).unwrap();
             assert_eq!(builtin_shape(&spec).unwrap().id, id);
         }
-        let mut spec = builtin_spec("corsair_gtx").unwrap();
+        let mut spec = builtin_spec("gannet_gt").unwrap();
         spec.shape = "hovercar.shape.ron".into();
         assert!(builtin_shape(&spec).is_err());
         assert!(load_shape("ShapeSpec(id: ").is_err());
@@ -311,13 +417,13 @@ mod tests {
         let err = load_spec("VehicleSpec(id: ").unwrap_err();
         assert!(err.starts_with("vehicle spec: "), "{err}");
 
-        let typo = CORSAIR.replace("wheelbase_m:", "wheelbse_m:");
+        let typo = GANNET.replace("wheelbase_m:", "wheelbse_m:");
         assert!(load_spec(&typo).is_err());
 
-        let negative = CORSAIR.replace("mass_kg: 1250", "mass_kg: -1250");
+        let negative = GANNET.replace("mass_kg: 1250", "mass_kg: -1250");
         assert_eq!(
             load_spec(&negative).unwrap_err(),
-            "vehicle spec `corsair_gtx`: NonPositiveMass"
+            "vehicle spec `gannet_gt`: NonPositiveMass"
         );
     }
 }

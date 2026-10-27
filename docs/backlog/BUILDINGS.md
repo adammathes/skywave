@@ -78,8 +78,8 @@ a hanger, book, bicycle, bowling pin, flower. Never a red cross on white (a prot
 
 **Wordmarks**: one or two words from a closed lexicon, lettered in a stroke style.
 - Lexicon (data, reviewed by a person, never generated free-form): invented surnames and given
-  names built from phonotactic tables so they read as names, not syllable soup ("Dalvey's",
-  "Orlan", "Kessick"); generic descriptors (Sunset, Harbor, Surf, Lakeshore, Corner, Golden,
+  names built from phonotactic tables so they read as names, not syllable soup ("Holdrek's",
+  "Vornie", "Kessick"); generic descriptors (Sunset, Harbor, Surf, Lakeshore, Corner, Golden,
   Coast, Northside, Avenue, Royal, Star); trade words (Donuts, Liquor, Records, Cleaners,
   Cocktails, Tacos, Motel, Bowl, Tires). Forms: `Name's`, `Name's Trade`, `Descriptor Trade`,
   `Trade` alone, plus a secondary line (`Cocktails`, `Open`, `Vacancy`, `Since 19xx` with a year
@@ -169,12 +169,12 @@ Visual tasks attach before/after screenshots of the four fixed coast cameras and
 | B1 | **Done.** `CREDITS.md` at the root: the format from ADR 0005 and, at its top, how to record a fitted number and its source | `CREDITS.md` | — |
 | B2 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars"; fields move in as later tasks need them). Grammar types in `world` (`no_std`, serde), RON loader in `app`, `california_coast_80s.ron` that reproduces today's look exactly: no hash moves. Tests: loader round-trip, current goldens unchanged | `world::grammar`, `app` loader, `assets/grammar/` | — |
 | B3 | Fit pass, numbers only: measure 20+ public-domain references per scene (Margolies, DOCUMERICA, HABS, NHAP) into the SoCal grammar with source comments | `assets/grammar/` | B2 |
-| B4 | Three-band facade and the storefront bay (bulkhead, glass, transom, piers, recessed entry); upper windows aligned to the base bays | `world::buildings` | B2 |
-| B5 | Pictogram library: 32 shapes as 2D polygons, extrude and neon-outline builders, a preview sheet in `tools/shape-preview`; tests for triangle budget and closed outlines | `world::signs`, tools | — |
-| B6 | Lexicon and wordmarks: phonotactic name tables, descriptors, trades, forms; stroke letterforms in four styles replacing the 5-pixel font on shop signs; uniqueness within a radius | `world::signs`, `assets/grammar/lexicon.ron` | B2 |
-| B7 | Sign carriers: band, blade, pole, rooftop, window lettering, ghost sign; night switching and flicker | `world::buildings` (sign fns), `world::procgen::detail` | B5, B6 |
-| B8 | Awnings and canopies: shed (striped, solid), bullnose, mansard shingle canopy, flat stucco canopy, aluminum; per-era weights | `world::buildings` (awning fns) | B4 |
-| B9 | Rooflines and rooftop units: parapet kinds, bracketed cornice, false front; packaged units with ducts by roof area | `world::buildings` (top, roof clutter) | B2 |
+| B4 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars": style entries chosen by zone, base bays, window and top kinds). Three-band facade and the storefront bay (bulkhead, glass, transom, piers, recessed entry); upper windows aligned to the base bays | `world::buildings` | B2 |
+| B5 | **Done** (as built: `world::signs::pictogram`, `shape-preview --signs`). Pictogram library: 32 shapes as 2D polygons, extrude and neon-outline builders, a preview sheet in `tools/shape-preview`; tests for triangle budget and closed outlines | `world::signs`, tools | — |
+| B6 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Shop signs" and "Letterforms"; the blade signs carry them). Lexicon and wordmarks: phonotactic name tables, descriptors, trades, forms; stroke letterforms in four styles replacing the 5-pixel font on shop signs; uniqueness within a radius | `world::signs`, `assets/grammar/lexicon.ron` | B2 |
+| B7 | Sign carriers: band, blade, pole, rooftop, window lettering, ghost sign; night switching and flicker. The sign bands (`buildings::named_sign`) and billboards still letter `signs::business_name` syllable names (in the new block capitals): move them onto `ShopSign`s from the lexicon here, then delete `business_name` and its tables | `world::buildings` (sign fns), `world::procgen::detail` | B5, B6 |
+| B8 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars", Signs). Awnings and canopies: shed (striped, solid), bullnose, mansard shingle canopy, flat stucco canopy, aluminum; per-era weights | `world::buildings` (awning fns) | B4 |
+| B9 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars", top and Roofs). Rooflines and rooftop units: parapet kinds, bracketed cornice, false front; packaged units with ducts by roof area | `world::buildings` (top, roof clutter) | B2 |
 | B10 | Parking lots: `LotRules` layout on front and rear lots, stripes, wheel stops, poles, islands, curb cuts; parked-car placement on stalls | `world::procgen` (parcels/props), `world::mesh` ground | B2 |
 | B11 | Window AC, through-wall units, grilles, burglar bars, wear bands | `world::buildings` (addenda) | B4 |
 | B12 | SoCal beach town pass: tune the grammar until the four coast cameras read as a 1985 beach town; owner look | `assets/grammar/` | B3–B11 |

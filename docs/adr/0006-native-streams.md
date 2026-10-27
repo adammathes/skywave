@@ -92,6 +92,10 @@ not ship and cannot check.
   Without an audio device the radio is dropped the same way.
 
 ## Consequences
+Natively a preset station plays only if one of its URLs is MP3 on a server that speaks a
+modern TLS suite: on 2026-10-27 that left three of the sixteen distinct preset stations on NO SIGNAL
+(Intergalactic FM's two channels, AAC only; WMXM, whose server offers only CBC suites, which
+rustls leaves out on purpose). The live test lists them and checks they still fail.
 Native release builds grow by the TLS stack (ring compiles C; `cc` is on every runner and
 the Steam Deck build container). `cargo deny` reports two more duplicate versions
 (`core-foundation`, `getrandom`) as warnings. If a permissive AAC decoder appears, it slots

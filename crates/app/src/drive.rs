@@ -18,7 +18,7 @@ use crate::input::{Action, InputState};
 use crate::vehicles;
 
 /// The car you get without asking for one.
-pub const DEFAULT_VEHICLE: &str = "corsair_gtx";
+pub const DEFAULT_VEHICLE: &str = "gannet_gt";
 
 /// What the car drives on: the town's collider (ground heights, curbs, walls, props).
 pub type DriveGround = world::WorldCollider;
@@ -523,21 +523,7 @@ impl Drive {
     /// coronas while they are lit (headlights on or braking). Returns them and how many.
     pub fn lights(&self, alpha: f32) -> ([PointLight; CAR_LIGHTS], usize) {
         let pose = self.pose(alpha);
-        let pitch = HEADLIGHT_PITCH_DEG.to_radians();
-        let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
-        let at = |lamp: Vec3| PointLight {
-            position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
-            color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
-            radius: HEADLIGHT_RADIUS_M,
-            direction: axis.to_array(),
-            cone_cos: [
-                HEADLIGHT_OUTER_DEG.to_radians().cos(),
-                HEADLIGHT_INNER_DEG.to_radians().cos(),
-            ],
-            cone_squash: HEADLIGHT_SQUASH,
-            wrap: HEADLIGHT_WRAP,
-            corona: HEADLIGHT_CORONA,
-        };
+        let at = |lamp: Vec3| headlight(&pose, lamp);
         let tail_kcd = if self.braking() { BRAKE_KCD } else { TAIL_KCD };
         let tail = |lamp: Vec3| PointLight {
             corona: TAIL_CORONA,
@@ -560,6 +546,26 @@ impl Drive {
             (false, false) => 0,
         };
         (out, n)
+    }
+}
+
+/// The low beam of the head lamp at body point `lamp` of a car at `pose`: a spot from just
+/// behind the lens, aimed [`HEADLIGHT_PITCH_DEG`] below the car's forward axis.
+pub fn headlight(pose: &Pose, lamp: Vec3) -> PointLight {
+    let pitch = HEADLIGHT_PITCH_DEG.to_radians();
+    let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
+    PointLight {
+        position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
+        color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
+        radius: HEADLIGHT_RADIUS_M,
+        direction: axis.to_array(),
+        cone_cos: [
+            HEADLIGHT_OUTER_DEG.to_radians().cos(),
+            HEADLIGHT_INNER_DEG.to_radians().cos(),
+        ],
+        cone_squash: HEADLIGHT_SQUASH,
+        wrap: HEADLIGHT_WRAP,
+        corona: HEADLIGHT_CORONA,
     }
 }
 
@@ -609,7 +615,7 @@ mod tests {
 
     #[test]
     fn both_cars_spawn_on_the_strip_facing_east() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let d = Drive::new(id).unwrap();
             assert_eq!(d.spec.id, id);
             let pose = d.pose(1.0);
@@ -659,7 +665,7 @@ mod tests {
 
     #[test]
     fn wheels_sit_at_the_shape_hubs_steer_and_roll() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let mut d = Drive::new(id).unwrap();
             let g = flat();
             let r = d.layout.wheel_radius;
@@ -856,7 +862,7 @@ mod tests {
 
     #[test]
     fn the_cabin_draws_interior_wheel_and_needles() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let d = Drive::new(id).unwrap();
             let ids = ids();
             let lod = ids.lods[0];
@@ -924,7 +930,7 @@ mod tests {
             assert_eq!(out.len(), 8, "{id}");
             assert_eq!(out[7].mesh, lod.shell_inside);
         }
-        let hardtop = Drive::new("palisade_wagon").unwrap();
+        let hardtop = Drive::new("homestead_wagon").unwrap();
         assert!(!hardtop.layout.open_top);
         let mut out = Vec::new();
         hardtop.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);

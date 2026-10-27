@@ -369,12 +369,22 @@ pub struct CarModel {
 impl CarModel {
     /// Builds the car `shape` describes for `spec` in palette color 0.
     pub fn build(spec: &VehicleSpec, shape: &ShapeSpec) -> Result<CarModel, String> {
+        CarModel::build_painted(spec, shape, 0)
+    }
+
+    /// Builds the car in palette entry `paint` (which wraps). Only the body (and so the
+    /// inside-out shell) depends on the paint.
+    pub fn build_painted(
+        spec: &VehicleSpec,
+        shape: &ShapeSpec,
+        paint: usize,
+    ) -> Result<CarModel, String> {
         let popups = shape.front.lights == HeadLights::PopUp;
         let make = |lod: u8, up: bool| {
             shape::build_with(
                 shape,
                 &BuildOptions {
-                    color_index: 0,
+                    color_index: paint,
                     lod,
                     popups_up: up,
                     paint: None,
@@ -468,17 +478,56 @@ impl CarModel {
             dial_ticks: add(&self.dial_ticks),
         }
     }
+
+    /// Registers only what depends on the paint (each level's bodies and inside-out shell)
+    /// through `add`, and returns `base` (the ids of the same car in another paint) with
+    /// those replaced.
+    pub fn register_paint(
+        &self,
+        base: &CarMeshes,
+        mut add: impl FnMut(&Mesh) -> MeshId,
+    ) -> CarMeshes {
+        let mut out = *base;
+        for (ids, l) in out.lods.iter_mut().zip(&self.lods) {
+            let down = add(&l.body[0]);
+            let up = if l.body[1] == l.body[0] {
+                down
+            } else {
+                add(&l.body[1])
+            };
+            ids.body = [down, up];
+            ids.shell_inside = add(&l.shell_inside);
+        }
+        out
+    }
 }
 
 /// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
-/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps off and four wheels), its origin on the ground
-/// midway between the axles, nose toward `-z`.
+/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps and four wheels), its origin
+/// on the ground midway between the axles, nose toward `-z`. The lamps are built lit (head
+/// lamps as the shape has them, tail lamps at [`TAIL_GLOW`]): an instance's `glow` switches
+/// them, 0 for a parked car, the lamp glow for an NPC car driving with its lights on.
 pub fn parked_mesh(
     shape: &ShapeSpec,
     paint: usize,
     era: Option<&'static str>,
     lod: u8,
 ) -> Result<Mesh, String> {
+    parked_mesh_and_lamps(shape, paint, era, lod).map(|(m, _)| m)
+}
+
+/// The head lamps' centers of `shape`'s [`parked_mesh`], left and right, in its frame.
+pub fn parked_headlamps(shape: &ShapeSpec) -> Result<[Vec3; 2], String> {
+    parked_mesh_and_lamps(shape, 0, None, 2).map(|(_, h)| h)
+}
+
+/// [`parked_mesh`] and its head lamps' centers, left and right, in the mesh's frame.
+fn parked_mesh_and_lamps(
+    shape: &ShapeSpec,
+    paint: usize,
+    era: Option<&'static str>,
+    lod: u8,
+) -> Result<(Mesh, [Vec3; 2]), String> {
     let car = shape::build_with(
         shape,
         &BuildOptions {
@@ -498,9 +547,10 @@ pub fn parked_mesh(
         out.indices.extend(m.indices.iter().map(|i| i + base));
     };
     add(&convert(&car.glass, offset, Surface::Glass));
+    let heads = lamp_centers(&car.lights, LampGroup::Head).map(|p| p + offset);
     let mut lamps = convert(&car.lights, offset, Surface::Plain);
     for v in &mut lamps.vertices {
-        if let Some(s) = lamp_scale(lamp_group(v.emissive), false, false) {
+        if let Some(s) = lamp_scale(lamp_group(v.emissive), true, false) {
             let e = v.emissive;
             v.emissive = render::emissive([e[0], e[1], e[2]], s);
         }
@@ -524,7 +574,7 @@ pub fn parked_mesh(
         }
         add(&w);
     }
-    Ok(out)
+    Ok((out, heads))
 }
 
 /// How a shape mesh's uvs map into the atlas.
@@ -595,6 +645,11 @@ fn uv_bounds(m: &MeshData, pick: impl Fn(usize) -> bool) -> ([f32; 2], [f32; 2])
         }
     }
     (lo, hi)
+}
+
+/// `m` as a render mesh in the white tile, as built (a pedestrian figure's part).
+pub(crate) fn plain_mesh(m: &MeshData) -> Mesh {
+    convert(m, Vec3::ZERO, Surface::Plain)
 }
 
 /// `m` as a render mesh, every position moved by `offset`.
@@ -810,12 +865,12 @@ mod tests {
 
     #[test]
     fn pop_ups_and_lamps_follow_the_switches() {
-        let (_, corsair) = model("corsair_gtx");
-        let (_, wagon) = model("palisade_wagon");
+        let (_, gannet) = model("gannet_gt");
+        let (_, wagon) = model("homestead_wagon");
         // Pop-ups: the raised variant is a different body; fixed lamps share one.
-        assert_ne!(corsair.lods[0].body[0], corsair.lods[0].body[1]);
+        assert_ne!(gannet.lods[0].body[0], gannet.lods[0].body[1]);
         assert_eq!(wagon.lods[0].body[0], wagon.lods[0].body[1]);
-        for m in [&corsair, &wagon] {
+        for m in [&gannet, &wagon] {
             let lights = &m.lods[0].lights;
             let peak = |mesh: &Mesh, g: LampGroup| {
                 mesh.vertices
@@ -873,7 +928,7 @@ mod tests {
             let (u, v) = (uv[0] as f32 / 65535.0, uv[1] as f32 / 65535.0);
             u >= u0 - 1e-4 && u <= u1 + 1e-4 && v >= v0 - 1e-4 && v <= v1 + 1e-4
         };
-        let (_, wagon) = model("palisade_wagon");
+        let (_, wagon) = model("homestead_wagon");
         let lod = &wagon.lods[0];
         assert!(lod
             .glass
@@ -958,7 +1013,7 @@ mod tests {
 
     #[test]
     fn open_tops_see_much_more_sky_from_the_seat() {
-        let (_, wagon) = model("palisade_wagon");
+        let (_, wagon) = model("homestead_wagon");
         let hard = sky_share(&wagon);
         for id in ["seabreeze_convertible", "regent_coupe_cabrio"] {
             let (_, m) = model(id);
@@ -975,7 +1030,7 @@ mod tests {
 
     #[test]
     fn left_steer_turns_the_wheel_counter_clockwise() {
-        let (spec, m) = model("corsair_gtx");
+        let (spec, m) = model("gannet_gt");
         let l = &m.layout;
         // The 12 o'clock point of the rim (up, square to the axis).
         let up = (Vec3::Y - l.wheel_axis * l.wheel_axis.y).normalize();
@@ -994,7 +1049,7 @@ mod tests {
 
     #[test]
     fn needles_read_speed_and_rpm() {
-        let (_, m) = model("corsair_gtx");
+        let (_, m) = model("gannet_gt");
         let [speedo, tach, _] = m.layout.dials;
         assert_eq!(speedo.reading, DialReading::Speed(0.0, 160.0, MPH_PER_MPS));
         assert_eq!(tach.reading, DialReading::Rpm(0.0, 8000.0));
@@ -1025,7 +1080,7 @@ mod tests {
 
     #[test]
     fn registering_shares_identical_meshes() {
-        let (_, wagon) = model("palisade_wagon");
+        let (_, wagon) = model("homestead_wagon");
         let mut n = 0;
         let ids = wagon.register(|_| {
             n += 1;
@@ -1035,9 +1090,9 @@ mod tests {
         // wheel, 4 lamp states; then 3 needles and the ticks.
         assert_eq!(n, 2 * 10 + 4);
         assert_eq!(ids.lods[0].body[0], ids.lods[0].body[1]);
-        let (_, corsair) = model("corsair_gtx");
+        let (_, gannet) = model("gannet_gt");
         let mut n = 0;
-        let ids = corsair.register(|_| {
+        let ids = gannet.register(|_| {
             n += 1;
             MeshId(n - 1)
         });

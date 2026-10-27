@@ -1,7 +1,8 @@
-// Forward pass: the analytic sky, then Lambert-lit, atlas-textured meshes with cascaded sun
+// Forward pass: Lambert-lit, atlas-textured meshes with cascaded sun
 // shadows, hemisphere sky ambient (plus cabin light for a car's interior), the point and
 // spot lights of each instance's light set (up to 8 of the frame's 256), the emissive
-// channel (soft-capped after exposure) and aerial-perspective fog.
+// channel (soft-capped after exposure) and aerial-perspective fog, then the analytic sky
+// behind them.
 //
 // Each fragment stage has two entry points: `fs_*` writes HDR radiance (Rgba16Float target,
 // tonemapped later) and `fs_*_ldr` tonemaps in place for targets without float rendering.
@@ -22,7 +23,8 @@ struct SkyOut {
 fn vs_sky(@builtin(vertex_index) index: u32) -> SkyOut {
     let p = fullscreen_corner(index);
     var out: SkyOut;
-    out.clip = vec4<f32>(p, 0.0, 1.0);
+    // At the far plane: drawn after the meshes, it passes the depth test only where none is.
+    out.clip = vec4<f32>(p, 1.0, 1.0);
     out.ndc = p;
     return out;
 }
@@ -131,7 +133,8 @@ fn fs_sky_ldr(in: SkyOut) -> @location(0) vec4<f32> {
 // ---- Meshes ---------------------------------------------------------------------------
 
 struct MeshOut {
-    @builtin(position) clip: vec4<f32>,
+    // Invariant, as in `vs_depth`: the pre-pass and this pass write the same depth.
+    @invariant @builtin(position) clip: vec4<f32>,
     @location(0) world_pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
@@ -140,9 +143,24 @@ struct MeshOut {
     @location(4) emissive: vec3<f32>,
     // Share of the frame's cabin light.
     @location(5) cabin: f32,
-    // x: lights in the instance's set, y, z: their indices, a byte each.
+    // x: lights in the instance's set (+256: no sun shadow), y, z: their indices, a byte
+    // each.
     @location(6) @interpolate(flat) lights: vec3<u32>,
 };
+
+// Depth pre-pass: depth only, with `vs_mesh`'s position math, so the forward pass's
+// less-or-equal test passes only for the nearest surface and each pixel shades once.
+@vertex
+fn vs_depth(v: VertexIn, i: InstanceIn) -> @invariant @builtin(position) vec4<f32> {
+    let world = instance_model(i) * vec4<f32>(v.pos, 1.0);
+    return frame.view_proj * world;
+}
+
+// Writes nothing (its target's write mask is empty); the pass needs a fragment stage.
+@fragment
+fn fs_depth() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0);
+}
 
 // Soft cap on emissive radiance in post-exposure terms: unchanged well under the cap,
 // approaching it far over (a fourth-power knee), hue kept.
@@ -172,7 +190,7 @@ fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
     let glow = bitcast<f32>(i.params.x);
     out.emissive = cap_emissive(v.emissive.rgb * (scale * window * frame.emissive.x * glow));
     out.cabin = f32(i.params.y & 0xffffu) * (1.0 / 65535.0);
-    out.lights = vec3<u32>(min(i.params.y >> 16u, LIGHTS_PER_DRAW), i.params.z, i.params.w);
+    out.lights = vec3<u32>(min((i.params.y >> 16u) & 255u, LIGHTS_PER_DRAW) | ((i.params.y >> 16u) & 256u), i.params.z, i.params.w);
     return out;
 }
 
@@ -238,7 +256,7 @@ fn spot_cos(d: vec3<f32>, axis: vec3<f32>, squash: f32) -> f32 {
 // light's cone covers every direction.
 fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec3<u32>) -> vec3<f32> {
     var sum = vec3<f32>(0.0);
-    for (var k = 0u; k < light_set.x; k++) {
+    for (var k = 0u; k < (light_set.x & 255u); k++) {
         let word = select(light_set.z, light_set.y, k < 4u);
         let index = min((word >> ((k & 3u) * 8u)) & 255u, MAX_LIGHTS - 1u);
         let packed = frame.lights[index];
@@ -323,8 +341,9 @@ fn shade(in: MeshOut) -> vec3<f32> {
     let albedo = in.color.rgb * texel.rgb;
     let n = normalize(in.normal);
     let ndl = max(dot(n, frame.sun_dir.xyz), 0.0);
-    var vis = 0.0;
-    if ndl > 0.0 {
+    // 1: unshadowed (it only ever scales ndl); bit 8 of the light count skips the test.
+    var vis = 1.0;
+    if ndl > 0.0 && (in.lights.x & 256u) == 0u {
         vis = sun_visibility(in.world_pos, n, ndl);
     }
     // Hemisphere ambient from the sky model: mean sky radiance above, lit ground below. A car's

@@ -10,6 +10,10 @@
 //!   procedural `california_coast` place for the seed).
 //! - `car=<id>`: built-in vehicle id (default: the vehicle setting, the car last picked,
 //!   else [`DEFAULT_VEHICLE`]).
+//! - `paint=<n>`: the car's palette entry, counting from 0 (default: 0 with `car=`, else the
+//!   paint saved with the vehicle setting). With `car=`, past the end of its palette is an
+//!   error; without, it paints the car the game starts in (the saved one, else the default),
+//!   its first paint when that car has fewer. Not saved.
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
 //!   which starts at `chase-mid` and remembers the last one picked).
 //! - `t=HH:MM`: time of day; when given the clock is frozen there (default 17:40, running).
@@ -25,6 +29,11 @@
 //! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
 //! - `stream=0`: build the whole place at load instead of streaming it round the camera
 //!   (`stream=1`, the default; see `app::stream`). The screenshot goldens use it.
+//! - `traffic=off|low|normal|busy`: NPC traffic and pedestrian density for this session,
+//!   over the saved setting (default: the setting, but `off` in a `still=1` scene, so the
+//!   screenshot goldens draw no traffic unless they ask). Traffic runs a while before the
+//!   first frame (`app::npc::WARMUP_S`, people longer), so even a still scene has cars on
+//!   the streets and people on the walks.
 
 use crate::camera::CameraMode;
 use crate::drive::DEFAULT_VEHICLE;
@@ -57,6 +66,8 @@ pub struct SceneSetup {
     pub car: String,
     /// The scene named the car (`car=`): the saved vehicle setting does not replace it.
     pub car_given: bool,
+    /// The car's palette entry, if the scene gave one.
+    pub paint: Option<usize>,
     /// The camera, or `None` for the player's camera setting.
     pub camera: Option<CameraMode>,
     /// Seconds of day the clock is frozen at, or `None` for the default running clock.
@@ -76,6 +87,8 @@ pub struct SceneSetup {
     pub ui_scale: Option<f32>,
     /// Stream the place round the camera (else build it all at load).
     pub stream: bool,
+    /// Traffic density over the setting, or `None` for the setting.
+    pub traffic: Option<traffic::Density>,
 }
 
 impl Default for SceneSetup {
@@ -85,6 +98,7 @@ impl Default for SceneSetup {
             place: PlaceKey::TestTown,
             car: DEFAULT_VEHICLE.to_string(),
             car_given: false,
+            paint: None,
             camera: None,
             time_s: None,
             pos: None,
@@ -95,6 +109,7 @@ impl Default for SceneSetup {
             map: false,
             ui_scale: None,
             stream: true,
+            traffic: None,
         }
     }
 }
@@ -113,10 +128,16 @@ impl SceneSetup {
         Ok(setup)
     }
 
+    /// The traffic density the scene asks for: its `traffic=`, else off in a still scene,
+    /// else `None` (the setting).
+    pub fn traffic_density(&self) -> Option<traffic::Density> {
+        self.traffic.or(self.still.then_some(traffic::Density::Off))
+    }
+
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 13] = [
-        "seed", "place", "car", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map", "ui",
-        "stream",
+    pub const KEYS: [&'static str; 15] = [
+        "seed", "place", "car", "paint", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map",
+        "ui", "stream", "traffic",
     ];
 
     /// Sets one key (see the module docs).
@@ -126,9 +147,10 @@ impl SceneSetup {
             "seed" => self.seed = value.parse().map_err(|_| bad())?,
             "place" => self.place = PlaceKey::from_name(value).ok_or_else(bad)?,
             "car" => {
-                self.car = value.to_string();
+                self.car = crate::vehicles::current_id(value).to_string();
                 self.car_given = true;
             }
+            "paint" => self.paint = Some(value.parse().map_err(|_| bad())?),
             "cam" => self.camera = Some(CameraMode::from_name(value).ok_or_else(bad)?),
             "t" => self.time_s = Some(parse_clock(value).ok_or_else(bad)?),
             "pos" => {
@@ -152,6 +174,7 @@ impl SceneSetup {
             "still" => self.still = parse_switch(value).ok_or_else(bad)?,
             "map" => self.map = parse_switch(value).ok_or_else(bad)?,
             "stream" => self.stream = parse_switch(value).ok_or_else(bad)?,
+            "traffic" => self.traffic = Some(crate::npc::density_from_name(value).ok_or_else(bad)?),
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;
                 if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {
@@ -197,16 +220,22 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&place=coast&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0",
+            "?seed=7&place=coast&car=homestead_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
         )
         .unwrap();
         assert!(s.map && !s.stream);
+        assert_eq!(s.traffic, Some(traffic::Density::Busy));
+        assert_eq!(s.traffic_density(), Some(traffic::Density::Busy));
+        assert_eq!(SceneSetup::default().traffic_density(), None, "the setting");
+        let still = SceneSetup::from_query("still=1").unwrap();
+        assert_eq!(still.traffic_density(), Some(traffic::Density::Off));
         assert!(SceneSetup::default().stream, "streamed by default");
         assert_eq!(s.ui_scale, Some(1.5));
         assert_eq!(s.seed, 7);
         assert_eq!(s.place, PlaceKey::Coast);
-        assert_eq!(s.car, "palisade_wagon");
+        assert_eq!(s.car, "homestead_wagon");
         assert!(s.car_given && !SceneSetup::default().car_given);
+        assert_eq!((s.paint, SceneSetup::default().paint), (Some(2), None));
         assert_eq!(s.camera, Some(CameraMode::Cockpit));
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
         assert_eq!(s.pos, Some([-200.5, 97.0]));
@@ -218,12 +247,17 @@ mod tests {
         let start = crate::drive::START_HEADING_RAD;
         assert!((east.heading_rad.unwrap() - start).abs() < 1e-6);
         assert_eq!(SceneSetup::default().place, PlaceKey::TestTown);
+        // An old URL's renamed car is the new one.
+        let s = SceneSetup::from_query("?car=palisade_wagon").unwrap();
+        assert_eq!(s.car, "homestead_wagon");
     }
 
     #[test]
     fn rejects_bad_values() {
         for q in [
             "seed=x",
+            "paint=-1",
+            "paint=red",
             "cam=drone",
             "t=24:00",
             "t=7:30",
@@ -238,6 +272,7 @@ mod tests {
             "ui=3",
             "ui=big",
             "stream=2",
+            "traffic=jam",
             "place=moon",
         ] {
             assert!(SceneSetup::from_query(q).is_err(), "{q}");

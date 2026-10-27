@@ -11,7 +11,7 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 **Gate:** docs approved; placeholder scene loads from the Pages URL in your browser.
 
 ## M1 — Drive
-- `vehicle`: raycast-car sim per `docs/VEHICLES.md` with two specs (`corsair_gtx`, `palisade_wagon`), assists, auto gearbox.
+- `vehicle`: raycast-car sim per `docs/VEHICLES.md` with two specs (`gannet_gt`, `homestead_wagon`), assists, auto gearbox.
 - `vehicle::shape`: parametric body + interior for those two, `tools/shape-preview`.
 - `place::test_grid` → a hand-laid flat test town with curbs, sidewalks, crosswalks, lamp posts, trees, facade geometry on buildings, parked-car placeholders; collision.
 - `render`: CSM shadows, analytic sky, fog, bloom, tonemap, cockpit + chase cameras, HUD speed/gear.
@@ -46,6 +46,12 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 ## M6 — Place compiler v1
 - `tools/placec`: bbox + era → Place skeleton from public-domain sources (TIGER roads, USGS 3DEP elevation, FEMA/city footprints; `docs/adr/0005-reference-sources.md`); style heuristics; era backfill; provenance header. First target: a real California beach town, compared side-by-side with the procedural one.
 **Gate:** does the real place beat the generated one? What does the generator need to learn from it?
+
+## M8 — Basin City, 2001 (the second world)
+Scenario switching (World page, `?scenario=`, era filter by car year); region template `socal_basin`
+with the 2001 grammar and palette; the hero and traffic cars of 2001; the set pieces; the 2001 radio
+preset. Backlog: `docs/backlog/LA2001.md`. Gate: the owner drives the night race boulevard, the
+channel and the tunnel and it feels like the era.
 
 ## M7+ — Breadth (each its own gate)
 Scenarios `chicago_1977` and `north_shore_suburb_1986` (templates `great_lakes_city`, `north_shore_suburb`, rosters, presets); eras 90s/00s/10s/20s; more regions, then `tokyo_ward`; Steam build; cel/dither/CRT styles; destinations with directions; getting out of the car; YouTube source (web); mobile shells; photo-derived palettes for the compiler; threads for streaming.
@@ -90,8 +96,8 @@ Every constant below lives next to its rationale in the code.
 **Gauges** (`vehicle::shape::interior`, shape RON). The cluster face sat inside the dash
 below its top surface, so the dash hid the lower half of the dials, and the wheel rim covered
 the rest. That was not fixable from the RON alone, so one line in `interior.rs` moves the face
-behind the dash lip (`dash_x + 0.025`, was `- 0.10`). The wheels sit lower (corsair
-`wheel_pos.y` 0.64 → 0.59, palisade 0.80 → 0.74), so the rim passes under the sight line.
+behind the dash lip (`dash_x + 0.025`, was `- 0.10`). The wheels sit lower (gannet
+`wheel_pos.y` 0.64 → 0.59, homestead 0.80 → 0.74), so the rim passes under the sight line.
 
 **Cameras** (`app::camera`). Vertical FOV: cockpit 75° → 58°, hood 70° → 55°, chase 65° → 50°.
 Chase distance/height near 4.2/1.5 → 5.0/1.65 m, mid 6.0/2.1 → 7.0/2.3, far 9.0/2.9 →
@@ -104,30 +110,30 @@ camera sits 2.4° off the car's heading, against 6.1° without the lead (≈ 11�
 axle's direction of travel plus stick × the tire's peak slip angle, within the old
 speed-sensitive lock. In a steady turn that is `atan(a·L/v²) + α_peak` with the car's real
 lateral acceleration, and in a slide it counter-steers. A fixed `atan(1.25 g·L/v²) + margin`
-version was tried first: it spun the corsair under full throttle at full lock, because fronts
+version was tried first: it spun the gannet under full throttle at full lock, because fronts
 that grip expose its light rear. Reverse is capped at 8 m/s (was ~20).
 
 | Test number | Before | After |
 |---|---|---|
-| Full-stick target at 30 m/s, corsair / palisade | 22.4° / 22.5° | 7.0° / 9.5° (straight) |
-| Full stick from 25 m/s, corsair: lateral g, front slip ÷ peak | 0.76 g, 3.8 | 1.15 g, 1.0 |
-| Full stick from 25 m/s, palisade | 0.54 g, 2.8 | 0.81 g, 1.0 |
-| Full throttle + full lock on grass (μ 0.6), corsair from 14 m/s | spins | holds, 0.55 g |
-| Reverse top speed, corsair / palisade | ~20 m/s | 7.96 / 7.91 m/s |
-| 0–60 mph, corsair / palisade (bands 5–8, 10–16 s) | 5.83 / 12.67 s | unchanged |
+| Full-stick target at 30 m/s, gannet / homestead | 22.4° / 22.5° | 7.0° / 9.5° (straight) |
+| Full stick from 25 m/s, gannet: lateral g, front slip ÷ peak | 0.76 g, 3.8 | 1.15 g, 1.0 |
+| Full stick from 25 m/s, homestead | 0.54 g, 2.8 | 0.81 g, 1.0 |
+| Full throttle + full lock on grass (μ 0.6), gannet from 14 m/s | spins | holds, 0.55 g |
+| Reverse top speed, gannet / homestead | ~20 m/s | 7.96 / 7.91 m/s |
+| 0–60 mph, gannet / homestead (bands 5–8, 10–16 s) | 5.83 / 12.67 s | unchanged |
 | Top speed | 69.6 / 49.3 m/s | unchanged |
-| Skidpad (assists off; corsair > palisade) | 1.075 / 0.764 g | unchanged |
+| Skidpad (assists off; gannet > homestead) | 1.075 / 0.764 g | unchanged |
 | Full lock at 30 mph, assists light, peak g | 1.06 / 0.86 g | 1.16 / 0.83 g, no roll |
 
 Pinned hashes moved deliberately in their own commit: vehicle replay, world curb drive
-(corsair), app scripted drive, shape mesh hashes, `selftest.json`.
+(gannet), app scripted drive, shape mesh hashes, `selftest.json`.
 
 **For the human at the feel gate**
 - Steering at speed: does full stick at 25–30 m/s turn hard enough and feel planted, or too
   "on rails"? Does the counter-steer in slides feel helpful or like the car steers itself? Try
   assists off (the old speed-sensitive lock) for comparison. Keyboard players hold full lock,
   and that case is now grip-limited.
-- The corsair still power-slides with full throttle mid-corner (rear slip ~4–6× peak, caught).
+- The gannet still power-slides with full throttle mid-corner (rear slip ~4–6× peak, caught).
   Is that fun or too loose? The knobs are `STEER_LIMIT_MARGIN` and the stability assist.
 - Camera lag: is the chase camera (6.5 rad/s, 8° lead) too stiff, or the lead too much on
   quick left-right flicks? Is the 50° chase FOV too tight at speed?
@@ -152,14 +158,14 @@ lets go while the handbrake is held; the steering assist then helps yaw toward
 `steer × 1.6 rad/s` (`HANDBRAKE_YAW_*`), so the handbrake pivots the car. Engine braking is a
 drag at the driven wheels through any gear, 0.13 g of the car's weight at idle rpm to 0.22 g
 at the redline (was 0.3 × peak torque at the redline, at the crank). Steering `return_rate`
-corsair 9 → 12, palisade 3.5 → 5; keyboard steer ramp 150 → 120 ms out (300 ms back as
+gannet 9 → 12, homestead 3.5 → 5; keyboard steer ramp 150 → 120 ms out (300 ms back as
 before). `brakes.max_nm` is unchanged: the brake boost and engine braking already put the
 arcade stops under the ~38 m / ~45 m targets, and 3500 / 4200 N·m was tried and gave 34.7 m /
 41.7 m.
 
 | Test number (default assists unless named) | Before (light default) | After (arcade default) |
 |---|---|---|
-| 60–0 mph, corsair / palisade | 47.6 / 56.4 m | 36.2 / 43.3 m (asserted ≤ 38.5 / 45.5) |
+| 60–0 mph, gannet / homestead | 47.6 / 56.4 m | 36.2 / 43.3 m (asserted ≤ 38.5 / 45.5) |
 | 60–0 mph with light assists | 47.6 / 56.4 m | 45.3 / 55.2 m (asserted ≤ before) |
 | 60–0 mph assists off, ABS / none | 47.6 / 56.4, 47.6 / 58.2 m | 45.3 / 55.2, 48.9 / 58.1 m |
 | Lift-off at 25 m/s, mean decel over 2 s | 0.065 / 0.043 g | 0.160 / 0.141 g |
@@ -175,8 +181,8 @@ arcade stops under the ~38 m / ~45 m targets, and 3500 / 4200 N·m was tried and
 chase (50°) FOVs are separate and unchanged. The eye sits 5 cm higher and 3 cm further forward
 than the shape's seat (`cockpit_eye_up_m`, `cockpit_eye_forward_m`). A ray test against the
 cabin meshes (`the_road_shows_from_six_metres_ahead_in_the_cockpit`) measures where the road
-first shows across the lane ahead of the eye: corsair more than 22 m → 6.45 m (3 cm up and
-forward gave only 9.5 m, so the eye went up 5); palisade 20.9 m → 10.9 m, held there by its long
+first shows across the lane ahead of the eye: gannet more than 22 m → 6.45 m (3 cm up and
+forward gave only 9.5 m, so the eye went up 5); homestead 20.9 m → 10.9 m, held there by its long
 flat hood (hood only: 10.0 m). New Camera page, all saved: Camera (the selected camera, also
 updated and saved whenever the camera is cycled; the game starts in it, a scene's `cam=` still
 wins), Cockpit FOV 50–80°, Seat height −5…+10 cm, Seat forward −10…+10 cm, Dashboard (full
@@ -189,7 +195,71 @@ scripted drive, `selftest.json`; the cockpit screenshot goldens were regenerated
 **For the human at the next play**
 - Is Arcade now tight enough, or too grippy ("on rails")? Light is the old default for
   comparison. Knobs: `Assists::ARCADE`, `SLIDE_GAIN`.
-- Brakes: do ~36 m stops (corsair) feel firm without being abrupt? Lifting off now slows at
+- Brakes: do ~36 m stops (gannet) feel firm without being abrupt? Lifting off now slows at
   ~0.15 g: does coasting feel natural or draggy? Knob: `ENGINE_BRAKE_G`.
 - Handbrake: does a flick with the stick pivot the car the way you expect?
 - Cockpit: is the default 62° / +5 cm right on your screen, and does the hood-only view help?
+
+### M4 status (2026-10-27, autonomous run)
+Traffic is in the game; pedestrians are simulated but not yet drawn. On `main`: the full
+twelve-car 1980s roster with distinct feel (0–60, top speed and skidpad ordering tests) and the
+vehicle select screen (pause menu, Vehicle page: turntable preview, specs, paints); the
+lane graph with junction turn tables, stop lines and signal timers; NPC cars (car following,
+claims at junctions, lane changes to pass, spawning out of view, headlights at dusk) drawn as
+instances of the parked-car meshes, lit by their own low beams at night and heard as they pass;
+**Settings › World › Traffic: Off / Low / Normal / Busy** (saved, Normal by default); the
+pedestrian figure (13 parts, walk cycle, step aside, hop, sit) and pedestrian behaviour on a
+sidewalk graph (crossings on the walk phase, groups at spots, getting out of the car's way),
+both simulation-only. **Waiting on the human gate**: play the web build on the coast with
+traffic on (Busy shows the most), day and night, and drive through a few junctions.
+
+**Gate tests** (`crates/app/src/npc/gate.rs`, `cargo test -p app --lib gate -- --nocapture`).
+The player's car is driven by input through the app, so the traffic sees it as in the game; the
+pedestrian scenarios step a `traffic::Pedestrians` beside the app, fed the app's own player and
+camera (people are not in the app yet). Coast, seed 1, noon, busy:
+
+| Scenario | Result |
+|---|---|
+| 60 mph through a signalized four-way against the light (a straight two-lane arterial on the north side; the line reached 4–9 s into the red, the cross traffic on its green) | at 26.0 m/s on the line; 3 NPC cars (already turning) within 15 m in the junction, none overlapping the player's footprint at any step (least centre gap less both half lengths 2.9 m); the cross queue's head car held 3.5 s on its green at the line until the player had cleared, then went (asserted) |
+| Stopped on a downtown crosswalk for a minute (the crossing people use most), people crossing round it | 0 person-steps inside the car, 6 people within 5 m, 0 NPC car overlaps over 85 s |
+| Nosed at 1.5 m/s into the people on a downtown corner during the walk phase, until the curb and the signal pole stop it | 0 person-steps inside; 3 people within 5 m, 1 stepped aside, 1 hopped |
+| Reversing into a queue at a red (the car behind 7.3 m back) | **fails, test ignored**: 915 car-steps overlapping from 1.6 s in. The player's car does not collide with NPC cars and a stopped queue has nowhere to go, so the player backs into it |
+| Density bands, 120 s each at the start, downtown and on the arterial, player still | Low 10–24 (band 9–24), Normal 33–48 (30–48), Busy 78–96 (72–96) cars of 96; Off drops every car and never steps the sim (not one timed step in 120 s, state unchanged) |
+
+What it found beyond the table: the walks are too narrow for the car (walls, posts, parked
+cars stop it within a few metres), so in the game nobody is ever in its way off the road, and
+step-aside and hop fire only at a corner or a curb. Traffic round the player is thin even at
+Busy (a car stood 100 s at a downtown stop line and nobody queued behind it): the pool is
+spread 150–360 m round the player, spawning only out of view.
+
+**Measured** (this container, debug build unless noted; `docs/PERFORMANCE.md` for the rest):
+
+| Number | Value |
+|---|---|
+| Traffic step and populate, busy coast (92 cars live) | median 0.173 ms, p99 0.243 ms a step (debug); 0.035 / 0.084 ms (release); Off: none |
+| Junction of `coast-traffic-noon`, busy vs off, Deck | draws 273 → 281, forward tris 394k → 408k, shadow tris 614k → 671k (4 cars in the forward pass) |
+| The same, Medium | draws 396 → 414, forward 394k → 408k, shadow 1109k → 1201k |
+| The start on the strip, busy vs off, High / Deck | draws 1183 → 1201 / 477 → 480 (77 cars live, 1 in view) |
+| Car meshes, parked plus NPC (coast) | 21.5 MB, 144 meshes; the traffic adds none on the coast (budget 27 MB) |
+| Lane graph, sidewalk graph (coast) | 0.36 MB, 1.05 MB |
+| Car and pedestrian pools | 96 × 112 B; 256 × 128 B, allocated once, nothing per frame |
+
+New golden scenes: `coast-traffic-night` (busy, 22:30, the strip junction, headlights on) and
+`coast-traffic-dusk-chase` (busy, 18:30, the highway inland, chase camera).
+
+**Deferred** (known, not in this milestone's build): pedestrians are not drawn in the game
+(figure instancing is next); NPC cars do not see pedestrians (turning traffic at signals,
+unsignalized crossings); no player–NPC collision (the player drives through NPC cars; they never
+drive into it); NPC wheels do not turn; no brake lights; traffic sparse near the player.
+
+**For the human at the gate**
+- Does the coast feel alive but calm with traffic on? Is Normal the right default, and is Busy
+  busy enough (it rarely fills the junction in front of you)?
+- Does it matter that you can drive through an NPC car? The fix is a soft push both ways
+  (`docs/NPCS.md`: a bumper-car push, no damage); until then reversing into a queue goes
+  through it. Should it be in M5?
+- NPC cars at night: are the low beams and lamps right, and how much do brake lights and turning
+  wheels matter?
+- Pedestrians: draw them next (before M5), and should cars yield to them at crossings first?
+- Do all twelve cars feel different and era-right? Does the vehicle select screen (pause menu,
+  Vehicle page) make picking one pleasant?

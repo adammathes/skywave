@@ -212,10 +212,16 @@ pub struct ChunkPlan {
     /// below it ([`buildings::footing`]); zeros on the flat test town.
     footings: Vec<(f32, f32)>,
     fronts: Vec<usize>,
+    /// The test town's strip-mall stall width (`LotRules::stall_w`).
+    stall_w: f32,
     /// Every prop meshed into the chunks, in build order: on the test town the lots'
     /// parked cars, the house sites', the streets'; on a terrain place its `Props` table
     /// but for the kinds the app instances ([`props::instanced`]).
     props: Vec<props::Prop>,
+    /// Per prop, the shop sign a blade sign is lettered with (`None` for every other kind).
+    shop_signs: Vec<Option<signs::lexicon::ShopSign>>,
+    /// The words the shop signs are lettered from.
+    lexicon: signs::lexicon::Lexicon,
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
     chunk_range: [[i32; 2]; 2],
@@ -243,7 +249,8 @@ impl ChunkPlan {
             .map(|(i, b)| {
                 let env = lookup.facade_envs(i);
                 let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-                let mut plan = buildings::plan_building(b, &env, door_pick, grammar);
+                let zone = building_zone(place, b);
+                let mut plan = buildings::plan_building(b, zone, &env, door_pick, grammar);
                 if terrain_place {
                     plan.signage = Some(buildings::signage(seed, i as u32, &grammar.signs));
                 }
@@ -251,6 +258,7 @@ impl ChunkPlan {
             })
             .collect();
         let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
+        let stall_w = grammar.lots.stall_w;
         let centroids = place
             .buildings
             .iter()
@@ -279,7 +287,7 @@ impl ChunkPlan {
         // scratch mesh), then the streets' and the parks'.
         let mut none = MeshSet::new(place.header.chunk_size_m, Keep::Nothing);
         let mut props = if terrain.is_none() {
-            ground::build(place, &blocks, &fronts, palette, seed, &mut none)
+            ground::build(place, &blocks, &fronts, palette, stall_w, seed, &mut none)
         } else {
             place
                 .props
@@ -315,6 +323,18 @@ impl ChunkPlan {
             props.extend(props::place(place, &net, &side_zone, &parks, seed));
         }
 
+        // Every blade sign a shop sign of the grammar's, no name repeated nearby.
+        let blades: Vec<usize> = (0..props.len())
+            .filter(|&i| matches!(props[i].kind, props::PropKind::NeonSign { .. }))
+            .collect();
+        let at: Vec<V2> = blades.iter().map(|&i| props[i].pos).collect();
+        let drawn =
+            signs::lexicon::assign(&grammar.signs, &grammar.lexicon, grammar.era, seed, &at);
+        let mut shop_signs = alloc::vec![None; props.len()];
+        for (&i, s) in blades.iter().zip(drawn) {
+            shop_signs[i] = Some(s);
+        }
+
         // The place's chunks and the terrain apron's.
         let o = place.header.chunk_origin;
         let n = place.header.size_chunks;
@@ -345,7 +365,10 @@ impl ChunkPlan {
             centroids,
             footings,
             fronts,
+            stall_w,
             props,
+            shop_signs,
+            lexicon: grammar.lexicon.clone(),
             kit: props::PropKit::new(),
             chunk_range: [lo, hi],
         }
@@ -448,7 +471,8 @@ impl ChunkPlan {
             Stage::Ground => match &self.terrain {
                 // Its parked cars are in `props` already.
                 None => {
-                    ground::build(place, &self.blocks, &self.fronts, palette, seed, out);
+                    let (blocks, fronts) = (&self.blocks, &self.fronts);
+                    ground::build(place, blocks, fronts, palette, self.stall_w, seed, out);
                 }
                 Some((g, colors)) => mesh::terrain::build(place, g, colors, palette, seed, out),
             },
@@ -500,7 +524,11 @@ impl ChunkPlan {
             Stage::Props => {
                 for (i, p) in self.props.iter().enumerate().skip(from) {
                     if out.wants(p.pos) {
-                        props::build(out.at(p.pos, MeshKind::Prop), p, palette, &self.kit);
+                        let m = out.at(p.pos, MeshKind::Prop);
+                        match &self.shop_signs[i] {
+                            Some(s) => props::shop_sign(m, p, palette, s, &self.lexicon),
+                            None => props::build(m, p, palette, &self.kit),
+                        }
                         if out.kept_vertices() >= max_vertices {
                             return Some(i + 1);
                         }
@@ -558,6 +586,32 @@ pub fn build_with_stats(
         stats.triangles_by_kind[c.kind as usize] += t;
     }
     (meshes, stats)
+}
+
+/// The zone under ground point `p` of `place` (`Water` off the map).
+pub fn zone_at(place: &Place, p: V2) -> ZoneId {
+    let h = &place.header;
+    let res = usize::from(place.terrain.res_per_chunk.max(1));
+    let [w, d] = place::Zones::cells_per_side(h, place.terrain.res_per_chunk);
+    let cell = h.chunk_size_m / res as f32;
+    let o = h.origin_m();
+    let (x, z) = ((p.x - o[0]) / cell, (p.y - o[1]) / cell);
+    if x < 0.0 || z < 0.0 || w == 0 || d == 0 {
+        return ZoneId::Water;
+    }
+    let (x, z) = ((x as usize).min(w - 1), (z as usize).min(d - 1));
+    place
+        .zones
+        .cells
+        .get(z * w + x)
+        .copied()
+        .unwrap_or(ZoneId::Water)
+}
+
+/// The zone a building's grammar rules are chosen by: the one under its footprint's
+/// centroid.
+pub fn building_zone(place: &Place, b: &place::Building) -> ZoneId {
+    zone_at(place, ground::centroid(&ground::to_v2(&b.footprint)))
 }
 
 /// Whether `place` stands on its own heightfield (a procedural or compiled place) rather
@@ -817,7 +871,7 @@ mod tests {
         // Pinned fingerprint: change deliberately, in its own commit, with the reason.
         assert_eq!(
             mesh_hash(&meshes),
-            0xF908_E7B3_4AA8_73B6,
+            0xB9CA_5ED1_40B9_D278,
             "{:#018X}",
             mesh_hash(&meshes)
         );

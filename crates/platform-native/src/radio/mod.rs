@@ -93,6 +93,16 @@ impl Player {
                     self.tx.clone(),
                 );
             }
+            RadioCommand::PlayFile { token, .. } => {
+                // Natively the dial holds no file stations yet (music folders come next);
+                // fail rather than leave the radio waiting.
+                self.out.ring.cut();
+                self.token = *token;
+                self.set_title(None);
+                let _ = self
+                    .tx
+                    .send(Note::Event(PlayerEvent::Failed { token: *token }));
+            }
             RadioCommand::Stop => {
                 self.out.ring.cut();
                 self.token = 0;

@@ -1,43 +1,19 @@
-// Radio preset: 1986 North Shore. Real stations whose stream URLs the broadcasters publish for
-// listening in other players (181.FM's stream links page, Radio Paradise's stream links for
-// WiFi radios and other players, WFMU's playlists, the college stations' own listen links);
-// names are the stations' own. Nothing is rehosted. tools/check-streams.mjs played 5 s of
-// audio from every URL, as the published page asks for it, on the date in `terms_checked`;
-// `verified` turns true after the owner's first listen. Format: crates/audio/src/station.rs,
-// docs/AUDIO_RADIO.md.
+// Radio preset: 1986 North Shore. Ad-free stations only (docs/AUDIO_RADIO.md, "the ad-free rule"):
+// listener-supported, public and college broadcasters that publish their stream URLs for
+// listening in other players, each checked for pre-roll and mid-roll ads as its
+// `ad-free:` note says. Names are the stations' own. Nothing is rehosted.
+// tools/check-streams.mjs plays every URL as the published page asks for it (its Referer
+// and Origin) and warns about a station without an `ad-free:` note; `verified` turns true
+// after the owner's first listen. Format: crates/audio/src/station.rs.
 RadioPreset(
     id: "1986_north_shore",
     title: "1986 North Shore",
     scenario: "north_shore_suburb_1986",
     stations: [
-        Station(
-            id: "181fm_awesome80s",
-            name: "181.FM Awesome 80's",
-            era: "1980s",
-            format: "80s pop and rock hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-awesome80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_classicbuzz",
-            name: "181.FM Classic Buzz",
-            era: "1980s",
-            format: "classic alternative and new wave",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-classicbuzz_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // non-commercial college station (Northwestern); music both times, no
+        // spots and no ad marks on its stream host's redirect. Terms: wnur.org's own player
+        // plays this URL; nothing forbids other players.
         Station(
             id: "wnur",
             name: "WNUR 89.3 FM",
@@ -52,34 +28,62 @@ RadioPreset(
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // "a free-form non-commercial station", volunteer-run (Lake Forest
+        // College); music both times, no spots. Terms: the home page's Listen Live links
+        // this stream (http there; the same host serves it over https).
         Station(
-            id: "181fm_lite80s",
-            name: "181.FM Lite 80's",
+            id: "wmxm",
+            name: "WMXM 88.9 FM",
+            era: "mixed",
+            format: "Lake Forest college radio: indie and freeform",
+            source: Stream(
+                urls: ["https://wmxm.streamguys1.com/live"],
+                homepage: "https://wmxm.org/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // volunteer-run and donation-supported (no ads on the site or the stream);
+        // music from the first second both times, ICY titles are track credits. Terms: the
+        // channel page publishes this URL and lists outside player apps; no terms forbid it.
+        Station(
+            id: "intergalactic_cbs",
+            name: "Intergalactic FM CBS",
             era: "1980s",
-            format: "80s soft hits",
+            format: "italo, new wave and electro",
             source: Stream(
-                urls: ["https://listen.181fm.com/181-lite80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
+                urls: ["https://radio.intergalactic.fm/1A"],
+                homepage: "https://www.intergalactic.fm/channels/cybernetic-broadcasting-system",
+                codec: Aac,
                 bitrate_kbps: 128,
                 terms_checked: "2026-10-27",
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, "Always 100% commercial-free" (its icy-description); music
+        // from the first second both times. Terms: URLs published for other players.
         Station(
-            id: "181fm_eagle",
-            name: "181.FM The Eagle",
-            era: "1970s",
-            format: "classic rock",
+            id: "radioparadise_main",
+            name: "Radio Paradise Main Mix",
+            era: "mixed",
+            format: "eclectic album rock",
             source: Stream(
-                urls: ["https://listen.181fm.com/181-eagle_128k.mp3"],
-                homepage: "https://www.181.fm/links",
+                urls: ["https://stream.radioparadise.com/mp3-128"],
+                homepage: "https://radioparadise.com/listen/stream-links",
                 codec: Mp3,
                 bitrate_kbps: 128,
                 terms_checked: "2026-10-27",
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, commercial-free; music from the first second both times.
+        // Terms: URLs published for WiFi radios and other players.
         Station(
             id: "radioparadise_rock",
             name: "Radio Paradise Rock Mix",
@@ -98,14 +102,18 @@ RadioPreset(
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, no commercials; music both times. Terms: wfmu.org
+        // publishes wfmu.pls for any player (http there; the same host serves it over
+        // https).
         Station(
-            id: "radioparadise_main",
-            name: "Radio Paradise Main Mix",
+            id: "wfmu",
+            name: "WFMU 91.1 FM",
             era: "mixed",
-            format: "eclectic album rock",
+            format: "freeform: rock, soul, oddities",
             source: Stream(
-                urls: ["https://stream.radioparadise.com/mp3-128"],
-                homepage: "https://radioparadise.com/listen/stream-links",
+                urls: ["https://stream0.wfmu.org/freeform-128k"],
+                homepage: "https://wfmu.org/",
                 codec: Mp3,
                 bitrate_kbps: 128,
                 terms_checked: "2026-10-27",

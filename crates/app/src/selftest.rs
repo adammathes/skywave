@@ -28,7 +28,7 @@ pub struct SelfTest {
     pub map_image_hash: u64,
     /// [`App::state_hash`] after [`run_drive`] in the default car, seed 1.
     pub drive_hash: u64,
-    /// `VehicleState::hash` after the vehicle crate's 10 s replay (corsair, palisade).
+    /// `VehicleState::hash` after the vehicle crate's 10 s replay (gannet, homestead).
     pub replay_hashes: [u64; 2],
 }
 
@@ -44,7 +44,7 @@ impl SelfTest {
             town_mesh_hash: world::mesh_hash(&meshes),
             map_image_hash: MapImage::rasterize(&place).hash(),
             drive_hash: app.state_hash(),
-            replay_hashes: [replay("corsair_gtx"), replay("palisade_wagon")],
+            replay_hashes: [replay("gannet_gt"), replay("homestead_wagon")],
         }
     }
 
@@ -57,8 +57,8 @@ impl SelfTest {
         m.insert("town_mesh_hash".into(), hex(self.town_mesh_hash));
         m.insert("map_image_hash".into(), hex(self.map_image_hash));
         m.insert("drive_hash".into(), hex(self.drive_hash));
-        m.insert("replay_corsair_gtx".into(), hex(self.replay_hashes[0]));
-        m.insert("replay_palisade_wagon".into(), hex(self.replay_hashes[1]));
+        m.insert("replay_gannet_gt".into(), hex(self.replay_hashes[0]));
+        m.insert("replay_homestead_wagon".into(), hex(self.replay_hashes[1]));
         m
     }
 
@@ -176,7 +176,7 @@ mod tests {
         let t = SelfTest::run();
         // The same values the crates' own golden tests pin.
         assert_eq!(t.place_content_hash, 0x08ED_FEF3_C160_CE98);
-        assert_eq!(t.town_mesh_hash, 0xF908_E7B3_4AA8_73B6);
+        assert_eq!(t.town_mesh_hash, 0xB9CA_5ED1_40B9_D278);
         assert_eq!(t.map_image_hash, 0x8a97_cf1e_db61_56ae);
         assert_eq!(t.drive_hash, 0xadde_172d_3f95_7922);
         assert_eq!(

@@ -19,7 +19,7 @@ use super::names::{self, action_label, device_label, device_noun};
 use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
-use crate::settings::Quality;
+use crate::settings::{FrameRate, Quality};
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -85,6 +85,19 @@ const MAX_PANEL_W: f32 = 880.0;
 /// Panel space above the first row (crumbs, title, rule) and below the last (rule, hints).
 const HEADER_H: f32 = 98.0;
 const FOOTER_H: f32 = 62.0;
+/// The Vehicle page: its panel's width (the rest of the safe area is the turntable's
+/// stage, when it is at least `STAGE_MIN_W` wide), the gap between them, the room above
+/// the stage for the car's name, and the spec lines under the rows.
+const VEHICLE_PANEL_W: [f32; 2] = [470.0, 600.0];
+const STAGE_GAP: f32 = 16.0;
+const STAGE_MIN_W: f32 = 220.0;
+const STAGE_TITLE_H: f32 = 56.0;
+const SPEC_LINES: usize = 7;
+/// Where a spec line's value starts, from the panel's text edge.
+const SPEC_VALUE_X: f32 = 150.0;
+/// Paint swatch size and spacing.
+const SWATCH: f32 = 20.0;
+const SWATCH_GAP: f32 = 8.0;
 
 fn width(text: &str, scale: f32) -> f32 {
     font::text_width(text) as f32 * scale
@@ -235,18 +248,108 @@ impl Ui {
         self.hud = hud;
     }
 
+    /// The Vehicle page's paint row: a swatch per palette entry (upper over lower paint),
+    /// right-aligned at `right`, the chosen one framed and the row's arrows round them.
+    fn draw_swatches(&self, hud: &mut HudBuilder, right: f32, y: f32, index: usize, focused: bool) {
+        let Some(car) = roster::roster().get(self.browse[0]) else {
+            return;
+        };
+        let n = car.paints.len();
+        let fg = if focused { ON_ACCENT } else { TEXT };
+        let ty = y + (ROW_H - 4.0 - 18.0) * 0.5;
+        let arrow = width(">", S);
+        text_right(hud, right, ty, S, fg, false, format_args!(">"));
+        let mut x = right - arrow - 12.0 - n as f32 * (SWATCH + SWATCH_GAP) + SWATCH_GAP;
+        hud.text(x - 12.0 - arrow, ty, S, fg, "<");
+        let sy = y + (ROW_H - 4.0 - SWATCH) * 0.5;
+        for (k, [upper, lower]) in car.paints.iter().enumerate() {
+            if k == index {
+                hud.rect(x - 4.0, sy - 4.0, SWATCH + 8.0, SWATCH + 8.0, fg);
+            }
+            let rgb = |c: [u8; 3]| [c[0], c[1], c[2], 255];
+            hud.rect(x, sy, SWATCH, SWATCH * 0.5, rgb(*upper));
+            hud.rect(x, sy + SWATCH * 0.5, SWATCH, SWATCH * 0.5, rgb(*lower));
+            x += SWATCH + SWATCH_GAP;
+        }
+    }
+
+    /// The Vehicle page's spec lines for the car on the turntable, the first `lines` of:
+    /// the stat strip (shortened where it does not fit `w`), class, era, engine, drive,
+    /// 0-60 and top speed.
+    fn draw_specs(&self, hud: &mut HudBuilder, x: f32, y: f32, w: f32, lines: usize) {
+        let Some(car) = roster::roster().get(self.browse[0]) else {
+            return;
+        };
+        let strip = [car.stats.as_str(), car.short.as_str()]
+            .into_iter()
+            .find(|t| width(t, S) <= w)
+            .unwrap_or("");
+        hud.text(x, y, S, ACCENT, strip);
+        let rows: [(&str, fmt::Arguments); SPEC_LINES - 1] = [
+            ("Class", format_args!("{}", car.class)),
+            ("Era", format_args!("{}", car.era)),
+            ("Engine", format_args!("{}", car.engine)),
+            ("Drive", format_args!("{}", car.drive)),
+            ("0-60 mph", format_args!("{:.1} s", car.zero_to_60_s)),
+            ("Top speed", format_args!("{:.0} mph", car.top_mph)),
+        ];
+        for (k, (label, value)) in rows.into_iter().enumerate().take(lines.saturating_sub(1)) {
+            let ly = y + (k + 1) as f32 * LINE_H;
+            hud.text(x, ly, S, DIM, label);
+            hud.text_fmt(x + SPEC_VALUE_X, ly, S, TEXT, value);
+        }
+    }
+
+    /// Over the turntable's stage: the car's name, and where it is in the roster.
+    fn draw_stage_title(&self, hud: &mut HudBuilder, stage: [f32; 4]) {
+        let Some(car) = roster::roster().get(self.browse[0]) else {
+            return;
+        };
+        let [x, y, w, _] = stage;
+        let cx = x + 0.5 * w;
+        let ty = y - STAGE_TITLE_H;
+        // Too long for the stage at the title size: the menu size.
+        let scale = if width(&car.name, TITLE_S) <= w {
+            TITLE_S
+        } else {
+            S
+        };
+        let shadowed = |hud: &mut HudBuilder, y: f32, scale: f32, color, args: fmt::Arguments| {
+            text_center(hud, cx + scale, y + scale, scale, SHADOW, args);
+            text_center(hud, cx, y, scale, color, args);
+        };
+        shadowed(hud, ty, scale, TEXT, format_args!("{}", car.name));
+        let n = roster::roster().len();
+        let line = ty + scale * font::LINE_HEIGHT as f32 + 2.0;
+        shadowed(
+            hud,
+            line,
+            S,
+            TEXT,
+            format_args!("{} of {n}", self.browse[0] + 1),
+        );
+    }
+
     fn draw_menu(&mut self, hud: &mut HudBuilder) {
         let [sx, sy, sw, sh] = hud.safe_rect();
         let [vw, vh] = hud.size();
-        // Dim the whole target, letterbox bars included.
-        hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, SHADE);
+        self.stage = None;
         let Some(menu) = &self.menu else { return };
         let page = menu.page();
+        let vehicle = page == Page::Vehicle && self.capture.is_none();
+        // The Vehicle page's spec lines take the note's place, as many as leave room for
+        // its rows.
+        let spec_lines = if vehicle {
+            let room = sh - HEADER_H - self.items.len() as f32 * ROW_H - FOOTER_H - 12.0;
+            ((room / LINE_H).floor().max(0.0) as usize).min(SPEC_LINES)
+        } else {
+            0
+        };
         // The panel fits its content, up to the safe area's height (then rows scroll).
         let note_lines = match (page, pages::note(page)) {
             (Page::Conflict, _) if self.conflict.is_some() => 2,
             (_, Some(note)) => note.split('\n').count(),
-            _ => 0,
+            _ => spec_lines,
         };
         let note_h = if note_lines > 0 {
             note_lines as f32 * LINE_H + 12.0
@@ -255,9 +358,27 @@ impl Ui {
         };
         let wanted = HEADER_H + self.items.len().max(1) as f32 * ROW_H + note_h + FOOTER_H;
         let ph = wanted.min(sh);
-        let pw = sw.min(MAX_PANEL_W);
-        let px = sx + (sw - pw) * 0.5;
+        let mut pw = sw.min(MAX_PANEL_W);
+        let mut px = sx + (sw - pw) * 0.5;
         let top = sy + (sh - ph) * 0.5;
+        // The Vehicle page sits at the left, the turntable's stage to its right.
+        let panel_w = (0.5 * sw).clamp(VEHICLE_PANEL_W[0], VEHICLE_PANEL_W[1]);
+        if vehicle && sw - panel_w - STAGE_GAP >= STAGE_MIN_W {
+            (px, pw) = (sx, panel_w);
+            let x = sx + pw + STAGE_GAP;
+            // Level with the panel: the name at its top, the turntable below.
+            let h = ph.max(0.6 * sh);
+            let y = (top + 0.5 * ph - 0.5 * h).max(sy);
+            self.stage = Some([x, y + STAGE_TITLE_H, sx + sw - x, h - STAGE_TITLE_H]);
+        }
+        // Dim the whole target, letterbox bars included, round the stage.
+        match self.stage {
+            Some([x, _, w, _]) => {
+                hud.rect(-vw, -vh, vw + x, 3.0 * vh, SHADE);
+                hud.rect(x + w, -vh, 2.0 * vw - x - w, 3.0 * vh, SHADE);
+            }
+            None => hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, SHADE),
+        }
         let bottom = top + ph;
         hud.rect(px, top, pw, ph, PANEL);
         hud.rect(px, top, pw, 4.0, ACCENT);
@@ -289,6 +410,18 @@ impl Ui {
         if self.items.is_empty() {
             let back = Glyph(self, d, Action::MenuBack);
             hud.text_fmt(px + PAD, footer, S, DIM, format_args!("[{back}] Back"));
+        } else if page == Page::Vehicle {
+            hud.text_fmt(
+                px + PAD,
+                footer,
+                S,
+                DIM,
+                format_args!(
+                    "[{}] Drive   [{}] Back",
+                    Glyph(self, d, Action::MenuConfirm),
+                    Glyph(self, d, Action::MenuBack),
+                ),
+            );
         } else {
             hud.text_fmt(
                 px + PAD,
@@ -303,7 +436,7 @@ impl Ui {
             );
         }
         if let Some(t) = self.toast() {
-            let args = ToastText(t);
+            let args = ToastText(t, &self.music_name);
             text_right(
                 hud,
                 px + pw - PAD,
@@ -335,11 +468,17 @@ impl Ui {
             }
         } else if let Some(note) = pages::note(page) {
             hud.text(px + PAD, y, S, DIM, note);
+        } else if spec_lines > 0 {
+            self.draw_specs(hud, px + PAD, y, pw - 2.0 * PAD, spec_lines);
+        }
+        if let Some(stage) = self.stage {
+            self.draw_stage_title(hud, stage);
         }
 
         // Rows.
         let rows_top = top + HEADER_H;
-        let rows = (((rows_bottom - rows_top) / ROW_H).floor() as usize).max(1);
+        // (A hair over, so a panel sized for n rows shows n.)
+        let rows = (((rows_bottom - rows_top) / ROW_H + 1e-3).floor() as usize).max(1);
         let len = self.items.len();
         if let Some(menu) = &mut self.menu {
             menu.fit(len, rows);
@@ -382,6 +521,10 @@ impl Ui {
                     let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
                     hud.text(px + PAD, ty, S, fg, name);
                 }
+                (ItemId::RemoveFolder(i), _) => {
+                    let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
+                    hud.text_fmt(px + PAD, ty, S, fg, format_args!("Remove {name}"));
+                }
                 _ => hud.text(px + PAD, ty, S, fg, item.label),
             }
             match item.widget {
@@ -417,6 +560,23 @@ impl Ui {
                     hud.rect(tx, ty, tw, 6.0, track);
                     hud.rect(tx, ty, tw * frac, 6.0, fill);
                 }
+                Widget::Choice { index, .. } if item.id == ItemId::Paint => {
+                    self.draw_swatches(hud, right, y, index, focused);
+                }
+                Widget::Choice { index, .. } if item.id == ItemId::FrameRate => {
+                    let hz = self.panel_hz();
+                    match FrameRate::ALL.get(index) {
+                        Some(&f) if index > 0 => {
+                            let fps = f.fps(hz);
+                            let args = format_args!("< {fps:.0} fps >");
+                            text_right(hud, right, ty, S, fg, false, args);
+                        }
+                        _ => {
+                            let args = format_args!("< Panel ({hz:.0}) >");
+                            text_right(hud, right, ty, S, fg, false, args);
+                        }
+                    }
+                }
                 Widget::Choice { options, index } => {
                     let name = options.get(index).copied().unwrap_or("?");
                     text_right(hud, right, ty, S, fg, false, format_args!("< {name} >"));
@@ -442,23 +602,11 @@ impl Ui {
                     );
                 }
             }
-            if let ItemId::Vehicle(i) = item.id {
-                // The stat strip on the right (shorter, or none, where the row is narrow),
-                // a dot before the car being driven.
-                if let Some(car) = roster::roster().get(i) {
-                    let room = right - (px + PAD) - width(item.label, S) - 24.0;
-                    let stats = [car.stats.as_str(), car.short.as_str()]
-                        .into_iter()
-                        .find(|t| width(t, S) <= room);
-                    if let Some(stats) = stats {
-                        text_right(hud, right, ty, S, dim, false, format_args!("{stats}"));
-                    }
-                }
-                if i == self.vehicle {
-                    let dot = if focused { ON_ACCENT } else { GOOD };
-                    let cy = y + (ROW_H - 4.0) * 0.5;
-                    hud.image(HudImage::disc(px + 24.0, cy, 5.0, dot));
-                }
+            if item.id == ItemId::VehicleCar && self.browse[0] == self.vehicle {
+                // A dot before the car being driven.
+                let dot = if focused { ON_ACCENT } else { GOOD };
+                let cy = y + (ROW_H - 4.0) * 0.5;
+                hud.image(HudImage::disc(px + 24.0, cy, 5.0, dot));
             }
         }
         if scroll > 0 {
@@ -558,7 +706,7 @@ impl Ui {
             None => text_right(hud, x, y, 5.0, TEXT, true, format_args!("--")),
         };
         if let Some(t) = self.toast() {
-            let args = ToastText(t);
+            let args = ToastText(t, &self.music_name);
             hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
         }
         if let Some(d) = &ctx.radio_display {
@@ -758,7 +906,7 @@ impl Ui {
         let r = &self.render_stats;
         let gpu_line = r.gpu_timing as u32 as f32;
         let label_line = !self.gpu_label.is_empty() as u32 as f32;
-        let lines = 10.0 + gpu_line + label_line;
+        let lines = 11.0 + gpu_line + label_line;
         hud.rect(
             sx - 10.0,
             sy - 10.0,
@@ -821,9 +969,12 @@ impl Ui {
                  view {}x{} of {}x{}  bloom {}\n\
                  lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
+                 traffic {} cars  step {:.3} ms\n\
+                 peds {} people  step {:.3} ms\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
-                 hud {} quads  ({} dropped)",
+                 hud {} quads  ({} dropped)\n\
+                 frame {:?}  world {}  ui {}  skip {}",
                 if r.backend.is_empty() { "?" } else { r.backend },
                 r.draw_calls,
                 r.shadow_draw_calls,
@@ -854,6 +1005,10 @@ impl Ui {
                 r.coronas,
                 self.last_steps,
                 ctx.ticks,
+                self.traffic.0,
+                self.traffic.1,
+                self.peds.0,
+                self.peds.1,
                 d.sun_elevation_deg,
                 d.sun_azimuth_deg,
                 cx,
@@ -861,19 +1016,26 @@ impl Ui {
                 cz,
                 r.hud_quads,
                 r.hud_quads_dropped,
+                r.last_work,
+                r.frames,
+                r.ui_frames,
+                r.skipped_frames,
             ),
         );
-        let mut y = y + 10.0 * line;
+        let mut y = y + 11.0 * line;
         if r.gpu_timing {
-            let ms = |p: usize| r.gpu_us[p] as f32 / 1000.0;
-            let total: u32 = r.gpu_us.iter().sum();
+            // Medians over the last 64 frames read back; the parts (each cascade; the
+            // depth pre-pass, meshes and sky) where timestamps work inside passes.
+            let ms = |p: usize| r.gpu_median_us[p] as f32 / 1000.0;
+            let part = |k: usize| r.gpu_median_part_us[k] as f32 / 1000.0;
+            let total: u32 = r.gpu_median_us.iter().sum();
             hud.text_fmt(
                 sx,
                 y,
                 s,
                 TEXT,
                 format_args!(
-                    "gpu {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}",
+                    "gpu med {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}{}",
                     total as f32 / 1000.0,
                     ms(0),
                     ms(1),
@@ -881,6 +1043,10 @@ impl Ui {
                     ms(3),
                     ms(4),
                     ms(5),
+                    GpuParts(
+                        r.gpu_parts
+                            .then(|| { [part(0), part(1), part(2), part(3), part(4), part(6)] })
+                    ),
                 ),
             );
             y += line;
@@ -891,9 +1057,26 @@ impl Ui {
     }
 }
 
-struct ToastText(Toast);
+/// The F3 overlay's GPU parts: the cascades, then the forward pass's depth pre-pass,
+/// meshes and sky, ms.
+struct GpuParts(Option<[f32; 6]>);
 
-impl Display for ToastText {
+impl Display for GpuParts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some([c0, c1, c2, z, m, sky]) => write!(
+                f,
+                " | c {c0:.2}/{c1:.2}/{c2:.2} z {z:.2} m {m:.2} sky {sky:.2}"
+            ),
+            None => Ok(()),
+        }
+    }
+}
+
+/// A toast and the music folder name it may name.
+struct ToastText<'a>(Toast, &'a str);
+
+impl Display for ToastText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             Toast::Bound(b, action, sign) => {
@@ -916,6 +1099,19 @@ impl Display for ToastText {
             },
             Toast::CarReset => f.write_str("Car reset"),
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
+            Toast::MusicAdded { tracks, kept } => {
+                let s = if tracks == 1 { "" } else { "s" };
+                write!(f, "{}: {tracks} track{s} on the dial", self.1)?;
+                if !kept {
+                    f.write_str(" (pick it again next time)")?;
+                }
+                Ok(())
+            }
+            Toast::MusicEmpty => f.write_str("No music found in that folder"),
+            Toast::MusicNeedsKeyboard => {
+                f.write_str("Use the keyboard or mouse, or drop a folder on the page")
+            }
+            Toast::MusicRemoved => f.write_str("Music folder removed"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }
     }

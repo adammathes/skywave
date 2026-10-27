@@ -35,31 +35,65 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 04:50 UTC): M0; M1 (drive, cockpit, HUD, settings, gamepad, invert Y);
-  M2 (procedural coast: terrain, roads, parcels, buildings, props, streaming, minimap, lights);
-  M3 part 1 (synthesized sound; web car radio with 7 working stations per era, NO SIGNAL
-  auto-skip); the second feel pass; convertibles; WebGPU→WebGL2 fallback, Safari shader fix;
-  GPU performance pass (culling, Low/Deck/Medium/High/Ultra presets with Deck auto-pick, native
-  `--stats`, `docs/PERFORMANCE.md`); in-game vehicle picker (`V`, Menu › Vehicle) and the credit
-  line; art pass (era cabins with backlit dials, detailed exteriors, two-tone paint, colored parked
-  cars with LOD2, richer props); traffic lane graph (M4 #1, `crates/traffic`); reference-sources
-  ADR 0005 and the buildings facade grammar backlog (`docs/backlog/BUILDINGS.md`); CI gates
-  stabilised (no single-worst-piece wall-clock assert; one CI run per PR).
-- Open PRs: light collision physics (#7, approved, merging main); reset key + radio dial sweep
-  (#9, approved after fixes, in CI). Branches in progress: `m4/pedestrian-figure` (M4 #3),
-  `m4/roster` (M4 #2, eight more cars), `m2/map-edges` (NOTES #3, natural boundaries).
-- Owner feedback not yet acted on: `docs/backlog/NOTES.md` 4(a) life (traffic behaviour M4 #4-#6,
-  pedestrians #5, window lights, parked cars that come and go) and 4(b) buildings
-  (`docs/backlog/BUILDINGS.md` B1-B15); mobile (NOTES #5, after Deck verification); the owner's
-  Deck `--stats` output is wanted (`docs/PERFORMANCE.md`).
-- Next: M4 #4 car following (after lane graph), #5 pedestrians (after figure), #6 density settings,
-  #7 vehicle select polish; M3 remainder (local music files, ICY titles on the dash, ambience by zone; native streams in `m3/native-radio`, ADR 0006);
-  buildings B1-B5 can start now (B4/B8/B9/B11/B13 touch `world::buildings` and run one at a time);
-  M5 (release polish, Deck verification), M6 (place compiler), M7+ (eras, Chicago scenarios).
+- Done on `main` (2026-10-27 19:20 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+  ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
+  pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
+  vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
+  physics; the hill-launch fix (wheel rays meet the ground's tangent plane); traffic lane graph
+  (M4 #1), NPC car movement (M4 #4), pedestrian figure (M4 #3) and behaviour (M4 #5) in
+  `crates/traffic`; NPC traffic drawn in the game with Settings › World › Traffic and passing-car
+  sound (M4 #6); vehicle select screen with turntable preview and paint picker (M4 #7); reference
+  sources ADR 0005; facade grammar loader (B1, B2); three-band facades with real storefronts (B4);
+  sign pictograms, stroke letterforms and the closed lexicon on blade signs (B5, B6); chunk pool
+  raised to 1211 web / 1617 native pages; CI gates stabilised; the M4 gate (#25: non-violence
+  scenarios, density tests, two gate goldens, gate notes in `docs/backlog/M4.md`); pedestrians
+  drawn in the game (#27: crowd beside the traffic, 8 figures × 13 parts instanced, Traffic
+  setting drives both, golden `coast-peds-noon`); awnings, canopies, rooflines and rooftop units
+  (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof); pedestrian hardening
+  (#24: four review rounds, 2040-run crossing sweep at zero reached, 0.4 m step-aside clearance);
+  the radio starts off every session (ce560a3) and the 181.FM presets are gone (7ca473c, pre-roll
+  ads); the M8 spec for the second world, Basin City 2001 (`docs/backlog/LA2001.md`); the 1980s sports cars
+  and their open versions (#28: 20 cars, exotics player-only, `TRAFFIC_SHAPES`); ad-free radio
+  presets (#30: 7 / 6 / 6 listener-supported, public and college stations, each cold-start
+  checked; the checker gained --listen/--save/--url and ad-sign warnings); the rename of the
+  two cars whose names were real models (#33: `gannet_gt`, `homestead_wagon`; old ids migrate);
+  GPU time per pass in `--stats` and F3, sky drawn last, a Deck-only depth pre-pass
+  (`--no-prepass` to A/B), kept shadow cascades (#32; the owner's Deck `--stats` runs with and
+  without the pre-pass decide whether it stays on); the player's own music folders as stations on
+  the web (#34: folder picker and drag-and-drop, one station per pick, tags on the dash, seeded
+  shuffle with resume, remembered handles, silent at start; native follows #15); draw only what
+  changed (#31: World/Ui/Skip frames, GPU near idle when paused, in menus or unfocused; a
+  frame-rate cap of whole panel divisors, default the panel rate; Battery = half rate at 0.85
+  scale; the game pauses when unfocused).
+- Open PRs: native radio (#15, approved; the owner signed off on 2026-10-27 19:55 by asking for
+  stations to work locally; its session is refreshing it on main, then native music folders follow);
+  natural map edges (#20, approved; refreshing on main after #24, then merges on green);
+  Sessions building: parking lots
+  (`bldg/parking-lots`, B10); era sports cars with open-top variants
+  (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
+  ; idle frames, frame cap, Battery preset
+ pedestrian follow-ups (`m4/peds-followups`: body-width gap in
+  the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
+  road); scenario switching and the era filter (`m8/scenarios`, M8 #1); the rename of
+  two roster cars that shared real model names (#33, now the Gannet GT and the Homestead Wagon). PRs in review:
+  lamps (#29, NPC brake lights, high beams, auto headlights); idle frames and the frame cap
+  
+- Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
+  `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
+  come and go); buildings B7, B10-B15.
+- M4 gate facts for the owner (from #25): NPC cars yield at junctions; no player–NPC collision
+  yet (reversing into a queue passes through; ignored test with numbers); NPC cars do not see
+  pedestrians; static wheels, no brake lights; traffic sparse near the start.
+- Next: merge #20, #29; M8 waves (region template `socal_basin` and the 2001 grammar after #20,
+  hero cars after #28, traffic cars, set pieces, the 2001 preset); B7 facade sign bands on the
+  lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
-  origin/main...origin/<branch>`; a PR that regenerates goldens merges before PRs that touch the
-  same scenes; a session merges `origin/main` into its branch itself when GitHub reports a
-  conflict; owner-priority fixes (radio, picker) merge ahead of feature work.
+  origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
+  the probe is re-run on every round until it counts zero; a PR that regenerates goldens merges
+  before PRs touching the same scenes, and after each such merge every open PR refreshes from
+  main; CI's pull_request event sometimes does not fire for a session-created PR, so a branch
+  update from main (or any push) is used to start it; two PRs that change the same signature
+  within an hour can both be green and still break main.
 
 ## Pitfalls met so far
 - Software-rendered screenshots take minutes per scene; never run several at once on one box.

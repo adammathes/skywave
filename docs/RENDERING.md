@@ -14,14 +14,18 @@ Not a DOS game, not flat boxes on a plane. A street must have: curbs with a gutt
 ## Pipeline (forward, HDR)
 ```
 shadow pass    sun CSM, 3 cascades (0–40 m, 40–160 m, 160–600 m), 2048² each (by preset: 2–3, 1024–3072²), PCF 3×3;
-               casters culled per cascade on the CPU, the far cascade optionally kept every other frame
-depth prepass  (optional on web; on for native)  → used by fog/SSAO later
+               casters culled per cascade on the CPU; a cascade is kept from an earlier frame while its map covers the
+               view, its casters are unchanged and the sun has moved under half a texel's shadow shift, and the far
+               one optionally between every 2nd or 3rd frame
+depth prepass  by preset (Deck): the forward pass's meshes depth-only first, then shaded with less-or-equal, so each
+               pixel shades once (the position math is `@invariant` in both)
 main pass      → HDR Rgba16Float at the resolution scale (50–100%), instances frustum-culled on the CPU: Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
                sun with CSM shadow, sky ambient (hemisphere: sky color up, ground color down),
                up to 8 point/spot lights per draw picked from the frame's 256 (uniform array, 32 bytes each;
                each instance carries its 8 light indices, culled on the CPU by the app per tile),
                height + distance fog tinted by sky toward the sun, emissive channel added last
-sky            analytic sky model (Preetham or Hosek-Wilkie fit, evaluated in the shader per pixel) + sun disc + moon + stars at night
+sky            analytic sky model (Preetham or Hosek-Wilkie fit, evaluated in the shader per pixel) + sun disc + moon + stars at night;
+               drawn after the meshes at the far plane, so only uncovered pixels shade it
 transparents   water (planar reflection, phase 2), windows glow quads
 coronas        additive soft sprites over lamp heads, car lamps, neon, the sun and moon; occlusion from 5 depth samples
 bloom          threshold on emissive/bright, 4–5-level downsample/upsample (Rgba16Float, from half the scaled target)
@@ -40,6 +44,17 @@ mip chain, sampled trilinearly at a per-quad mip level), a flat fill or the play
 in the shader), with the content rotated by any angle and an optional circle or rounded-rectangle mask, all
 edges anti-aliased in the fragment shader. The HUD bind group holds the font atlas and the map (two textures,
 two samplers); each quad's flags pick one, so images cost no extra draw call or texture switch.
+
+Vehicle select (`app::preview`): the pause menu's Vehicle page leaves a stage beside its panel (not dimmed),
+and the car being browsed turns slowly on a plain grey disc there, its real LOD0 exterior in the paint chosen.
+It is drawn in the main forward pass from its own camera without a second camera in the renderer: a scale
+model placed 0.5 m in front of the frame's camera, aimed down the ray to the stage's center and sized to
+fill it, so the frame's camera sees it as a turntable camera would see the full-size car. The player's car
+(and its lamps) and any traffic or prop within 4 m of the eye are not drawn under the page, so nothing that
+moves cuts into it. It is lit by the current sun, sky ambient and exposure, plus the cabin fill light after
+dark; no street lamps, and it neither casts nor receives a sun shadow (`MeshInstance::receives_shadow`, one
+bit in the instance's packed params that `forward.wgsl` reads to skip the cascade test). Cost: up to 10
+instances while the page is open, none otherwise; no pass or uniform.
 
 Map (`app::map`): the Place rasterized once at load into a 1024 px (longer side) image, north up: muted zone
 tints, parks, water with a darker shoreline, faint building footprints, roads by class with a 1 px darker
@@ -68,11 +83,11 @@ First person cockpit (eye position from the spec; head sways with suspension and
 | Player car exterior (LOD0) | 8–14k |
 | Player car interior | 4–8k |
 | Parked / NPC cars | 3–5k within 80 m (LOD1), ~2k beyond (LOD2) |
-| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300 |
-| Buildings | ≤ 3.5k (ceiling; `world::buildings` still plans each to 2,000 until the building pass) |
+| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300; a shop's blade sign (frame, word, pictogram, both faces) ≤ 360 (`props::BLADE_TRIANGLES`) |
+| Buildings | ≤ 3.5k (ceiling): `world::buildings` plans each to 2,000 and adds what a street front's base band costs, up to the ceiling |
 | Chunk vertex cap | 256k vertices (384k comes with the building pass, when a chunk needs it) |
 
-Chunk meshes: pooled vertex/index buffers made once at load (`render::ChunkPool`): a fixed number of chunk slots over buffers cut into pages of 4096 vertices and 6144 indices; a written slot holds a run of consecutive pages, as many as its chunk needs (the test town's chunks range from 80 to 95k vertices, so equal-sized slots would waste most of the pool). Up to 256k vertices (`render::MAX_CHUNK_VERTICES`) and 32 draws per chunk (32-bit indices, rebased per slot since WebGL2 has no base vertex). Web: 121 slots, 4.5M vertices (189 MB); native: 225 slots, 6M vertices (252 MB), sized to the procedural coast with its buildings (its densest 11×11 chunks take 941 pages, the whole place 1283). A full pool is an error, never a new buffer. Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 400 web, ≤ 1000 native. Vertex: position f32×3, normal f32×3, uv u16×2 (atlas), color rgba8, emissive rgba8 (36 bytes; emissive alpha bit 7 = window flag, low 7 bits = intensity 0..8×). Props and cars use 2 LODs (full within 80 m, half beyond); chunks beyond 400 m drop facade detail to silhouettes.
+Chunk meshes: pooled vertex/index buffers made once at load (`render::ChunkPool`): a fixed number of chunk slots over buffers cut into pages of 4096 vertices and 6144 indices; a written slot holds a run of consecutive pages, as many as its chunk needs (the test town's chunks range from 80 to 95k vertices, so equal-sized slots would waste most of the pool). Up to 256k vertices (`render::MAX_CHUNK_VERTICES`) and 32 draws per chunk (32-bit indices, rebased per slot since WebGL2 has no base vertex). Web: 121 slots, 4.96M vertices (208 MB); native: 225 slots, 6.62M vertices (278 MB), sized to the procedural coast with its buildings and stroke-lettered signs plus about 10% headroom (its densest 11×11 chunks take 1100 of the web pool's 1211 pages, the whole place 1470 of the native pool's 1617; the three-band facades had left 8 and 6 pages and the signs' letters needed 10 and 5 more, so the pools grew from 4.5M and 6M vertices, +19 MB and +26 MB of buffers; with the awnings, canopies, rooflines and rooftop units of B8 and B9 the coast measured within a page of that, 1100 and 1470). A page is 4096 vertices of 36 bytes and 6144 indices of 4, 168 KiB; the vertex buffers (178 MB web, 238 MB native) stay under the 256 MiB `max_buffer_size` of the downlevel limits. The densest chunk has 241k vertices, under the 256k cap. The test fails when the densest resident square (11×11 on web, so every 3×3 around the car with it) or the whole place outgrows its pool. The next building task re-measures with `every_coast_chunk_fits_the_pool_and_the_far_terrain_is_small` and keeps inside the headroom, or brings the per-building LOD that lets it shrink. A full pool is an error, never a new buffer. Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 400 web, ≤ 1000 native. Vertex: position f32×3, normal f32×3, uv u16×2 (atlas), color rgba8, emissive rgba8 (36 bytes; emissive alpha bit 7 = window flag, low 7 bits = intensity 0..8×). Props and cars use 2 LODs (full within 80 m, half beyond); chunks beyond 400 m drop facade detail to silhouettes.
 
 ## Platform tiers
 | Tier | Target | Notes |
@@ -86,16 +101,31 @@ A resolution-scale setting (50–100%) and a quality preset keep the Deck at its
 Settings → Video → Quality; `app::Quality` maps each to a `render::RenderQuality` carried in every `SceneView` (the
 renderer rebuilds the shadow atlas or the scaled targets when their size changes). Unchosen, the game picks **Deck**
 on the Deck's APU / an AMD integrated GPU / a 1280×800 Linux surface and **Medium** elsewhere; the choice is saved.
+**Battery** is Deck at 85% resolution that also sets Frame rate to every other refresh.
 
-| Preset | Cascades | Size | Far cascade | Skip casters under | Resolution | Bloom levels | Coronas |
-|---|---|---|---|---|---|---|---|
-| Low | 2 (50/400 m) | 1024² | every other frame | 3 texels | 75% | 4 | off |
-| Deck | 2 (50/400 m) | 1536² | every other frame | 2 texels | 100% | 4 | on |
-| Medium (default) | 3 | 1536² | every other frame | 2 texels | 100% | 5 | on |
-| High | 3 | 2048² | every frame | — | 100% | 5 | on |
-| Ultra | 3 | 3072² (device permitting) | every frame | — | 100% | 5 | on |
+| Preset | Cascades | Size | Far cascade | Skip casters under | Resolution | Bloom levels | Coronas | Depth pre-pass |
+|---|---|---|---|---|---|---|---|---|
+| Low | 2 (50/400 m) | 1024² | every third frame | 3 texels | 75% | 4 | off | off |
+| Battery | 2 (50/400 m) | 1536² | every third frame | 2 texels | 85% | 4 | on | on |
+| Deck | 2 (50/400 m) | 1536² | every third frame | 2 texels | 100% | 4 | on | on |
+| Medium (default) | 3 | 1536² | every other frame | 2 texels | 100% | 5 | on | off |
+| High | 3 | 2048² | every frame | — | 100% | 5 | on | off |
+| Ultra | 3 | 3072² (device permitting) | every frame | — | 100% | 5 | on | off |
 
 The cost model, the reasoning behind each knob and how to measure on hardware are in `docs/PERFORMANCE.md`.
+
+**Drawing only what changed.** Platforms call `Renderer::draw(scene, acquire)` once a frame.
+It runs `Renderer::plan`: **World** when anything the world passes draw differs from the
+last world frame (camera, sun, sky, quality, instances, lights; positions and orientations
+within a stillness tolerance judged from the camera) or the renderer's own state changed
+under it (targets rebuilt, a mesh added, a chunk written or freed); **Ui** when only the HUD
+quads differ: the HDR target and bloom chain still hold the last world frame, so the frame
+is the tonemap pass and the HUD pass; **Skip** when nothing differs: `acquire` is never
+called, nothing is submitted or presented. `render` draws the world unconditionally and
+`render_ui` the Ui frame; both record what they drew for the next plan. A platform that
+reconfigures its surface, or whose window was hidden, calls `screen_lost` (the next frame
+is at least Ui). Without an HDR target (LDR mode) there is nothing to keep, so Ui becomes
+World. Battery and the frame-rate cap are in `docs/PERFORMANCE.md`.
 
 **Web start-up and fallback** (`crates/platform-web`). WebGPU is tried first where `navigator.gpu` exists. The device is requested with no optional features and with `Limits::downlevel_defaults()` (WebGL2's own limits on GL), the texture size raised to the adapter's and every value clamped to what the adapter reports, so no browser can reject the request for asking too much. The canvas is configured with its preferred 8-bit format (the shaders encode sRGB), FIFO, opaque; the float path is used only where the adapter reports `Rgba16Float` as renderable, blendable and filterable. Surface configuration, renderer construction and a probe frame (`SceneView::probe`: sky, low sun, one mesh, presented to the canvas) run inside validation, out-of-memory and internal error scopes; an uncaptured-error handler and a device-lost callback catch the rest. Any failure before the first frame (no adapter, `requestDevice` rejected, no surface configuration or no texture from the canvas, a scope reporting an error, the device lost) destroys the device and starts again on WebGL2 on a fresh canvas (a canvas never changes context kind), with the reason in the console and the page footer. A crash (wasm trap) during the WebGPU start is caught by the page, which starts a fresh wasm instance on WebGL2. `?gl=1` goes straight to WebGL2, `?gpu=1` uses WebGPU with no fallback, and the F3 overlay and the footer name the backend.
 
@@ -107,7 +137,7 @@ The corona pass is optional: its pipeline is built in its own error scope and co
 Cel: quantized Lambert + edge detect from depth/normal. Dither/CRT: ordered dither to palette, scanline/curvature post. VHS: chroma shift, blur. All in the post pass; off by default.
 
 ## Debug
-A debug overlay (F3) showing frame time graph, draw calls, CPU submit time, instances submitted and drawn per pass, triangles, cascades and their size, scene and swapchain size, GPU time per pass (timestamp queries, native), light count, the adapter, and camera/sun parameters, drawn with the HUD font. Native `--stats` prints the same once a second (`docs/PERFORMANCE.md`). Screenshot command writes a PNG (native) or triggers canvas download (web).
+A debug overlay (F3) showing frame time graph, draw calls, CPU submit time, instances submitted and drawn per pass, triangles, cascades and their size, scene and swapchain size, GPU time per pass and per cascade (timestamp queries, native; medians over 64 frames), light count, the adapter, and camera/sun parameters, drawn with the HUD font. Native `--stats` prints the same once a second, and every 5 s a per-pass GPU table (min / median / p95) with the fragments the forward pass shaded, from occlusion queries (`docs/PERFORMANCE.md`). Screenshot command writes a PNG (native) or triggers canvas download (web).
 
 ## Acceptance tests
 - Renders under WebGL2 (CI screenshot, SwiftShader) and WebGPU (manual; headless Chromium can run it on SwiftShader's Vulkan with `--enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader`) with identical scene content.

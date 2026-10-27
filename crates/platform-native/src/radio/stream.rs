@@ -494,9 +494,20 @@ mod tests {
         assert_eq!(ring.available(), 0);
     }
 
+    /// Preset stations the native player cannot play, and why. The live test checks they
+    /// still fail, so a station that changes is noticed either way.
+    const NATIVE_NO_SIGNAL: [(&str, &str); 3] = [
+        ("intergalactic_cbs", "AAC only"),
+        ("intergalactic_disco", "AAC only"),
+        (
+            "wmxm",
+            "its server offers only CBC cipher suites, which rustls does not implement",
+        ),
+    ];
+
     /// Plays 5 s of every preset station from the internet, each URL in order as the radio
-    /// tries them, and checks the audio is real: `cargo test -p platform-native --
-    /// --ignored --nocapture every_preset_station_plays`.
+    /// tries them, and checks the audio is real (and that [`NATIVE_NO_SIGNAL`] still fail):
+    /// `cargo test -p platform-native -- --ignored --nocapture every_preset_station_plays`.
     #[test]
     #[ignore = "needs the internet"]
     fn every_preset_station_plays() {
@@ -553,12 +564,16 @@ mod tests {
                     );
                     break;
                 }
-                if line.starts_with("FAIL") {
-                    failed.push(station.id.clone());
+                let known = NATIVE_NO_SIGNAL.iter().find(|(id, _)| *id == station.id);
+                match (line.starts_with("FAIL"), known) {
+                    (true, Some((_, why))) => line = format!("no   {:<22} ({why})", station.id),
+                    (true, None) => failed.push(station.id.clone()),
+                    (false, Some(_)) => failed.push(format!("{} (plays now)", station.id)),
+                    (false, None) => {}
                 }
                 println!("{line}");
             }
         }
-        assert!(failed.is_empty(), "no audio from {failed:?}");
+        assert!(failed.is_empty(), "unexpected: {failed:?}");
     }
 }

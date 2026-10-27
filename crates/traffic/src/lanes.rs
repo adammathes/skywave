@@ -204,7 +204,7 @@ struct End {
 
 /// Edge `e`'s profile polyline from `a` to `b`: node positions at the ends, interior
 /// samples at least [`MIN_SAMPLE_M`] apart (as `world::roads` lays it).
-fn raw_line(place: &Place, e: &place::Edge) -> Vec<[f32; 3]> {
+pub(crate) fn raw_line(place: &Place, e: &place::Edge) -> Vec<[f32; 3]> {
     let nodes = &place.roads.nodes;
     let (na, nb) = (&nodes[e.a as usize], &nodes[e.b as usize]);
     let prof = &e.profile;
@@ -303,6 +303,19 @@ fn lane_offset(e: &place::Edge, slot: u8, n: u8) -> f32 {
         MEDIAN_HALF_M + HIGHWAY_LANE_M * k
     } else {
         k * inner / f32::from(n)
+    }
+}
+
+/// Painted width of a lane of `e` driving forward (from `a` to `b`) or back.
+pub(crate) fn lane_width(e: &place::Edge, forward: bool) -> f32 {
+    let n = f32::from(if forward { e.lanes_fwd } else { e.lanes_back }.max(1));
+    let inner = e.width_m * 0.5 - GUTTER_M;
+    if e.oneway {
+        2.0 * inner / n
+    } else if e.class == RoadClass::Highway {
+        HIGHWAY_LANE_M
+    } else {
+        inner / n
     }
 }
 

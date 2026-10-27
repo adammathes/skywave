@@ -1,7 +1,7 @@
 //! `shape-preview`: renders a `ShapeSpec` from four fixed angles into one PNG so a car can
 //! be looked at without a GPU.
 //!
-//! Usage: `cargo run -p shape-preview -- assets/vehicles/corsair_gtx.shape.ron out.png
+//! Usage: `cargo run -p shape-preview -- assets/vehicles/gannet_gt.shape.ron out.png
 //! [--color N] [--lod L] [--popups] [--view 0-3] [--zoom Z]`
 //!
 //! Panels, left to right: front three-quarter, side, rear three-quarter, cockpit from the
@@ -10,10 +10,14 @@
 //! `cargo run -p shape-preview -- --figures out.png [--seed S]` instead draws a contact
 //! sheet of twelve seeded pedestrian figures mid-stride, seventies above, eighties below
 //! (seeds `S..S + 6` in each era).
+//!
+//! `cargo run -p shape-preview -- --signs out.png` draws the sign sheet: the 32
+//! pictograms, then a row in each of the four letterforms.
 
 mod figures;
 mod png;
 mod raster;
+mod signs;
 
 use raster::{Camera, Item, Target};
 use vehicle::shape::{BuildOptions, CarMesh, MeshData, ShapeSpec};
@@ -184,6 +188,7 @@ fn main() {
     let mut view: Option<usize> = None;
     let mut zoom = 1.0f32;
     let mut figures_out: Option<String> = None;
+    let mut signs_out: Option<String> = None;
     // The first of six seeds per era; from 126 the twelve wear every outfit in both eras.
     let mut seed = 126u64;
     let mut k = 1;
@@ -202,6 +207,10 @@ fn main() {
                 k += 1;
                 figures_out = args.get(k).cloned();
             }
+            "--signs" => {
+                k += 1;
+                signs_out = args.get(k).cloned();
+            }
             "--seed" => {
                 k += 1;
                 seed = args.get(k).and_then(|v| v.parse().ok()).unwrap_or(seed);
@@ -217,6 +226,16 @@ fn main() {
             a => pos.push(a),
         }
         k += 1;
+    }
+    if let Some(out) = signs_out {
+        let (w, h, rgb) = signs::sheet(160, SS);
+        let png = png::encode(w as u32, h as u32, &rgb);
+        std::fs::write(&out, png).unwrap_or_else(|e| {
+            eprintln!("{out}: {e}");
+            std::process::exit(1);
+        });
+        println!("wrote {out} ({w}x{h})");
+        return;
     }
     if let Some(out) = figures_out {
         let (w, h, rgb) = figures::sheet(seed, 220, 360, SS);
@@ -271,11 +290,11 @@ fn main() {
 mod tests {
     use super::*;
 
-    const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.shape.ron");
+    const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.shape.ron");
 
     #[test]
-    fn renders_the_corsair() {
-        let spec = load(CORSAIR).unwrap();
+    fn renders_the_gannet() {
+        let spec = load(GANNET).unwrap();
         let car = vehicle::shape::build(&spec, 0).unwrap();
         let panel = 96;
         let (w, h, rgb) = render(&spec, &car, panel);

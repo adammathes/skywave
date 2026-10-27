@@ -19,11 +19,11 @@
 
 use glam::{Mat4, Quat, Vec3};
 use place::{Place, PropKind};
-use render::{LightSet, Mesh, MeshId, MeshInstance, PointLight};
+use render::{LightSet, Mesh, MeshId, MeshInstance};
 use vehicle::shape;
 use world::{MeshKind, Palette, WorldMesh};
 
-use crate::lighting::{light_set, Bounds};
+use crate::lighting::{Bounds, FrameLights};
 use crate::worldmesh::atlas_mesh;
 use crate::{car, convert, lighttiles, vehicles, Part};
 
@@ -37,10 +37,10 @@ pub const CAR_DETAIL_RADIUS_M: f32 = 80.0;
 /// Parked cars whose paint nibble (0..16) is under this wear their own palette's colors.
 const OWN_PAINT_NIBBLES: usize = 5;
 /// Paints a place uses per shape, from its own palette and from the era's street colors:
-/// each (shape, paint) pair is two meshes, so this bounds the parked-car mesh set (twelve
+/// each (shape, paint) pair is two meshes, so this bounds the parked-car mesh set (fourteen
 /// shapes at 2 + 4 paints) whatever the place holds.
 const OWN_PAINTS: usize = 2;
-const ERA_PAINTS: usize = 4;
+pub(crate) const ERA_PAINTS: usize = 4;
 /// Most a parked car's dust and wear darkens it.
 const MAX_WEAR: f32 = 0.14;
 
@@ -58,17 +58,24 @@ fn era_index(roll: u32) -> usize {
 /// list keeps to bodies within half a meter of the length of the class's collision box
 /// (`world::props::parked_car_size`, by class, in `crates/world`) and no more than 10 cm
 /// wider; a class past the end (`Utility`, which the world
-/// does not park) parks as the wagon.
+/// does not park) parks as the wagon. The exotics and the sports cars' open versions never
+/// park: the street sees the everyday cars and the two common sports cars.
 const PARKED: [&[(&str, u32)]; 10] = [
-    &[("corsair_gtx", 3), ("halcyon_turbo", 3), ("pipit_hatch", 2)], // Sports
+    &[
+        ("gannet_gt", 3),
+        ("halcyon_turbo", 3),
+        ("pipit_hatch", 2),
+        ("longbow_coupe", 2),
+        ("appaloosa_gt", 2),
+    ], // Sports
     &[
         ("bancroft_sedan", 3),
         ("prescott_landau", 3),
-        ("palisade_wagon", 1),
+        ("homestead_wagon", 1),
         ("buckboard_pickup", 2),
     ], // Sedan
     &[
-        ("palisade_wagon", 3),
+        ("homestead_wagon", 3),
         ("meadow_minivan", 3),
         ("drayman_van", 1),
         ("buckboard_pickup", 1),
@@ -78,18 +85,18 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("halcyon_turbo", 2),
         ("burro_4x4", 2),
     ], // Coupe
-    &[("buckboard_pickup", 1)],                                      // Pickup
-    &[("meadow_minivan", 1), ("drayman_van", 1)],                    // Van
-    &[("pipit_hatch", 1)],                                           // Hatch
-    &[("seabreeze_convertible", 1)],                                 // Convertible
-    &[("regent_coupe_cabrio", 1), ("bancroft_sedan", 1)],            // Luxury
-    &[("corsair_gtx", 1), ("halcyon_turbo", 1)],                     // Muscle
+    &[("buckboard_pickup", 1)],                           // Pickup
+    &[("meadow_minivan", 1), ("drayman_van", 1)],         // Van
+    &[("pipit_hatch", 1)],                                // Hatch
+    &[("seabreeze_convertible", 1)],                      // Convertible
+    &[("regent_coupe_cabrio", 1), ("bancroft_sedan", 1)], // Luxury
+    &[("gannet_gt", 1), ("halcyon_turbo", 1), ("appaloosa_gt", 1)], // Muscle
 ];
 
 /// The paints a place of `seed` parks shape `s` (with `n_own` palette entries) in: up to
 /// [`OWN_PAINTS`] palette indices and [`ERA_PAINTS`] distinct [`shape::ERA_1980S_PAINT`]
 /// indices, drawn by the era's weights so the common street colors are the likely ones.
-fn place_paints(seed: u64, s: usize, n_own: usize) -> (Vec<usize>, Vec<usize>) {
+pub(crate) fn place_paints(seed: u64, s: usize, n_own: usize) -> (Vec<usize>, Vec<usize>) {
     let roll = |j: u64| skywave_core::hash64(seed, &[0x5041_494e, s as u64, j]);
     let start = (roll(0) % n_own as u64) as usize;
     let own: Vec<usize> = (0..OWN_PAINTS.min(n_own))
@@ -114,7 +121,7 @@ fn parked_shape(vehicle_class: u8, roll: u32) -> usize {
     let list = PARKED
         .get(usize::from(vehicle_class & 15))
         .copied()
-        .unwrap_or(&[("palisade_wagon", 1)]);
+        .unwrap_or(&[("homestead_wagon", 1)]);
     let total: u32 = list.iter().map(|e| e.1).sum();
     let mut r = roll % total;
     let mut id = list[0].0;
@@ -230,6 +237,9 @@ pub struct PropInstances {
     entries: Vec<Entry>,
     /// The street lights' mesh.
     lamp_mesh: u16,
+    /// Per shape, per paint (its palette, then the era's): the parked car's level-1 mesh
+    /// (level 2 is the next), when the place parks it.
+    cars: Vec<Vec<Option<u16>>>,
 }
 
 impl PropInstances {
@@ -375,7 +385,17 @@ impl PropInstances {
             ids: Vec::new(),
             entries,
             lamp_mesh,
+            cars: car_mesh,
         }))
+    }
+
+    /// The registered ids of the parked car `shape` in era paint `era` (an index into
+    /// `shape::ERA_1980S_PAINT`) at levels 1 and 2, when the place parks one.
+    pub fn car_ids(&self, shape: usize, era: usize) -> Option<[MeshId; 2]> {
+        let paints = self.cars.get(shape)?;
+        let n_own = paints.len() - shape::ERA_1980S_PAINT.len();
+        let m = usize::from((*paints.get(n_own + era)?)?);
+        Some([*self.ids.get(m)?, *self.ids.get(m + 1)?])
     }
 
     /// The shared meshes, to register with the renderer.
@@ -401,7 +421,7 @@ impl PropInstances {
         &self,
         eye: Vec3,
         live: impl Fn([i32; 2]) -> bool,
-        lights: &[PointLight],
+        lights: &FrameLights,
         lamp_glow: f32,
         rocking: &world::collide::Rocking,
         out: &mut Vec<MeshInstance>,
@@ -426,12 +446,15 @@ impl PropInstances {
                 }
                 let mesh = if far { e.far } else { e.mesh };
                 let lights = if d2 < lit2 {
-                    light_set(lights, &e.bounds)
+                    lights.set_for(&e.bounds)
                 } else {
                     LightSet::EMPTY
                 };
+                // A parked car's lamps (built lit for the traffic) are off.
                 let glow = if e.mesh == self.lamp_mesh {
                     lamp_glow
+                } else if e.car {
+                    0.0
                 } else {
                     1.0
                 };
@@ -468,12 +491,29 @@ fn tilted(transform: [[f32; 4]; 4], tilt: [f32; 2]) -> [[f32; 4]; 4] {
 mod tests {
     use super::*;
 
+    /// The built-in shapes no place parks: the exotics and the sports cars' open versions,
+    /// which only the player drives.
+    const UNPARKED: [&str; 6] = [
+        "basilisk_v12",
+        "basilisk_roadster",
+        "avocet_v8",
+        "avocet_spider",
+        "longbow_convertible",
+        "appaloosa_convertible",
+    ];
+
     #[test]
     fn parked_cars_fit_their_class_and_every_shape_parks() {
         let shapes: Vec<_> = vehicles::BUILTIN_SHAPES
             .iter()
             .map(|(_, text)| vehicles::load_shape(text).unwrap())
             .collect();
+        // The shapes that never park are the ones traffic leaves out.
+        let tail: Vec<&str> = shapes[vehicles::TRAFFIC_SHAPES..]
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(tail, UNPARKED);
         let mut parked = vec![false; shapes.len()];
         for (class, list) in PARKED.iter().enumerate() {
             let [box_len, box_w, _] = world::props::parked_car_size(class as u8);
@@ -501,11 +541,15 @@ mod tests {
                 assert!(picked.iter().any(|&k| shapes[k].id == id), "{id}");
             }
         }
-        assert!(
-            parked.iter().all(|&p| p),
-            "every built-in shape parks somewhere"
-        );
-        assert_eq!(shapes[parked_shape(15, 7)].id, "palisade_wagon");
+        for (k, s) in shapes.iter().enumerate() {
+            assert_eq!(
+                parked[k],
+                !UNPARKED.contains(&s.id.as_str()),
+                "{} parks somewhere unless it is one of UNPARKED",
+                s.id
+            );
+        }
+        assert_eq!(shapes[parked_shape(15, 7)].id, "homestead_wagon");
     }
 
     #[test]
@@ -522,9 +566,10 @@ mod tests {
         assert!((0..8).any(|seed| place_paints(seed, 0, 7) != place_paints(1, 0, 7)));
     }
 
-    /// Bytes of parked-car mesh on the coast (seed 1), vertices plus indices: 22.9 MB with
+    /// Bytes of parked- and NPC-car mesh on the coast (seed 1), vertices plus indices: 22.9 MB with
     /// the four first shapes in every paint the place used, 65 MB for twelve shapes that
-    /// way, 21.5 MB for twelve in at most six paints each. The ceiling is ~1.2x the four
+    /// way, 21.5 MB for twelve in at most six paints each, 24.8 MB for the fourteen that
+    /// park (the sports cars' two common coupes added). The ceiling is ~1.2x the four
     /// (`docs/PERFORMANCE.md`).
     const PARKED_MESH_BYTES_MAX: usize = 27_000_000;
 
@@ -532,9 +577,11 @@ mod tests {
     fn parked_car_meshes_stay_within_budget() {
         let place =
             crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
-        let props = PropInstances::new(&place, &Palette::socal_1985(), |_| [0, 0])
+        let mut props = PropInstances::new(&place, &Palette::socal_1985(), |_| [0, 0])
             .unwrap()
             .unwrap();
+        let ids = (0..props.meshes().len() as u32).map(MeshId).collect();
+        props.set_ids(ids);
         let first_car: usize = LOOKS.iter().map(|l| l.variants as usize).sum();
         let cars = &props.meshes()[first_car..];
         let bytes: usize = cars
@@ -549,10 +596,25 @@ mod tests {
             "parked cars: {} meshes, {tris} triangles, {bytes} bytes",
             cars.len()
         );
-        assert!(cars.len() <= 12 * (OWN_PAINTS + ERA_PAINTS) * 2);
+        let parking = vehicles::BUILTIN_SHAPES.len() - UNPARKED.len();
+        assert!(cars.len() <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
+        // The traffic takes the parked cars' era paints, sharing their meshes; it builds
+        // only the (shape, paint) pairs the place does not park, inside the same budget.
+        let mut npcs = crate::npc::Npcs::new(&place, skywave_core::Seed(1));
+        let mut built = 0;
+        npcs.build_meshes(Some(&props), |_| {
+            built += 1;
+            MeshId(u32::MAX)
+        })
+        .unwrap();
+        let npc = npcs.built_bytes();
+        // The pedestrian figures' meshes have their own budget (`peds`).
+        let built = built - crate::peds::VARIANTS * traffic::figure::PARTS;
+        eprintln!("traffic: {built} more meshes, {npc} bytes");
+        assert!(cars.len() + built <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
         assert!(
-            bytes <= PARKED_MESH_BYTES_MAX,
-            "{bytes} bytes of parked cars"
+            bytes + npc <= PARKED_MESH_BYTES_MAX,
+            "{bytes} bytes of parked cars and {npc} of traffic"
         );
     }
 }

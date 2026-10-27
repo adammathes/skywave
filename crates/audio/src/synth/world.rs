@@ -17,9 +17,11 @@
 //!   on its own output for the ui bus.
 //! - **Ambience**: an ocean wash (low-passed noise swelling every ~12 s) and, by day, the
 //!   odd bird call (a few swept chirps panned somewhere), each scaled by its amount.
+//! - **Traffic**: each passing car's engine (`AudioParams::traffic`) a buzzy pulse at its
+//!   firing frequency, low-passed, with a little rumble under it, at its level and pan.
 
 use super::dsp::{fract, pan_gains, sin_turns, smoothstep, unit, Decay, Noise, Slew, Svf, DT};
-use super::{AudioParams, Surface};
+use super::{AudioParams, Surface, TRAFFIC_VOICES};
 
 /// Filter coefficients, targets and events are updated every this many samples.
 const TICK: usize = 32;
@@ -93,6 +95,32 @@ pub struct WorldSynth {
     bird_phase: f32,
     bird_pan: [f32; 2],
     bird_level: f32,
+
+    traffic: [Engine; TRAFFIC_VOICES],
+}
+
+/// A passing car's engine voice.
+#[derive(Clone, Debug)]
+struct Engine {
+    phase: f32,
+    hz: f32,
+    gain_l: Slew,
+    gain_r: Slew,
+    target: [f32; 2],
+    lp: Svf,
+}
+
+impl Engine {
+    fn new() -> Engine {
+        Engine {
+            phase: 0.0,
+            hz: 0.0,
+            gain_l: Slew::new(0.0, 0.08),
+            gain_r: Slew::new(0.0, 0.08),
+            target: [0.0; 2],
+            lp: Svf::new(300.0, 0.8),
+        }
+    }
 }
 
 impl Default for WorldSynth {
@@ -159,6 +187,7 @@ impl WorldSynth {
             bird_phase: 0.0,
             bird_pan: [0.7, 0.7],
             bird_level: 0.0,
+            traffic: core::array::from_fn(|_| Engine::new()),
         }
     }
 
@@ -272,6 +301,18 @@ impl WorldSynth {
         let a = sin_turns(self.swell_phase[0]).max(0.0);
         let b = sin_turns(self.swell_phase[1]).max(0.0);
         self.swell = 0.3 + 0.5 * a * a + 0.2 * b;
+
+        // Traffic: the pitch follows at once (the Doppler shift is the app's), the level
+        // eases so a voice handed to another car does not click.
+        for (e, v) in self.traffic.iter_mut().zip(&p.traffic) {
+            let [gl, gr] = pan_gains(v.pan);
+            let g = 0.16 * v.gain;
+            e.target = [g * gl, g * gr];
+            if v.gain > 0.0 {
+                e.hz = v.hz;
+            }
+            e.lp.set((4.0 * e.hz).clamp(80.0, 1600.0), 0.8);
+        }
 
         // Birds: a call every few seconds while there are birds about.
         if self.bird_notes == 0 {
@@ -406,6 +447,19 @@ impl WorldSynth {
             }
         }
 
+        // Traffic engines.
+        for e in &mut self.traffic {
+            let gl = e.gain_l.step(e.target[0]);
+            let gr = e.gain_r.step(e.target[1]);
+            if gl + gr > 1e-5 {
+                e.phase = fract(e.phase + e.hz * DT);
+                let pulse = if e.phase < 0.3 { 1.0 } else { -0.43 };
+                let x = e.lp.low(pulse + 0.4 * self.brown);
+                l += x * gl;
+                r += x * gr;
+            }
+        }
+
         if l.is_finite() && r.is_finite() && horn.is_finite() {
             [l, r, horn]
         } else {
@@ -429,6 +483,9 @@ impl WorldSynth {
             &mut self.ocean_r,
         ] {
             f.reset();
+        }
+        for e in &mut self.traffic {
+            e.lp.reset();
         }
         self.brown = 0.0;
     }
@@ -574,6 +631,30 @@ mod tests {
         assert_eq!(soft[0], soft[1]);
         let left = bump(20.0, -1.0);
         assert!(left[0] > 1.5 * left[1], "{left:?}");
+    }
+
+    #[test]
+    fn a_passing_car_is_heard_on_its_side_and_fades_with_its_gain() {
+        let ears = |gain: f32, pan: f32| {
+            let mut p = AudioParams::default();
+            p.traffic[2] = crate::synth::TrafficVoice {
+                gain,
+                pan,
+                hz: 90.0,
+            };
+            let x = render(&p, 48_000);
+            let l: Vec<f32> = x[24_000..].iter().step_by(2).copied().collect();
+            let r: Vec<f32> = x[24_001..].iter().step_by(2).copied().collect();
+            [rms(&l), rms(&r)]
+        };
+        let near = ears(1.0, -0.8);
+        assert!(near[0] > 0.01 && near[0] > 2.0 * near[1], "{near:?}");
+        let far = ears(0.1, 0.0);
+        assert!(
+            far[0] < 0.3 * near[0] && (far[0] - far[1]).abs() < 1e-4,
+            "{far:?}"
+        );
+        assert!(ears(0.0, 0.0)[0] < 1e-4, "no car, no engine");
     }
 
     #[test]

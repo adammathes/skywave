@@ -1,4 +1,4 @@
-// Corsair GTX body: a low early-80s wedge.
+// Gannet GT body: a low early-80s wedge.
 //
 // Intent: a knife-edge nose that rises in one straight line to a very raked windshield,
 // a short flat roof, a long fastback covered in louvers and a wide, flat, upright tail
@@ -9,7 +9,7 @@
 // Units are meters; x runs rearward from the nose, y up from the ground. Layout:
 // docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
 ShapeSpec(
-    id: "corsair_gtx",
+    id: "gannet_gt",
     // Top from the nose to the tail, then the underside back to the nose.
     side: [
         (0.00, 0.50), (0.06, 0.60), (0.45, 0.70), (1.30, 0.80), (1.42, 0.82),

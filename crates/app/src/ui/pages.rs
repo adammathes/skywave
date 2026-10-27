@@ -3,8 +3,9 @@
 //!
 //! ```text
 //! Pause:     Resume · Reset car · Vehicle › · Settings › · Quit (native only)
-//! Vehicle:   one row per built-in car (name, then class, kW/t, drive, gearbox), the one
-//!            driven marked; select to swap it in where you are
+//! Vehicle:   Car (left/right through every built-in car) · Paint (its palette) · Drive
+//!            this car; a turntable preview and the car's specs beside them, and Select on
+//!            any row swaps the car in where you are
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
 //! Drive:     Handling (Arcade / Light / Off)
 //! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
@@ -16,13 +17,17 @@
 //!            this device; select to remap
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
-//! Video:     Quality (Low / Deck / Medium / High / Ultra) · UI scale · Resolution scale ·
-//!            Bloom · Performance overlay
+//! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (the
+//!            panel's, then its whole divisors: 45 / 30 at 90 Hz) · UI scale · Resolution
+//!            scale · Bloom · Performance overlay
 //! HUD:       Minimap · Rotate with car · Minimap zoom
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
-//!            Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
-//! Stations:  one on/off row per station of the preset and per added stream
-//! World:     Time of day · Clock speed
+//!            Radio in background · Stations › · [web: Add stream URL] · [Remove added
+//!            streams, when there are some] · [web: Add music folder, or Pick music folder
+//!            again] · [Remove music folders, when there are some]
+//! Stations:  one on/off row per station of the preset, per added stream and per music
+//!            folder, then "Remove <folder>" per music folder
+//! World:     Time of day · Clock speed · Traffic
 //! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
 //! ```
@@ -33,7 +38,7 @@ use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
 use crate::radio::{CarRadio, PRESET_TITLES};
 use crate::settings::{
-    Handling, Quality, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP,
+    FrameRate, Handling, Quality, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP,
     RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM,
     UI_SCALE_STEP, VOLUME_STEP,
 };
@@ -43,7 +48,7 @@ use super::menu::{Item, Unit, Widget};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Pause,
-    /// Pick a car: one row per [`crate::vehicles::BUILTIN`] entry.
+    /// Pick a car and its paint, with a turntable preview.
     Vehicle,
     Settings,
     Drive,
@@ -72,8 +77,13 @@ pub enum ItemId {
     ResetCar,
     Quit,
     Open(Page),
-    /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`].
+    /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`] (in the
+    /// paint chosen on the page).
     Vehicle(usize),
+    /// The Vehicle page's car being looked at: a [`crate::vehicles::BUILTIN`] index.
+    VehicleCar,
+    /// The Vehicle page's paint: an entry of the car's palette.
+    Paint,
     /// Look Y (and free-fly look Y) invert on a device.
     InvertLookY(DeviceKind),
     InvertLookX(DeviceKind),
@@ -96,6 +106,7 @@ pub enum ItemId {
     Dashboard,
     CameraShake,
     Quality,
+    FrameRate,
     UiScale,
     ResolutionScale,
     Bloom,
@@ -104,17 +115,24 @@ pub enum ItemId {
     MinimapRotate,
     MinimapZoom,
     MasterVolume,
+    /// The radio in the background: keep playing (0) or mute (1).
+    BackgroundRadio,
     EngineVolume,
     WorldVolume,
     Mute,
     TimeOfDay,
     ClockSpeed,
+    Traffic,
     RadioVolume,
     RadioPreset,
     /// Row `i` of `CarRadio::rows`: the station on the dial or not.
     Station(usize),
     AddStream,
     ClearStreams,
+    AddMusic,
+    ClearMusic,
+    /// Row `i` of `CarRadio::rows`, a music folder: take it off the dial for good.
+    RemoveFolder(usize),
     KeepExisting,
     UseNew,
 }
@@ -129,9 +147,23 @@ pub struct PageCtx<'a> {
     pub radio: &'a CarRadio,
     /// The platform can ask the user for a line of text (a stream URL).
     pub text_entry: bool,
+    /// The platform can ask the user for a music folder, and whether last session's must
+    /// be picked again.
+    pub music_picker: bool,
+    pub music_again: bool,
     /// The preset in effect (the saved one, else the one picked for the device).
     pub quality: Quality,
+    /// The frame-rate cap in effect, and the display's refresh rate it divides.
+    pub frame_rate: FrameRate,
+    pub panel_hz: f64,
+    /// The Vehicle page's car (a [`crate::vehicles::BUILTIN`] index) and paint.
+    pub browse: [usize; 2],
 }
+
+/// Option names of the paint chooser, one per palette entry (the page draws swatches).
+pub const PAINT_NAMES: [&str; super::roster::MAX_PAINTS] = [
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
+];
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
 /// Names of [`MINIMAP_RANGES_M`].
@@ -142,7 +174,12 @@ pub const HANDLING_NAMES: [&str; Handling::ALL.len()] = ["Arcade", "Light", "Off
 pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
     ["Cockpit", "Hood", "Chase near", "Chase mid", "Chase far"];
 /// Names of [`Quality::ALL`].
-pub const QUALITY_NAMES: [&str; Quality::ALL.len()] = ["Low", "Deck", "Medium", "High", "Ultra"];
+pub const QUALITY_NAMES: [&str; Quality::ALL.len()] =
+    ["Low", "Battery", "Deck", "Medium", "High", "Ultra"];
+/// Names of [`FrameRate::ALL`] (the page draws the frames a second they come to).
+pub const FRAME_RATE_NAMES: [&str; FrameRate::ALL.len()] = ["Panel", "1/2", "1/3", "1/4"];
+/// The Radio in background choice: index 0 keeps playing, 1 mutes.
+pub const BACKGROUND_RADIO_NAMES: [&str; 2] = ["Keep playing", "Mute"];
 /// The Dashboard choice: index 0 draws it, 1 is hood only.
 pub const DASHBOARD_NAMES: [&str; 2] = ["Full cockpit", "Hood only"];
 
@@ -198,12 +235,10 @@ pub fn note(page: Page) -> Option<&'static str> {
             "Select a row, then press the new input.\n\
              (hold): let go after a second. Other actions on that button act on release.",
         ),
-        Page::Vehicle => Some(
-            "The marked car is the one you are driving.\n\
-             Select another to swap it in right where you are.",
-        ),
         Page::Video => Some(
-            "Quality sets shadows, bloom and glow; Deck targets 90 fps there.\n\
+            "Quality sets shadows, bloom and glow; Deck holds the panel's 90 fps there,\n\
+             Battery every other refresh at 85% resolution. Frame rate draws every Nth refresh;\n\
+             the game runs the same.\n\
              Resolution scale draws the world smaller and upscales it.",
         ),
         Page::Drive => Some(
@@ -446,12 +481,25 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             let index = Quality::ALL
                 .iter()
                 .position(|&q| q == ctx.quality)
-                .unwrap_or(2);
+                .unwrap_or(0);
             add(
                 ItemId::Quality,
                 "Quality",
                 Widget::Choice {
                     options: &QUALITY_NAMES,
+                    index,
+                },
+            );
+            let offered = FrameRate::offered(ctx.panel_hz);
+            let index = offered
+                .iter()
+                .position(|&f| f == ctx.frame_rate)
+                .unwrap_or(0);
+            add(
+                ItemId::FrameRate,
+                "Frame rate",
+                Widget::Choice {
+                    options: &FRAME_RATE_NAMES[..offered.len()],
                     index,
                 },
             );
@@ -492,6 +540,12 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     "",
                     Widget::Toggle(ctx.settings.radio.is_enabled(&row.id)),
                 );
+            }
+            for (i, row) in ctx.radio.rows().iter().enumerate() {
+                if ctx.radio.files().iter().any(|c| c.id == row.id) {
+                    // Drawn as "Remove <name>" from the row.
+                    add(ItemId::RemoveFolder(i), "", Widget::Action);
+                }
             }
         }
         Page::Hud => {
@@ -539,6 +593,14 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     index: ctx.radio.preset_index(),
                 },
             );
+            add(
+                ItemId::BackgroundRadio,
+                "Radio in background",
+                Widget::Choice {
+                    options: &BACKGROUND_RADIO_NAMES,
+                    index: usize::from(s.mute_radio_unfocused),
+                },
+            );
             let (id, w) = open(Page::Stations);
             add(id, "Stations", w);
             if ctx.text_entry {
@@ -546,6 +608,14 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             }
             if !s.radio.custom.is_empty() {
                 add(ItemId::ClearStreams, "Remove added streams", Widget::Action);
+            }
+            if ctx.music_again {
+                add(ItemId::AddMusic, "Pick music folder again", Widget::Action);
+            } else if ctx.music_picker {
+                add(ItemId::AddMusic, "Add music folder", Widget::Action);
+            }
+            if !ctx.radio.files().is_empty() || ctx.music_again {
+                add(ItemId::ClearMusic, "Remove music folders", Widget::Action);
             }
         }
         Page::World => {
@@ -567,11 +637,44 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     index,
                 },
             );
+            let index = crate::npc::DENSITIES
+                .iter()
+                .position(|&d| d == ctx.settings.traffic)
+                .unwrap_or(2);
+            add(
+                ItemId::Traffic,
+                "Traffic",
+                Widget::Choice {
+                    options: &crate::npc::DENSITY_NAMES,
+                    index,
+                },
+            );
         }
         Page::Vehicle => {
-            for (i, car) in super::roster::roster().iter().enumerate() {
-                add(ItemId::Vehicle(i), car.name.as_str(), Widget::Action);
-            }
+            let [car, paint] = ctx.browse;
+            let names = super::roster::names();
+            let car = car.min(names.len().saturating_sub(1));
+            add(
+                ItemId::VehicleCar,
+                "Car",
+                Widget::Choice {
+                    options: names,
+                    index: car,
+                },
+            );
+            let paints = super::roster::roster()
+                .get(car)
+                .map_or(1, |c| c.paints.len())
+                .clamp(1, PAINT_NAMES.len());
+            add(
+                ItemId::Paint,
+                "Paint",
+                Widget::Choice {
+                    options: &PAINT_NAMES[..paints],
+                    index: paint.min(paints - 1),
+                },
+            );
+            add(ItemId::Vehicle(car), "Drive this car", Widget::Action);
         }
         Page::About => {}
         Page::Conflict => {
@@ -611,7 +714,12 @@ mod tests {
             can_quit: false,
             radio: &radio,
             text_entry: false,
+            music_picker: false,
+            music_again: false,
             quality: Quality::Deck,
+            frame_rate: FrameRate::Half,
+            panel_hz: 90.0,
+            browse: [3, 1],
         };
         let mut items = Vec::new();
         build(Page::Pause, &ctx, &mut items);
@@ -630,13 +738,18 @@ mod tests {
             ]
         );
         build(Page::Vehicle, &ctx, &mut items);
-        assert_eq!(items.len(), crate::vehicles::BUILTIN.len());
-        for (i, item) in items.iter().enumerate() {
-            assert_eq!(item.id, ItemId::Vehicle(i));
-            assert_eq!(item.widget, Widget::Action);
-            let spec = crate::vehicles::builtin_spec(crate::vehicles::BUILTIN[i].0).unwrap();
-            assert_eq!(item.label, spec.name);
-        }
+        let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
+        assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(3)]);
+        let Widget::Choice { options, index } = items[0].widget else {
+            panic!("{:?}", items[0])
+        };
+        assert_eq!((options.len(), index), (crate::vehicles::BUILTIN.len(), 3));
+        assert_eq!(options[3], "Regent Coupe Cabrio");
+        let Widget::Choice { options, index } = items[1].widget else {
+            panic!("{:?}", items[1])
+        };
+        assert_eq!((options.len(), index), (7, 1), "the Regent's palette");
+        assert_eq!(items[2].widget, Widget::Action);
         assert!(note(Page::About)
             .unwrap()
             .contains("Created by Adam Mathes"));
@@ -656,13 +769,23 @@ mod tests {
         assert!(matches!(items[3].widget, Widget::Slider { value, .. } if value == 0.8));
         assert_eq!(items[4].widget, Widget::Toggle(false), "not muted");
         assert!(matches!(items[5].widget, Widget::Choice { index: 0, .. }));
-        assert_eq!(items.len(), 7, "no text entry, no added streams");
+        assert_eq!(items[6].id, ItemId::BackgroundRadio);
+        assert!(
+            matches!(items[6].widget, Widget::Choice { index: 0, .. }),
+            "keeps playing"
+        );
+        assert_eq!(items.len(), 8, "no text entry, no added streams");
         build(Page::Stations, &ctx, &mut items);
         assert_eq!(items.len(), radio.rows().len());
         assert!(items.iter().all(|i| i.widget == Widget::Toggle(true)));
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));
+        assert_eq!(items[2].id, ItemId::Traffic);
+        assert!(
+            matches!(items[2].widget, Widget::Choice { index: 2, .. }),
+            "normal traffic"
+        );
         build(Page::Drive, &ctx, &mut items);
         assert!(
             matches!(items[0].widget, Widget::Choice { index: 0, .. }),
@@ -682,8 +805,13 @@ mod tests {
         build(Page::Video, &ctx, &mut items);
         assert_eq!(items[0].id, ItemId::Quality);
         assert!(
-            matches!(items[0].widget, Widget::Choice { index: 1, .. }),
+            matches!(items[0].widget, Widget::Choice { index: 2, .. }),
             "deck"
+        );
+        assert_eq!(items[1].id, ItemId::FrameRate);
+        assert!(
+            matches!(items[1].widget, Widget::Choice { index: 1, options } if options.len() == 3),
+            "45 of 90, 45 and 30"
         );
     }
 }
