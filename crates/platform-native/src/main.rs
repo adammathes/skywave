@@ -8,7 +8,8 @@
 //! free cursor; the raw motion still drives the look.
 //!
 //! Usage: `skywave [--seed N] [--car ID] [--scenario ID] [--scene KEY=VALUE]... [--stats]
-//! [--frames N] [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--version]`.
+//! [--frames N] [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--radio-off]
+//! [--version]`.
 //! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
 //! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N`, `--car ID` and `--scenario ID`
 //! are `--scene seed=N`, `--scene car=ID` and `--scene scenario=ID` (a world,
@@ -22,7 +23,9 @@
 //! (`AutoNoVsync`; the default is `AutoVsync`) and, for benchmarks, draws the whole world
 //! every frame with no frame-rate cap. `--quality low|deck|medium|high|ultra`
 //! forces a graphics preset for the session (not saved); `--no-cull` turns instance culling
-//! off and `--no-prepass` the depth pre-pass (for comparisons). `--version` prints the build's `git describe` (see `build.rs`)
+//! off and `--no-prepass` the depth pre-pass (for comparisons). `--radio-off` keeps the car
+//! radio silent and off the network (CI and benchmarks). `--version` prints the build's
+//! `git describe` (see `build.rs`)
 //! and exits.
 //!
 //! Frames are drawn no more often than Settings › Video › Frame rate allows (the panel's
@@ -40,9 +43,11 @@
 //! `$XDG_CONFIG_HOME/skywave/settings.json` (see `settings`).
 //!
 //! Sound plays through the default output device at 48 kHz (`sfx`); without one the game
-//! runs silent.
+//! runs silent. The car radio's internet stations play through it too (`radio`); the
+//! window title shows the station and what it says is playing.
 
 mod pad;
+mod radio;
 mod settings;
 mod sfx;
 
@@ -110,6 +115,8 @@ struct Options {
     quality: Option<Quality>,
     no_cull: bool,
     no_prepass: bool,
+    /// The radio stays silent and fetches nothing.
+    radio_off: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -122,6 +129,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--no-vsync" => opts.no_vsync = true,
             "--no-cull" => opts.no_cull = true,
             "--no-prepass" => opts.no_prepass = true,
+            "--radio-off" => opts.radio_off = true,
             "--frames" => {
                 let v = args.next().ok_or("--frames needs a count")?;
                 let n = v
@@ -784,9 +792,47 @@ struct Shell {
     error: Option<String>,
     /// The sound sink, if a device opened.
     sfx: Option<sfx::Sfx>,
+    /// The car radio's player, when there is a sink to play it and it is not turned off.
+    radio: Option<radio::Player>,
+    /// What the window title last showed: the station playing and the player's title count.
+    title: (Option<usize>, u32),
 }
 
 impl Shell {
+    /// The radio's side of the frame: the player's reports in, this frame's commands out,
+    /// and the station with its now-playing title in the window title.
+    fn pump_radio(&mut self) {
+        let Some(player) = &mut self.radio else {
+            // Nobody plays: drop the commands.
+            self.app.radio_commands().for_each(drop);
+            return;
+        };
+        while let Some(event) = player.poll() {
+            self.app.radio_event(event);
+        }
+        for cmd in self.app.radio_commands() {
+            player.command(&cmd);
+        }
+        let r = self.app.radio();
+        let playing = match r.state() {
+            audio::RadioState::Playing { station } => Some(station),
+            _ => None,
+        };
+        let key = (playing, player.titles());
+        let Some(gpu) = self.gpu.as_ref().filter(|_| key != self.title) else {
+            return;
+        };
+        let mut title = String::from("Skywave");
+        if let Some(c) = playing.and_then(|i| r.channels().get(i)) {
+            let _ = write!(title, " \u{b7} {}", c.name);
+            if let Some(now) = player.title() {
+                let _ = write!(title, " \u{b7} {now}");
+            }
+        }
+        gpu.window.set_title(&title);
+        self.title = key;
+    }
+
     /// Seconds since the start: the pacing clock.
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64()
@@ -909,6 +955,7 @@ impl ApplicationHandler for Shell {
                 if let Some(sfx) = &self.sfx {
                     sfx.set_params(self.app.audio_params());
                 }
+                self.pump_radio();
                 if self.app.quit_requested() {
                     event_loop.exit();
                     return;
@@ -916,6 +963,10 @@ impl ApplicationHandler for Shell {
                 if let Some(world) = self.app.take_world_pick() {
                     match self.app.switch_world(&self.opts.scene, world) {
                         Ok(()) => {
+                            // The new world's radio starts off: silence the old one's.
+                            if let Some(player) = &mut self.radio {
+                                player.command(&audio::RadioCommand::Stop);
+                            }
                             if let Some(gpu) = &mut self.gpu {
                                 gpu.reload(&self.app, &self.opts);
                             }
@@ -1012,7 +1063,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "usage: skywave [--seed N] [--car ID] [--scenario ID] [--scene KEY=VALUE]... [--stats] \
                  [--frames N [--exit]] [--no-vsync] [--quality low|battery|deck|medium|high|ultra] \
-                 [--no-cull] [--no-prepass] [--version]"
+                 [--no-cull] [--no-prepass] [--radio-off] [--version]"
             );
             return if e.is_empty() {
                 ExitCode::SUCCESS
@@ -1051,6 +1102,11 @@ fn main() -> ExitCode {
     app.set_stream_budget(app::stream::StreamBudget::NATIVE);
     app.set_settings_store(Box::new(store));
     let opts_frames = opts.frames;
+    // The radio plays through the sound sink: without a device (or with --radio-off) its
+    // commands are dropped, as on a web page without the player glue.
+    let radio_out = (!opts.radio_off).then(|| Arc::new(radio::Output::new()));
+    let sfx = sfx::Sfx::start(radio_out.clone());
+    let radio = radio_out.filter(|_| sfx.is_some()).map(radio::Player::new);
     let mut shell = Shell {
         app,
         opts,
@@ -1067,7 +1123,9 @@ fn main() -> ExitCode {
         stats: Stats::new(opts_frames),
         frames_drawn: 0,
         error: None,
-        sfx: sfx::Sfx::start(),
+        sfx,
+        radio,
+        title: (None, 0),
     };
     if let Err(e) = event_loop.run_app(&mut shell) {
         eprintln!("skywave: event loop failed: {e}");
@@ -1165,6 +1223,7 @@ mod tests {
         assert!(args(&["--exit"]).is_err(), "--exit needs --frames");
         assert!(args(&["--quality", "potato"]).is_err());
         assert!(!args(&["--frames", "3"]).unwrap().exit);
+        assert!(args(&["--radio-off"]).unwrap().radio_off);
     }
 
     #[test]
