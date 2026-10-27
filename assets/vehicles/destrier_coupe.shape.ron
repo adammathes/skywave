@@ -1,0 +1,63 @@
+// Destrier Coupe body: a late-60s big-block muscle coupe with a supercharger through the
+// hood, kept and dressed up by its owners into 2001.
+//
+// Intent: a long, flat hood and a short deck. A full-width grille with a round lamp
+// either side, a chrome blade bumper, a thin-pillared notchback roof with a near-upright
+// rear window, a hip over the rear wheels, a small ducktail and full-width tail lamps.
+// Chrome trim, deep-dish rims and the blower's polished case and scoop standing out of
+// the hood. Front engine, rear drive. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "destrier_coupe",
+    side: [
+        (0.00, 0.62), (0.04, 0.74), (0.20, 0.80), (1.90, 0.90), (1.98, 0.92),
+        (2.48, 1.30), (2.58, 1.34), (3.18, 1.33), (3.68, 0.99), (3.76, 0.98),
+        (4.66, 0.97), (4.75, 0.88),
+        (4.75, 0.32), (4.58, 0.24), (4.10, 0.21), (0.80, 0.19), (0.14, 0.24), (0.00, 0.34),
+    ],
+    plan: [
+        (0.00, 0.86), (0.08, 0.885), (0.40, 0.90), (3.00, 0.90), (3.70, 0.915), (4.50, 0.905),
+        (4.75, 0.88),
+    ],
+    belt: [(1.96, 0.91), (3.68, 0.97)],
+    section: Section(shoulder: 0.94, tumblehome_deg: 20, greenhouse_frac: 0.76, crown: 0.03, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.99, 2.48),
+        backlight: (3.22, 3.66),
+        side: [(2.06, 2.95), (3.02, 3.20)],
+    ),
+    wheels: Wheels(radius: 0.34, width: 0.25, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.73, track: 1.52),
+    front: Front(lights: Round, grille: Wide, bumper: Chrome, bumper_y: (0.26, 0.42)),
+    rear: Rear(lights: FullWidth, spoiler: Lip, bumper: Chrome, bumper_y: (0.28, 0.44)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.80, creases: [(0.10, 0.70, 4.70, 0.74)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: Mast, rims: Dish, hubcaps: false),
+    details: [ChromeTrim, Blower, Badge(Chevron)],
+    // The second and fifth colors get rally stripes.
+    color_details: [(1, RallyStripes), (4, RallyStripes)],
+    // Black, bright orange, plum, lime green, white, dark blue, gold.
+    palette: ["#141416", "#e0561a", "#5a1f4a", "#7fb52a", "#eeece4", "#1c2a52", "#b8902a"],
+    accent: "#161618",
+    interior: InteriorShape(
+        dash_height: 0.90,
+        dash_x: 2.14,
+        wheel_pos: (2.52, 0.74),
+        wheel_radius: 0.20,
+        column_angle_deg: 22,
+        mirror_pos: (2.40, 1.22),
+        seat: (2.95, 0.43),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash and black vinyl with
+        // ribbed inserts, black carpet, a brushed band, white-lit dials.
+        colors: ["#1a1b1d", "#1e1f22", "#1c1d1f", "#2a2b2e", "#2c2d30", "#c8c8c8"],
+        display: "#f2efe4",
+        insert: "#2c2d31",
+        piping: "#111113",
+        dash_top: "#1e1f22",
+        applique: Brushed,
+        manual: true,
+    ),
+)

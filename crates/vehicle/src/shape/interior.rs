@@ -203,7 +203,8 @@ impl<'a, 'b> Interior<'a, 'b> {
     }
 
     /// Inward-facing trim over the inside of the body, skipping the glass. A convertible
-    /// keeps only the door cards: no pillars or headliner over the open cabin.
+    /// keeps only the door cards: no pillars or headliner over the open cabin; a targa has
+    /// no headliner under its opening.
     fn shell(&mut self) {
         let open = self.b.convertible;
         let b = self.b;
@@ -246,9 +247,11 @@ impl<'a, 'b> Interior<'a, 'b> {
             let within = |r: (f32, f32)| sa >= r.0 - 1e-4 && sb <= r.1 + 1e-4;
             let side_glass = g.side.iter().any(|&r| within(r));
             let top_glass = within(g.windshield) || within(g.backlight);
+            let targa = b.targa.is_some_and(within);
             for j in 0..6 {
                 let mat: Mat = match j {
                     _ if open && j >= 2 => continue,
+                    _ if targa && j >= 3 => continue,
                     0 => m.door_card,
                     1 => m.int_trim,
                     2 if side_glass => continue,
@@ -1590,7 +1593,7 @@ impl<'a, 'b> Interior<'a, 'b> {
             0.006,
             m.int_trim,
         );
-        if b.convertible {
+        if b.convertible || b.targa.is_some() {
             self.header_visors();
             return;
         }
@@ -1679,7 +1682,7 @@ impl<'a, 'b> Interior<'a, 'b> {
         }
     }
 
-    /// A convertible's sun visors: short, folded flat against the windshield under the header
+    /// An open roof's sun visors (a convertible's, a targa's): short, folded flat against the windshield under the header
     /// so they keep out of the open view.
     fn header_visors(&mut self) {
         let b = self.b;

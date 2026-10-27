@@ -330,15 +330,12 @@ impl Ui {
             text_center(hud, cx, y, scale, color, args);
         };
         shadowed(hud, ty, scale, TEXT, format_args!("{}", car.name));
-        let n = roster::roster().len();
+        // Counted among this world's cars, as the chooser lists them.
+        let lineup = crate::scenario::lineup(self.scenario);
+        let n = lineup.cars.len();
+        let at = lineup.position(self.browse[0]).unwrap_or(0) + 1;
         let line = ty + scale * font::LINE_HEIGHT as f32 + 2.0;
-        shadowed(
-            hud,
-            line,
-            S,
-            TEXT,
-            format_args!("{} of {n}", self.browse[0] + 1),
-        );
+        shadowed(hud, line, S, TEXT, format_args!("{at} of {n}"));
     }
 
     /// The World page: cards for the worlds side by side in `[x, y, w, h]` (each its still,

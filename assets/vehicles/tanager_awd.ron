@@ -1,0 +1,47 @@
+// Tanager AWD: a late-90s all-wheel-drive twin-turbo V6 coupe.
+//
+// Intent: heavy, clever and unflustered. All four wheels pull, so it leaves the line
+// without a chirp and claws out of corners; the twin-turbo V6 is strong through the
+// middle. It understeers a little when pushed and never bites. Quicker off the line than
+// its power suggests, not as fast at the top as the grand tourer.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "tanager_awd",
+    name: "Tanager AWD",
+    era: Nineties,
+    year: 1999,
+    class: Sports,
+
+    mass_kg: 1700,
+    dims_m: (4.55, 1.84, 1.29),    // length, width, height
+    wheelbase_m: 2.47,
+    track_m: 1.55,
+    cg_height_m: 0.48,
+    cg_fore_aft: 0.45,             // 55% front
+
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 7000,
+        torque_nm: [(1000, 205), (2000, 312), (2800, 370), (4500, 370), (5800, 340), (7000, 262)],
+    ),
+    gears: [3.07, 1.88, 1.31, 1.0, 0.85],
+    final_drive: 4.15,
+    reverse: 3.0,
+    shift_ms: 200,
+    auto: true,
+    drive: All,
+
+    tires: Tires(grip_lat: 1.308, grip_long: 1.25, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 36000, damper: 3600, travel_m: 0.15, antiroll: 0.45),
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 10.0),
+    brakes: Brakes(max_nm: 4000, bias_front: 0.62, abs: true, handbrake_nm: 3000),
+    aero: Aero(cd: 0.345, frontal_m2: 2.0, downforce_coef: 0.04),
+    feel: Feel(oversteer_bias: 0.08, body_roll: 0.3, engine_sound: "v6", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 180, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "tanager_awd.shape.ron",
+)

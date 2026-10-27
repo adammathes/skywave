@@ -12,7 +12,10 @@
 //! so lamp states cannot be instance tints: each lens vertex is classified by its emissive
 //! hue (warm white head, red tail, amber marker) and the mesh is baked four times,
 //! headlights off/on × brake off/on, with each group's intensity ([`lamp_scale`]). Drawing
-//! picks one of the four.
+//! picks one of the four. The underglow (`CarMesh::underglow`, a car with
+//! `Detail::Underglow`) is a lamp group of its own: a separate lit mesh drawn while its
+//! switch is on, with two lights under the car for the glow on the road
+//! ([`CarLayout::underglow`]).
 //!
 //! **Glass** is single-sided, facing out. The forward pass culls back faces and has no
 //! blended path yet, so windows are opaque tinted panes seen from outside and vanish from
@@ -207,6 +210,36 @@ pub struct CarLayout {
     /// A convertible: the cabin is open above the belt, so the interior and steering wheel
     /// are drawn from every camera, not only the first-person ones.
     pub open_top: bool,
+    /// The underglow's lights, if the car has one.
+    pub underglow: Option<Underglow>,
+}
+
+/// Where a car's underglow lights the road from and in what color.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Underglow {
+    /// The tubes' color, linear, in `0..=1`.
+    pub rgb: [f32; 3],
+    /// Two light points under the car, front and rear, body space.
+    pub lights: [Vec3; 2],
+}
+
+impl Underglow {
+    /// The glow of `tubes` (model space) under a car whose body is `offset` from it: the
+    /// tubes' color, and points on the centerline over the lowest tube, a quarter of the
+    /// tubes' run in from each end. `None` for no tubes.
+    fn of(tubes: &MeshData, offset: Vec3) -> Option<Underglow> {
+        let e = tubes.emissive.first()?;
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for p in &tubes.positions {
+            lo = lo.min(Vec3::from(*p));
+            hi = hi.max(Vec3::from(*p));
+        }
+        let at = |t: f32| Vec3::new(0.0, lo.y, lo.z + (hi.z - lo.z) * t) + offset;
+        Some(Underglow {
+            rgb: [e[0], e[1], e[2]].map(|c| f32::from(c) / 255.0),
+            lights: [at(0.25), at(0.75)],
+        })
+    }
 }
 
 impl CarLayout {
@@ -258,6 +291,7 @@ impl CarLayout {
             taillamps: lamp_centers(&lit.lights, LampGroup::Tail).map(|p| p + offset),
             dims: spec.dims_m,
             open_top: shape.roof.convertible(),
+            underglow: Underglow::of(&car.underglow, offset),
         }
     }
 
@@ -336,6 +370,8 @@ pub struct CarLod {
     pub wheel: Mesh,
     /// `lights[headlights][braking]`.
     pub lights: [[Mesh; 2]; 2],
+    /// The underglow tubes, lit, if the car has them.
+    pub underglow: Option<Mesh>,
 }
 
 /// Mesh ids of one level of detail.
@@ -348,6 +384,7 @@ pub struct CarLodIds {
     pub steering_wheel: MeshId,
     pub wheel: MeshId,
     pub lights: [[MeshId; 2]; 2],
+    pub underglow: Option<MeshId>,
 }
 
 /// Mesh ids of the player's car, as registered with the renderer.
@@ -442,6 +479,8 @@ impl CarModel {
                     [lamps(down, false, false), lamps(down, false, true)],
                     [lamps(lit, true, false), lamps(lit, true, true)],
                 ],
+                underglow: (!down.underglow.indices.is_empty())
+                    .then(|| convert(&down.underglow, offset, Surface::Plain)),
             }
         });
         Ok(CarModel {
@@ -478,6 +517,7 @@ impl CarModel {
                     [add(&l.lights[0][0]), add(&l.lights[0][1])],
                     [add(&l.lights[1][0]), add(&l.lights[1][1])],
                 ],
+                underglow: l.underglow.as_ref().map(&mut add),
             }
         };
         let lods = [lod_ids(&self.lods[0]), lod_ids(&self.lods[1])];

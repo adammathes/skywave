@@ -112,6 +112,8 @@ pub enum Spoiler {
     None,
     Lip,
     Wing,
+    /// An aftermarket wing on tall uprights, well clear of the deck, with big end plates.
+    TallWing,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -180,6 +182,9 @@ pub enum Rims {
     Dish,
     /// A flat face with a ring of long slots.
     Slotted,
+    /// Aftermarket: six pairs of thin polished spokes from a small cap to a wide bright
+    /// lip, on a bigger rim with a low-profile tire.
+    Twin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -251,6 +256,39 @@ pub enum Detail {
     NacaDucts,
     /// Slats across the deck lid behind the cabin: a mid-engined car's engine cover.
     EngineLouvers,
+    /// An aftermarket body kit in the paint: a deep front air dam with a splitter lip, side
+    /// skirts between the arches and a rear valance with a dark diffuser.
+    BodyKit,
+    /// A supercharger standing through the hood: a polished case, twin carburetor stacks
+    /// and a butterfly scoop on top.
+    Blower,
+    /// A lift-out roof panel over the front seats (hardtops with side windows): the roof is
+    /// open from the windshield header to the end of the first side window, a painted
+    /// hoop behind it; the side glass stays up.
+    Targa,
+    /// Neon tubes under the sills and the bumpers, lit by their own switch
+    /// (`CarMesh::underglow`).
+    Underglow(Neon),
+}
+
+/// An underglow tube's color.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Neon {
+    Blue,
+    Violet,
+    Green,
+}
+
+impl Neon {
+    /// The tube's glow, sRGB.
+    pub fn rgb(self) -> [u8; 3] {
+        match self {
+            Neon::Blue => [40, 110, 255],
+            Neon::Violet => [170, 60, 255],
+            Neon::Green => [60, 255, 140],
+        }
+    }
 }
 
 /// Where a convertible's fabric top is.
@@ -470,6 +508,8 @@ pub enum ShapeError {
     /// A `PickupBed` on a convertible, shorter than a meter, or under a top that is not at
     /// the belt.
     Bed,
+    /// A `Targa` on a convertible or a car with no side window to end the opening.
+    Targa,
 }
 
 /// Parses `#rrggbb` into sRGB bytes.
@@ -764,6 +804,15 @@ impl ShapeSpec {
         if !ok {
             return Err(ShapeError::Interior);
         }
+        if self.details.contains(&Detail::Targa) {
+            let ok = !self.roof.convertible()
+                && g.side
+                    .first()
+                    .is_some_and(|w| w.1 > g.windshield.1 + 0.4 && w.1 < g.backlight.0);
+            if !ok {
+                return Err(ShapeError::Targa);
+            }
+        }
         if self.roof.convertible() {
             // The cabin opens from the header back to the boot well; the rear seat sits
             // ahead of the well and the deck behind the header is at the belt (there is no
@@ -792,6 +841,15 @@ impl ShapeSpec {
             }
         }
         Ok(())
+    }
+
+    /// The open range of a `Targa` roof along the car: from the windshield header to the
+    /// end of the first side window.
+    pub(crate) fn targa(&self) -> Option<(f32, f32)> {
+        let w = self.glass.side.first()?;
+        self.details
+            .contains(&Detail::Targa)
+            .then_some((self.glass.windshield.1, w.1))
     }
 
     /// The open range of a `PickupBed` along the car: from the bulkhead behind the cab's

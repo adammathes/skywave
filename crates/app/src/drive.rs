@@ -92,8 +92,12 @@ const TAIL_CORONA: Corona = Corona {
     radius: 0.4,
     strength: 0.8,
 };
-/// Most lights one car gives the frame: two headlamps, two tail lamps.
-pub const CAR_LIGHTS: usize = 4;
+/// Most lights one car gives the frame: two headlamps, two tail lamps, two underglow lights.
+pub const CAR_LIGHTS: usize = 6;
+/// The underglow's lights: as bright (kcd) as a dim lamp and short-reaching, so they pool
+/// on the road round the car and no further.
+const UNDERGLOW_KCD: f32 = 0.25;
+const UNDERGLOW_RADIUS_M: f32 = 3.5;
 /// Instance tint of the cabin walls (the body shell inside out, so in the paint color): the
 /// inside of the roof and pillars reads as a dark lining, not as bright paint under the
 /// cabin light.
@@ -244,6 +248,8 @@ pub struct Drive {
     /// The headlights follow dusk and dawn (Settings › Drive › Headlights: Auto): they
     /// switch when it gets dark or light, and the switch overrides them in between.
     pub auto_headlights: bool,
+    /// The underglow switched on (off at the start; lit only on a car that has one).
+    pub underglow: bool,
     /// Whether it was dark at the last frame, `None` until the next frame decides.
     pub auto_dark: Option<bool>,
     /// Held this frame (for the audio task).
@@ -295,6 +301,7 @@ impl Drive {
             headlights: false,
             high_beams: false,
             auto_headlights: false,
+            underglow: false,
             auto_dark: None,
             horn: false,
             roll: [0.0; 4],
@@ -340,7 +347,7 @@ impl Drive {
     /// Swaps in the car `spec` (with its body `layout`) where this one is: on the ground
     /// under it, level, facing the same way; at rest, unless this one was rolling slower
     /// than [`KEEP_SPEED_MPS`], whose velocity it keeps. The odometer starts again; the
-    /// headlights, the assists and the respawn point stay.
+    /// headlights, the underglow switch, the assists and the respawn point stay.
     pub fn switch_car(&mut self, spec: VehicleSpec, layout: CarLayout, ground: &DriveGround) {
         let pose = self.pose(1.0);
         let f = pose.forward();
@@ -353,6 +360,7 @@ impl Drive {
         next.headlights = self.headlights;
         next.high_beams = self.high_beams;
         next.auto_headlights = self.auto_headlights;
+        next.underglow = self.underglow;
         next.auto_dark = self.auto_dark;
         next.start_ground = self.start_ground;
         next.start_heading = self.start_heading;
@@ -382,6 +390,9 @@ impl Drive {
         if input.just_pressed(Action::HighBeams) {
             self.high_beams = !self.headlights || !self.high_beams;
             self.headlights = true;
+        }
+        if input.just_pressed(Action::Underglow) {
+            self.underglow = !self.underglow;
         }
         self.horn = input.pressed(Action::Horn);
     }
@@ -544,6 +555,12 @@ impl Drive {
             glow: glow.lamps,
             ..instance(lod.lights[on][usize::from(self.braking())], body)
         });
+        if let Some(tubes) = lod.underglow.filter(|_| self.underglow) {
+            out.push(MeshInstance {
+                glow: glow.lamps,
+                ..instance(tubes, body)
+            });
+        }
         for w in self.wheels(alpha) {
             out.push(instance(lod.wheel, w));
         }
@@ -584,8 +601,8 @@ impl Drive {
 
     /// The car's lights: the headlight beams (two spots, from the left and right headlamps
     /// along the car's nose, pitched down; high beams when selected) when the headlights are
-    /// on, then the tail lamps' coronas while they are lit (headlights on or braking).
-    /// Returns them and how many.
+    /// on, then the tail lamps' coronas while they are lit (headlights on or braking), then
+    /// the underglow's two pools of light while it is on. Returns them and how many.
     pub fn lights(&self, alpha: f32) -> ([PointLight; CAR_LIGHTS], usize) {
         let pose = self.pose(alpha);
         let high = self.high_beams_lit();
@@ -607,16 +624,30 @@ impl Drive {
         };
         let [l, r] = self.layout.headlamps;
         let [tl, tr] = self.layout.taillamps;
-        let mut out = [at(l), at(r), tail(tl), tail(tr)];
-        let n = match (self.headlights, self.braking()) {
-            (true, _) => 4,
-            (false, true) => {
-                out[0] = out[2];
-                out[1] = out[3];
-                2
-            }
-            (false, false) => 0,
+        let mut out = [PointLight::omni([0.0; 3], [0.0; 3], 0.0); CAR_LIGHTS];
+        let mut n = 0;
+        let mut push = |light: PointLight| {
+            out[n] = light;
+            n += 1;
         };
+        if self.headlights {
+            push(at(l));
+            push(at(r));
+        }
+        if self.headlights || self.braking() {
+            push(tail(tl));
+            push(tail(tr));
+        }
+        if let Some(glow) = self.layout.underglow.filter(|_| self.underglow) {
+            for p in glow.lights {
+                let rgb = glow.rgb.map(|c| c * UNDERGLOW_KCD);
+                push(PointLight::omni(
+                    pose.point(p).to_array(),
+                    rgb,
+                    UNDERGLOW_RADIUS_M,
+                ));
+            }
+        }
         (out, n)
     }
 }
@@ -691,6 +722,7 @@ mod tests {
                 [MeshId(k + 6), MeshId(k + 7)],
                 [MeshId(k + 8), MeshId(k + 9)],
             ],
+            underglow: Some(MeshId(k + 11)),
         };
         CarMeshes {
             lods: [lod(10), lod(30)],
@@ -1040,6 +1072,57 @@ mod tests {
         assert!(lights[..2]
             .iter()
             .all(|l| l.radius == 0.0 && l.corona == brake.corona));
+    }
+
+    #[test]
+    fn the_underglow_has_its_own_switch() {
+        let mut d = Drive::new("siskin_coupe").unwrap();
+        let glow = d.layout.underglow.expect("the tuner has underglow");
+        assert!(glow.rgb[2] > glow.rgb[0], "blue");
+        let ids = ids();
+        let tubes = ids.lods[0].underglow.unwrap();
+        let drawn = |d: &Drive| {
+            let mut out = Vec::new();
+            d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
+            out.iter().any(|i| i.mesh == tubes)
+        };
+        // Off at the start: nothing drawn, nothing lit.
+        assert!(!d.underglow && !drawn(&d));
+        assert_eq!(d.lights(1.0).1, 0);
+        let mut input = InputState::default();
+        input.set(Action::Underglow, 1.0);
+        input.set_just_pressed(Action::Underglow, true);
+        d.frame(&input, true);
+        assert!(d.underglow && drawn(&d) && !d.headlights);
+        // Two pools of its color under the car, front and rear.
+        let (lights, n) = d.lights(1.0);
+        assert_eq!(n, 2);
+        let pose = d.pose(1.0);
+        let local: Vec<Vec3> = lights[..2]
+            .iter()
+            .map(|l| pose.rot.inverse() * (Vec3::from(l.position) - pose.pos))
+            .collect();
+        for (l, p) in lights.iter().zip(&local) {
+            assert!(l.radius > 1.0 && l.direction == [0.0; 3]);
+            assert!(l.color[2] > l.color[0]);
+            assert!(p.x.abs() < 1e-4 && p.y < 0.0, "{p}");
+        }
+        assert!(local[0].z < local[1].z, "front then rear");
+        // With the headlights too: beams, tail lamps, then the underglow.
+        d.headlights = true;
+        let (all, n) = d.lights(1.0);
+        assert_eq!(n, CAR_LIGHTS);
+        assert_eq!(all[4], lights[0]);
+        // It stays on across a switch of cars, and lights nothing on a car without one.
+        let next = Drive::new(DEFAULT_VEHICLE).unwrap();
+        d.switch_car(next.spec, next.layout, &flat());
+        assert!(d.underglow && d.layout.underglow.is_none());
+        d.headlights = false;
+        assert_eq!(d.lights(1.0).1, 0);
+        // The switch turns it off again.
+        input.set_just_pressed(Action::Underglow, true);
+        d.frame(&input, true);
+        assert!(!d.underglow);
     }
 
     #[test]

@@ -778,7 +778,11 @@ mod tests {
         let Widget::Choice { options, index } = items[0].widget else {
             panic!("{:?}", items[0])
         };
-        assert_eq!((options.len(), index), (crate::vehicles::BUILTIN.len(), 3));
+        // The coast's cars only: no 2001 car lists in 1984.
+        assert_eq!(
+            (options.len(), index),
+            (crate::scenario::lineup(0).cars.len(), 3)
+        );
         assert_eq!(options[3], "Regent Coupe Cabrio");
         let Widget::Choice { options, index } = items[1].widget else {
             panic!("{:?}", items[1])
