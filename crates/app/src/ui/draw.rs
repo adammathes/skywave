@@ -1052,6 +1052,7 @@ impl Display for ToastText {
             },
             Toast::CarReset => f.write_str("Car reset"),
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
+            Toast::MusicAdded(n) => write!(f, "Your music is on the dial: {n} tracks"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }
     }

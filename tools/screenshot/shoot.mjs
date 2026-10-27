@@ -8,13 +8,16 @@
 //   node tools/screenshot/shoot.mjs --all                         # every scene in scenes.json
 //   node tools/screenshot/shoot.mjs --all --golden                # -> golden/<name>.png
 //   node tools/screenshot/shoot.mjs --selftest                    # wasm vs native hashes
+//   node tools/screenshot/shoot.mjs --music                       # a dropped MP3 plays
 //   node tools/screenshot/shoot.mjs [--url-query "?seed=1"] [--out path.png]   # ad hoc
 //   node tools/screenshot/shoot.mjs ... --size 1280x800          # another viewport (16:10)
 //
 // `--scene` may repeat and combines with `--selftest`. Scenes are named URL queries in
 // `scenes.json` (keys: crates/app/src/scene.rs). `--selftest` opens `?selftest=1`, reads
 // the `{"skywave_selftest": {...}}` console line and compares it with `selftest.json`, the
-// values native tests pin. Compare captures with goldens using `diff.mjs`.
+// values native tests pin. `--music` drops a short MP3 (silence with an ID3 tag, generated
+// here) on a running game, tunes the radio to the station it becomes and checks that the
+// page's player plays it. Compare captures with goldens using `diff.mjs`.
 //
 // Uses an already-installed `playwright` package (global/NODE_PATH or tools/screenshot/
 // node_modules); it does not download browsers.
@@ -68,7 +71,8 @@ const jobs = names.map((name) => ({
   out: join(here, golden ? "golden" : "out", `${name}.png`),
 }));
 const selftest = flag("--selftest");
-if (jobs.length === 0 && !selftest) {
+const music = flag("--music");
+if (jobs.length === 0 && !selftest && !music) {
   jobs.push({
     name: "ad hoc",
     query: opt("--url-query", "?seed=1"),
@@ -231,8 +235,85 @@ async function runSelftest() {
   }
 }
 
+/// A `secs`-second MP3: an ID3v2.3 tag (TIT2, TPE1), then silent MPEG-1 Layer III frames
+/// (128 kb/s, 44.1 kHz, mono; all-zero side information decodes to silence).
+function silentMp3(secs, title, artist) {
+  const frame = (id, text) => {
+    const body = Buffer.concat([Buffer.from([0]), Buffer.from(text, "latin1")]);
+    const head = Buffer.alloc(10);
+    head.write(id, 0, "latin1");
+    head.writeUInt32BE(body.length, 4);
+    return Buffer.concat([head, body]);
+  };
+  const frames = Buffer.concat([frame("TIT2", title), frame("TPE1", artist)]);
+  const n = frames.length;
+  const tag = Buffer.concat([
+    Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]),
+    frames,
+  ]);
+  const count = Math.ceil((secs * 44100) / 1152);
+  const audio = Buffer.alloc(count * 417);
+  for (let i = 0; i < count; i++) audio.set([0xff, 0xfb, 0x90, 0xc0], i * 417);
+  return Buffer.concat([tag, audio]);
+}
+
+async function runMusic() {
+  const { page, problems } = await open("music", "?stream=0&nohelp=1");
+  const frames = (n) =>
+    page.evaluate(
+      (n) => new Promise((ok) => {
+        let k = 0;
+        const tick = () => (++k >= n ? ok() : requestAnimationFrame(tick));
+        requestAnimationFrame(tick);
+      }),
+      n,
+    );
+  try {
+    const mp3 = silentMp3(4, "Test Tone", "Skywave");
+    await page.evaluate((bytes) => {
+      const file = new File([new Uint8Array(bytes)], "01 test tone.mp3", { type: "audio/mpeg" });
+      const data = new DataTransfer();
+      data.items.add(file);
+      window.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+    }, [...mp3]);
+    await page.waitForFunction(() => window.skywaveMusic.folders.length === 1, null, { timeout: 30_000 });
+    // The game takes the folder on its next frame; the station is last on the dial, so
+    // "previous" from off tunes it.
+    await frames(3);
+    await page.keyboard.down("BracketLeft");
+    await frames(2);
+    await page.keyboard.up("BracketLeft");
+    await page.waitForFunction(() => /^live files_[0-9a-f]{8}$/.test(window.skywaveRadio.state), null, {
+      timeout: 120_000,
+      polling: 250,
+    });
+    const { state, log, paused } = await page.evaluate(() => ({
+      state: window.skywaveRadio.state,
+      log: window.skywaveRadio.log.join(" | "),
+      paused: window.skywaveRadio.audio.paused,
+    }));
+    console.log(`shoot: music: ${state}; player log: ${log}`);
+    if (!/file 0\/0 \d+/.test(log)) throw new Error("the player never got the dropped file");
+    if (paused) throw new Error("the player is paused");
+    // Warnings are expected (no WebGPU adapter on SwiftShader); errors are not.
+    if (problems.some((p) => !p.startsWith("console.warning"))) throw new Error("the page logged errors");
+    console.log("shoot: music: the dropped MP3 is a station and plays");
+  } finally {
+    for (const p of problems) console.error(`shoot: music: ${p}`);
+    await page.close();
+  }
+}
+
 let failed = 0;
 try {
+  if (music) {
+    try {
+      await runMusic();
+    } catch (e) {
+      console.error(`shoot: music: FAILED: ${e.message}`);
+      failed++;
+    }
+  }
   if (selftest) {
     try {
       await runSelftest();

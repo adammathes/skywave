@@ -1685,6 +1685,50 @@ fn still_scenes_keep_the_radio_off() {
 }
 
 #[test]
+fn music_folders_are_picked_from_the_audio_page() {
+    let mut h = Harness::new();
+    let label = |h: &Harness| {
+        h.ui()
+            .items()
+            .iter()
+            .find(|i| i.id == ItemId::AddMusic)
+            .map(|i| i.label)
+    };
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    assert_eq!(label(&h), None, "no picker on this platform");
+    h.app.set_music_picker(true, true);
+    h.pad(PadButton::DpadDown);
+    assert_eq!(label(&h), Some("Pick music folder again"));
+    h.focus_on(ItemId::AddMusic);
+    h.pad(PadButton::South);
+    assert!(h.app.take_music_request());
+    assert!(!h.app.take_music_request());
+    let rows = h.app.ui().radio().rows().len();
+    let track = |i: usize| audio::Track {
+        key: format!("0/{i}"),
+        label: format!("Song {i}"),
+        secs: 200.0,
+    };
+    h.app
+        .add_music_folder("Music/Yacht", "Yacht", vec![track(0), track(1)], true);
+    assert_eq!(h.app.ui().toast(), Some(Toast::MusicAdded(2)));
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    h.app
+        .add_music_folder("Music/Yacht", "Yacht", vec![track(0)], false);
+    h.app
+        .add_music_folder("Music/Empty", "Empty", Vec::new(), true);
+    assert_eq!(
+        h.app.ui().radio().rows().len(),
+        rows + 1,
+        "replaced; empty left out"
+    );
+    let mine = h.app.radio().channels().last().unwrap();
+    assert_eq!((mine.name.as_str(), mine.tracks.len()), ("Yacht", 1));
+    h.pad(PadButton::DpadUp);
+    assert_eq!(label(&h), Some("Add music folder"), "picked again");
+}
+
+#[test]
 fn streams_can_be_added_by_url() {
     let mut h = Harness::new();
     h.app.set_text_entry(true);

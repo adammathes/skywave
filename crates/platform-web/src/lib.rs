@@ -27,12 +27,19 @@
 //!
 //! The car radio: every frame the app's `audio::RadioCommand`s go to the page's player
 //! glue, `window.skywaveRadio` (the radio block of `web/index.html`, an `<audio>` element):
-//! `command(kind, url, token, value, name)` with kind `play`, `stop` or `volume` (the dial
-//! sweep between stations is synthesized in the mixer, so it plays through `sfx`);
-//! its reports come back from `takeEvent()` as `"<started|failed|blocked> <token>"`
+//! `command(kind, url, token, value, name)` with kind `play`, `file` (a music file by its
+//! key, `value` the second to start at), `stop` or `volume` (the dial sweep between
+//! stations is synthesized in the mixer, so it plays through `sfx`); its reports come back
+//! from `takeEvent()` as `"<started|failed|blocked|ended> <token>"`
 //! ([`parse_player_event`]), and the radio's state goes to `report(text)` whenever it
 //! changes ([`radio_state_text`]). Without the glue the radio stays silent. The page may
 //! ask for a stream URL with `window.prompt` (Settings, Audio, "Add stream URL").
+//!
+//! The player's own music: `window.skywaveMusic` (same block) holds the folders the user
+//! picked or dropped. The game calls `pick()` for "Add music folder", takes each folder
+//! read with `takeFolder()` (`{path, name, announce, files: [{key, name, size, head}]}`,
+//! `head` the file's first `audio::music::HEAD_BYTES` for its tags) and reads `again` (the
+//! folders of last session must be picked again). Files never leave the page.
 //!
 //! **Backends.** WebGPU is tried first where the browser offers it; if anything fails
 //! before the first frame (no adapter, `requestDevice` rejected, the canvas refusing its
@@ -287,6 +294,7 @@ pub fn parse_player_event(text: &str) -> Option<audio::PlayerEvent> {
         "started" => audio::PlayerEvent::Started { token },
         "failed" => audio::PlayerEvent::Failed { token },
         "blocked" => audio::PlayerEvent::Blocked { token },
+        "ended" => audio::PlayerEvent::Ended { token },
         _ => return None,
     })
 }
@@ -482,10 +490,11 @@ mod tests {
 
     #[test]
     fn radio_reports_and_states_read_and_print() {
-        use audio::PlayerEvent::{Blocked, Failed, Started};
+        use audio::PlayerEvent::{Blocked, Ended, Failed, Started};
         assert_eq!(parse_player_event("started 3"), Some(Started { token: 3 }));
         assert_eq!(parse_player_event("failed 12"), Some(Failed { token: 12 }));
         assert_eq!(parse_player_event("blocked 1"), Some(Blocked { token: 1 }));
+        assert_eq!(parse_player_event("ended 4"), Some(Ended { token: 4 }));
         for bad in ["", "started", "started x", "paused 3", "failed -1"] {
             assert_eq!(parse_player_event(bad), None, "{bad}");
         }
@@ -494,6 +503,7 @@ mod tests {
             name: "A".into(),
             format: "f".into(),
             urls: vec!["https://a/1".into()],
+            tracks: Vec::new(),
         };
         let mut r = audio::Radio::new(vec![channel]);
         assert_eq!(radio_state_text(&r), "off");

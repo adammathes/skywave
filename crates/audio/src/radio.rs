@@ -16,8 +16,17 @@
 //! failed shows [`ErrorReason::NoSignal`] for [`NO_SIGNAL_SECONDS`], then the radio moves up
 //! the dial; failed stations are remembered and skipped until one plays again. Every `Play`
 //! carries a token; a [`PlayerEvent`] about an older token (a
-//! station already switched away from) is ignored. The radio allocates only when it
-//! starts a station (the URL in the `Play` command).
+//! station already switched away from) is ignored.
+//!
+//! A files station (the player's own music, [`crate::music`]) plays its tracks in their
+//! seeded shuffle with `PlayFile` commands: tuning to it starts the track, and the second
+//! into it, where the station is by the radio's clock (the time the radio has run), so it
+//! sounds as if it had been playing all along; each `Ended` plays the next track. A track
+//! that fails is skipped; when every track has failed in a row the station has no signal.
+//! The radio allocates only when it starts a station or a track (the URL or key in the
+//! command, the station's shuffle).
+
+use crate::music::{self, Playlist, Track};
 
 /// How long the dial sweep between stations lasts, s: the new station starts as it ends.
 pub const TUNE_SECONDS: f32 = 0.5;
@@ -25,14 +34,17 @@ pub const TUNE_SECONDS: f32 = 0.5;
 /// How long a station that did not play stays on "no signal" before the radio moves on, s.
 pub const NO_SIGNAL_SECONDS: f32 = 2.0;
 
-/// A station the radio can play: a stream station of a preset or one the user added.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A station the radio can play: a stream station of a preset, one the user added, or a
+/// folder of the user's own music.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Channel {
     pub id: String,
     pub name: String,
     pub format: String,
-    /// Tried in order until one plays; never empty.
+    /// Tried in order until one plays; empty for a files station.
     pub urls: Vec<String>,
+    /// A files station's tracks (never empty for one); empty for a stream.
+    pub tracks: Vec<Track>,
 }
 
 impl Channel {
@@ -44,7 +56,26 @@ impl Channel {
             name: s.name.clone(),
             format: s.format.clone(),
             urls: urls.to_vec(),
+            tracks: Vec::new(),
         })
+    }
+
+    /// The files station of the folder at `path` (see [`music::station_id`]), shown as
+    /// `name`, with these tracks (at most [`music::MAX_TRACKS`]); `None` without tracks.
+    pub fn files(path: &str, name: &str, mut tracks: Vec<Track>) -> Option<Channel> {
+        tracks.truncate(music::MAX_TRACKS);
+        (!tracks.is_empty()).then(|| Channel {
+            id: music::station_id(path),
+            name: music::station_name(name, crate::station::MAX_NAME),
+            format: format!("your music, {} tracks", tracks.len()),
+            urls: Vec::new(),
+            tracks,
+        })
+    }
+
+    /// Plays the user's files rather than a stream.
+    pub fn is_files(&self) -> bool {
+        self.urls.is_empty() && !self.tracks.is_empty()
     }
 }
 
@@ -80,6 +111,13 @@ pub enum RadioState {
 pub enum RadioCommand {
     /// Play this stream (replacing whatever played); report back with `token`.
     Play { url: String, token: u32 },
+    /// Play the user's file `key` (a [`Track::key`]) from `start_s` seconds in (replacing
+    /// whatever played); report back with `token`, and `Ended` when it is over.
+    PlayFile {
+        key: String,
+        start_s: f32,
+        token: u32,
+    },
     /// Silence.
     Stop,
     /// Radio volume, 0 to 1.
@@ -96,6 +134,8 @@ pub enum PlayerEvent {
     /// The browser wants a user gesture before it plays sound; the platform retries on the
     /// next one.
     Blocked { token: u32 },
+    /// The file played to its end (files stations only).
+    Ended { token: u32 },
 }
 
 /// The car radio: its stations, its state and the commands waiting for the platform.
@@ -107,6 +147,13 @@ pub struct Radio {
     last: Option<usize>,
     /// Which of the playing station's URLs is being tried.
     url: usize,
+    /// A playing files station's shuffle, and the place in it of the track playing.
+    playlist: Option<Playlist>,
+    track: usize,
+    /// Tracks in a row that failed to play.
+    misses: usize,
+    /// Seconds the radio has run (ticked), the clock files stations play by.
+    clock: f64,
     token: u32,
     tunes: u32,
     live: bool,
@@ -127,6 +174,10 @@ impl Radio {
             state: RadioState::Off,
             last: None,
             url: 0,
+            playlist: None,
+            track: 0,
+            misses: 0,
+            clock: 0.0,
             token: 0,
             tunes: 0,
             live: false,
@@ -161,6 +212,15 @@ impl Radio {
 
     pub fn channel(&self) -> Option<&Channel> {
         self.station().and_then(|i| self.channels.get(i))
+    }
+
+    /// The track a files station is playing (or trying to).
+    pub fn track(&self) -> Option<&Track> {
+        let RadioState::Playing { station } = self.state else {
+            return None;
+        };
+        let k = *self.playlist.as_ref()?.order.get(self.track)?;
+        self.channels.get(station)?.tracks.get(k as usize)
     }
 
     /// The id of the station last tuned (what settings keep).
@@ -215,6 +275,7 @@ impl Radio {
                 .and_then(|id| channels.iter().position(|c| &c.id == id))
         };
         let (new_current, new_last) = (find(&current), find(&last));
+        let current_key = self.track().map(|t| t.key.clone());
         self.channels = channels;
         self.last = new_last;
         match (self.state, new_current) {
@@ -225,6 +286,24 @@ impl Radio {
             }
             (RadioState::Playing { .. }, Some(station)) => {
                 self.state = RadioState::Playing { station };
+                let tracks = &self.channels[station].tracks;
+                if self
+                    .playlist
+                    .as_ref()
+                    .is_some_and(|p| p.order.len() != tracks.len())
+                {
+                    // The folder was read again with other files: the track playing plays
+                    // on (found by key in the new shuffle), the next comes after it.
+                    let list = Playlist::new(tracks, music::seed(&self.channels[station].id));
+                    self.track = current_key
+                        .and_then(|key| {
+                            list.order
+                                .iter()
+                                .position(|&k| tracks[k as usize].key == key)
+                        })
+                        .unwrap_or(0);
+                    self.playlist = Some(list);
+                }
             }
             (RadioState::Error { reason, .. }, Some(station)) => {
                 self.state = RadioState::Error { station, reason };
@@ -323,6 +402,7 @@ impl Radio {
     /// Advances the tuning phase by `dt` seconds; the new station starts at its end.
     /// After [`NO_SIGNAL_SECONDS`] of "no signal" the radio tunes the next working station.
     pub fn tick(&mut self, dt: f32) {
+        self.clock += f64::from(dt.max(0.0));
         if let RadioState::Error { station, .. } = self.state {
             self.error_t += dt.max(0.0);
             if self.error_t >= NO_SIGNAL_SECONDS {
@@ -338,7 +418,18 @@ impl Radio {
             if t >= TUNE_SECONDS {
                 self.state = RadioState::Playing { station: to };
                 self.url = 0;
-                self.play_url();
+                self.misses = 0;
+                let c = &self.channels[to];
+                if c.is_files() {
+                    let list = Playlist::new(&c.tracks, music::seed(&c.id));
+                    let (i, start_s) = list.at(&c.tracks, self.clock);
+                    self.playlist = Some(list);
+                    self.track = i;
+                    self.play_track(start_s);
+                } else {
+                    self.playlist = None;
+                    self.play_url();
+                }
             } else {
                 self.state = RadioState::Tuning { from, to, t };
             }
@@ -357,24 +448,56 @@ impl Radio {
         });
     }
 
+    /// Plays the files station's track at [`Self::track`] from `start_s` seconds in.
+    fn play_track(&mut self, start_s: f32) {
+        let Some(track) = self.track() else {
+            return;
+        };
+        let key = track.key.clone();
+        self.token = self.token.wrapping_add(1);
+        self.out.push(RadioCommand::PlayFile {
+            key,
+            start_s,
+            token: self.token,
+        });
+    }
+
+    /// Moves a files station on to its next track.
+    fn next_track(&mut self) {
+        let n = self.playlist.as_ref().map_or(0, |p| p.order.len());
+        if n > 0 {
+            self.track = (self.track + 1) % n;
+            self.play_track(0.0);
+        }
+    }
+
     /// Takes a report from the player. Reports about an earlier `Play` are ignored.
     pub fn on_event(&mut self, event: PlayerEvent) {
         let RadioState::Playing { station } = self.state else {
             return;
         };
+        let files = self.channels[station].is_files();
         match event {
             PlayerEvent::Started { token } if token == self.token => {
                 self.live = true;
                 self.blocked = false;
+                self.misses = 0;
                 let id = &self.channels[station].id;
                 self.failed.retain(|f| f != id);
             }
             PlayerEvent::Blocked { token } if token == self.token => self.blocked = true,
+            PlayerEvent::Ended { token } if token == self.token && files => {
+                self.live = false;
+                self.next_track();
+            }
             PlayerEvent::Failed { token } if token == self.token => {
                 self.live = false;
                 self.blocked = false;
                 self.url += 1;
-                if self.url < self.channels[station].urls.len() {
+                self.misses += 1;
+                if files && self.misses < self.channels[station].tracks.len() {
+                    self.next_track();
+                } else if !files && self.url < self.channels[station].urls.len() {
                     self.play_url();
                 } else {
                     self.state = RadioState::Error {
@@ -415,6 +538,7 @@ mod tests {
             name: id.to_uppercase(),
             format: "test".into(),
             urls: urls.iter().map(|u| u.to_string()).collect(),
+            tracks: Vec::new(),
         }
     }
 
@@ -653,5 +777,120 @@ mod tests {
             },
         };
         assert_eq!(Channel::from_station(&s), None);
+    }
+
+    fn folder(name: &str, secs: &[f32]) -> Channel {
+        let tracks = secs
+            .iter()
+            .enumerate()
+            .map(|(i, &secs)| Track {
+                key: format!("{name}/{i}"),
+                label: format!("Track {i}"),
+                secs,
+            })
+            .collect();
+        Channel::files(name, name, tracks).unwrap()
+    }
+
+    /// The `PlayFile` commands since the last call, as (key, start).
+    fn files_played(r: &mut Radio) -> Vec<(String, f32)> {
+        r.drain_commands()
+            .filter_map(|c| match c {
+                RadioCommand::PlayFile { key, start_s, .. } => Some((key, start_s)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn files_stations_play_their_shuffle_where_it_would_be() {
+        let mine = folder("Mine", &[100.0, 50.0, 200.0, 75.0]);
+        assert!(mine.is_files() && mine.id.starts_with("files_"));
+        assert_eq!(mine.format, "your music, 4 tracks");
+        assert_eq!(Channel::files("Empty", "Empty", Vec::new()), None);
+        let disc = |path: &str| Channel::files(path, "Disc 1", mine.tracks.clone()).unwrap();
+        assert_ne!(
+            disc("A/Disc 1").id,
+            disc("B/Disc 1").id,
+            "same name, two stations"
+        );
+        let list = Playlist::new(&mine.tracks, music::seed(&mine.id));
+        let mut r = Radio::new(vec![channel("a", &["https://a/1"]), mine.clone()]);
+        r.tick(1000.0);
+        r.prev();
+        r.tick(TUNE_SECONDS);
+        // Where the station is at the radio's clock (1000.5 s), the second into the track.
+        let (i, start) = list.at(&mine.tracks, 1000.0 + f64::from(TUNE_SECONDS));
+        let key = |i: usize| format!("Mine/{}", list.order[i]);
+        assert_eq!(files_played(&mut r), [(key(i), start)]);
+        assert_eq!(r.track().map(|t| t.key.clone()), Some(key(i)));
+        // It ends: the next track of the shuffle, from its start, no dial sweep.
+        let tunes = r.tunes();
+        r.on_event(PlayerEvent::Started { token: r.token() });
+        assert!(r.is_live());
+        r.on_event(PlayerEvent::Ended { token: r.token() });
+        assert_eq!(files_played(&mut r), [(key((i + 1) % 4), 0.0)]);
+        assert_eq!(r.tunes(), tunes);
+        // A stale end changes nothing.
+        r.on_event(PlayerEvent::Ended {
+            token: r.token() - 1,
+        });
+        assert_eq!(files_played(&mut r), []);
+        // Away for 300 s and back: it resumes where it would be by then.
+        r.next();
+        r.tick(TUNE_SECONDS);
+        r.tick(300.0);
+        r.prev();
+        r.tick(TUNE_SECONDS);
+        let (j, start) = list.at(&mine.tracks, r.clock);
+        assert_eq!(files_played(&mut r), [(key(j), start)]);
+    }
+
+    #[test]
+    fn a_folder_read_again_keeps_playing_from_its_new_shuffle() {
+        let mut r = Radio::new(vec![folder("Mine", &[60.0; 5])]);
+        r.next();
+        r.tick(TUNE_SECONDS);
+        files_played(&mut r);
+        let playing = r.track().unwrap().clone();
+        let mut fewer = folder("Mine", &[60.0; 5]);
+        fewer
+            .tracks
+            .retain(|t| t.key == playing.key || t.key == "Mine/0");
+        if fewer.tracks.len() == 1 {
+            fewer
+                .tracks
+                .push(folder("Mine", &[60.0; 2]).tracks[1].clone());
+        }
+        let keys: Vec<String> = fewer.tracks.iter().map(|t| t.key.clone()).collect();
+        r.set_channels(vec![fewer]);
+        assert_eq!(files_played(&mut r), [], "the track playing plays on");
+        assert_eq!(r.track(), Some(&playing), "and the dash names it");
+        r.on_event(PlayerEvent::Ended { token: r.token() });
+        let next = files_played(&mut r);
+        assert_eq!(next.len(), 1);
+        assert!(
+            keys.contains(&next[0].0) && next[0].0 != playing.key,
+            "{next:?}"
+        );
+    }
+
+    #[test]
+    fn a_failing_track_is_skipped_and_all_failing_is_no_signal() {
+        let mut r = Radio::new(vec![
+            folder("Mine", &[60.0; 3]),
+            channel("b", &["https://b/1"]),
+        ]);
+        r.next();
+        r.tick(TUNE_SECONDS);
+        assert_eq!(files_played(&mut r).len(), 1);
+        r.on_event(PlayerEvent::Failed { token: r.token() });
+        assert_eq!(files_played(&mut r).len(), 1, "the next track");
+        assert_eq!(r.state(), RadioState::Playing { station: 0 });
+        r.on_event(PlayerEvent::Failed { token: r.token() });
+        r.on_event(PlayerEvent::Failed { token: r.token() });
+        assert!(matches!(r.state(), RadioState::Error { station: 0, .. }));
+        assert_eq!(r.drain_commands().next_back(), Some(Stop));
+        assert_eq!(r.track(), None);
     }
 }
