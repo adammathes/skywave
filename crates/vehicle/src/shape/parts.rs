@@ -284,9 +284,9 @@ impl<'a, 'b> Parts<'a, 'b> {
                 let (a, b) = (x0 + dx * i as f32 + 0.002, x0 + dx * (i + 1) as f32 - 0.002);
                 let (c, d) = (y0 + dy * k as f32 + 0.002, y0 + dy * (k + 1) as f32 - 0.002);
                 let mat = if (i + k) % 2 == 0 {
-                    lens.shade(1.25)
+                    lens.shade(1.1)
                 } else {
-                    lens.shade(0.78)
+                    lens.shade(0.9)
                 };
                 self.lights.quad_dir(
                     [a, c, z],
