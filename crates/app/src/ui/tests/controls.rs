@@ -230,12 +230,15 @@ fn the_pause_menu_and_the_pad_alone_open_and_close_it() {
 #[test]
 fn the_performance_overlay_hides_under_the_card() {
     let mut h = Harness::new();
-    h.key(Key::F3);
-    assert!(h.hud_text().contains("fps"));
-    h.key(Key::KeyH);
-    assert!(!h.hud_text().contains("fps"));
-    h.key(Key::KeyH);
-    assert!(h.hud_text().contains("fps"));
+    // Each mode: hidden while the card is up, back (the same mode) when it goes.
+    for mode in [Overlay::Fps, Overlay::Full] {
+        h.key(Key::F3);
+        assert_eq!(overlay_shown(&h), Some(mode));
+        h.key(Key::KeyH);
+        assert_eq!(overlay_shown(&h), None, "{mode:?} under the card");
+        h.key(Key::KeyH);
+        assert_eq!(overlay_shown(&h), Some(mode));
+    }
 }
 
 /// The card's quads as drawn now: all inside the safe area, and no two text boxes
