@@ -123,6 +123,9 @@ impl<'a, 'b> Parts<'a, 'b> {
                 Detail::MudFlaps => self.mud_flaps(),
                 Detail::RoofRack if hardtop => self.roof_rack(),
                 Detail::SpareTire => self.spare_tire(),
+                Detail::SideStrakes => self.side_strakes(),
+                Detail::NacaDucts => self.naca_ducts(),
+                Detail::EngineLouvers => self.engine_louvers(),
                 Detail::Badge(shape) if self.lod0() => {
                     self.badge(shape, true);
                     self.badge(shape, false);
@@ -1489,6 +1492,131 @@ impl<'a, 'b> Parts<'a, 'b> {
             let a = self.p(s0 - 0.05, xa, fa.top_y(xa.abs()) + 0.012);
             let b = self.p(s1 + 0.04, xb, fb.top_y(xb.abs()) + 0.012);
             self.body.beam(a, b, UP, 0.025, 0.012, m);
+        }
+    }
+
+    /// The intake ahead of each rear wheel, `(s0, s1, y0, y1)`: from mid-door to the arch,
+    /// between the wheel center and the belt ledge.
+    fn intake_box(&self) -> (f32, f32, f32, f32) {
+        let b = self.b;
+        let s1 = b.axle[1] - b.ra - 0.05;
+        let s0 = (s1 - 1.0).max(b.axle[0] + b.ra + 0.3);
+        let y0 = b.wy + 0.04;
+        let y1 = (b.frame(s1).y_ledge - 0.07).max(y0 + 0.1);
+        (s0, s1, y0, y1)
+    }
+
+    /// [`Self::side_patch`] cut into `n` pieces along the car and three up it, so it
+    /// follows a side that bulges between its ends and curves in toward the shoulder.
+    #[allow(clippy::too_many_arguments)]
+    fn side_patch_n(
+        &mut self,
+        sx: f32,
+        s0: f32,
+        s1: f32,
+        y0: [f32; 2],
+        y1: [f32; 2],
+        lift: f32,
+        mat: Mat,
+        n: usize,
+    ) {
+        const ROWS: usize = 3;
+        for k in 0..n {
+            let (t0, t1) = (k as f32 / n as f32, (k + 1) as f32 / n as f32);
+            let lo = [lerp(y0[0], y0[1], t0), lerp(y0[0], y0[1], t1)];
+            let hi = [lerp(y1[0], y1[1], t0), lerp(y1[0], y1[1], t1)];
+            for r in 0..ROWS {
+                let (r0, r1) = (r as f32 / ROWS as f32, (r + 1) as f32 / ROWS as f32);
+                self.side_patch(
+                    sx,
+                    lerp(s0, s1, t0),
+                    lerp(s0, s1, t1),
+                    [lerp(lo[0], hi[0], r0), lerp(lo[1], hi[1], r0)],
+                    [lerp(lo[0], hi[0], r1), lerp(lo[1], hi[1], r1)],
+                    lift,
+                    mat,
+                );
+            }
+        }
+    }
+
+    fn side_strakes(&mut self) {
+        let (s0, s1, y0, y1) = self.intake_box();
+        let n = if self.b.lod == 2 { 3 } else { 5 };
+        let pieces = if self.lod0() { 3 } else { 1 };
+        let m = self.m;
+        for sx in [-1.0f32, 1.0] {
+            // The dark mouth behind the fins, set into the flank's last third.
+            let s_mouth = lerp(s0, s1, 0.62);
+            self.side_patch_n(sx, s_mouth, s1, [y0, y0], [y1, y1], 0.002, m.grille, pieces);
+            for k in 0..n {
+                let y = lerp(y0, y1, (k as f32 + 0.5) / n as f32);
+                let mat = self.b.paint_at(m, s1, y);
+                // Each fin stands out more toward the intake.
+                for j in 0..pieces {
+                    let (t0, t1) = (j as f32 / pieces as f32, (j + 1) as f32 / pieces as f32);
+                    let (sa, sb) = (lerp(s0, s1, t0), lerp(s0, s1, t1));
+                    let a = self.p(sa, sx * (self.side(sa, y) + lerp(0.004, 0.014, t0)), y);
+                    let b = self.p(sb, sx * (self.side(sb, y) + lerp(0.004, 0.014, t1)), y);
+                    self.body.beam(a, b, UP, 0.016, 0.007, mat);
+                }
+            }
+        }
+    }
+
+    fn naca_ducts(&mut self) {
+        let (_, s1, _, y1) = self.intake_box();
+        let s0 = s1 - 0.6;
+        let m = self.m;
+        let pieces = if self.lod0() { 6 } else { 2 };
+        let (top, lo) = (y1 + 0.03, [y1 - 0.01, y1 - 0.14]);
+        for sx in [-1.0f32, 1.0] {
+            // Narrow at the front, opening rearward, with a dark lip along its lower edge.
+            self.side_patch_n(sx, s0, s1, lo, [top, top], 0.003, m.grille, pieces);
+            if self.lod0() {
+                let under = [lo[0] - 0.012, lo[1] - 0.012];
+                self.side_patch_n(sx, s0, s1, under, lo, 0.004, m.trim, pieces);
+            }
+        }
+    }
+
+    fn engine_louvers(&mut self) {
+        let l = self.b.length;
+        let (s0, s1) = (self.b.spec.glass.backlight.1 + 0.12, l - 0.16);
+        if s1 - s0 < 0.2 {
+            return;
+        }
+        let (b, m) = (self.b, self.m);
+        let n = if self.lod0() { 9 } else { 5 };
+        let x = |s: f32| (b.frame(s).z_re * 0.62).max(0.15);
+        // A dark well under the slats, in strips that follow the deck's crown.
+        let strips = if self.lod0() { 6 } else { 2 };
+        let cols = 4;
+        let corner = |s: f32, u: f32| {
+            let f = b.frame(s);
+            let z = u * (x(s) + 0.02);
+            b.p(s, z, f.top_y(z.abs()) + 0.003)
+        };
+        for i in 0..strips {
+            let sa = lerp(s0 - 0.03, s1 + 0.03, i as f32 / strips as f32);
+            let sb = lerp(s0 - 0.03, s1 + 0.03, (i + 1) as f32 / strips as f32);
+            for j in 0..cols {
+                let ua = lerp(-1.0, 1.0, j as f32 / cols as f32);
+                let ub = lerp(-1.0, 1.0, (j + 1) as f32 / cols as f32);
+                let (p0, p1) = (corner(sa, ua), corner(sa, ub));
+                let (p2, p3) = (corner(sb, ub), corner(sb, ua));
+                self.body.quad_dir(p0, p1, p2, p3, m.grille, UP);
+            }
+        }
+        for k in 0..n {
+            let s = lerp(s0, s1, (k as f32 + 0.5) / n as f32);
+            let f = b.frame(s);
+            let w = x(s);
+            let y = f.top_y(w) + 0.014;
+            // Fins lean back so they read as louvers from behind and above.
+            let up = norm([0.0, 1.0, -0.8]);
+            self.body
+                .beam(self.p(s, -w, y), self.p(s, w, y), up, 0.016, 0.004, m.trim);
         }
     }
 
