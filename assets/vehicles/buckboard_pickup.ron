@@ -1,0 +1,48 @@
+// Buckboard Pickup: an early-80s full-size rear-drive pickup, empty bed.
+//
+// Intent: high, rear-light and bouncy unloaded. A torquey V8 through a three-speed
+// automatic gets it moving smartly; the empty bed leaves little weight over the rear
+// wheels, so stiff leaf-spring rates with little damping make it hop over bumps and the
+// tail steps out under power (oversteer_bias > 0 on a nose-heavy truck). Slow, heavy
+// steering, lots of roll.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "buckboard_pickup",
+    name: "Buckboard Pickup",
+    era: Eighties,
+    class: Pickup,
+
+    mass_kg: 1700,
+    dims_m: (5.10, 1.95, 1.75),    // length, width, height
+    wheelbase_m: 3.10,
+    track_m: 1.62,
+    cg_height_m: 0.72,             // tall: high frame, empty bed
+    cg_fore_aft: 0.42,             // 58% front, light rear
+
+    // A 5.7 L V8: ~140 kW, torque from idle.
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 4400,
+        torque_nm: [(800, 310), (2000, 375), (2800, 390), (3600, 365), (4400, 300)],
+    ),
+    gears: [2.48, 1.48, 1.0],      // three-speed automatic
+    final_drive: 3.08,
+    reverse: 2.1,
+    shift_ms: 420,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.9, grip_long: 0.88, load_sens: 0.13, slip_peak_deg: 9.5),
+    suspension: Susp(spring_n_m: 32000, damper: 1700, travel_m: 0.24, antiroll: 0.12),
+    steering: Steer(max_deg: 32, speed_sens: 0.5, return_rate: 5.0),
+    brakes: Brakes(max_nm: 4000, bias_front: 0.7, abs: false, handbrake_nm: 2400),
+    aero: Aero(cd: 0.5, frontal_m2: 2.75, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.05, body_roll: 0.85, engine_sound: "v8_lazy", shift_jerk: 0.15),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 100, mph), Tach(0, 5000)],
+        radio: "amber_seek",
+    ),
+    shape: "buckboard_pickup.shape.ron",
+)

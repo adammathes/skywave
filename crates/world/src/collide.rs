@@ -42,6 +42,7 @@ use vehicle::sim::{self, DT, WHEEL_RADIUS_M};
 use vehicle::{Ground, Hit, Rock, VehicleSpec, VehicleState};
 
 use crate::buildings;
+use crate::grammar::Grammar;
 use crate::ground::{self, Surface as LotSurface};
 use crate::math::{floor, signed_area, sqrt, V2};
 use crate::mesh::terrain::TerrainGrid;
@@ -360,7 +361,7 @@ const MAX_STEP_UP_M: f32 = 0.5;
 
 impl WorldCollider {
     /// Collision shapes of `place`, consistent with what [`crate::build_chunk_meshes`] draws.
-    pub fn build(place: &Place) -> WorldCollider {
+    pub fn build(place: &Place, grammar: &Grammar) -> WorldCollider {
         let net = Network::new(place);
         let mut shapes = Shapes {
             points: Vec::new(),
@@ -386,7 +387,7 @@ impl WorldCollider {
         let (posts, boxes) = if terrain_place {
             place_prop_solids(place)
         } else {
-            prop_solids(&props_of(place, &net, &blocks))
+            prop_solids(&props_of(place, grammar, &net, &blocks))
         };
 
         // Grid over everything, with a cell of margin.
@@ -925,7 +926,12 @@ fn building_walls(place: &Place) -> Vec<Wall> {
 /// Every prop [`crate::build_chunk_meshes`] places, in the same passes: parked cars in
 /// strip-mall lots, house sites, then street and park furniture. The meshes those passes
 /// also emit go to scratch buffers and are dropped.
-fn props_of(place: &Place, net: &Network, blocks: &[ground::Block]) -> Vec<Prop> {
+fn props_of(
+    place: &Place,
+    grammar: &Grammar,
+    net: &Network,
+    blocks: &[ground::Block],
+) -> Vec<Prop> {
     let seed = place.header.seed;
     let pal = Palette::socal_1985();
     let lookup = crate::Lookup::new(place, net);
@@ -936,7 +942,7 @@ fn props_of(place: &Place, net: &Network, blocks: &[ground::Block]) -> Vec<Prop>
     for (i, b) in place.buildings.iter().enumerate() {
         let env = lookup.facade_envs(i);
         let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-        let plan = buildings::plan_building(b, &env, door_pick);
+        let plan = buildings::plan_building(b, &env, door_pick, grammar);
         if b.style == place::StyleTag::StripMall {
             let fp = ground::to_v2(&b.footprint);
             let c = ground::centroid(&fp);

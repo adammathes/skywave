@@ -66,6 +66,23 @@ Checked and left alone:
   1920×1080. That is the honest size of the window; `--stats` prints physical and logical
   sizes and the scale factor, and resolution scale is the knob when it is too much.
 
+## Parked-car meshes
+
+Parked cars are instances of one mesh per (shape, paint, level of detail), built when the
+place loads (`app::propinst`). With every paint a place uses that set grows with the roster:
+on the coast (seed 1), vertices plus indices, measured in `parked_car_meshes_stay_within_budget`:
+
+| Parked cars | Meshes | Triangles | Bytes |
+|---|---|---|---|
+| Four shapes, every paint used (before the full roster) | 152 | 421k | 22.9 MB |
+| Twelve shapes, every paint used | 436 | 1.20M | 65.0 MB |
+| Twelve shapes, 2 palette + 4 era paints per shape per place (shipped) | 144 | 396k | 21.5 MB |
+
+Each place draws its six paints per shape from the era's weights by its seed, so the street
+mix still varies place to place. The test fails above 27 MB (about 1.2x the four-shape set),
+always, not only under `SKYWAVE_ENFORCE_BUDGETS`. The lasting fix is paint as a per-instance
+attribute (`docs/IDEAS.md`).
+
 ## Quality presets
 
 Settings → Video → Quality. `Settings::quality` is `None` until the player picks one; then

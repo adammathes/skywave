@@ -783,7 +783,7 @@ struct Town {
 /// The whole town of `place` built at load ([`render_meshes`]): static meshes, one
 /// instance each.
 fn resident_town(place: &Place) -> Town {
-    let chunks = world::build_chunk_meshes(place, &Palette::socal_1985());
+    let chunks = world::build_chunk_meshes(place, &Palette::socal_1985(), places::grammar());
     let place_lights: Vec<PointLight> = place
         .lights
         .items

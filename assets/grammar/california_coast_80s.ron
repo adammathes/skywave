@@ -1,0 +1,415 @@
+// The 1980s Southern California beach town (`california_coast`, Eighties): the numbers and
+// weights the building planner reads. Format: crates/world/src/grammar.rs and
+// docs/WORLD_GENERATION.md ("Facade grammars"). Lengths are meters; `ByUse` splits a value
+// by what the building is used for (residential, office, anything else); a `_256` share
+// is out of 256; count ranges are inclusive and `(0, 0)` draws nothing.
+//
+// Provenance: every value below is a starting value, not yet fitted (ADR 0005, "Fit"; B3
+// fits them). They reproduce the planner's former code constants exactly, so the coast
+// and the test town are bit-identical to before. A fitted number replaces one of these
+// with a comment naming its source and item (see CREDITS.md).
+Grammar(
+    era: Eighties,
+    template: "california_coast",
+
+    styles: [
+        // Shops and flats in smooth stucco; the lower parapet on flats.
+        StyleRules(
+            style: StuccoBox,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Brick fronts: narrower bays and taller windows than stucco.
+        StyleRules(
+            style: Brick,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.7, other: 2.7),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0, w: (1.1, 1.1), head: 1.3, h_max: 1.8),
+                    other: Window(w_share: 0, w: (1.1, 1.1), head: 1.3, h_max: 1.8),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Streamline fronts: windows a fixed share of the bay.
+        StyleRules(
+            style: Deco,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.62, w: (0.5, 10), head: 1.45, h_max: 1.5),
+                    other: Window(w_share: 0.62, w: (0.5, 10), head: 1.45, h_max: 1.5),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // One storey behind a front lot; the tall parapet hides the roof units.
+        StyleRules(
+            style: StripMall,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.25, other: 0.25),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1.8, office: 1.8, other: 1.8)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Flats over open carports.
+        StyleRules(
+            style: Dingbat,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Bungalows.
+        StyleRules(
+            style: Craftsman,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Long, low houses with wide windows.
+        StyleRules(
+            style: Ranch,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.9, 1.9), head: 1.35, h_max: 1.2),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // 1970s tract houses.
+        StyleRules(
+            style: Tract70s,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Curtain-wall offices: wide bays.
+        StyleRules(
+            style: Glass,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 4.5, office: 4.5, other: 4.5),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Pilastered sheds: the widest bays.
+        StyleRules(
+            style: Warehouse,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 6, office: 6, other: 6),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Farm barns and silos.
+        StyleRules(
+            style: Barn,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // A door and window per room: every floor the same height.
+        StyleRules(
+            style: Motel,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: true, other: true),
+                floor_h: 3.3,
+                ground_floor_h: (3.8, 4.8),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.8, office: 3.8, other: 3.8),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+    ],
+
+    signs: SignRules(
+        // Striped, solid, a flat canopy, none: equally often.
+        awnings: [(Striped, 1), (Solid, 1), (Canopy, 1), (None, 1)],
+        lit_box_256: 70,
+        shop_lit_256: 115,
+    ),
+
+    lots: LotRules(
+        front_min_yard: 9.5,
+        stall_w: 2.8,
+        front_fill: (0.25, 0.75),
+        aisle_fill: 0.4,
+    ),
+)

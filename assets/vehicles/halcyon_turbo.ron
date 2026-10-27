@@ -1,0 +1,47 @@
+// Halcyon Turbo: a mid-80s front-engined, rear-drive wedge coupe with a turbo four.
+//
+// Intent: balanced, with a surge. Below 3000 rpm the turbo four is soft; then the boost
+// arrives and it pulls hard to the redline. Near 50/50 weight, firm springs and a stiff
+// bar keep it flat; it is neutral until you lift, when the tail comes round a little.
+// Quicker than everything but the Corsair, and slower than the Corsair everywhere.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "halcyon_turbo",
+    name: "Halcyon Turbo",
+    era: Eighties,
+    class: Coupe,
+
+    mass_kg: 1300,
+    dims_m: (4.40, 1.70, 1.28),    // length, width, height
+    wheelbase_m: 2.42,
+    track_m: 1.44,
+    cg_height_m: 0.47,
+    cg_fore_aft: 0.49,             // 51% front
+
+    // ~140 kW at 5000 rpm, little of it below 3000: the turbo surge.
+    engine: Engine(
+        idle_rpm: 850,
+        redline_rpm: 6800,
+        torque_nm: [(1000, 130), (2500, 165), (3400, 235), (4800, 255), (6000, 228), (6800, 196)],
+    ),
+    gears: [3.3, 1.95, 1.35, 1.0, 0.8],
+    final_drive: 3.9,
+    reverse: 3.1,
+    shift_ms: 260,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.16, grip_long: 1.08, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 30000, damper: 3000, travel_m: 0.16, antiroll: 0.4),
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 11.0),
+    brakes: Brakes(max_nm: 3200, bias_front: 0.63, abs: false, handbrake_nm: 2800),
+    aero: Aero(cd: 0.34, frontal_m2: 1.9, downforce_coef: 0.01),
+    feel: Feel(oversteer_bias: 0.12, body_roll: 0.35, engine_sound: "i4", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 150, mph), Tach(0, 8000)],
+        radio: "digital_green",
+    ),
+    shape: "halcyon_turbo.shape.ron",
+)

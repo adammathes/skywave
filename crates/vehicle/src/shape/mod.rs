@@ -13,6 +13,7 @@
 //! Everything here is deterministic: no platform math, no hash maps, the same spec gives
 //! bit-identical meshes everywhere.
 
+mod bed;
 mod body;
 mod interior;
 mod math;
@@ -212,6 +213,7 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
     let mut shell = mesh::Soup::new(38.0);
     let mut glass = mesh::Soup::new(30.0);
     b.emit(&mats, &mut shell, &mut glass);
+    bed::build(&b, &mats, &mut shell);
 
     let mut p = parts::Parts::new(&b, &mats, opts.popups_up);
     p.build();
