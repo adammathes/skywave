@@ -14,8 +14,9 @@ use crate::map::view::{MapGeom, Minimap, MINIMAP_DIAMETER};
 
 use super::menu::{Unit, Widget};
 use super::names::{self, action_label, device_label, device_noun};
-use super::pages::{self, ItemId, Page};
+use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::{covers, Toast, Ui, FRAME_HISTORY};
+use crate::settings::Quality;
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -648,11 +649,14 @@ impl Ui {
         let s = 2.0;
         let line = font::LINE_HEIGHT as f32 * s;
         let (graph_w, graph_h) = (FRAME_HISTORY as f32 * 2.0, 48.0);
-        let lines = 6.0;
+        let r = &self.render_stats;
+        let gpu_line = r.gpu_timing as u32 as f32;
+        let label_line = !self.gpu_label.is_empty() as u32 as f32;
+        let lines = 10.0 + gpu_line + label_line;
         hud.rect(
             sx - 10.0,
             sy - 10.0,
-            440.0,
+            760.0,
             20.0 + line + graph_h + 10.0 + lines * line,
             [0, 0, 0, 160],
         );
@@ -695,7 +699,6 @@ impl Ui {
             [255, 255, 255, 110],
         );
 
-        let r = &self.render_stats;
         let d = ctx.daylight;
         let [cx, cy, cz] = ctx.camera;
         let y = gy + graph_h + 10.0;
@@ -705,8 +708,12 @@ impl Ui {
             s,
             TEXT,
             format_args!(
-                "draws {}  (shadow {}, bloom {})\n\
-                 instances {}  lights {}/{}  coronas {}\n\
+                "draws {}  (shadow {}, bloom {})  cpu {:.2} ms\n\
+                 instances {}  drawn {}  shadow {}/{}/{}\n\
+                 tris {:.0}k  shadow {:.0}k\n\
+                 shadow {} x{} ({} drawn)  {} {}\n\
+                 view {}x{} of {}x{}  bloom {}\n\
+                 lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
@@ -714,7 +721,27 @@ impl Ui {
                 r.draw_calls,
                 r.shadow_draw_calls,
                 r.bloom_draw_calls,
+                self.cpu_submit_ms,
                 r.instances,
+                r.instances_drawn,
+                r.shadow_instances[0],
+                r.shadow_instances[1],
+                r.shadow_instances[2],
+                r.triangles as f64 / 1000.0,
+                r.shadow_triangles as f64 / 1000.0,
+                r.shadow_size,
+                r.cascades,
+                r.cascades_drawn,
+                QUALITY_NAMES[Quality::ALL
+                    .iter()
+                    .position(|&q| q == self.quality())
+                    .unwrap_or(2)],
+                if self.settings.bloom { "" } else { "bloom off" },
+                r.render_size.0,
+                r.render_size.1,
+                r.surface_size.0,
+                r.surface_size.1,
+                r.bloom_levels,
                 r.lights_used,
                 r.lights_submitted,
                 r.coronas,
@@ -729,6 +756,31 @@ impl Ui {
                 r.hud_quads_dropped,
             ),
         );
+        let mut y = y + 10.0 * line;
+        if r.gpu_timing {
+            let ms = |p: usize| r.gpu_us[p] as f32 / 1000.0;
+            let total: u32 = r.gpu_us.iter().sum();
+            hud.text_fmt(
+                sx,
+                y,
+                s,
+                TEXT,
+                format_args!(
+                    "gpu {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}",
+                    total as f32 / 1000.0,
+                    ms(0),
+                    ms(1),
+                    ms(2),
+                    ms(3),
+                    ms(4),
+                    ms(5),
+                ),
+            );
+            y += line;
+        }
+        if !self.gpu_label.is_empty() {
+            hud.text(sx, y, s, DIM, &self.gpu_label);
+        }
     }
 }
 

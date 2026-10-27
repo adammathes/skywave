@@ -14,7 +14,8 @@
 //!            this device; select to remap
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
-//! Video:     UI scale · Resolution scale · Bloom · Performance overlay
+//! Video:     Quality (Low / Deck / Medium / High / Ultra) · UI scale · Resolution scale ·
+//!            Bloom · Performance overlay
 //! HUD:       Minimap · Rotate with car · Minimap zoom
 //! Audio:     Master volume · Engine volume · World volume · Mute
 //! World:     Time of day · Clock speed
@@ -27,9 +28,9 @@ use crate::daylight::{Clock, CLOCK_SPEEDS};
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
 use crate::settings::{
-    Handling, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP, RESOLUTION_SCALE_MIN,
-    RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM, UI_SCALE_STEP,
-    VOLUME_STEP,
+    Handling, Quality, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP,
+    RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM,
+    UI_SCALE_STEP, VOLUME_STEP,
 };
 
 use super::menu::{Item, Unit, Widget};
@@ -81,6 +82,7 @@ pub enum ItemId {
     SeatForward,
     Dashboard,
     CameraShake,
+    Quality,
     UiScale,
     ResolutionScale,
     Bloom,
@@ -105,6 +107,8 @@ pub struct PageCtx<'a> {
     pub bindings: &'a Bindings,
     pub clock: &'a Clock,
     pub can_quit: bool,
+    /// The preset in effect (the saved one, else the one picked for the device).
+    pub quality: Quality,
 }
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
@@ -115,6 +119,8 @@ pub const HANDLING_NAMES: [&str; Handling::ALL.len()] = ["Arcade", "Light", "Off
 /// Names of [`CameraMode::CYCLE`].
 pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
     ["Cockpit", "Hood", "Chase near", "Chase mid", "Chase far"];
+/// Names of [`Quality::ALL`].
+pub const QUALITY_NAMES: [&str; Quality::ALL.len()] = ["Low", "Deck", "Medium", "High", "Ultra"];
 /// The Dashboard choice: index 0 draws it, 1 is hood only.
 pub const DASHBOARD_NAMES: [&str; 2] = ["Full cockpit", "Hood only"];
 
@@ -164,7 +170,10 @@ pub fn note(page: Page) -> Option<&'static str> {
              Code, font and art: ours. Music: whatever you tune in.",
         ),
         Page::Bindings(_) => Some("Select a row, then press the new input."),
-        Page::Video => Some("Resolution scale is saved for an upcoming renderer option."),
+        Page::Video => Some(
+            "Quality sets shadows, bloom and glow; Deck targets 90 fps there.\n\
+             Resolution scale draws the world smaller and upscales it.",
+        ),
         Page::Drive => Some(
             "Arcade: grippy, short stops, forgiving.\n\
              Light: looser, the car slides more. Off: no help.",
@@ -395,6 +404,18 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
         }
         Page::Video => {
             let s = ctx.settings;
+            let index = Quality::ALL
+                .iter()
+                .position(|&q| q == ctx.quality)
+                .unwrap_or(2);
+            add(
+                ItemId::Quality,
+                "Quality",
+                Widget::Choice {
+                    options: &QUALITY_NAMES,
+                    index,
+                },
+            );
             add(
                 ItemId::UiScale,
                 "UI scale",
@@ -516,6 +537,7 @@ mod tests {
             bindings: &bindings,
             clock: &clock,
             can_quit: false,
+            quality: Quality::Deck,
         };
         let mut items = Vec::new();
         build(Page::Pause, &ctx, &mut items);
@@ -555,5 +577,11 @@ mod tests {
             "dashboard"
         );
         assert_eq!(items[5].widget, Widget::Toggle(true));
+        build(Page::Video, &ctx, &mut items);
+        assert_eq!(items[0].id, ItemId::Quality);
+        assert!(
+            matches!(items[0].widget, Widget::Choice { index: 1, .. }),
+            "deck"
+        );
     }
 }

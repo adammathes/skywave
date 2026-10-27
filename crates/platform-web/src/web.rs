@@ -150,6 +150,14 @@ pub async fn run(
         App::from_setup(&default_car).expect("the default car is built in")
     });
     app.set_settings_store(Box::new(LocalStore));
+    let info = adapter.get_info();
+    app.set_gpu_info(&app::GpuInfo {
+        name: info.name.clone(),
+        backend: backend.to_owned(),
+        integrated: info.device_type == wgpu::DeviceType::IntegratedGpu,
+        linux: false,
+        surface: (width, height),
+    });
     if crate::menu_from_query(&query) {
         app.open_settings();
     }
@@ -509,8 +517,12 @@ impl State {
         };
         let view = frame.texture.create_view(&Default::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
+        let started = self.performance.as_ref().map(|p| p.now());
         self.renderer
             .render(&view, &self.app.scene_view(steps.alpha, aspect));
+        if let (Some(p), Some(t)) = (&self.performance, started) {
+            self.app.set_cpu_submit_ms((p.now() - t) as f32);
+        }
         self.queue.present(frame);
         self.app.set_render_stats(self.renderer.stats());
 

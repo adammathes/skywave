@@ -25,7 +25,9 @@ pub mod ui;
 pub mod vehicles;
 mod worldmesh;
 
-pub use settings::{Handling, MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
+pub use settings::{
+    GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
+};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
@@ -483,7 +485,7 @@ impl App {
             instances: &self.instances,
             lights: self.lights.lights(),
             hud: self.ui.hud(),
-            quality: render::RenderQuality::default(),
+            quality: self.ui.render_quality(),
         }
     }
 }

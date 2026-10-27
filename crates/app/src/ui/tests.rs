@@ -209,7 +209,12 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     assert!(changed >= 2 * (3 + 8 * 4) + 4 + 2, "{changed}");
     // Everything was put back, and the simulation stood still throughout.
     assert_eq!(h.app.bindings(), &bindings);
-    assert_eq!(h.app.settings(), &settings);
+    // Choosing a preset (and back) makes the automatic one an explicit choice.
+    let explicit = Settings {
+        quality: Some(Quality::Medium),
+        ..settings
+    };
+    assert_eq!(h.app.settings(), &explicit);
     assert_eq!(h.app.ticks(), paused_at);
 
     // Back on the pause page closes the menu, and the simulation runs again.
@@ -883,4 +888,44 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     let saved = store.0.borrow().clone().expect("saved on close");
     let (s, _) = Settings::from_json(&saved);
     assert!(s.mute && (s.master_volume - 0.75).abs() < 1e-6);
+}
+
+#[test]
+fn quality_presets_apply_to_the_renderer_and_save() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    // Nothing saved: auto, Medium on an unknown GPU, Deck on the Deck.
+    assert_eq!(h.app.settings().quality, None);
+    assert_eq!(h.app.ui().quality(), Quality::Medium);
+    let medium = h.app.renderer_options().quality;
+    assert_eq!(medium, Quality::Medium.render(1.0));
+    h.app.set_gpu_info(&GpuInfo {
+        name: "AMD Custom GPU 0405 (RADV VANGOGH)".into(),
+        backend: "Vulkan".into(),
+        integrated: true,
+        linux: true,
+        surface: (1280, 800),
+    });
+    assert_eq!(h.app.ui().quality(), Quality::Deck);
+    assert_eq!(h.app.scene_view(0.0, 1.6).quality.cascades, 2);
+    // Low on the Video page: cheaper shadows, 75% resolution, saved.
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Video)]);
+    h.focus_on(ItemId::Quality);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.settings().quality, Some(Quality::Low));
+    assert_eq!(h.app.settings().resolution_scale, 0.75);
+    let low = h.app.renderer_options().quality;
+    assert_eq!(low, Quality::Low.render(0.75));
+    assert_ne!(low, medium);
+    assert_eq!(h.app.scene_view(0.0, 1.6).quality, low);
+    h.pad(PadButton::Start);
+    let saved = store.0.borrow().clone().expect("saved");
+    assert!(saved.contains("\"quality\": \"low\""), "{saved}");
+    // A forced preset wins for the session with its own scale, unsaved.
+    h.app.force_quality(Some(Quality::Ultra));
+    assert_eq!(
+        h.app.scene_view(0.0, 1.6).quality,
+        Quality::Ultra.render(1.0)
+    );
+    assert_eq!(h.app.settings().quality, Some(Quality::Low));
 }

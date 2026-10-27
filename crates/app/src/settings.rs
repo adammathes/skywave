@@ -6,7 +6,8 @@
 //!   "drive": { "handling": "arcade" },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
-//!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false },
+//!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
+//!              "quality": "auto" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
 //!   "world": { "clock_speed": 10.0 },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false },
@@ -93,6 +94,110 @@ impl Handling {
     }
 }
 
+/// The graphics preset: what the renderer may spend (`docs/PERFORMANCE.md` has the table
+/// and the reasoning). [`Settings::quality`] `None` is "auto": [`Quality::auto`] picks
+/// for the device each run until the player chooses one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Quality {
+    /// Integrated GPUs that struggle: two 1024² cascades, 75% resolution, no coronas.
+    Low,
+    /// The Steam Deck at 1280×800 and 90 Hz: two 1536² cascades, full resolution.
+    Deck,
+    /// The default: three 1536² cascades, the far one drawn every other frame.
+    Medium,
+    /// Desktop GPUs: three 2048² cascades every frame, five bloom levels.
+    High,
+    /// Big desktop GPUs: three 3072² cascades where the device allows.
+    Ultra,
+}
+
+impl Quality {
+    /// In the order the Video page offers them.
+    pub const ALL: [Quality; 5] = [
+        Quality::Low,
+        Quality::Deck,
+        Quality::Medium,
+        Quality::High,
+        Quality::Ultra,
+    ];
+
+    /// Stable name (settings JSON, `--quality`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Quality::Low => "low",
+            Quality::Deck => "deck",
+            Quality::Medium => "medium",
+            Quality::High => "high",
+            Quality::Ultra => "ultra",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Quality> {
+        Quality::ALL.into_iter().find(|q| q.name() == name)
+    }
+
+    /// The resolution scale choosing this preset sets (the slider can change it after).
+    pub fn resolution_scale(self) -> f32 {
+        match self {
+            Quality::Low => 0.75,
+            _ => 1.0,
+        }
+    }
+
+    /// The renderer's knobs for this preset, at `resolution_scale`.
+    pub fn render(self, resolution_scale: f32) -> render::RenderQuality {
+        let (shadow_size, cascades, bloom_levels, coronas, far_cascade_interval, min_caster) =
+            match self {
+                Quality::Low => (1024, 2, 4, false, 2, 3.0),
+                Quality::Deck => (1536, 2, 4, true, 2, 2.0),
+                Quality::Medium => (1536, 3, 4, true, 2, 2.0),
+                Quality::High => (2048, 3, 5, true, 1, 0.0),
+                Quality::Ultra => (3072, 3, 5, true, 1, 0.0),
+            };
+        render::RenderQuality {
+            shadow_size,
+            cascades,
+            resolution_scale,
+            bloom_levels,
+            coronas,
+            far_cascade_interval,
+            min_caster_texels: min_caster,
+        }
+    }
+
+    /// The preset for a device nobody chose one for: [`Quality::Deck`] on what looks like
+    /// a Steam Deck (its APU's names, an AMD integrated GPU, or a 1280×800 surface on
+    /// Linux), [`Quality::Medium`] everywhere else.
+    pub fn auto(gpu: &GpuInfo) -> Quality {
+        let name = gpu.name.to_ascii_lowercase();
+        let deck_apu = ["van gogh", "vangogh", "sephiroth", "custom gpu 0405"]
+            .iter()
+            .any(|n| name.contains(n));
+        let amd = name.contains("amd") || name.contains("radv") || name.contains("radeon");
+        let deck_screen = gpu.linux && gpu.surface == (1280, 800);
+        if deck_apu || (amd && gpu.integrated) || deck_screen {
+            Quality::Deck
+        } else {
+            Quality::Medium
+        }
+    }
+}
+
+/// What the platform knows about the GPU: for the automatic preset and the overlay.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GpuInfo {
+    /// The adapter's name as the driver reports it (`wgpu::AdapterInfo::name`).
+    pub name: String,
+    /// Backend and driver, for the overlay ("Vulkan, radv Mesa 24.1").
+    pub backend: String,
+    /// The adapter says it is an integrated GPU.
+    pub integrated: bool,
+    /// Running on Linux.
+    pub linux: bool,
+    /// The window's size in pixels when the game started.
+    pub surface: (u32, u32),
+}
+
 /// Cockpit field of view, degrees: range and slider step.
 pub const COCKPIT_FOV_MIN: f32 = 50.0;
 pub const COCKPIT_FOV_MAX: f32 = 80.0;
@@ -122,10 +227,12 @@ pub struct Settings {
     pub camera_shake: bool,
     /// HUD and menu scale, 1–2 (TV distance wants more).
     pub ui_scale: f32,
-    /// Render resolution as a fraction of the window, 0.5–1. Stored for the renderer's
-    /// upcoming scaled target; not applied yet.
+    /// Render resolution as a fraction of the window, 0.5–1: the scene draws at this
+    /// size and is upscaled, the HUD stays sharp.
     pub resolution_scale: f32,
     pub bloom: bool,
+    /// The graphics preset; `None` picks one for the device ([`Quality::auto`]).
+    pub quality: Option<Quality>,
     /// The frame-stats overlay (F3).
     pub debug_overlay: bool,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
@@ -156,6 +263,7 @@ impl Default for Settings {
             ui_scale: 1.0,
             resolution_scale: 1.0,
             bloom: true,
+            quality: None,
             debug_overlay: false,
             clock_speed: 10.0,
             minimap: true,
@@ -225,6 +333,8 @@ struct Video {
     resolution_scale: f32,
     bloom: bool,
     debug_overlay: bool,
+    /// A [`Quality`] name, or "auto".
+    quality: String,
 }
 
 impl Default for Video {
@@ -235,8 +345,14 @@ impl Default for Video {
             resolution_scale: s.resolution_scale,
             bloom: s.bloom,
             debug_overlay: s.debug_overlay,
+            quality: quality_name(s.quality).to_owned(),
         }
     }
+}
+
+/// The settings name of a preset choice.
+fn quality_name(q: Option<Quality>) -> &'static str {
+    q.map_or("auto", Quality::name)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -365,6 +481,7 @@ impl Settings {
                 resolution_scale: self.resolution_scale,
                 bloom: self.bloom,
                 debug_overlay: self.debug_overlay,
+                quality: quality_name(self.quality).to_owned(),
             },
             "hud": HudSection {
                 minimap: self.minimap,
@@ -416,6 +533,7 @@ impl Settings {
             ui_scale: video.ui_scale,
             resolution_scale: video.resolution_scale,
             bloom: video.bloom,
+            quality: Quality::from_name(&video.quality),
             debug_overlay: video.debug_overlay,
             clock_speed: world.clock_speed,
             minimap: hud.minimap,
@@ -449,6 +567,7 @@ mod tests {
             ui_scale: 1.75,
             resolution_scale: 0.75,
             bloom: false,
+            quality: Some(Quality::Low),
             debug_overlay: true,
             clock_speed: 60.0,
             minimap: false,
@@ -525,6 +644,81 @@ mod tests {
         assert!(s.dashboard && s.camera_shake);
         for h in Handling::ALL {
             assert_eq!(Handling::from_name(h.name()), Some(h));
+        }
+    }
+
+    #[test]
+    fn quality_presets_round_trip_and_map_to_the_renderer() {
+        let b = Bindings::default();
+        for q in Quality::ALL.map(Some).into_iter().chain([None]) {
+            let s = Settings {
+                quality: q,
+                ..Settings::default()
+            };
+            assert_eq!(Settings::from_json(&s.to_json(&b)).0.quality, q);
+        }
+        let (s, _) = Settings::from_json(r#"{ "video": { "quality": "potato" } }"#);
+        assert_eq!(s.quality, None, "unknown names are auto");
+        // Cheaper presets never ask for more than dearer ones.
+        let r = Quality::ALL.map(|q| q.render(q.resolution_scale()));
+        for w in r.windows(2) {
+            assert!(w[0].shadow_size <= w[1].shadow_size);
+            assert!(w[0].cascades <= w[1].cascades);
+            assert!(w[0].bloom_levels <= w[1].bloom_levels);
+            assert!(w[0].resolution_scale <= w[1].resolution_scale);
+        }
+        assert_eq!(Quality::High.render(1.0), render::RenderQuality::default());
+        assert_eq!(r[0].cascades, 2);
+        assert_eq!(r[0].resolution_scale, 0.75);
+        assert_eq!(r[2].shadow_size, 1536);
+    }
+
+    #[test]
+    fn auto_quality_picks_deck_on_the_deck() {
+        let gpu = |name: &str, integrated, linux, surface| GpuInfo {
+            name: name.to_owned(),
+            integrated,
+            linux,
+            surface,
+            ..GpuInfo::default()
+        };
+        let deck = [
+            gpu(
+                "AMD Custom GPU 0405 (RADV VANGOGH)",
+                true,
+                true,
+                (1280, 800),
+            ),
+            gpu(
+                "AMD Custom GPU 0932 (RADV SEPHIROTH)",
+                true,
+                true,
+                (1920, 1080),
+            ),
+            gpu(
+                "AMD Radeon Graphics (RADV GFX1103_R1)",
+                true,
+                true,
+                (2560, 1440),
+            ),
+            gpu("llvmpipe (LLVM 17.0.6, 256 bits)", false, true, (1280, 800)),
+        ];
+        for g in &deck {
+            assert_eq!(Quality::auto(g), Quality::Deck, "{g:?}");
+        }
+        let other = [
+            gpu(
+                "AMD Radeon RX 7800 XT (RADV NAVI32)",
+                false,
+                true,
+                (2560, 1440),
+            ),
+            gpu("Apple M2", true, false, (2880, 1800)),
+            gpu("Intel(R) Iris(R) Xe Graphics", true, false, (1280, 800)),
+            gpu("Google SwiftShader", false, true, (1280, 720)),
+        ];
+        for g in &other {
+            assert_eq!(Quality::auto(g), Quality::Medium, "{g:?}");
         }
     }
 
