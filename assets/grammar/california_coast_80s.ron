@@ -907,7 +907,7 @@ Grammar(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
                 kinds: TopKinds(
                     parapet: 2, cornice: 0, stepped: 0, shaped: 0,
-                    false_front: 0, bracketed: 0, mansard: 1,
+                    false_front: 0, bracketed: 0, mansard: 0,
                 ),
                 cornice_d: 0.2,
             ),

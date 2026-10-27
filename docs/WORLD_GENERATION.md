@@ -96,8 +96,6 @@ SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], li
               shop_lit_256, lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
               wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
 Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
-TradeRule], forms: [(Form, weight)],
-              wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
 TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
               lines: [(Word(String) | Since, weight)], descriptors_out: [String] }
 Lexicon     { id, syllables: { onsets, nuclei, codas }, given, surnames, descriptors, trades,
@@ -143,8 +141,9 @@ building, from an `Rng` keyed by the building's door pick):
   over the street front's middle, a false front (the street wall carried up 1.2–2.4 m;
   one storey only, taller buildings get the plain parapet), a deep cornice on brackets
   along the street front (two storeys or more, else the plain cornice), or a shingled
-  mansard all round, 1.1 m down the wall and 0.7 m out (two storeys or more, else the
-  plain parapet: a one-storey front's signs reach the top of its wall).
+  mansard all round, 1.1 m down the wall and 0.7 m out (two storeys or more and not a
+  motel, else the plain parapet: a one-storey front's signs reach the top of its wall, and
+  a motel's walkway roof runs where the eave would).
 - **Windows.** Bays of `bay_w` (1.5× on facades more than 30 m from a road, then widened until
   the triangle budget fits); a window is `clamp(bay_w · w_share, w)` wide and
   `min(upper floor − head, h_max)` tall, at least `window_h_min`; sills `sill_ground` above the
@@ -158,15 +157,17 @@ building, from an `Rng` keyed by the building's door pick):
   range times the area, rounded at random, at least one when the range is above zero, at
   most 6 units, 3 fans and 8 skylights. They are counted at planning (`BuildingPlan::roof`,
   so the triangle estimate covers them) and placed toward the back of the roof, in the
-  street front's frame, so the parapet hides most of them from the street; a strip mall's
+  street front's frame, so the parapet hides most of them from the street, and only where the
+  whole item stands on the roof; a strip mall's
   1.8 m parapet hides them all. Buildings of `bulkhead_floors` or more get a stair
   bulkhead, and one in `water_tank_1_in` of those a water tank.
 - **Signs** (terrain places). The awning over each run of storefronts is drawn from
   `awnings` by weight in listed order: a striped or solid canvas shed, a flat stucco
-  canopy, a vinyl bullnose, a ribbed aluminum shed, a shingled mansard pent, or none; its
-  lowest edge stays 2.4 m over the floor. A strip mall's canopy is drawn from
+  canopy, a vinyl bullnose, a ribbed aluminum shed, a shingled mansard pent, or none. Each
+  hangs from the transoms' top down, under the sign band, its lowest edge 2.4 m over the
+  floor; a transom too low for that gets none. A strip mall's canopy is drawn from
   `mall_canopies`: a shingled mansard on posts (0.9–1.5 m tall, 2–3 m out, the tenants'
-  letters on a raceway at its foot) or the flat canopy (any other kind). Where the shop is
+  letters on its shingled face) or the flat canopy (any other kind). Where the shop is
   open late the awning's or canopy's underside glows at window strength, the spill of the
   light the detailing puts in front of it. `lit_box_256` and `shop_lit_256` are shares out
   of 256 of backlit-box signs and late shops.
