@@ -35,7 +35,7 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 15:15 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+- Done on `main` (2026-10-27 16:00 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   7 working stations per era and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
@@ -48,15 +48,16 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   raised to 1211 web / 1617 native pages; CI gates stabilised; the M4 gate (#25: non-violence
   scenarios, density tests, two gate goldens, gate notes in `docs/backlog/M4.md`); pedestrians
   drawn in the game (#27: crowd beside the traffic, 8 figures × 13 parts instanced, Traffic
-  setting drives both, golden `coast-peds-noon`).
+  setting drives both, golden `coast-peds-noon`); awnings, canopies, rooflines and rooftop units
+  (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof).
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
   natural map edges (#20, approved, blocked until #24 lands, then re-pins two traffic hashes);
   pedestrian hardening (#24, fourth review round: a car along or turning across a crossing must
   never reach anyone; the adversarial probe sweep over every crossing, seeds 1-4, is becoming the
   standing test; review round 4 passed; CI red on main's new gate test "nobody crossing in
-  three minutes", the session is fixing it and loosening the step gate's p99 to 5 ms); awnings,
-  canopies, rooflines and rooftop units (#26, B8 and B9, review fixes done, refreshing from main
-  after #27; merge on green). Sessions building: era sports cars with open-top variants
+  three minutes": fixed at 5656b0a, walkers wait for stragglers only on crossings, step-aside
+  clearance 0.4 m, step gate p99 5 ms; merges on green CI). Sessions building: parking lots
+  (`bldg/parking-lots`, B10); era sports cars with open-top variants
   (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
   ad-free presets and the player's own MP3 folders as stations (`m3/music-2`, NOTES 9; no
   synthetic music, the owner declined); idle frames, frame cap, Battery preset
