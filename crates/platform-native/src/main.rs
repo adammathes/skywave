@@ -8,7 +8,7 @@
 //! free cursor; the raw motion still drives the look.
 //!
 //! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--frames N]
-//! [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--version]`.
+//! [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--version]`.
 //! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
 //! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are
 //! `--scene seed=N` and `--scene car=ID`. `--stats` prints the adapter, the surface and a
@@ -19,7 +19,7 @@
 //! there (scripted benchmarks). `--no-vsync` presents without waiting for the display
 //! (`AutoNoVsync`; the default is `AutoVsync`). `--quality low|deck|medium|high|ultra`
 //! forces a graphics preset for the session (not saved); `--no-cull` turns instance culling
-//! off (for comparisons). `--version` prints the build's `git describe` (see `build.rs`)
+//! off and `--no-prepass` the depth pre-pass (for comparisons). `--version` prints the build's `git describe` (see `build.rs`)
 //! and exits.
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::NATIVE` (13×13
@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use app::{App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, MOUSE_RIGHT};
 use pad::Pads;
-use render::{RenderStats, Renderer, GPU_PASS_NAMES};
+use render::{RenderStats, Renderer, GPU_PARTS, GPU_PART_NAMES, GPU_PASSES, GPU_PASS_NAMES};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -59,6 +59,12 @@ const PIXELS_PER_NOTCH: f64 = 100.0;
 /// Frames left out of the `--frames` summary while the town streams in and caches warm.
 const SUMMARY_WARMUP_FRAMES: usize = 60;
 
+/// `--stats` prints the GPU table over this many seconds.
+const GPU_TABLE_SECONDS: u64 = 5;
+
+/// GPU time of one frame read back: each pass, then each part ([`GPU_PART_NAMES`]), µs.
+type GpuSample = [u32; GPU_PASSES + GPU_PARTS];
+
 #[derive(Debug, Default, PartialEq)]
 struct Options {
     scene: SceneSetup,
@@ -71,6 +77,7 @@ struct Options {
     no_vsync: bool,
     quality: Option<Quality>,
     no_cull: bool,
+    no_prepass: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -82,6 +89,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--exit" => opts.exit = true,
             "--no-vsync" => opts.no_vsync = true,
             "--no-cull" => opts.no_cull = true,
+            "--no-prepass" => opts.no_prepass = true,
             "--frames" => {
                 let v = args.next().ok_or("--frames needs a count")?;
                 let n = v
@@ -231,6 +239,98 @@ fn render_line(r: &RenderStats) -> String {
     s
 }
 
+/// Minimum, median and 95th percentile of `us` (sorted in place), ms.
+fn spread(us: &mut [u32]) -> (f32, f32, f32) {
+    if us.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    us.sort_unstable();
+    let p95 = us[((us.len() as f32 * 0.95).ceil() as usize).clamp(1, us.len()) - 1];
+    let ms = |v: u32| v as f32 / 1000.0;
+    (ms(us[0]), ms(us[us.len() / 2]), ms(p95))
+}
+
+/// The `--stats` GPU table: min, median and p95 of each pass (and, with `parts`, each
+/// part under its pass) and of their total, over `samples`.
+fn gpu_table(samples: &[GpuSample], parts: bool) -> String {
+    let mut s = format!(
+        "{:<14}{:>8}{:>8}{:>8}   ({} frames read)",
+        "gpu ms",
+        "min",
+        "median",
+        "p95",
+        samples.len()
+    );
+    let mut column: Vec<u32> = Vec::with_capacity(samples.len());
+    let mut row = |s: &mut String, name: &str, f: &dyn Fn(&GpuSample) -> u32| {
+        column.clear();
+        column.extend(samples.iter().map(f));
+        let (min, med, p95) = spread(&mut column);
+        let _ = write!(s, "\n  {name:<12}{min:>8.2}{med:>8.2}{p95:>8.2}");
+    };
+    // Which parts belong under which pass: the cascades under shadow, the rest under
+    // forward.
+    let under = |p: usize| match p {
+        0 => 0..render::CASCADES,
+        1 => render::CASCADES..GPU_PARTS,
+        _ => 0..0,
+    };
+    for (p, name) in GPU_PASS_NAMES.iter().enumerate() {
+        row(&mut s, name, &|g| g[p]);
+        if parts {
+            for k in under(p) {
+                row(&mut s, &format!("  {}", GPU_PART_NAMES[k]), &|g| {
+                    g[GPU_PASSES + k]
+                });
+            }
+        }
+    }
+    row(&mut s, "total", &|g| g[..GPU_PASSES].iter().sum());
+    s
+}
+
+/// The renderer's work in its last frame: draws, triangles, and (with GPU timing) the
+/// fragments the forward pass shaded and the depth texels each cascade wrote.
+fn work_line(r: &RenderStats) -> String {
+    let px = u64::from(r.render_size.0) * u64::from(r.render_size.1);
+    let mut s = format!(
+        "draws {} (shadow {}, bloom {}) | tris fwd {}k shadow {}k | lights: {} instances with \
+         a full set, {} in all sets",
+        r.draw_calls,
+        r.shadow_draw_calls,
+        r.bloom_draw_calls,
+        r.triangles / 1000,
+        r.shadow_triangles / 1000,
+        r.full_light_sets,
+        r.light_slots,
+    );
+    if r.gpu_timing {
+        let c = &r.gpu_counts;
+        let covered = px.saturating_sub(c.sky).max(1);
+        let _ = write!(
+            s,
+            " | px {}k: sky {}k, meshes {}k (overdraw {:.2}{}), light evals {}k, pcf {}k \
+             lookups x{} taps | depth texels {}k/{}k/{}k",
+            px / 1000,
+            c.sky / 1000,
+            c.meshes / 1000,
+            c.meshes as f64 / covered as f64,
+            if c.complete {
+                ""
+            } else {
+                ", some draws uncounted"
+            },
+            c.light_evals / 1000,
+            c.shadowed / 1000,
+            render::PCF_TAPS,
+            c.depth_texels[0] / 1000,
+            c.depth_texels[1] / 1000,
+            c.depth_texels[2] / 1000,
+        );
+    }
+    s
+}
+
 /// Frame-time statistics, printed to stderr once per second with `--stats`, and over the
 /// whole run (after warmup) with `--frames`. Sample buffers are reused; the run's grows
 /// only with `--frames`.
@@ -243,6 +343,11 @@ struct Stats {
     cpu_ms: Vec<f32>,
     /// Every frame of a `--frames` run, ms (frame, CPU).
     run: Vec<(f32, f32)>,
+    /// GPU readings over the table's window, the newest reading's frame and when the
+    /// window started.
+    gpu: Vec<GpuSample>,
+    gpu_frame: u64,
+    gpu_since: Option<Instant>,
 }
 
 impl Stats {
@@ -251,8 +356,32 @@ impl Stats {
             frame_ms: Vec::with_capacity(1024),
             cpu_ms: Vec::with_capacity(1024),
             run: Vec::with_capacity(frames.map_or(0, |n| n as usize)),
+            gpu: Vec::with_capacity(1024),
             ..Stats::default()
         }
+    }
+
+    /// Records the GPU reading in `r` if it is new; every [`GPU_TABLE_SECONDS`] (of `now`)
+    /// returns the table and the work line to print.
+    fn record_gpu(&mut self, r: &RenderStats, now: Instant) -> Option<String> {
+        if !r.gpu_timing {
+            return None;
+        }
+        if r.gpu_frame != self.gpu_frame {
+            self.gpu_frame = r.gpu_frame;
+            let mut g: GpuSample = [0; GPU_PASSES + GPU_PARTS];
+            g[..GPU_PASSES].copy_from_slice(&r.gpu_us);
+            g[GPU_PASSES..].copy_from_slice(&r.gpu_part_us);
+            self.gpu.push(g);
+        }
+        let since = *self.gpu_since.get_or_insert(now);
+        if now - since < Duration::from_secs(GPU_TABLE_SECONDS) || self.gpu.is_empty() {
+            return None;
+        }
+        let out = format!("{}\n  {}", gpu_table(&self.gpu, r.gpu_parts), work_line(r));
+        self.gpu.clear();
+        self.gpu_since = Some(now);
+        Some(out)
     }
 
     /// Records a frame of `dt` with `cpu` spent recording and submitting it; once a
@@ -348,10 +477,13 @@ impl Gpu {
         .map_err(|e| e.to_string())?;
         let info = adapter.get_info();
         log::info!("adapter: {info:?}");
-        // GPU time per pass, for `--stats` only.
+        // GPU time per pass (and per part of a pass, where timestamps can be written
+        // inside passes), for `--stats` only.
         let timestamps = wgpu::Features::TIMESTAMP_QUERY;
+        let inside = wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
         let features = if opts.stats && adapter.features().contains(timestamps) {
-            timestamps
+            timestamps | (adapter.features() & inside)
         } else {
             wgpu::Features::empty()
         };
@@ -410,10 +542,15 @@ impl Gpu {
                 surface.get_capabilities(&adapter).present_modes,
             );
             eprintln!(
-                "quality: {} {:?} culling {}",
+                "quality: {} {:?} culling {}{}",
                 app.ui().quality().name(),
                 options.quality,
                 if options.culling { "on" } else { "off" },
+                if opts.no_prepass {
+                    ", depth pre-pass forced off"
+                } else {
+                    ""
+                },
             );
         }
         let mut renderer = Renderer::with_options(
@@ -433,8 +570,10 @@ impl Gpu {
             let on = renderer.enable_gpu_timing();
             eprintln!(
                 "gpu timing: {}",
-                if on {
-                    "timestamp queries per pass"
+                if on && renderer.stats().gpu_parts {
+                    "timestamp queries per pass and inside passes; occlusion queries"
+                } else if on {
+                    "timestamp queries per pass (none inside passes); occlusion queries"
                 } else {
                     "unavailable (no TIMESTAMP_QUERY on this adapter)"
                 }
@@ -462,7 +601,7 @@ impl Gpu {
 
     /// Draws a frame; returns the CPU time spent building and submitting it (the scene
     /// view and the renderer, not waiting for the swapchain).
-    fn draw(&mut self, app: &mut App, alpha: f32) -> Duration {
+    fn draw(&mut self, app: &mut App, alpha: f32, no_prepass: bool) -> Duration {
         app.sync_chunks(&mut self.renderer);
         // A car driven for the first time this session (and the saved one, at startup).
         for mesh in app.take_new_meshes() {
@@ -483,7 +622,9 @@ impl Gpu {
         let view = frame.texture.create_view(&Default::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
         let start = Instant::now();
-        self.renderer.render(&view, &app.scene_view(alpha, aspect));
+        let mut scene = app.scene_view(alpha, aspect);
+        scene.quality.depth_prepass &= !no_prepass;
+        self.renderer.render(&view, &scene);
         let cpu = start.elapsed();
         self.window.pre_present_notify();
         self.queue.present(frame);
@@ -603,12 +744,21 @@ impl ApplicationHandler for Shell {
                 let Some(gpu) = &mut self.gpu else {
                     return;
                 };
-                let cpu = gpu.draw(&mut self.app, steps.alpha);
+                let cpu = gpu.draw(&mut self.app, steps.alpha, self.opts.no_prepass);
                 let render = gpu.stats();
                 self.app.set_render_stats(render);
                 self.app.set_cpu_submit_ms(cpu.as_secs_f32() * 1000.0);
                 self.frames_drawn += 1;
                 let keep = self.opts.frames.is_some();
+                if self.opts.stats {
+                    if let Some(table) = self.stats.record_gpu(&render, now) {
+                        eprintln!(
+                            "[gpu] t={:.0}s over {GPU_TABLE_SECONDS} s, quality={}\n{table}",
+                            self.started.elapsed().as_secs_f64(),
+                            self.app.ui().quality().name(),
+                        );
+                    }
+                }
                 if (self.opts.stats || keep) && !dt.is_zero() {
                     if let Some(line) = self.stats.record(dt, cpu, keep) {
                         if self.opts.stats {
@@ -664,7 +814,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] \
                  [--frames N [--exit]] [--no-vsync] [--quality low|deck|medium|high|ultra] \
-                 [--no-cull] [--version]"
+                 [--no-cull] [--no-prepass] [--version]"
             );
             return if e.is_empty() {
                 ExitCode::SUCCESS
@@ -791,11 +941,12 @@ mod tests {
             "--quality",
             "deck",
             "--no-cull",
+            "--no-prepass",
             "--scene",
             "place=coast",
         ])
         .unwrap();
-        assert!(o.stats && o.exit && o.no_vsync && o.no_cull);
+        assert!(o.stats && o.exit && o.no_vsync && o.no_cull && o.no_prepass);
         assert_eq!(o.frames, Some(600));
         assert_eq!(o.quality, Some(Quality::Deck));
         assert!(args(&["--frames"]).is_err());
@@ -957,6 +1108,110 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gpu_table_reports_min_median_and_p95_per_pass_and_part() {
+        let samples: Vec<GpuSample> = (1..=100)
+            .map(|i| std::array::from_fn(|k| if k == 1 { 2000 * i } else { 100 * i }))
+            .collect();
+        let table = gpu_table(&samples, true);
+        let lines: Vec<&str> = table.lines().collect();
+        assert!(lines[0].contains("(100 frames read)"), "{table}");
+        assert!(
+            table.contains("\n  shadow          0.10    5.10    9.50"),
+            "{table}"
+        );
+        assert!(
+            table.contains("\n    cascade1      0.10    5.10    9.50"),
+            "{table}"
+        );
+        assert!(
+            table.contains("\n  forward         2.00  102.00  190.00"),
+            "{table}"
+        );
+        assert!(table.contains("\n    depth "), "{table}");
+        // Six passes (each 100 µs × i, forward 2000 µs × i) summed.
+        assert!(
+            table.contains("\n  total           2.50  127.50  237.50"),
+            "{table}"
+        );
+        assert_eq!(lines.len(), 1 + GPU_PASSES + GPU_PARTS + 1);
+        assert_eq!(
+            gpu_table(&samples, false).lines().count(),
+            1 + GPU_PASSES + 1
+        );
+
+        // A reading is kept once (by its frame) and the table comes every few seconds.
+        let mut st = Stats::new(None);
+        let t0 = Instant::now();
+        let mut r = RenderStats {
+            gpu_timing: true,
+            gpu_frame: 1,
+            ..RenderStats::default()
+        };
+        assert!(st.record_gpu(&r, t0).is_none());
+        assert!(st.record_gpu(&r, t0 + Duration::from_secs(1)).is_none());
+        r.gpu_frame = 2;
+        let out = st
+            .record_gpu(&r, t0 + Duration::from_secs(GPU_TABLE_SECONDS))
+            .unwrap();
+        assert!(out.contains("(2 frames read)"), "{out}");
+        assert!(out.contains("draws 0 (shadow 0, bloom 0)"), "{out}");
+        assert!(st.gpu.is_empty());
+        r.gpu_timing = false;
+        assert!(st.record_gpu(&r, t0 + Duration::from_secs(60)).is_none());
+    }
+
+    /// Frames of the coast's `coast-strip-golden` scene at Deck on a Vulkan device
+    /// (lavapipe on CI), counted with occlusion queries: the sky shades only the pixels the
+    /// meshes leave, the depth pre-pass shades each covered pixel about once (half the
+    /// fragments of drawing without it), and a still scene keeps both cascades. Skipped
+    /// without a Vulkan device, except on CI.
+    #[test]
+    fn fragments_on_the_coast_at_deck() {
+        let Some((device, queue, name)) = vulkan_device() else {
+            assert!(std::env::var_os("CI").is_none(), "no Vulkan device on CI");
+            eprintln!("skipped: no Vulkan device (install mesa-vulkan-drivers)");
+            return;
+        };
+        eprintln!("device: {name}");
+        let size = (1280, 800);
+        let query = "?seed=1&place=coast&car=corsair_gtx&still=1&cam=chase-far&t=17:40";
+        let (mut app, mut r) = streamed(query, None, &device, &queue, size);
+        let view = target(&device, size);
+        assert!(r.enable_gpu_timing());
+        app.force_quality(Some(Quality::Deck));
+        let mut frames = |prepass: bool| {
+            for _ in 0..3 {
+                let mut scene = app.scene_view(1.0, 1.6);
+                assert!(scene.quality.depth_prepass, "the Deck preset has it");
+                scene.quality.depth_prepass = prepass;
+                r.render(&view, &scene);
+                let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            }
+            let s = r.stats();
+            eprintln!("{}", work_line(&s));
+            s
+        };
+        let without = frames(false);
+        let with = frames(true);
+        let px = 1280 * 800;
+        let (a, b) = (&without.gpu_counts, &with.gpu_counts);
+        assert!(a.complete && b.complete);
+        // Measured: 104k of 1024k pixels are sky.
+        assert!(b.sky > 0 && b.sky < px / 5, "{b:?}");
+        assert_eq!(a.sky, b.sky);
+        // Measured: 1879k mesh fragments without the pre-pass, 920k (the 920k pixels
+        // covered) with it.
+        let covered = px - b.sky;
+        assert!(b.meshes <= covered + covered / 50, "{b:?}");
+        assert!(b.meshes * 100 <= a.meshes * 55, "{a:?} {b:?}");
+        // Bloom from half the 1280×800 target, four levels: four passes down, three up.
+        assert_eq!(with.bloom_draw_calls, 7);
+        // Nothing moves: after the first frames both cascades are kept.
+        assert_eq!(with.cascades_drawn, 0, "{with:?}");
+        assert_eq!(with.shadow_draw_calls, 0);
+    }
+
     /// Prints what culling and each preset leave the GPU on the streamed coast at the
     /// native budget (instances and triangles per pass, from the renderer's stats on
     /// wgpu's no-op device) and what culling costs the CPU, without traffic and with busy
@@ -994,14 +1249,17 @@ mod tests {
         (Quality::Deck, DECK_DRAWS, DECK_TRIS, DECK_SHADOW),
         (Quality::Medium, MEDIUM_DRAWS, MEDIUM_TRIS, MEDIUM_SHADOW),
     ];
-    // Measured (debug and release agree; 4 NPC cars in the forward pass, 76 live):
-    // Deck 281 draws, 408k forward and 671k shadow triangles; Medium 414, 408k, 1201k.
-    const DECK_DRAWS: u32 = 310;
+    // Measured over 4 frames driving at 100 km/h (4 NPC cars in the forward pass, 76 live):
+    // the most draws in a frame (the first, which draws every cascade; at Deck the depth
+    // pre-pass draws the forward pass's meshes twice), forward triangles, and shadow
+    // triangles a frame (the far cascade is kept while its map covers the view):
+    // Deck 950 draws, 410k forward and 381k shadow triangles; Medium 1025, 410k, 790k.
+    const DECK_DRAWS: u32 = 1050;
     const DECK_TRIS: u64 = 450_000;
-    const DECK_SHADOW: u64 = 740_000;
-    const MEDIUM_DRAWS: u32 = 455;
+    const DECK_SHADOW: u64 = 420_000;
+    const MEDIUM_DRAWS: u32 = 1130;
     const MEDIUM_TRIS: u64 = 450_000;
-    const MEDIUM_SHADOW: u64 = 1_320_000;
+    const MEDIUM_SHADOW: u64 = 870_000;
 
     /// What busy traffic in view costs the GPU at a coast junction on the no-op device,
     /// streamed at the web budget: the cars are drawn (more instances in the forward pass
@@ -1040,6 +1298,7 @@ mod tests {
     /// One preset's counts over a run of frames.
     struct Counts {
         instances_drawn: u32,
+        /// The most in a frame.
         draws: u32,
         triangles: u64,
         /// Mean a frame (a kept far cascade draws none on alternate frames).
@@ -1047,8 +1306,8 @@ mod tests {
     }
 
     /// Streams the scene `query` until idle (at `stream`, else the web budget), then
-    /// renders `frames` frames per run on the no-op device at 1280×800, printing and
-    /// returning each run's counts.
+    /// renders `frames` frames per run on the no-op device at 1280×800 with the camera
+    /// driving, printing and returning each run's counts.
     fn render_counts(
         query: &str,
         stream: Option<app::stream::StreamBudget>,
@@ -1074,14 +1333,185 @@ mod tests {
             ..Default::default()
         }))
         .unwrap();
+        let size = (1280, 800);
+        let (mut app, mut r) = streamed(query, stream, &device, &queue, size);
+        eprintln!("{query}: {} cars", app.traffic_count());
+        let view = target(&device, size);
+        let mut out = Vec::new();
+        for &(label, q, culling) in runs {
+            app.force_quality(Some(q));
+            r.set_culling(culling);
+            let mut best = f64::INFINITY;
+            let mut total = 0.0;
+            // Shadow work alternates when the far cascade is kept: the most per cascade
+            // over the run, and the mean triangles a frame.
+            let mut shadow_max = [0; 3];
+            let mut shadow_tris = 0u64;
+            let mut draws = 0;
+            for f in 0..frames {
+                // Driving: the camera moves 0.3 m a frame along the world's x (100 km/h
+                // at 90 fps), so the cascades cannot be kept as they are for a still view.
+                let mut scene = app.scene_view(1.0, 1.6);
+                let d = 0.3 * f as f32;
+                for k in 0..3 {
+                    scene.camera.view[3][k] -= d * scene.camera.view[0][k];
+                }
+                let t = Instant::now();
+                r.render(&view, &scene);
+                let dt = t.elapsed().as_secs_f64();
+                best = best.min(dt);
+                total += dt;
+                let s = r.stats();
+                for (m, n) in shadow_max.iter_mut().zip(s.shadow_instances) {
+                    *m = (*m).max(n);
+                }
+                shadow_tris += s.shadow_triangles;
+                draws = draws.max(s.draw_calls);
+            }
+            let s = r.stats();
+            eprintln!(
+                "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
+                 shadow {}k a frame | draws {} at most | cpu render() avg {:.2} ms best {:.2} ms",
+                s.instances,
+                s.instances_drawn,
+                shadow_max,
+                s.cascades,
+                s.triangles / 1000,
+                shadow_tris / u64::from(frames) / 1000,
+                draws,
+                total / f64::from(frames) * 1000.0,
+                best * 1000.0,
+            );
+            out.push((
+                q,
+                Counts {
+                    instances_drawn: s.instances_drawn,
+                    draws,
+                    triangles: s.triangles,
+                    shadow_triangles: shadow_tris / u64::from(frames),
+                },
+            ));
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        out
+    }
+
+    /// A Vulkan device (lavapipe in a container, or a real GPU) with timestamp queries,
+    /// inside passes where it has them; `None` without one.
+    fn vulkan_device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        let wanted = wgpu::Features::TIMESTAMP_QUERY
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: adapter.features() & wanted,
+            required_limits: render_limits().using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .ok()?;
+        let info = adapter.get_info();
+        Some((
+            device,
+            queue,
+            format!("{} ({})", info.name, info.driver_info),
+        ))
+    }
+
+    /// Renders `frames` frames of `app` at `q`, waiting for each, and returns the last
+    /// frame's stats (GPU medians over the run, counts of the last frame read).
+    fn measure(
+        app: &mut App,
+        r: &mut render::Renderer,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+        q: Quality,
+        frames: u32,
+    ) -> RenderStats {
+        app.force_quality(Some(q));
+        for _ in 0..frames {
+            r.render(view, &app.scene_view(1.0, 1.6));
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        // One more so the last frame's readings are in.
+        r.render(view, &app.scene_view(1.0, 1.6));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        r.stats()
+    }
+
+    /// The renderer's work and its GPU medians, for a preset.
+    fn gpu_report(label: &str, s: &RenderStats) -> String {
+        let mut line = format!("{label:>8}: {} | gpu median", work_line(s));
+        for (name, us) in GPU_PASS_NAMES.iter().zip(s.gpu_median_us) {
+            let _ = write!(line, " {name}={:.2}", us as f32 / 1000.0);
+        }
+        line
+    }
+
+    /// The coast's golden scenes on a Vulkan device (lavapipe here): fragments shaded per
+    /// pass from occlusion queries and GPU time per pass, at Deck and Medium. On a CPU
+    /// rasterizer the times rank the passes, not the Deck's milliseconds; the fragment
+    /// counts are exact. Run with
+    /// `cargo test --release -p platform-native -- --ignored --nocapture gpu_passes_on_the_coast`.
+    #[test]
+    #[ignore = "benchmark; needs a Vulkan device (lavapipe: mesa-vulkan-drivers)"]
+    fn gpu_passes_on_the_coast() {
+        let Some((device, queue, name)) = vulkan_device() else {
+            eprintln!("no Vulkan device");
+            return;
+        };
+        eprintln!("device: {name}");
+        let scenes = [
+            ("coast-strip-golden", "cam=chase-far&t=17:40"),
+            (
+                "coast-traffic-noon",
+                "cam=chase-mid&t=12:00&pos=477.5,1001.2&yaw=347&traffic=busy",
+            ),
+            ("coast-night-golden", "cam=chase-near&t=22:30&lights=1"),
+        ];
+        let size = (1280, 800);
+        let view = target(&device, size);
+        let frames = std::env::var("SKYWAVE_BENCH_FRAMES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(6);
+        for (scene, params) in scenes {
+            let query = format!("?seed=1&place=coast&car=corsair_gtx&still=1&{params}");
+            let (mut app, mut r) = streamed(&query, None, &device, &queue, size);
+            assert!(r.enable_gpu_timing(), "no timestamp queries");
+            eprintln!("{scene}:");
+            for q in [Quality::Deck, Quality::Medium] {
+                let s = measure(&mut app, &mut r, &device, &view, q, frames);
+                eprintln!("{}", gpu_report(q.name(), &s));
+            }
+        }
+    }
+
+    const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+    /// The scene `query` loaded and streamed until idle (at `stream`, else the web budget)
+    /// into a renderer for a `size` target.
+    fn streamed(
+        query: &str,
+        stream: Option<app::stream::StreamBudget>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: (u32, u32),
+    ) -> (App, render::Renderer) {
         let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
         if let Some(budget) = stream {
             app.set_stream_budget(budget);
         }
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-        let size = (1280, 800);
-        let mut r =
-            render::Renderer::with_options(&device, &queue, format, size, app.renderer_options());
+        let mut r = render::Renderer::with_options(
+            device,
+            queue,
+            TARGET_FORMAT,
+            size,
+            app.renderer_options(),
+        );
         for m in app.meshes() {
             r.add_mesh(m);
         }
@@ -1096,70 +1526,27 @@ mod tests {
                 r.add_mesh(&m);
             }
         }
-        eprintln!("{query}: {} cars", app.traffic_count());
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let view = target.create_view(&Default::default());
-        let mut out = Vec::new();
-        for &(label, q, culling) in runs {
-            app.force_quality(Some(q));
-            r.set_culling(culling);
-            let mut best = f64::INFINITY;
-            let mut total = 0.0;
-            // Shadow work alternates when the far cascade is kept: the most per cascade
-            // over the run, and the mean triangles a frame.
-            let mut shadow_max = [0; 3];
-            let mut shadow_tris = 0u64;
-            for _ in 0..frames {
-                let t = Instant::now();
-                r.render(&view, &app.scene_view(1.0, 1.6));
-                let dt = t.elapsed().as_secs_f64();
-                best = best.min(dt);
-                total += dt;
-                let s = r.stats();
-                for (m, n) in shadow_max.iter_mut().zip(s.shadow_instances) {
-                    *m = (*m).max(n);
-                }
-                shadow_tris += s.shadow_triangles;
-            }
-            let s = r.stats();
-            eprintln!(
-                "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
-                 shadow {}k a frame | draws {} | cpu render() avg {:.2} ms best {:.2} ms",
-                s.instances,
-                s.instances_drawn,
-                shadow_max,
-                s.cascades,
-                s.triangles / 1000,
-                shadow_tris / u64::from(frames) / 1000,
-                s.draw_calls,
-                total / f64::from(frames) * 1000.0,
-                best * 1000.0,
-            );
-            out.push((
-                q,
-                Counts {
-                    instances_drawn: s.instances_drawn,
-                    draws: s.draw_calls,
-                    triangles: s.triangles,
-                    shadow_triangles: shadow_tris / u64::from(frames),
+        (app, r)
+    }
+
+    /// A render target of `size` the renderer can draw into as it would the swapchain.
+    fn target(device: &wgpu::Device, size: (u32, u32)) -> wgpu::TextureView {
+        device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
                 },
-            ));
-            let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        }
-        out
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TARGET_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&Default::default())
     }
 
     /// The native shell's device limits, with room for full-size cascades.

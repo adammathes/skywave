@@ -156,12 +156,14 @@ impl Quality {
     pub fn render(self, resolution_scale: f32) -> render::RenderQuality {
         let (shadow_size, cascades, bloom_levels, coronas, far_cascade_interval, min_caster) =
             match self {
-                Quality::Low => (1024, 2, 4, false, 2, 3.0),
-                Quality::Deck => (1536, 2, 4, true, 2, 2.0),
+                Quality::Low => (1024, 2, 4, false, 3, 3.0),
+                Quality::Deck => (1536, 2, 4, true, 3, 2.0),
                 Quality::Medium => (1536, 3, 5, true, 2, 2.0),
                 Quality::High => (2048, 3, 5, true, 1, 0.0),
                 Quality::Ultra => (3072, 3, 5, true, 1, 0.0),
             };
+        // Where the GPU is short of fragment time: Low and the Deck.
+        let depth_prepass = matches!(self, Quality::Low | Quality::Deck);
         render::RenderQuality {
             shadow_size,
             cascades,
@@ -170,6 +172,7 @@ impl Quality {
             coronas,
             far_cascade_interval,
             min_caster_texels: min_caster,
+            depth_prepass,
         }
     }
 
