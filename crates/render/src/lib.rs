@@ -3160,6 +3160,39 @@ mod tests {
         }
     }
 
+    /// Safari's WGSL compiler rejects a `let` whose type is a sampler or a texture
+    /// ("'sampler' cannot be used as the type of a 'let'"), which naga and the other
+    /// browsers accept. The handle types have to be used by name.
+    #[test]
+    fn shaders_never_bind_a_sampler_or_texture_to_a_let() {
+        let handles: Vec<String> = shaders::ALL
+            .iter()
+            .flat_map(|&(_, source)| {
+                source.lines().filter_map(|l| {
+                    let (_, decl) = l.trim().split_once("var ")?;
+                    let is_handle = decl.contains(": sampler") || decl.contains(": texture_");
+                    is_handle.then(|| decl.split(':').next().unwrap().trim().to_string())
+                })
+            })
+            .collect();
+        assert!(!handles.is_empty());
+        for (name, source) in shaders::ALL {
+            for (i, line) in source.lines().enumerate() {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("let ") {
+                    if let Some((_, value)) = rest.split_once('=') {
+                        let value = value.trim().trim_end_matches(';');
+                        assert!(
+                            !handles.iter().any(|h| h == value),
+                            "{name}:{}: `{line}` binds a handle to a let; use `{value}` directly",
+                            i + 1
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Parses and validates every shader module the way the GLSL test does.
     fn validated_shaders() -> Vec<(&'static str, naga::Module, naga::valid::ModuleInfo)> {
         shaders::ALL
