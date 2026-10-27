@@ -1175,7 +1175,7 @@ mod tests {
         };
         eprintln!("device: {name}");
         let size = (1280, 800);
-        let query = "?seed=1&place=coast&car=corsair_gtx&still=1&cam=chase-far&t=17:40";
+        let query = "?seed=1&place=coast&car=corsair_gtx&still=1&cam=chase-far&t=17:40&traffic=off";
         let (mut app, mut r) = streamed(query, None, &device, &queue, size);
         let (texture, _) = target(&device, size);
         assert!(r.enable_gpu_timing());
@@ -1213,7 +1213,7 @@ mod tests {
         };
         let size = (1280, 800);
         let query = "?seed=1&car=palisade_wagon&cam=chase-far&t=12:00&pos=-197.5,-150&yaw=0\
-                     &still=1&stream=0";
+                     &still=1&stream=0&traffic=off";
         let (mut app, mut r) = streamed(query, None, &device, &queue, size);
         let (texture, _) = target(&device, size);
         app.force_quality(Some(Quality::Deck));
@@ -1317,32 +1317,25 @@ mod tests {
     }
 
     /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
-    /// warmed up and held still (queued, oncoming and crossing cars and people on the walks
-    /// in view).
+    /// warmed up (queued, oncoming and crossing cars and people on the walks in view). Not
+    /// `still`: the world runs, so cars and people move between frames.
     const JUNCTION: &str = "?seed=1&place=coast&car=corsair_gtx&cam=chase-mid&t=12:00\
-                            &pos=477.5,1001.2&yaw=347&still=1";
+                            &pos=477.5,1001.2&yaw=347";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
-    /// draws, forward and shadow triangles a frame (`docs/PERFORMANCE.md`): the measured
-    /// numbers plus about 10%.
-    const JUNCTION_BUDGET: [(Quality, u32, u64, u64); 2] = [
-        (Quality::Deck, DECK_DRAWS, DECK_TRIS, DECK_SHADOW),
-        (Quality::Medium, MEDIUM_DRAWS, MEDIUM_TRIS, MEDIUM_SHADOW),
+    /// draws in the worst frame and in the median frame after the first, forward and shadow
+    /// triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus about 10%.
+    const JUNCTION_BUDGET: [(Quality, u32, u32, u64, u64); 2] = [
+        (Quality::Deck, 1250, 750, 470_000, 740_000),
+        (Quality::Medium, 1235, 555, 470_000, 1_325_000),
     ];
-    // Measured over 4 frames driving at 100 km/h (debug and release agree; 186 car and
-    // figure-part instances in the forward pass: 4 cars and 14 people of 76 cars and 41
-    // people live): the most draws in a frame (the first, which draws every cascade; at
-    // Deck the depth pre-pass draws the forward pass's meshes twice), forward triangles,
-    // and shadow triangles a frame (the far cascade is kept while its map covers the view):
-    // Deck 1143 draws, 427k forward and 383k shadow triangles; Medium 1140, 427k, 794k.
-    // A frame without the far cascade: Deck 694 (main's 385 plus 309 pre-pass draws),
-    // Medium 529 (main's 530).
-    const DECK_DRAWS: u32 = 1260;
-    const DECK_TRIS: u64 = 465_000;
-    const DECK_SHADOW: u64 = 420_000;
-    const MEDIUM_DRAWS: u32 = 1255;
-    const MEDIUM_TRIS: u64 = 465_000;
-    const MEDIUM_SHADOW: u64 = 870_000;
+    // Measured over 8 frames driving at 100 km/h with the world running (release; a debug
+    // build lands within 2%: 1151, 696, 429k, 674k at Deck; 224 car and figure-part instances in the forward pass of 74 cars and 41 people
+    // live): the most draws in a frame (the first draws every cascade; at Deck the depth
+    // pre-pass draws the forward pass's meshes twice), the median frame's after it (no far
+    // cascade), forward triangles and shadow triangles a frame (moving casters redraw the
+    // far cascade on its interval): Deck 1134, 681, 428k, 672k; Medium 1121, 503, 428k,
+    // 1206k. Main's median frame before the pre-pass: Deck 385, Medium 530.
     /// Instances one pedestrian adds: a figure's parts.
     const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 
@@ -1357,8 +1350,8 @@ mod tests {
             ("deck", Quality::Deck, true),
         ];
         let started = Instant::now();
-        let off = render_counts(&format!("{JUNCTION}&traffic=off"), None, &runs, 4);
-        let busy = render_counts(&format!("{JUNCTION}&traffic=busy"), None, &runs, 4);
+        let off = render_counts(&format!("{JUNCTION}&traffic=off"), None, &runs, 8);
+        let busy = render_counts(&format!("{JUNCTION}&traffic=busy"), None, &runs, 8);
         eprintln!(
             "junction benchmark took {:.1} s",
             started.elapsed().as_secs_f64()
@@ -1367,9 +1360,15 @@ mod tests {
             let npcs = b.instances_drawn - a.instances_drawn;
             eprintln!("{q:?}: {npcs} NPC car and figure-part instances in the forward pass");
             assert!(npcs >= 3 + 3 * FIGURE_PARTS, "{q:?}: {npcs} in view");
-            let &(_, draws, fwd, shadow) = JUNCTION_BUDGET.iter().find(|j| j.0 == *q).unwrap();
+            let &(_, draws, steady, fwd, shadow) =
+                JUNCTION_BUDGET.iter().find(|j| j.0 == *q).unwrap();
             if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
                 assert!(b.draws <= draws, "{q:?}: {} draws", b.draws);
+                assert!(
+                    b.steady_draws <= steady,
+                    "{q:?}: {} draws in the median frame",
+                    b.steady_draws
+                );
                 assert!(b.triangles <= fwd, "{q:?}: {} triangles", b.triangles);
                 assert!(
                     b.shadow_triangles <= shadow,
@@ -1383,8 +1382,10 @@ mod tests {
     /// One preset's counts over a run of frames.
     struct Counts {
         instances_drawn: u32,
-        /// The most in a frame.
+        /// The most in a frame, and the median frame's after the first (which draws every
+        /// cascade from cold): a frame without the far cascade.
         draws: u32,
+        steady_draws: u32,
         triangles: u64,
         /// Mean a frame (a kept far cascade draws none on alternate frames).
         shadow_triangles: u64,
@@ -1426,6 +1427,9 @@ mod tests {
             app.pedestrian_count()
         );
         let (_, view) = target(&device, size);
+        let mut mapper = InputMapper::default();
+        let started = Instant::now();
+        let clock = || started.elapsed().as_secs_f64();
         let mut out = Vec::new();
         for &(label, q, culling) in runs {
             app.force_quality(Some(q));
@@ -1437,7 +1441,10 @@ mod tests {
             let mut shadow_max = [0; 3];
             let mut shadow_tris = 0u64;
             let mut draws = 0;
+            let mut later = Vec::with_capacity(frames as usize);
             for f in 0..frames {
+                // The world moves on (traffic, people, the clock) a 90 Hz frame at a time.
+                app.frame(&mut mapper, 1.0 / 90.0, &clock);
                 // Driving: the camera moves 0.3 m a frame along the world's x (100 km/h
                 // at 90 fps), so the cascades cannot be kept as they are for a still view.
                 let mut scene = app.scene_view(1.0, 1.6);
@@ -1456,11 +1463,17 @@ mod tests {
                 }
                 shadow_tris += s.shadow_triangles;
                 draws = draws.max(s.draw_calls);
+                if f > 0 {
+                    later.push(s.draw_calls);
+                }
             }
+            later.sort_unstable();
+            let steady = later.get(later.len() / 2).copied().unwrap_or(draws);
             let s = r.stats();
             eprintln!(
                 "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
-                 shadow {}k a frame | draws {} at most | cpu render() avg {:.2} ms best {:.2} ms",
+                 shadow {}k a frame | draws {} at most, median {} after the first | cpu render() \
+                 avg {:.2} ms best {:.2} ms",
                 s.instances,
                 s.instances_drawn,
                 shadow_max,
@@ -1468,6 +1481,7 @@ mod tests {
                 s.triangles / 1000,
                 shadow_tris / u64::from(frames) / 1000,
                 draws,
+                steady,
                 total / f64::from(frames) * 1000.0,
                 best * 1000.0,
             );
@@ -1476,6 +1490,7 @@ mod tests {
                 Counts {
                     instances_drawn: s.instances_drawn,
                     draws,
+                    steady_draws: steady,
                     triangles: s.triangles,
                     shadow_triangles: shadow_tris / u64::from(frames),
                 },

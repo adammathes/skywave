@@ -17,7 +17,7 @@ shadow pass    sun CSM, 3 cascades (0–40 m, 40–160 m, 160–600 m), 2048² e
                casters culled per cascade on the CPU; a cascade is kept from an earlier frame while its map covers the
                view, its casters are unchanged and the sun has moved under half a texel's shadow shift, and the far
                one optionally between every 2nd or 3rd frame
-depth prepass  by preset (Deck, Low): the forward pass's meshes depth-only first, then shaded with less-or-equal, so each
+depth prepass  by preset (Deck): the forward pass's meshes depth-only first, then shaded with less-or-equal, so each
                pixel shades once (the position math is `@invariant` in both)
 main pass      → HDR Rgba16Float at the resolution scale (50–100%), instances frustum-culled on the CPU: Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
                sun with CSM shadow, sky ambient (hemisphere: sky color up, ground color down),
@@ -104,7 +104,7 @@ on the Deck's APU / an AMD integrated GPU / a 1280×800 Linux surface and **Medi
 
 | Preset | Cascades | Size | Far cascade | Skip casters under | Resolution | Bloom levels | Coronas | Depth pre-pass |
 |---|---|---|---|---|---|---|---|---|
-| Low | 2 (50/400 m) | 1024² | every third frame | 3 texels | 75% | 4 | off | on |
+| Low | 2 (50/400 m) | 1024² | every third frame | 3 texels | 75% | 4 | off | off |
 | Deck | 2 (50/400 m) | 1536² | every third frame | 2 texels | 100% | 4 | on | on |
 | Medium (default) | 3 | 1536² | every other frame | 2 texels | 100% | 5 | on | off |
 | High | 3 | 2048² | every frame | — | 100% | 5 | on | off |

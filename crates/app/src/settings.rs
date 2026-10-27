@@ -162,8 +162,9 @@ impl Quality {
                 Quality::High => (2048, 3, 5, true, 1, 0.0),
                 Quality::Ultra => (3072, 3, 5, true, 1, 0.0),
             };
-        // Where the GPU is short of fragment time: Low and the Deck.
-        let depth_prepass = matches!(self, Quality::Low | Quality::Deck);
+        // The Deck only: short of fragment time, and native (the pre-pass's ~300 extra draws
+        // cost most on WebGL2, where Low also runs).
+        let depth_prepass = self == Quality::Deck;
         render::RenderQuality {
             shadow_size,
             cascades,

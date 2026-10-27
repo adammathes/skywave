@@ -33,7 +33,7 @@ Per frame, in order (`crates/render/src/lib.rs`):
 | Pass | Work | Scales with |
 |---|---|---|
 | Shadow | depth-only, every caster once per cascade (3 cascades, `size²` each, side by side in one `Depth32Float` atlas); a cascade whose casters, coverage and sun have not changed is kept from an earlier frame | casters × cascades redrawn (vertex), `size²` × cascades redrawn (depth fill and clear) |
-| Forward | the depth pre-pass at Deck and Low (every visible mesh, depth only), then every visible instance: atlas texel, Lambert sun with 3×3 PCF (twice in the cascade blend band), hemisphere ambient, up to 8 point/spot lights, fog, emissive; then the sky (one fullscreen triangle at the far plane, shading only what no mesh covered) | visible triangles (vertex; twice with the pre-pass), shaded fragments × lights (fragment) |
+| Forward | the depth pre-pass at Deck (every visible mesh, depth only), then every visible instance: atlas texel, Lambert sun with 3×3 PCF (twice in the cascade blend band), hemisphere ambient, up to 8 point/spot lights, fog, emissive; then the sky (one fullscreen triangle at the far plane, shading only what no mesh covered) | visible triangles (vertex; twice with the pre-pass), shaded fragments × lights (fragment) |
 | Coronas | one instanced quad per light with a corona (≤ 258), 5 depth taps each in the vertex shader | lights at night, sprite size on screen |
 | Bloom | prefilter (13 taps) into half the scene's size, then down and up a chain of 4–5 levels | scene pixels / 4, levels |
 | Tonemap | one fullscreen triangle: exposure, bloom, AgX, vignette, dither, upscale when scaled | swapchain pixels |
@@ -74,9 +74,9 @@ Vulkan device; `--stats` on the Deck gives the times):
 | Coronas off at Low | no corona pass | night scenes only; one draw, potentially large additive quads |
 | Present mode | `AutoVsync` by default (it was already); `--no-vsync` for benchmarks | none; makes measurements honest |
 | Sky drawn last | the sky's triangle sits at the far plane and is drawn after the meshes with a less-or-equal depth test, so it shades only the pixels they leave | measured: 1024k sky fragments a frame → 104–240k on the coast scenes (−77 to −90%); each runs the sky model, stars, moon and sun disc |
-| Depth pre-pass (Deck, Low) | every visible mesh drawn depth-only first (same position math, `@invariant`), then shaded with less-or-equal: each covered pixel shades once | measured: the meshes' fragments −51 to −63% (2.0–2.7× overdraw → 1.00×), night light evaluations 15.0 M → 6.2 M; costs the forward pass's vertex work again and ~300 draws (why it is not on at Medium, the web default, where draws cost the CPU most). Reasoned for the Deck: ~1.1 M fewer fragments of ~300 ALU ops and ~11 texture reads ≈ 1–2 ms, against ~0.4–0.6 ms of depth-only geometry; `--no-prepass` measures it |
-| Cascades kept while nothing changes | each cascade is kept from an earlier frame while its map still covers this frame's slice (to half a texel), a hash of its casters (meshes and transforms) is unchanged, and the sun has moved too little to shift a 50 m caster's shadow by half a texel; the far cascade between its frames still keeps the old rule | a still view (stopped at a light, paused under the menu) draws no cascade at all; driving with a still sun the far cascade is redrawn only when the view leaves its padded map. Driving at 100 km/h on the coast at Deck: 723k shadow triangles a frame → 129k (frozen traffic and clock; moving NPC cars in the far cascade redraw it every third frame, and at the default 10× clock the sun passes the far cascade's threshold every ~0.15 s at golden hour to ~4 s at noon, the near one's every frame or two to ~0.5 s) |
-| Far cascade every third frame (Deck, Low) | `far_cascade_interval` 2 → 3 | where it is redrawn on its interval (moving casters in it), a third of the far cascade's cost instead of half |
+| Depth pre-pass (Deck) | every visible mesh drawn depth-only first (same position math, `@invariant`), then shaded with less-or-equal: each covered pixel shades once | measured: the meshes' fragments −51 to −63% (2.0–2.7× overdraw → 1.00×), night light evaluations 15.0 M → 6.2 M; costs the forward pass's vertex work again and ~300 draws (why it is Deck only: not at Medium, the web default, nor Low, which runs on the web too, where draws cost the CPU most). Reasoned for the Deck: ~1.1 M fewer fragments of ~300 ALU ops and ~11 texture reads ≈ 1–2 ms, against ~0.4–0.6 ms of depth-only geometry; `--no-prepass` measures it |
+| Cascades kept while nothing changes | each cascade is kept from an earlier frame while its map still covers this frame's slice (to half a texel), a hash of its casters (meshes, transforms and the chunk pool's writes) is unchanged, and the sun has moved too little to shift a 50 m caster's shadow by half a texel; the far cascade between its frames still keeps the old rule; with no cascade to draw there is no shadow pass at all | pays when the world is still: paused, in a menu, parked with nothing moving near. Otherwise anything moving in a cascade (the player's car while driving, NPC cars, people within 40 m) changes its hash, and at the default 10× clock the sun passes the threshold about every 2 s at noon (the still check binds first), every ~0.15 s at golden hour for the far cascade and every frame or two for the near one. Kept maps are sampled with their own fit, so a kept frame can differ from a fresh one by under half a shadow texel |
+| Far cascade every third frame (Deck, Low) | `far_cascade_interval` 2 → 3 | while driving, the far cascade is redrawn on its interval (something in it moves), a third of its cost instead of half: on the coast at Deck, driving at 100 km/h with the world running, 723k → 534k shadow triangles a frame (busy traffic 749k → 561k), about −26% |
 
 Checked and left alone:
 
@@ -128,14 +128,14 @@ Linux; **Medium** everywhere else. `--quality NAME` forces one for a session (no
 
 | Preset | Cascades | Cascade size | Far cascade | Small casters | Resolution | Bloom levels | Coronas | Depth pre-pass | For |
 |---|---|---|---|---|---|---|---|---|---|
-| Low | 2 (50 / 400 m) | 1024² | every third frame | < 3 texels skipped | 75% | 4 | off | on | weak integrated GPUs |
+| Low | 2 (50 / 400 m) | 1024² | every third frame | < 3 texels skipped | 75% | 4 | off | off | weak integrated GPUs |
 | Deck | 2 (50 / 400 m) | 1536² | every third frame | < 2 texels | 100% | 4 | on | on | Steam Deck, 1280×800 @ 90 Hz |
 | Medium (default) | 3 (40 / 160 / 600 m) | 1536² | every other frame | < 2 texels | 100% | 5 | on | off | everything else until chosen |
 | High | 3 | 2048² | every frame | all | 100% | 5 | on | off | desktop GPUs (the renderer's own default, `RenderQuality::default()`) |
 | Ultra | 3 | 3072² (where the device allows 9216-wide textures) | every frame | all | 100% | 5 | on | off | big desktop GPUs |
 
 At every preset the sky is drawn last and a cascade is kept while nothing it shows has
-changed (neither changes the image). The pre-pass changes 130 isolated pixels of
+changed (a kept cascade within half a shadow texel of a fresh one). The pre-pass changes 130 isolated pixels of
 1 024 000 on the coast, where two triangles of one mesh tie in depth and its
 less-or-equal test lets the later one win (`depth_prepass_keeps_the_image`).
 
@@ -203,24 +203,29 @@ Cuts looked at and not made, by this accounting:
 `cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast` streams the
 coast at the native budget (13×13 chunks) and renders it at 1280×800 on wgpu's no-op
 device, printing the renderer's counts per preset, without traffic and with busy traffic
-(warmed up 20 s, 77 cars live). Since the cascades can be kept, the camera drives at
-100 km/h (0.3 m a frame) over the 40 frames, `draws` is the most in a frame (the first,
-drawing every cascade) and the triangles are the mean a frame; traffic and the clock stand
-still, so the far cascade is redrawn only when the view leaves its map. With the GPU
-cuts, 2026-10-27:
+(warmed up 20 s, 78 cars and 55 people live). Since the cascades can be kept, the camera
+drives at 100 km/h (0.3 m a frame) over the 40 frames while the world runs (traffic,
+people and the clock move a 90 Hz frame each); `draws` is the most in a frame (the first,
+drawing every cascade) and the median frame's after it, and the triangles are the mean a
+frame. With the GPU cuts, 2026-10-27:
 
 ```
-traffic off: 0 cars
-high, no culling: instances 2863 fwd 2863 shadow [2800, 2800, 2800] (3 cascades) | tris fwd 3259k shadow 9674k a frame | draws 4884 at most
-            high: instances 2863 fwd 851 shadow [80, 421, 1229] (3 cascades) | tris fwd 847k shadow 1910k a frame | draws 1224 at most
-          medium: instances 2863 fwd 851 shadow [80, 421, 1323] (3 cascades) | tris fwd 847k shadow 572k a frame | draws 1264 at most
-            deck: instances 2863 fwd 851 shadow [101, 1099, 0] (2 cascades) | tris fwd 847k shadow 129k a frame | draws 1376 at most
-             low: instances 2863 fwd 851 shadow [101, 1072, 0] (2 cascades) | tris fwd 847k shadow 128k a frame | draws 1367 at most
-traffic busy: 78 cars
-            deck: instances 2933 fwd 851 shadow [103, 1120, 0] (2 cascades) | tris fwd 844k shadow 134k a frame | draws 1395 at most
+traffic off: 0 cars, 0 people
+high, no culling: instances 2863 fwd 2863 shadow [2800, 2800, 2800] (3 cascades) | tris fwd 3265k shadow 9692k a frame | draws 4908 at most, median 4908 after the first
+            high: instances 2863 fwd 850 shadow [81, 421, 1229] (3 cascades) | tris fwd 843k shadow 1913k a frame | draws 1238 at most, median 1235 after the first
+          medium: instances 2862 fwd 850 shadow [81, 423, 1323] (3 cascades) | tris fwd 843k shadow 574k a frame | draws 1276 at most, median 674 after the first
+            deck: instances 2862 fwd 850 shadow [101, 1101, 0] (2 cascades) | tris fwd 843k shadow 534k a frame | draws 1389 at most, median 903 after the first
+             low: instances 2862 fwd 849 shadow [101, 1074, 0] (2 cascades) | tris fwd 842k shadow 531k a frame | draws 962 at most, median 485 after the first
+traffic busy: 78 cars, 55 people
+            high: instances 3646 fwd 1017 shadow [148, 437, 1244] (3 cascades) | tris fwd 858k shadow 1959k a frame | draws 1399 at most, median 1396 after the first
+          medium: instances 3648 fwd 1012 shadow [148, 435, 1346] (3 cascades) | tris fwd 857k shadow 1350k a frame | draws 1448 at most, median 825 after the first
+            deck: instances 3647 fwd 1007 shadow [168, 1126, 0] (2 cascades) | tris fwd 857k shadow 561k a frame | draws 1632 at most, median 1125 after the first
+             low: instances 3646 fwd 1008 shadow [168, 1101, 0] (2 cascades) | tris fwd 859k shadow 558k a frame | draws 1115 at most, median 616 after the first
 ```
 
-(The forward triangles at Deck and Low are drawn twice, once depth-only; recording a
+Medium without traffic keeps its far cascade (nothing in it moves; its interval is 2 and
+its map 8% wider than the view); with traffic it is redrawn every other frame as before.
+(The forward triangles at Deck are drawn twice, once depth-only; recording a
 frame still takes 0.4–0.9 ms on the no-op device.) Before the GPU cuts (same command with
 a still camera, `draws` the last frame's, an earlier `main` with M4 #6):
 
@@ -262,24 +267,25 @@ level-1 meshes in the forward pass and the cascades), about 3.5k triangles each 
 again per cascade. A person is 13 part instances of about 1k triangles in all; people drawn
 as one figure share its 13 draws per pass, so the draws grow with the figures in view (at
 most 8 × 13 per pass), not the people, and only people within 40 m cast shadows. Those
-numbers are the last frame of a still camera. Since the GPU cuts the test drives the camera
-(as above) and counts the most draws in a frame and the mean shadow triangles: busy, **Deck
-1143 draws, 427k forward, 383k shadow; Medium 1140, 427k, 794k**. Where the draws come
-from, frame by frame (busy):
+numbers are the last frame of a still camera, with the simulation stopped (`still=1`).
+Since the GPU cuts the test drives the camera over 8 frames with the world running and
+counts the most draws in a frame, the median frame's after the first, and the mean
+triangles: busy, **Deck 1134 draws, 681 in the median frame, 428k forward, 672k shadow;
+Medium 1121, 503, 428k, 1206k**. Where the draws come from, frame by frame (busy):
 
 | Frame | Medium | Deck |
 |---|---|---|
 | Before (main, the last of 4 still frames: far cascade kept) | 530 | 385 |
-| Now, a frame drawing the near cascade(s) only | 529 (forward 315, shadow 205, bloom 9) | 694 (forward 625: 316 shaded + 309 pre-pass; shadow 62; bloom 7) |
-| Now, the frame that also draws the far cascade (the worst) | 1140 (shadow 816) | 1143 (shadow 511) |
+| Now, the median frame (the near cascade(s) only) | 503 | 681 (the 309 pre-pass draws on top) |
+| Now, the frame that also draws the far cascade (the worst) | 1121 | 1134 |
 
 So Medium's draws are unchanged: the old count's frame parity skipped the far cascade's
-~600 draws, which it redrew every other frame and now redraws only when the view leaves its
-map (or its casters move, every third frame at Deck). Deck's steady frame gains the 309
+~600 draws, which it redraws every other frame now too. Deck's frames gain the ~300
 pre-pass draws, depth-only, for the junction's 2121k → 784k shaded fragments (overdraw
 2.71 → 1.00, lavapipe): about 1.3 M fragments of the full forward shader against ~0.3k draws
-and 427k depth-only triangles. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1260
-draws, 465k forward and 420k shadow triangles; Medium 1255 draws, 465k and 870k** (about
+and 428k depth-only triangles. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1250
+draws, 750 in the median frame, 470k forward and 740k shadow triangles; Medium 1235, 555,
+470k and 1325k** (about
 10% over), and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the
 pedestrian sim (busy) each have a median under 0.5 ms a step in a debug build
@@ -342,7 +348,7 @@ skywave --stats --frames 600 --exit --scene place=coast 2> stats-vsync.txt
 for q in low deck medium high; do
   skywave --stats --no-vsync --frames 600 --exit --quality $q --scene place=coast 2> stats-$q.txt
 done
-# Culling off, to see what it saves; the depth pre-pass off (Deck, Low), the same:
+# Culling off, to see what it saves; the depth pre-pass off (Deck), the same:
 skywave --stats --no-vsync --frames 600 --exit --no-cull --scene place=coast 2> stats-nocull.txt
 skywave --stats --no-vsync --frames 600 --exit --no-prepass --scene place=coast 2> stats-noprepass.txt
 # Another backend (Vulkan is the default on Linux; GL is the fallback):

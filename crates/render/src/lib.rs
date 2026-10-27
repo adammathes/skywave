@@ -2136,7 +2136,9 @@ impl Renderer {
         let mut shadow_draws = 0;
         let mut shadow_instances = [0u32; CASCADES];
         let mut shadow_triangles = 0u64;
-        {
+        // Every cascade kept: no shadow pass at all (a tiled GPU would still load and store
+        // the whole atlas for an empty one).
+        if drawn.iter().any(|&d| d) {
             // Every cascade drawn: clear the atlas. Some kept: clear only the drawn ones.
             let all = (0..n).all(|k| drawn[k]);
             let load = if all {
@@ -2194,8 +2196,9 @@ impl Renderer {
                 shadow_draws += draws;
                 shadow_triangles += tris;
             }
+            drop(pass);
+            timed |= 1 << timing::PASS_SHADOW;
         }
-        timed |= 1 << timing::PASS_SHADOW;
         let mut forward_draws = 1;
         let triangles;
         {
@@ -2505,8 +2508,8 @@ impl Renderer {
     }
 
     /// Culls every instance for the forward pass (`view_proj`) and each cascade in `cull`.
-    /// Returns a hash of each cascade's casters (meshes and transforms, in order), so a
-    /// cascade whose casters have not changed can be kept.
+    /// Returns a hash of each cascade's casters (meshes and transforms, in order, and the
+    /// chunk pool's writes), so a cascade whose casters have not changed can be kept.
     fn cull(
         &mut self,
         scene: &SceneView,
@@ -2520,7 +2523,11 @@ impl Renderer {
         let min_texels = self.quality.min_caster_texels;
         self.vis.clear();
         self.raws.clear();
-        let mut hashes = [FNV_OFFSET; CASCADES];
+        // Every chunk written into the pool changes every hash: a slot freed and written
+        // again keeps its part ids (and chunks are drawn untransformed) but not its mesh.
+        let writes = self.chunk_pool.stats().writes;
+        let seed = fnv(fnv(FNV_OFFSET, writes as u32), (writes >> 32) as u32);
+        let mut hashes = [seed; CASCADES];
         for inst in scene.instances {
             let mut bits = 0u8;
             if let Some(b) = self.mesh_bounds(inst.mesh) {
@@ -4073,6 +4080,12 @@ mod tests {
                 assert_eq!((stats.shadow_draw_calls, stats.cascades_drawn), (0, 0));
                 assert_eq!(stats.draw_calls, runs + passes + bloom);
 
+                // The depth pre-pass draws every mesh run again, depth only, before them.
+                let mut prepass = scene;
+                prepass.quality.depth_prepass = true;
+                render_frames(&device, &mut r, format, &prepass, &[(64, 48)]);
+                assert_eq!(r.stats().draw_calls, 2 * runs + passes + bloom);
+
                 // Bloom off, no lights, no coronas: those passes are skipped.
                 scene.sky.bloom_strength = 0.0;
                 scene.sky.corona_strength = 0.0;
@@ -4958,6 +4971,54 @@ mod tests {
         };
         assert_eq!(drawn(&mut r, &scene), 3);
         assert_eq!(drawn(&mut r, &scene), 0);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// A chunk slot freed and written again with other geometry keeps its part ids (and
+    /// chunks draw untransformed), so the pool's writes go into the cascades' hashes: the
+    /// kept maps are drawn again.
+    #[test]
+    fn a_chunk_written_again_draws_its_cascades_again() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let options = RendererOptions {
+            chunk_pool: ChunkPoolConfig {
+                slots: 1,
+                pages: 1,
+                page_vertices: 64,
+                page_indices: 96,
+            },
+            ..Default::default()
+        };
+        let mut r = Renderer::with_options(&device, &queue, FORMAT, (64, 48), options);
+        let slot = r.alloc_chunk_slot().unwrap();
+        r.write_chunk(
+            slot,
+            &Mesh::cuboid([0.0; 3], [1.0; 3], [200; 4]),
+            &[[0, 36]],
+        )
+        .unwrap();
+        let instances = [MeshInstance::new(
+            MeshId::chunk_part(slot, 0),
+            Mat4::IDENTITY.to_cols_array_2d(),
+        )];
+        let scene = test_scene(&instances);
+        let drawn = |r: &mut Renderer| {
+            render_frames(&device, r, FORMAT, &scene, &[(64, 48)]);
+            r.stats().cascades_drawn
+        };
+        assert_eq!(drawn(&mut r), 3);
+        assert_eq!(drawn(&mut r), 0);
+        // A taller building where the first stood, in the same slot.
+        r.free_chunk_slot(slot).unwrap();
+        assert_eq!(r.alloc_chunk_slot(), Ok(slot));
+        r.write_chunk(
+            slot,
+            &Mesh::cuboid([0.0; 3], [1.0, 5.0, 1.0], [90; 4]),
+            &[[0, 36]],
+        )
+        .unwrap();
+        assert_eq!(drawn(&mut r), 3);
+        assert_eq!(drawn(&mut r), 0);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
