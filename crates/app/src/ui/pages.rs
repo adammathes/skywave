@@ -9,7 +9,7 @@
 //! Worlds:    one card per scenario, side by side (still, title, kind and year, car and
 //!            station counts; "coming" on a stub); Select loads that world
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
-//! Drive:     Handling (Arcade / Light / Off)
+//! Drive:     Handling (Arcade / Light / Off) · Headlights (Auto / Manual)
 //! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
 //!            Hood only) · Camera shake
 //! Controls:  Gamepad › · Keyboard & mouse ›
@@ -106,6 +106,7 @@ pub enum ItemId {
     SwapTriggers,
     ResetDevice(DeviceKind),
     Handling,
+    Headlights,
     CameraView,
     CockpitFov,
     SeatHeight,
@@ -177,6 +178,8 @@ pub const PAINT_NAMES: [&str; super::roster::MAX_PAINTS] = [
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
 /// Names of [`MINIMAP_RANGES_M`].
 pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] = ["100 m", "150 m", "250 m"];
+/// The Headlights choice: index 0 is Auto, 1 Manual.
+pub const HEADLIGHT_NAMES: [&str; 2] = ["Auto", "Manual"];
 /// Names of [`Handling::ALL`].
 pub const HANDLING_NAMES: [&str; Handling::ALL.len()] = ["Arcade", "Light", "Off"];
 /// Names of [`CameraMode::CYCLE`].
@@ -424,6 +427,14 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 Widget::Choice {
                     options: &HANDLING_NAMES,
                     index,
+                },
+            );
+            add(
+                ItemId::Headlights,
+                "Headlights",
+                Widget::Choice {
+                    options: &HEADLIGHT_NAMES,
+                    index: usize::from(!ctx.settings.headlights_auto),
                 },
             );
         }

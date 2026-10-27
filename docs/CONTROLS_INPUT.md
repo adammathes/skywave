@@ -14,7 +14,8 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Look back | button | Q | Right stick click |
 | Radio next / prev | buttons | ] / [ | D-pad right / left |
 | Radio off | button | \ | D-pad down |
-| Headlights | button | L | D-pad up |
+| Headlights | button | L | D-pad up (tap) |
+| High beams (`HighBeams`) | button | K | D-pad up held 1 s |
 | Horn | button | H | Left stick click |
 | Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
 | Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
@@ -58,6 +59,19 @@ The odometer, headlights and camera are kept, and "Car reset" shows for 2 s. On 
 hold that scrubbed time (the right stick moved, however late) fires neither. A remap of Reset to another pad
 button is a long press too. Every other action on a long-press button acts on release rather than press (the
 Bindings page says so under its rows); that is what keeps a tap and a hold apart.
+`Headlights` toggles the low beams (pop-up lamps rise and fall with it). `HighBeams` with the headlights
+on toggles the high beams (a taller, brighter, longer spot, 40 kcd per lamp to 140 m, against the low beam's
+14 kcd to 60 m); with them off it switches them on on high beams. The high beams stay selected while the
+headlights are switched off and on again with `Headlights`.
+On the pad both share D-pad up: a tap is the headlights, a hold of 1 s or more (`Binding::long`, as for
+`Reset`) the high beams, so the headlights act on release there. The cockpit dash shows a green tell-tale
+on the first dial while the headlights are on and a blue one beside it with the high beams. Settings ›
+Drive › Headlights is Auto (the default) or Manual: Auto switches them on at dusk and off at dawn (when the
+NPC drivers' first lamps switch: 25 min after sunset, 25 min before sunrise) and the switch overrides them in
+between until the next dusk or dawn; Manual leaves them to the switch. Brake lamps light while the service
+brakes are asked for anything: the brake pedal, or the throttle while reversing (reversing on the brake
+pedal and coasting leave them dark), and whenever the car stands with the brake held, whatever gear
+brake-to-reverse has picked.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
 
@@ -81,7 +95,7 @@ action in the same context uses the input, a dialog offers "Keep on <that action
 tree is documented in `crates/app/src/ui/pages.rs`; the sim is paused while a menu is open.
 
 ## Settings UI (bindings UI ships in M1, the rest grows per milestone)
-A minimal in-game menu (bitmap font, keyboard/gamepad navigable, mouse optional): Drive (handling: Arcade / Light / Off assists; later units mph/kph, auto/manual), Camera (camera, cockpit FOV, seat height and fore-aft, dashboard or hood only, camera shake), Controls (remap table, deadzones), Video (resolution scale, shadow quality, bloom, style post), Audio (radio volume, engine volume, stations manager), World (seed code, era, region, time speed, traffic/pedestrian density), About (license, credits). All stored in one settings JSON.
+A minimal in-game menu (bitmap font, keyboard/gamepad navigable, mouse optional): Drive (handling: Arcade / Light / Off assists; headlights: Auto / Manual; later units mph/kph, auto/manual), Camera (camera, cockpit FOV, seat height and fore-aft, dashboard or hood only, camera shake), Controls (remap table, deadzones), Video (resolution scale, shadow quality, bloom, style post), Audio (radio volume, engine volume, stations manager), World (seed code, era, region, time speed, traffic/pedestrian density), About (license, credits). All stored in one settings JSON.
 
 ## Accessibility
 Steering sensitivity and assist strength are settings. Color-blind-safe HUD palette. Camera shake toggle. No flashing effects above 3 Hz.

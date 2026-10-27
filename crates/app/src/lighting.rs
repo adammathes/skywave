@@ -48,6 +48,10 @@ pub const EMISSIVE_CAP: f32 = 5.0;
 /// tail lamps (scale 1) glow a saturated red at ~1.5 and brake lamps (3.5) near the cap at
 /// night (brighter, AgX rolls a red lamp toward salmon).
 const CAR_LAMP_EXPOSED: f32 = 1.5;
+/// ...and at least, by day: as built a lens's glow is a tenth of its own sunlit color at
+/// noon and brake lamps did not read in the sun. At this a brake lamp lands at ~2.5, red and
+/// clearly brighter than a tail lamp, which stays under the bloom threshold.
+const CAR_LAMP_DAY_EXPOSED: f32 = 0.7;
 /// The same for the instruments: the radio display (scale 1.5) at ~0.9, just under the
 /// bloom threshold, the needles (3, white with red tips) at ~1.8 with a faint halo, the dial
 /// faces (0.7) as a backlight in the car's display color.
@@ -182,10 +186,13 @@ fn glow_cap(d: &Daylight, peak: f32) -> f32 {
     (peak / (exposure_from_ev100(d.ev100) * EMISSIVE_BOOST)).min(1.0)
 }
 
-/// How brightly the car's lamps and instruments glow at `d`.
+/// How brightly the car's lamps and instruments glow at `d`: the lamps as built, dimmed at
+/// night to [`CAR_LAMP_EXPOSED`] and raised by day to [`CAR_LAMP_DAY_EXPOSED`]; the
+/// instruments as built by day and dimmed at night.
 pub fn car_glow(d: &Daylight) -> CarGlow {
+    let day = CAR_LAMP_DAY_EXPOSED / (exposure_from_ev100(d.ev100) * EMISSIVE_BOOST);
     CarGlow {
-        lamps: glow_cap(d, CAR_LAMP_EXPOSED),
+        lamps: glow_cap(d, CAR_LAMP_EXPOSED).max(day),
         instruments: glow_cap(d, INSTRUMENT_EXPOSED),
     }
 }
@@ -545,9 +552,13 @@ mod tests {
     }
 
     #[test]
-    fn lamps_and_instruments_glow_as_built_by_day_and_dimmed_at_night() {
-        let day = car_glow(&at(12.0));
-        assert_eq!((day.lamps, day.instruments), (1.0, 1.0));
+    fn lamps_glow_alike_day_and_night_and_instruments_dim_at_night() {
+        let day_d = at(12.0);
+        let day = car_glow(&day_d);
+        assert_eq!(day.instruments, 1.0);
+        let e = exposure_from_ev100(day_d.ev100) * EMISSIVE_BOOST;
+        assert!((day.lamps * e - CAR_LAMP_DAY_EXPOSED).abs() < 1e-3);
+        assert!(day.lamps > 10.0, "the sun needs {}", day.lamps);
         let night_d = at(22.5);
         let night = car_glow(&night_d);
         let e = exposure_from_ev100(night_d.ev100) * EMISSIVE_BOOST;

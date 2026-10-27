@@ -282,10 +282,11 @@ impl App {
         let (palette, grammar) = (places::palette_of(world), places::grammar_of(world));
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let start = (start.pos, start.heading);
-        let drive = Drive::with_layout(spec, model.layout, start.0, start.1);
+        let mut drive = Drive::with_layout(spec, model.layout, start.0, start.1);
         let map = map::MapImage::rasterize(&place);
         let mut ui = ui::Ui::new();
         ui.set_scenario(scenario);
+        drive.auto_headlights = ui.settings().headlights_auto;
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         let ground = drive::ground_in(&place, grammar);
@@ -432,6 +433,11 @@ impl App {
             app.clock_frozen = true;
         }
         app.still = setup.still;
+        app.drive.auto_headlights = app.ui.settings().headlights_auto;
+        // A scene that switches them on keeps them on until the next dusk or dawn.
+        if setup.headlights {
+            app.drive.auto_dark = Some(app.traffic_clock().dark(0.0));
+        }
         if setup.map {
             app.ui.open_full_map();
         }
@@ -701,7 +707,9 @@ impl App {
                 self.camera_cycled = true;
             }
         }
-        self.drive.frame(input);
+        // Auto headlights switch when the NPC drivers' first lamps do.
+        let dark = self.traffic_clock().dark(0.0);
+        self.drive.frame(input, dark);
         let none = InputState::default();
         let dt = SIM_DT as f32;
         let (mut traffic_s, mut peds_s) = (0.0, 0.0);
@@ -1574,6 +1582,55 @@ mod tests {
             .all(|i| i.lights.indices() == [0, 1]));
     }
 
+    /// Auto headlights (the default) come on at dusk and go off at dawn across the whole
+    /// day, with the NPC drivers' first lamps; the switch overrides them until the next
+    /// dusk or dawn; Manual leaves them to the switch.
+    #[test]
+    fn auto_headlights_follow_the_daylight_clock() {
+        let mut app = App::new(Seed(0));
+        assert!(app.drive.auto_headlights);
+        let mut input = InputState::default();
+        let at = |app: &mut App, input: &InputState, h: f64| {
+            app.time.clock.seconds_of_day = (h * 3600.0).rem_euclid(86_400.0);
+            app.update(input, 1.0 / 60.0);
+            app.traffic_clock().dark(0.0)
+        };
+        let mut dark_steps = 0;
+        for k in 0..24 * 6 {
+            let h = 12.0 + f64::from(k) / 6.0;
+            let dark = at(&mut app, &input, h);
+            assert_eq!(app.drive.headlights, dark, "at {h:.2} h");
+            dark_steps += usize::from(dark);
+        }
+        assert!((24..120).contains(&dark_steps), "{dark_steps} dark steps");
+        assert!(at(&mut app, &input, 12.0) == app.drive.headlights);
+        assert!(!app.drive.headlights, "off by day");
+        // Switched on at noon, they stay on through the afternoon, and dusk keeps them on;
+        // switched off at night, they stay off until dawn switches them... off.
+        press(&mut input, Action::Headlights);
+        at(&mut app, &input, 12.1);
+        input.set_just_pressed(Action::Headlights, false);
+        input.set(Action::Headlights, 0.0);
+        at(&mut app, &input, 16.0);
+        assert!(app.drive.headlights, "the switch holds by day");
+        assert!(at(&mut app, &input, 23.0) && app.drive.headlights);
+        press(&mut input, Action::Headlights);
+        at(&mut app, &input, 23.1);
+        input.set_just_pressed(Action::Headlights, false);
+        input.set(Action::Headlights, 0.0);
+        at(&mut app, &input, 2.0);
+        assert!(!app.drive.headlights, "the switch holds by night");
+        at(&mut app, &input, 12.0);
+        assert!(
+            at(&mut app, &input, 23.0) && app.drive.headlights,
+            "the next dusk"
+        );
+        // Manual: the clock never touches them.
+        app.drive.auto_headlights = false;
+        at(&mut app, &input, 12.0);
+        assert!(app.drive.headlights, "manual keeps them on by day");
+    }
+
     #[test]
     fn fly_camera_flies_along_minus_z_at_fly_speed() {
         let mut app = App::new(Seed(0));
@@ -1636,7 +1693,8 @@ mod tests {
         // the chase view).
         assert_eq!(MeshId(world as u32), ids.lods[0].body[0]);
         // ...then the turntable's disc.
-        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 2));
+        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 4));
+        assert_eq!(ids.telltales, [3, 2].map(|k| MeshId(meshes as u32 - k)));
         assert_eq!(turntable, MeshId(meshes as u32 - 1));
         assert_eq!(view.instances.len(), world + 7);
         for (i, inst) in view.instances[..world].iter().enumerate() {

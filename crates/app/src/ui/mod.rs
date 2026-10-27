@@ -713,6 +713,10 @@ impl Ui {
                 self.settings.handling = Handling::ALL[i.min(Handling::ALL.len() - 1)];
                 self.dirty = true;
             }
+            Effect::Choose(ItemId::Headlights, i) => {
+                self.settings.headlights_auto = i == 0;
+                self.dirty = true;
+            }
             Effect::Choose(ItemId::CameraView, i) => {
                 self.settings.camera = CameraMode::CYCLE[i.min(CameraMode::CYCLE.len() - 1)];
                 self.camera_changed = true;
@@ -1487,6 +1491,11 @@ impl App {
         self.apply_traffic(self.traffic_scene.unwrap_or(self.ui.settings.traffic));
         let s = &self.ui.settings;
         self.drive.assists = s.handling.assists();
+        // Switched to Auto, the headlights follow the clock from the next frame.
+        if s.headlights_auto && !self.drive.auto_headlights {
+            self.drive.auto_dark = None;
+        }
+        self.drive.auto_headlights = s.headlights_auto;
         self.camera.prefs = crate::camera::CameraPrefs {
             cockpit_fov_deg: s.cockpit_fov_deg,
             seat_up_m: s.seat_height_cm * 0.01,
