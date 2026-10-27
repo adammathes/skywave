@@ -1,7 +1,8 @@
 //! The synthesized sounds (`docs/AUDIO_RADIO.md`, "Engine and world sound"): no recorded
 //! audio anywhere. [`engine`] is the car's engine, [`world`] everything else the car and the
-//! place make. Both read one [`AudioParams`], a plain struct the app fills every frame from
-//! the car's sim state, the collider and the place.
+//! place make, [`tune`] the radio's dial between stations. All read one [`AudioParams`], a
+//! plain struct the app fills every frame from the car's sim state, the collider, the place
+//! and the radio.
 //!
 //! Events (a curb kick, a wall hit) are counters rather than flags, so a sink that skips a
 //! parameter update (the native audio thread reads them without waiting) never loses one,
@@ -9,9 +10,11 @@
 
 pub mod dsp;
 pub mod engine;
+pub mod tune;
 pub mod world;
 
 pub use engine::{EngineProfile, EngineSynth};
+pub use tune::TuneSynth;
 pub use world::WorldSynth;
 
 /// What a tire rolls on (the collider's surfaces).
@@ -101,6 +104,11 @@ pub struct AudioParams {
     /// residential streets and parks.
     pub ocean: f32,
     pub birds: f32,
+    /// Counts every tune of the radio so far ([`crate::Radio::tunes`]): each new one plays
+    /// the dial sweep between stations...
+    pub tunes: u32,
+    /// ...at this level, `[0, 1]`: the radio volume setting.
+    pub tune_volume: f32,
 }
 
 impl Default for AudioParams {
@@ -131,6 +139,8 @@ impl Default for AudioParams {
             horn: false,
             ocean: 0.0,
             birds: 0.0,
+            tunes: 0,
+            tune_volume: 1.0,
         }
     }
 }
@@ -172,6 +182,7 @@ impl AudioParams {
             hit_side: clamp(fin(self.hit_side, 0.0), -1.0, 1.0),
             ocean: unit(self.ocean),
             birds: unit(self.birds),
+            tune_volume: unit(self.tune_volume),
             ..*self
         }
     }

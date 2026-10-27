@@ -231,7 +231,8 @@
   // sends its RadioCommands to window.skywaveRadio.command(kind, url, token, value, name)
   // and polls takeEvent() for what happened ("started|failed|blocked <token>"); report(text)
   // gets the radio's state. Nothing loads until the game asks for a stream: the only network
-  // use is the stream URL the player chose. Tune noise is synthesized here, not a sample.
+  // use is the stream URL the player chose. The dial sweep between stations is not played
+  // here: the game synthesizes it with its other sounds (the sfx worklet above).
   // Browsers play sound only after a user gesture: a refused play() is reported as blocked
   // (the game shows "Press any key for radio") and retried on the next key, click or touch.
   // A stream that neither plays nor errors within STALL_MS is reported as failed, so the
@@ -248,7 +249,6 @@
     let token = 0; // the Play being played; 0 when stopped
     let blocked = 0; // the Play waiting for a user gesture
     let volume = 1;
-    let ctx = null;
     let stall = 0; // the timer that fails a Play that never started
     const STALL_MS = 10000;
     const note = (line) => { log.push(line); if (log.length > 200) log.shift(); };
@@ -278,28 +278,6 @@
       audio.pause();
       if (audio.getAttribute("src")) { audio.removeAttribute("src"); audio.load(); }
     };
-    const noise = (seconds) => {
-      try {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return;
-        ctx = ctx || new AC();
-        if (ctx.state === "suspended") ctx.resume().catch(() => {});
-        const n = Math.max(1, Math.floor(ctx.sampleRate * seconds));
-        const buf = ctx.createBuffer(1, n, ctx.sampleRate);
-        const d = buf.getChannelData(0);
-        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        const band = ctx.createBiquadFilter();
-        band.type = "bandpass";
-        band.frequency.value = 2400;
-        band.Q.value = 0.8;
-        const gain = ctx.createGain();
-        gain.gain.value = 0.2 * volume;
-        src.connect(band).connect(gain).connect(ctx.destination);
-        src.start();
-      } catch { /* no Web Audio: switch silently */ }
-    };
     const metadata = (name) => {
       try {
         if (name && "mediaSession" in navigator && window.MediaMetadata) {
@@ -309,7 +287,6 @@
     };
     const gesture = () => {
       if (blocked && blocked === token) { blocked = 0; note("retry after a gesture"); arm(token); tryPlay(token); }
-      if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
     };
     for (const t of ["keydown", "mousedown", "touchstart"]) window.addEventListener(t, gesture, true);
     window.skywaveRadio = {
@@ -326,7 +303,6 @@
           tryPlay(t);
         } else if (kind === "stop") stop();
         else if (kind === "volume") { volume = Math.min(1, Math.max(0, value)); audio.volume = volume; }
-        else if (kind === "noise") noise(value);
       },
       takeEvent() { return events.length ? events.shift() : null; },
       report(state) { this.state = state; note(`state ${state}`); },

@@ -149,6 +149,8 @@ pub struct App {
     curr: FlyCamera,
     drive: Drive,
     ground: DriveGround,
+    /// The place's lanes, where a reset puts the car.
+    lanes: world::lanes::LaneLines,
     camera: CameraRig,
     /// The scene chose the camera (`cam=`): the saved camera setting does not replace it.
     camera_from_scene: bool,
@@ -247,6 +249,7 @@ impl App {
         ui.vehicle_switched(vehicle_index, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         let ground = drive::ground_for(&place);
+        let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
         let mut props = propinst::PropInstances::new(&place, &Palette::socal_1985(), |p| {
             [
@@ -296,6 +299,7 @@ impl App {
             prev: fly,
             curr: fly,
             ground,
+            lanes,
             drive,
             camera,
             camera_from_scene: false,
@@ -425,6 +429,25 @@ impl App {
         self.switch_to(next, true);
     }
 
+    /// `Reset`: the car back on the nearest lane, at rest ([`Drive::reset`]), the camera
+    /// behind it, and a "Car reset" toast. Nothing while the free-fly camera flies.
+    pub fn reset_car(&mut self) {
+        if self.fly {
+            return;
+        }
+        self.drive.reset(&self.lanes, &self.ground);
+        self.settle_camera();
+        self.ui.car_reset();
+    }
+
+    /// The same camera, settled behind (or in) the car where it now is.
+    fn settle_camera(&mut self) {
+        let mut rig = CameraRig::new(self.camera.selected(), &self.drive);
+        rig.tuning = self.camera.tuning;
+        rig.prefs = self.camera.prefs;
+        self.camera = rig;
+    }
+
     /// [`App::switch_vehicle_at`]; a car that fails to build (never a built-in one, whose
     /// specs and shapes are tested) leaves the current one.
     fn switch_to(&mut self, index: usize, toast: bool) {
@@ -461,11 +484,7 @@ impl App {
             self.drive.switch_car(spec, car.layout, &self.ground);
             self.car_meshes = car.meshes;
             self.sound.set_car(&self.drive);
-            // The same camera, settled behind (or in) the new car.
-            let mut rig = CameraRig::new(self.camera.selected(), &self.drive);
-            rig.tuning = self.camera.tuning;
-            rig.prefs = self.camera.prefs;
-            self.camera = rig;
+            self.settle_camera();
         }
         self.ui.vehicle_switched(index, true, toast);
         Ok(())

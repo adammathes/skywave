@@ -42,7 +42,7 @@ use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 pub const CAPTURE_TIMEOUT: f32 = 8.0;
 /// Seconds a status message stays up.
 const TOAST_SECONDS: f32 = 2.5;
-/// Seconds the new car's name stays up after a switch.
+/// Seconds the new car's name stays up after a switch, and "Car reset" after a reset.
 pub const VEHICLE_TOAST_SECONDS: f32 = 2.0;
 /// Miles per hour in one meter per second.
 const MPH_PER_MPS: f32 = 2.236_936;
@@ -79,6 +79,8 @@ pub enum Toast {
     Reset(DeviceKind),
     /// Switched to the built-in car with this index (its name).
     Vehicle(usize),
+    /// The car was put back on the road.
+    CarReset,
     /// A stream was added to the stations.
     StreamAdded,
     /// The text given for a stream was not an `https://` URL (or there are too many).
@@ -103,6 +105,8 @@ pub struct Ui {
     camera_changed: bool,
     /// The Vehicle page picked the built-in car with this index; the app switches to it.
     vehicle_pick: Option<usize>,
+    /// The pause menu's "Reset car" was chosen; the app resets the car.
+    reset_pick: bool,
     /// The car being driven, an index into `vehicles::BUILTIN` (marked on the Vehicle page).
     vehicle: usize,
     /// Something changed since the last save.
@@ -159,6 +163,7 @@ impl Ui {
             bindings_changed: false,
             camera_changed: false,
             vehicle_pick: None,
+            reset_pick: false,
             vehicle: 0,
             dirty: false,
             store: None,
@@ -314,6 +319,16 @@ impl Ui {
     /// Takes the car the Vehicle page picked, once.
     fn take_vehicle_pick(&mut self) -> Option<usize> {
         self.vehicle_pick.take()
+    }
+
+    /// Takes the pause menu's "Reset car", once.
+    fn take_reset_pick(&mut self) -> bool {
+        std::mem::take(&mut self.reset_pick)
+    }
+
+    /// The app reset the car: say so for [`VEHICLE_TOAST_SECONDS`].
+    pub(crate) fn car_reset(&mut self) {
+        self.toast = Some((Toast::CarReset, VEHICLE_TOAST_SECONDS));
     }
 
     /// The car being driven: an index into [`crate::vehicles::BUILTIN`].
@@ -671,6 +686,11 @@ impl Ui {
     fn activate(&mut self, id: ItemId) {
         match id {
             ItemId::Resume => self.close(),
+            ItemId::ResetCar => {
+                // Back to the road, where the car now is.
+                self.reset_pick = true;
+                self.close();
+            }
             ItemId::Vehicle(i) => {
                 // Back to the road to see it.
                 self.vehicle_pick = Some(i);
@@ -719,7 +739,7 @@ impl Ui {
 
     /// One frame of the radio (never in a still scene): it starts from the settings on
     /// the first, takes the station keys when `keys` (driving, no menu or map up), runs its
-    /// tune noise, and saves the power and station when they change.
+    /// tuning phase, and saves the power and station when they change.
     fn radio_frame(&mut self, s: &InputState, dt: f32, keys: bool) {
         self.radio.set_gain(self.radio_gain());
         self.radio.start(&self.settings.radio);
@@ -860,7 +880,8 @@ fn covers(b: &Binding, slot: Sign) -> bool {
 
 /// The binding a captured raw input makes for one row of an action: two-way actions take a
 /// whole stick axis (or a key for one direction), one-way actions the half of the stick
-/// that was pushed; the analog triggers bind as axes for analog actions.
+/// that was pushed; the analog triggers bind as axes for analog actions. Reset on a pad
+/// button is a long press, as by default.
 pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) -> Binding {
     let half = if value < 0.0 {
         Sign::Negative
@@ -879,6 +900,9 @@ pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) ->
         RawInput::PadAxis(PadAxis::L2 | PadAxis::R2) => Binding::new(raw, Sign::Full),
         RawInput::PadAxis(_) if action.is_bipolar() => Binding::new(raw, Sign::Full),
         RawInput::PadAxis(_) => Binding::new(raw, half),
+        RawInput::PadButton(_) if action == Action::Reset => {
+            Binding::new(raw, Sign::Positive).held_long()
+        }
         _ => Binding::new(
             raw,
             if sign == Sign::Negative {
@@ -922,15 +946,14 @@ impl App {
         if self.ui.take_camera_changed() {
             self.camera.set_mode(self.ui.settings.camera);
         }
+        let driving = !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !self.still;
         if let Some(i) = self.ui.take_vehicle_pick() {
             self.switch_to(i, true);
-        } else if state.just_pressed(Action::VehicleNext)
-            && !was_open
-            && !self.ui.is_open()
-            && !self.ui.full_map_open()
-            && !self.still
-        {
+        } else if state.just_pressed(Action::VehicleNext) && driving {
             self.cycle_vehicle();
+        }
+        if self.ui.take_reset_pick() || (state.just_pressed(Action::Reset) && driving) {
+            self.reset_car();
         }
         self.apply_clock_speed();
         self.apply_settings();
@@ -993,10 +1016,14 @@ impl App {
             &self.ui.settings,
             self.ui.is_open(),
         );
-        // The engine and the world duck under a station that is playing.
-        if self.ui.radio.radio().is_live() {
+        // The engine and the world duck under a station that is playing; the dial sweeps
+        // between stations at the radio's volume.
+        let radio = self.ui.radio.radio();
+        if radio.is_live() {
             self.audio.radio = self.ui.settings.radio.volume;
         }
+        self.audio.tunes = radio.tunes();
+        self.audio.tune_volume = self.ui.settings.radio.volume;
         steps
     }
 

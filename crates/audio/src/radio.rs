@@ -10,15 +10,17 @@
 //!                             └──────────────── Error ◀───────────┘
 //! ```
 //!
-//! Switching stops the old station and plays [`TUNE_SECONDS`] of tune noise before the new
-//! one starts. A station whose every URL failed shows [`ErrorReason::NoSignal`] for
-//! [`NO_SIGNAL_SECONDS`], then the radio moves up the dial; failed stations are remembered
-//! and skipped until one plays again. Every `Play` carries a token; a [`PlayerEvent`] about an older token (a
+//! Switching stops the old station and plays [`TUNE_SECONDS`] of the dial sweep before the
+//! new one starts: the radio counts its tunes ([`Radio::tunes`]) and the mixer's
+//! [`crate::synth::TuneSynth`] plays a burst for each new one. A station whose every URL
+//! failed shows [`ErrorReason::NoSignal`] for [`NO_SIGNAL_SECONDS`], then the radio moves up
+//! the dial; failed stations are remembered and skipped until one plays again. Every `Play`
+//! carries a token; a [`PlayerEvent`] about an older token (a
 //! station already switched away from) is ignored. The radio allocates only when it
 //! starts a station (the URL in the `Play` command).
 
-/// How long the tune-noise burst between stations lasts, s.
-pub const TUNE_SECONDS: f32 = 0.15;
+/// How long the dial sweep between stations lasts, s: the new station starts as it ends.
+pub const TUNE_SECONDS: f32 = 0.5;
 
 /// How long a station that did not play stays on "no signal" before the radio moves on, s.
 pub const NO_SIGNAL_SECONDS: f32 = 2.0;
@@ -57,7 +59,7 @@ pub enum ErrorReason {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RadioState {
     Off,
-    /// Between stations: tune noise for [`TUNE_SECONDS`]; `t` is the time spent so far.
+    /// Between stations: the dial sweep for [`TUNE_SECONDS`]; `t` is the time spent so far.
     Tuning {
         from: Option<usize>,
         to: usize,
@@ -82,8 +84,6 @@ pub enum RadioCommand {
     Stop,
     /// Radio volume, 0 to 1.
     Volume(f32),
-    /// A short burst of tuning noise (synthesized by the platform, not a sample).
-    TuneNoise { seconds: f32 },
 }
 
 /// What the platform's player reports about the `Play` with `token`.
@@ -108,6 +108,7 @@ pub struct Radio {
     /// Which of the playing station's URLs is being tried.
     url: usize,
     token: u32,
+    tunes: u32,
     live: bool,
     blocked: bool,
     volume: f32,
@@ -127,6 +128,7 @@ impl Radio {
             last: None,
             url: 0,
             token: 0,
+            tunes: 0,
             live: false,
             blocked: false,
             volume: 1.0,
@@ -309,12 +311,16 @@ impl Radio {
         self.blocked = false;
         self.state = RadioState::Tuning { from, to, t: 0.0 };
         self.last = Some(to);
-        self.out.push(RadioCommand::TuneNoise {
-            seconds: TUNE_SECONDS,
-        });
+        self.tunes = self.tunes.wrapping_add(1);
     }
 
-    /// Advances the tune-noise phase by `dt` seconds; the new station starts at its end.
+    /// Counts every tune so far (for [`crate::synth::AudioParams::tunes`]): each starts a
+    /// dial sweep.
+    pub fn tunes(&self) -> u32 {
+        self.tunes
+    }
+
+    /// Advances the tuning phase by `dt` seconds; the new station starts at its end.
     /// After [`NO_SIGNAL_SECONDS`] of "no signal" the radio tunes the next working station.
     pub fn tick(&mut self, dt: f32) {
         if let RadioState::Error { station, .. } = self.state {
@@ -401,7 +407,7 @@ impl Radio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use RadioCommand::{Play, Stop, TuneNoise, Volume};
+    use RadioCommand::{Play, Stop, Volume};
 
     fn channel(id: &str, urls: &[&str]) -> Channel {
         Channel {
@@ -443,12 +449,6 @@ mod tests {
         }
     }
 
-    fn noise() -> RadioCommand {
-        TuneNoise {
-            seconds: TUNE_SECONDS,
-        }
-    }
-
     fn play(url: &str, token: u32) -> RadioCommand {
         Play {
             url: url.into(),
@@ -459,42 +459,48 @@ mod tests {
     #[test]
     fn switching_table() {
         use In::*;
-        // (input, state after, commands it sent)
-        let table: Vec<(In, &str, Vec<RadioCommand>)> = vec![
-            (Tick(1.0), "off", vec![]),
-            (Started(0), "off", vec![]),
-            (Off, "off", vec![]),
-            (Next, "tuning None->0", vec![noise()]),
-            (Tick(0.1), "tuning None->0", vec![]),
-            (Tick(0.06), "playing 0", vec![play("https://a/1", 1)]),
-            (Started(0), "playing 0", vec![]),
+        // (input, state after, commands it sent, whether it tuned: one dial sweep)
+        let table: Vec<(In, &str, Vec<RadioCommand>, bool)> = vec![
+            (Tick(1.0), "off", vec![], false),
+            (Started(0), "off", vec![], false),
+            (Off, "off", vec![], false),
+            (Next, "tuning None->0", vec![], true),
+            (Tick(0.3), "tuning None->0", vec![], false),
+            (Tick(0.25), "playing 0", vec![play("https://a/1", 1)], false),
+            (Started(0), "playing 0", vec![], false),
             // Switching stops the old station, then tunes.
-            (Next, "tuning Some(0)->1", vec![Stop, noise()]),
+            (Next, "tuning Some(0)->1", vec![Stop], true),
             // Pressing again while tuning restarts from the target.
-            (Next, "tuning Some(1)->2", vec![noise()]),
-            (Tick(0.2), "playing 2", vec![play("https://c/1", 2)]),
-            (Next, "tuning Some(2)->0", vec![Stop, noise()]),
-            (Tick(0.2), "playing 0", vec![play("https://a/1", 3)]),
+            (Next, "tuning Some(1)->2", vec![], true),
+            (Tick(0.5), "playing 2", vec![play("https://c/1", 2)], false),
+            (Next, "tuning Some(2)->0", vec![Stop], true),
+            (Tick(0.5), "playing 0", vec![play("https://a/1", 3)], false),
             // A stale report is ignored; a fresh failure tries the next URL...
-            (Failed(1), "playing 0", vec![]),
-            (Failed(0), "playing 0", vec![play("https://a/2", 4)]),
+            (Failed(1), "playing 0", vec![], false),
+            (Failed(0), "playing 0", vec![play("https://a/2", 4)], false),
             // ...and when none is left the station is in error, silent.
-            (Failed(0), "error 0", vec![Stop]),
-            (Failed(0), "error 0", vec![]),
+            (Failed(0), "error 0", vec![Stop], false),
+            (Failed(0), "error 0", vec![], false),
             // From an error the dial still moves (nothing to stop).
-            (Prev, "tuning Some(0)->2", vec![noise()]),
-            (Tick(0.15), "playing 2", vec![play("https://c/1", 5)]),
-            (Blocked(0), "playing 2", vec![]),
-            (Off, "off", vec![Stop]),
+            (Prev, "tuning Some(0)->2", vec![], true),
+            (
+                Tick(TUNE_SECONDS),
+                "playing 2",
+                vec![play("https://c/1", 5)],
+                false,
+            ),
+            (Blocked(0), "playing 2", vec![], false),
+            (Off, "off", vec![Stop], false),
             // Power resumes the last station; prev from off does too.
-            (Power, "tuning None->2", vec![noise()]),
-            (Power, "off", vec![Stop]),
-            (Prev, "tuning None->2", vec![noise()]),
-            (Off, "off", vec![Stop]),
+            (Power, "tuning None->2", vec![], true),
+            (Power, "off", vec![Stop], false),
+            (Prev, "tuning None->2", vec![], true),
+            (Off, "off", vec![Stop], false),
         ];
         let mut r = radio();
-        for (i, (input, want, cmds)) in table.into_iter().enumerate() {
+        for (i, (input, want, cmds, tuned)) in table.into_iter().enumerate() {
             let token = r.token();
+            let tunes = r.tunes();
             match input {
                 Next => r.next(),
                 Prev => r.prev(),
@@ -514,6 +520,7 @@ mod tests {
             assert_eq!(kind(r.state()), want, "row {i}: {input:?}");
             let got: Vec<RadioCommand> = r.drain_commands().collect();
             assert_eq!(got, cmds, "row {i}: {input:?}");
+            assert_eq!(r.tunes() - tunes, u32::from(tuned), "row {i}: {input:?}");
         }
     }
 
@@ -534,8 +541,10 @@ mod tests {
         assert_eq!(kind(r.state()), "error 0");
         r.tick(NO_SIGNAL_SECONDS * 0.9);
         assert_eq!(kind(r.state()), "error 0", "no signal shows for a while");
+        let tunes = r.tunes();
         r.tick(NO_SIGNAL_SECONDS * 0.2);
         assert_eq!(kind(r.state()), "tuning Some(0)->1");
+        assert_eq!(r.tunes(), tunes + 1, "moving on sweeps the dial");
         r.tick(TUNE_SECONDS);
         r.drain_commands().for_each(drop);
         // From b the dial skips a both ways.

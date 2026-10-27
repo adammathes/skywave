@@ -2,7 +2,7 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Vehicle › · Settings › · Quit (native only)
+//! Pause:     Resume · Reset car · Vehicle › · Settings › · Quit (native only)
 //! Vehicle:   one row per built-in car (name, then class, kW/t, drive, gearbox), the one
 //!            driven marked; select to swap it in where you are
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
@@ -68,6 +68,8 @@ pub enum Page {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ItemId {
     Resume,
+    /// Put the car back on the nearest lane (and close the menu).
+    ResetCar,
     Quit,
     Open(Page),
     /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`].
@@ -192,7 +194,10 @@ pub fn note(page: Page) -> Option<&'static str> {
              Skywave is free software under the BSD-3-Clause license.\n\
              Code, font and art: ours. Music: whatever you tune in.",
         ),
-        Page::Bindings(_) => Some("Select a row, then press the new input."),
+        Page::Bindings(_) => Some(
+            "Select a row, then press the new input.\n\
+             (hold): let go after a second. Other actions on that button act on release.",
+        ),
         Page::Vehicle => Some(
             "The marked car is the one you are driving.\n\
              Select another to swap it in right where you are.",
@@ -234,6 +239,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
     match page {
         Page::Pause => {
             add(ItemId::Resume, "Resume", Widget::Action);
+            add(ItemId::ResetCar, "Reset car", Widget::Action);
             let (id, w) = open(Page::Vehicle);
             add(id, "Vehicle", w);
             let (id, w) = open(Page::Settings);
@@ -615,9 +621,10 @@ mod tests {
         );
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(
-            ids[..3],
+            ids[..4],
             [
                 ItemId::Resume,
+                ItemId::ResetCar,
                 ItemId::Open(Page::Vehicle),
                 ItemId::Open(Page::Settings)
             ]
