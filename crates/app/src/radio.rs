@@ -194,7 +194,7 @@ impl CarRadio {
         self.shown_s = 0.0;
     }
 
-    /// Advances the tune noise, the toast and the dash scroll by `dt` seconds.
+    /// Advances the tuning phase, the toast and the dash scroll by `dt` seconds.
     pub fn tick(&mut self, dt: f32) {
         self.radio.tick(dt);
         self.toast = (self.toast - dt).max(0.0);
@@ -424,12 +424,10 @@ mod tests {
         assert_eq!(t, ToastLines::Station(1, 7, &first));
         assert_eq!(t.title().to_string(), "1/7  SomaFM Left Coast 70s");
         assert_eq!(t.detail().to_string(), "mellow 70s album rock");
-        r.tick(0.2);
+        assert_eq!(r.radio().tunes(), 1);
+        r.tick(audio::TUNE_SECONDS);
         let cmds: Vec<_> = r.commands().collect();
-        assert!(
-            matches!(&cmds[..], [RadioCommand::TuneNoise { .. }, RadioCommand::Play { url, .. }]
-            if url == &first.urls[0])
-        );
+        assert!(matches!(&cmds[..], [RadioCommand::Play { url, .. }] if url == &first.urls[0]));
         r.tick(TOAST_SECONDS);
         assert!(r.toast().is_none());
         // Every URL fails: no signal, toast again, the dash says so.

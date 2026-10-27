@@ -26,6 +26,10 @@ pub enum Sign {
 /// like "hold the right mouse button to look"). While a chord's `hold` is down, unchorded
 /// bindings of the same `raw` on that device are ignored, so Select + right stick scrubs
 /// time instead of also looking around.
+///
+/// A `long` binding (a button only) fires once its input has been held for
+/// [`LONG_PRESS_S`] without a chord on it; the input's other actions then act on release, as
+/// a chord's hold's do, so a tap of pad Select opens the map and holding it resets the car.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {
     pub raw: RawInput,
@@ -33,6 +37,15 @@ pub struct Binding {
     pub sign: Sign,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold: Option<RawInput>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub long: bool,
+}
+
+/// How long a `long` binding's input must be held, s.
+pub const LONG_PRESS_S: f32 = 1.0;
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl Binding {
@@ -41,7 +54,13 @@ impl Binding {
             raw,
             sign,
             hold: None,
+            long: false,
         }
+    }
+
+    /// This binding, firing only after [`LONG_PRESS_S`] held.
+    pub fn held_long(self) -> Binding {
+        Binding { long: true, ..self }
     }
 
     /// This binding, active only while `hold` is held.
@@ -52,11 +71,11 @@ impl Binding {
         }
     }
 
-    /// True when both bindings read the same physical input: same raw input and chord, and
-    /// for analog inputs, overlapping halves (`Positive` and `Negative` of one stick axis
-    /// are different inputs).
+    /// True when both bindings read the same physical input: same raw input, chord and
+    /// press length, and for analog inputs, overlapping halves (`Positive` and `Negative`
+    /// of one stick axis are different inputs).
     pub fn overlaps(&self, other: &Binding) -> bool {
-        if self.raw != other.raw || self.hold != other.hold {
+        if self.raw != other.raw || self.hold != other.hold || self.long != other.long {
             return false;
         }
         !self.raw.is_analog()
@@ -372,6 +391,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Headlights => vec![key(Key::KeyL, Pos)],
             Action::Horn => vec![key(Key::KeyH, Pos)],
             Action::VehicleNext => vec![key(Key::KeyV, Pos)],
+            Action::Reset => vec![key(Key::KeyR, Pos)],
             Action::MapToggle => vec![key(Key::KeyM, Pos)],
             Action::MapZoom => vec![key(Key::Minus, Neg), key(Key::Equal, Pos)],
             Action::TimeScrub => vec![key(Key::Comma, Neg), key(Key::Period, Pos)],
@@ -409,6 +429,8 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Horn => vec![btn(PadButton::L3)],
             // The pad picks a car on the pause menu's Vehicle page.
             Action::VehicleNext => vec![],
+            // Held, so a tap (the map) never resets by accident.
+            Action::Reset => vec![btn(PadButton::Select).held_long()],
             Action::MapToggle => vec![btn(PadButton::Select)],
             Action::MapZoom => vec![
                 Binding::new(RawInput::PadButton(PadButton::L1), Neg),
@@ -473,7 +495,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 19] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 20] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -537,6 +559,11 @@ mod tests {
             ),
             (Action::Horn, vec![K(Key::KeyH)], vec![B(PadButton::L3)]),
             (Action::VehicleNext, vec![K(Key::KeyV)], vec![]),
+            (
+                Action::Reset,
+                vec![K(Key::KeyR)],
+                vec![B(PadButton::Select)],
+            ),
             (
                 Action::MapToggle,
                 vec![K(Key::KeyM)],

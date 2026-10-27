@@ -1082,6 +1082,125 @@ fn a_slow_roll_survives_the_switch() {
     assert_eq!(h.app.drive.spec.id, "palisade_wagon");
 }
 
+/// Puts the car off the road in a block, tipped over, sliding, with miles on it.
+fn strand(app: &mut App) {
+    let s = &mut app.drive.state;
+    s.pos = [-150.0, 3.0, 47.0];
+    s.rot = glam::Quat::from_rotation_z(1.4).to_array();
+    s.vel = [2.0, 0.0, -1.0];
+    s.speed_mps = 2.0;
+    s.odometer_m = 1234.0;
+    app.drive.prev = app.drive.state;
+}
+
+/// The car is at rest, upright, on a lane's centerline heading along it, with its miles.
+fn assert_on_a_lane(app: &App) {
+    let (at, heading) = spot(app);
+    let hit = app.lanes.nearest(at, 1.0).expect("on a lane");
+    assert!(hit.dist < 0.05, "{hit:?}");
+    let lane_heading = (-hit.dir[0]).atan2(-hit.dir[1]);
+    let turn = (heading - lane_heading + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
+    assert!(turn.abs() < 1e-3, "{heading} {lane_heading}");
+    let up = app.drive.pose(1.0).rot * glam::Vec3::Y;
+    assert!(up.y > 0.999, "{up}");
+    // At rest (the sim has stepped since, settling on its springs).
+    assert!(app.drive.state.speed_mps.abs() < 0.01);
+    assert!(glam::Vec3::from(app.drive.state.vel).length() < 0.05);
+    // The miles stay (plus any the stranded car slid before the reset).
+    assert!((1234.0..1240.0).contains(&app.drive.odometer_m()));
+}
+
+#[test]
+fn r_puts_a_stuck_car_back_on_the_nearest_lane() {
+    let mut h = Harness::new();
+    strand(&mut h.app);
+    let p = h.app.drive.state.pos;
+    let want = h.app.lanes.nearest([p[0], p[2]], 200.0).unwrap();
+    h.key(Key::KeyR);
+    assert_on_a_lane(&h.app);
+    let (at, _) = spot(&h.app);
+    assert!((at[0] - want.pos[0]).abs() < 0.05 && (at[1] - want.pos[2]).abs() < 0.05);
+    // "Car reset" for 2 s.
+    assert!(h.hud_text().contains("Car reset"), "{}", h.hud_text());
+    for _ in 0..((VEHICLE_TOAST_SECONDS as f64 / DT) as usize + 2) {
+        h.frame();
+    }
+    assert!(!h.hud_text().contains("Car reset"));
+    // Far from every road the car goes back to its start, miles kept.
+    h.app.drive.state.pos = [5000.0, 0.0, 5000.0];
+    h.app.drive.state.odometer_m = 99.0;
+    h.key(Key::KeyR);
+    let (at, heading) = spot(&h.app);
+    assert!((at[0] - h.app.start.0[0]).abs() < 0.05 && (at[1] - h.app.start.0[2]).abs() < 0.05);
+    assert!((heading - h.app.start.1).abs() < 1e-3);
+    assert!((h.app.drive.odometer_m() - 99.0).abs() < 0.01);
+}
+
+#[test]
+fn holding_select_resets_and_a_tap_opens_the_map() {
+    let mut h = Harness::new();
+    strand(&mut h.app);
+    let select = RawInput::PadButton(PadButton::Select);
+    // Half a second is not enough.
+    h.input.press(select);
+    for _ in 0..30 {
+        h.frame();
+    }
+    assert!(!h.hud_text().contains("Car reset"));
+    // A second is; letting go then does not open the map.
+    for _ in 0..32 {
+        h.frame();
+    }
+    h.input.release(select);
+    h.frame();
+    assert_on_a_lane(&h.app);
+    assert!(h.hud_text().contains("Car reset"));
+    assert!(!h.ui().full_map_open());
+    // A tap opens the map and resets nothing.
+    strand(&mut h.app);
+    h.pad(PadButton::Select);
+    assert!(h.ui().full_map_open());
+    let (at, _) = spot(&h.app);
+    assert!(
+        (at[0] + 150.0).abs() < 1.0 && (at[1] - 47.0).abs() < 1.0,
+        "{at:?}"
+    );
+}
+
+#[test]
+fn the_pause_menu_resets_the_car() {
+    let mut h = Harness::new();
+    strand(&mut h.app);
+    h.open(&[ItemId::ResetCar]);
+    assert!(!h.app.menu_open());
+    assert_on_a_lane(&h.app);
+    assert!(h.hud_text().contains("Car reset"));
+}
+
+#[test]
+fn reset_is_listed_on_both_bindings_pages() {
+    for (device, input) in [
+        (DeviceKind::Gamepad, "Select (hold)"),
+        (DeviceKind::KeyboardMouse, "R"),
+    ] {
+        let mut h = Harness::new();
+        h.open(&[
+            ItemId::Open(Page::Settings),
+            ItemId::Open(Page::Controls),
+            ItemId::Open(Page::Device(device)),
+            ItemId::Open(Page::Bindings(device)),
+        ]);
+        h.focus_on(ItemId::Bind(device, Action::Reset, Sign::Full));
+        let text = h.hud_text();
+        let row = text
+            .lines()
+            .find(|l| l.contains("Reset car"))
+            .unwrap_or_else(|| panic!("{text}"));
+        assert!(row.contains(input), "{row}");
+    }
+}
+
 #[test]
 fn about_page_credits_the_author() {
     let mut h = Harness::new();
@@ -1118,17 +1237,24 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
     // The radio's 0.8 times the master volume's 0.8.
     assert_eq!(cmds, [RadioCommand::Volume(0.8 * 0.8)], "off until a key");
     assert!(h.app.ui().radio().toast().is_none());
+    assert_eq!(h.app.audio_params().tunes, 0);
     h.key(Key::BracketRight);
     assert!(h.app.ui().radio().toast().is_some());
     assert!(h.hud_text().contains("SomaFM Left Coast 70s"));
-    for _ in 0..12 {
+    // The dial sweeps (in the mixer, at the radio's volume), then the station plays.
+    assert_eq!(h.app.audio_params().tunes, 1);
+    assert_eq!(h.app.audio_params().tune_volume, 0.8);
+    assert!(h
+        .app
+        .radio_commands()
+        .all(|c| !matches!(c, RadioCommand::Play { .. })));
+    for _ in 0..((audio::TUNE_SECONDS as f64 / DT) as usize + 1) {
         h.frame();
     }
     let cmds: Vec<_> = h.app.radio_commands().collect();
     let first = h.app.radio().channels()[0].clone();
     assert!(
-        matches!(&cmds[..], [RadioCommand::TuneNoise { .. }, RadioCommand::Play { url, .. }]
-            if *url == first.urls[0]),
+        matches!(&cmds[..], [RadioCommand::Play { url, .. }] if *url == first.urls[0]),
         "{cmds:?}"
     );
     let saved = store.0.borrow().clone().unwrap();

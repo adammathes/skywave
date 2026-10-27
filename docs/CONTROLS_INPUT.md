@@ -17,6 +17,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Headlights | button | L | D-pad up |
 | Horn | button | H | Left stick click |
 | Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
+| Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
 | Map toggle | button | M | Back / Share |
 | Map zoom (full map) | axis −1..1 | − / = (and the mouse wheel) | L1 / R1 |
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
@@ -36,6 +37,15 @@ unless the scene names one (`car=`). It is unbound on the pad by default: the pa
 Vehicle page (Resume · Vehicle › · Settings ›), one row per built-in car with its class, power to weight,
 driven wheels and gearbox, the car being driven marked and focused; selecting one swaps it in the same way and
 closes the menu.
+
+`Reset` puts the car at rest, upright, on the centerline of the nearest road lane (`world::lanes`: the
+place's lane table, or each road's lanes laid out from its cross section, driving on the right), heading
+the way that lane drives, on the deck it is on; with no lane within 200 m it goes back to the place's start.
+The odometer, headlights and camera are kept, and "Car reset" shows for 2 s. On the pad it is a long press
+(`Binding::long`): Back fires it once after 1 s held with no chord used, so a tap still opens the map and
+holding Back while scrubbing time never resets; a remap of Reset to another pad button is a long press too.
+The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
+is separate and stays.
 
 ## Per-axis options (mandatory, every analog action)
 `invert` (Y invert on look is the canonical case and must work on gamepad and mouse), `sensitivity` (0.25–4×), `deadzone` (0–0.3), `curve` (1.0 linear to 2.5), `swap` presets (triggers↔stick for throttle/brake, left↔right sticks, southpaw). Stored per device kind (keyboard/mouse vs gamepad). A reset-to-default per action and per device.

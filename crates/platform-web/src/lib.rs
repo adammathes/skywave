@@ -26,7 +26,8 @@
 //!
 //! The car radio: every frame the app's `audio::RadioCommand`s go to the page's player
 //! glue, `window.skywaveRadio` (the radio block of `web/index.html`, an `<audio>` element):
-//! `command(kind, url, token, value, name)` with kind `play`, `stop`, `volume` or `noise`;
+//! `command(kind, url, token, value, name)` with kind `play`, `stop` or `volume` (the dial
+//! sweep between stations is synthesized in the mixer, so it plays through `sfx`);
 //! its reports come back from `takeEvent()` as `"<started|failed|blocked> <token>"`
 //! ([`parse_player_event`]), and the radio's state goes to `report(text)` whenever it
 //! changes ([`radio_state_text`]). Without the glue the radio stays silent. The page may

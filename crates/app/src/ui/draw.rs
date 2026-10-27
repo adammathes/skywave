@@ -914,6 +914,7 @@ impl Display for ToastText {
                 Some(car) => f.write_str(&car.name),
                 None => Ok(()),
             },
+            Toast::CarReset => f.write_str("Car reset"),
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }

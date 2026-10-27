@@ -19,6 +19,7 @@ extern crate std;
 pub mod buildings;
 pub mod collide;
 pub mod ground;
+pub mod lanes;
 pub mod math;
 pub mod mesh;
 pub mod palette;

@@ -1,6 +1,6 @@
 //! Raw events in, one [`InputState`] per frame out.
 
-use super::bindings::{Binding, Bindings};
+use super::bindings::{Binding, Bindings, LONG_PRESS_S};
 use super::raw::{DeviceKind, MouseAxis, RawInput};
 use super::{Action, InputState};
 
@@ -34,10 +34,16 @@ pub struct InputMapper {
     value: [f32; RawInput::COUNT],
     /// Pressed at least once since the last sample.
     pressed_edge: [bool; RawInput::COUNT],
-    /// Used as some binding's `hold`; such an input fires its own actions on release, and
-    /// only if no chord was used while it was down.
+    /// Used as some binding's `hold`, or by a `long` binding; such an input fires its own
+    /// actions on release, and only if no chord (or long press) was used while it was down.
     modifier: [bool; RawInput::COUNT],
     chord_used: [bool; RawInput::COUNT],
+    /// Some `long` binding reads this input.
+    long: [bool; RawInput::COUNT],
+    /// Seconds each input has been held, counted at samples.
+    held_s: [f32; RawInput::COUNT],
+    /// Held past [`LONG_PRESS_S`] at this sample: its `long` bindings fire.
+    long_edge: [bool; RawInput::COUNT],
     /// Released since the last sample without using a chord.
     tap: [bool; RawInput::COUNT],
     /// Keyboard-ramped value of each analog action, per device.
@@ -65,6 +71,9 @@ impl InputMapper {
             pressed_edge: [false; RawInput::COUNT],
             modifier: [false; RawInput::COUNT],
             chord_used: [false; RawInput::COUNT],
+            long: [false; RawInput::COUNT],
+            held_s: [0.0; RawInput::COUNT],
+            long_edge: [false; RawInput::COUNT],
             tap: [false; RawInput::COUNT],
             ramp: [[0.0; Action::ANALOG.len()]; DeviceKind::COUNT],
             was_pressed: [false; Action::COUNT],
@@ -89,11 +98,16 @@ impl InputMapper {
 
     fn index_modifiers(&mut self) {
         self.modifier = [false; RawInput::COUNT];
+        self.long = [false; RawInput::COUNT];
         for device in DeviceKind::ALL {
             for action in Action::ALL {
                 for b in self.bindings.get(device, action) {
                     if let Some(i) = b.hold.and_then(RawInput::slot) {
                         self.modifier[i] = true;
+                    }
+                    if let Some(i) = b.raw.slot().filter(|_| b.long && !b.raw.is_analog()) {
+                        self.modifier[i] = true;
+                        self.long[i] = true;
                     }
                 }
             }
@@ -112,6 +126,7 @@ impl InputMapper {
             return;
         }
         self.held[i] = true;
+        self.held_s[i] = 0.0;
         self.pressed_edge[i] = true;
         self.chord_used[i] = false;
         self.note_chord_use(raw);
@@ -240,6 +255,25 @@ impl InputMapper {
     pub fn sample(&mut self, dt: f32) -> &InputState {
         let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
 
+        // Long presses: an input held past the threshold with no chord used fires its long
+        // bindings once and counts as used, so it does not also tap on release.
+        self.long_edge = [false; RawInput::COUNT];
+        for i in 0..RawInput::COUNT {
+            if !self.held[i] {
+                continue;
+            }
+            let before = self.held_s[i];
+            self.held_s[i] += dt;
+            if self.long[i]
+                && !self.chord_used[i]
+                && before < LONG_PRESS_S
+                && self.held_s[i] >= LONG_PRESS_S
+            {
+                self.long_edge[i] = true;
+                self.chord_used[i] = true;
+            }
+        }
+
         // Inputs taken over by a chord whose hold is down, and holds whose chord is in use
         // (the stick may already be deflected when the hold goes down).
         let mut captured = [false; RawInput::COUNT];
@@ -338,7 +372,9 @@ impl InputMapper {
             };
             return Some((b.read(self.value[i] * scale), false));
         }
-        let (down, edge) = if self.modifier[i] && b.hold.is_none() {
+        let (down, edge) = if b.long {
+            (self.long_edge[i], self.long_edge[i])
+        } else if self.modifier[i] && b.hold.is_none() {
             (self.tap[i], self.tap[i])
         } else {
             (self.held[i], self.pressed_edge[i])
@@ -739,6 +775,47 @@ mod tests {
         m.release(btn(PadButton::Select));
         assert!(m.sample(0.01).just_pressed(Action::MapToggle));
         assert!(!m.sample(0.01).just_pressed(Action::MapToggle));
+    }
+
+    #[test]
+    fn holding_select_resets_once_and_a_tap_does_not() {
+        let mut m = InputMapper::default();
+        let reset = |m: &mut InputMapper, dt| {
+            let s = m.sample(dt);
+            (
+                s.just_pressed(Action::Reset),
+                s.just_pressed(Action::MapToggle),
+            )
+        };
+        // A tap: the map, no reset.
+        m.press(btn(PadButton::Select));
+        assert_eq!(reset(&mut m, 0.3), (false, false));
+        m.release(btn(PadButton::Select));
+        assert_eq!(reset(&mut m, 0.01), (false, true));
+        // Held: nothing until a second, then the reset once, and no map on release.
+        m.press(btn(PadButton::Select));
+        let mut fired = Vec::new();
+        for frame in 1..=90 {
+            let (r, map) = reset(&mut m, 1.0 / 60.0);
+            assert!(!map);
+            if r {
+                fired.push(frame);
+            }
+        }
+        // 60 or 61 sixtieths, as the float sum lands.
+        assert!(matches!(fired[..], [60 | 61]), "{fired:?}");
+        m.release(btn(PadButton::Select));
+        assert_eq!(reset(&mut m, 0.01), (false, false));
+        // Scrubbing time with Select held is not a long press.
+        m.press(btn(PadButton::Select));
+        m.axis(pad(PadAxis::RightX), 0.8);
+        for _ in 0..90 {
+            assert_eq!(reset(&mut m, 1.0 / 60.0), (false, false));
+        }
+        m.release(btn(PadButton::Select));
+        // The keyboard's R resets at once.
+        m.press(key(Key::KeyR));
+        assert!(m.sample(0.01).just_pressed(Action::Reset));
     }
 
     #[test]
