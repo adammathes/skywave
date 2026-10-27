@@ -1,6 +1,7 @@
 //! The car radio as the game uses it: the built-in presets, the [`audio::Radio`] tuned to
 //! the scenario's preset (less the stations the user switched off, plus the streams they
-//! added), the station keys, the HUD toast and the dash display's scrolling text.
+//! added and their own music folders), the station keys, the HUD toast and the dash
+//! display's scrolling text (a files station shows the track playing).
 //!
 //! The radio starts with the first frame that runs the game (never in a still scene, so
 //! screenshot goldens stay silent and unchanged): volume from the settings, the last
@@ -46,7 +47,7 @@ const SCROLL_CHARS_PER_S: f32 = 3.0;
 /// Blank characters between the end of a scrolling name and its start.
 const SCROLL_GAP: usize = 3;
 
-/// A row of the stations page: a preset stream station or an added stream.
+/// A row of the stations page: a preset stream station, an added stream or a music folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StationRow {
     pub id: String,
@@ -70,6 +71,17 @@ pub struct CarRadio {
     shown_s: f32,
     /// The platform should ask the user for a stream URL.
     wants_url: bool,
+    /// The platform should ask the user for a music folder.
+    wants_music: bool,
+    /// The user's music folders, by name, as stations.
+    files: Vec<Channel>,
+    /// Each folder station's id and the platform's path for it (what it forgets it by).
+    paths: Vec<(String, String)>,
+    /// Paths of folders the user removed, for the platform to forget ("*": all of them).
+    forgotten: Vec<String>,
+    /// The last station is a music folder the platform has not handed over yet: it
+    /// becomes the station the power key resumes when it arrives, unless a key came first.
+    pending: Option<String>,
     /// What the radio volume is scaled by: the master volume, 0 when muted.
     gain: f32,
 }
@@ -98,6 +110,11 @@ impl CarRadio {
             toast: 0.0,
             shown_s: 0.0,
             wants_url: false,
+            wants_music: false,
+            files: Vec::new(),
+            paths: Vec::new(),
+            forgotten: Vec::new(),
+            pending: None,
             gain: 1.0,
         };
         radio.apply(&RadioSettings::default());
@@ -160,14 +177,14 @@ impl CarRadio {
             ..s.clone()
         };
         self.rows = all
-            .channels(preset)
+            .channels(preset, &self.files)
             .into_iter()
             .map(|c: Channel| StationRow {
                 id: c.id,
                 name: c.name,
             })
             .collect();
-        self.radio.set_channels(s.channels(preset));
+        self.radio.set_channels(s.channels(preset, &self.files));
         if self.started {
             self.radio.set_volume(s.volume * self.gain);
         }
@@ -184,12 +201,74 @@ impl CarRadio {
         self.apply(s);
         if let Some(id) = &s.last_station {
             self.radio.restore(id);
+            let missing = self.radio.last_id() != Some(id.as_str());
+            if missing && id.starts_with("files_") {
+                // A music folder the platform is still reading (or must ask for again).
+                self.pending = Some(id.clone());
+            }
         }
+    }
+
+    /// Puts music folder `station` (a [`Channel::files`]) on the dial, replacing the one of
+    /// the same path, folders in name order after the streams. The last station of the
+    /// previous session, if it is this folder, is what the power key resumes (the radio
+    /// stays off: a session starts silent).
+    pub fn add_files(&mut self, path: &str, station: Channel, s: &RadioSettings) {
+        let id = station.id.clone();
+        self.files.retain(|c| c.id != id);
+        self.paths.retain(|(i, _)| *i != id);
+        self.paths.push((id.clone(), path.to_string()));
+        self.files.push(station);
+        self.files
+            .sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+        self.apply(s);
+        if self.pending.as_ref() == Some(&id) {
+            self.pending = None;
+            if !self.radio.is_on() {
+                self.radio.restore(&id);
+            }
+        }
+    }
+
+    /// The music folders on the dial (on or off).
+    pub fn files(&self) -> &[Channel] {
+        &self.files
+    }
+
+    /// Takes music folder `id` off the dial for good: the platform forgets it.
+    pub fn remove_files(&mut self, id: &str, s: &RadioSettings) {
+        self.files.retain(|c| c.id != id);
+        if let Some(i) = self.paths.iter().position(|(i, _)| i == id) {
+            self.forgotten.push(self.paths.remove(i).1);
+        }
+        self.apply(s);
+    }
+
+    /// Takes every music folder off the dial, and has the platform forget them all
+    /// (remembered ones that never came back too).
+    pub fn clear_files(&mut self, s: &RadioSettings) {
+        self.files.clear();
+        self.paths.clear();
+        self.pending = None;
+        self.forgotten.push("*".to_string());
+        self.apply(s);
+    }
+
+    /// The paths of the folders removed since the last call ("*": forget them all).
+    pub fn take_forgotten(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.forgotten)
     }
 
     /// The station keys of one frame. Returns whether the power or the station changed.
     pub fn press(&mut self, input: &InputState) -> bool {
         let before = (self.radio.is_on(), self.radio.station());
+        let any = [Action::RadioNext, Action::RadioPrev, Action::RadioOff]
+            .iter()
+            .any(|&a| input.just_pressed(a));
+        if any {
+            // The user tunes: a folder still on its way no longer takes over.
+            self.pending = None;
+        }
         if input.just_pressed(Action::RadioNext) {
             self.radio.next();
         } else if input.just_pressed(Action::RadioPrev) {
@@ -229,9 +308,14 @@ impl CarRadio {
     /// toast again ("no signal").
     pub fn on_event(&mut self, event: PlayerEvent) {
         let was_error = matches!(self.radio.state(), RadioState::Error { .. });
+        let track = self.radio.track().map(|t| t.key.clone());
         self.radio.on_event(event);
         if !was_error && matches!(self.radio.state(), RadioState::Error { .. }) {
             self.toast = TOAST_SECONDS;
+        }
+        if self.radio.track().map(|t| &t.key) != track.as_ref() {
+            // A new track on the dash: start its scroll over.
+            self.shown_s = 0.0;
         }
     }
 
@@ -243,7 +327,8 @@ impl CarRadio {
     /// Writes the power and last station into `s`; true when they changed.
     pub fn store(&self, s: &mut RadioSettings) -> bool {
         let on = self.radio.is_on();
-        let last = self.radio.last_id();
+        // Still waiting for the last session's folder: keep it as the last station.
+        let last = self.radio.last_id().or(self.pending.as_deref());
         if s.on == on && s.last_station.as_deref() == last {
             return false;
         }
@@ -260,6 +345,16 @@ impl CarRadio {
     /// Takes the request for a stream URL.
     pub fn take_url_request(&mut self) -> bool {
         std::mem::take(&mut self.wants_url)
+    }
+
+    /// Asks the platform for a music folder (settings, "Add music folder").
+    pub fn request_music(&mut self) {
+        self.wants_music = true;
+    }
+
+    /// Takes the request for a music folder.
+    pub fn take_music_request(&mut self) -> bool {
+        std::mem::take(&mut self.wants_music)
     }
 
     /// The toast's text, while it is up.
@@ -282,12 +377,15 @@ impl CarRadio {
         })
     }
 
-    /// What the dash display shows `chars` characters at a time: the station name
-    /// (scrolling when it does not fit), or "NO SIGNAL"; nothing while off.
+    /// What the dash display shows `chars` characters at a time: the station name, or the
+    /// track a files station plays (scrolling when it does not fit), or "NO SIGNAL";
+    /// nothing while off.
     pub fn dash(&self, chars: usize) -> Option<DashText<'_>> {
         let c = self.radio.channel()?;
         let text = if matches!(self.radio.state(), RadioState::Error { .. }) {
             "NO SIGNAL"
+        } else if let Some(t) = self.radio.track() {
+            t.label.as_str()
         } else {
             c.name.as_str()
         };
@@ -578,6 +676,106 @@ mod tests {
         assert_eq!(wrap.to_string(), "DE  ");
         let wrap = DashText { start: 7, ..wrap };
         assert_eq!(wrap.to_string(), " ABC");
+    }
+
+    fn folder(name: &str) -> Channel {
+        let tracks = (0..3)
+            .map(|i| audio::Track {
+                key: format!("{name}/{i}"),
+                label: format!("Artist - Song {i}"),
+                secs: 180.0,
+            })
+            .collect();
+        Channel::files(name, name, tracks).unwrap()
+    }
+
+    #[test]
+    fn music_folders_join_the_dial_and_the_last_one_resumes() {
+        let mine = folder("Yacht");
+        let s = RadioSettings {
+            on: true,
+            last_station: Some(mine.id.clone()),
+            ..RadioSettings::default()
+        };
+        let mut r = CarRadio::new();
+        r.start(&s);
+        // Off, as every session starts; the folder is not there yet, and the settings keep
+        // it as the last station.
+        assert!(!r.radio().is_on());
+        let mut kept = s.clone();
+        r.store(&mut kept);
+        assert_eq!(kept.last_station, s.last_station);
+        r.add_files("Wave", folder("Wave"), &s);
+        r.add_files("Yacht", mine.clone(), &s);
+        // Still off and silent; the power key resumes the folder.
+        assert!(!r.radio().is_on());
+        assert!(r
+            .commands()
+            .all(|c| !matches!(c, RadioCommand::PlayFile { .. })));
+        assert!(press(&mut r, Action::RadioOff));
+        assert_eq!(
+            r.radio().channel().map(|c| c.id.as_str()),
+            Some(mine.id.as_str())
+        );
+        let ids: Vec<&str> = r.rows().iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(
+            &ids[7..],
+            [folder("Wave").id.as_str(), mine.id.as_str()],
+            "by name, after the streams"
+        );
+        assert_eq!(
+            r.dash(40).unwrap().to_string(),
+            "Yacht",
+            "the folder's name while tuning"
+        );
+        r.tick(audio::TUNE_SECONDS);
+        let cmds: Vec<_> = r.commands().collect();
+        assert!(
+            cmds.iter().any(
+                |c| matches!(c, RadioCommand::PlayFile { key, .. } if key.starts_with("Yacht/"))
+            ),
+            "{cmds:?}"
+        );
+        // Playing: the dash shows the track.
+        assert!(r
+            .dash(40)
+            .unwrap()
+            .to_string()
+            .starts_with("Artist - Song "));
+        // A folder the user switched off is not on the dial, but still on the stations page.
+        let mut off = s.clone();
+        off.set_enabled(&mine.id, false);
+        r.apply(&off);
+        assert!(r.radio().channels().iter().all(|c| c.id != mine.id));
+        assert!(r.rows().iter().any(|row| row.id == mine.id));
+        // Removed: off the stations page too, and the platform forgets its path.
+        r.remove_files(&mine.id, &s);
+        assert!(r.rows().iter().all(|row| row.id != mine.id));
+        assert_eq!(r.take_forgotten(), ["Yacht"]);
+        r.clear_files(&s);
+        assert!(r.files().is_empty());
+        assert_eq!(r.take_forgotten(), ["*"]);
+        assert!(r.take_forgotten().is_empty());
+    }
+
+    #[test]
+    fn a_key_before_the_folder_arrives_wins() {
+        let mine = folder("Yacht");
+        let s = RadioSettings {
+            on: true,
+            last_station: Some(mine.id.clone()),
+            ..RadioSettings::default()
+        };
+        let mut r = CarRadio::new();
+        r.start(&s);
+        press(&mut r, Action::RadioNext);
+        let first = r.radio().station();
+        r.add_files("Yacht", mine, &s);
+        assert_eq!(
+            r.radio().station(),
+            first,
+            "the folder arriving does not retune"
+        );
     }
 
     #[test]
