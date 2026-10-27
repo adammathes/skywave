@@ -1177,30 +1177,20 @@ mod tests {
         let size = (1280, 800);
         let query = "?seed=1&place=coast&car=corsair_gtx&still=1&cam=chase-far&t=17:40";
         let (mut app, mut r) = streamed(query, None, &device, &queue, size);
-        let view = target(&device, size);
+        let (texture, _) = target(&device, size);
         assert!(r.enable_gpu_timing());
         app.force_quality(Some(Quality::Deck));
-        let mut frames = |prepass: bool| {
-            for _ in 0..3 {
-                let mut scene = app.scene_view(1.0, 1.6);
-                assert!(scene.quality.depth_prepass, "the Deck preset has it");
-                scene.quality.depth_prepass = prepass;
-                r.render(&view, &scene);
-                let _ = device.poll(wgpu::PollType::wait_indefinitely());
-            }
-            let s = r.stats();
-            eprintln!("{}", work_line(&s));
-            s
-        };
-        let without = frames(false);
-        let with = frames(true);
+        let (without, before) = deck_frames(&mut app, &mut r, &device, &queue, &texture, false);
+        let (with, after) = deck_frames(&mut app, &mut r, &device, &queue, &texture, true);
+        // The same image ([`assert_same_image`]).
+        assert_same_image(&before, &after, "coast-strip-golden");
         let px = 1280 * 800;
         let (a, b) = (&without.gpu_counts, &with.gpu_counts);
         assert!(a.complete && b.complete);
         // Measured: 104k of 1024k pixels are sky.
         assert!(b.sky > 0 && b.sky < px / 5, "{b:?}");
         assert_eq!(a.sky, b.sky);
-        // Measured: 1879k mesh fragments without the pre-pass, 920k (the 920k pixels
+        // Measured: 1958k mesh fragments without the pre-pass, 920k (the 920k pixels
         // covered) with it.
         let covered = px - b.sky;
         assert!(b.meshes <= covered + covered / 50, "{b:?}");
@@ -1210,6 +1200,95 @@ mod tests {
         // Nothing moves: after the first frames both cascades are kept.
         assert_eq!(with.cascades_drawn, 0, "{with:?}");
         assert_eq!(with.shadow_draw_calls, 0);
+    }
+
+    /// The town's wagon (`town-noon-wagon`: trim and wood panels over its body) looks the
+    /// same at Deck with the depth pre-pass as without it ([`assert_same_image`]). Skipped without a Vulkan device,
+    /// except on CI.
+    #[test]
+    fn depth_prepass_keeps_the_image() {
+        let Some((device, queue, _)) = vulkan_device() else {
+            assert!(std::env::var_os("CI").is_none(), "no Vulkan device on CI");
+            return;
+        };
+        let size = (1280, 800);
+        let query = "?seed=1&car=palisade_wagon&cam=chase-far&t=12:00&pos=-197.5,-150&yaw=0\
+                     &still=1&stream=0";
+        let (mut app, mut r) = streamed(query, None, &device, &queue, size);
+        let (texture, _) = target(&device, size);
+        app.force_quality(Some(Quality::Deck));
+        let (_, before) = deck_frames(&mut app, &mut r, &device, &queue, &texture, false);
+        let (_, after) = deck_frames(&mut app, &mut r, &device, &queue, &texture, true);
+        assert_same_image(&before, &after, "town-noon-wagon");
+    }
+
+    /// Three frames of `app` at Deck with the pre-pass on or off into `texture`: the last
+    /// frame's stats and its pixels (RGBA8, rows packed).
+    fn deck_frames(
+        app: &mut App,
+        r: &mut render::Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+        prepass: bool,
+    ) -> (RenderStats, Vec<u8>) {
+        let view = texture.create_view(&Default::default());
+        for _ in 0..3 {
+            let mut scene = app.scene_view(1.0, 1.6);
+            assert!(scene.quality.depth_prepass, "the Deck preset has it");
+            scene.quality.depth_prepass = prepass;
+            r.render(&view, &scene);
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let s = r.stats();
+        eprintln!("{}", work_line(&s));
+        (s, pixels(device, queue, texture))
+    }
+
+    /// `texture`'s RGBA8 pixels, rows packed.
+    fn pixels(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<u8> {
+        let (w, h) = (texture.width(), texture.height());
+        let row = (4 * w).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(row * h),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: None,
+                },
+            },
+            texture.size(),
+        );
+        queue.submit([encoder.finish()]);
+        buffer.map_async(wgpu::MapMode::Read, .., |r| r.unwrap());
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let data = buffer.get_mapped_range(..).unwrap();
+        data.chunks(row as usize)
+            .flat_map(|r| &r[..4 * w as usize])
+            .copied()
+            .collect()
+    }
+
+    /// Fails unless `a` and `b` are the same image but for a few pixels in 10 000: where two
+    /// triangles of one mesh tie in depth the pre-pass's less-or-equal test lets the later
+    /// one win (measured: 130 isolated pixels of 1 024 000 on the coast, 5 for the wagon,
+    /// on distant silhouettes).
+    fn assert_same_image(a: &[u8], b: &[u8], scene: &str) {
+        let differ = a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
+        let limit = a.len() / 4 / 5000;
+        assert!(
+            differ <= limit,
+            "{scene}: {differ} pixels differ with the depth pre-pass (at most {limit})"
+        );
     }
 
     /// Prints what culling and each preset leave the GPU on the streamed coast at the
@@ -1346,7 +1425,7 @@ mod tests {
             app.traffic_count(),
             app.pedestrian_count()
         );
-        let view = target(&device, size);
+        let (_, view) = target(&device, size);
         let mut out = Vec::new();
         for &(label, q, culling) in runs {
             app.force_quality(Some(q));
@@ -1483,7 +1562,7 @@ mod tests {
             ("coast-night-golden", "cam=chase-near&t=22:30&lights=1"),
         ];
         let size = (1280, 800);
-        let view = target(&device, size);
+        let (_, view) = target(&device, size);
         let frames = std::env::var("SKYWAVE_BENCH_FRAMES")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -1539,24 +1618,25 @@ mod tests {
         (app, r)
     }
 
-    /// A render target of `size` the renderer can draw into as it would the swapchain.
-    fn target(device: &wgpu::Device, size: (u32, u32)) -> wgpu::TextureView {
-        device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size: wgpu::Extent3d {
-                    width: size.0,
-                    height: size.1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: TARGET_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            })
-            .create_view(&Default::default())
+    /// A render target of `size` the renderer can draw into as it would the swapchain, and
+    /// its view.
+    fn target(device: &wgpu::Device, size: (u32, u32)) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TARGET_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        (texture, view)
     }
 
     /// The native shell's device limits, with room for full-size cascades.

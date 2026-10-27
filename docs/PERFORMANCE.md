@@ -33,7 +33,7 @@ Per frame, in order (`crates/render/src/lib.rs`):
 | Pass | Work | Scales with |
 |---|---|---|
 | Shadow | depth-only, every caster once per cascade (3 cascades, `size²` each, side by side in one `Depth32Float` atlas); a cascade whose casters, coverage and sun have not changed is kept from an earlier frame | casters × cascades redrawn (vertex), `size²` × cascades redrawn (depth fill and clear) |
-| Forward | the depth pre-pass at Deck and Low (every visible mesh, depth only), then every visible instance nearest first: atlas texel, Lambert sun with 3×3 PCF (twice in the cascade blend band), hemisphere ambient, up to 8 point/spot lights, fog, emissive; then the sky (one fullscreen triangle at the far plane, shading only what no mesh covered) | visible triangles (vertex; twice with the pre-pass), shaded fragments × lights (fragment) |
+| Forward | the depth pre-pass at Deck and Low (every visible mesh, depth only), then every visible instance: atlas texel, Lambert sun with 3×3 PCF (twice in the cascade blend band), hemisphere ambient, up to 8 point/spot lights, fog, emissive; then the sky (one fullscreen triangle at the far plane, shading only what no mesh covered) | visible triangles (vertex; twice with the pre-pass), shaded fragments × lights (fragment) |
 | Coronas | one instanced quad per light with a corona (≤ 258), 5 depth taps each in the vertex shader | lights at night, sprite size on screen |
 | Bloom | prefilter (13 taps) into half the scene's size, then down and up a chain of 4–5 levels | scene pixels / 4, levels |
 | Tonemap | one fullscreen triangle: exposure, bloom, AgX, vignette, dither, upscale when scaled | swapchain pixels |
@@ -74,7 +74,6 @@ Vulkan device; `--stats` on the Deck gives the times):
 | Coronas off at Low | no corona pass | night scenes only; one draw, potentially large additive quads |
 | Present mode | `AutoVsync` by default (it was already); `--no-vsync` for benchmarks | none; makes measurements honest |
 | Sky drawn last | the sky's triangle sits at the far plane and is drawn after the meshes with a less-or-equal depth test, so it shades only the pixels they leave | measured: 1024k sky fragments a frame → 104–240k on the coast scenes (−77 to −90%); each runs the sky model, stars, moon and sun disc |
-| Front-to-back | the forward pass's runs of one mesh (one instanced draw each) are sorted by their nearest instance's distance, ties in scene order | measured: −4 to −20% of the meshes' fragments without the pre-pass (most overdraw is inside a chunk's own mesh, which sorting cannot reach) |
 | Depth pre-pass (Deck, Low) | every visible mesh drawn depth-only first (same position math, `@invariant`), then shaded with less-or-equal: each covered pixel shades once | measured: the meshes' fragments −51 to −63% (2.0–2.7× overdraw → 1.00×), night light evaluations 15.0 M → 6.2 M; costs the forward pass's vertex work again and ~300 draws (why it is not on at Medium, the web default, where draws cost the CPU most). Reasoned for the Deck: ~1.1 M fewer fragments of ~300 ALU ops and ~11 texture reads ≈ 1–2 ms, against ~0.4–0.6 ms of depth-only geometry; `--no-prepass` measures it |
 | Cascades kept while nothing changes | each cascade is kept from an earlier frame while its map still covers this frame's slice (to half a texel), a hash of its casters (meshes and transforms) is unchanged, and the sun has moved too little to shift a 50 m caster's shadow by half a texel; the far cascade between its frames still keeps the old rule | a still view (stopped at a light, paused under the menu) draws no cascade at all; driving with a still sun the far cascade is redrawn only when the view leaves its padded map. Driving at 100 km/h on the coast at Deck: 723k shadow triangles a frame → 129k (frozen traffic and clock; moving NPC cars in the far cascade redraw it every third frame, and at the default 10× clock the sun passes the far cascade's threshold every ~0.15 s at golden hour to ~4 s at noon, the near one's every frame or two to ~0.5 s) |
 | Far cascade every third frame (Deck, Low) | `far_cascade_interval` 2 → 3 | where it is redrawn on its interval (moving casters in it), a third of the far cascade's cost instead of half |
@@ -134,8 +133,10 @@ Linux; **Medium** everywhere else. `--quality NAME` forces one for a session (no
 | High | 3 | 2048² | every frame | all | 100% | 5 | on | off | desktop GPUs (the renderer's own default, `RenderQuality::default()`) |
 | Ultra | 3 | 3072² (where the device allows 9216-wide textures) | every frame | all | 100% | 5 | on | off | big desktop GPUs |
 
-At every preset the sky is drawn last, the forward pass is sorted nearest first and a
-cascade is kept while nothing it shows has changed (none of these changes the image).
+At every preset the sky is drawn last and a cascade is kept while nothing it shows has
+changed (neither changes the image). The pre-pass changes 130 isolated pixels of
+1 024 000 on the coast, where two triangles of one mesh tie in depth and its
+less-or-equal test lets the later one win (`depth_prepass_keeps_the_image`).
 
 Choosing a preset sets the resolution scale slider to the preset's value; the slider can
 then move it (50–100%). Far terrain detail is the same at every preset: it is one mesh of
@@ -160,13 +161,18 @@ samples that pass the depth test, so these are exact counts of fragments shaded;
 fragments: there the pre-pass makes the forward pass slower, 192 → 244 ms), so they are
 not quoted. Deck preset, 2026-10-27:
 
-| Scene | Pixels covered | Sky fragments, before → after | Mesh fragments (overdraw): before | sorted | + pre-pass |
-|---|---|---|---|---|---|
-| coast-strip-golden | 920k | 1024k → 104k | 1959k (2.13×) | 1879k (2.04×) | 920k (1.00×) |
-| coast-traffic-noon | 784k | 1024k → 240k | 2121k (2.71×) | 1705k (2.18×) | 784k (1.00×) |
-| coast-night-golden | 885k | 1024k → 139k | 2089k (2.36×) | 1966k (2.22×) | 885k (1.00×) |
+| Scene | Pixels covered | Sky fragments, before → after | Mesh fragments (overdraw): before | with the pre-pass |
+|---|---|---|---|---|
+| coast-strip-golden | 920k | 1024k → 104k | 1959k (2.13×) | 920k (1.00×) |
+| coast-traffic-noon | 784k | 1024k → 240k | 2121k (2.71×) | 784k (1.00×) |
+| coast-night-golden | 885k | 1024k → 139k | 2089k (2.36×) | 885k (1.00×) |
 
-At night the light loop runs 15.0 M times a frame before, 13.9 M sorted, 6.2 M with the
+Drawing the meshes front to back instead (runs of one mesh sorted by distance, no extra
+pass) only got to 2.04–2.22× (most overdraw is inside a chunk's own mesh) and changed
+which of two coplanar meshes wins (a car's trim over its body) as the distances changed,
+a flicker while driving; it was taken out.
+
+At night the light loop runs 15.0 M times a frame before, 6.2 M with the
 pre-pass (7.0 per fragment: the 36 instances with a full set of 8 lights are chunk tiles
 under most of the street). A pre-pass of the chunk geometry alone (fewer draws) leaves
 1.07–1.38× overdraw (cars and props in front of walls), so every mesh goes in it.
@@ -269,8 +275,8 @@ from, frame by frame (busy):
 So Medium's draws are unchanged: the old count's frame parity skipped the far cascade's
 ~600 draws, which it redrew every other frame and now redraws only when the view leaves its
 map (or its casters move, every third frame at Deck). Deck's steady frame gains the 309
-pre-pass draws, depth-only, for the junction's 1705k → 784k shaded fragments (overdraw
-2.18 → 1.00, lavapipe): about 0.9 M fragments of the full forward shader against ~0.3k draws
+pre-pass draws, depth-only, for the junction's 2121k → 784k shaded fragments (overdraw
+2.71 → 1.00, lavapipe): about 1.3 M fragments of the full forward shader against ~0.3k draws
 and 427k depth-only triangles. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1260
 draws, 465k forward and 420k shadow triangles; Medium 1255 draws, 465k and 870k** (about
 10% over), and if fewer than three cars' and three people's instances more are in the

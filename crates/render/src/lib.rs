@@ -10,7 +10,7 @@
 //!    its map covers the view, its casters have not changed and the sun has hardly moved;
 //!    the farthest also between its frames ([`RenderQuality::far_cascade_interval`]).
 //! 2. **Forward**: optionally the meshes' depth first ([`RenderQuality::depth_prepass`]),
-//!    then the meshes nearest first: vertex color × atlas texel, Lambert sun with 3×3 PCF
+//!    then the meshes: vertex color × atlas texel, Lambert sun with 3×3 PCF
 //!    cascaded shadows, hemisphere sky ambient, the point and spot lights of each
 //!    instance's [`LightSet`] (up to [`LIGHTS_PER_DRAW`] of the frame's [`MAX_LIGHTS`]), the
 //!    vertex emissive channel and aerial-perspective fog; then the analytic sky (Preetham,
@@ -1122,11 +1122,6 @@ pub struct Renderer {
     raws: Vec<InstanceRaw>,
     /// Scene instance indices in `instance_staging` order.
     order: Vec<u32>,
-    /// Per scene instance: distance from the camera to its bounds (culling scratch).
-    near: Vec<f32>,
-    /// The forward pass's runs of one mesh: nearest distance, then their span of the
-    /// forward survivors (sorting scratch).
-    runs: Vec<(f32, u32, u32)>,
     timer: Option<GpuTimer>,
     stats: RenderStats,
 }
@@ -1810,8 +1805,6 @@ impl Renderer {
             vis: Vec::with_capacity(instance_capacity),
             raws: Vec::with_capacity(instance_capacity),
             order: Vec::with_capacity(PASSES * instance_capacity),
-            near: Vec::with_capacity(instance_capacity),
-            runs: Vec::with_capacity(instance_capacity),
             timer: None,
             stats: RenderStats {
                 backend,
@@ -1951,8 +1944,6 @@ impl Renderer {
                 .reserve(packed - self.instance_staging.len());
             self.order.reserve(packed - self.order.len());
             self.vis.reserve(self.instance_capacity - self.vis.len());
-            self.near.reserve(self.instance_capacity - self.near.len());
-            self.runs.reserve(self.instance_capacity - self.runs.len());
             self.raws.reserve(self.instance_capacity - self.raws.len());
         }
     }
@@ -2527,22 +2518,15 @@ impl Renderer {
         let camera = Frustum::from_matrix(view_proj);
         let boxes = fits.map(|f| Frustum::from_matrix(f.view_proj));
         let min_texels = self.quality.min_caster_texels;
-        let eye = Mat4::from_cols_array_2d(&scene.camera.view)
-            .inverse()
-            .w_axis
-            .xyz();
         self.vis.clear();
         self.raws.clear();
-        self.near.clear();
         let mut hashes = [FNV_OFFSET; CASCADES];
         for inst in scene.instances {
             let mut bits = 0u8;
-            let mut near = 0.0;
             if let Some(b) = self.mesh_bounds(inst.mesh) {
                 let (c, h) = b.transformed(&Mat4::from_cols_array_2d(&inst.transform));
                 if !self.culling || camera.intersects(c, h) {
                     bits |= 1;
-                    near = ((c - eye).abs() - h).max(Vec3::ZERO).length();
                 }
                 if inst.casts_shadow {
                     let diagonal = 2.0 * h.length();
@@ -2560,7 +2544,6 @@ impl Renderer {
                 }
             }
             self.vis.push(bits);
-            self.near.push(near);
             self.raws.push(if bits != 0 {
                 InstanceRaw::new(inst, lights)
             } else {
@@ -2605,8 +2588,12 @@ impl Renderer {
                         self.order.push(i as u32);
                     }
                 }
-                if late == Some(false) {
-                    self.sort_front_to_back(scene.instances, sweep);
+                // Coplanar surfaces of different meshes (a car's trim on its body) resolve by
+                // draw order: the first drawn wins a less-than test. After the pre-pass the
+                // test is less-or-equal, where the last drawn wins, so the meshes go in
+                // reverse and the same one wins.
+                if late == Some(false) && self.quality.depth_prepass {
+                    self.order[sweep..].reverse();
                 }
                 for &i in &self.order[sweep..] {
                     self.instance_staging.push(self.raws[i as usize]);
@@ -2615,40 +2602,6 @@ impl Renderer {
             *range = start..self.order.len();
         }
         (ranges, late_start)
-    }
-
-    /// Reorders `order[from..]` (forward survivors) nearest first by runs of one mesh, so
-    /// the depth test rejects more hidden fragments before they are shaded while each run
-    /// stays one instanced draw. A run's distance is its nearest instance's; ties keep
-    /// scene order, so the order is deterministic.
-    fn sort_front_to_back(&mut self, instances: &[MeshInstance], from: usize) {
-        self.runs.clear();
-        let order = &self.order[from..];
-        let mut start = 0;
-        while start < order.len() {
-            let mesh = instances[order[start] as usize].mesh;
-            let mut end = start;
-            let mut near = f32::INFINITY;
-            while end < order.len() && instances[order[end] as usize].mesh == mesh {
-                near = near.min(self.near[order[end] as usize]);
-                end += 1;
-            }
-            self.runs.push((near, start as u32, end as u32));
-            start = end;
-        }
-        self.runs
-            .sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        // Rewrite in place through the tail of `order` as scratch.
-        let n = self.order.len() - from;
-        for k in 0..self.runs.len() {
-            let (_, a, b) = self.runs[k];
-            for j in a..b {
-                let v = self.order[from + j as usize];
-                self.order.push(v);
-            }
-        }
-        self.order.copy_within(from + n.., from);
-        self.order.truncate(from + n);
     }
 
     /// Model-space bounds of what `id` draws, or `None` when it draws nothing.

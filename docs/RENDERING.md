@@ -19,8 +19,7 @@ shadow pass    sun CSM, 3 cascades (0–40 m, 40–160 m, 160–600 m), 2048² e
                one optionally between every 2nd or 3rd frame
 depth prepass  by preset (Deck, Low): the forward pass's meshes depth-only first, then shaded with less-or-equal, so each
                pixel shades once (the position math is `@invariant` in both)
-main pass      → HDR Rgba16Float at the resolution scale (50–100%), instances frustum-culled on the CPU and drawn nearest
-               first (by runs of one mesh): Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
+main pass      → HDR Rgba16Float at the resolution scale (50–100%), instances frustum-culled on the CPU: Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
                sun with CSM shadow, sky ambient (hemisphere: sky color up, ground color down),
                up to 8 point/spot lights per draw picked from the frame's 256 (uniform array, 32 bytes each;
                each instance carries its 8 light indices, culled on the CPU by the app per tile),
