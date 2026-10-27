@@ -2604,7 +2604,7 @@ fn storefront_awning(
         k if k == Awning::Canopy as u8 => {
             // A flat stucco canopy with a fascia in the trim color.
             let d = 1.7;
-            let (lo, hi) = ([ax0, tt - 0.05, 0.0], [ax1, tt + 0.23, d]);
+            let (lo, hi) = ([ax0, tt - 0.28, 0.0], [ax1, tt, d]);
             boxf(
                 m,
                 f,
@@ -2614,12 +2614,13 @@ fn storefront_awning(
                 look.wall,
             );
             boxf(m, f, lo, hi, face::NEG_Y, underside(look, look.wall));
-            rect(m, f, ax0, tt - 0.05, ax1, tt + 0.23, d, false, look.trim);
+            rect(m, f, ax0, tt - 0.28, ax1, tt, d, false, look.trim);
         }
         k if k == Awning::Bullnose as u8 => {
-            // A quarter round of vinyl from the wall over and down to its front edge.
-            let r = 0.9;
-            let yb = tt - drop(0.2, 0.0);
+            // A quarter round of vinyl from the transoms' top at the wall over and down to
+            // its front edge.
+            let r = drop(0.9, 0.0).max(0.3);
+            let yb = tt - r;
             let arc = |k: u32| {
                 let (s, c) = crate::math::sin_cos(core::f32::consts::FRAC_PI_2 * k as f32 / 4.0);
                 (r * s, yb + r * c)
@@ -2678,31 +2679,27 @@ fn storefront_awning(
             );
         }
         k if k == Awning::Mansard as u8 => {
-            // A shingled pent from above the transom down and out, a soffit under it.
-            let (d, h) = (1.0, 0.9);
+            // A shingled pent from the transoms' top down and out under the sign band, a
+            // soffit under it.
+            let d = 1.0;
+            let yb = tt - drop(0.6, 0.0);
             let slope = [
-                f.p(ax0, tt + h, 0.0),
-                f.p(ax1, tt + h, 0.0),
-                f.p(ax1, tt, d),
-                f.p(ax0, tt, d),
-            ];
-            quad(m, slope, f.y * d + f.z * h, look.roof_tile);
-            let soffit = [
                 f.p(ax0, tt, 0.0),
                 f.p(ax1, tt, 0.0),
-                f.p(ax1, tt, d),
-                f.p(ax0, tt, d),
+                f.p(ax1, yb, d),
+                f.p(ax0, yb, d),
+            ];
+            quad(m, slope, f.y * d + f.z * (tt - yb), look.roof_tile);
+            let soffit = [
+                f.p(ax0, yb, 0.0),
+                f.p(ax1, yb, 0.0),
+                f.p(ax1, yb, d),
+                f.p(ax0, yb, d),
             ];
             quad(m, soffit, -f.y, underside(look, look.reveal));
             for (x, side) in [(ax0, -f.x), (ax1, f.x)] {
-                tri(
-                    m,
-                    f.p(x, tt, 0.0),
-                    f.p(x, tt + h, 0.0),
-                    f.p(x, tt, d),
-                    side,
-                    look.roof_tile,
-                );
+                let cheek = [f.p(x, tt, 0.0), f.p(x, yb, 0.0), f.p(x, yb, d)];
+                tri(m, cheek[0], cheek[1], cheek[2], side, look.roof_tile);
             }
         }
         _ => {}
@@ -4329,6 +4326,25 @@ mod tests {
                     let mut m = WorldMesh::default();
                     let stats = build(&mut m, &b, &plan, &pal, 5, pick);
                     assert!(stats.triangles <= BUILDING_TRIANGLE_BUDGET, "{awning:?}");
+                    // Nothing hangs over the sign band: every awning stays below the
+                    // transoms' top, the highest a storefront's glass and transom reach.
+                    let bp = plan.facades[plan.frontage].base.unwrap();
+                    let y1 = plan.floor_y[1];
+                    let (_, tt) = storefront_heights(&bp, plan.plinth_top, y1, true);
+                    let mut bare = WorldMesh::default();
+                    let mut none = plan.clone();
+                    none.signage = Some(Signage {
+                        awning: Awning::None as u8,
+                        ..s
+                    });
+                    build(&mut bare, &b, &none, &pal, 5, pick);
+                    let reach = |m: &WorldMesh| {
+                        m.vertices
+                            .iter()
+                            .filter(|v| v.pos[2] > 18.2 && v.pos[1] > tt + 0.01)
+                            .count()
+                    };
+                    assert_eq!(reach(&m), reach(&bare), "{awning:?}");
                     let glow = lit_undersides(&m);
                     assert_eq!(glow > 0, lit && awning != Awning::None, "{awning:?} {lit}");
                 }
