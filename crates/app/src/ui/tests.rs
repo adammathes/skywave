@@ -259,8 +259,10 @@ fn invert_y_toggle_flips_gamepad_look_and_persists() {
     assert!(h.input.state().axis(Action::FlyLookY) < -0.5);
     h.input.axis(RawInput::PadAxis(PadAxis::RightY), 0.0);
 
-    // Leaving the menu saves; the JSON round-trips into a fresh app and its mapper.
-    assert!(store.load().is_none());
+    // Leaving the menu saves (until then only the start card's dismissal was); the JSON
+    // round-trips into a fresh app and its mapper.
+    let early = store.load().and_then(|t| Settings::from_json(&t).1);
+    assert!(early.is_none_or(|b| !b.axis_options(pad, Action::LookY).invert));
     h.pad(PadButton::Start);
     assert!(!h.app.menu_open());
     let saved = store.load().expect("saved on close");
@@ -940,7 +942,7 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     let idle = p.engine.rpm;
     // Throttle revs it; the horn key sounds the horn.
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 1.0);
-    h.input.press(RawInput::Key(Key::KeyH));
+    h.input.press(RawInput::Key(Key::KeyB));
     for _ in 0..60 {
         h.frame();
     }
@@ -951,7 +953,7 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     );
     assert!(p.horn && p.speed_mps > 1.0);
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
-    h.input.release(RawInput::Key(Key::KeyH));
+    h.input.release(RawInput::Key(Key::KeyB));
     // Audio page: the master volume down a step, mute on; a menu pauses the sound.
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
     assert!(h.app.audio_params().paused);

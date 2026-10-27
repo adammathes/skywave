@@ -536,6 +536,6 @@ mod tests {
         assert_eq!(cell(&mut out, &mut part, pad, "Next car"), "-");
         let mut text = String::from("D-pad right / D-pad left");
         clip(&mut text, draw::width("D-pad right", S));
-        assert_eq!(text, "D-pad rig..");
+        assert_eq!(text, "D-pad righ..");
     }
 }
