@@ -65,7 +65,7 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
   road); scenario switching and the era filter (`m8/scenarios`, M8 #1). Sports cars (#28,
   `m4/sports-cars`) is in review: fix the Basilisk's NACA ducts and tail, then merge; after it,
-  a rename PR for `corsair_gtx` and `palisade_wagon` (real model names).
+  a rename PR for `gannet_gt` and `homestead_wagon` (real model names).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
