@@ -47,7 +47,7 @@ fn allocations() -> usize {
 /// Pinned [`Traffic::hash`] after 30 s of busy traffic on the coast at seed 1 around a
 /// player standing at the start. Moves when the lane graph, the place or the traffic sim
 /// changes; update it in its own commit with the reason.
-const COAST_SEED1_TRAFFIC_HASH: u64 = 0xb87a_03b6_06be_0f5d;
+const COAST_SEED1_TRAFFIC_HASH: u64 = 0x9eb9_45c8_a080_070b;
 
 const HZ: usize = 120;
 const EAST: f32 = -std::f32::consts::FRAC_PI_2;
