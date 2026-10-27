@@ -62,8 +62,8 @@ here. A template's `edges` says what bounds each side (`crate::edges`, `place::E
 |---|---|---|
 | `Ocean`, `Lake` | the coast: beach and surf, the sea floor falling away | open water to the horizon |
 | `Bay` | the coast | water, and a far shore of hills 1.5–2.3 km out |
-| `Mountains` | a 90–140 m cliff wall rising over 80 m, crest at the side | ridges climbing to 300–600 m |
-| `Hills` | a 55–85 m wall over 48 m | rolling hills, ridges to ~170 m |
+| `Mountains` | a 90–140 m cliff wall rising over 96 m | ridges climbing to 300–600 m |
+| `Hills` | a 55–85 m wall rising over 60 m | rolling hills, ridges to ~170 m |
 | `HighwayLoop` | as `Hills`; the highway turns back along it | as `Hills` |
 | `Forest` | a 20–30 m wooded bluff (`Park` zone) | a low forest plateau |
 | `RailYards` | a 7–9 m embankment; 160 m of industry inside it | flat yards |
@@ -71,8 +71,10 @@ here. A template's `edges` says what bounds each side (`crate::edges`, `place::E
 The coast side must be water and the others land. A land side's wall stands in a roadless band (the wall,
 24 m of crest wander and a 28 m clear foot); roads, lots and points of interest stay in the playable
 rectangle inside the bands, so streets end at the foot of the hills, at the highway or at the beach. The
-wall rises from the higher of the ground and the ground at the band's foot, its face steeper than 1.5:1, so
-it turns a car by geometry: the raycast car stops at the toe even when launched at it at 45 m/s. Across the
+wall rises from the higher of the ground and the ground at the band's foot, its face steeper than 1.5:1, and
+the collider gives the face a vertical wall about a meter up it, as it does a building's walls (a raycast
+car's wheels would otherwise read a steep face as a step and ride up it): the car meets the cliff it sees
+and stops there, even launched at it at 45 m/s. Across the
 water the walls of the neighboring sides rise out of the sea as headlands. Water deeper than a car's hubs
 drags it to a stop; after 1.5 s in deep water it goes back to its start with a "Deep water: resetting" toast.
 `california_coast`: ocean west, mountains east, highway loops north and south. Tests: every road of seeds

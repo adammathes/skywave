@@ -3157,6 +3157,7 @@ impl<'a> StreetPlan<'a> {
                                 }
                             }
                         }
+                        // None does: they pass each other.
                         if lo > hi {
                             continue;
                         }

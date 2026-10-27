@@ -959,8 +959,8 @@ mod tests {
     }
 
     /// The coast's walls turn the car: from the foot of each land side's band, at full
-    /// throttle straight at the side for 30 s, at rest or already at 45 m/s, every car stays
-    /// well short of the crest.
+    /// throttle straight at the side for 30 s, at rest or already at 45 m/s, every car stops
+    /// at the face (the collider's wall in it) well short of the crest.
     #[test]
     fn the_coast_walls_turn_the_car() {
         use place::{EAST, NORTH, SOUTH};

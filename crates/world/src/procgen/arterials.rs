@@ -61,6 +61,8 @@ pub const SNAP_M: f32 = 40.0;
 pub const SNAP_AHEAD_M: f32 = 160.0;
 /// Nodes closer than this merge.
 pub const MERGE_M: f32 = 12.0;
+/// A split this close to an edge's end is that end.
+const COINCIDENT_M: f32 = 1.0;
 /// Dead ends shorter than this are removed outside `Suburb`/`Hills`.
 pub const STUB_M: f32 = 60.0;
 /// Steepest profile segment of any road but the ramps.
@@ -108,14 +110,17 @@ const OVERPASS_ROOM_M: f32 = 200.0;
 const TERMINUS_M: f32 = 300.0;
 /// How far beside the highway an interchange's ramps run, for the bank check.
 const RAMP_BANK_M: f32 = 30.0;
-/// An interchange needs the highway within 25° of straight over its ramps' run.
+/// An interchange needs the highway within 25° of its heading at the crossing everywhere
+/// within five of these steps either way (past the ramps' reach).
 const STRAIGHT_COS: f32 = 0.906;
+const STRAIGHT_STEP_M: f32 = 50.0;
 /// Most at-grade junctions on the highway ([`junctions`])...
 const JUNCTIONS: usize = 5;
 /// ...this far apart along it and from interchanges and the terminals...
 const JUNCTION_GAP_M: f32 = 320.0;
-/// ...for road ends within this of it.
+/// ...for road ends within this of it, heading for it within 25°.
 const JUNCTION_REACH_M: f32 = 70.0;
+const SPUR_COS: f32 = 0.906;
 /// Roads stop where the corridor carve moved the terrain by more than this...
 const CUT_BARRIER_M: f32 = 1.0;
 /// ... except that crossing roads bridge highway cuts up to this deep.
@@ -2061,7 +2066,9 @@ fn junctions(
             }
             let toward = (q - e).normalize();
             let tan = (hw.pts[j + 1] - hw.pts[j]).normalize();
-            if (e - prev).normalize().dot(toward) < 0.5 || abs(tan.turn(toward)) < 0.7 {
+            // The spur carries on the road's heading (no bend by the junction's markings)
+            // and meets the highway square enough.
+            if (e - prev).normalize().dot(toward) < SPUR_COS || abs(tan.turn(toward)) < 0.7 {
                 continue;
             }
             if taken.iter().any(|&x| abs(x - s) < JUNCTION_GAP_M) {
@@ -2334,11 +2341,10 @@ fn choose_interchanges<'c>(
                     && c.s >= TERMINUS_M
                     && c.s <= total - TERMINUS_M.max(RAMP_RUN_M + 50.0)
                     // Ramps run beside a straight stretch, not round a bend.
-                    && ctx
-                        .hwy
-                        .tangent_at(c.s - RAMP_RUN_M)
-                        .dot(ctx.hwy.tangent_at(c.s + RAMP_RUN_M))
-                        >= STRAIGHT_COS
+                    && (-5..=5).all(|k| {
+                        let t = ctx.hwy.tangent_at(c.s + k as f32 * STRAIGHT_STEP_M);
+                        t.dot(ctx.hwy.tangent_at(c.s)) >= STRAIGHT_COS
+                    })
                     && !crossings
                         .iter()
                         .any(|o| !core::ptr::eq(o, *c) && abs(o.s - c.s) < clear)
@@ -3337,6 +3343,13 @@ fn connector_ok(ctx: &Ctx<'_>, g: &Graph, p: V2, q: V2, target: usize) -> bool {
 
 /// Splits live edge `ei` at point `q` on its segment `k`, returning the new node.
 fn split_edge(g: &mut Graph, ei: usize, k: usize, q: V2) -> u32 {
+    // At (or on) one of its ends: that end, not a zero-length piece.
+    let (a, b) = (g.edges[ei].a, g.edges[ei].b);
+    for end in [a, b] {
+        if (g.nodes[end as usize] - q).length() < COINCIDENT_M {
+            return end;
+        }
+    }
     let id = g.nodes.len() as u32;
     g.nodes.push(q);
     g.hw_arc.push(None);

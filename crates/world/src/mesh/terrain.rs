@@ -530,7 +530,11 @@ pub fn build(
                 WATER_SPLIT,
                 &mut m,
             );
-            surf(place, grid, pal, [cx, cz], res, seed, &mut m);
+            let wet = (cz * res..(cz + 1) * res)
+                .any(|z| (cx * res..(cx + 1) * res).any(|x| zone_at(x, z) == ZoneId::Water));
+            if wet {
+                surf(place, grid, pal, [cx, cz], res, seed, &mut m);
+            }
             let dst = out.at(center, MeshKind::Ground);
             let base = dst.vertices.len() as u32;
             dst.vertices.extend_from_slice(&m.vertices);
@@ -735,7 +739,7 @@ pub fn build_far(
     m
 }
 
-/// The surf on the shorelines of chunk `c`: along every segment of an ocean's or a lake's
+/// The surf on the shorelines of chunk `c` (one with water): along every segment of an ocean's or a lake's
 /// shoreline (its polygon less the place's sides) whose middle is in the chunk, with dry
 /// ground on one side and water on the other, a band of foam just seaward of the waterline
 /// and, on the ocean, a broken line of breakers further out; flat on the water, a hair

@@ -3,8 +3,9 @@
 //! inside the place) and the horizon mesh (what continues past it).
 //!
 //! A land side raises a **wall** in a band inside it: flat ground up to the wall's toe, a
-//! face steeper than 1.5:1 that no car climbs, and a crest at or just inside the side, so
-//! the place never ends in open ground. The band is roadless ([`band_m`]): streets end at
+//! face steeper than 1.5:1 (which the collider also stands a vertical wall in,
+//! [`face_inside`]), and a crest at or just inside the side, so the place never ends in
+//! open ground. The band is roadless ([`band_m`]): streets end at
 //! its foot, the highway turns back along it. Past the side, [`beyond`] carries the ground
 //! on up into ridges (mountains, hills), out over a forest or rail yards, or down under the
 //! water to the horizon.
@@ -30,17 +31,19 @@ pub struct Wall {
 pub const CREST_WANDER_M: f32 = 24.0;
 /// Clear ground between the wall's toe and the nearest road.
 pub const FOOT_M: f32 = 28.0;
-/// The face rises over the middle of the ramp, between these fractions of it: steepest
-/// grade `1.5 · height / (0.7 · ramp)`.
+/// The face rises over the middle of the ramp, between these fractions of it from the
+/// toe: steepest grade `1.5 · height / (0.7 · ramp)`.
 const FACE: (f32, f32) = (0.15, 0.85);
+/// The face's collision wall stands this far into it (about a meter up the face).
+const FACE_WALL: f32 = 0.05;
 /// Hash key of the edge noise.
 const KEY: u64 = 0x4544_4745;
 
 /// The wall of a land `kind`; `None` for water and open sides.
 pub fn wall(kind: EdgeKind) -> Option<Wall> {
     let (height_m, ramp_m) = match kind {
-        EdgeKind::Mountains => ((90.0, 140.0), 80.0),
-        EdgeKind::Hills | EdgeKind::HighwayLoop => ((55.0, 85.0), 48.0),
+        EdgeKind::Mountains => ((90.0, 140.0), 96.0),
+        EdgeKind::Hills | EdgeKind::HighwayLoop => ((55.0, 85.0), 60.0),
         // A wooded bluff, and a rail embankment.
         EdgeKind::Forest => ((20.0, 30.0), 24.0),
         EdgeKind::RailYards => ((7.0, 9.0), 9.0),
@@ -100,6 +103,16 @@ pub fn rise(seed: u64, side: usize, kind: EdgeKind, along: f32, inside: f32) -> 
     let crest = CREST_WANDER_M * value_noise(k ^ 2, along, 0.0, 160.0);
     let t = 1.0 - (inside - crest) / w.ramp_m;
     height * smoothstep(FACE.0, FACE.1, t)
+}
+
+/// How far in from `side` the face of its wall stands at `along`, a few meters up from its
+/// foot: where the collider puts the face's vertical wall, so a raycast car meets the
+/// cliff it sees instead of being lifted up it by its wheels. `None` for water and open
+/// sides.
+pub fn face_inside(seed: u64, side: usize, kind: EdgeKind, along: f32) -> Option<f32> {
+    let w = wall(kind)?;
+    let crest = CREST_WANDER_M * value_noise(key(seed, side) ^ 2, along, 0.0, 160.0);
+    Some(crest + (1.0 - FACE.0 - FACE_WALL) * w.ramp_m)
 }
 
 /// The crest height of the wall of `side` at `along` above its toe (what [`rise`] reaches).
