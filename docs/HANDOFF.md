@@ -52,9 +52,11 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output is wanted; NOTES 4(a) life beyond traffic (window lights, parked cars that come
   and go); buildings B7-B15.
-- Next: M4 #8 (non-violence scenarios, density tests, gate screenshots) once #6 merges; pedestrians
-  drawn in the app (figure instancing) after #6; B8 awnings and B9 rooflines after B4; B10 parking
-  lots after map edges; M5 (release polish, Deck verification); M6 place compiler; M7+ scenarios.
+- M4 #8 (gate scenarios, density tests, gate screenshots, gate notes in `docs/MILESTONES.md`) is
+  in its PR; the M4 gate waits on the owner.
+- Next: pedestrians drawn in the app (figure instancing); B8 awnings and B9 rooflines after B4;
+  B10 parking lots after map edges; M5 (release polish, Deck verification); M6 place compiler;
+  M7+ scenarios.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy; a PR that regenerates
   goldens merges before PRs touching the same scenes; a session merges `origin/main` itself when
