@@ -8,7 +8,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 
 use place::Place;
 use skywave_core::Seed;
@@ -43,6 +43,14 @@ static GLOBAL: CountingAlloc = CountingAlloc;
 
 fn allocations() -> usize {
     ALLOCS.with(|n| n.get())
+}
+
+/// Every test but the budget runs under a read lock the budget test takes for writing, so
+/// it times the step on a quiet machine.
+static QUIET: RwLock<()> = RwLock::new(());
+
+fn shared() -> RwLockReadGuard<'static, ()> {
+    QUIET.read().unwrap_or_else(|e| e.into_inner())
 }
 
 const REGIONS: [(&str, &str); 3] = [
@@ -206,6 +214,7 @@ fn new_peds(b: &Built, budget: PedestrianBudget) -> Pedestrians {
 
 #[test]
 fn walks_lie_on_sidewalks_and_crossings_on_the_road() {
+    let _quiet = shared();
     for b in places() {
         let g = &b.walks;
         let (mut walk_n, mut walk_bad, mut cross_n, mut cross_road) = (0, 0, 0, 0);
@@ -372,6 +381,7 @@ fn near_link(g: &WalkGraph, p: [f32; 3], crossing: bool) -> f32 {
 
 #[test]
 fn people_stay_on_the_walks_and_out_of_the_lanes() {
+    let _quiet = shared();
     let b = coast();
     let index = LaneIndex::new(&b.place, &b.lanes);
     let eye = busy_eye(&b.walks);
@@ -418,6 +428,7 @@ fn people_stay_on_the_walks_and_out_of_the_lanes() {
 
 #[test]
 fn people_cross_only_on_the_walk_phase() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::LARGE);
@@ -528,6 +539,7 @@ fn car_pass(
 
 #[test]
 fn people_step_aside_for_a_car_and_are_never_inside_it() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut warm = new_peds(b, PedestrianBudget::LARGE);
@@ -570,6 +582,7 @@ fn people_step_aside_for_a_car_and_are_never_inside_it() {
 
 #[test]
 fn people_clear_a_crossing_for_a_car() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::LARGE);
@@ -615,6 +628,7 @@ fn people_clear_a_crossing_for_a_car() {
 
 #[test]
 fn groups_keep_together() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::LARGE);
@@ -646,6 +660,7 @@ fn groups_keep_together() {
 
 #[test]
 fn density_bands_hold_and_nothing_spawns_in_view() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut counts = Vec::new();
@@ -741,6 +756,7 @@ fn thirty_seconds(b: &Built) -> u64 {
 
 #[test]
 fn thirty_seconds_at_seed_1_hash_is_pinned() {
+    let _quiet = shared();
     let b = coast();
     let h = thirty_seconds(b);
     println!("coast seed 1, 30 s of pedestrians: {h:#018x}");
@@ -750,6 +766,7 @@ fn thirty_seconds_at_seed_1_hash_is_pinned() {
 
 #[test]
 fn stepping_allocates_nothing_after_construction() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::SMALL);
@@ -778,6 +795,7 @@ fn step_budget_for_128_people() {
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::SMALL);
     run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
+    let _quiet = QUIET.write().unwrap_or_else(|e| e.into_inner());
     // The car drives slowly through the people the whole time, so reactions are timed.
     // Three 5 s windows; the best one is gated, so a burst of load on a shared machine
     // does not fail the build, but a real regression shows in every window.
@@ -954,6 +972,7 @@ fn warm_and_crossing(b: &Built) -> (Pedestrians, [f32; 3], [f32; 3], [f32; 2]) {
 
 #[test]
 fn nobody_enters_a_car_stopped_on_a_crosswalk() {
+    let _quiet = shared();
     let b = coast();
     let (mut peds, eye, mid, along) = warm_and_crossing(b);
     let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |_| {
@@ -966,6 +985,7 @@ fn nobody_enters_a_car_stopped_on_a_crosswalk() {
 
 #[test]
 fn nobody_enters_a_car_creeping_over_a_crosswalk() {
+    let _quiet = shared();
     let b = coast();
     let (mut peds, eye, mid, along) = warm_and_crossing(b);
     let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
@@ -978,6 +998,7 @@ fn nobody_enters_a_car_creeping_over_a_crosswalk() {
 
 #[test]
 fn nobody_enters_a_car_parked_on_the_sidewalk() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::LARGE);
@@ -995,6 +1016,7 @@ fn nobody_enters_a_car_parked_on_the_sidewalk() {
 
 #[test]
 fn nobody_enters_a_car_driving_slowly_through_a_crowd() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::LARGE);
@@ -1012,6 +1034,7 @@ fn nobody_enters_a_car_driving_slowly_through_a_crowd() {
 
 #[test]
 fn people_stepping_aside_stay_on_the_walk() {
+    let _quiet = shared();
     let b = coast();
     let eye = busy_eye(&b.walks);
     let mut warm = new_peds(b, PedestrianBudget::LARGE);
@@ -1078,6 +1101,7 @@ fn people_stepping_aside_stay_on_the_walk() {
 /// road ends differ by up to a meter, so the band alone flags people on the curb).
 #[test]
 fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
+    let _quiet = shared();
     let ron = REGIONS[0].1;
     let t: RegionTemplate = ron::from_str(ron).expect("parse");
     let grammar = grammar();
@@ -1207,6 +1231,7 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
 /// appears on at its first step, for 1.5 s).
 #[test]
 fn nobody_is_run_over_by_a_car_coming_along_a_crosswalk() {
+    let _quiet = shared();
     let ron = REGIONS[0].1;
     let t: RegionTemplate = ron::from_str(ron).expect("parse");
     let grammar = grammar();
