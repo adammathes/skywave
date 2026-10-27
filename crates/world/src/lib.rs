@@ -922,7 +922,7 @@ mod tests {
             let m = &c.mesh;
             assert_eq!(m.indices.len() % 3, 0);
             assert!(
-                m.vertices.len() <= 256 * 1024,
+                m.vertices.len() <= 384 * 1024, // render::MAX_CHUNK_VERTICES
                 "chunk {:?} {:?}: {}",
                 c.chunk,
                 c.kind,

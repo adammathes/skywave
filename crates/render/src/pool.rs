@@ -29,7 +29,7 @@ const _: () = assert!(1 << PART_BITS == MAX_CHUNK_PARTS);
 /// Marks a [`MeshId`] as a chunk part rather than an [`crate::Renderer::add_mesh`] mesh.
 const CHUNK_BIT: u32 = 1 << 31;
 /// Most vertices one chunk may have (`docs/ARCHITECTURE.md`, "Memory budgets").
-pub const MAX_CHUNK_VERTICES: u32 = 256 * 1024;
+pub const MAX_CHUNK_VERTICES: u32 = 384 * 1024;
 
 /// Handle of one slot of the chunk pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

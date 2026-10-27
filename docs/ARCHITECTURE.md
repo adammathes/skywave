@@ -60,7 +60,7 @@ Web (primary; what CI tests) → **Steam Deck** (Linux x86_64 binary, Vulkan, 12
 | | Web (default) | Native |
 |---|---|---|
 | Resident chunks | 9×9 (1.15 km square) | 13×13 |
-| Chunk vertices | 256k per chunk max | same |
+| Chunk vertices | 384k per chunk max | same |
 | Vehicle instances | 64 | 128 |
 | Pedestrians | 256 | 512 |
 | Point lights per frame | 256 | 1024 |
