@@ -204,7 +204,7 @@ struct End {
 
 /// Edge `e`'s profile polyline from `a` to `b`: node positions at the ends, interior
 /// samples at least [`MIN_SAMPLE_M`] apart (as `world::roads` lays it).
-fn raw_line(place: &Place, e: &place::Edge) -> Vec<[f32; 3]> {
+pub(crate) fn raw_line(place: &Place, e: &place::Edge) -> Vec<[f32; 3]> {
     let nodes = &place.roads.nodes;
     let (na, nb) = (&nodes[e.a as usize], &nodes[e.b as usize]);
     let prof = &e.profile;
@@ -306,8 +306,21 @@ fn lane_offset(e: &place::Edge, slot: u8, n: u8) -> f32 {
     }
 }
 
+/// Painted width of a lane of `e` driving forward (from `a` to `b`) or back.
+pub(crate) fn lane_width(e: &place::Edge, forward: bool) -> f32 {
+    let n = f32::from(if forward { e.lanes_fwd } else { e.lanes_back }.max(1));
+    let inner = e.width_m * 0.5 - GUTTER_M;
+    if e.oneway {
+        2.0 * inner / n
+    } else if e.class == RoadClass::Highway {
+        HIGHWAY_LANE_M
+    } else {
+        inner / n
+    }
+}
+
 /// Point on cubic `c` at parameter `t`.
-fn bezier(c: &[[f32; 3]; 4], t: f32) -> [f32; 3] {
+pub(crate) fn bezier(c: &[[f32; 3]; 4], t: f32) -> [f32; 3] {
     let u = 1.0 - t;
     let (b0, b1, b2, b3) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
     let mut p = [0.0; 3];
@@ -341,7 +354,7 @@ fn measure(c: [[f32; 3]; 4], d0: [f32; 2]) -> ([[f32; 3]; 4], f32, f32) {
     (c, length_m, min_radius_m)
 }
 
-fn heading(d: [f32; 2]) -> f32 {
+pub(crate) fn heading(d: [f32; 2]) -> f32 {
     atan2(-d[0], -d[1])
 }
 
@@ -951,6 +964,17 @@ impl LaneGraph {
         }
         let j = &self.junctions[l.end_node as usize];
         Some(signal::light(j.offset, l.phase, j.phases, tick))
+    }
+
+    /// Ticks until the light `lane` faces turns red (0 while red), when it ends at a
+    /// signal.
+    pub fn until_red(&self, lane: u32, tick: u64) -> Option<u32> {
+        let l = &self.lanes[lane as usize];
+        if l.control != Control::Signal {
+            return None;
+        }
+        let j = &self.junctions[l.end_node as usize];
+        Some(signal::until_red(j.offset, l.phase, j.phases, tick))
     }
 
     /// Bytes the graph's arrays hold.

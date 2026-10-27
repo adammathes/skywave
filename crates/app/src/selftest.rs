@@ -35,7 +35,8 @@ pub struct SelfTest {
 impl SelfTest {
     pub fn run() -> SelfTest {
         let place = place::Place::test_grid();
-        let meshes = world::build_chunk_meshes(&place, &Palette::socal_1985());
+        let meshes =
+            world::build_chunk_meshes(&place, &Palette::socal_1985(), crate::places::grammar());
         let mut app = App::new(Seed(1));
         run_drive(&mut app);
         SelfTest {
@@ -174,10 +175,10 @@ mod tests {
     fn selftest_matches_the_pins_and_the_committed_json() {
         let t = SelfTest::run();
         // The same values the crates' own golden tests pin.
-        assert_eq!(t.place_content_hash, 0x324D_158F_EC2A_D198);
-        assert_eq!(t.town_mesh_hash, 0xF908_E7B3_4AA8_73B6);
+        assert_eq!(t.place_content_hash, 0x08ED_FEF3_C160_CE98);
+        assert_eq!(t.town_mesh_hash, 0xB9CA_5ED1_40B9_D278);
         assert_eq!(t.map_image_hash, 0x8a97_cf1e_db61_56ae);
-        assert_eq!(t.drive_hash, 0x3bd9_240f_f5b3_05d0);
+        assert_eq!(t.drive_hash, 0xadde_172d_3f95_7922);
         assert_eq!(
             t.replay_hashes,
             [0x90e4_6e3d_5a39_5dc1, 0xaa95_1912_809c_e63b]

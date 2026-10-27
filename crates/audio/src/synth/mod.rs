@@ -1,7 +1,8 @@
 //! The synthesized sounds (`docs/AUDIO_RADIO.md`, "Engine and world sound"): no recorded
 //! audio anywhere. [`engine`] is the car's engine, [`world`] everything else the car and the
-//! place make. Both read one [`AudioParams`], a plain struct the app fills every frame from
-//! the car's sim state, the collider and the place.
+//! place make, [`tune`] the radio's dial between stations. All read one [`AudioParams`], a
+//! plain struct the app fills every frame from the car's sim state, the collider, the place
+//! and the radio.
 //!
 //! Events (a curb kick, a wall hit) are counters rather than flags, so a sink that skips a
 //! parameter update (the native audio thread reads them without waiting) never loses one,
@@ -9,9 +10,11 @@
 
 pub mod dsp;
 pub mod engine;
+pub mod tune;
 pub mod world;
 
 pub use engine::{EngineProfile, EngineSynth};
+pub use tune::TuneSynth;
 pub use world::WorldSynth;
 
 /// What a tire rolls on (the collider's surfaces).
@@ -67,6 +70,21 @@ impl Default for EngineParams {
     }
 }
 
+/// Passing NPC cars the world bus voices at once: the nearest.
+pub const TRAFFIC_VOICES: usize = 4;
+
+/// One passing car's engine, as the listener hears it: the app pans and attenuates it by
+/// where the car is and pitches it by its speed and the Doppler shift.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TrafficVoice {
+    /// Level at the ear, `[0, 1]` (0: no car in this voice).
+    pub gain: f32,
+    /// Where it is, `[-1, 1]` (left to right).
+    pub pan: f32,
+    /// Firing frequency heard, Hz.
+    pub hz: f32,
+}
+
 /// Everything the sound needs for one frame. Plain data; `Default` is a car idling in
 /// first gear on asphalt, at full volume.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,16 +104,28 @@ pub struct AudioParams {
     pub speed_mps: f32,
     /// Front-left, front-right, rear-left, rear-right.
     pub wheels: [WheelParams; 4],
-    /// Counts every curb kick so far.
+    /// Counts every curb kick so far, and how fast the latest wheel hit its curb, m/s.
     pub curb_kicks: u32,
+    pub curb_speed_mps: f32,
     /// Counts every wall, post or box hit so far, and how hard the latest was, m/s.
     pub hits: u32,
     pub hit_speed_mps: f32,
+    /// Which side of the car the latest curb kick and hit were on, `[-1, 1]` (left to
+    /// right): the bump leans that way in the stereo image.
+    pub curb_side: f32,
+    pub hit_side: f32,
     pub horn: bool,
     /// Ambience amounts, `[0, 1]`: ocean wash near beach and water, birds by day in
     /// residential streets and parks.
     pub ocean: f32,
     pub birds: f32,
+    /// The nearest passing cars' engines.
+    pub traffic: [TrafficVoice; TRAFFIC_VOICES],
+    /// Counts every tune of the radio so far ([`crate::Radio::tunes`]): each new one plays
+    /// the dial sweep between stations...
+    pub tunes: u32,
+    /// ...at this level, `[0, 1]`: the radio volume setting.
+    pub tune_volume: f32,
 }
 
 impl Default for AudioParams {
@@ -118,11 +148,17 @@ impl Default for AudioParams {
             speed_mps: 0.0,
             wheels: [wheel; 4],
             curb_kicks: 0,
+            curb_speed_mps: 0.0,
             hits: 0,
             hit_speed_mps: 0.0,
+            curb_side: 0.0,
+            hit_side: 0.0,
             horn: false,
             ocean: 0.0,
             birds: 0.0,
+            traffic: [TrafficVoice::default(); TRAFFIC_VOICES],
+            tunes: 0,
+            tune_volume: 1.0,
         }
     }
 }
@@ -142,6 +178,11 @@ impl AudioParams {
             w.load = clamp(w.load, 0.0, 4.0);
             w.speed_mps = clamp(w.speed_mps, 0.0, 150.0);
         }
+        let traffic = self.traffic.map(|v| TrafficVoice {
+            gain: unit(v.gain),
+            pan: clamp(fin(v.pan, 0.0), -1.0, 1.0),
+            hz: clamp(fin(v.hz, 0.0), 0.0, 400.0),
+        });
         AudioParams {
             master: unit(self.master),
             engine_volume: unit(self.engine_volume),
@@ -158,9 +199,14 @@ impl AudioParams {
             },
             speed_mps: clamp(fin(self.speed_mps, 0.0), -150.0, 150.0),
             wheels,
+            curb_speed_mps: clamp(self.curb_speed_mps, 0.0, 100.0),
             hit_speed_mps: clamp(self.hit_speed_mps, 0.0, 100.0),
+            curb_side: clamp(fin(self.curb_side, 0.0), -1.0, 1.0),
+            hit_side: clamp(fin(self.hit_side, 0.0), -1.0, 1.0),
             ocean: unit(self.ocean),
             birds: unit(self.birds),
+            traffic,
+            tune_volume: unit(self.tune_volume),
             ..*self
         }
     }
@@ -178,6 +224,11 @@ mod tests {
             ocean: 7.0,
             ..AudioParams::default()
         };
+        p.traffic[1] = TrafficVoice {
+            gain: f32::NAN,
+            pan: 4.0,
+            hz: f32::INFINITY,
+        };
         p.engine.rpm = f32::INFINITY;
         p.engine.redline_rpm = f32::NAN;
         p.wheels[2].slip = f32::NEG_INFINITY;
@@ -188,6 +239,8 @@ mod tests {
         assert_eq!(s.wheels[2].slip, 0.0);
         assert_eq!(s.speed_mps, 0.0);
         assert_eq!(s.ocean, 1.0);
+        assert_eq!((s.traffic[1].gain, s.traffic[1].pan), (0.0, 1.0));
+        assert_eq!(s.traffic[1].hz, 0.0);
         assert_eq!(AudioParams::default().sanitized(), AudioParams::default());
     }
 }

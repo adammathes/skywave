@@ -332,7 +332,7 @@ pub struct PlaceSource {
 
 impl PlaceSource {
     pub fn new(place: Place, palette: Palette) -> PlaceSource {
-        let plan = ChunkPlan::new(&place, &palette);
+        let plan = ChunkPlan::new(&place, &palette, crate::places::grammar());
         let mut statics: Vec<StaticLight> = place
             .lights
             .items
@@ -446,22 +446,23 @@ pub struct StreamBudget {
 }
 
 impl StreamBudget {
-    /// 9×9 chunks, 2 ms a step; a pool for 4.5M vertices, 189 MB of buffers. With its
-    /// buildings, baked props and the light tiles its street lamps cut, the coast's
-    /// densest 11×11 chunks (the ring and the chunks waiting to be evicted) take 1078 pages
-    /// of 4096 vertices on seed 1; this is 1099 (trees, cars, lamps and small furniture are
-    /// instances, outside the pool).
+    /// 9×9 chunks, 2 ms a step; a pool for 4.96M vertices, 208 MB of buffers. With its
+    /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
+    /// stroke-lettered signs and the light tiles its street lamps cut, the coast's densest
+    /// 11×11 chunks (the ring and the chunks waiting to be evicted) take 1100 pages of 4096
+    /// vertices on seed 1; this is 1211, a tenth more (trees, cars, lamps and small
+    /// furniture are instances, outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         step_budget_s: 0.002,
-        pool_vertices: 4_500_000,
+        pool_vertices: 4_960_000,
     };
-    /// 13×13 chunks, 4 ms a step; 6M vertices, 252 MB: room for the whole coast (1445
-    /// pages on seed 1).
+    /// 13×13 chunks, 4 ms a step; 6.62M vertices, 278 MB: room for the whole coast (1470
+    /// pages on seed 1) and a tenth more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         step_budget_s: 0.004,
-        pool_vertices: 6_000_000,
+        pool_vertices: 6_620_000,
     };
 
     /// Chunks resident at most: the ring, and the ring one chunk out where chunks wait to
@@ -1067,7 +1068,7 @@ mod tests {
         let mut place = Place::test_grid();
         place.header.seed = 1;
         let pal = Palette::socal_1985();
-        let plan = ChunkPlan::new(&place, &pal);
+        let plan = ChunkPlan::new(&place, &pal, crate::places::grammar());
         let src = PlaceSource::new(place.clone(), pal);
         let triangles = |m: &Mesh| {
             let mut t: Vec<[u32; 9]> = m
@@ -1149,8 +1150,9 @@ mod tests {
         let all: usize = c.pages.iter().map(|p| p.1).sum();
         let native = StreamBudget::NATIVE.pool_config().pages as usize;
         eprintln!(
-            "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; the whole \
-             place {all} of the native pool's {native}"
+            "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; densest 3x3 \
+             {}; the whole place {all} of the native pool's {native}",
+            c.densest_pages(3)
         );
         assert!(pages <= pool, "{pages} pages of {pool}");
         assert!(all <= native, "{all} pages of {native}");

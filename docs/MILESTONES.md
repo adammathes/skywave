@@ -47,6 +47,12 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 - `tools/placec`: bbox + era → Place skeleton from public-domain sources (TIGER roads, USGS 3DEP elevation, FEMA/city footprints; `docs/adr/0005-reference-sources.md`); style heuristics; era backfill; provenance header. First target: a real California beach town, compared side-by-side with the procedural one.
 **Gate:** does the real place beat the generated one? What does the generator need to learn from it?
 
+## M8 — Basin City, 2001 (the second world)
+Scenario switching (World page, `?scenario=`, era filter by car year); region template `socal_basin`
+with the 2001 grammar and palette; the hero and traffic cars of 2001; the set pieces; the 2001 radio
+preset. Backlog: `docs/backlog/LA2001.md`. Gate: the owner drives the night race boulevard, the
+channel and the tunnel and it feels like the era.
+
 ## M7+ — Breadth (each its own gate)
 Scenarios `chicago_1977` and `north_shore_suburb_1986` (templates `great_lakes_city`, `north_shore_suburb`, rosters, presets); eras 90s/00s/10s/20s; more regions, then `tokyo_ward`; Steam build; cel/dither/CRT styles; destinations with directions; getting out of the car; YouTube source (web); mobile shells; photo-derived palettes for the compiler; threads for streaming.
 
@@ -193,3 +199,67 @@ scripted drive, `selftest.json`; the cockpit screenshot goldens were regenerated
   ~0.15 g: does coasting feel natural or draggy? Knob: `ENGINE_BRAKE_G`.
 - Handbrake: does a flick with the stick pivot the car the way you expect?
 - Cockpit: is the default 62° / +5 cm right on your screen, and does the hood-only view help?
+
+### M4 status (2026-10-27, autonomous run)
+Traffic is in the game; pedestrians are simulated but not yet drawn. On `main`: the full
+twelve-car 1980s roster with distinct feel (0–60, top speed and skidpad ordering tests) and the
+vehicle select screen (pause menu, Vehicle page: turntable preview, specs, paints); the
+lane graph with junction turn tables, stop lines and signal timers; NPC cars (car following,
+claims at junctions, lane changes to pass, spawning out of view, headlights at dusk) drawn as
+instances of the parked-car meshes, lit by their own low beams at night and heard as they pass;
+**Settings › World › Traffic: Off / Low / Normal / Busy** (saved, Normal by default); the
+pedestrian figure (13 parts, walk cycle, step aside, hop, sit) and pedestrian behaviour on a
+sidewalk graph (crossings on the walk phase, groups at spots, getting out of the car's way),
+both simulation-only. **Waiting on the human gate**: play the web build on the coast with
+traffic on (Busy shows the most), day and night, and drive through a few junctions.
+
+**Gate tests** (`crates/app/src/npc/gate.rs`, `cargo test -p app --lib gate -- --nocapture`).
+The player's car is driven by input through the app, so the traffic sees it as in the game; the
+pedestrian scenarios step a `traffic::Pedestrians` beside the app, fed the app's own player and
+camera (people are not in the app yet). Coast, seed 1, noon, busy:
+
+| Scenario | Result |
+|---|---|
+| 60 mph through a signalized four-way against the light (a straight two-lane arterial on the north side; the line reached 4–9 s into the red, the cross traffic on its green) | at 26.0 m/s on the line; 3 NPC cars (already turning) within 15 m in the junction, none overlapping the player's footprint at any step (least centre gap less both half lengths 2.9 m); the cross queue's head car held 3.5 s on its green at the line until the player had cleared, then went (asserted) |
+| Stopped on a downtown crosswalk for a minute (the crossing people use most), people crossing round it | 0 person-steps inside the car, 6 people within 5 m, 0 NPC car overlaps over 85 s |
+| Nosed at 1.5 m/s into the people on a downtown corner during the walk phase, until the curb and the signal pole stop it | 0 person-steps inside; 3 people within 5 m, 1 stepped aside, 1 hopped |
+| Reversing into a queue at a red (the car behind 7.3 m back) | **fails, test ignored**: 915 car-steps overlapping from 1.6 s in. The player's car does not collide with NPC cars and a stopped queue has nowhere to go, so the player backs into it |
+| Density bands, 120 s each at the start, downtown and on the arterial, player still | Low 10–24 (band 9–24), Normal 33–48 (30–48), Busy 78–96 (72–96) cars of 96; Off drops every car and never steps the sim (not one timed step in 120 s, state unchanged) |
+
+What it found beyond the table: the walks are too narrow for the car (walls, posts, parked
+cars stop it within a few metres), so in the game nobody is ever in its way off the road, and
+step-aside and hop fire only at a corner or a curb. Traffic round the player is thin even at
+Busy (a car stood 100 s at a downtown stop line and nobody queued behind it): the pool is
+spread 150–360 m round the player, spawning only out of view.
+
+**Measured** (this container, debug build unless noted; `docs/PERFORMANCE.md` for the rest):
+
+| Number | Value |
+|---|---|
+| Traffic step and populate, busy coast (92 cars live) | median 0.173 ms, p99 0.243 ms a step (debug); 0.035 / 0.084 ms (release); Off: none |
+| Junction of `coast-traffic-noon`, busy vs off, Deck | draws 273 → 281, forward tris 394k → 408k, shadow tris 614k → 671k (4 cars in the forward pass) |
+| The same, Medium | draws 396 → 414, forward 394k → 408k, shadow 1109k → 1201k |
+| The start on the strip, busy vs off, High / Deck | draws 1183 → 1201 / 477 → 480 (77 cars live, 1 in view) |
+| Car meshes, parked plus NPC (coast) | 21.5 MB, 144 meshes; the traffic adds none on the coast (budget 27 MB) |
+| Lane graph, sidewalk graph (coast) | 0.36 MB, 1.05 MB |
+| Car and pedestrian pools | 96 × 112 B; 256 × 128 B, allocated once, nothing per frame |
+
+New golden scenes: `coast-traffic-night` (busy, 22:30, the strip junction, headlights on) and
+`coast-traffic-dusk-chase` (busy, 18:30, the highway inland, chase camera).
+
+**Deferred** (known, not in this milestone's build): pedestrians are not drawn in the game
+(figure instancing is next); NPC cars do not see pedestrians (turning traffic at signals,
+unsignalized crossings); no player–NPC collision (the player drives through NPC cars; they never
+drive into it); NPC wheels do not turn; no brake lights; traffic sparse near the player.
+
+**For the human at the gate**
+- Does the coast feel alive but calm with traffic on? Is Normal the right default, and is Busy
+  busy enough (it rarely fills the junction in front of you)?
+- Does it matter that you can drive through an NPC car? The fix is a soft push both ways
+  (`docs/NPCS.md`: a bumper-car push, no damage); until then reversing into a queue goes
+  through it. Should it be in M5?
+- NPC cars at night: are the low beams and lamps right, and how much do brake lights and turning
+  wheels matter?
+- Pedestrians: draw them next (before M5), and should cars yield to them at crossings first?
+- Do all twelve cars feel different and era-right? Does the vehicle select screen (pause menu,
+  Vehicle page) make picking one pleasant?

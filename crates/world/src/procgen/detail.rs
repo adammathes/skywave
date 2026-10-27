@@ -45,6 +45,7 @@ use skywave_core::{Rng, Seed};
 use super::macro_map::{MacroMap, MacroPoiKind};
 use super::stage;
 use crate::buildings::{self, BuildingPlan, FacadeEnv};
+use crate::grammar::{Grammar, LotRules};
 use crate::math::{floor, point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
 use crate::mesh::{Glow, WorldMesh};
@@ -96,11 +97,17 @@ const WINDOW_RADIUS_M: f32 = 7.0;
 /// Fills `place.props` and `place.lights` (see the module docs). `m` is the macro map the
 /// place was built from (for the pier). Leaves the tables unsorted; the caller sorts the
 /// place by chunk.
-pub fn detail(seed: Seed, template: &RegionTemplate, m: &MacroMap, place: &mut Place) {
+pub fn detail(
+    seed: Seed,
+    template: &RegionTemplate,
+    grammar: &Grammar,
+    m: &MacroMap,
+    place: &mut Place,
+) {
     let pal = Palette::socal_1985();
-    let plan = ChunkPlan::new(place, &pal);
+    let plan = ChunkPlan::new(place, &pal, grammar);
     let (props, lights) = {
-        let mut d = Detailer::new(place, &plan, template, seed);
+        let mut d = Detailer::new(place, &plan, template, &grammar.lots, seed);
         d.streets();
         d.junctions();
         d.houses();
@@ -243,6 +250,7 @@ struct Detailer<'a> {
     footings: &'a [(f32, f32)],
     grid: &'a TerrainGrid,
     template: &'a RegionTemplate,
+    lots: &'a LotRules,
     seed: u64,
     segs: Vec<Seg>,
     seg_bins: Bins,
@@ -310,6 +318,7 @@ impl<'a> Detailer<'a> {
         place: &'a Place,
         plan: &'a ChunkPlan,
         template: &'a RegionTemplate,
+        lots: &'a LotRules,
         seed: Seed,
     ) -> Detailer<'a> {
         let net = &plan.net;
@@ -384,6 +393,7 @@ impl<'a> Detailer<'a> {
             footings: &plan.footings,
             grid,
             template,
+            lots,
             seed: seed.0,
             segs,
             seg_bins,
@@ -404,22 +414,7 @@ impl<'a> Detailer<'a> {
 
     /// The zone under ground point `p`.
     fn zone_at(&self, p: V2) -> ZoneId {
-        let h = &self.place.header;
-        let res = usize::from(self.place.terrain.res_per_chunk.max(1));
-        let [w, d] = place::Zones::cells_per_side(h, self.place.terrain.res_per_chunk);
-        let cell = h.chunk_size_m / res as f32;
-        let o = h.origin_m();
-        let (x, z) = ((p.x - o[0]) / cell, (p.y - o[1]) / cell);
-        if x < 0.0 || z < 0.0 || w == 0 || d == 0 {
-            return ZoneId::Water;
-        }
-        let (x, z) = ((x as usize).min(w - 1), (z as usize).min(d - 1));
-        self.place
-            .zones
-            .cells
-            .get(z * w + x)
-            .copied()
-            .unwrap_or(ZoneId::Water)
+        crate::zone_at(self.place, p)
     }
 
     fn ground(&self, p: V2) -> f32 {
@@ -1183,7 +1178,7 @@ impl<'a> Detailer<'a> {
             let (env, plan) = &plans[i];
             let fi = plan.frontage;
             let yard = env[fi].yard;
-            if yard < 9.5 {
+            if yard < self.lots.front_min_yard {
                 continue;
             }
             let mut rng = self.rng(PART_LOTS, i as u64);
@@ -1195,15 +1190,17 @@ impl<'a> Detailer<'a> {
             let along = (c - a) * (1.0 / len);
             let out = along.right();
             // Nose to the canopy: the car's center 3.2 m (canopy) + 0.7 m + half a car out.
-            let stalls = ((len - 2.0) / 2.8) as u32;
-            let fill = 0.25 + 0.5 * rng.next_f32();
+            let stall = self.lots.stall_w;
+            let stalls = ((len - 2.0) / stall) as u32;
+            let (lo, hi) = self.lots.front_fill;
+            let fill = rng.range_f32(lo, hi);
             for k in 0..stalls {
                 if rng.next_f32() >= fill {
                     continue;
                 }
                 let roll = rng.range(0, 100);
                 let half = props::parked_car_size(if roll < 34 { 0 } else { 2 })[0] * 0.5;
-                let q = a + along * (1.0 + 1.4 + 2.8 * k as f32) + out * (3.9 + half);
+                let q = a + along * (1.0 + stall * 0.5 + stall * k as f32) + out * (3.9 + half);
                 let y = self.ground(q);
                 if !self.on_asphalt(q, 2.8) && !self.near_building(q, 0.5) {
                     self.car(q, y, -out, roll, &mut rng);
@@ -1225,7 +1222,7 @@ impl<'a> Detailer<'a> {
             for sigma in [1.0f32, -1.0] {
                 let mut s = ea.trim + 4.0;
                 while s < path.len() - eb.trim - 4.0 {
-                    if rng.next_f32() < 0.4 {
+                    if rng.next_f32() < self.lots.aisle_fill {
                         let roll = rng.range(0, 100);
                         let half = props::parked_car_size(if roll < 34 { 0 } else { 2 })[0] * 0.5;
                         let t = ea.hw + 0.6 + half;
@@ -1242,7 +1239,7 @@ impl<'a> Detailer<'a> {
                             self.car(q, y, facing, roll, &mut rng);
                         }
                     }
-                    s += 2.8;
+                    s += self.lots.stall_w;
                 }
             }
         }

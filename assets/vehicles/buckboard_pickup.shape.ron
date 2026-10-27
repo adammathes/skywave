@@ -1,0 +1,56 @@
+// Buckboard Pickup body: a square-bodied early-80s full-size pickup, regular cab, long bed.
+//
+// Intent: flat slabs and right angles. A tall upright face with an egg-crate grille
+// between rectangular lamps, a long flat hood, an upright windshield, a short cab with a
+// flat roof and a vertical back window, then an open bed with a tailgate. Chrome bumpers
+// and trim, mud flaps, painted steel wheels. Usually two-tone. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "buckboard_pickup",
+    side: [
+        (0.00, 0.98), (0.05, 1.04), (1.45, 1.08), (1.52, 1.10), (1.86, 1.73),
+        (1.94, 1.75), (2.60, 1.75), (2.64, 1.73), (2.70, 1.12), (2.74, 1.10),
+        (5.04, 1.10), (5.10, 1.08),
+        (5.10, 0.48), (4.95, 0.42), (4.60, 0.40), (1.20, 0.40), (0.15, 0.44), (0.00, 0.50),
+    ],
+    plan: [
+        (0.00, 0.94), (0.06, 0.97), (0.40, 0.975), (5.00, 0.975), (5.10, 0.96),
+    ],
+    belt: [(1.52, 1.10), (5.10, 1.10)],
+    section: Section(shoulder: 0.97, tumblehome_deg: 6, greenhouse_frac: 0.90, crown: 0.02, tuck: 0.03),
+    glass: Glass(
+        windshield: (1.54, 1.86),
+        backlight: (2.64, 2.70),
+        side: [(1.94, 2.56)],
+    ),
+    wheels: Wheels(radius: 0.38, width: 0.23, arch_clearance: 0.05, front_x: 0.98, rear_x: 4.08, track: 1.62),
+    front: Front(lights: Rect, grille: Egg, bumper: Chrome, bumper_y: (0.42, 0.58)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Chrome, bumper_y: (0.44, 0.58)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.86, creases: [(0.10, 0.86, 5.05, 0.88)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: false),
+    details: [PickupBed, ChromeTrim, MudFlaps, Badge(Bar)],
+    // White over red, tan over brown, blue, white, red, light blue over white, black.
+    palette: ["#ecebe4/#a8262a", "#cdb894/#6a4a32", "#2f4b7a", "#ecebe4", "#a8262a", "#93aac2/#ecebe4", "#1e1f22"],
+    accent: "#ecebe4",
+    interior: InteriorShape(
+        dash_height: 1.10,
+        dash_x: 1.72,
+        wheel_pos: (2.10, 0.96),
+        wheel_radius: 0.21,
+        column_angle_deg: 32,
+        mirror_pos: (1.92, 1.62),
+        seat: (2.42, 0.76),
+        driver_offset: 0.42,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: red vinyl with a lighter red insert
+        // and white piping, a black rubber floor, green-lit dials.
+        colors: ["#3a1c1c", "#8e2626", "#26201e", "#c8c0b4", "#5a2222", "#c8c8c8"],
+        display: "#3cff7a",
+        insert: "#a83434",
+        piping: "#e8e4dc",
+        dash_top: "#4a2222",
+    ),
+)

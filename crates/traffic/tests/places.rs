@@ -29,6 +29,7 @@ const REGIONS: [(&str, &str); 3] = [
     ),
 ];
 const SEEDS: [u64; 3] = [1, 2, 3];
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 
 /// Pinned [`LaneGraph::hash`] of the coast at seed 1. The graph is a pure function of the
 /// place, so this moves when lane building or the place's roads or props change; update it
@@ -69,7 +70,8 @@ fn places() -> &'static [Built] {
                     scope.spawn(move || {
                         let t: RegionTemplate = ron::from_str(ron).expect("parse");
                         t.validate().expect("validate");
-                        let place = build_place(Seed(seed), &t);
+                        let g: world::Grammar = ron::from_str(GRAMMAR).expect("grammar");
+                        let place = build_place(Seed(seed), &t, &g);
                         let graph = LaneGraph::new(&place);
                         Built {
                             name: format!("{region} seed {seed}"),

@@ -33,6 +33,7 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::Headlights, _) => "Headlights",
         (Action::Horn, _) => "Horn",
         (Action::VehicleNext, _) => "Next vehicle",
+        (Action::Reset, _) => "Reset car",
         (Action::MapToggle, _) => "Map",
         (Action::MapZoom, N) => "Map zoom out",
         (Action::MapZoom, P) => "Map zoom in",
@@ -178,7 +179,11 @@ pub fn write_binding(out: &mut impl fmt::Write, b: &Binding) -> fmt::Result {
         write_raw(out, hold, Sign::Full)?;
         out.write_str(" + ")?;
     }
-    write_raw(out, b.raw, b.sign)
+    write_raw(out, b.raw, b.sign)?;
+    if b.long {
+        out.write_str(" (hold)")?;
+    }
+    Ok(())
 }
 
 /// Writes a list of bindings separated by commas, or "-" for none.

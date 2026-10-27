@@ -25,7 +25,7 @@ pub type DriveGround = world::WorldCollider;
 
 /// The collider for `place`, built once.
 pub fn ground_for(place: &Place) -> DriveGround {
-    world::WorldCollider::build(place)
+    world::WorldCollider::build(place, crate::places::grammar())
 }
 
 /// The test town's `PlayerStart` spawn, for what starts without a Place at hand
@@ -96,6 +96,9 @@ const WATER_DRAG: f32 = 6.0;
 /// ...and after this long deeper than this, s and m, the car is put back at its start.
 pub const DEEP_RESET_S: f32 = 1.5;
 pub const DEEP_M: f32 = 0.6;
+/// A reset looks this far for a lane; with none that close the car goes back to its
+/// start, m.
+pub const RESET_RANGE_M: f32 = 200.0;
 
 /// A rigid transform: body origin (the center of mass) and body-to-world rotation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -224,6 +227,8 @@ pub struct Drive {
     pub input: VehicleInput,
     /// What the collider did in the last step (for the sound).
     pub impact: world::Impact,
+    /// Parked cars this car has knocked, swaying until they settle (for drawing).
+    pub rocking: world::collide::Rocking,
     pub headlights: bool,
     /// Held this frame (for the audio task).
     pub horn: bool,
@@ -274,6 +279,7 @@ impl Drive {
             assists: Assists::default(),
             input: VehicleInput::default(),
             impact: world::Impact::default(),
+            rocking: world::collide::Rocking::default(),
             headlights: false,
             horn: false,
             roll: [0.0; 4],
@@ -326,6 +332,31 @@ impl Drive {
         }
     }
 
+    /// The `Reset` action: at rest and upright on the centerline of the nearest of `lanes`
+    /// (on the ground under it, the deck it is on), heading along it the way it drives; at
+    /// the start when no lane is within [`RESET_RANGE_M`]. The odometer, headlights and
+    /// assists stay.
+    pub fn reset(&mut self, lanes: &world::lanes::LaneLines, ground: &DriveGround) {
+        let odometer = self.state.odometer_m;
+        let p = self.state.pos;
+        // The ground point under the body, for which level of a bridge it is on.
+        let foot = [p[0], p[1] - self.spec.cg_height_m, p[2]];
+        match lanes.nearest(foot, RESET_RANGE_M) {
+            Some(h) => {
+                let [x, y, z] = h.pos;
+                let (y, _) = ground.level_from([x, z], y + 0.5);
+                let heading = (-h.dir[0]).atan2(-h.dir[1]);
+                self.state = VehicleState::spawn(&self.spec, [x, y, z], heading);
+                self.prev = self.state;
+                self.roll = [0.0; 4];
+                self.prev_roll = [0.0; 4];
+            }
+            None => self.respawn(),
+        }
+        self.state.odometer_m = odometer;
+        self.prev.odometer_m = odometer;
+    }
+
     /// Swaps in the car `spec` (with its body `layout`) where this one is: on the ground
     /// under it, level, facing the same way; at rest, unless this one was rolling slower
     /// than [`KEEP_SPEED_MPS`], whose velocity it keeps. The odometer starts again; the
@@ -370,6 +401,8 @@ impl Drive {
         self.input = input;
         vehicle::step(&self.spec, &mut self.state, &input, &self.assists, ground);
         self.impact = world::resolve(&mut self.state, &self.spec, ground);
+        self.rocking.note(&self.impact, ground);
+        self.rocking.step();
         for i in 0..4 {
             let r = self.roll[i] + self.state.wheels[i].spin * DT;
             let wrap = if r >= TAU {
@@ -541,21 +574,7 @@ impl Drive {
     /// coronas while they are lit (headlights on or braking). Returns them and how many.
     pub fn lights(&self, alpha: f32) -> ([PointLight; CAR_LIGHTS], usize) {
         let pose = self.pose(alpha);
-        let pitch = HEADLIGHT_PITCH_DEG.to_radians();
-        let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
-        let at = |lamp: Vec3| PointLight {
-            position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
-            color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
-            radius: HEADLIGHT_RADIUS_M,
-            direction: axis.to_array(),
-            cone_cos: [
-                HEADLIGHT_OUTER_DEG.to_radians().cos(),
-                HEADLIGHT_INNER_DEG.to_radians().cos(),
-            ],
-            cone_squash: HEADLIGHT_SQUASH,
-            wrap: HEADLIGHT_WRAP,
-            corona: HEADLIGHT_CORONA,
-        };
+        let at = |lamp: Vec3| headlight(&pose, lamp);
         let tail_kcd = if self.braking() { BRAKE_KCD } else { TAIL_KCD };
         let tail = |lamp: Vec3| PointLight {
             corona: TAIL_CORONA,
@@ -578,6 +597,26 @@ impl Drive {
             (false, false) => 0,
         };
         (out, n)
+    }
+}
+
+/// The low beam of the head lamp at body point `lamp` of a car at `pose`: a spot from just
+/// behind the lens, aimed [`HEADLIGHT_PITCH_DEG`] below the car's forward axis.
+pub fn headlight(pose: &Pose, lamp: Vec3) -> PointLight {
+    let pitch = HEADLIGHT_PITCH_DEG.to_radians();
+    let axis = pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos());
+    PointLight {
+        position: pose.point(lamp + Vec3::Z * HEADLIGHT_SETBACK_M).to_array(),
+        color: HEADLIGHT_COLOR.map(|c| c * HEADLIGHT_KCD),
+        radius: HEADLIGHT_RADIUS_M,
+        direction: axis.to_array(),
+        cone_cos: [
+            HEADLIGHT_OUTER_DEG.to_radians().cos(),
+            HEADLIGHT_INNER_DEG.to_radians().cos(),
+        ],
+        cone_squash: HEADLIGHT_SQUASH,
+        wrap: HEADLIGHT_WRAP,
+        corona: HEADLIGHT_CORONA,
     }
 }
 

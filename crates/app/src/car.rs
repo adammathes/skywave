@@ -369,12 +369,22 @@ pub struct CarModel {
 impl CarModel {
     /// Builds the car `shape` describes for `spec` in palette color 0.
     pub fn build(spec: &VehicleSpec, shape: &ShapeSpec) -> Result<CarModel, String> {
+        CarModel::build_painted(spec, shape, 0)
+    }
+
+    /// Builds the car in palette entry `paint` (which wraps). Only the body (and so the
+    /// inside-out shell) depends on the paint.
+    pub fn build_painted(
+        spec: &VehicleSpec,
+        shape: &ShapeSpec,
+        paint: usize,
+    ) -> Result<CarModel, String> {
         let popups = shape.front.lights == HeadLights::PopUp;
         let make = |lod: u8, up: bool| {
             shape::build_with(
                 shape,
                 &BuildOptions {
-                    color_index: 0,
+                    color_index: paint,
                     lod,
                     popups_up: up,
                     paint: None,
@@ -468,17 +478,56 @@ impl CarModel {
             dial_ticks: add(&self.dial_ticks),
         }
     }
+
+    /// Registers only what depends on the paint (each level's bodies and inside-out shell)
+    /// through `add`, and returns `base` (the ids of the same car in another paint) with
+    /// those replaced.
+    pub fn register_paint(
+        &self,
+        base: &CarMeshes,
+        mut add: impl FnMut(&Mesh) -> MeshId,
+    ) -> CarMeshes {
+        let mut out = *base;
+        for (ids, l) in out.lods.iter_mut().zip(&self.lods) {
+            let down = add(&l.body[0]);
+            let up = if l.body[1] == l.body[0] {
+                down
+            } else {
+                add(&l.body[1])
+            };
+            ids.body = [down, up];
+            ids.shell_inside = add(&l.shell_inside);
+        }
+        out
+    }
 }
 
 /// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
-/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps off and four wheels), its origin on the ground
-/// midway between the axles, nose toward `-z`.
+/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps and four wheels), its origin
+/// on the ground midway between the axles, nose toward `-z`. The lamps are built lit (head
+/// lamps as the shape has them, tail lamps at [`TAIL_GLOW`]): an instance's `glow` switches
+/// them, 0 for a parked car, the lamp glow for an NPC car driving with its lights on.
 pub fn parked_mesh(
     shape: &ShapeSpec,
     paint: usize,
     era: Option<&'static str>,
     lod: u8,
 ) -> Result<Mesh, String> {
+    parked_mesh_and_lamps(shape, paint, era, lod).map(|(m, _)| m)
+}
+
+/// The head lamps' centers of `shape`'s [`parked_mesh`], left and right, in its frame.
+pub fn parked_headlamps(shape: &ShapeSpec) -> Result<[Vec3; 2], String> {
+    parked_mesh_and_lamps(shape, 0, None, 2).map(|(_, h)| h)
+}
+
+/// [`parked_mesh`] and its head lamps' centers, left and right, in the mesh's frame.
+fn parked_mesh_and_lamps(
+    shape: &ShapeSpec,
+    paint: usize,
+    era: Option<&'static str>,
+    lod: u8,
+) -> Result<(Mesh, [Vec3; 2]), String> {
     let car = shape::build_with(
         shape,
         &BuildOptions {
@@ -498,9 +547,10 @@ pub fn parked_mesh(
         out.indices.extend(m.indices.iter().map(|i| i + base));
     };
     add(&convert(&car.glass, offset, Surface::Glass));
+    let heads = lamp_centers(&car.lights, LampGroup::Head).map(|p| p + offset);
     let mut lamps = convert(&car.lights, offset, Surface::Plain);
     for v in &mut lamps.vertices {
-        if let Some(s) = lamp_scale(lamp_group(v.emissive), false, false) {
+        if let Some(s) = lamp_scale(lamp_group(v.emissive), true, false) {
             let e = v.emissive;
             v.emissive = render::emissive([e[0], e[1], e[2]], s);
         }
@@ -524,7 +574,7 @@ pub fn parked_mesh(
         }
         add(&w);
     }
-    Ok(out)
+    Ok((out, heads))
 }
 
 /// How a shape mesh's uvs map into the atlas.
@@ -595,6 +645,11 @@ fn uv_bounds(m: &MeshData, pick: impl Fn(usize) -> bool) -> ([f32; 2], [f32; 2])
         }
     }
     (lo, hi)
+}
+
+/// `m` as a render mesh in the white tile, as built (a pedestrian figure's part).
+pub(crate) fn plain_mesh(m: &MeshData) -> Mesh {
+    convert(m, Vec3::ZERO, Surface::Plain)
 }
 
 /// `m` as a render mesh, every position moved by `offset`.

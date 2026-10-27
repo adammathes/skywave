@@ -11,14 +11,17 @@
 //!   [`JOINT_SPACING_M`], grass a swishing hiss.
 //! - **Wind**: band-passed noise, independent per ear, rising with the square of speed,
 //!   with a slow gust.
-//! - **Curb kick** and **wall hit**: a low thump; the hit adds a short, soft crunch.
+//! - **Curb kick** and **wall hit**: a low thump, louder the faster the bump and leaning
+//!   toward the side of the car it was on; the hit adds a short, soft crunch.
 //! - **Horn**: two tones a minor third apart (410 and 500 Hz), brassy through a band-pass,
 //!   on its own output for the ui bus.
 //! - **Ambience**: an ocean wash (low-passed noise swelling every ~12 s) and, by day, the
 //!   odd bird call (a few swept chirps panned somewhere), each scaled by its amount.
+//! - **Traffic**: each passing car's engine (`AudioParams::traffic`) a buzzy pulse at its
+//!   firing frequency, low-passed, with a little rumble under it, at its level and pan.
 
 use super::dsp::{fract, pan_gains, sin_turns, smoothstep, unit, Decay, Noise, Slew, Svf, DT};
-use super::{AudioParams, Surface};
+use super::{AudioParams, Surface, TRAFFIC_VOICES};
 
 /// Filter coefficients, targets and events are updated every this many samples.
 const TICK: usize = 32;
@@ -64,10 +67,12 @@ pub struct WorldSynth {
     curb: Decay,
     curb_click: Decay,
     curb_osc: f32,
+    curb_gain: [f32; 2],
     click_lp: Svf,
     hit: Decay,
     thud: Decay,
     hit_osc: f32,
+    hit_gain: [f32; 2],
     hit_lp: Svf,
 
     horn: f32,
@@ -90,6 +95,32 @@ pub struct WorldSynth {
     bird_phase: f32,
     bird_pan: [f32; 2],
     bird_level: f32,
+
+    traffic: [Engine; TRAFFIC_VOICES],
+}
+
+/// A passing car's engine voice.
+#[derive(Clone, Debug)]
+struct Engine {
+    phase: f32,
+    hz: f32,
+    gain_l: Slew,
+    gain_r: Slew,
+    target: [f32; 2],
+    lp: Svf,
+}
+
+impl Engine {
+    fn new() -> Engine {
+        Engine {
+            phase: 0.0,
+            hz: 0.0,
+            gain_l: Slew::new(0.0, 0.08),
+            gain_r: Slew::new(0.0, 0.08),
+            target: [0.0; 2],
+            lp: Svf::new(300.0, 0.8),
+        }
+    }
 }
 
 impl Default for WorldSynth {
@@ -131,10 +162,12 @@ impl WorldSynth {
             curb: Decay::SILENT,
             curb_click: Decay::SILENT,
             curb_osc: 0.0,
+            curb_gain: [1.0, 1.0],
             click_lp: Svf::new(1500.0, 0.7),
             hit: Decay::SILENT,
             thud: Decay::SILENT,
             hit_osc: 0.0,
+            hit_gain: [1.0, 1.0],
             hit_lp: Svf::new(1800.0, 0.7),
             horn: 0.0,
             horn_phase: [0.0; 2],
@@ -154,6 +187,7 @@ impl WorldSynth {
             bird_phase: 0.0,
             bird_pan: [0.7, 0.7],
             bird_level: 0.0,
+            traffic: core::array::from_fn(|_| Engine::new()),
         }
     }
 
@@ -162,9 +196,11 @@ impl WorldSynth {
     pub fn set_params(&mut self, p: &AudioParams) {
         if !self.fresh {
             if p.curb_kicks != self.target.curb_kicks {
-                self.curb = Decay::hit(0.7, 0.07);
-                self.curb_click = Decay::hit(0.35, 0.004);
+                let level = 0.7 * (0.2 + 0.8 * unit(p.curb_speed_mps / 24.0));
+                self.curb = Decay::hit(level, 0.07);
+                self.curb_click = Decay::hit(0.5 * level, 0.004);
                 self.curb_osc = 0.0;
+                self.curb_gain = side_gains(p.curb_side);
             }
             if p.hits != self.target.hits {
                 let level = 0.15 + 0.55 * unit(p.hit_speed_mps / 12.0);
@@ -172,6 +208,7 @@ impl WorldSynth {
                     self.hit = Decay::hit(level, 0.045);
                     self.thud = Decay::hit(level, 0.06);
                     self.hit_osc = 0.0;
+                    self.hit_gain = side_gains(p.hit_side);
                 }
             }
         }
@@ -265,6 +302,18 @@ impl WorldSynth {
         let b = sin_turns(self.swell_phase[1]).max(0.0);
         self.swell = 0.3 + 0.5 * a * a + 0.2 * b;
 
+        // Traffic: the pitch follows at once (the Doppler shift is the app's), the level
+        // eases so a voice handed to another car does not click.
+        for (e, v) in self.traffic.iter_mut().zip(&p.traffic) {
+            let [gl, gr] = pan_gains(v.pan);
+            let g = 0.16 * v.gain;
+            e.target = [g * gl, g * gr];
+            if v.gain > 0.0 {
+                e.hz = v.hz;
+            }
+            e.lp.set((4.0 * e.hz).clamp(80.0, 1600.0), 0.8);
+        }
+
         // Birds: a call every few seconds while there are birds about.
         if self.bird_notes == 0 {
             self.bird_timer -= dt;
@@ -335,8 +384,8 @@ impl WorldSynth {
             let thump = c * sin_turns(self.curb_osc);
             self.curb_osc = fract(self.curb_osc + (50.0 + 40.0 * c) * DT);
             let click = self.click_lp.low(w) * self.curb_click.step() * 2.0;
-            l += thump + click;
-            r += thump + click;
+            l += (thump + click) * self.curb_gain[0];
+            r += (thump + click) * self.curb_gain[1];
         }
 
         // Wall hit: a thud and a short, soft crunch.
@@ -347,8 +396,8 @@ impl WorldSynth {
             let t = self.thud.step();
             let thud = t * sin_turns(self.hit_osc);
             self.hit_osc = fract(self.hit_osc + (60.0 + 30.0 * t) * DT);
-            l += crunch + thud;
-            r += crunch + thud;
+            l += (crunch + thud) * self.hit_gain[0];
+            r += (crunch + thud) * self.hit_gain[1];
         }
 
         // Horn.
@@ -398,6 +447,19 @@ impl WorldSynth {
             }
         }
 
+        // Traffic engines.
+        for e in &mut self.traffic {
+            let gl = e.gain_l.step(e.target[0]);
+            let gr = e.gain_r.step(e.target[1]);
+            if gl + gr > 1e-5 {
+                e.phase = fract(e.phase + e.hz * DT);
+                let pulse = if e.phase < 0.3 { 1.0 } else { -0.43 };
+                let x = e.lp.low(pulse + 0.4 * self.brown);
+                l += x * gl;
+                r += x * gr;
+            }
+        }
+
         if l.is_finite() && r.is_finite() && horn.is_finite() {
             [l, r, horn]
         } else {
@@ -422,8 +484,17 @@ impl WorldSynth {
         ] {
             f.reset();
         }
+        for e in &mut self.traffic {
+            e.lp.reset();
+        }
         self.brown = 0.0;
     }
+}
+
+/// Left and right gains of a bump on `side` of the car (`[-1, 1]`, left to right): a
+/// lean, not a pan, so a bump square on the nose plays as it always did.
+fn side_gains(side: f32) -> [f32; 2] {
+    [1.0 - 0.35 * side, 1.0 + 0.35 * side]
 }
 
 #[cfg(test)]
@@ -535,6 +606,55 @@ mod tests {
         w.set_params(&p);
         render_into(&mut w, &mut buf);
         assert!(rms(&buf) < 1e-3, "{}", rms(&buf));
+    }
+
+    #[test]
+    fn bumps_scale_with_speed_and_lean_to_their_side() {
+        // One curb kick at `speed` on `side`: the RMS of each ear over its thump.
+        let bump = |speed: f32, side: f32| {
+            let mut w = WorldSynth::new();
+            let mut p = AudioParams::default();
+            w.set_params(&p);
+            p.curb_kicks = 1;
+            p.curb_speed_mps = speed;
+            p.curb_side = side;
+            w.set_params(&p);
+            let mut buf = vec![0.0; 9600];
+            render_into(&mut w, &mut buf);
+            let l: Vec<f32> = buf.iter().step_by(2).copied().collect();
+            let r: Vec<f32> = buf.iter().skip(1).step_by(2).copied().collect();
+            [rms(&l), rms(&r)]
+        };
+        let soft = bump(14.0, 0.0);
+        let hard = bump(25.0, 0.0);
+        assert!(hard[0] > 1.2 * soft[0], "{soft:?} {hard:?}");
+        assert_eq!(soft[0], soft[1]);
+        let left = bump(20.0, -1.0);
+        assert!(left[0] > 1.5 * left[1], "{left:?}");
+    }
+
+    #[test]
+    fn a_passing_car_is_heard_on_its_side_and_fades_with_its_gain() {
+        let ears = |gain: f32, pan: f32| {
+            let mut p = AudioParams::default();
+            p.traffic[2] = crate::synth::TrafficVoice {
+                gain,
+                pan,
+                hz: 90.0,
+            };
+            let x = render(&p, 48_000);
+            let l: Vec<f32> = x[24_000..].iter().step_by(2).copied().collect();
+            let r: Vec<f32> = x[24_001..].iter().step_by(2).copied().collect();
+            [rms(&l), rms(&r)]
+        };
+        let near = ears(1.0, -0.8);
+        assert!(near[0] > 0.01 && near[0] > 2.0 * near[1], "{near:?}");
+        let far = ears(0.1, 0.0);
+        assert!(
+            far[0] < 0.3 * near[0] && (far[0] - far[1]).abs() < 1e-4,
+            "{far:?}"
+        );
+        assert!(ears(0.0, 0.0)[0] < 1e-4, "no car, no engine");
     }
 
     #[test]

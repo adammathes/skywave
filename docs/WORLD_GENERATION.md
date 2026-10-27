@@ -85,6 +85,158 @@ cannot climb them or drive out to sea (`app::drive` tests).
 ## Region templates
 A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
+## Facade grammars
+A `world::grammar::Grammar` is data (RON, `assets/grammar/<template>_<era>.ron`, ADR 0002):
+the numbers and weights the building planner and the detailing read, one file per region
+template and era (`docs/backlog/BUILDINGS.md`). `app::places::grammar()` parses and
+validates it once; `build_place`, `ChunkPlan::new`, `build_chunk_meshes` and
+`WorldCollider::build` take it beside the palette. The geometry builders stay in
+`world::buildings`; a grammar says how big, how many and how often. Today one grammar,
+`california_coast_80s.ron`, dresses every place (the test town too). Its B2 values are the
+planner's former code constants (`shipped_grammar_keeps_the_former_constants` in
+`crates/world/src/grammar.rs`); the three-band facade's (B4) are starting values from
+`docs/backlog/BUILDINGS.md`.
+
+As built (B2, B4, B8, B9):
+```
+Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules }
+            (+ lexicon: Lexicon, attached by the loader from assets/grammar/lexicon.ron)
+StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addenda }
+  zones:    All | Only([ZoneId, ...])
+  massing:  even_floors: ByUse<bool>, floor_h, ground_floor_h: (min, max), ground_share_max
+  base:     plinth_h: ByUse<f32>, bay_w: ByUse<f32>, door: ByUse<(w, h)>,
+            ground: ByUse<GroundBays { storefront, lobby, garage, wall, door }>  (weights),
+            front_bay_w: (min, max), pier_w: (min, max),
+            storefront: Storefront { bulkhead_h, glass_top, transom_h: (min, max),
+                                     transom_glass_256, entry: (w, h), recessed_256,
+                                     recess: (min, max), side_entry_256 }
+  body:     window: ByUse<Window { w_share, w: (min, max), head, h_max }>,
+            kinds: ByUse<WindowKinds { punched, paired, ribbon, bay, picture }>  (weights),
+            window_h_min, sill_ground, sill_upper
+  top:      parapet_h: ByUse<f32>, cornice_d,
+            kinds: TopKinds { parapet, cornice, stepped, shaped, false_front, bracketed,
+                              mansard }  (weights)
+  addenda:  roof_vents: ByUse<(min, max)>  (a count),
+            roof_units, exhaust_fans, skylights: ByUse<(min, max)>  (per 1000 m² of roof),
+            bulkhead_floors, water_tank_1_in
+ByUse<T>    { residential, office, other }   other: commercial, industrial, civic, hotel, parking
+SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], lit_box_256,
+              shop_lit_256, lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
+              wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
+Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
+TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
+              lines: [(Word(String) | Since, weight)], descriptors_out: [String] }
+Lexicon     { id, syllables: { onsets, nuclei, codas }, given, surnames, descriptors, trades,
+              lines }
+LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
+```
+**Which rules.** A style may have several entries. A building takes the first entry, in file
+order, whose `style` is its style and whose `zones` hold its zone (the zone under its
+footprint's centroid, `world::building_zone`); so zone-specific entries come before an `All`
+one. `Grammar::validate` refuses a grammar that leaves some style without rules in some zone.
+The coast grammar gives stucco and brick buildings in `Industrial` zones their own entries
+(loading doors and blank wall instead of shops).
+
+How the planner reads it, for a building of style `s` and use `u` in zone `z` (rules
+`r = grammar.style(s, z)`, every `ByUse` taken at `u`; weights are drawn in listed order, per
+building, from an `Rng` keyed by the building's door pick):
+- **Floors.** Wall top `height_m`; the roof sits `parapet_h` below it (none on pitched roofs, at
+  most 30% of the height), the walls start `plinth_h` above the lot. With `even_floors` every
+  floor is the same; otherwise the ground floor is
+  `clamp(span − (floors − 1) · floor_h, ground_floor_h).min(span · ground_share_max)` and the
+  upper floors share the rest.
+- **Three bands.** The street front of a building whose `ground` weights are not all zero (and
+  whose style does not draw its own ground floor, as dingbats, warehouses, glass towers and
+  motels do) gets a **base**:
+  the ground floor split into `round(len / w)` bays (`w` drawn from `front_bay_w`, at most 12)
+  with a pier (`pier_w`) on every bay line. Each bay is drawn from `ground`: a storefront, the
+  lobby (one at most, moved to the middle), a garage, blank wall, or the door to the flats
+  (one at most, never on one storey); a front left with no way in gets its likeliest entrance
+  in the middle. A storefront bay is, bottom up, a bulkhead (`bulkhead_h`), display glass with
+  thin mullions to `glass_top`, a transom bar and a transom (`transom_h`; glazed with chance
+  `transom_glass_256`, else panelled). A run of adjacent storefront bays is one business: one
+  awning hung from the transoms' top and one sign band above it span the run.
+  On a low ground floor the glass and then the transom give way to the sign band, never below
+  the entry's height. The entry (`entry`) is centred or, with chance `side_entry_256`, at one
+  side, and on a building with chance `recessed_256` it is recessed by `recess` behind a floor
+  and glass returns; otherwise flush. A belt course caps the base. The **body**'s windows are
+  a whole number of window bays per base bay, so every pier has wall, not glass, over it.
+  The window kind is drawn per building from `kinds`: punched (one per bay), paired (two
+  narrow ones), ribbon (glass bay to bay with mullions on the bay lines; upper floors and
+  door-less ground floors), bay (a projecting glazed box; upper floors) or picture (one wide
+  one). The **top** of a flat roof is drawn from `top.kinds`: the plain parapet, a cornice
+  projecting `cornice_d`, a parapet stepped up or shaped (shoulders and a curved crown)
+  over the street front's middle, a false front (the street wall carried up 1.2–2.4 m;
+  one storey only, taller buildings get the plain parapet), a deep cornice on brackets
+  along the street front (two storeys or more, else the plain cornice), or a shingled
+  mansard all round, 1.1 m down the wall and 0.7 m out (two storeys or more and not a
+  motel, else the plain parapet: a one-storey front's signs reach the top of its wall, and
+  a motel's walkway roof runs where the eave would).
+- **Windows.** Bays of `bay_w` (1.5× on facades more than 30 m from a road, then widened until
+  the triangle budget fits); a window is `clamp(bay_w · w_share, w)` wide and
+  `min(upper floor − head, h_max)` tall, at least `window_h_min`; sills `sill_ground` above the
+  plinth and `sill_upper` above each upper floor. Doors are `door`.
+- **Triangles.** The planner aims for 2,000 triangles a building
+  (`buildings::PLAIN_TRIANGLE_TARGET`); a building with a base band may use the 3,500 ceiling
+  of `docs/backlog/ART.md` (`BUILDING_TRIANGLE_BUDGET`).
+- **Roofs.** `roof_vents` is an inclusive count per flat roof (`(0, 0)` draws nothing).
+  `roof_units` (packaged units: a cabinet on a curb with a duct elbow into the roof),
+  `exhaust_fans` and `skylights` are rates per 1000 m² of footprint: a rate drawn from the
+  range times the area, rounded at random, at least one when the range is above zero, at
+  most 6 units, 3 fans and 8 skylights. They are counted at planning (`BuildingPlan::roof`,
+  so the triangle estimate covers them) and placed toward the back of the roof, in the
+  street front's frame, so the parapet hides most of them from the street, and only where the
+  whole item stands on the roof; a strip mall's
+  1.8 m parapet hides them all. Buildings of `bulkhead_floors` or more get a stair
+  bulkhead, and one in `water_tank_1_in` of those a water tank.
+- **Signs** (terrain places). The awning over each run of storefronts is drawn from
+  `awnings` by weight in listed order: a striped or solid canvas shed, a flat stucco
+  canopy, a vinyl bullnose, a ribbed aluminum shed, a shingled mansard pent, or none. Each
+  hangs from the transoms' top down, under the sign band, its lowest edge 2.4 m over the
+  floor; a transom too low for that gets none. A strip mall's canopy is drawn from
+  `mall_canopies`: a shingled mansard on posts (0.9–1.5 m tall, 2–3 m out, the tenants'
+  letters on its shingled face) or the flat canopy (any other kind). Where the shop is
+  open late the awning's or canopy's underside glows at window strength, the spill of the
+  light the detailing puts in front of it. `lit_box_256` and `shop_lit_256` are shares out
+  of 256 of backlit-box signs and late shops.
+- **Shop signs** (the blade signs the detailing hangs on storefronts; `world::signs`). Each
+  draws a trade from `trades` by weight, a form from `forms` (`Name's`, `Name's Trade`,
+  `Descriptor Trade`, `Trade`), a name from the lexicon's given names and surnames, a
+  descriptor (never one in its trade's `descriptors_out`: pairs that would name a well-known
+  business), a pictogram from its trade's `pictograms`, a lettering style from `wordmarks`
+  and, `line_256` times in 256, a secondary line from its trade's `lines` (`SINCE` and a year
+  2-35 years before the era). `Descriptor Trade` that would say a word twice becomes
+  `Name's Trade`; a line that repeats the trade is dropped. `ChunkPlan` assigns them in prop
+  order and redraws (up to 24 times) any sign whose main line or name a sign within
+  `name_radius` already has. Every word comes from the lexicon (`assets/grammar/lexicon.ron`,
+  closed and reviewed; names are two or three syllables from its `syllables` tables), which
+  `app::places::load_grammar` attaches to the grammar after checking its `id` against
+  `signs.lexicon`. A grammar parsed without it gets plain blade signs (a pictogram, no words).
+  The blade puts the word first: bold stacked capitals up to 0.6 m tall (the stroke a fifth
+  of the cap), or the main line reading upward in script, inside a neon frame; a backlit
+  box (`lit_box_256`) letters dark on a lit panel. The pictogram (`signs::pictogram`, 32
+  generic shapes as 2D polygons, extruded 4 cm proud of both faces and outlined in neon)
+  goes above the word when the word leaves at least 0.4 m and the triangles for it, so short
+  words get one. A sign spends at most 360 triangles (`props::BLADE_TRIANGLES`): a word that
+  does not fit gives way to the trade, then to block capitals; the pictogram's neon goes
+  before the pictogram. Blades carry no second line (the carriers of B7 will).
+- **Letterforms** (`signs::letters`): stroke polylines on a 20-unit cap grid, ours, in four
+  styles (block capitals, condensed sans, connected script, slab serif), built as neon tubes,
+  dark strokes on a backlit box, extruded channel letters or flat paint. The sign bands and
+  billboards letter their (still syllable-built, `signs::business_name`) names in the block
+  capitals until B7 moves the band carriers onto the shop signs.
+- **Lots.** Strip malls with at least `front_min_yard` of open ground in front get nose-in
+  stalls `stall_w` wide, a `front_fill` share of them taken; beach aisles take a stall with
+  chance `aisle_fill` (terrain places). The test town's strip-mall lots use `stall_w` too.
+
+Still in code, to move with the tasks that change them: the palette (`world::Palette` and
+`buildings::look`), which styles get carports, walkways and step-backs, the step-back floors
+(`STEP_BACK_FLOORS`, also read by the building generator), the triangle budget, and every
+builder's own dimensions (sign bands, awnings and canopies, the parapet and cornice
+shapes, rooftop units, the belt course). A value moves into
+the grammar when a task first needs to vary it; a fitted value names its source
+(`CREDITS.md`).
+
 ## Known hard parts (plan for them)
 - Junction geometry at odd angles (use a generic polygon junction with per-edge trimming; no special cases per count).
 - Roads on slopes: cut/fill the terrain to the road profile within road width + 4 m shoulder.

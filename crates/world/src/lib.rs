@@ -19,7 +19,9 @@ extern crate std;
 pub mod buildings;
 pub mod collide;
 pub mod edges;
+pub mod grammar;
 pub mod ground;
+pub mod lanes;
 pub mod math;
 pub mod mesh;
 pub mod palette;
@@ -33,7 +35,8 @@ use alloc::vec::Vec;
 
 use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
-pub use collide::{resolve, Impact, WorldCollider};
+pub use collide::{resolve, Bump, Impact, WorldCollider};
+pub use grammar::Grammar;
 pub use mesh::terrain::TerrainGrid;
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;
@@ -210,17 +213,23 @@ pub struct ChunkPlan {
     /// below it ([`buildings::footing`]); zeros on the flat test town.
     footings: Vec<(f32, f32)>,
     fronts: Vec<usize>,
+    /// The test town's strip-mall stall width (`LotRules::stall_w`).
+    stall_w: f32,
     /// Every prop meshed into the chunks, in build order: on the test town the lots'
     /// parked cars, the house sites', the streets'; on a terrain place its `Props` table
     /// but for the kinds the app instances ([`props::instanced`]).
     props: Vec<props::Prop>,
+    /// Per prop, the shop sign a blade sign is lettered with (`None` for every other kind).
+    shop_signs: Vec<Option<signs::lexicon::ShopSign>>,
+    /// The words the shop signs are lettered from.
+    lexicon: signs::lexicon::Lexicon,
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
     chunk_range: [[i32; 2]; 2],
 }
 
 impl ChunkPlan {
-    pub fn new(place: &Place, palette: &Palette) -> ChunkPlan {
+    pub fn new(place: &Place, palette: &Palette, grammar: &Grammar) -> ChunkPlan {
         let seed = place.header.seed;
         let net = roads::Network::new(place);
         let side_zone = side_zones(place, &net);
@@ -241,14 +250,16 @@ impl ChunkPlan {
             .map(|(i, b)| {
                 let env = lookup.facade_envs(i);
                 let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-                let mut plan = buildings::plan_building(b, &env, door_pick);
+                let zone = building_zone(place, b);
+                let mut plan = buildings::plan_building(b, zone, &env, door_pick, grammar);
                 if terrain_place {
-                    plan.signage = Some(buildings::signage(seed, i as u32));
+                    plan.signage = Some(buildings::signage(seed, i as u32, &grammar.signs));
                 }
                 (env, plan)
             })
             .collect();
         let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
+        let stall_w = grammar.lots.stall_w;
         let centroids = place
             .buildings
             .iter()
@@ -277,7 +288,7 @@ impl ChunkPlan {
         // scratch mesh), then the streets' and the parks'.
         let mut none = MeshSet::new(place.header.chunk_size_m, Keep::Nothing);
         let mut props = if terrain.is_none() {
-            ground::build(place, &blocks, &fronts, palette, seed, &mut none)
+            ground::build(place, &blocks, &fronts, palette, stall_w, seed, &mut none)
         } else {
             place
                 .props
@@ -313,6 +324,18 @@ impl ChunkPlan {
             props.extend(props::place(place, &net, &side_zone, &parks, seed));
         }
 
+        // Every blade sign a shop sign of the grammar's, no name repeated nearby.
+        let blades: Vec<usize> = (0..props.len())
+            .filter(|&i| matches!(props[i].kind, props::PropKind::NeonSign { .. }))
+            .collect();
+        let at: Vec<V2> = blades.iter().map(|&i| props[i].pos).collect();
+        let drawn =
+            signs::lexicon::assign(&grammar.signs, &grammar.lexicon, grammar.era, seed, &at);
+        let mut shop_signs = alloc::vec![None; props.len()];
+        for (&i, s) in blades.iter().zip(drawn) {
+            shop_signs[i] = Some(s);
+        }
+
         // The place's chunks and the terrain apron's.
         let o = place.header.chunk_origin;
         let n = place.header.size_chunks;
@@ -343,7 +366,10 @@ impl ChunkPlan {
             centroids,
             footings,
             fronts,
+            stall_w,
             props,
+            shop_signs,
+            lexicon: grammar.lexicon.clone(),
             kit: props::PropKit::new(),
             chunk_range: [lo, hi],
         }
@@ -455,7 +481,8 @@ impl ChunkPlan {
             Stage::Ground => match &self.terrain {
                 // Its parked cars are in `props` already.
                 None => {
-                    ground::build(place, &self.blocks, &self.fronts, palette, seed, out);
+                    let (blocks, fronts) = (&self.blocks, &self.fronts);
+                    ground::build(place, blocks, fronts, palette, self.stall_w, seed, out);
                 }
                 Some((g, colors)) => mesh::terrain::build(place, g, colors, palette, seed, out),
             },
@@ -507,7 +534,11 @@ impl ChunkPlan {
             Stage::Props => {
                 for (i, p) in self.props.iter().enumerate().skip(from) {
                     if out.wants(p.pos) {
-                        props::build(out.at(p.pos, MeshKind::Prop), p, palette, &self.kit);
+                        let m = out.at(p.pos, MeshKind::Prop);
+                        match &self.shop_signs[i] {
+                            Some(s) => props::shop_sign(m, p, palette, s, &self.lexicon),
+                            None => props::build(m, p, palette, &self.kit),
+                        }
                         if out.kept_vertices() >= max_vertices {
                             return Some(i + 1);
                         }
@@ -524,15 +555,20 @@ impl ChunkPlan {
 
 /// Builds all meshes of `place`, grouped by chunk and [`MeshKind`], sorted by kind then
 /// chunk.
-pub fn build_chunk_meshes(place: &Place, palette: &Palette) -> Vec<ChunkMesh> {
-    build_with_stats(place, palette).0
+pub fn build_chunk_meshes(place: &Place, palette: &Palette, grammar: &Grammar) -> Vec<ChunkMesh> {
+    build_with_stats(place, palette, grammar).0
 }
 
 /// The meshes of one chunk, sorted by kind: exactly the ones [`build_chunk_meshes`] gives
 /// for it. To build many chunks, make one [`ChunkPlan`] and use
 /// [`ChunkPlan::build_stage`].
-pub fn build_chunk(place: &Place, palette: &Palette, chunk: [i32; 2]) -> Vec<ChunkMesh> {
-    let plan = ChunkPlan::new(place, palette);
+pub fn build_chunk(
+    place: &Place,
+    palette: &Palette,
+    grammar: &Grammar,
+    chunk: [i32; 2],
+) -> Vec<ChunkMesh> {
+    let plan = ChunkPlan::new(place, palette, grammar);
     let mut out = MeshSet::new(plan.chunk_size, Keep::Chunk(chunk));
     for stage in Stage::ALL {
         plan.run(place, palette, stage, &mut out, None);
@@ -541,8 +577,12 @@ pub fn build_chunk(place: &Place, palette: &Palette, chunk: [i32; 2]) -> Vec<Chu
 }
 
 /// [`build_chunk_meshes`] plus totals.
-pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, BuildStats) {
-    let plan = ChunkPlan::new(place, palette);
+pub fn build_with_stats(
+    place: &Place,
+    palette: &Palette,
+    grammar: &Grammar,
+) -> (Vec<ChunkMesh>, BuildStats) {
+    let plan = ChunkPlan::new(place, palette, grammar);
     let mut out = MeshSet::new(plan.chunk_size, Keep::All);
     let mut stats = BuildStats::default();
     for stage in Stage::ALL {
@@ -556,6 +596,32 @@ pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, Bu
         stats.triangles_by_kind[c.kind as usize] += t;
     }
     (meshes, stats)
+}
+
+/// The zone under ground point `p` of `place` (`Water` off the map).
+pub fn zone_at(place: &Place, p: V2) -> ZoneId {
+    let h = &place.header;
+    let res = usize::from(place.terrain.res_per_chunk.max(1));
+    let [w, d] = place::Zones::cells_per_side(h, place.terrain.res_per_chunk);
+    let cell = h.chunk_size_m / res as f32;
+    let o = h.origin_m();
+    let (x, z) = ((p.x - o[0]) / cell, (p.y - o[1]) / cell);
+    if x < 0.0 || z < 0.0 || w == 0 || d == 0 {
+        return ZoneId::Water;
+    }
+    let (x, z) = ((x as usize).min(w - 1), (z as usize).min(d - 1));
+    place
+        .zones
+        .cells
+        .get(z * w + x)
+        .copied()
+        .unwrap_or(ZoneId::Water)
+}
+
+/// The zone a building's grammar rules are chosen by: the one under its footprint's
+/// centroid.
+pub fn building_zone(place: &Place, b: &place::Building) -> ZoneId {
+    zone_at(place, ground::centroid(&ground::to_v2(&b.footprint)))
 }
 
 /// Whether `place` stands on its own heightfield (a procedural or compiled place) rather
@@ -781,8 +847,9 @@ mod tests {
     fn test_town_is_deterministic_and_within_budgets() {
         let place = Place::test_grid();
         let pal = Palette::socal_1985();
+        let g = grammar::coast_80s();
         let t0 = Instant::now();
-        let (meshes, stats) = build_with_stats(&place, &pal);
+        let (meshes, stats) = build_with_stats(&place, &pal, &g);
         let elapsed = t0.elapsed();
         std::println!(
             "world: {} triangles ({:?} by kind), {} vertices, {} meshes, {} buildings (max {} tris), {} windows ({} lit), {} props in {:.1} ms",
@@ -809,12 +876,12 @@ mod tests {
         assert!(stats.max_building_triangles <= buildings::BUILDING_TRIANGLE_BUDGET);
         let lit = stats.lit_windows as f32 / stats.windows as f32;
         assert!((0.3..0.5).contains(&lit), "{lit}");
-        let again = build_chunk_meshes(&place, &pal);
+        let again = build_chunk_meshes(&place, &pal, &g);
         assert_eq!(mesh_hash(&meshes), mesh_hash(&again));
         // Pinned fingerprint: change deliberately, in its own commit, with the reason.
         assert_eq!(
             mesh_hash(&meshes),
-            0xF908_E7B3_4AA8_73B6,
+            0xB9CA_5ED1_40B9_D278,
             "{:#018X}",
             mesh_hash(&meshes)
         );
@@ -823,7 +890,7 @@ mod tests {
         other.header.seed = 2;
         assert_ne!(
             mesh_hash(&meshes),
-            mesh_hash(&build_chunk_meshes(&other, &pal))
+            mesh_hash(&build_chunk_meshes(&other, &pal, &g))
         );
     }
 
@@ -833,8 +900,9 @@ mod tests {
     fn a_chunk_build_is_the_slice_of_the_whole_build() {
         let place = Place::test_grid();
         let pal = Palette::socal_1985();
-        let all = build_chunk_meshes(&place, &pal);
-        let plan = ChunkPlan::new(&place, &pal);
+        let g = grammar::coast_80s();
+        let all = build_chunk_meshes(&place, &pal, &g);
+        let plan = ChunkPlan::new(&place, &pal, &g);
         let [lo, hi] = plan.chunk_range();
         let mut chunks: Vec<[i32; 2]> = all.iter().map(|c| c.chunk).collect();
         chunks.sort_unstable();
@@ -874,7 +942,7 @@ mod tests {
         );
         assert_eq!(total, all.len());
         let c = chunks[chunks.len() / 2];
-        let one = build_chunk(&place, &pal, c);
+        let one = build_chunk(&place, &pal, &g, c);
         let slice: Vec<ChunkMesh> = all.iter().filter(|m| m.chunk == c).cloned().collect();
         assert_eq!(one, slice);
     }
@@ -885,7 +953,8 @@ mod tests {
     fn a_stage_in_pieces_is_the_stage() {
         let place = Place::test_grid();
         let pal = Palette::socal_1985();
-        let plan = ChunkPlan::new(&place, &pal);
+        let g = grammar::coast_80s();
+        let plan = ChunkPlan::new(&place, &pal, &g);
         for chunk in [[0, 0], [-1, 1], [0, -2], [2, 1]] {
             for stage in Stage::ALL {
                 let whole = plan.build_stage(&place, &pal, chunk, stage);
@@ -927,7 +996,7 @@ mod tests {
     #[test]
     fn meshes_are_well_formed() {
         let place = Place::test_grid();
-        let meshes = build_chunk_meshes(&place, &Palette::socal_1985());
+        let meshes = build_chunk_meshes(&place, &Palette::socal_1985(), &grammar::coast_80s());
         for c in &meshes {
             let m = &c.mesh;
             assert_eq!(m.indices.len() % 3, 0);

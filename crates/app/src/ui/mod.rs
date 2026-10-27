@@ -42,7 +42,7 @@ use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 pub const CAPTURE_TIMEOUT: f32 = 8.0;
 /// Seconds a status message stays up.
 const TOAST_SECONDS: f32 = 2.5;
-/// Seconds the new car's name stays up after a switch.
+/// Seconds the new car's name stays up after a switch, and "Car reset" after a reset.
 pub const VEHICLE_TOAST_SECONDS: f32 = 2.0;
 /// Miles per hour in one meter per second.
 const MPH_PER_MPS: f32 = 2.236_936;
@@ -79,6 +79,8 @@ pub enum Toast {
     Reset(DeviceKind),
     /// Switched to the built-in car with this index (its name).
     Vehicle(usize),
+    /// The car was put back on the road.
+    CarReset,
     /// A stream was added to the stations.
     StreamAdded,
     /// The text given for a stream was not an `https://` URL (or there are too many).
@@ -101,10 +103,19 @@ pub struct Ui {
     bindings_changed: bool,
     /// The Camera page picked another camera.
     camera_changed: bool,
-    /// The Vehicle page picked the built-in car with this index; the app switches to it.
-    vehicle_pick: Option<usize>,
-    /// The car being driven, an index into `vehicles::BUILTIN` (marked on the Vehicle page).
+    /// The Vehicle page picked the built-in car with this index, in this paint; the app
+    /// switches to it.
+    vehicle_pick: Option<(usize, usize)>,
+    /// The pause menu's "Reset car" was chosen; the app resets the car.
+    reset_pick: bool,
+    /// The car being driven, an index into `vehicles::BUILTIN`, and its paint.
     vehicle: usize,
+    vehicle_paint: usize,
+    /// The car and paint the Vehicle page shows (on the turntable).
+    browse: [usize; 2],
+    /// Where the Vehicle page left room for the turntable, virtual HUD units `[x, y, w,
+    /// h]`, as last drawn (`None`: no room, or another page).
+    stage: Option<[f32; 4]>,
     /// Something changed since the last save.
     dirty: bool,
     store: Option<Box<dyn SettingsStore>>,
@@ -141,6 +152,10 @@ pub struct Ui {
     /// CPU time the platform spent recording and submitting the last frame, ms (0:
     /// not measured).
     cpu_submit_ms: f32,
+    /// Live NPC cars and the traffic sim's time per step (ms), for the overlay.
+    pub(crate) traffic: (usize, f32),
+    /// Live pedestrians and the pedestrian sim's time per step (ms), for the overlay.
+    pub(crate) peds: (usize, f32),
     /// Adapter and backend, for the overlay.
     gpu_label: String,
 }
@@ -159,7 +174,11 @@ impl Ui {
             bindings_changed: false,
             camera_changed: false,
             vehicle_pick: None,
+            reset_pick: false,
             vehicle: 0,
+            vehicle_paint: 0,
+            browse: [0, 0],
+            stage: None,
             dirty: false,
             store: None,
             menu: None,
@@ -184,6 +203,8 @@ impl Ui {
             auto_quality: Quality::Medium,
             forced_quality: None,
             cpu_submit_ms: 0.0,
+            traffic: (0, 0.0),
+            peds: (0, 0.0),
             gpu_label: String::new(),
         }
     }
@@ -261,6 +282,12 @@ impl Ui {
         full.pan(dir, dt, &geom, rect);
     }
 
+    /// The settings, to change in tests as the menu would.
+    #[cfg(test)]
+    pub(crate) fn settings_mut(&mut self) -> &mut Settings {
+        &mut self.settings
+    }
+
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -311,9 +338,19 @@ impl Ui {
         std::mem::take(&mut self.camera_changed)
     }
 
-    /// Takes the car the Vehicle page picked, once.
-    fn take_vehicle_pick(&mut self) -> Option<usize> {
+    /// Takes the car (and paint) the Vehicle page picked, once.
+    fn take_vehicle_pick(&mut self) -> Option<(usize, usize)> {
         self.vehicle_pick.take()
+    }
+
+    /// Takes the pause menu's "Reset car", once.
+    fn take_reset_pick(&mut self) -> bool {
+        std::mem::take(&mut self.reset_pick)
+    }
+
+    /// The app reset the car: say so for [`VEHICLE_TOAST_SECONDS`].
+    pub(crate) fn car_reset(&mut self) {
+        self.toast = Some((Toast::CarReset, VEHICLE_TOAST_SECONDS));
     }
 
     /// The car being driven: an index into [`crate::vehicles::BUILTIN`].
@@ -321,23 +358,51 @@ impl Ui {
         self.vehicle
     }
 
-    /// The Vehicle page opens on the car being driven.
+    /// The paint the car being driven wears: a palette entry.
+    pub fn vehicle_paint(&self) -> usize {
+        self.vehicle_paint
+    }
+
+    /// The Vehicle page opens on the car being driven, in its paint, the car chooser
+    /// focused.
     fn focus_current_vehicle(&mut self) {
         if let Some(menu) = &mut self.menu {
             if menu.page() == Page::Vehicle {
-                menu.set_focus(self.vehicle);
+                self.browse = [self.vehicle, self.vehicle_paint];
+                menu.set_focus(0);
             }
         }
     }
 
-    /// The app now drives the built-in car `index`. With `remember`, it becomes the vehicle
-    /// setting (saved now, so the next session starts in it); with `toast`, its name shows
-    /// for [`VEHICLE_TOAST_SECONDS`].
-    pub(crate) fn vehicle_switched(&mut self, index: usize, remember: bool, toast: bool) {
+    /// The car and paint on the turntable and where it goes on screen (virtual HUD units
+    /// `[x, y, w, h]`), while the Vehicle page is up and has room for it.
+    pub fn preview(&self) -> Option<(usize, usize, [f32; 4])> {
+        let page = self.menu.as_ref()?.page();
+        let stage = self.stage?;
+        (page == Page::Vehicle && self.capture.is_none()).then_some((
+            self.browse[0],
+            self.browse[1],
+            stage,
+        ))
+    }
+
+    /// The app now drives the built-in car `index` in palette entry `paint`. With
+    /// `remember`, they become the vehicle setting (saved now, so the next session starts
+    /// in it); with `toast`, its name shows for [`VEHICLE_TOAST_SECONDS`].
+    pub(crate) fn vehicle_switched(
+        &mut self,
+        index: usize,
+        paint: usize,
+        remember: bool,
+        toast: bool,
+    ) {
         self.vehicle = index;
+        self.vehicle_paint = paint;
         let id = crate::vehicles::BUILTIN.get(index).map(|(id, _)| *id);
-        if remember && id.is_some() && self.settings.vehicle != id {
+        if remember && id.is_some() && (self.settings.vehicle != id || self.settings.paint != paint)
+        {
             self.settings.vehicle = id;
+            self.settings.paint = paint;
             self.dirty = true;
             self.save_if_dirty();
         }
@@ -413,6 +478,7 @@ impl Ui {
             radio: &self.radio,
             text_entry: self.text_entry,
             quality: self.quality(),
+            browse: self.browse,
         }
     }
 
@@ -485,6 +551,10 @@ impl Ui {
         self.rebuild(clock);
         if let Some(nav) = self.repeat.update(&input, dt) {
             let effect = match &mut self.menu {
+                // Select drives the car shown from any row of the Vehicle page.
+                Some(menu) if menu.page() == Page::Vehicle && nav == Nav::Confirm => {
+                    Effect::Activate(ItemId::Vehicle(self.browse[0]))
+                }
                 Some(menu) => menu.apply(nav, &self.items),
                 None => Effect::None,
             };
@@ -499,12 +569,27 @@ impl Ui {
             Effect::None | Effect::Moved | Effect::Opened(_) => {}
             Effect::Toggle(id, on) => self.set_toggle(id, on),
             Effect::Slide(id, v) => self.set_slider(id, v, clock),
+            Effect::Choose(ItemId::VehicleCar, i) => {
+                // Another car: the paint it is driven in, else its first.
+                let paint = if i == self.vehicle {
+                    self.vehicle_paint
+                } else {
+                    0
+                };
+                self.browse = [i, paint];
+            }
+            Effect::Choose(ItemId::Paint, k) => self.browse[1] = k,
             Effect::Choose(ItemId::ClockSpeed, i) => {
                 self.settings.clock_speed = CLOCK_SPEEDS[i.min(CLOCK_SPEEDS.len() - 1)];
                 self.dirty = true;
             }
             Effect::Choose(ItemId::MinimapZoom, i) => {
                 self.settings.minimap_range_m = MINIMAP_RANGES_M[i.min(MINIMAP_RANGES_M.len() - 1)];
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::Traffic, i) => {
+                self.settings.traffic =
+                    crate::npc::DENSITIES[i.min(crate::npc::DENSITIES.len() - 1)];
                 self.dirty = true;
             }
             Effect::Choose(ItemId::Handling, i) => {
@@ -671,9 +756,19 @@ impl Ui {
     fn activate(&mut self, id: ItemId) {
         match id {
             ItemId::Resume => self.close(),
+            ItemId::ResetCar => {
+                // Back to the road, where the car now is.
+                self.reset_pick = true;
+                self.close();
+            }
             ItemId::Vehicle(i) => {
                 // Back to the road to see it.
-                self.vehicle_pick = Some(i);
+                let paint = if i == self.browse[0] {
+                    self.browse[1]
+                } else {
+                    0
+                };
+                self.vehicle_pick = Some((i, paint));
                 self.close();
             }
             ItemId::Quit => {
@@ -719,7 +814,7 @@ impl Ui {
 
     /// One frame of the radio (never in a still scene): it starts from the settings on
     /// the first, takes the station keys when `keys` (driving, no menu or map up), runs its
-    /// tune noise, and saves the power and station when they change.
+    /// tuning phase, and saves the power and station when they change.
     fn radio_frame(&mut self, s: &InputState, dt: f32, keys: bool) {
         self.radio.set_gain(self.radio_gain());
         self.radio.start(&self.settings.radio);
@@ -860,7 +955,8 @@ fn covers(b: &Binding, slot: Sign) -> bool {
 
 /// The binding a captured raw input makes for one row of an action: two-way actions take a
 /// whole stick axis (or a key for one direction), one-way actions the half of the stick
-/// that was pushed; the analog triggers bind as axes for analog actions.
+/// that was pushed; the analog triggers bind as axes for analog actions. Reset on a pad
+/// button is a long press, as by default.
 pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) -> Binding {
     let half = if value < 0.0 {
         Sign::Negative
@@ -879,6 +975,9 @@ pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) ->
         RawInput::PadAxis(PadAxis::L2 | PadAxis::R2) => Binding::new(raw, Sign::Full),
         RawInput::PadAxis(_) if action.is_bipolar() => Binding::new(raw, Sign::Full),
         RawInput::PadAxis(_) => Binding::new(raw, half),
+        RawInput::PadButton(_) if action == Action::Reset => {
+            Binding::new(raw, Sign::Positive).held_long()
+        }
         _ => Binding::new(
             raw,
             if sign == Sign::Negative {
@@ -922,15 +1021,14 @@ impl App {
         if self.ui.take_camera_changed() {
             self.camera.set_mode(self.ui.settings.camera);
         }
-        if let Some(i) = self.ui.take_vehicle_pick() {
-            self.switch_to(i, true);
-        } else if state.just_pressed(Action::VehicleNext)
-            && !was_open
-            && !self.ui.is_open()
-            && !self.ui.full_map_open()
-            && !self.still
-        {
+        let driving = !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !self.still;
+        if let Some((i, paint)) = self.ui.take_vehicle_pick() {
+            self.switch_to(i, paint, true);
+        } else if state.just_pressed(Action::VehicleNext) && driving {
             self.cycle_vehicle();
+        }
+        if self.ui.take_reset_pick() || (state.just_pressed(Action::Reset) && driving) {
+            self.reset_car();
         }
         self.apply_clock_speed();
         self.apply_settings();
@@ -946,9 +1044,9 @@ impl App {
         } else if was_open || self.ui.full_map_open() {
             // The press that closed the menu (Space on Resume) is not also a drive input,
             // and the full map takes the sticks and keys: the car coasts under it.
-            self.update(&InputState::default(), dt)
+            self.advance(&InputState::default(), dt, now_seconds)
         } else {
-            self.update(&state, dt)
+            self.advance(&state, dt, now_seconds)
         };
         self.alpha = steps.alpha;
         if std::mem::take(&mut self.camera_cycled) {
@@ -986,6 +1084,7 @@ impl App {
             radio_display,
         };
         self.ui.draw(&ctx);
+        self.update_preview(dt as f32);
         self.audio = self.sound.params(
             &self.drive,
             &self.ground,
@@ -993,10 +1092,26 @@ impl App {
             &self.ui.settings,
             self.ui.is_open(),
         );
-        // The engine and the world duck under a station that is playing.
-        if self.ui.radio.radio().is_live() {
+        // The engine and the world duck under a station that is playing; the dial sweeps
+        // between stations at the radio's volume.
+        let radio = self.ui.radio.radio();
+        if radio.is_live() {
             self.audio.radio = self.ui.settings.radio.volume;
         }
+        self.audio.tunes = radio.tunes();
+        self.audio.tune_volume = self.ui.settings.radio.volume;
+        // The listener is the camera, moving with the car.
+        let velocity = glam::Vec3::from(self.drive.state.vel);
+        let (eye, forward) = if self.fly {
+            let (s, c) = self.curr.yaw.sin_cos();
+            (self.curr.pos, glam::Vec3::new(-s, 0.0, -c))
+        } else {
+            let pose = self.camera.pose(&self.drive, steps.alpha);
+            (pose.eye, pose.forward())
+        };
+        self.audio.traffic = self.npcs.voices(steps.alpha, eye, forward, velocity);
+        self.ui.traffic = (self.npcs.count(), self.npcs.step_ms());
+        self.ui.peds = (self.npcs.crowd.count(), self.npcs.crowd.step_ms());
         steps
     }
 
@@ -1106,26 +1221,35 @@ impl App {
     }
 
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next
-    /// [`App::frame`]) and saves there from now on. The saved vehicle replaces the car the
-    /// app was built with unless a scene named that one (`car=`); its meshes then wait in
-    /// [`App::take_new_meshes`].
+    /// [`App::frame`]) and saves there from now on. The saved vehicle and paint replace the
+    /// car the app was built with unless a scene named that one (`car=`); its meshes then
+    /// wait in [`App::take_new_meshes`].
     pub fn set_settings_store(&mut self, store: Box<dyn SettingsStore>) {
         self.ui.set_store(store);
         if !self.camera_from_scene {
             self.camera.set_mode(self.ui.settings.camera);
         }
         if !self.car_from_scene {
+            // The saved car, in the scene's paint (not saved) or its saved one.
             let saved = self.ui.settings.vehicle.and_then(roster::index_of);
-            if let Some(i) = saved.filter(|&i| i != self.ui.vehicle) {
-                self.switch_to(i, false);
+            let paint = self.paint_from_scene.unwrap_or(self.ui.settings.paint);
+            if let Some(i) =
+                saved.filter(|&i| (i, paint) != (self.ui.vehicle, self.ui.vehicle_paint))
+            {
+                let remember = self.paint_from_scene.is_none();
+                let switched = self.switch_vehicle_at(i, paint, false, remember);
+                debug_assert!(switched.is_ok(), "{switched:?}");
             }
         }
         self.apply_clock_speed();
         self.apply_settings();
+        // Loading: traffic the saved setting switched on warms up before the first frame.
+        self.finish_warm_up();
     }
 
     /// The handling preset drives the car's assists; the camera settings reach the rig.
     fn apply_settings(&mut self) {
+        self.apply_traffic(self.traffic_scene.unwrap_or(self.ui.settings.traffic));
         let s = &self.ui.settings;
         self.drive.assists = s.handling.assists();
         self.camera.prefs = crate::camera::CameraPrefs {

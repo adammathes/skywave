@@ -11,7 +11,9 @@
 //! and kept, so switching back reuses its ids. Meshes registered after load wait in
 //! [`App::take_new_meshes`], which the platform drains into the renderer every frame
 //! before drawing; the ids continue after [`App::meshes`]. A session registers at most
-//! one set of meshes per built-in car.
+//! one set of meshes per built-in car, plus the paint-dependent ones (bodies and cabin
+//! walls) for each further paint it drives or shows on the Vehicle page's turntable
+//! ([`preview`]), which draws from the same ids.
 
 pub mod camera;
 pub mod car;
@@ -21,7 +23,10 @@ mod input;
 pub mod lighting;
 mod lighttiles;
 pub mod map;
+pub mod npc;
+mod peds;
 mod places;
+pub mod preview;
 mod propinst;
 pub mod radio;
 pub mod scene;
@@ -149,6 +154,8 @@ pub struct App {
     curr: FlyCamera,
     drive: Drive,
     ground: DriveGround,
+    /// The place's lanes, where a reset puts the car.
+    lanes: world::lanes::LaneLines,
     camera: CameraRig,
     /// The scene chose the camera (`cam=`): the saved camera setting does not replace it.
     camera_from_scene: bool,
@@ -157,14 +164,24 @@ pub struct App {
     time: TimeOfDay,
     meshes: Vec<Mesh>,
     car_meshes: CarMeshes,
-    /// Every car registered so far (the one driven among them), for switching back.
+    /// Every car and paint registered so far (the one driven among them), for switching
+    /// back and for the turntable.
     cars: Vec<RegisteredCar>,
+    /// The Vehicle page's turntable this frame: the car and its stage (virtual HUD units).
+    preview: Option<(RegisteredCar, [f32; 4])>,
+    /// The turntable's disc and its turn, radians.
+    turntable: MeshId,
+    spin: f32,
+    /// The instances the turntable added in the last [`App::scene_view`].
+    preview_drawn: core::ops::Range<usize>,
     /// Meshes registered since the platform last called [`App::take_new_meshes`].
     pending_meshes: Vec<Mesh>,
     /// Mesh ids handed out: `meshes`, then every pending batch.
     mesh_count: u32,
     /// The scene chose the car (`car=`): the saved vehicle setting does not replace it.
     car_from_scene: bool,
+    /// The scene chose a paint but no car (`paint=` alone): it paints the saved car too.
+    paint_from_scene: Option<usize>,
     /// The world's instances, then this frame's car instances (refilled by `scene_view`).
     instances: Vec<MeshInstance>,
     world_instances: usize,
@@ -186,6 +203,11 @@ pub struct App {
     start: ([f32; 3], f32),
     /// A terrain place's trees and parked cars, drawn as instances near the camera.
     props: Option<propinst::PropInstances>,
+    /// The place's NPC traffic.
+    npcs: npc::Npcs,
+    /// The scene's traffic density over the setting (`traffic=`; off unless a scene
+    /// says otherwise, so tests and the self-test drive alone).
+    traffic_scene: Option<traffic::Density>,
     /// The sound's view of the game, and what it made of the last frame.
     sound: sound::Sound,
     audio: audio::synth::AudioParams,
@@ -208,10 +230,11 @@ const WATER_TOAST: &str = "Deep water: resetting";
 const TOAST_RGBA: [u8; 4] = [255, 178, 62, 255];
 const TOAST_SHADOW: [u8; 4] = [0, 0, 0, 170];
 
-/// A car whose meshes the renderer has (or will have, once drained).
+/// A car in one paint whose meshes the renderer has (or will have, once drained).
 #[derive(Clone, Copy, Debug)]
 struct RegisteredCar {
     id: &'static str,
+    paint: usize,
     meshes: CarMeshes,
     layout: CarLayout,
 }
@@ -231,35 +254,41 @@ impl App {
     /// The built-in car `vehicle_id` at the `PlayerStart` of the place `key` names, the
     /// whole place built at load.
     pub fn new_in(seed: Seed, vehicle_id: &str, key: PlaceKey) -> Result<App, String> {
-        App::build(seed, vehicle_id, key, None)
+        App::build(seed, vehicle_id, 0, key, None)
     }
 
     /// [`App::new_with`], the town streamed within `budget` round the camera instead
     /// (nothing is built until [`App::frame`] runs).
     pub fn new_streamed(seed: Seed, vehicle_id: &str, budget: StreamBudget) -> Result<App, String> {
-        App::build(seed, vehicle_id, PlaceKey::TestTown, Some(budget))
+        App::build(seed, vehicle_id, 0, PlaceKey::TestTown, Some(budget))
     }
 
-    /// The car on the place `key` names, built at load or (with `stream`) streamed.
+    /// The car in palette entry `paint` on the place `key` names, built at load or (with
+    /// `stream`) streamed.
     fn build(
         seed: Seed,
         vehicle_id: &str,
+        paint: usize,
         key: PlaceKey,
         stream: Option<StreamBudget>,
     ) -> Result<App, String> {
         let spec = vehicles::builtin_spec(vehicle_id)?;
         let vehicle_index = ui::roster::index_of(vehicle_id).ok_or("not a built-in car")?;
         let shape = vehicles::builtin_shape(&spec)?;
-        let model = CarModel::build(&spec, &shape)?;
+        if paint >= shape.palette.len() {
+            return Err(format!("`{vehicle_id}` has no paint {paint}"));
+        }
+        let model = CarModel::build_painted(&spec, &shape, paint)?;
         let place: Place = places::build(key, seed)?;
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let start = (start.pos, start.heading);
         let drive = Drive::with_layout(spec, model.layout, start.0, start.1);
         let map = map::MapImage::rasterize(&place);
         let mut ui = ui::Ui::new();
-        ui.vehicle_switched(vehicle_index, false, false);
+        ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         let ground = drive::ground_for(&place);
+        let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
         let mut props = propinst::PropInstances::new(&place, &Palette::socal_1985(), |p| {
             [
@@ -268,6 +297,7 @@ impl App {
             ]
         })?;
         let sound = sound::Sound::new(&place, &drive);
+        let npcs = npc::Npcs::new(&place, seed);
         let town = match stream {
             None => resident_town(&place),
             Some(budget) => streamed_town(place, budget),
@@ -279,6 +309,8 @@ impl App {
             meshes.push(m.clone());
             MeshId(meshes.len() as u32 - 1)
         });
+        meshes.push(preview::turntable_mesh());
+        let turntable = MeshId(meshes.len() as u32 - 1);
         if let Some(p) = &mut props {
             let ids = p
                 .meshes()
@@ -290,12 +322,16 @@ impl App {
                 .collect();
             p.set_ids(ids);
         }
-        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&props);
+        let extra = drive::MAX_CAR_INSTANCES
+            + preview::MAX_INSTANCES
+            + prop_capacity(&props)
+            + npcs.capacity();
         instances.reserve_exact(town.world_capacity - world_instances + extra);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
         let cars = vec![RegisteredCar {
             id: vehicles::BUILTIN[vehicle_index].0,
+            paint,
             meshes: car_meshes,
             layout: model.layout,
         }];
@@ -309,6 +345,7 @@ impl App {
             prev: fly,
             curr: fly,
             ground,
+            lanes,
             drive,
             camera,
             camera_from_scene: false,
@@ -317,9 +354,14 @@ impl App {
             meshes,
             car_meshes,
             cars,
+            preview: None,
+            turntable,
+            spin: preview::STILL_SPIN_RAD,
+            preview_drawn: 0..0,
             pending_meshes: Vec::new(),
             mesh_count,
             car_from_scene: false,
+            paint_from_scene: None,
             instances,
             world_instances,
             roles: town.roles,
@@ -331,6 +373,8 @@ impl App {
             map,
             start,
             props,
+            npcs,
+            traffic_scene: Some(traffic::Density::Off),
             sound,
             audio: audio::synth::AudioParams::default(),
             aspect: 16.0 / 9.0,
@@ -347,7 +391,16 @@ impl App {
     /// [`App::set_stream_budget`] changes that.
     pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
         let stream = setup.stream.then_some(StreamBudget::WEB);
-        let mut app = App::build(Seed(setup.seed), &setup.car, setup.place, stream)?;
+        // A paint for a named car must be one of its own; without a car it paints whichever
+        // car the game starts in (see `set_settings_store`).
+        let paint = match (setup.car_given, setup.paint) {
+            (true, paint) => paint.unwrap_or(0),
+            (false, paint) => {
+                ui::roster::index_of(&setup.car).map_or(0, |i| paint_of(i, paint.unwrap_or(0)))
+            }
+        };
+        let mut app = App::build(Seed(setup.seed), &setup.car, paint, setup.place, stream)?;
+        app.paint_from_scene = setup.paint.filter(|_| !setup.car_given);
         let pos = setup.pos.unwrap_or([app.start.0[0], app.start.0[2]]);
         let heading = setup.heading_rad.unwrap_or(app.start.1);
         let (y, _) = app.ground.level_at(pos);
@@ -371,6 +424,12 @@ impl App {
         }
         if let Some(s) = setup.ui_scale {
             app.ui.force_ui_scale(s);
+        }
+        // A scene's density applies now; the setting's once the settings are loaded.
+        app.traffic_scene = setup.traffic_density();
+        if let Some(d) = app.traffic_scene {
+            app.apply_traffic(d);
+            app.finish_warm_up();
         }
         Ok(app)
     }
@@ -426,65 +485,127 @@ impl App {
         self.mesh_count as usize
     }
 
-    /// Swaps in the built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) where the car is
-    /// now ([`Drive::switch_car`]), keeping the camera and the headlights, and remembers it
-    /// in the settings; its name shows on the HUD. Its meshes are built and queued for
-    /// [`App::take_new_meshes`] the first time; later switches reuse them.
+    /// Swaps in the built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) in its first
+    /// paint where the car is now ([`Drive::switch_car`]), keeping the camera and the
+    /// headlights, and remembers it in the settings; its name shows on the HUD. Its meshes
+    /// are built and queued for [`App::take_new_meshes`] the first time; later switches
+    /// reuse them.
     pub fn switch_vehicle(&mut self, vehicle_id: &str) -> Result<(), String> {
         let index = ui::roster::index_of(vehicle_id).ok_or(format!("no vehicle `{vehicle_id}`"))?;
-        self.switch_vehicle_at(index, true)
+        self.switch_vehicle_at(index, 0, true, true)
     }
 
-    /// `VehicleNext`: the next car in [`vehicles::BUILTIN`], wrapping after the last.
+    /// `VehicleNext`: the next car in [`vehicles::BUILTIN`], wrapping after the last, in
+    /// its first paint.
     pub fn cycle_vehicle(&mut self) {
         let next = (self.ui.vehicle() + 1) % vehicles::BUILTIN.len();
-        self.switch_to(next, true);
+        self.switch_to(next, 0, true);
+    }
+
+    /// `Reset`: the car back on the nearest lane, at rest ([`Drive::reset`]), the camera
+    /// behind it, and a "Car reset" toast. Nothing while the free-fly camera flies.
+    pub fn reset_car(&mut self) {
+        if self.fly {
+            return;
+        }
+        self.drive.reset(&self.lanes, &self.ground);
+        self.settle_camera();
+        self.ui.car_reset();
+    }
+
+    /// The same camera, settled behind (or in) the car where it now is.
+    fn settle_camera(&mut self) {
+        let mut rig = CameraRig::new(self.camera.selected(), &self.drive);
+        rig.tuning = self.camera.tuning;
+        rig.prefs = self.camera.prefs;
+        self.camera = rig;
     }
 
     /// [`App::switch_vehicle_at`]; a car that fails to build (never a built-in one, whose
     /// specs and shapes are tested) leaves the current one.
-    fn switch_to(&mut self, index: usize, toast: bool) {
-        let switched = self.switch_vehicle_at(index, toast);
+    fn switch_to(&mut self, index: usize, paint: usize, toast: bool) {
+        let switched = self.switch_vehicle_at(index, paint, toast, true);
         debug_assert!(switched.is_ok(), "{switched:?}");
     }
 
-    /// Switches to `vehicles::BUILTIN[index]`, toasting its name or not. The car already
-    /// driven stays, and only the toast and the setting happen.
-    fn switch_vehicle_at(&mut self, index: usize, toast: bool) -> Result<(), String> {
-        let &(id, _) = vehicles::BUILTIN.get(index).ok_or("no such vehicle")?;
-        if self.drive.spec.id != id {
-            let spec = vehicles::builtin_spec(id)?;
-            let car = match self.cars.iter().find(|c| c.id == id) {
-                Some(car) => *car,
-                None => {
-                    let model = CarModel::build(&spec, &vehicles::builtin_shape(&spec)?)?;
-                    let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
-                    let meshes = model.register(|m| {
-                        pending.push(m.clone());
-                        next += 1;
-                        MeshId(next - 1)
-                    });
-                    self.mesh_count = next;
-                    let car = RegisteredCar {
-                        id,
-                        meshes,
-                        layout: model.layout,
-                    };
-                    self.cars.push(car);
-                    car
-                }
-            };
+    /// Switches to `vehicles::BUILTIN[index]` in palette entry `paint` (its first when it
+    /// has no such entry), toasting its name or not and remembering it in the settings or
+    /// not. The car already driven stays, and only the paint, the toast and the setting
+    /// happen.
+    fn switch_vehicle_at(
+        &mut self,
+        index: usize,
+        paint: usize,
+        toast: bool,
+        remember: bool,
+    ) -> Result<(), String> {
+        let paint = paint_of(index, paint);
+        let car = self.registered(index, paint)?;
+        if self.drive.spec.id != car.id {
+            let spec = vehicles::builtin_spec(car.id)?;
             self.drive.switch_car(spec, car.layout, &self.ground);
-            self.car_meshes = car.meshes;
             self.sound.set_car(&self.drive);
-            // The same camera, settled behind (or in) the new car.
-            let mut rig = CameraRig::new(self.camera.selected(), &self.drive);
-            rig.tuning = self.camera.tuning;
-            rig.prefs = self.camera.prefs;
-            self.camera = rig;
+            self.settle_camera();
         }
-        self.ui.vehicle_switched(index, true, toast);
+        self.car_meshes = car.meshes;
+        self.ui.vehicle_switched(index, paint, remember, toast);
         Ok(())
+    }
+
+    /// `vehicles::BUILTIN[index]` in palette entry `paint`, its meshes registered (queued
+    /// for [`App::take_new_meshes`]) the first time it is asked for: the whole car, or for a
+    /// further paint of a car already registered only its bodies and cabin walls.
+    fn registered(&mut self, index: usize, paint: usize) -> Result<RegisteredCar, String> {
+        let &(id, _) = vehicles::BUILTIN.get(index).ok_or("no such vehicle")?;
+        if let Some(car) = self.cars.iter().find(|c| c.id == id && c.paint == paint) {
+            return Ok(*car);
+        }
+        let spec = vehicles::builtin_spec(id)?;
+        let model = CarModel::build_painted(&spec, &vehicles::builtin_shape(&spec)?, paint)?;
+        let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
+        let mut add = |m: &Mesh| {
+            pending.push(m.clone());
+            next += 1;
+            MeshId(next - 1)
+        };
+        let meshes = match self.cars.iter().find(|c| c.id == id) {
+            Some(base) => model.register_paint(&base.meshes, &mut add),
+            None => model.register(&mut add),
+        };
+        self.mesh_count = next;
+        let car = RegisteredCar {
+            id,
+            paint,
+            meshes,
+            layout: model.layout,
+        };
+        self.cars.push(car);
+        Ok(car)
+    }
+
+    /// The car and paint the Vehicle page shows, registered (see [`App::registered`]) and
+    /// put on the turntable for [`App::scene_view`]; the turntable turns `dt` seconds (not
+    /// in a still scene, which shows [`preview::STILL_SPIN_RAD`]). Nothing when the page is
+    /// not up.
+    fn update_preview(&mut self, dt: f32) {
+        self.preview = match self.ui.preview() {
+            Some((index, paint, stage)) => {
+                let car = self.registered(index, paint_of(index, paint));
+                debug_assert!(car.is_ok(), "{car:?}");
+                car.ok().map(|car| (car, stage))
+            }
+            None => None,
+        };
+        if self.preview.is_some() && !self.still {
+            self.spin =
+                (self.spin + dt * preview::SPIN_RAD_PER_S).rem_euclid(core::f32::consts::TAU);
+        }
+    }
+
+    /// Instances of the turntable in the last [`App::scene_view`] (empty when the Vehicle
+    /// page is not up).
+    pub fn preview_instances(&self) -> core::ops::Range<usize> {
+        self.preview_drawn.clone()
     }
 
     /// Simulation steps run so far.
@@ -495,6 +616,15 @@ impl App {
     /// Advances real time by `dt_real` seconds, running as many fixed steps as are due.
     /// Pass the returned `alpha` to [`App::scene_view`].
     pub fn update(&mut self, input: &InputState, dt_real: f64) -> Steps {
+        self.advance(input, dt_real, &|| 0.0)
+    }
+
+    /// [`App::update`], timing the traffic sim by `now` (seconds, any origin) for the
+    /// overlay.
+    fn advance(&mut self, input: &InputState, dt_real: f64, now: &dyn Fn() -> f64) -> Steps {
+        // Traffic switched on mid-game warms up a batch a frame, not all in one.
+        let inputs = self.traffic_inputs();
+        self.npcs.warm_up(&inputs, npc::WARMUP_BATCH);
         if self.still {
             return Steps {
                 count: 0,
@@ -514,6 +644,7 @@ impl App {
         self.drive.frame(input);
         let none = InputState::default();
         let dt = SIM_DT as f32;
+        let (mut traffic_s, mut peds_s) = (0.0, 0.0);
         for _ in 0..steps.count {
             self.prev = self.curr;
             let car_input = if self.fly {
@@ -524,6 +655,29 @@ impl App {
             };
             self.drive.step(car_input, &self.ground);
             self.sound.note_step(&self.drive.impact);
+            if self.npcs.active() {
+                let t = now();
+                let inp = npc::StepInputs {
+                    player: self.traffic_player(),
+                    clock: self.traffic_clock(),
+                    ..inputs
+                };
+                self.npcs.step(&inp);
+                traffic_s += now() - t;
+            } else {
+                self.npcs.step(&inputs);
+            }
+            if self.npcs.crowd.active() {
+                let t = now();
+                // Signed: a reversing car's danger zone is behind it (the cars' is not).
+                let player = traffic::Player {
+                    speed: self.drive.state.speed_mps,
+                    ..self.traffic_player()
+                };
+                let inp = npc::StepInputs { player, ..inputs };
+                self.npcs.step_peds(&inp);
+                peds_s += now() - t;
+            }
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);
@@ -534,7 +688,68 @@ impl App {
             self.water_toast = WATER_TOAST_S;
         }
         self.water_toast = (self.water_toast - dt_real as f32).max(0.0);
+        self.npcs.note_time(traffic_s * 1000.0, steps.count);
+        self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
         steps
+    }
+
+    /// The traffic's view of the game now: the player's car, the camera, the clock.
+    fn traffic_inputs(&self) -> npc::StepInputs {
+        let (eye, forward, fov) = if self.fly {
+            let c = &self.curr;
+            let (s, co) = c.yaw.sin_cos();
+            (c.pos, Vec3::new(-s, 0.0, -co), FLY_FOV_DEG.to_radians())
+        } else {
+            let pose = self.camera.pose(&self.drive, 1.0);
+            (pose.eye, pose.forward(), pose.fov_y_rad)
+        };
+        npc::StepInputs {
+            player: self.traffic_player(),
+            view: npc::view(eye, forward, fov, self.aspect),
+            clock: self.traffic_clock(),
+        }
+    }
+
+    fn traffic_player(&self) -> traffic::Player {
+        let s = &self.drive.state;
+        npc::player(&self.drive.pose(1.0), s.speed_mps, self.drive.spec.dims_m)
+    }
+
+    fn traffic_clock(&self) -> traffic::Clock {
+        let c = &self.time.clock;
+        npc::clock(c.seconds_of_day, self.time.latitude_deg, c.day_of_year)
+    }
+
+    /// Live NPC cars.
+    pub fn traffic_count(&self) -> usize {
+        self.npcs.count()
+    }
+
+    /// Live pedestrians.
+    pub fn pedestrian_count(&self) -> usize {
+        self.npcs.crowd.count()
+    }
+
+    /// The traffic density from the scene or the setting; the NPC cars' meshes are built
+    /// and queued for [`App::take_new_meshes`] the first time it is on.
+    fn apply_traffic(&mut self, density: traffic::Density) {
+        if density != traffic::Density::Off && !self.npcs.has_meshes() {
+            let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
+            let built = self.npcs.build_meshes(self.props.as_ref(), |m| {
+                pending.push(m);
+                next += 1;
+                MeshId(next - 1)
+            });
+            debug_assert!(built.is_ok(), "{built:?}");
+            self.mesh_count = next;
+        }
+        self.npcs.set_density(density);
+    }
+
+    /// Runs the traffic's whole warm-up now: while the scene loads, before its first frame.
+    fn finish_warm_up(&mut self) {
+        let inputs = self.traffic_inputs();
+        self.npcs.warm_up_unseen(&inputs);
     }
 
     /// Whether the deep-water toast is up.
@@ -547,7 +762,7 @@ impl App {
         let c = &self.curr;
         let bits = |v: f32| u64::from(v.to_bits());
         let clock = &self.time.clock;
-        hash64(
+        let h = hash64(
             self.ticks,
             &[
                 bits(c.pos.x),
@@ -560,7 +775,34 @@ impl App {
                 u64::from(clock.day_of_year),
                 u64::from(self.drive.headlights),
             ],
-        )
+        );
+        // The traffic and pedestrians only while they run, so a scene without them hashes
+        // as before.
+        if self.npcs.active() || self.npcs.crowd.active() {
+            hash64(h, &[self.npcs.hash()])
+        } else {
+            h
+        }
+    }
+
+    /// A stage in virtual HUD units (`[x, y, w, h]`) in normalized device coordinates
+    /// (`[x0, y0, x1, y1]`, y up) on the target, or on one of `aspect` when the platform has
+    /// not said its size.
+    fn stage_ndc(&self, stage: [f32; 4], aspect: f32) -> [f32; 4] {
+        let target = self
+            .target
+            .unwrap_or(((aspect * 1080.0).round().max(1.0) as u32, 1080));
+        let layout = render::HudLayout::new(target, self.ui.settings().ui_scale);
+        let [x, y, w, h] = stage;
+        let [px0, py0] = layout.to_pixels(x, y);
+        let [px1, py1] = layout.to_pixels(x + w, y + h);
+        let (tw, th) = (target.0 as f32, target.1 as f32);
+        [
+            px0 / tw * 2.0 - 1.0,
+            1.0 - py1 / th * 2.0,
+            px1 / tw * 2.0 - 1.0,
+            1.0 - py0 / th * 2.0,
+        ]
     }
 
     /// The scene interpolated `alpha` of the way from the previous to the current step.
@@ -586,40 +828,95 @@ impl App {
                 inst.glow = lamp_glow;
             }
         }
-        let cabin = if self.fly || !self.camera.mode().first_person() {
+        let first_person = !self.fly && self.camera.mode().first_person();
+        let cabin = if !first_person {
             drive::Cabin::Outside
         } else if self.ui.settings().dashboard {
             drive::Cabin::Full
         } else {
             drive::Cabin::Frame
         };
-        self.drive.push_instances(
-            alpha,
-            &self.car_meshes,
-            cabin,
-            lighting::car_glow(&daylight),
-            &mut self.instances,
-        );
-        // The car's lamps, then every static light the photocell has on; each instance gets
-        // the nearest that reach it, the car's instances those round the car.
+        // Under the Vehicle page the turntable shows the car (and stands where the cabin
+        // would be round a first-person eye): no car of our own.
+        if self.preview.is_none() {
+            self.drive.push_instances(
+                alpha,
+                &self.car_meshes,
+                cabin,
+                lighting::car_glow(&daylight),
+                &mut self.instances,
+            );
+        }
+        // The car's lamps, the nearest NPC cars' low beams, then every static light the
+        // photocell has on; each instance gets the nearest that reach it, the car's
+        // instances those round the car.
         let (car_lights, n) = self.drive.lights(alpha);
+        let n = if self.preview.is_some() { 0 } else { n };
         let eye = view.inverse().w_axis.truncate();
+        let mut dynamic = [PointLight::omni([0.0; 3], [0.0; 3], 0.0); DYNAMIC_LIGHTS];
+        dynamic[..n].copy_from_slice(&car_lights[..n]);
+        let mut npc_lights = [dynamic[0]; npc::NPC_LIGHTS];
+        let m = self.npcs.lights(alpha, eye, &mut npc_lights);
+        dynamic[n..n + m].copy_from_slice(&npc_lights[..m]);
         self.lights
-            .gather(eye, daylight.streetlights_on, &car_lights[..n]);
+            .gather(eye, daylight.streetlights_on, &dynamic[..n + m]);
+        self.lights.set_second(n..n + m);
         let (world, car) = self.instances.split_at_mut(self.world_instances);
         self.lights.assign(&self.bounds, world);
         let reach = 0.5 * self.drive.layout.dims.iter().fold(0.0f32, |a, &b| a.max(b));
         let around = Bounds::cube(self.drive.pose(alpha).pos, reach);
-        let set = lighting::light_set(self.lights.lights(), &around);
+        let set = self.lights.set_for(&around);
         for inst in car {
             inst.lights = set;
         }
         if let Some(props) = &self.props {
             let stream = self.stream.as_deref();
             let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
-            let lights = self.lights.lights();
-            props.push(eye, live, lights, lamp_glow, &mut self.instances);
+            let lights = &self.lights;
+            let rocking = &self.drive.rocking;
+            props.push(eye, live, lights, lamp_glow, rocking, &mut self.instances);
         }
+        let npc_glow = lighting::car_glow(&daylight).lamps;
+        self.npcs
+            .push(alpha, eye, &self.lights, npc_glow, &mut self.instances);
+        // Whole people only: none near the vehicle preview (below), none cut in half there.
+        let clear = if self.preview.is_some() {
+            preview::CLEAR_M + peds::REACH_M
+        } else {
+            0.0
+        };
+        self.npcs
+            .crowd
+            .push(alpha, eye, clear, &self.lights, &mut self.instances);
+        if self.preview.is_some() {
+            // Nothing that moves or stands by the eye cuts into the turntable: drop the
+            // traffic, people and props near it (in place, keeping their order).
+            let mut keep = self.world_instances;
+            for k in self.world_instances..self.instances.len() {
+                let at = Vec3::from_slice(&self.instances[k].transform[3][..3]);
+                if at.distance_squared(eye) > preview::CLEAR_M * preview::CLEAR_M {
+                    self.instances.swap(keep, k);
+                    keep += 1;
+                }
+            }
+            self.instances.truncate(keep);
+        }
+        let start = self.instances.len();
+        if let Some((car, stage)) = &self.preview {
+            let stage = self.stage_ndc(*stage, aspect);
+            if let Some(table) = preview::table_to_world(view, proj, stage, &car.layout, self.spin)
+            {
+                let model = preview::Model {
+                    car: &car.meshes,
+                    layout: &car.layout,
+                    turntable: self.turntable,
+                };
+                let glow = lighting::car_glow(&daylight);
+                let fill = daylight.window_emissive_scale;
+                preview::push(table, &model, glow, fill, &mut self.instances);
+            }
+        }
+        self.preview_drawn = start..self.instances.len();
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),
@@ -649,6 +946,24 @@ impl App {
         }
     }
 }
+
+/// `paint` when `vehicles::BUILTIN[index]` has that palette entry, else its first.
+fn paint_of(index: usize, paint: usize) -> usize {
+    let paints = ui::roster::roster()
+        .get(index)
+        .map_or(1, |c| c.paints.len());
+    if paint < paints {
+        paint
+    } else {
+        0
+    }
+}
+
+/// Instances one pedestrian draws: a part each.
+pub const FIGURE_PARTS: usize = traffic::figure::PARTS;
+
+/// Most dynamic lights a frame has: the player's car's, then the traffic's.
+const DYNAMIC_LIGHTS: usize = drive::CAR_LIGHTS + npc::NPC_LIGHTS;
 
 /// Room for the instanced props a frame may draw.
 fn prop_capacity(props: &Option<propinst::PropInstances>) -> usize {
@@ -697,7 +1012,7 @@ struct Town {
 /// The whole town of `place` built at load ([`render_meshes`]): static meshes, one
 /// instance each.
 fn resident_town(place: &Place) -> Town {
-    let chunks = world::build_chunk_meshes(place, &Palette::socal_1985());
+    let chunks = world::build_chunk_meshes(place, &Palette::socal_1985(), places::grammar());
     let place_lights: Vec<PointLight> = place
         .lights
         .items
@@ -813,7 +1128,7 @@ impl App {
         s.streamer = Streamer::new(&s.source, budget);
         // Nothing is drawn yet, so these are empty: room for every part and the car.
         let parts = s.streamer.capacity() * MAX_CHUNK_PARTS;
-        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props);
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props) + self.npcs.capacity();
         self.instances.reserve_exact(parts + extra);
         self.roles.reserve_exact(parts);
         self.bounds.reserve_exact(parts);
@@ -829,7 +1144,7 @@ impl App {
 
     /// Most instances a frame can draw: reserve them in the renderer at load.
     pub fn max_instances(&self) -> usize {
-        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props);
+        let extra = drive::MAX_CAR_INSTANCES + prop_capacity(&self.props) + self.npcs.capacity();
         self.instances.capacity().max(self.world_instances + extra)
     }
 
@@ -1147,7 +1462,7 @@ mod tests {
         // deliberately.
         assert_eq!(
             a.state_hash(),
-            0x3bd9_240f_f5b3_05d0,
+            0xadde_172d_3f95_7922,
             "{:#x}",
             a.state_hash()
         );
@@ -1280,11 +1595,14 @@ mod tests {
         let world = app.world_instances;
         let meshes = app.meshes().len();
         let ids = app.car_meshes;
+        let turntable = app.turntable;
         let view = app.scene_view(steps.alpha, 16.0 / 9.0);
         // The world, then the car: body, glass, unlit lamps and four wheels (no cabin in
         // the chase view).
         assert_eq!(MeshId(world as u32), ids.lods[0].body[0]);
-        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 1));
+        // ...then the turntable's disc.
+        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 2));
+        assert_eq!(turntable, MeshId(meshes as u32 - 1));
         assert_eq!(view.instances.len(), world + 7);
         for (i, inst) in view.instances[..world].iter().enumerate() {
             assert_eq!(inst.mesh, MeshId(i as u32));
@@ -1359,9 +1677,9 @@ mod tests {
 
     #[test]
     fn a_scene_setup_places_the_car_and_freezes_the_clock() {
-        // The default setup is the normal start.
+        // The default setup is the normal start (with traffic, which `App::new` leaves off).
         let mut normal = App::new(Seed(1));
-        let mut same = App::from_setup(&SceneSetup::default()).unwrap();
+        let mut same = App::from_setup(&SceneSetup::from_query("traffic=off").unwrap()).unwrap();
         assert_eq!(same.state_hash(), normal.state_hash());
         assert_eq!(
             same.scene_view(1.0, 1.5).camera.view,
@@ -1369,7 +1687,7 @@ mod tests {
         );
 
         let setup = SceneSetup::from_query(
-            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0",
+            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0&traffic=off",
         )
         .unwrap();
         let mut app = App::from_setup(&setup).unwrap();

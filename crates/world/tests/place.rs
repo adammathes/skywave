@@ -9,6 +9,12 @@ use skywave_core::Seed;
 use world::procgen::build_place;
 use world::template::RegionTemplate;
 
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+
+fn grammar() -> world::Grammar {
+    ron::from_str(GRAMMAR).expect("parse grammar")
+}
+
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
 
 fn template() -> RegionTemplate {
@@ -25,14 +31,14 @@ fn template() -> RegionTemplate {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0xD0FE_1A1C_2BC2_CF6D,
-    0x93EC_BA10_B88B_CE5F,
-    0x2970_7192_2275_82B0,
-    0xE2C6_34E2_AAEC_8175,
-    0x1105_1427_4ECB_54A5,
-    0x30E6_8FC1_0FD9_EB47,
-    0xA351_2833_1C49_8181,
-    0x25A9_A3A0_0B94_8A57,
+    0x1217_17D4_2488_EB8A,
+    0x4AF3_F43B_A35E_2028,
+    0x8B6D_EC03_68A9_9FBB,
+    0xC3C3_7AB4_DE36_8FA2,
+    0xDB82_3E1F_BC7E_0573,
+    0x37F8_CDDF_3112_7F81,
+    0xD14F_E021_96CB_0CC6,
+    0xC16B_C76D_7504_0BD2,
 ];
 
 #[test]
@@ -41,7 +47,7 @@ fn places_validate_and_are_deterministic() {
     let mut got = Vec::new();
     for seed in 1..=8u64 {
         let start = Instant::now();
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(p.validate(), Ok(()), "seed {seed}");
         assert_eq!(p.header.region, RegionId::CaliforniaCoast);
@@ -64,7 +70,7 @@ fn places_validate_and_are_deterministic() {
         assert!((s.pos[1] - ground).abs() < 8.0, "seed {seed}");
         got.push(p.content_hash());
     }
-    assert_eq!(build_place(Seed(1), &t).content_hash(), got[0]);
+    assert_eq!(build_place(Seed(1), &t, &grammar()).content_hash(), got[0]);
     let table = got
         .iter()
         .map(|h| {
@@ -147,7 +153,7 @@ fn edges_bound_the_coast() {
     const MOUNTAINS_RISE_M: f32 = 85.0;
     let t = template();
     for seed in 1..=8u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let edges = p.terrain.edges;
         assert_eq!(edges, t.edges.sides());
         let ext = p.header.extent_m();
@@ -271,9 +277,9 @@ fn coast_meshes_sit_roads_on_the_terrain() {
     use world::{build_with_stats, MeshKind, Palette, Pattern};
     let t = template();
     for seed in 1..=2u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let start = Instant::now();
-        let (meshes, stats) = build_with_stats(&p, &Palette::socal_1985());
+        let (meshes, stats) = build_with_stats(&p, &Palette::socal_1985(), &grammar());
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         let net = Network::new(&p);
         let (grid, graded) = TerrainGrid::graded(&p, &net);
@@ -428,10 +434,10 @@ fn collider_follows_slopes_and_decks() {
     use world::roads::{Network, DECK_CLEARANCE_M};
     use world::WorldCollider;
     let t = template();
-    let p = build_place(Seed(1), &t);
+    let p = build_place(Seed(1), &t, &grammar());
     let net = Network::new(&p);
     let grid = TerrainGrid::new(&p, &net);
-    let c = WorldCollider::build(&p);
+    let c = WorldCollider::build(&p, &grammar());
     let down = [0.0, -1.0, 0.0];
     let probe = |x: f32, y: f32, z: f32| {
         let hit = c
@@ -582,10 +588,10 @@ fn collider_follows_slopes_and_decks() {
 #[test]
 fn coast_chunks_build_as_slices_of_the_whole_build() {
     use world::{build_chunk_meshes, mesh_hash, ChunkMesh, ChunkPlan, Palette, Stage};
-    let p = build_place(Seed(1), &template());
+    let p = build_place(Seed(1), &template(), &grammar());
     let pal = Palette::socal_1985();
-    let all = build_chunk_meshes(&p, &pal);
-    let plan = ChunkPlan::new(&p, &pal);
+    let all = build_chunk_meshes(&p, &pal, &grammar());
+    let plan = ChunkPlan::new(&p, &pal, &grammar());
     let [lo, hi] = plan.chunk_range();
     assert_eq!((lo, hi), ([0, 0], [15, 15]), "the place's chunks");
     let t0 = Instant::now();
@@ -619,8 +625,10 @@ fn far_terrain_lies_under_the_ground() {
     use world::{ChunkPlan, Palette, Pattern};
     let pal = Palette::socal_1985();
     for seed in 1..=2u64 {
-        let p = build_place(Seed(seed), &template());
-        let far = ChunkPlan::new(&p, &pal).far_terrain(&p, &pal).unwrap();
+        let p = build_place(Seed(seed), &template(), &grammar());
+        let far = ChunkPlan::new(&p, &pal, &grammar())
+            .far_terrain(&p, &pal)
+            .unwrap();
         let grid = TerrainGrid::new(&p, &Network::new(&p));
         let tris = far.indices.len() / 3;
         assert!(
@@ -677,8 +685,8 @@ fn horizon_rises_past_the_land_and_leaves_the_sea() {
     use world::mesh::terrain::HORIZON_RINGS_M;
     use world::{ChunkPlan, Palette};
     let pal = Palette::socal_1985();
-    let p = build_place(Seed(1), &template());
-    let plan = ChunkPlan::new(&p, &pal);
+    let p = build_place(Seed(1), &template(), &grammar());
+    let plan = ChunkPlan::new(&p, &pal, &grammar());
     let far = plan.far_terrain(&p, &pal).unwrap();
     let h = plan.horizon(&p, &pal).unwrap();
     let ext = p.header.extent_m();

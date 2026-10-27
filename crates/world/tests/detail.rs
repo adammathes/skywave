@@ -15,6 +15,12 @@ use world::roads::Network;
 use world::template::RegionTemplate;
 use world::WorldCollider;
 
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+
+fn grammar() -> world::Grammar {
+    ron::from_str(GRAMMAR).expect("parse grammar")
+}
+
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
 
 fn template() -> RegionTemplate {
@@ -116,7 +122,7 @@ fn polygon_distance(q: V2, poly: &[V2]) -> f32 {
 fn seed_one_props_by_zone() {
     let t = template();
     let t0 = Instant::now();
-    let p = build_place(Seed(1), &t);
+    let p = build_place(Seed(1), &t, &grammar());
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
     let mut by_kind: BTreeMap<&str, usize> = BTreeMap::new();
     let mut by_zone: BTreeMap<(String, &str), usize> = BTreeMap::new();
@@ -192,9 +198,9 @@ fn seed_one_props_by_zone() {
 fn props_stand_on_the_ground_clear_of_roads_and_buildings() {
     let t = template();
     for seed in 1..=2u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let net = Network::new(&p);
-        let c = WorldCollider::build(&p);
+        let c = WorldCollider::build(&p, &grammar());
         let segs = road_segments(&p, &net);
         let fps = footprints(&p);
         let (mut grounded, mut worst) = (0usize, 0.0f32);
@@ -300,7 +306,7 @@ fn props_stand_on_the_ground_clear_of_roads_and_buildings() {
 fn parked_cars_keep_to_the_chunk_cap() {
     let t = template();
     for seed in 1..=4u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let mut per: BTreeMap<[u16; 2], usize> = BTreeMap::new();
         for x in &p.props.items {
             if matches!(x.kind, PropKind::ParkedCar { .. }) {
@@ -327,7 +333,7 @@ fn parked_cars_keep_to_the_chunk_cap() {
 /// front of lit shops; nothing else.
 #[test]
 fn lights_are_the_lamps_signs_and_shops() {
-    let p = build_place(Seed(1), &template());
+    let p = build_place(Seed(1), &template(), &grammar());
     let lamps: Vec<&place::Prop> = p
         .props
         .items
@@ -372,8 +378,10 @@ fn lights_are_the_lamps_signs_and_shops() {
             LightKind::Neon => {
                 neon += 1;
                 let by_sign = signs.iter().any(|s| (*s - q).length() < 2.0);
+                // 1.2 m out from its sign, which on a strip mall's mansard canopy stands up
+                // to 3 m out from the wall.
                 assert!(
-                    wall < 2.0 || by_sign,
+                    wall < 4.5 || by_sign,
                     "neon light at {:?} by no sign",
                     l.pos
                 );
@@ -396,10 +404,10 @@ fn lights_are_the_lamps_signs_and_shops() {
 /// with `cargo test -p world --test detail -- --nocapture` (it prints the table), check the
 /// coast screenshots, and commit the new values in their own commit saying why they moved.
 const GOLDEN: [u64; 4] = [
-    0x565E_268E_8580_6D32,
-    0x3C12_0EFE_CA89_D0B8,
-    0xE145_9056_7D8B_2D45,
-    0xE74F_B95D_353C_03ED,
+    0x1E45_9EDE_5C3C_5916,
+    0xCAF2_F5D1_3B8F_E50E,
+    0x8FF9_995E_CE2A_C45B,
+    0x4AB5_3D7D_3AD8_0FBD,
 ];
 
 /// The detail is deterministic, valid and pinned.
@@ -408,12 +416,12 @@ fn detail_is_deterministic_valid_and_pinned() {
     let t = template();
     let mut got = Vec::new();
     for seed in 1..=4u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         assert_eq!(p.validate(), Ok(()), "seed {seed}");
         assert!(!p.props.items.is_empty() && !p.lights.items.is_empty());
         got.push(hash_detail(&p));
     }
-    assert_eq!(hash_detail(&build_place(Seed(1), &t)), got[0]);
+    assert_eq!(hash_detail(&build_place(Seed(1), &t, &grammar())), got[0]);
     let table = got
         .iter()
         .map(|h| {
@@ -433,7 +441,7 @@ fn detail_is_deterministic_valid_and_pinned() {
 /// the place's own lookup on a road's side).
 #[test]
 fn rural_and_hill_roads_are_dark_but_their_junctions() {
-    let p = build_place(Seed(1), &template());
+    let p = build_place(Seed(1), &template(), &grammar());
     let net = Network::new(&p);
     let segs = road_segments(&p, &net);
     let mut lone = 0;

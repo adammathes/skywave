@@ -35,27 +35,53 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## Where things stand (keep current)
-- Done on `main`: M0; M1 (drive, two cars, cockpit, HUD, settings, gamepad, invert Y); M2
-  (procedural coast: terrain, roads, parcels, buildings, props, streaming, minimap, lights);
-  M3 part 1 (synthesized sound; web car radio with internet stations); the second feel pass;
-  convertibles; WebGPU→WebGL2 fallback with `?diag=1`; GPU performance pass (culling, quality
-  presets with Steam Deck auto-pick, native `--stats`, `docs/PERFORMANCE.md`).
-- Open branches:
-  - `vehicle-picker` (c8c5770): in-game vehicle picker (`V`, Menu › Vehicle) and the "Created by
-    Adam Mathes" credit on the About page and the web footer. Verified green on its base; needs a
-    PR into `main` and a merge resolution against the radio and performance merges in
-    `crates/app/src/ui/{draw,mod,pages,tests}.rs`, `crates/platform-web/src/lib.rs`, `index.html`.
-    On the WebGL2-fallback restart, meshes already drained from `take_new_meshes` must be
-    re-uploaded if the renderer is rebuilt but the `App` is kept.
-- Known red: the two cockpit goldens (`strip-golden-cockpit`, `strip-night-cockpit`) predate the
-  commit that widened the cockpit view and need regenerating in their own commit.
-- Owner feedback not yet acted on: `docs/backlog/NOTES.md` (reset key, radio tuning sound, natural map
-  edges, life and real buildings, mobile, light physics); `docs/backlog/ART.md` (more polygons and color in interiors,
-  cars, NPC cars, props); Safari untested after the fallback work; the owner's Deck `--stats`
-  output is wanted (`docs/PERFORMANCE.md` says what to run); native radio playback.
-- Next: M3 remainder (local music files, native streams, ambience by zone), M4 (traffic,
-  pedestrians, full car roster), M5 (release polish, Deck verification), M6 (place compiler),
-  M7+ (eras, Chicago scenarios). Backlogs in `docs/backlog/`.
+- Done on `main` (2026-10-27 16:45 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+  ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
+  pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
+  vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
+  physics; the hill-launch fix (wheel rays meet the ground's tangent plane); traffic lane graph
+  (M4 #1), NPC car movement (M4 #4), pedestrian figure (M4 #3) and behaviour (M4 #5) in
+  `crates/traffic`; NPC traffic drawn in the game with Settings › World › Traffic and passing-car
+  sound (M4 #6); vehicle select screen with turntable preview and paint picker (M4 #7); reference
+  sources ADR 0005; facade grammar loader (B1, B2); three-band facades with real storefronts (B4);
+  sign pictograms, stroke letterforms and the closed lexicon on blade signs (B5, B6); chunk pool
+  raised to 1211 web / 1617 native pages; CI gates stabilised; the M4 gate (#25: non-violence
+  scenarios, density tests, two gate goldens, gate notes in `docs/backlog/M4.md`); pedestrians
+  drawn in the game (#27: crowd beside the traffic, 8 figures × 13 parts instanced, Traffic
+  setting drives both, golden `coast-peds-noon`); awnings, canopies, rooflines and rooftop units
+  (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof); pedestrian hardening
+  (#24: four review rounds, 2040-run crossing sweep at zero reached, 0.4 m step-aside clearance);
+  the radio starts off every session (ce560a3) and the 181.FM presets are gone (7ca473c, pre-roll
+  ads); the M8 spec for the second world, Basin City 2001 (`docs/backlog/LA2001.md`).
+- Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
+  natural map edges (#20, approved; refreshing on main after #24, then merges on green);
+  Sessions building: parking lots
+  (`bldg/parking-lots`, B10); era sports cars with open-top variants
+  (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
+  ad-free presets and the player's own MP3 folders as stations (`m3/music-2`, NOTES 9; no
+  synthetic music, the owner declined); idle frames, frame cap, Battery preset
+  (`perf/idle-and-cap`, NOTES 10a); GPU timestamps per pass and per-frame cuts
+  (`perf/gpu-time`, NOTES 10b); pedestrian follow-ups (`m4/peds-followups`: body-width gap in
+  the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
+  road); scenario switching and the era filter (`m8/scenarios`, M8 #1). Sports cars (#28,
+  `m4/sports-cars`) is in review: fix the Basilisk's NACA ducts and tail, then merge; after it,
+  a rename PR for `corsair_gtx` and `palisade_wagon` (real model names).
+- Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
+  `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
+  come and go); buildings B7, B10-B15.
+- M4 gate facts for the owner (from #25): NPC cars yield at junctions; no player–NPC collision
+  yet (reversing into a queue passes through; ignored test with numbers); NPC cars do not see
+  pedestrians; static wheels, no brake lights; traffic sparse near the start.
+- Next: merge #20 and #28; M8 waves (region template `socal_basin` and the 2001 grammar after #20,
+  hero cars after #28, traffic cars, set pieces, the 2001 preset); B7 facade sign bands on the
+  lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
+- Conventions learned this run: reviews are read-only Opus subagents over `git diff
+  origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
+  the probe is re-run on every round until it counts zero; a PR that regenerates goldens merges
+  before PRs touching the same scenes, and after each such merge every open PR refreshes from
+  main; CI's pull_request event sometimes does not fire for a session-created PR, so a branch
+  update from main (or any push) is used to start it; two PRs that change the same signature
+  within an hour can both be green and still break main.
 
 ## Pitfalls met so far
 - Software-rendered screenshots take minutes per scene; never run several at once on one box.

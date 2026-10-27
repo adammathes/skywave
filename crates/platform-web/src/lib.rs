@@ -14,7 +14,8 @@
 //! lock keep a free cursor, and `movementX/Y` still drive the look.
 //!
 //! Settings and bindings are kept in `localStorage` (key `skywave.settings`). `?menu=1`
-//! opens the settings menu at startup, `?menu=vehicle` the Vehicle page.
+//! opens the settings menu at startup, `?menu=vehicle` the Vehicle page (on the car and paint
+//! of `car=` and `paint=`).
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::WEB`, timed with
 //! `performance.now()`; `window.skywaveStreamIdle` turns true when nothing is left to
@@ -26,7 +27,8 @@
 //!
 //! The car radio: every frame the app's `audio::RadioCommand`s go to the page's player
 //! glue, `window.skywaveRadio` (the radio block of `web/index.html`, an `<audio>` element):
-//! `command(kind, url, token, value, name)` with kind `play`, `stop`, `volume` or `noise`;
+//! `command(kind, url, token, value, name)` with kind `play`, `stop` or `volume` (the dial
+//! sweep between stations is synthesized in the mixer, so it plays through `sfx`);
 //! its reports come back from `takeEvent()` as `"<started|failed|blocked> <token>"`
 //! ([`parse_player_event`]), and the radio's state goes to `report(text)` whenever it
 //! changes ([`radio_state_text`]). Without the glue the radio stays silent. The page may

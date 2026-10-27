@@ -23,6 +23,7 @@ use super::macro_map::{MacroMap, WaterKind};
 use super::parcels::parcels_all;
 use super::streets::streets_all;
 use super::{RES_PER_CHUNK, ZONE_SAMPLES};
+use crate::grammar::Grammar;
 use crate::math::{atan2, segment_distance, V2};
 use crate::template::RegionTemplate;
 
@@ -52,8 +53,8 @@ pub fn era_of(year: u16) -> Era {
 }
 
 /// A skeleton Place for `(seed, template)`: see the module docs. `template` must have
-/// passed [`RegionTemplate::validate`]. Deterministic.
-pub fn build_place(seed: Seed, template: &RegionTemplate) -> Place {
+/// passed [`RegionTemplate::validate`], `grammar` [`Grammar::validate`]. Deterministic.
+pub fn build_place(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> Place {
     let m = MacroMap::generate(seed, template, PLACE_CHUNKS);
     let arterials = arterials(seed, template, &m);
     // The start is found on the arterials as they are, before the streets split them.
@@ -66,7 +67,7 @@ pub fn build_place(seed: Seed, template: &RegionTemplate) -> Place {
     place.buildings = buildings_all(seed, template, &m, &place.parcels, &place.roads);
     // Stage 7 reads the buildings where the meshes will find them.
     place.sort_by_chunk();
-    detail(seed, template, &m, &mut place);
+    detail(seed, template, grammar, &m, &mut place);
     place.sort_by_chunk();
     place
 }

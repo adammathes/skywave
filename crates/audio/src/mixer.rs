@@ -2,7 +2,8 @@
 //! fixed blocks of [`BLOCK_FRAMES`].
 //!
 //! Each block the synths fill three buses: [`Bus::Engine`], [`Bus::World`] (tires, road,
-//! wind, knocks, ambience) and [`Bus::Ui`] (the horn, and later menu sounds). Every bus has
+//! wind, knocks, ambience) and [`Bus::Ui`] (the horn, the radio's tune burst, and later menu
+//! sounds). Every bus has
 //! a gain (the engine and world volumes, ducked under the radio by [`duck_gain`] and faded
 //! out while paused; the ui bus is fixed), then the master volume and a DC blocker, then a
 //! soft limiter:
@@ -14,7 +15,7 @@
 //! allocates nothing: blocks are rendered into fixed arrays and copied out.
 
 use crate::synth::dsp::{exp, tau_coef, unit, DcBlock};
-use crate::synth::{AudioParams, EngineSynth, WorldSynth};
+use crate::synth::{AudioParams, EngineSynth, TuneSynth, WorldSynth};
 
 /// Frames per second.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -76,6 +77,7 @@ pub struct Mixer {
     params: AudioParams,
     engine: EngineSynth,
     world: WorldSynth,
+    tune: TuneSynth,
     buses: [[f32; BLOCK_SAMPLES]; BUS_COUNT],
     mono: [f32; BLOCK_FRAMES],
     gains: [f32; BUS_COUNT],
@@ -101,6 +103,7 @@ impl Mixer {
             params: AudioParams::default(),
             engine: EngineSynth::new(),
             world: WorldSynth::new(),
+            tune: TuneSynth::new(),
             buses: [[0.0; BLOCK_SAMPLES]; BUS_COUNT],
             mono: [0.0; BLOCK_FRAMES],
             gains: [0.0; BUS_COUNT],
@@ -119,6 +122,7 @@ impl Mixer {
         let p = p.sanitized();
         self.engine.set_params(&p.engine);
         self.world.set_params(&p);
+        self.tune.set_params(p.tunes, p.tune_volume);
         self.params = p;
     }
 
@@ -168,6 +172,9 @@ impl Mixer {
             f[1] = m;
         }
         self.world.render(world, ui);
+        if self.tune.active() {
+            self.tune.render(ui);
+        }
     }
 
     /// Sums the buses into `block` with ramped gains, then limits.
@@ -279,6 +286,7 @@ pub(crate) mod script {
             surface,
         }; 4];
         p.curb_kicks = frame / 150;
+        p.curb_speed_mps = 30.0;
         p.hits = frame / 330;
         p.hit_speed_mps = 6.0;
         p.horn = (10.0..10.6).contains(&t);
@@ -505,6 +513,69 @@ mod tests {
             v.extend_from_slice(&s.to_le_bytes());
         }
         v
+    }
+
+    /// The app's default mix: master, engine, world and radio volume at 0.8.
+    fn default_mix() -> AudioParams {
+        AudioParams {
+            master: 0.8,
+            engine_volume: 0.8,
+            world_volume: 0.8,
+            tune_volume: 0.8,
+            ..AudioParams::default()
+        }
+    }
+
+    /// `seconds` of the mixer at `p`.
+    fn render_for(m: &mut Mixer, p: &AudioParams, seconds: f32) -> Vec<f32> {
+        m.set_params(p);
+        let mut out = vec![0.0; (seconds * SAMPLE_RATE as f32) as usize * 2];
+        m.render(&mut out);
+        out
+    }
+
+    /// The dial sweep alone at the default mix, the gains settled first.
+    fn tune_burst() -> Vec<f32> {
+        let mut p = AudioParams {
+            engine_volume: 0.0,
+            world_volume: 0.0,
+            ..default_mix()
+        };
+        let mut m = Mixer::new();
+        render_for(&mut m, &p, 0.2);
+        p.tunes = 1;
+        render_for(&mut m, &p, crate::TUNE_SECONDS)
+    }
+
+    #[test]
+    fn the_tune_burst_is_clearly_audible_over_the_idle() {
+        let mut m = Mixer::new();
+        let idle = render_for(&mut m, &default_mix(), 1.5);
+        let idle = rms(&idle[idle.len() / 3..]);
+        let burst = tune_burst();
+        // While the static sounds (to the squelch, 80 ms before the end).
+        let sounding = ((crate::TUNE_SECONDS - 0.08) * SAMPLE_RATE as f32) as usize * 2;
+        let level = rms(&burst[..sounding]);
+        let ratio = level / idle;
+        assert!((1.2..2.5).contains(&ratio), "{ratio}");
+        // About +4 dB over the idle; and it ends silent, 20 ms after the click, for the
+        // station.
+        let tail = &burst[sounding + 2 * 960..];
+        assert!(tail.iter().all(|v| v.abs() < 1e-3));
+    }
+
+    /// The dial sweep renders bit-identically everywhere. `SKYWAVE_TUNE_WAV=path` writes it.
+    ///
+    /// Re-pin deliberately, in its own commit, when the tune synth changes.
+    #[test]
+    fn tune_burst_renders_deterministically() {
+        const PINNED: u64 = 0xc020_1ee9_e606_45d9;
+        let bytes = wav(&tune_burst());
+        if let Ok(path) = std::env::var("SKYWAVE_TUNE_WAV") {
+            std::fs::write(&path, &bytes).expect("write the WAV");
+        }
+        let hash = fnv(&bytes);
+        assert_eq!(hash, PINNED, "tune hash changed: {hash:#018x}");
     }
 
     /// The scripted drive (12 s per engine profile, all five) renders bit-identically

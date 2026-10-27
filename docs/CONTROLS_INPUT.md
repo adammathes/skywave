@@ -17,6 +17,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Headlights | button | L | D-pad up |
 | Horn | button | H | Left stick click |
 | Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
+| Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
 | Map toggle | button | M | Back / Share |
 | Map zoom (full map) | axis −1..1 | − / = (and the mouse wheel) | L1 / R1 |
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
@@ -32,10 +33,25 @@ Pause close it (Pause does not open the menu over it). The wheel is read raw as 
 `VehicleNext` swaps in the next built-in car (wrapping after the last) where the car is: same spot and
 heading, at rest unless it was rolling under 5 m/s, odometer from zero, camera and headlights kept; the new
 car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the car the next session starts in
-unless the scene names one (`car=`). It is unbound on the pad by default: the pad path is the pause menu's
-Vehicle page (Resume · Vehicle › · Settings ›), one row per built-in car with its class, power to weight,
-driven wheels and gearbox, the car being driven marked and focused; selecting one swaps it in the same way and
-closes the menu.
+unless the scene names one (`car=`, with `paint=`). It is unbound on the pad by default: the pad path is the
+pause menu's Vehicle page (Resume · Vehicle › · Settings ›): Car (left/right through all twelve, wrapping;
+the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car turning on a
+turntable beside the panel and its stat strip and specs (class, era, peak power and torque, drive and
+gearbox, 0–60 mph and top speed, measured with the sim) under the rows. It opens on the car driven, in its
+paint; another car starts in its first paint. Select on any row swaps the car shown in, in the paint shown,
+the same way, and closes the menu; the car and paint become the `vehicle` and `paint` settings. At a UI scale
+over 1.5 there is no room for the turntable and the specs shorten to what fits.
+
+`Reset` puts the car at rest, upright, on the centerline of the nearest road lane (`world::lanes`: the
+place's lane table, or each road's lanes laid out from its cross section, driving on the right), heading
+the way that lane drives, on the deck it is on; with no lane within 200 m it goes back to the place's start.
+The odometer, headlights and camera are kept, and "Car reset" shows for 2 s. On the pad it is a long press
+(`Binding::long`): letting go of Back after 1 s or more held fires it, so a tap still opens the map, and a
+hold that scrubbed time (the right stick moved, however late) fires neither. A remap of Reset to another pad
+button is a long press too. Every other action on a long-press button acts on release rather than press (the
+Bindings page says so under its rows); that is what keeps a tap and a hold apart.
+The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
+is separate and stays.
 
 ## Per-axis options (mandatory, every analog action)
 `invert` (Y invert on look is the canonical case and must work on gamepad and mouse), `sensitivity` (0.25–4×), `deadzone` (0–0.3), `curve` (1.0 linear to 2.5), `swap` presets (triggers↔stick for throttle/brake, left↔right sticks, southpaw). Stored per device kind (keyboard/mouse vs gamepad). A reset-to-default per action and per device.

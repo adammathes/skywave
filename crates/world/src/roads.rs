@@ -27,7 +27,7 @@ use crate::palette::{mix, shade, Palette};
 use crate::{MeshKind, MeshSet, CURB_M, PAINT_LIFT, TERRAIN_Y};
 
 /// Concrete gutter pan along each curb, inside the curb-to-curb width.
-const GUTTER_M: f32 = 0.45;
+pub(crate) const GUTTER_M: f32 = 0.45;
 /// Curb top strip, part of the sidewalk width.
 const CURB_TOP_M: f32 = 0.2;
 /// Grass parkway between curb and walk on residential streets.
@@ -49,9 +49,9 @@ const PARAPET_THICK_M: f32 = 0.3;
 const PIER_SPACING_M: f32 = 20.0;
 const PIER_M: f32 = 1.2;
 /// Highway cross section: median barrier, lanes and paint.
-const MEDIAN_HALF_M: f32 = 1.2;
+pub(crate) const MEDIAN_HALF_M: f32 = 1.2;
 const BARRIER_M: f32 = 0.8;
-const HIGHWAY_LANE_M: f32 = 3.6;
+pub(crate) const HIGHWAY_LANE_M: f32 = 3.6;
 /// Rng/noise keys.
 const KEY_ASPHALT: u64 = 0x4153_5048;
 const KEY_SLABS: u64 = 0x534C_4142;
