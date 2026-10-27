@@ -23,8 +23,8 @@ fn grammar() -> world::Grammar {
     g
 }
 
-const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
-const PALISADE: &str = include_str!("../../../assets/vehicles/palisade_wagon.ron");
+const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
+const HOMESTEAD: &str = include_str!("../../../assets/vehicles/homestead_wagon.ron");
 const MPH: f32 = 0.447_04;
 const STEPS_PER_S: usize = 120;
 const SIDEWALK_Y: f32 = world::CURB_M;
@@ -60,7 +60,7 @@ fn load(text: &str) -> VehicleSpec {
 }
 
 fn cars() -> [VehicleSpec; 2] {
-    [load(CORSAIR), load(PALISADE)]
+    [load(GANNET), load(HOMESTEAD)]
 }
 
 fn town() -> (Place, WorldCollider) {
@@ -880,7 +880,7 @@ fn walls_hold_at_seventy_meters_per_second() {
     let (_, c) = town();
     let (_, wall) = open_wall(&c, 6.0, 14.0);
     let mid = add(wall.a, sub(wall.b, wall.a), 0.5);
-    let spec = load(CORSAIR);
+    let spec = load(GANNET);
     for v in [40.0, 70.0] {
         let start = add(mid, wall.n, 1.0 + 0.5 * spec.dims_m[0]);
         let y = c.level_at(start).0;
@@ -903,7 +903,7 @@ fn walls_hold_at_seventy_meters_per_second() {
                 hspeed(&s)
             );
         }
-        println!("corsair_gtx     wall at {v} m/s: deepest {worst:+.4} m");
+        println!("gannet_gt     wall at {v} m/s: deepest {worst:+.4} m");
         assert!(worst < 0.02, "passed the wall at {v} m/s: {worst}");
     }
 }
@@ -1029,7 +1029,7 @@ fn scripted_drive_is_deterministic_and_pinned() {
         );
         hashes[k] = h;
     }
-    assert_eq!(hashes, PINNED, "scripted hashes moved (corsair, palisade)");
+    assert_eq!(hashes, PINNED, "scripted hashes moved (gannet, homestead)");
 }
 
 #[test]

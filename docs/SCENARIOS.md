@@ -7,7 +7,7 @@ Scenario(
   id: "socal_beach_1984", title: "Pacific Shore, 1984",
   region: "california_coast", era: 1984, default_seed: 1,
   roster: "1980s_us", radio: "1984_socal", palette: "sunbleached_pastel",
-  default_time: (18, 40), default_vehicle: "corsair_gtx", weather: Clear,
+  default_time: (18, 40), default_vehicle: "gannet_gt", weather: Clear,
 )
 ```
 

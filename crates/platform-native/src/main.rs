@@ -899,9 +899,9 @@ mod tests {
     #[test]
     fn parses_arguments() {
         assert_eq!(args(&[]), Ok(Options::default()));
-        let mut scene = SceneSetup::from_query("seed=42&car=palisade_wagon").unwrap();
+        let mut scene = SceneSetup::from_query("seed=42&car=homestead_wagon").unwrap();
         assert_eq!(
-            args(&["--stats", "--seed", "42", "--car", "palisade_wagon"]),
+            args(&["--stats", "--seed", "42", "--car", "homestead_wagon"]),
             Ok(Options {
                 scene: scene.clone(),
                 stats: true,
@@ -915,7 +915,7 @@ mod tests {
                 "--seed",
                 "42",
                 "--scene",
-                "car=palisade_wagon",
+                "car=homestead_wagon",
                 "--scene",
                 "t=22:30",
                 "--scene",
@@ -1144,7 +1144,7 @@ mod tests {
     /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
     /// warmed up and held still (queued, oncoming and crossing cars and people on the walks
     /// in view).
-    const JUNCTION: &str = "?seed=1&place=coast&car=corsair_gtx&cam=chase-mid&t=12:00\
+    const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
                             &pos=477.5,1001.2&yaw=347&still=1";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
