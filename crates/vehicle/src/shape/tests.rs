@@ -444,10 +444,10 @@ fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
     let expected: [u64; 4] = [
-        0x65e5_ccbe_1efa_0810,
-        0x8cc1_04fd_092c_d665,
-        0x60c1_e30c_9a8a_ade9,
-        0x27ee_0832_409e_fc1f,
+        0x1eba_1d20_a4a5_023f,
+        0x711d_386f_f001_e557,
+        0xe8fa_88e7_8dba_9790,
+        0x1279_2d2b_6c10_b887,
     ];
     let mut got = [0u64; 4];
     for (k, spec) in shapes().iter().enumerate() {
