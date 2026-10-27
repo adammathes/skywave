@@ -9,6 +9,12 @@ use skywave_core::Seed;
 use world::procgen::build_place;
 use world::template::RegionTemplate;
 
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+
+fn grammar() -> world::Grammar {
+    ron::from_str(GRAMMAR).expect("parse grammar")
+}
+
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
 
 fn template() -> RegionTemplate {
@@ -41,7 +47,7 @@ fn places_validate_and_are_deterministic() {
     let mut got = Vec::new();
     for seed in 1..=8u64 {
         let start = Instant::now();
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(p.validate(), Ok(()), "seed {seed}");
         assert_eq!(p.header.region, RegionId::CaliforniaCoast);
@@ -64,7 +70,7 @@ fn places_validate_and_are_deterministic() {
         assert!((s.pos[1] - ground).abs() < 8.0, "seed {seed}");
         got.push(p.content_hash());
     }
-    assert_eq!(build_place(Seed(1), &t).content_hash(), got[0]);
+    assert_eq!(build_place(Seed(1), &t, &grammar()).content_hash(), got[0]);
     let table = got
         .iter()
         .map(|h| {
@@ -143,9 +149,9 @@ fn coast_meshes_sit_roads_on_the_terrain() {
     use world::{build_with_stats, MeshKind, Palette, Pattern};
     let t = template();
     for seed in 1..=2u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         let start = Instant::now();
-        let (meshes, stats) = build_with_stats(&p, &Palette::socal_1985());
+        let (meshes, stats) = build_with_stats(&p, &Palette::socal_1985(), &grammar());
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         let net = Network::new(&p);
         let (grid, graded) = TerrainGrid::graded(&p, &net);
@@ -300,10 +306,10 @@ fn collider_follows_slopes_and_decks() {
     use world::roads::{Network, DECK_CLEARANCE_M};
     use world::WorldCollider;
     let t = template();
-    let p = build_place(Seed(1), &t);
+    let p = build_place(Seed(1), &t, &grammar());
     let net = Network::new(&p);
     let grid = TerrainGrid::new(&p, &net);
-    let c = WorldCollider::build(&p);
+    let c = WorldCollider::build(&p, &grammar());
     let down = [0.0, -1.0, 0.0];
     let probe = |x: f32, y: f32, z: f32| {
         let hit = c
@@ -454,10 +460,10 @@ fn collider_follows_slopes_and_decks() {
 #[test]
 fn coast_chunks_build_as_slices_of_the_whole_build() {
     use world::{build_chunk_meshes, mesh_hash, ChunkMesh, ChunkPlan, Palette, Stage};
-    let p = build_place(Seed(1), &template());
+    let p = build_place(Seed(1), &template(), &grammar());
     let pal = Palette::socal_1985();
-    let all = build_chunk_meshes(&p, &pal);
-    let plan = ChunkPlan::new(&p, &pal);
+    let all = build_chunk_meshes(&p, &pal, &grammar());
+    let plan = ChunkPlan::new(&p, &pal, &grammar());
     let [lo, hi] = plan.chunk_range();
     assert_eq!((lo, hi), ([0, 0], [15, 15]), "the place's chunks");
     let t0 = Instant::now();
@@ -491,8 +497,10 @@ fn far_terrain_lies_under_the_ground() {
     use world::{ChunkPlan, Palette, Pattern};
     let pal = Palette::socal_1985();
     for seed in 1..=2u64 {
-        let p = build_place(Seed(seed), &template());
-        let far = ChunkPlan::new(&p, &pal).far_terrain(&p, &pal).unwrap();
+        let p = build_place(Seed(seed), &template(), &grammar());
+        let far = ChunkPlan::new(&p, &pal, &grammar())
+            .far_terrain(&p, &pal)
+            .unwrap();
         let grid = TerrainGrid::new(&p, &Network::new(&p));
         let tris = far.indices.len() / 3;
         assert!(

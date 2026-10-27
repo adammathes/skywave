@@ -18,6 +18,7 @@ extern crate std;
 
 pub mod buildings;
 pub mod collide;
+pub mod grammar;
 pub mod ground;
 pub mod lanes;
 pub mod math;
@@ -34,6 +35,7 @@ use alloc::vec::Vec;
 use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
 pub use collide::{resolve, Bump, Impact, WorldCollider};
+pub use grammar::Grammar;
 pub use mesh::terrain::TerrainGrid;
 pub use mesh::{Glow, Pattern, WorldMesh, WorldVertex};
 pub use palette::Palette;
@@ -220,7 +222,7 @@ pub struct ChunkPlan {
 }
 
 impl ChunkPlan {
-    pub fn new(place: &Place, palette: &Palette) -> ChunkPlan {
+    pub fn new(place: &Place, palette: &Palette, grammar: &Grammar) -> ChunkPlan {
         let seed = place.header.seed;
         let net = roads::Network::new(place);
         let side_zone = side_zones(place, &net);
@@ -241,9 +243,9 @@ impl ChunkPlan {
             .map(|(i, b)| {
                 let env = lookup.facade_envs(i);
                 let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-                let mut plan = buildings::plan_building(b, &env, door_pick);
+                let mut plan = buildings::plan_building(b, &env, door_pick, grammar);
                 if terrain_place {
-                    plan.signage = Some(buildings::signage(seed, i as u32));
+                    plan.signage = Some(buildings::signage(seed, i as u32, &grammar.signs));
                 }
                 (env, plan)
             })
@@ -515,15 +517,20 @@ impl ChunkPlan {
 
 /// Builds all meshes of `place`, grouped by chunk and [`MeshKind`], sorted by kind then
 /// chunk.
-pub fn build_chunk_meshes(place: &Place, palette: &Palette) -> Vec<ChunkMesh> {
-    build_with_stats(place, palette).0
+pub fn build_chunk_meshes(place: &Place, palette: &Palette, grammar: &Grammar) -> Vec<ChunkMesh> {
+    build_with_stats(place, palette, grammar).0
 }
 
 /// The meshes of one chunk, sorted by kind: exactly the ones [`build_chunk_meshes`] gives
 /// for it. To build many chunks, make one [`ChunkPlan`] and use
 /// [`ChunkPlan::build_stage`].
-pub fn build_chunk(place: &Place, palette: &Palette, chunk: [i32; 2]) -> Vec<ChunkMesh> {
-    let plan = ChunkPlan::new(place, palette);
+pub fn build_chunk(
+    place: &Place,
+    palette: &Palette,
+    grammar: &Grammar,
+    chunk: [i32; 2],
+) -> Vec<ChunkMesh> {
+    let plan = ChunkPlan::new(place, palette, grammar);
     let mut out = MeshSet::new(plan.chunk_size, Keep::Chunk(chunk));
     for stage in Stage::ALL {
         plan.run(place, palette, stage, &mut out, None);
@@ -532,8 +539,12 @@ pub fn build_chunk(place: &Place, palette: &Palette, chunk: [i32; 2]) -> Vec<Chu
 }
 
 /// [`build_chunk_meshes`] plus totals.
-pub fn build_with_stats(place: &Place, palette: &Palette) -> (Vec<ChunkMesh>, BuildStats) {
-    let plan = ChunkPlan::new(place, palette);
+pub fn build_with_stats(
+    place: &Place,
+    palette: &Palette,
+    grammar: &Grammar,
+) -> (Vec<ChunkMesh>, BuildStats) {
+    let plan = ChunkPlan::new(place, palette, grammar);
     let mut out = MeshSet::new(plan.chunk_size, Keep::All);
     let mut stats = BuildStats::default();
     for stage in Stage::ALL {
@@ -772,8 +783,9 @@ mod tests {
     fn test_town_is_deterministic_and_within_budgets() {
         let place = Place::test_grid();
         let pal = Palette::socal_1985();
+        let g = grammar::coast_80s();
         let t0 = Instant::now();
-        let (meshes, stats) = build_with_stats(&place, &pal);
+        let (meshes, stats) = build_with_stats(&place, &pal, &g);
         let elapsed = t0.elapsed();
         std::println!(
             "world: {} triangles ({:?} by kind), {} vertices, {} meshes, {} buildings (max {} tris), {} windows ({} lit), {} props in {:.1} ms",
@@ -800,7 +812,7 @@ mod tests {
         assert!(stats.max_building_triangles <= buildings::BUILDING_TRIANGLE_BUDGET);
         let lit = stats.lit_windows as f32 / stats.windows as f32;
         assert!((0.3..0.5).contains(&lit), "{lit}");
-        let again = build_chunk_meshes(&place, &pal);
+        let again = build_chunk_meshes(&place, &pal, &g);
         assert_eq!(mesh_hash(&meshes), mesh_hash(&again));
         // Pinned fingerprint: change deliberately, in its own commit, with the reason.
         assert_eq!(
@@ -814,7 +826,7 @@ mod tests {
         other.header.seed = 2;
         assert_ne!(
             mesh_hash(&meshes),
-            mesh_hash(&build_chunk_meshes(&other, &pal))
+            mesh_hash(&build_chunk_meshes(&other, &pal, &g))
         );
     }
 
@@ -824,8 +836,9 @@ mod tests {
     fn a_chunk_build_is_the_slice_of_the_whole_build() {
         let place = Place::test_grid();
         let pal = Palette::socal_1985();
-        let all = build_chunk_meshes(&place, &pal);
-        let plan = ChunkPlan::new(&place, &pal);
+        let g = grammar::coast_80s();
+        let all = build_chunk_meshes(&place, &pal, &g);
+        let plan = ChunkPlan::new(&place, &pal, &g);
         let [lo, hi] = plan.chunk_range();
         let mut chunks: Vec<[i32; 2]> = all.iter().map(|c| c.chunk).collect();
         chunks.sort_unstable();
@@ -865,7 +878,7 @@ mod tests {
         );
         assert_eq!(total, all.len());
         let c = chunks[chunks.len() / 2];
-        let one = build_chunk(&place, &pal, c);
+        let one = build_chunk(&place, &pal, &g, c);
         let slice: Vec<ChunkMesh> = all.iter().filter(|m| m.chunk == c).cloned().collect();
         assert_eq!(one, slice);
     }
@@ -876,7 +889,8 @@ mod tests {
     fn a_stage_in_pieces_is_the_stage() {
         let place = Place::test_grid();
         let pal = Palette::socal_1985();
-        let plan = ChunkPlan::new(&place, &pal);
+        let g = grammar::coast_80s();
+        let plan = ChunkPlan::new(&place, &pal, &g);
         for chunk in [[0, 0], [-1, 1], [0, -2], [2, 1]] {
             for stage in Stage::ALL {
                 let whole = plan.build_stage(&place, &pal, chunk, stage);
@@ -918,7 +932,7 @@ mod tests {
     #[test]
     fn meshes_are_well_formed() {
         let place = Place::test_grid();
-        let meshes = build_chunk_meshes(&place, &Palette::socal_1985());
+        let meshes = build_chunk_meshes(&place, &Palette::socal_1985(), &grammar::coast_80s());
         for c in &meshes {
             let m = &c.mesh;
             assert_eq!(m.indices.len() % 3, 0);

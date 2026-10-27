@@ -25,6 +25,7 @@ use alloc::vec::Vec;
 use place::{Building, BuildingUse, Roof, StyleTag};
 use skywave_core::{Rng, Seed};
 
+use crate::grammar::{Grammar, SignRules, StyleRules};
 use crate::math::{abs, clamp, floor, offset_polygon, V2, V3};
 use crate::mesh::{
     boxf, face, frustum, lathe, polygon_cap, quad, rect, ring_band, tri, Frame, Glow, Paint,
@@ -123,6 +124,8 @@ pub struct BuildingPlan {
     pub tower: Option<Box<TowerPlan>>,
     /// What the detailing adds to the street front; `None` keeps the plain look.
     pub signage: Option<Signage>,
+    /// The grammar's rules for the building's style, which the builders read too.
+    pub rules: StyleRules,
 }
 
 /// What a terrain place's detailing adds to a building's street front.
@@ -143,18 +146,15 @@ pub struct Signage {
 
 /// Rng key for signage.
 const KEY_SIGNAGE: u64 = 0x5349_474E;
-/// Share of shops (out of 256) open late, and of signs that are backlit boxes.
-const SHOP_LIT_256: u64 = 115;
-const LIT_BOX_256: u64 = 70;
 
 /// The signage of building `index` of a place with detail seed `seed`.
-pub fn signage(seed: u64, index: u32) -> Signage {
+pub fn signage(seed: u64, index: u32, rules: &SignRules) -> Signage {
     let h = skywave_core::hash64(seed, &[KEY_SIGNAGE, u64::from(index)]);
     Signage {
         name_seed: h,
-        awning: ((h >> 8) % 4) as u8,
-        lit_box: (h >> 16) & 255 < LIT_BOX_256,
-        shop_lit: (h >> 24) & 255 < SHOP_LIT_256,
+        awning: rules.awning(h >> 8) as u8,
+        lit_box: (h >> 16) & 255 < u64::from(rules.lit_box_256),
+        shop_lit: (h >> 24) & 255 < u64::from(rules.shop_lit_256),
     }
 }
 
@@ -181,9 +181,9 @@ impl BuildingPlan {
     /// Sill height of the windows on floor `k`.
     fn sill(&self, k: usize) -> f32 {
         if k == 0 {
-            self.plinth_top + 0.65
+            self.plinth_top + self.rules.body.sill_ground
         } else {
-            self.floor_y[k] + 0.9
+            self.floor_y[k] + self.rules.body.sill_upper
         }
     }
 }
@@ -201,33 +201,38 @@ pub fn is_pitched(b: &Building) -> bool {
     b.roof != Roof::Flat && b.footprint.len() == 4
 }
 
-fn parapet(b: &Building) -> f32 {
+fn parapet(b: &Building, rules: &StyleRules) -> f32 {
     if is_pitched(b) {
         return 0.0;
     }
-    match (b.style, b.usage) {
-        (StyleTag::StuccoBox, BuildingUse::Residential) => 0.5,
-        (StyleTag::StuccoBox, _) => 0.8,
-        (StyleTag::StripMall, _) => 1.8,
-        // Brick, Deco and the rest.
-        _ => 1.0,
-    }
+    rules.top.parapet_h.of(b.usage)
 }
 
-/// Decides floors, the window grid of every facade, and the storefront and door.
-/// `door_pick` chooses the door bay on houses (any number; it is reduced modulo the bays).
+/// Decides floors, the window grid of every facade, and the storefront and door, by the
+/// grammar's rules for the building's style. `door_pick` chooses the door bay on houses (any number; it is reduced modulo the bays).
 /// Brick, Deco and stucco towers of [`STEP_BACK_MIN_FLOORS`] or more step back above
 /// [`STEP_BACK_FLOORS`]: the plan is the base's, with the tower's in
 /// [`BuildingPlan::tower`].
-pub fn plan_building(b: &Building, env: &[FacadeEnv], door_pick: u32) -> BuildingPlan {
-    if let Some(split) = step_back(b, env, door_pick) {
+pub fn plan_building(
+    b: &Building,
+    env: &[FacadeEnv],
+    door_pick: u32,
+    grammar: &Grammar,
+) -> BuildingPlan {
+    let rules = grammar.style(b.style);
+    if let Some(split) = step_back(b, env, door_pick, rules) {
         return split;
     }
-    plan_one(b, env, door_pick, BUILDING_TRIANGLE_BUDGET)
+    plan_one(b, env, door_pick, BUILDING_TRIANGLE_BUDGET, rules)
 }
 
 /// The base and tower of a building that steps back, if it does.
-fn step_back(b: &Building, env: &[FacadeEnv], door_pick: u32) -> Option<BuildingPlan> {
+fn step_back(
+    b: &Building,
+    env: &[FacadeEnv],
+    door_pick: u32,
+    rules: &StyleRules,
+) -> Option<BuildingPlan> {
     let stepped = matches!(
         b.style,
         StyleTag::Deco | StyleTag::Brick | StyleTag::StuccoBox
@@ -244,7 +249,7 @@ fn step_back(b: &Building, env: &[FacadeEnv], door_pick: u32) -> Option<Building
     if short - 2.0 * inset < 8.0 {
         return None;
     }
-    let full = plan_one(b, env, door_pick, BUILDING_TRIANGLE_BUDGET);
+    let full = plan_one(b, env, door_pick, BUILDING_TRIANGLE_BUDGET, rules);
     let k = usize::from(STEP_BACK_FLOORS);
     let base_roof = full.floor_y[k];
     let base_b = Building {
@@ -252,7 +257,7 @@ fn step_back(b: &Building, env: &[FacadeEnv], door_pick: u32) -> Option<Building
         floors: STEP_BACK_FLOORS,
         ..b.clone()
     };
-    let mut base = plan_one(&base_b, env, door_pick, BASE_BUDGET);
+    let mut base = plan_one(&base_b, env, door_pick, BASE_BUDGET, rules);
     let tower_fp = offset_polygon(&fp, |_| -inset);
     let tower_b = Building {
         footprint: tower_fp.iter().map(|p| [p.x, p.y]).collect(),
@@ -273,7 +278,7 @@ fn step_back(b: &Building, env: &[FacadeEnv], door_pick: u32) -> Option<Building
     // Both estimates count the generous fixed share; one is enough for the pair.
     let used = estimate(&base_b, &base.facades, base.floors());
     let budget = (BUILDING_TRIANGLE_BUDGET + TRIS_FIXED / 2).saturating_sub(used);
-    let mut plan = plan_one(&tower_b, &tower_env, door_pick, budget);
+    let mut plan = plan_one(&tower_b, &tower_env, door_pick, budget, rules);
     // The tower has no entrance of its own.
     for f in &mut plan.facades {
         f.door = None;
@@ -334,27 +339,31 @@ fn faces_court(fp: &[V2], i: usize) -> bool {
 }
 
 /// [`plan_building`] for one block of walls within `budget` triangles.
-fn plan_one(b: &Building, env: &[FacadeEnv], door_pick: u32, budget: usize) -> BuildingPlan {
+fn plan_one(
+    b: &Building,
+    env: &[FacadeEnv],
+    door_pick: u32,
+    budget: usize,
+    rules: &StyleRules,
+) -> BuildingPlan {
     let fp = &b.footprint;
     let n = fp.len();
     let floors = usize::from(b.floors.clamp(1, 40));
     let residential = b.usage == BuildingUse::Residential;
-    let even = residential || b.style == StyleTag::Motel;
+    let mass = &rules.massing;
+    let even = mass.even_floors.of(b.usage);
     let top = b.height_m;
-    let roof_y = top - parapet(b).min(top * 0.3);
-    let plinth = match (residential, b.style) {
-        (true, _) => 0.12,
-        (_, StyleTag::StripMall) => 0.25,
-        _ => 0.45,
-    };
-    let plinth_top = LOT_Y + plinth;
+    let roof_y = top - parapet(b, rules).min(top * 0.3);
+    let plinth_top = LOT_Y + rules.base.plinth_h.of(b.usage);
     let span = roof_y - LOT_Y;
     let (ground_h, upper_h) = if even {
         (span / floors as f32, span / floors as f32)
     } else if floors == 1 {
         (span, span)
     } else {
-        let g = clamp(span - (floors - 1) as f32 * 3.3, 3.8, 4.8).min(span * 0.6);
+        let (lo, hi) = mass.ground_floor_h;
+        let g = clamp(span - (floors - 1) as f32 * mass.floor_h, lo, hi)
+            .min(span * mass.ground_share_max);
         (g, (span - g) / (floors - 1) as f32)
     };
     let mut floor_y = Vec::with_capacity(floors + 1);
@@ -364,23 +373,11 @@ fn plan_one(b: &Building, env: &[FacadeEnv], door_pick: u32, budget: usize) -> B
     }
     floor_y[floors] = roof_y;
 
-    let bay = match (b.usage, b.style) {
-        (_, StyleTag::Motel) => 3.8,
-        (_, StyleTag::Glass) => 4.5,
-        (_, StyleTag::Warehouse) => 6.0,
-        (BuildingUse::Residential, _) => 3.6,
-        (_, StyleTag::Brick) => 2.7,
-        (BuildingUse::Office, _) => 2.8,
-        _ => 3.0,
-    };
-    let (window_w, window_h) = match (residential, b.style) {
-        (true, StyleTag::Ranch) => (1.9, (upper_h - 1.35).min(1.2)),
-        (true, _) => (1.3, (upper_h - 1.35).min(1.3)),
-        (false, StyleTag::Brick) => (1.1, (upper_h - 1.3).min(1.8)),
-        (false, StyleTag::Deco) => (bay * 0.62, (upper_h - 1.45).min(1.5)),
-        _ => (clamp(bay * 0.5, 0.9, 1.6), (upper_h - 1.3).min(1.7)),
-    };
-    let (door_w, door_h) = if residential { (1.0, 2.2) } else { (2.0, 2.6) };
+    let bay = rules.base.bay_w.of(b.usage);
+    let win = rules.body.window.of(b.usage);
+    let window_w = clamp(bay * win.w_share, win.w.0, win.w.1);
+    let window_h = (upper_h - win.head).min(win.h_max);
+    let (door_w, door_h) = rules.base.door.of(b.usage);
 
     let len = |i: usize| (V2::from_array(fp[(i + 1) % n]) - V2::from_array(fp[i])).length();
     // The frontage: the open facade facing the parcel's frontage road, else the one closest
@@ -516,11 +513,12 @@ fn plan_one(b: &Building, env: &[FacadeEnv], door_pick: u32, budget: usize) -> B
         facades,
         frontage,
         window_w,
-        window_h: window_h.max(0.6),
+        window_h: window_h.max(rules.body.window_h_min),
         door_w,
         door_h,
         tower: None,
         signage: None,
+        rules: *rules,
     }
 }
 
@@ -2622,12 +2620,15 @@ fn roof_clutter(
             rng.range_f32(lo.y + mz, hi.y - mz),
         )
     };
-    let residential = b.usage == BuildingUse::Residential;
-    let vents = if residential {
-        rng.range(1, 3)
-    } else {
-        rng.range(2, 5)
+    let add = &plan.rules.addenda;
+    let draw = |rng: &mut Rng, (lo, hi): (u8, u8)| {
+        if hi == 0 {
+            0
+        } else {
+            rng.range(u32::from(lo), u32::from(hi) + 1)
+        }
     };
+    let vents = draw(rng, add.roof_vents.of(b.usage));
     for _ in 0..vents {
         let p = spot(rng, 1.0);
         let f = Frame::at(p.at(y));
@@ -2644,33 +2645,31 @@ fn roof_clutter(
             frustum(m, &f, 0.12, 0.12, 0.6, 6, true, false, dark);
         }
     }
-    if !residential {
-        let units = rng.range(1, 3);
-        for _ in 0..units {
-            let p = spot(rng, 2.0);
-            let f = Frame::at(p.at(y));
-            boxf(
-                m,
-                &f,
-                [-0.65, 0.0, -0.5],
-                [0.65, 1.0, 0.5],
-                face::NO_BOTTOM,
-                metal,
-            );
-            frustum(
-                m,
-                &f.offset(0.0, 1.0, 0.0),
-                0.4,
-                0.4,
-                0.02,
-                8,
-                true,
-                false,
-                dark,
-            );
-        }
+    let units = draw(rng, add.roof_units.of(b.usage));
+    for _ in 0..units {
+        let p = spot(rng, 2.0);
+        let f = Frame::at(p.at(y));
+        boxf(
+            m,
+            &f,
+            [-0.65, 0.0, -0.5],
+            [0.65, 1.0, 0.5],
+            face::NO_BOTTOM,
+            metal,
+        );
+        frustum(
+            m,
+            &f.offset(0.0, 1.0, 0.0),
+            0.4,
+            0.4,
+            0.02,
+            8,
+            true,
+            false,
+            dark,
+        );
     }
-    if plan.floors() >= 4 {
+    if plan.floors() >= usize::from(add.bulkhead_floors) {
         let p = spot(rng, 3.0);
         boxf(
             m,
@@ -2680,7 +2679,7 @@ fn roof_clutter(
             face::NO_BOTTOM,
             look.parapet_in,
         );
-        if rng.range(0, 2) == 0 && size.x > 9.0 && size.y > 9.0 {
+        if rng.range(0, add.water_tank_1_in) == 0 && size.x > 9.0 && size.y > 9.0 {
             water_tank(m, spot(rng, 3.5).at(y), pal);
         }
     }
@@ -2984,7 +2983,7 @@ mod tests {
     #[test]
     fn window_insets_match_the_floor_grid() {
         let b = house(2);
-        let plan = plan_building(&b, &env(4), 1);
+        let plan = plan_building(&b, &env(4), 1, &crate::grammar::coast_80s());
         // The 12 m street front gets 3 bays of 3.6 m; the sides and back, with no road
         // within 30 m, get 1.5x wider bays: 1 on the 9 m sides, 2 on the 12 m back.
         let cols: Vec<u32> = plan.facades.iter().map(|f| f.columns).collect();
@@ -3016,7 +3015,7 @@ mod tests {
         b.usage = BuildingUse::Commercial;
         b.style = StyleTag::Brick;
         b.height_m = 3.0 * 3.7 + 1.4;
-        let plan = plan_building(&b, &env(4), 0);
+        let plan = plan_building(&b, &env(4), 0, &crate::grammar::coast_80s());
         let front = plan.facades[plan.frontage];
         assert!(front.storefront);
         assert_eq!(front.window_rows, 2);
@@ -3040,7 +3039,7 @@ mod tests {
             built_year: None,
             usage: BuildingUse::Office,
         };
-        let plan = plan_building(&b, &env(4), 0);
+        let plan = plan_building(&b, &env(4), 0, &crate::grammar::coast_80s());
         let mut m = WorldMesh::default();
         let stats = build(&mut m, &b, &plan, &Palette::socal_1985(), 5, 2);
         assert_eq!(stats.windows, plan.windows());
@@ -3082,7 +3081,7 @@ mod tests {
                 built_year: None,
                 usage,
             };
-            let plan = plan_building(&b, &env(4), 3);
+            let plan = plan_building(&b, &env(4), 3, &crate::grammar::coast_80s());
             let mut m = WorldMesh::default();
             let stats = build(&mut m, &b, &plan, &Palette::socal_1985(), 5, 9);
             assert_eq!(stats.windows, plan.windows(), "{style:?}");
@@ -3105,7 +3104,7 @@ mod tests {
             built_year: None,
             usage: BuildingUse::Office,
         };
-        let plan = plan_building(&tall, &env(4), 0);
+        let plan = plan_building(&tall, &env(4), 0, &crate::grammar::coast_80s());
         let t = plan.tower.as_ref().expect("a tower");
         assert_eq!(plan.floors() + t.plan.floors(), 12);
     }
@@ -3115,7 +3114,7 @@ mod tests {
         let b = house(1);
         let mut e = env(4);
         e[0].blocked = true;
-        let plan = plan_building(&b, &e, 0);
+        let plan = plan_building(&b, &e, 0, &crate::grammar::coast_80s());
         assert_eq!(plan.facades[0].columns, 0);
         assert_eq!(plan.facades[0].windows(), 0);
     }
