@@ -86,6 +86,9 @@ const SPIN_DECEL: f32 = 3.0;
 /// neighbouring lane's cars (lanes 3.3 m apart and more)...
 pub const SHOVE_SIDE_M: f32 = 0.5;
 pub const SHOVE_YAW: f32 = 0.12;
+/// ...nor further than this along it (m): a car pushed back from a stop line and turning
+/// would otherwise swing a long offset out over the corner.
+pub const SHOVE_ALONG_M: f32 = 1.5;
 /// The room [`Traffic::shove`] takes where the road has room for every shove: right, left
 /// (m) and the turn (rad).
 pub const FREE_ROOM: [f32; 3] = [SHOVE_SIDE_M, SHOVE_SIDE_M, SHOVE_YAW];
@@ -1864,6 +1867,16 @@ impl Traffic {
         }
     }
 
+    /// Car `i`'s room off its path, as [`Traffic::shove`] takes it: the caller measures it
+    /// again while a shoved car drives on (the road beside it changes, through a turn most).
+    pub fn set_room(&mut self, i: usize, room: [f32; 3]) {
+        self.cars[i].room = [
+            room[0].clamp(0.0, SHOVE_SIDE_M),
+            room[1].clamp(0.0, SHOVE_SIDE_M),
+            room[2].clamp(0.0, SHOVE_YAW),
+        ];
+    }
+
     /// A hash of every car, bit for bit, in pool order.
     pub fn hash(&self) -> u64 {
         let f = |x: f32| u64::from(x.to_bits());
@@ -1883,7 +1896,12 @@ impl Traffic {
             h = hash64(h, &w);
             // Only a car the player has hit has these, so traffic never hit hashes as
             // before they existed.
-            if c.hold > 0 || c.shove != [0.0; 2] || c.yaw != 0.0 || c.slide != [0.0; 2] {
+            if c.hold > 0
+                || c.shove != [0.0; 2]
+                || c.yaw != 0.0
+                || c.slide != [0.0; 2]
+                || c.spin != 0.0
+            {
                 let w = [
                     f(c.shove[0]) | f(c.shove[1]) << 32,
                     f(c.slide[0]) | f(c.slide[1]) << 32,
@@ -1917,6 +1935,15 @@ fn unshove(c: &mut Car, ds: f32) {
         let out = dot(c.slide, side);
         if out * lat > 0.0 {
             c.slide = [c.slide[0] - side[0] * out, c.slide[1] - side[1] * out];
+        }
+    }
+    let along = dot(c.shove, path);
+    if along.abs() > SHOVE_ALONG_M {
+        let over = along - SHOVE_ALONG_M * along.signum();
+        c.shove = [c.shove[0] - path[0] * over, c.shove[1] - path[1] * over];
+        let out = dot(c.slide, path);
+        if out * along > 0.0 {
+            c.slide = [c.slide[0] - path[0] * out, c.slide[1] - path[1] * out];
         }
     }
     if c.yaw.abs() > c.room[2] {

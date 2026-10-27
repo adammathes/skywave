@@ -394,6 +394,16 @@ impl Npcs {
         spec: &vehicle::VehicleSpec,
         ground: &drive::DriveGround,
     ) -> Option<world::Bump> {
+        // A shoved car driving on is measured again: the road beside it changes, and in a
+        // turn what was behind it swings out to its side.
+        for i in 0..self.traffic.cars().len() {
+            let c = self.traffic.cars()[i];
+            if c.speed > 0.0 && (c.shove != [0.0; 2] || c.yaw != 0.0) {
+                if let Some(room) = road_room(ground, &c, &self.bodies[usize::from(c.shape)]) {
+                    self.traffic.set_room(i, room);
+                }
+            }
+        }
         let [len, wid, _] = spec.dims_m;
         let reach = 0.5 * (len + wid) + 4.0;
         let mut hardest: Option<world::Bump> = None;
@@ -420,7 +430,7 @@ impl Npcs {
                 // off it from the last hit keeps that hit's room.
                 let fresh = c.shove == [0.0; 2] && c.yaw == 0.0 && c.slide == [0.0; 2];
                 let room = if fresh {
-                    road_room(ground, &c, &b)
+                    road_room(ground, &c, &b).unwrap_or([0.0; 3])
                 } else {
                     c.room
                 };
@@ -701,9 +711,10 @@ const ROAD_LEVEL_M: f32 = 0.08;
 
 /// How far car `c` (body `b`) may be shoved off its path to its right and left, m, and
 /// turned, rad, with every corner of its body still on the roadway (asphalt, level with
-/// the road beside its path): at most traffic's caps, nothing where even its unshoved body
-/// is not (near a junction, where lanes and drawn roads part a little).
-pub fn road_room(ground: &drive::DriveGround, c: &traffic::Car, b: &CarBody) -> [f32; 3] {
+/// the road beside its path): at most traffic's caps; `None` where even its unshoved body
+/// is not on the roadway (near a junction, where lanes and drawn roads part a little, and
+/// on a few tight turns that cut over a curb return).
+pub fn road_room(ground: &drive::DriveGround, c: &traffic::Car, b: &CarBody) -> Option<[f32; 3]> {
     use traffic::cars::{SHOVE_SIDE_M, SHOVE_YAW};
     // Its place on the path: the drawn car less the shove and the turn.
     let (sn, cs) = traffic::math::sin_cos(c.yaw);
@@ -732,12 +743,13 @@ pub fn road_room(ground: &drive::DriveGround, c: &traffic::Car, b: &CarBody) -> 
                 surface == world::collide::Surface::Asphalt && (yq - yl).abs() < ROAD_LEVEL_M
             })
     };
-    let Some(yaw) = [SHOVE_YAW, 0.5 * SHOVE_YAW, 0.0]
+    if !on_road(0.0, 0.0) {
+        return None;
+    }
+    let yaw = [SHOVE_YAW, 0.5 * SHOVE_YAW]
         .into_iter()
         .find(|&t| on_road(0.0, t) && on_road(0.0, -t))
-    else {
-        return [0.0; 3];
-    };
+        .unwrap_or(0.0);
     let mut room = [0.0f32; 2];
     for (k, sign) in [1.0f32, -1.0].into_iter().enumerate() {
         for n in 1..=(SHOVE_SIDE_M / ROOM_STEP_M).round() as u32 {
@@ -748,7 +760,7 @@ pub fn road_room(ground: &drive::DriveGround, c: &traffic::Car, b: &CarBody) -> 
             room[k] = off;
         }
     }
-    [room[0], room[1], yaw]
+    Some([room[0], room[1], yaw])
 }
 
 /// Ticks after which every signal of `graph` shows what it showed: the least common

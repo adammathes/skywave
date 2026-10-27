@@ -1294,9 +1294,13 @@ fn car_run(
     run
 }
 
-/// Head-on with each car at 15, 30 and 50 km/h: both stop, never overlapping, and neither
-/// is thrown back: the oncoming car's approach is stopped before any push away is capped,
-/// so the player's car is not left to take the whole exchange.
+/// Head-on with each car at 15, 30 and 50 km/h against a 1300 kg NPC car: both stop, never
+/// overlapping, and neither is thrown back: the oncoming car's approach is stopped before
+/// any push away is capped, so the player's car is not left to take the whole exchange.
+/// That holds while the NPC car weighs no more than the player's: against a heavier one
+/// the player's car still takes its share of the momentum and is thrown back (a 1250 kg
+/// car by a 1900 kg one at 1.1-1.6 m/s; a 900 kg car up to 4.2 m/s, about 60% of what
+/// the full exchange would give).
 #[test]
 fn head_ons_stop_both_and_throw_nobody_back() {
     for spec in cars() {

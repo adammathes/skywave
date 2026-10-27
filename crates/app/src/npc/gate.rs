@@ -752,6 +752,115 @@ fn rams_never_push_an_npc_onto_the_sidewalk() {
     assert_eq!(inside, 0);
 }
 
+/// A car waiting at a stop sign on a lane that can only turn is nosed into from the front
+/// ten times at 8 m/s, then let go: it is pushed back at most 1.5 m along its path and
+/// 0.5 m to the side, and as it turns (what was behind it swinging out) its body is never
+/// over a curb anywhere its unshoved body is not.
+#[test]
+fn a_car_pushed_back_from_a_stop_line_turns_without_mounting_the_curb() {
+    let c = coast();
+    let g = &c.lanes;
+    // Stop lanes whose every way out is a turn (none straight on) onto a lane with room for
+    // the car, longest first.
+    let mut lanes: Vec<u32> = (0..g.lanes.len() as u32)
+        .filter(|&l| {
+            let lane = &g.lanes[l as usize];
+            lane.control == Control::Stop
+                && lane.length_m > 50.0
+                && !g.next(l).is_empty()
+                && g.next(l).iter().all(|t| {
+                    t.kind != traffic::TurnKind::Straight && g.lanes[t.to as usize].length_m > 30.0
+                })
+        })
+        .collect();
+    lanes.sort_by(|a, b| {
+        g.lanes[*b as usize]
+            .length_m
+            .total_cmp(&g.lanes[*a as usize].length_m)
+    });
+    let lane = *lanes.first().expect("a stop lane that must turn");
+    let len = g.lanes[lane as usize].length_m;
+    let wait = g.pose(lane, len - 30.0);
+    let mut app = app_at(wait.pos, wait.heading, "t=12:00&traffic=busy");
+    let graph = app.npcs.graph.clone();
+    let id = app
+        .npcs
+        .traffic
+        .spawn_at(&graph, lane, len - 1.0, 0.0)
+        .expect("room in the pool");
+    let spec = app.drive.spec.clone();
+    let hold = follow(&app, wait.pos, wait.dir, 0.0);
+    let (mut rams, mut curb, mut widest, mut back) = (0, 0, 0.0f32, 0.0f32);
+    let mut turned = false;
+    for k in 0..25 * 120 {
+        let Some(i) = app.npcs.cars().iter().position(|c| c.id == id) else {
+            break;
+        };
+        let car = app.npcs.cars()[i];
+        if k < 10 * 60 && k % 60 == 0 {
+            // Nose to nose, closing at 8 m/s.
+            let b = app.npcs.body(&car);
+            let mid = [
+                car.pos[0] - car.dir[0] * b.back,
+                car.pos[2] - car.dir[1] * b.back,
+            ];
+            let ahead = b.half[0] + 0.5 * spec.dims_m[0] - 0.03;
+            let at = [
+                mid[0] + car.dir[0] * ahead,
+                car.pos[1],
+                mid[1] + car.dir[1] * ahead,
+            ];
+            let mut ram =
+                vehicle::VehicleState::spawn(&spec, at, car.heading + core::f32::consts::PI);
+            ram.vel = [-car.dir[0] * 8.0, 0.0, -car.dir[1] * 8.0];
+            if app.npcs.collide(&mut ram, &spec, &app.ground).is_some() {
+                rams += 1;
+            }
+        }
+        step(&mut app, &hold);
+        let Some(car) = app.npcs.cars().iter().find(|c| c.id == id).copied() else {
+            break;
+        };
+        turned |= car.seg >= g.lanes.len() as u32;
+        if car.shove != [0.0; 2] || car.yaw != 0.0 {
+            let (sn, cs) = car.yaw.sin_cos();
+            let d = [
+                car.dir[0] * cs - car.dir[1] * sn,
+                car.dir[1] * cs + car.dir[0] * sn,
+            ];
+            back = back.max(-dot(car.shove, d));
+            widest = widest.max(dot(car.shove, right(d)).abs());
+            let b = app.npcs.body(&car);
+            let unshoved = traffic::Car {
+                pos: [
+                    car.pos[0] - car.shove[0],
+                    car.pos[1],
+                    car.pos[2] - car.shove[1],
+                ],
+                dir: d,
+                shove: [0.0; 2],
+                yaw: 0.0,
+                ..car
+            };
+            if !body_on_road(&app, &car, &b) && body_on_road(&app, &unshoved, &b) {
+                curb += 1;
+            }
+        }
+    }
+    eprintln!(
+        "pushed back from a stop line: lane {lane}, {rams} rams, back at most {back:.2} m, \
+         {widest:.2} m to the side, turned {turned}, {curb} steps over a curb"
+    );
+    assert_eq!(rams, 10);
+    assert!(turned, "never turned");
+    assert!(back <= traffic::cars::SHOVE_ALONG_M + 1e-3, "{back} m back");
+    assert!(
+        widest <= traffic::cars::SHOVE_SIDE_M + 1e-3,
+        "{widest} m aside"
+    );
+    assert_eq!(curb, 0);
+}
+
 /// On the coast at seed 1, every 5 m of every lane 15 m clear of its ends, the largest
 /// traffic body standing on its lane: wherever it stands on the roadway, it still does
 /// shoved as far as the measured room allows to either side and turned either way as far
@@ -796,7 +905,7 @@ fn the_measured_room_keeps_every_shove_on_the_roadway() {
                 continue;
             }
             road += 1;
-            let room = super::road_room(&app.ground, &car, &b);
+            let room = super::road_room(&app.ground, &car, &b).unwrap_or([0.0; 3]);
             full += usize::from(room == traffic::cars::FREE_ROOM);
             none += usize::from(room[0] == 0.0 && room[1] == 0.0);
             let side = right(p.dir);
