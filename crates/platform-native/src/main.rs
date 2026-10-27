@@ -1643,7 +1643,7 @@ mod tests {
     /// coast (release, 8 frames, busy): Medium 694 draws at most, 312 in the median frame,
     /// 197k forward and 1078k shadow triangles; Deck 598, 294, 197k, 687k.
     const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
-                            &pos=737.1,464.8&yaw=-19.6";
+                            &pos=747.7,493.9&yaw=-20.5";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
     /// draws in the worst frame and in the median frame after the first, forward and shadow
@@ -1879,7 +1879,7 @@ mod tests {
             ("coast-strip-golden", "cam=chase-far&t=17:40"),
             (
                 "coast-traffic-noon",
-                "cam=chase-mid&t=12:00&pos=737.1,464.8&yaw=-19.6&traffic=busy&phase=1440",
+                "cam=chase-mid&t=12:00&pos=747.7,493.9&yaw=-20.5&traffic=busy&phase=1440",
             ),
             ("coast-night-golden", "cam=chase-near&t=22:30&lights=1"),
         ];
