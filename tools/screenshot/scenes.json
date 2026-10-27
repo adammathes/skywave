@@ -28,7 +28,7 @@
     "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-far", "t": "17:40", "still": "1", "stream": "1" }
   },
   "coast-traffic-noon": {
-    "about": "Busy NPC traffic at a signalized strip junction on the coast at noon, from the mid chase camera waiting at the stop line (traffic warmed up 20 s before the frame).",
+    "about": "Busy NPC traffic at a signalized strip junction on the coast at noon, from the mid chase camera waiting at the stop line, and the busy pedestrians that come with it: a few people on the walks toward the beach (traffic warmed up 20 s before the frame, people 60 s).",
     "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-mid", "t": "12:00", "pos": "477.5,1001.2", "yaw": "347", "traffic": "busy", "still": "1", "stream": "1" }
   },
   "coast-peds-noon": {
