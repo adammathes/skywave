@@ -16,6 +16,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Radio off | button | \ | D-pad down |
 | Headlights | button | L | D-pad up |
 | Horn | button | H | Left stick click |
+| Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
 | Map toggle | button | M | Back / Share |
 | Map zoom (full map) | axis −1..1 | − / = (and the mouse wheel) | L1 / R1 |
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
@@ -27,6 +28,14 @@ While the full map is open the sim keeps running, but the car gets no driving in
 directions (arrows, d-pad, left stick) pan the map, Map zoom and the wheel zoom it, and Map toggle, Back or
 Pause close it (Pause does not open the menu over it). The wheel is read raw as notches per frame
 (`InputState::wheel`), one notch a fixed zoom step whatever the frame time.
+
+`VehicleNext` swaps in the next built-in car (wrapping after the last) where the car is: same spot and
+heading, at rest unless it was rolling under 5 m/s, odometer from zero, camera and headlights kept; the new
+car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the car the next session starts in
+unless the scene names one (`car=`). It is unbound on the pad by default: the pad path is the pause menu's
+Vehicle page (Resume · Vehicle › · Settings ›), one row per built-in car with its class, power to weight,
+driven wheels and gearbox, the car being driven marked and focused; selecting one swaps it in the same way and
+closes the menu.
 
 ## Per-axis options (mandatory, every analog action)
 `invert` (Y invert on look is the canonical case and must work on gamepad and mouse), `sensitivity` (0.25–4×), `deadzone` (0–0.3), `curve` (1.0 linear to 2.5), `swap` presets (triggers↔stick for throttle/brake, left↔right sticks, southpaw). Stored per device kind (keyboard/mouse vs gamepad). A reset-to-default per action and per device.

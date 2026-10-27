@@ -42,6 +42,8 @@ pub enum Action {
     RadioOff,
     Headlights,
     Horn,
+    /// Swap to the next built-in vehicle, in place.
+    VehicleNext,
     MapToggle,
     /// Full map zoom out (-) / in (+), `[-1, 1]`.
     MapZoom,
@@ -80,7 +82,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 33;
+    pub const COUNT: usize = 34;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -95,6 +97,7 @@ impl Action {
         Action::RadioOff,
         Action::Headlights,
         Action::Horn,
+        Action::VehicleNext,
         Action::MapToggle,
         Action::MapZoom,
         Action::TimeScrub,
@@ -202,6 +205,7 @@ impl Action {
             Action::RadioOff => "RadioOff",
             Action::Headlights => "Headlights",
             Action::Horn => "Horn",
+            Action::VehicleNext => "VehicleNext",
             Action::MapToggle => "MapToggle",
             Action::MapZoom => "MapZoom",
             Action::TimeScrub => "TimeScrub",

@@ -84,6 +84,11 @@ impl Sound {
         }
     }
 
+    /// The player switched to the car `drive` drives: its engine's voice from now on.
+    pub fn set_car(&mut self, drive: &Drive) {
+        self.profile = EngineProfile::from_name(&drive.spec.feel.engine_sound);
+    }
+
     /// After every sim step: counts a new wall hit and a new curb kick.
     pub fn note_step(&mut self, impact: &world::Impact) {
         let contact = impact.contact && impact.speed >= HIT_MIN_MPS;

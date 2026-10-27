@@ -169,6 +169,12 @@ impl MenuNav {
         }
     }
 
+    /// Puts the top page's focus on item `index` (kept in range and in view by
+    /// [`MenuNav::fit`]).
+    pub fn set_focus(&mut self, index: usize) {
+        self.top_mut().focus = index;
+    }
+
     /// Closes the top page; false (and nothing changes) on the bottom one.
     pub fn pop(&mut self) -> bool {
         if self.depth > 1 {
