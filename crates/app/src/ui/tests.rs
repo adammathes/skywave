@@ -2256,3 +2256,160 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     assert_eq!(h.app.frame_rate(), FrameRate::Half);
     assert_eq!(h.app.settings().frame_rate, FrameRate::Third);
 }
+
+/// The images of `texture` on the HUD the app last laid out.
+fn images(h: &mut Harness, texture: render::HudTexture) -> Vec<render::HudImage> {
+    h.app
+        .scene_view(0.0, 1.0)
+        .hud
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            render::HudItem::Image(m) if m.texture == texture => Some(*m),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    let settings = h.app.settings().clone();
+    h.open(&[ItemId::Open(Page::Worlds)]);
+    assert_eq!(
+        (h.page(), h.focus()),
+        (Page::Worlds, 0),
+        "on the world it is"
+    );
+    // A card per world, side by side: left and right (and up and down) move, wrapping.
+    let text = h.hud_text();
+    for line in [
+        "Pacific Shore",
+        "Beach town, 1984",
+        "20 cars",
+        "Inland Basin",
+        "coming",
+        "here",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+    let stills = images(&mut h, render::HudTexture::Still);
+    assert_eq!(stills.len(), 2);
+    assert_eq!((stills[0].uv[0], stills[1].uv[0]), (0.0, 0.5));
+    assert!(stills[1].color[0] < 200, "the stub's still is greyed");
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.focus(), 1);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.focus(), 0, "wraps");
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.focus(), 1);
+    h.pad(PadButton::DpadDown);
+    h.pad(PadButton::DpadUp);
+    assert_eq!(h.focus(), 1);
+    assert_eq!(h.app.take_world_pick(), None, "nothing picked yet");
+    // Select closes the menu, remembers the world and asks the platform to load it.
+    h.pad(PadButton::South);
+    assert!(!h.app.menu_open());
+    assert_eq!(h.app.take_world_pick(), Some(1));
+    assert_eq!(h.app.take_world_pick(), None, "once");
+    let saved = store.0.borrow().clone().expect("saved");
+    assert_eq!(
+        Settings::from_json(&saved).0.scenario,
+        Some("inland_basin_2001")
+    );
+
+    // The platform's load: the same settings in the other world, its place, the radio off,
+    // what the platform said (the panel, the music picker) and the music library kept.
+    h.app.set_panel_hz(144.0);
+    h.app.set_music_picker(true, false);
+    h.app.add_music_folder(library(), false, true);
+    assert_eq!(h.app.ui().deck().kind(), audio::deck::Kind::Tape);
+    h.app
+        .switch_world(&crate::SceneSetup::default(), 1)
+        .unwrap();
+    h.frame();
+    assert_eq!(h.app.scenario(), 1);
+    assert_eq!(h.app.ui().panel_hz(), 144.0);
+    assert_eq!(h.app.deck().library().albums.len(), 2, "the library kept");
+    assert_eq!(
+        h.app.ui().deck().kind(),
+        audio::deck::Kind::Cd,
+        "a CD in 2001"
+    );
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    assert!(h.ui().items().iter().any(|i| i.id == ItemId::AddMusic));
+    h.pad(PadButton::Start);
+    assert!(
+        h.hud_text().contains("Inland Basin, 2001"),
+        "{}",
+        h.hud_text()
+    );
+    assert!(!h.app.radio().is_on());
+    assert_eq!(
+        h.app.settings(),
+        &Settings {
+            scenario: Some("inland_basin_2001"),
+            ..settings
+        }
+    );
+    // The pause menu's World page now opens on it.
+    h.open(&[ItemId::Open(Page::Worlds)]);
+    assert_eq!(h.focus(), 1);
+    // The next session starts there unless the scene names a place.
+    let saved = store.0.borrow().clone();
+    let next = crate::SceneSetup::default().with_saved_world(saved.as_deref());
+    assert_eq!((next.scenario, next.place), (1, crate::PlaceKey::Coast));
+}
+
+#[test]
+fn the_world_page_pages_one_card_at_a_tv_scale() {
+    let mut h = Harness::new();
+    h.app.ui.force_ui_scale(2.0);
+    h.open(&[ItemId::Open(Page::Worlds)]);
+    let stills = images(&mut h, render::HudTexture::Still);
+    assert_eq!(stills.len(), 1, "one card a page");
+    // Beside its text, and bigger than a third of the card width would give.
+    assert!(stills[0].h >= 100.0, "{:?}", stills[0]);
+    assert!(h.hud_text().contains("< 1 / 2 >"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("Pacific Shore"));
+    h.pad(PadButton::DpadRight);
+    assert!(h.hud_text().contains("< 2 / 2 >"));
+    assert!(h.hud_text().contains("Inland Basin") && !h.hud_text().contains("Pacific Shore"));
+    assert_eq!(
+        images(&mut h, render::HudTexture::Still)[0].uv,
+        crate::scenario::still_uv(1)
+    );
+}
+
+#[test]
+fn an_unknown_world_says_where_the_game_starts() {
+    let setup = crate::SceneSetup::from_query("scenario=atlantis").unwrap();
+    let mut h = Harness {
+        app: App::from_setup(&setup).unwrap(),
+        input: InputMapper::default(),
+    };
+    h.frame();
+    assert_eq!(h.app.scenario(), 0);
+    assert!(
+        h.hud_text()
+            .contains("No such world; starting in Pacific Shore"),
+        "{}",
+        h.hud_text()
+    );
+}
+
+#[test]
+fn the_vehicle_page_lists_this_worlds_cars() {
+    let mut h = Harness::new();
+    h.open(&[ItemId::Open(Page::Vehicle)]);
+    let Widget::Choice { options, .. } = h.item(0).widget else {
+        panic!("{:?}", h.item(0))
+    };
+    assert_eq!(options, &crate::scenario::lineup(0).names[..]);
+    // Every car of the world, by the pad, ends where it started.
+    for _ in 0..options.len() {
+        h.pad(PadButton::DpadRight);
+    }
+    assert_eq!(browsed(&h), (0, 0));
+}

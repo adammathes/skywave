@@ -35,7 +35,8 @@ pub const PRESETS: [(&str, &str); 3] = [
 /// Each preset's title, as its file gives it (checked by a test).
 pub const PRESET_TITLES: [&str; PRESETS.len()] = ["1984 SoCal", "1977 Chicago", "1986 North Shore"];
 
-/// The scenario every place is part of for now, and its preset (`docs/SCENARIOS.md`).
+/// The first scenario, whose preset a radio starts on (`docs/SCENARIOS.md`); a world's own
+/// comes with [`CarRadio::set_scenario`].
 pub const SCENARIO: &str = "socal_beach_1984";
 const SCENARIO_PRESET: &str = "1984_socal";
 
@@ -54,6 +55,8 @@ pub struct StationRow {
 }
 
 pub struct CarRadio {
+    /// The world's scenario id and its preset: the settings remember a preset per scenario.
+    scenario: (&'static str, &'static str),
     presets: Vec<RadioPreset>,
     /// Index into `presets` of the one on the dial.
     preset: usize,
@@ -68,6 +71,10 @@ pub struct CarRadio {
     shown_s: f32,
     /// The platform should ask the user for a stream URL.
     wants_url: bool,
+    /// What the station playing says is on (its stream's ICY title, where the platform
+    /// reads them), and a count of its changes.
+    now_playing: Option<String>,
+    titles: u32,
     /// What the radio volume is scaled by: the master volume, 0 when muted.
     gain: f32,
 }
@@ -87,6 +94,7 @@ impl CarRadio {
             .collect();
         let preset = preset_index(SCENARIO_PRESET);
         let mut radio = CarRadio {
+            scenario: (SCENARIO, SCENARIO_PRESET),
             presets,
             preset,
             radio: Radio::new(Vec::new()),
@@ -95,6 +103,8 @@ impl CarRadio {
             toast: 0.0,
             shown_s: 0.0,
             wants_url: false,
+            now_playing: None,
+            titles: 0,
             gain: 1.0,
         };
         radio.apply(&RadioSettings::default());
@@ -103,6 +113,18 @@ impl CarRadio {
 
     pub fn radio(&self) -> &Radio {
         &self.radio
+    }
+
+    /// The world is scenario `id`, whose own preset is `preset` (one of [`PRESETS`]): the
+    /// dial takes the preset picked for it, else that one, from the next
+    /// [`CarRadio::apply`].
+    pub fn set_scenario(&mut self, id: &'static str, preset: &'static str) {
+        self.scenario = (id, preset);
+    }
+
+    /// The world's scenario id and its own preset.
+    pub fn scenario(&self) -> (&'static str, &'static str) {
+        self.scenario
     }
 
     #[cfg(test)]
@@ -137,7 +159,8 @@ impl CarRadio {
     /// streams, and once started the volume (times the gain). The station playing keeps
     /// playing if it is still there.
     pub fn apply(&mut self, s: &RadioSettings) {
-        self.preset = preset_index(s.preset_for(SCENARIO, SCENARIO_PRESET));
+        let (id, own) = self.scenario;
+        self.preset = preset_index(s.preset_for(id, own));
         let preset = &self.presets[self.preset];
         let all = RadioSettings {
             disabled: Vec::new(),
@@ -206,6 +229,20 @@ impl CarRadio {
     pub fn off(&mut self) {
         self.radio.off();
         self.toast = 0.0;
+    }
+
+    /// What the playing station's stream says is on (`None`: nothing, or not read).
+    pub fn set_now_playing(&mut self, title: Option<&str>) {
+        let title = title.map(audio::music::ascii).filter(|t| !t.is_empty());
+        if title != self.now_playing {
+            self.now_playing = title;
+            self.titles = self.titles.wrapping_add(1);
+        }
+    }
+
+    /// The playing station's title, and the count of its changes.
+    pub fn now_playing(&self) -> (Option<&str>, u32) {
+        (self.now_playing.as_deref(), self.titles)
     }
 
     fn on_tuned(&mut self) {
@@ -309,14 +346,14 @@ fn preset_index(id: &str) -> usize {
         .unwrap_or(0)
 }
 
-/// Picks preset `index` of [`PRESETS`] for the scenario (its default is kept as no
-/// entry at all).
-pub fn choose_preset(s: &mut RadioSettings, index: usize) {
+/// Picks preset `index` of [`PRESETS`] for the scenario `(id, its own preset)` (its own
+/// is kept as no entry at all).
+pub fn choose_preset(s: &mut RadioSettings, scenario: (&str, &str), index: usize) {
     let id = PRESETS[index.min(PRESETS.len() - 1)].0;
-    if id == SCENARIO_PRESET {
-        s.presets.remove(SCENARIO);
+    if id == scenario.1 {
+        s.presets.remove(scenario.0);
     } else {
-        s.presets.insert(SCENARIO.to_string(), id.to_string());
+        s.presets.insert(scenario.0.to_string(), id.to_string());
     }
 }
 
@@ -518,6 +555,34 @@ mod tests {
         r.commands().for_each(drop);
         r.start(&RadioSettings::default());
         assert_eq!(r.commands().count(), 0);
+    }
+
+    #[test]
+    fn each_world_keeps_its_own_preset() {
+        let mut r = CarRadio::new();
+        let mut s = RadioSettings::default();
+        choose_preset(&mut s, r.scenario(), 1);
+        r.apply(&s);
+        assert_eq!(r.preset_index(), 1);
+        // Another world starts on its own preset, and a pick there is its own.
+        r.set_scenario("inland_basin_2001", "1986_north_shore");
+        r.apply(&s);
+        assert_eq!(r.preset_index(), 2);
+        choose_preset(&mut s, r.scenario(), 0);
+        r.apply(&s);
+        assert_eq!(r.preset_index(), 0);
+        assert_eq!(
+            s.presets.get(SCENARIO).map(String::as_str),
+            Some("1977_chicago")
+        );
+        choose_preset(&mut s, r.scenario(), 2);
+        assert!(
+            !s.presets.contains_key("inland_basin_2001"),
+            "its own is no entry"
+        );
+        r.set_scenario(SCENARIO, SCENARIO_PRESET);
+        r.apply(&s);
+        assert_eq!(r.preset_index(), 1);
     }
 
     #[test]

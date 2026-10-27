@@ -2,14 +2,37 @@
 
 A **scenario** is the thing you pick on the title screen and share as a code: a kind of place, an era, the cars on the road, the radio, the light. People will want the place of their childhood. The procedural templates give the *kind* of place; the place compiler (M6) gives the *specific* one. Both use the same era layers, rosters and presets.
 
+As built (`assets/scenarios/<id>.ron`, read by `crates/app/src/scenario.rs` with
+`deny_unknown_fields`; the World page lists them in the fixed order of `scenario::BUILTIN`):
 ```
 Scenario(
-  id: "socal_beach_1984", title: "Pacific Shore, 1984",
-  region: "california_coast", era: 1984, default_seed: 1,
-  roster: "1980s_us", radio: "1984_socal", palette: "sunbleached_pastel",
-  default_time: (18, 40), default_vehicle: "gannet_gt", weather: Clear,
+  id: "socal_beach_1984",              // the file stem; `?scenario=` / `--scenario`
+  title: "Pacific Shore", year: 1984,  // what the World page's card says
+  kind: "Beach town",                  // the kind of place, on the card
+  region: "california_coast",          // assets/regions/<id>.ron
+  grammar: "california_coast_80s.ron", // assets/grammar/<file>
+  radio: "1984_socal",                 // assets/radio/<id>.ron: the dial starts on it
+  palette: "socal_1985",               // a world::Palette
+  default_time: (17, 40),              // the clock a world starts at, running
+  default_vehicle: "gannet_gt",      // the car it starts in unless one was picked
+  years: (1979, 1987),                 // the era: cars of these years are everyday cars
+  heroes: [],                          // rare-by-age cars kept on the road (weight >= 0.05)
+  stub: false,                         // optional: a world still being built ("coming")
 )
 ```
+Validation: years in order and the year within them, a known region, grammar, palette and preset, a
+default car no newer than the years, heroes that are built-in cars. The era filter and its weights are in
+`docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
+64,768 bytes, committed; rendered with `tools/screenshot`, cropped clear of the HUD and quantized, see
+`assets/stills/README.md`), laid out in an atlas four to a row for the World page.
+
+**Switching worlds.** The pause menu's World page (`docs/CONTROLS_INPUT.md`) shows a card per scenario;
+picking one saves it as the `scenario` setting and the platform reloads the game in it: the session's scene
+moved to that world's procedural place, its start and default time (`SceneSetup::for_world`), the settings
+kept, the radio off; the old app and renderer are dropped whole. A session starts in the world last picked
+unless its scene names a place or a world (`?scenario=<id>` on the web, `--scenario <id>` natively; an id
+that is not built in starts the first world and says so). There is no title screen yet: the World page (Pause › Worlds) is
+reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
 ## Launch scenario
 **`socal_beach_1984` — Pacific Shore, 1984.** Beach strip with neon and palms, a small downtown, a residential grid with a canal pocket, a highway through brown hills to a farm valley. Golden hour, yacht rock and soft rock, pastels and stucco. The test of the whole idea.
@@ -33,8 +56,8 @@ underglow on the tuner cars, a lit race start line with a crowd that steps aside
 
 The deck (the player's own music, `docs/AUDIO_RADIO.md`) is named by the scenario's year:
 **TAPE** for worlds up to 1989 (Pacific Shore 1984, Lake City 1977, the 1986 suburb), **CD** for
-1990–2009 (Inland Basin 2001), **MP3** from 2010. Until scenarios carry their `years`, the year is a
-constant per scenario id (`app::deck::scenario_year`); it is the scenario's `max` year after.
+1990–2009 (Inland Basin 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
+worlds renames it and keeps the library.
 
 Era rules: the roster is filtered by year. A scenario has `years: (min, max)`; a car has a
 `year`. Cars newer than the scenario's `max` never appear, in traffic, parked or on the vehicle
@@ -58,9 +81,10 @@ as the train comes), the channel run (ramps into the flood channel and a long ru
 bridges), the tunnel, the drag strip (a lit quarter mile with a tree), the hills overlook, the
 crew garage (a warehouse with the hero cars parked and a lit sign), a taco stand lot with lowriders.
 
-"Change worlds": the title screen and the pause menu get a World page listing every scenario as a
-card (title, year, a still, the cars and stations it ships with); picking one reloads the place
-and persists; `?scenario=` on the web.
+"Change worlds": a World page listing every scenario as a card (title, year, a still, the cars and
+stations it ships with); picking one reloads the place and persists; `?scenario=` on the web. Built (see
+the format above), in the pause menu. Until the basin's template, grammar, palette and preset land,
+`inland_basin_2001` is a stub on the coast's, marked "coming" on its card.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

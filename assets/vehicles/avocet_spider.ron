@@ -9,6 +9,7 @@ VehicleSpec(
     id: "avocet_spider",
     name: "Avocet Spider",
     era: Eighties,
+    year: 1986,
     class: Convertible,
 
     mass_kg: 1340,

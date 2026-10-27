@@ -7,11 +7,14 @@
 //! with the button or when the window loses focus. Platforms that refuse both just keep a
 //! free cursor; the raw motion still drives the look.
 //!
-//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--frames N]
-//! [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--version]`.
+//! Usage: `skywave [--seed N] [--car ID] [--scenario ID] [--scene KEY=VALUE]... [--stats]
+//! [--frames N] [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--radio-off]
+//! [--version]`.
 //! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
-//! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are
-//! `--scene seed=N` and `--scene car=ID`. `--stats` prints the adapter, the surface and a
+//! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N`, `--car ID` and `--scenario ID`
+//! are `--scene seed=N`, `--scene car=ID` and `--scene scenario=ID` (a world,
+//! `assets/scenarios/`; without one or a place the game starts in the world last picked on
+//! the World page, and picking another there reloads the game in it). `--stats` prints the adapter, the surface and a
 //! line of frame statistics every second to stderr (format in `docs/PERFORMANCE.md`), with
 //! GPU time per pass where the adapter has timestamp queries; it also prints the detected
 //! gamepads at startup and as they connect (otherwise the info log has them,
@@ -20,7 +23,9 @@
 //! (`AutoNoVsync`; the default is `AutoVsync`) and, for benchmarks, draws the whole world
 //! every frame with no frame-rate cap. `--quality low|deck|medium|high|ultra`
 //! forces a graphics preset for the session (not saved); `--no-cull` turns instance culling
-//! off and `--no-prepass` the depth pre-pass (for comparisons). `--version` prints the build's `git describe` (see `build.rs`)
+//! off and `--no-prepass` the depth pre-pass (for comparisons). `--radio-off` keeps the car
+//! radio silent and off the network (CI and benchmarks). `--version` prints the build's
+//! `git describe` (see `build.rs`)
 //! and exits.
 //!
 //! Frames are drawn no more often than Settings › Video › Frame rate allows (the panel's
@@ -38,9 +43,11 @@
 //! `$XDG_CONFIG_HOME/skywave/settings.json` (see `settings`).
 //!
 //! Sound plays through the default output device at 48 kHz (`sfx`); without one the game
-//! runs silent.
+//! runs silent. The car radio's internet stations play through it too (`radio`); the
+//! window title shows the station and what it says is playing.
 
 mod pad;
+mod radio;
 mod settings;
 mod sfx;
 
@@ -50,7 +57,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use app::pacing::{frame_interval, Pacer};
-use app::{App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, MOUSE_RIGHT};
+use app::{
+    App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, SettingsStore, MOUSE_RIGHT,
+};
 use pad::Pads;
 use render::{RenderStats, Renderer, GPU_PARTS, GPU_PART_NAMES, GPU_PASSES, GPU_PASS_NAMES};
 use winit::application::ApplicationHandler;
@@ -106,6 +115,8 @@ struct Options {
     quality: Option<Quality>,
     no_cull: bool,
     no_prepass: bool,
+    /// The radio stays silent and fetches nothing.
+    radio_off: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -118,6 +129,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--no-vsync" => opts.no_vsync = true,
             "--no-cull" => opts.no_cull = true,
             "--no-prepass" => opts.no_prepass = true,
+            "--radio-off" => opts.radio_off = true,
             "--frames" => {
                 let v = args.next().ok_or("--frames needs a count")?;
                 let n = v
@@ -144,6 +156,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--car" => {
                 let v = args.next().ok_or("--car needs a vehicle id")?;
                 opts.scene.set("car", &v)?;
+            }
+            "--scenario" => {
+                let v = args.next().ok_or("--scenario needs a world id")?;
+                opts.scene.set("scenario", &v)?;
             }
             "--scene" => {
                 let kv = args.next().ok_or("--scene needs key=value")?;
@@ -607,21 +623,9 @@ impl Gpu {
                 },
             );
         }
-        let mut renderer = Renderer::with_options(
-            &device,
-            &queue,
-            config.format,
-            (config.width, config.height),
-            options,
-        );
-        for mesh in app.meshes() {
-            renderer.add_mesh(mesh);
-        }
-        renderer.reserve_instances(app.max_instances());
-        let map = app.map_image();
-        renderer.upload_map(map.w, map.h, &map.rgba);
+        let (renderer, timing) = build_renderer(&device, &queue, &config, app, opts);
         if opts.stats {
-            let on = renderer.enable_gpu_timing();
+            let on = timing;
             eprintln!(
                 "gpu timing: {}",
                 if on && renderer.stats().gpu_parts {
@@ -642,6 +646,11 @@ impl Gpu {
             renderer,
             panel_hz,
         })
+    }
+
+    /// A new renderer for `app`, which just moved to another world.
+    fn reload(&mut self, app: &App, opts: &Options) {
+        self.renderer = build_renderer(&self.device, &self.queue, &self.config, app, opts).0;
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -730,6 +739,33 @@ impl Gpu {
     }
 }
 
+/// A renderer for `app` with what it draws from uploaded (its meshes, instance room, map
+/// and stills), and with `--stats` GPU timing on where the adapter has it (true then).
+fn build_renderer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    config: &wgpu::SurfaceConfiguration,
+    app: &App,
+    opts: &Options,
+) -> (Renderer, bool) {
+    let options = render::RendererOptions {
+        culling: !opts.no_cull,
+        ..app.renderer_options()
+    };
+    let size = (config.width, config.height);
+    let mut renderer = Renderer::with_options(device, queue, config.format, size, options);
+    for mesh in app.meshes() {
+        renderer.add_mesh(mesh);
+    }
+    renderer.reserve_instances(app.max_instances());
+    let map = app.map_image();
+    renderer.upload_map(map.w, map.h, &map.rgba);
+    let (w, h, rgba) = app.stills();
+    renderer.upload_stills(w, h, rgba);
+    let timing = opts.stats && renderer.enable_gpu_timing();
+    (renderer, timing)
+}
+
 struct Shell {
     opts: Options,
     app: App,
@@ -756,9 +792,50 @@ struct Shell {
     error: Option<String>,
     /// The sound sink, if a device opened.
     sfx: Option<sfx::Sfx>,
+    /// The car radio's player, when there is a sink to play it and it is not turned off.
+    radio: Option<radio::Player>,
+    /// What the window title last showed: the station playing and the player's title count.
+    title: (Option<usize>, u32),
 }
 
 impl Shell {
+    /// The radio's side of the frame: the player's reports in, this frame's commands out,
+    /// and the station with its now-playing title in the window title.
+    fn pump_radio(&mut self) {
+        let Some(player) = &mut self.radio else {
+            // Nobody plays: drop the commands.
+            self.app.radio_commands().for_each(drop);
+            return;
+        };
+        while let Some(event) = player.poll() {
+            self.app.radio_event(event);
+        }
+        if player.titles() != self.title.1 {
+            self.app.set_now_playing(player.title());
+        }
+        for cmd in self.app.radio_commands() {
+            player.command(&cmd);
+        }
+        let r = self.app.radio();
+        let playing = match r.state() {
+            audio::RadioState::Playing { station } => Some(station),
+            _ => None,
+        };
+        let key = (playing, player.titles());
+        let Some(gpu) = self.gpu.as_ref().filter(|_| key != self.title) else {
+            return;
+        };
+        let mut title = String::from("Skywave");
+        if let Some(c) = playing.and_then(|i| r.channels().get(i)) {
+            let _ = write!(title, " \u{b7} {}", c.name);
+            if let Some(now) = player.title() {
+                let _ = write!(title, " \u{b7} {now}");
+            }
+        }
+        gpu.window.set_title(&title);
+        self.title = key;
+    }
+
     /// Seconds since the start: the pacing clock.
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64()
@@ -881,9 +958,24 @@ impl ApplicationHandler for Shell {
                 if let Some(sfx) = &self.sfx {
                     sfx.set_params(self.app.audio_params());
                 }
+                self.pump_radio();
                 if self.app.quit_requested() {
                     event_loop.exit();
                     return;
+                }
+                if let Some(world) = self.app.take_world_pick() {
+                    match self.app.switch_world(&self.opts.scene, world) {
+                        Ok(()) => {
+                            // The new world's radio starts off: silence the old one's.
+                            if let Some(player) = &mut self.radio {
+                                player.command(&audio::RadioCommand::Stop);
+                            }
+                            if let Some(gpu) = &mut self.gpu {
+                                gpu.reload(&self.app, &self.opts);
+                            }
+                        }
+                        Err(e) => log::warn!("{e}; staying in this world"),
+                    }
                 }
                 let Some(gpu) = &mut self.gpu else {
                     return;
@@ -972,9 +1064,9 @@ fn main() -> ExitCode {
                 eprintln!("skywave: {e}");
             }
             eprintln!(
-                "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] \
+                "usage: skywave [--seed N] [--car ID] [--scenario ID] [--scene KEY=VALUE]... [--stats] \
                  [--frames N [--exit]] [--no-vsync] [--quality low|battery|deck|medium|high|ultra] \
-                 [--no-cull] [--no-prepass] [--version]"
+                 [--no-cull] [--no-prepass] [--radio-off] [--version]"
             );
             return if e.is_empty() {
                 ExitCode::SUCCESS
@@ -1000,7 +1092,9 @@ fn main() -> ExitCode {
     } else {
         log::info!("{}", pads.summary());
     }
-    let mut app = match App::from_setup(&opts.scene) {
+    let store = settings::FileStore::from_env();
+    let scene = opts.scene.clone().with_saved_world(store.load().as_deref());
+    let mut app = match App::from_setup(&scene) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("skywave: {e}");
@@ -1009,8 +1103,13 @@ fn main() -> ExitCode {
     };
     app.set_can_quit(true);
     app.set_stream_budget(app::stream::StreamBudget::NATIVE);
-    app.set_settings_store(Box::new(settings::FileStore::from_env()));
+    app.set_settings_store(Box::new(store));
     let opts_frames = opts.frames;
+    // The radio plays through the sound sink: without a device (or with --radio-off) its
+    // commands are dropped, as on a web page without the player glue.
+    let radio_out = (!opts.radio_off).then(|| Arc::new(radio::Output::new()));
+    let sfx = sfx::Sfx::start(radio_out.clone());
+    let radio = radio_out.filter(|_| sfx.is_some()).map(radio::Player::new);
     let mut shell = Shell {
         app,
         opts,
@@ -1027,7 +1126,9 @@ fn main() -> ExitCode {
         stats: Stats::new(opts_frames),
         frames_drawn: 0,
         error: None,
-        sfx: sfx::Sfx::start(),
+        sfx,
+        radio,
+        title: (None, 0),
     };
     if let Err(e) = event_loop.run_app(&mut shell) {
         eprintln!("skywave: event loop failed: {e}");
@@ -1090,6 +1191,11 @@ mod tests {
         assert!(args(&["--scene", "zoom=2"]).is_err());
         assert!(args(&["--seed"]).is_err());
         assert!(args(&["--car"]).is_err());
+        assert!(args(&["--scenario"]).is_err());
+        let world = args(&["--scenario", "inland_basin_2001"]).unwrap().scene;
+        assert_eq!((world.scenario, world.place), (1, app::PlaceKey::Coast));
+        let unknown = args(&["--scenario", "atlantis"]).unwrap().scene;
+        assert!(unknown.unknown_scenario && unknown.scenario == 0);
         assert!(args(&["--seed", "x"]).is_err());
         assert!(args(&["--fast"]).is_err());
         assert_eq!(args(&["--help"]), Err(String::new()));
@@ -1120,6 +1226,7 @@ mod tests {
         assert!(args(&["--exit"]).is_err(), "--exit needs --frames");
         assert!(args(&["--quality", "potato"]).is_err());
         assert!(!args(&["--frames", "3"]).unwrap().exit);
+        assert!(args(&["--radio-off"]).unwrap().radio_off);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! transport on the radio's keys while the deck is the source, its toast, and what the
 //! corner readout and the cockpit dash show of it.
 //!
-//! What the deck is follows the world's era ([`Kind::for_year`] of the scenario's year):
+//! What the deck is follows the world's era ([`Kind::for_year`] of the scenario's `year`):
 //! a tape deck in the 1980s worlds, a CD player in 2001, an MP3 player from 2010. Like the
 //! radio it starts silent every session: the last session's mode, track and second are
 //! restored, and nothing plays until a key.
@@ -17,16 +17,6 @@ use crate::radio::{DashText, TOAST_SECONDS};
 /// Settings keep the second into a playing track at this granularity (exact when
 /// paused), so a playing deck saves the settings at most this often, s.
 const SAVE_EVERY_S: f32 = 5.0;
-
-/// The year of scenario `id` (`docs/SCENARIOS.md`), until scenarios carry their `years`.
-pub fn scenario_year(id: &str) -> u16 {
-    match id {
-        "chicago_1977" => 1977,
-        "north_shore_suburb_1986" => 1986,
-        "inland_basin_2001" => 2001,
-        _ => 1984,
-    }
-}
 
 /// What the deck's toast says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,16 +47,16 @@ pub struct CarDeck {
 
 impl Default for CarDeck {
     fn default() -> CarDeck {
-        CarDeck::new(crate::radio::SCENARIO)
+        CarDeck::new()
     }
 }
 
 impl CarDeck {
-    /// An empty, stopped deck of scenario `scenario`'s era.
-    pub fn new(scenario: &str) -> CarDeck {
+    /// An empty, stopped deck of the first world's era (a tape deck in 1984).
+    pub fn new() -> CarDeck {
         CarDeck {
             deck: Deck::new(),
-            kind: Kind::for_year(scenario_year(scenario)),
+            kind: Kind::for_year(crate::scenario::get(0).year),
             folders: Vec::new(),
             forgotten: Vec::new(),
             wants_music: false,
@@ -85,6 +75,18 @@ impl CarDeck {
 
     pub fn folders(&self) -> &[Folder] {
         &self.folders
+    }
+
+    /// The world is of `year`: the deck is that era's.
+    pub fn set_year(&mut self, year: u16) {
+        self.kind = Kind::for_year(year);
+    }
+
+    /// The library `old` has, in this deck too (a world loaded after the platform handed
+    /// the folders over: it does so only when they are picked or at start-up).
+    pub fn carry_folders(&mut self, old: &CarDeck) {
+        self.folders = old.folders.clone();
+        self.rebuild();
     }
 
     /// Picks up the last session's mode, track and second (once). Nothing plays.
@@ -430,9 +432,10 @@ mod tests {
 
     #[test]
     fn the_deck_follows_the_era() {
-        assert_eq!(CarDeck::default().kind(), Kind::Tape);
-        assert_eq!(CarDeck::new("chicago_1977").kind(), Kind::Tape);
-        assert_eq!(CarDeck::new("inland_basin_2001").kind(), Kind::Cd);
+        let mut d = CarDeck::default();
+        assert_eq!(d.kind(), Kind::Tape);
+        d.set_year(2001);
+        assert_eq!(d.kind(), Kind::Cd);
         assert_eq!(Kind::for_year(2012).badge(), "MP3");
     }
 

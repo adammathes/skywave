@@ -31,6 +31,7 @@ mod places;
 pub mod preview;
 mod propinst;
 pub mod radio;
+pub mod scenario;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -217,6 +218,8 @@ pub struct App {
     aspect: f32,
     /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
     target: Option<(u32, u32)>,
+    /// The world the World page picked, for the platform to load ([`App::take_world_pick`]).
+    world_pick: Option<usize>,
 }
 
 /// A car in one paint whose meshes the renderer has (or will have, once drained).
@@ -243,54 +246,63 @@ impl App {
     /// The built-in car `vehicle_id` at the `PlayerStart` of the place `key` names, the
     /// whole place built at load.
     pub fn new_in(seed: Seed, vehicle_id: &str, key: PlaceKey) -> Result<App, String> {
-        App::build(seed, vehicle_id, 0, key, None)
+        App::build(seed, vehicle_id, 0, key, None, 0)
     }
 
     /// [`App::new_with`], the town streamed within `budget` round the camera instead
     /// (nothing is built until [`App::frame`] runs).
     pub fn new_streamed(seed: Seed, vehicle_id: &str, budget: StreamBudget) -> Result<App, String> {
-        App::build(seed, vehicle_id, 0, PlaceKey::TestTown, Some(budget))
+        App::build(seed, vehicle_id, 0, PlaceKey::TestTown, Some(budget), 0)
     }
 
-    /// The car in palette entry `paint` on the place `key` names, built at load or (with
-    /// `stream`) streamed.
+    /// The car in palette entry `paint` on the place `key` names in built-in scenario
+    /// `scenario` ([`scenario::BUILTIN`]), built at load or (with `stream`) streamed. The car
+    /// must be one the scenario has ([`scenario::Lineup`]).
     fn build(
         seed: Seed,
         vehicle_id: &str,
         paint: usize,
         key: PlaceKey,
         stream: Option<StreamBudget>,
+        scenario: usize,
     ) -> Result<App, String> {
+        let world = scenario::get(scenario);
+        let lineup = scenario::lineup(scenario);
         let spec = vehicles::builtin_spec(vehicle_id)?;
         let vehicle_index = ui::roster::index_of(vehicle_id).ok_or("not a built-in car")?;
+        if !lineup.allows(vehicle_index) {
+            return Err(format!("`{vehicle_id}` is newer than {}", world.title));
+        }
         let shape = vehicles::builtin_shape(&spec)?;
         if paint >= shape.palette.len() {
             return Err(format!("`{vehicle_id}` has no paint {paint}"));
         }
         let model = CarModel::build_painted(&spec, &shape, paint)?;
-        let place: Place = places::build(key, seed)?;
+        let place: Place = places::build_in(key, seed, world)?;
+        let (palette, grammar) = (places::palette_of(world), places::grammar_of(world));
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let start = (start.pos, start.heading);
         let mut drive = Drive::with_layout(spec, model.layout, start.0, start.1);
         let map = map::MapImage::rasterize(&place);
         let mut ui = ui::Ui::new();
+        ui.set_scenario(scenario);
         drive.auto_headlights = ui.settings().headlights_auto;
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
-        let ground = drive::ground_for(&place);
+        let ground = drive::ground_in(&place, grammar);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
-        let mut props = propinst::PropInstances::new(&place, &Palette::socal_1985(), |p| {
+        let mut props = propinst::PropInstances::new(&place, &palette, &lineup.shapes, |p| {
             [
                 world::math::floor(p[0] / chunk_size) as i32,
                 world::math::floor(p[1] / chunk_size) as i32,
             ]
         })?;
         let sound = sound::Sound::new(&place, &drive);
-        let npcs = npc::Npcs::new(&place, seed);
+        let npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         let town = match stream {
-            None => resident_town(&place),
-            Some(budget) => streamed_town(place, budget),
+            None => resident_town(&place, &palette, grammar),
+            Some(budget) => streamed_town(place, budget, palette, grammar),
         };
         let mut meshes = town.meshes;
         let mut instances = town.instances;
@@ -340,7 +352,10 @@ impl App {
             camera,
             camera_from_scene: false,
             camera_cycled: false,
-            time: TimeOfDay::default(),
+            time: TimeOfDay {
+                clock: daylight::Clock::new(lighting::DEFAULT_DAY_OF_YEAR, world.default_time_s()),
+                ..TimeOfDay::default()
+            },
             meshes,
             car_meshes,
             cars,
@@ -369,6 +384,7 @@ impl App {
             audio: audio::synth::AudioParams::default(),
             aspect: 16.0 / 9.0,
             target: None,
+            world_pick: None,
         })
     }
 
@@ -378,15 +394,26 @@ impl App {
     /// [`App::set_stream_budget`] changes that.
     pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
         let stream = setup.stream.then_some(StreamBudget::WEB);
+        let car = setup.car.as_str();
         // A paint for a named car must be one of its own; without a car it paints whichever
         // car the game starts in (see `set_settings_store`).
         let paint = match (setup.car_given, setup.paint) {
             (true, paint) => paint.unwrap_or(0),
             (false, paint) => {
-                ui::roster::index_of(&setup.car).map_or(0, |i| paint_of(i, paint.unwrap_or(0)))
+                ui::roster::index_of(car).map_or(0, |i| paint_of(i, paint.unwrap_or(0)))
             }
         };
-        let mut app = App::build(Seed(setup.seed), &setup.car, paint, setup.place, stream)?;
+        let mut app = App::build(
+            Seed(setup.seed),
+            car,
+            paint,
+            setup.place,
+            stream,
+            setup.scenario,
+        )?;
+        if setup.unknown_scenario {
+            app.ui.unknown_world();
+        }
         app.paint_from_scene = setup.paint.filter(|_| !setup.car_given);
         let pos = setup.pos.unwrap_or([app.start.0[0], app.start.0[2]]);
         let heading = setup.heading_rad.unwrap_or(app.start.1);
@@ -453,6 +480,12 @@ impl App {
         }
     }
 
+    /// Every world's still for `render::Renderer::upload_stills`: width, height, RGBA8.
+    pub fn stills(&self) -> (u32, u32, &'static [u8]) {
+        let s = scenario::stills();
+        (s.w, s.h, &s.rgba)
+    }
+
     /// The map image for `render::Renderer::upload_map`, made once at load.
     pub fn map_image(&self) -> &map::MapImage {
         &self.map
@@ -487,11 +520,52 @@ impl App {
         self.switch_vehicle_at(index, 0, true, true)
     }
 
-    /// `VehicleNext`: the next car in [`vehicles::BUILTIN`], wrapping after the last, in
-    /// its first paint.
+    /// `VehicleNext`: the next car in [`vehicles::BUILTIN`] this world has, wrapping after
+    /// the last, in its first paint.
     pub fn cycle_vehicle(&mut self) {
-        let next = (self.ui.vehicle() + 1) % vehicles::BUILTIN.len();
+        let next = scenario::lineup(self.ui.scenario()).next_after(self.ui.vehicle());
         self.switch_to(next, 0, true);
+    }
+
+    /// The world the World page picked (an index into [`scenario::BUILTIN`]), once: the
+    /// platform loads it with [`App::switch_world`] and builds a new renderer for it.
+    pub fn take_world_pick(&mut self) -> Option<usize> {
+        self.world_pick.take()
+    }
+
+    /// The world this app is: an index into [`scenario::BUILTIN`].
+    pub fn scenario(&self) -> usize {
+        self.ui.scenario()
+    }
+
+    /// Replaces this app with one in world `scenario`: the scene `base` (the one the
+    /// session started with) moved there ([`SceneSetup::for_world`]), with this app's
+    /// settings store (so the settings and the saved car carry over), its platform options
+    /// (quit, text entry, the stream budget, the GPU, a forced preset or UI scale) and
+    /// target size. Everything else (the place, its chunks, parked cars, traffic, meshes)
+    /// is dropped; the platform then builds a new renderer for it as at start-up
+    /// ([`App::meshes`], [`App::map_image`], [`App::stills`]). The radio starts again off;
+    /// the platform stops whatever it was playing. On an error nothing changes.
+    pub fn switch_world(&mut self, base: &SceneSetup, scenario: usize) -> Result<(), String> {
+        self.ui.save_if_dirty();
+        let mut next = App::from_setup(&base.for_world(scenario))?;
+        if let Some(s) = &self.stream {
+            next.set_stream_budget(s.streamer.budget());
+        }
+        next.target = self.target;
+        next.aspect = self.aspect;
+        next.ui.carry_platform(&self.ui);
+        // A store-less app (a test) carries its settings in memory.
+        let store = self.ui.take_store().unwrap_or_else(|| {
+            Box::new(MemoryStore {
+                text: Some(self.ui.settings().to_json(self.ui.bindings())),
+                saves: 0,
+            })
+        });
+        next.set_settings_store(store);
+        next.ui.world_loaded();
+        *self = next;
+        Ok(())
     }
 
     /// `Reset`: the car back on the nearest lane, at rest ([`Drive::reset`]), the camera
@@ -980,8 +1054,8 @@ struct Town {
 
 /// The whole town of `place` built at load ([`render_meshes`]): static meshes, one
 /// instance each.
-fn resident_town(place: &Place) -> Town {
-    let chunks = world::build_chunk_meshes(place, &Palette::socal_1985(), places::grammar());
+fn resident_town(place: &Place, palette: &Palette, grammar: &world::Grammar) -> Town {
+    let chunks = world::build_chunk_meshes(place, palette, grammar);
     let place_lights: Vec<PointLight> = place
         .lights
         .items
@@ -1038,8 +1112,13 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
 /// `place` to be streamed within `budget`: nothing built yet but a terrain place's far
 /// terrain (drawn always, under the chunks, out to the horizon), every static light known
 /// (and off until its chunk is drawn), room for every part the resident chunks can have.
-fn streamed_town(place: Place, budget: StreamBudget) -> Town {
-    let source = PlaceSource::new(place, Palette::socal_1985());
+fn streamed_town(
+    place: Place,
+    budget: StreamBudget,
+    palette: Palette,
+    grammar: &world::Grammar,
+) -> Town {
+    let source = PlaceSource::with_grammar(place, palette, grammar);
     let streamer = Streamer::new(&source, budget);
     let statics = source.static_lights();
     let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());
@@ -1840,6 +1919,55 @@ mod tests {
 
     /// The scene streamed: once its ring is filled, the same holds, the static lights are
     /// the same ones, and filling it allocated nothing in the app's own lists.
+    /// What an app holds for its world: mesh ids handed out, instance room, the chunk pool
+    /// it asks for, parked-car and prop meshes, the traffic and crowd pools.
+    fn footprint(app: &App) -> (usize, usize, usize, ChunkPoolConfig, usize, usize) {
+        (
+            app.mesh_count(),
+            app.max_instances(),
+            app.instances.capacity(),
+            app.chunk_pool_config(),
+            app.props.as_ref().map_or(0, |p| p.meshes().len()),
+            app.npcs.capacity(),
+        )
+    }
+
+    #[test]
+    fn switching_worlds_twice_leaks_nothing() {
+        let base = SceneSetup::from_query("place=coast&t=12:00&traffic=busy").unwrap();
+        let mut app = App::from_setup(&base).unwrap();
+        app.set_settings_store(Box::new(MemoryStore::default()));
+        let mut input = InputMapper::default();
+        // A second of play in a fresh chunk pool, as a new renderer gives the new app.
+        let mut play = |app: &mut App| {
+            let mut pool = render::ChunkPool::new(app.chunk_pool_config());
+            for _ in 0..60 {
+                app.frame(&mut input, 1.0 / 60.0, &wall_clock);
+                app.sync_chunks(&mut pool);
+            }
+            assert!(app.traffic_count() > 0);
+            pool.stats()
+        };
+        let first = footprint(&app);
+        let used = play(&mut app);
+        assert!(used.used > 0 && used.used <= used.slots, "{used:?}");
+        let mut seen = vec![first];
+        for world in [1, 0] {
+            app.switch_world(&base, world).unwrap();
+            assert_eq!(app.scenario(), world);
+            seen.push(footprint(&app));
+            let stats = play(&mut app);
+            assert!(
+                stats.used <= stats.slots && stats.slots == used.slots,
+                "{stats:?}"
+            );
+        }
+        // Back in the first world it holds what it held at the start: nothing carried over.
+        assert_eq!(seen[2], seen[0]);
+        // The stub shares the coast's place, so the second world holds the same too.
+        assert_eq!(seen[1], seen[0]);
+    }
+
     #[test]
     fn a_streamed_town_fills_its_ring_and_its_lamps_pool_the_same() {
         let query = "t=22:30&cam=cockpit&lights=1&still=1";

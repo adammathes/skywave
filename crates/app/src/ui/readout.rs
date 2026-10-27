@@ -2,7 +2,8 @@
 //! corner opposite the minimap), under the clock and the station toast. A badge for the
 //! source (TAPE, CD or MP3 for the deck by era, RADIO) with the mode and transport state
 //! beside it, then three lines: artist, album and song for the deck, the station's name
-//! and format for the radio (the web player reads no stream titles). A line that does not
+//! and what its stream says is on for the radio (its ICY title natively; the web player
+//! reads none, so its format there). A line that does not
 //! fit scrolls a character at a time. It shows for [`SHOW_S`] after anything changes (a
 //! transport key, a new track or station, the source) and fades out over [`FADE_S`].
 //!
@@ -86,6 +87,7 @@ impl Ui {
             self.deck.deck().changes(),
             r.station(),
             r.is_on(),
+            self.radio.now_playing().1,
         );
         match self.readout_seen {
             Some(was) if was != seen => self.readout_s = 0.0,
@@ -116,7 +118,10 @@ impl Ui {
                 };
                 let lines = match r.channel() {
                     _ if r.channels().is_empty() => ["No stations", "", ""],
-                    Some(c) if r.is_on() => [c.name.as_str(), c.format.as_str(), ""],
+                    Some(c) if r.is_on() => {
+                        let now = self.radio.now_playing().0;
+                        [c.name.as_str(), now.unwrap_or(c.format.as_str()), ""]
+                    }
                     _ => ["", "", ""],
                 };
                 Content {

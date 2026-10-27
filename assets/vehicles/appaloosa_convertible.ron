@@ -9,6 +9,7 @@ VehicleSpec(
     id: "appaloosa_convertible",
     name: "Appaloosa Convertible",
     era: Eighties,
+    year: 1987,
     class: Convertible,
 
     mass_kg: 1480,
