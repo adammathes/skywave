@@ -911,6 +911,44 @@ fn spot(app: &App) -> ([f32; 2], f32) {
     ([pose.pos.x, pose.pos.z], (-f.x).atan2(-f.z))
 }
 
+/// The meshes one more paint of a car registers (its bodies and cabin walls).
+fn paint_mesh_count(id: &str) -> usize {
+    let spec = crate::vehicles::builtin_spec(id).unwrap();
+    let shape = crate::vehicles::builtin_shape(&spec).unwrap();
+    let model = crate::car::CarModel::build(&spec, &shape).unwrap();
+    let base = model.register(|_| render::MeshId(0));
+    let mut n = 0;
+    model.register_paint(&base, |_| {
+        n += 1;
+        render::MeshId(n - 1)
+    });
+    n as usize
+}
+
+/// The Vehicle page's car and paint choosers' indices.
+fn browsed(h: &Harness) -> (usize, usize) {
+    let index = |i: usize| match h.item(i).widget {
+        Widget::Choice { index, .. } => index,
+        w => panic!("{w:?}"),
+    };
+    (index(0), index(1))
+}
+
+/// The turntable's meshes in a fresh scene view: its instances come last, the disc last of
+/// them, and none casts a shadow or takes a street lamp.
+fn turntable(h: &mut Harness) -> Vec<render::MeshId> {
+    h.app.scene_view(1.0, 16.0 / 9.0);
+    let range = h.app.preview_instances();
+    let disc = h.app.turntable;
+    let view = h.app.scene_view(1.0, 16.0 / 9.0);
+    assert_eq!(range.end, view.instances.len());
+    let shown = &view.instances[range];
+    assert!(shown.iter().all(|i| !i.casts_shadow && i.lights.is_empty()));
+    let meshes: Vec<_> = shown.iter().map(|i| i.mesh).collect();
+    assert!(meshes.is_empty() || meshes.last() == Some(&disc));
+    meshes
+}
+
 #[test]
 fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     let builtin = &crate::vehicles::BUILTIN;
@@ -941,26 +979,44 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert!(h.app.drive.state.speed_mps > 5.0);
     assert!(h.app.drive.odometer_m() > 5.0);
 
-    // Pause > Vehicle: every built-in car, the focus on the one driven.
+    // Pause > Vehicle: the car chooser focused on the car driven, its specs beside it.
     h.open(&[ItemId::Open(Page::Vehicle)]);
     assert_eq!(h.page(), Page::Vehicle);
-    assert_eq!(h.ui().items().len(), builtin.len());
-    for (i, item) in h.ui().items().iter().enumerate() {
-        assert_eq!(item.id, ItemId::Vehicle(i));
-        assert_eq!(item.label, roster::roster()[i].name);
-    }
-    assert_eq!(h.focus(), 0);
+    let ids: Vec<ItemId> = h.ui().items().iter().map(|i| i.id).collect();
+    assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(0)]);
+    assert_eq!((h.focus(), browsed(&h)), (0, (0, 0)));
     let text = h.hud_text();
-    for car in roster::roster() {
-        assert!(
-            text.contains(&car.name) && text.contains(&car.stats),
-            "{text}"
-        );
+    let corsair = &roster::roster()[0];
+    for line in [
+        &corsair.name,
+        &corsair.stats,
+        &corsair.engine,
+        &corsair.drive,
+    ] {
+        assert!(text.contains(line.as_str()), "{text}");
     }
+    assert!(
+        text.contains("0-60 mph") && text.contains("5.6 s"),
+        "{text}"
+    );
+    assert!(text.contains("155 mph") && text.contains("1980s"), "{text}");
+    // From the cockpit the turntable stands where the cabin was: no car of our own.
+    assert_eq!(turntable(&mut h).len(), 8);
+    let world = h.app.world_instances;
+    let view = h.app.scene_view(1.0, 16.0 / 9.0);
+    assert!(view.instances[world..]
+        .iter()
+        .all(|i| i.mesh != corsair_ids.lods[0].interior));
     let (at, heading) = spot(&h.app);
 
-    // Pick the wagon: the menu closes on the new car, where the old one was.
-    h.focus_on(ItemId::Vehicle(1));
+    // Right: the wagon on the turntable, built and queued once; Select drives it, the menu
+    // closing on the new car where the old one was.
+    let wagon_meshes = car_mesh_count(builtin[1].0);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(browsed(&h), (1, 0));
+    assert!(h.hud_text().contains("Palisade Wagon"));
+    assert_eq!(h.app.mesh_count(), before + wagon_meshes);
+    assert_eq!(h.app.drive.spec.id, "corsair_gtx", "not yet");
     h.pad(PadButton::South);
     assert!(!h.app.menu_open());
     assert_eq!(h.app.drive.spec.id, builtin[1].0);
@@ -978,7 +1034,6 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
 
     // Its meshes are new ids after the old ones, waiting for the renderer; the old car's
     // stay registered (for switching back).
-    let wagon_meshes = car_mesh_count(builtin[1].0);
     assert_eq!(h.app.mesh_count(), before + wagon_meshes);
     let ids = h.app.car_meshes;
     assert_eq!(ids.lods[0].body[0], render::MeshId(before as u32));
@@ -988,6 +1043,7 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     );
     assert_eq!(h.app.take_new_meshes().count(), wagon_meshes);
     assert_eq!(h.app.take_new_meshes().count(), 0);
+    assert!(turntable(&mut h).is_empty(), "the page is closed");
     let view = h.app.scene_view(1.0, 1.5);
     assert!(view.instances.iter().any(|i| i.mesh == ids.lods[0].body[1]));
     assert!(view
@@ -1004,19 +1060,19 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
 
     // Saved at once.
     let (saved, _) = Settings::from_json(&store.load().expect("saved"));
-    assert_eq!(saved.vehicle, Some("palisade_wagon"));
+    assert_eq!((saved.vehicle, saved.paint), (Some("palisade_wagon"), 0));
 
     // Back to the first car: its meshes again, nothing new.
     h.open(&[ItemId::Open(Page::Vehicle)]);
-    assert_eq!(h.focus(), 1, "starts on the car driven");
-    h.focus_on(ItemId::Vehicle(0));
+    assert_eq!(browsed(&h), (1, 0), "starts on the car driven");
+    h.pad(PadButton::DpadLeft);
     h.pad(PadButton::South);
     assert_eq!(h.app.drive.spec.id, builtin[0].0);
     assert_eq!(h.app.car_meshes, corsair_ids);
     assert_eq!(h.app.mesh_count(), before + wagon_meshes);
     assert_eq!(h.app.take_new_meshes().count(), 0);
-    // Picking the car already driven changes nothing.
-    h.open(&[ItemId::Open(Page::Vehicle), ItemId::Vehicle(0)]);
+    // Picking the car already driven, from any row, changes nothing.
+    h.open(&[ItemId::Open(Page::Vehicle), ItemId::Paint]);
     assert_eq!(h.app.car_meshes, corsair_ids);
     assert!(!h.app.menu_open());
 
@@ -1042,6 +1098,216 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     scene.set_settings_store(Box::new(store.clone()));
     assert_eq!(scene.drive.spec.id, "corsair_gtx");
 }
+
+#[test]
+fn the_vehicle_page_cycles_every_car_on_one_turntable() {
+    let builtin = &crate::vehicles::BUILTIN;
+    let mut h = Harness::new();
+    assert!(turntable(&mut h).is_empty(), "driving");
+    h.open(&[ItemId::Open(Page::Vehicle)]);
+    let before = h.app.mesh_count();
+    let new: usize = builtin[1..].iter().map(|(id, _)| car_mesh_count(id)).sum();
+    for lap in 0..2 {
+        for k in 1..=builtin.len() {
+            h.pad(PadButton::DpadRight);
+            let i = k % builtin.len();
+            assert_eq!(browsed(&h), (i, 0), "lap {lap}");
+            let car = &roster::roster()[i];
+            let text = h.hud_text();
+            assert!(
+                text.contains(&car.name) && text.contains(&car.engine),
+                "{text}"
+            );
+            assert!(text.contains(&format!("{} of 12", i + 1)), "{text}");
+            // Exactly one car on the disc: the browsed one's meshes, in its first paint.
+            let meshes = turntable(&mut h);
+            let spec = crate::vehicles::builtin_spec(builtin[i].0).unwrap();
+            let open = crate::vehicles::builtin_shape(&spec)
+                .unwrap()
+                .roof
+                .convertible();
+            assert_eq!(meshes.len(), if open { 10 } else { 8 }, "{}", builtin[i].0);
+            let ids = h
+                .app
+                .cars
+                .iter()
+                .find(|c| c.id == builtin[i].0)
+                .unwrap()
+                .meshes;
+            let lod = ids.lods[0];
+            assert_eq!(
+                meshes[..7],
+                [
+                    lod.body[0],
+                    lod.glass,
+                    lod.lights[0][0],
+                    lod.wheel,
+                    lod.wheel,
+                    lod.wheel,
+                    lod.wheel
+                ]
+            );
+            assert_eq!(h.app.drive.spec.id, builtin[0].0, "only looking");
+        }
+        // Each car registered once, the first lap; the second reuses them all.
+        assert_eq!(h.app.mesh_count(), before + new, "lap {lap}");
+    }
+    assert_eq!(h.app.take_new_meshes().count(), new);
+    // Left goes back round the other way.
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(browsed(&h), (11, 0));
+    // The paint row and Drive keep the car; Back leaves without driving it.
+    h.pad(PadButton::DpadDown);
+    h.pad(PadButton::DpadDown);
+    assert_eq!(h.item(2).id, ItemId::Vehicle(11));
+    h.pad(PadButton::East);
+    assert_eq!(h.page(), Page::Pause);
+    assert!(turntable(&mut h).is_empty(), "the page is closed");
+    assert_eq!(h.app.drive.spec.id, builtin[0].0);
+}
+
+#[test]
+fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    let regent = roster::index_of("regent_coupe_cabrio").unwrap();
+    h.open(&[ItemId::Open(Page::Vehicle)]);
+    while browsed(&h).0 != regent {
+        h.pad(PadButton::DpadRight);
+    }
+    // Down to the paint, two to the right: the turntable wears it at once.
+    h.pad(PadButton::DpadDown);
+    let plain = turntable(&mut h)[0];
+    h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(browsed(&h), (regent, 2));
+    let painted = turntable(&mut h);
+    assert_ne!(painted[0], plain, "another body");
+    let cars = h.app.mesh_count();
+    let added = 2 * paint_mesh_count("regent_coupe_cabrio");
+    // Browsing back to a paint seen is free.
+    h.pad(PadButton::DpadLeft);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.mesh_count(), cars);
+    h.pad(PadButton::South);
+    assert!(!h.app.menu_open());
+    assert_eq!(h.app.drive.spec.id, "regent_coupe_cabrio");
+    assert_eq!(h.app.ui().vehicle_paint(), 2);
+    let ids = h.app.car_meshes;
+    assert_eq!(ids.lods[0].body[0], painted[0]);
+    assert_eq!(h.app.mesh_count(), cars, "built while browsing");
+    assert!(added > 0);
+
+    // Saved with the car, and the next session starts in it.
+    let (saved, _) = Settings::from_json(&store.load().expect("saved"));
+    assert_eq!(
+        (saved.vehicle, saved.paint),
+        (Some("regent_coupe_cabrio"), 2)
+    );
+    let again = Harness::with_store(&store);
+    assert_eq!(again.app.drive.spec.id, "regent_coupe_cabrio");
+    assert_eq!(again.app.ui().vehicle_paint(), 2);
+    // The page opens on it.
+    let mut again = again;
+    again.open(&[ItemId::Open(Page::Vehicle)]);
+    assert_eq!(browsed(&again), (regent, 2));
+    // Another car starts in its first paint.
+    again.pad(PadButton::DpadRight);
+    assert_eq!(browsed(&again).1, 0);
+
+    // The scene key: a car in a paint, the same body as the one picked above.
+    let setup = crate::SceneSetup::from_query("car=regent_coupe_cabrio&paint=2&stream=0").unwrap();
+    let scene = App::from_setup(&setup).unwrap();
+    assert_eq!(scene.ui().vehicle_paint(), 2);
+    let body = scene.car_meshes.lods[0].body[0].0 as usize;
+    assert_eq!(scene.meshes()[body], {
+        let spec = crate::vehicles::builtin_spec("regent_coupe_cabrio").unwrap();
+        let shape = crate::vehicles::builtin_shape(&spec).unwrap();
+        crate::car::CarModel::build_painted(&spec, &shape, 2)
+            .unwrap()
+            .lods[0]
+            .body[0]
+            .clone()
+    });
+    let setup = crate::SceneSetup::from_query("car=regent_coupe_cabrio&paint=7&stream=0").unwrap();
+    assert!(App::from_setup(&setup).is_err(), "seven paints");
+    // A saved paint the car does not have is its first.
+    let store = SharedStore::default();
+    *store.0.borrow_mut() =
+        Some(r#"{ "drive": { "vehicle": "palisade_wagon", "paint": 11 } }"#.to_owned());
+    let h = Harness::with_store(&store);
+    assert_eq!(h.app.drive.spec.id, "palisade_wagon");
+    assert_eq!(h.app.ui().vehicle_paint(), 0);
+}
+
+#[test]
+fn the_vehicle_page_fits_the_deck_and_a_tv() {
+    for target in [(1280, 800), (1920, 1080)] {
+        for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
+            let mut h = Harness::new();
+            h.app.set_target_size(target.0, target.1);
+            h.app.ui.force_ui_scale(scale);
+            h.open(&[ItemId::Open(Page::Vehicle)]);
+            let ui = h.ui();
+            let [sx, sy, sw, sh] = render::HudLayout::safe_rect(scale);
+            let hud = ui.hud();
+            let stage = ui.preview().map(|p| p.2);
+            // Every glyph and box but the shade inside the safe area; the panel's left of
+            // the stage, and only the car's name and number (and their shadows) over it.
+            for item in hud.items {
+                let (x, y, w, h) = match *item {
+                    render::HudItem::Text {
+                        x,
+                        y,
+                        scale: s,
+                        text,
+                        ..
+                    } => {
+                        let t = hud.str(text);
+                        let w = render::font::text_width(t) as f32 * s;
+                        let h = render::font::GLYPH_H as f32 * s;
+                        (x, y, w, h)
+                    }
+                    render::HudItem::Rect { color, .. } if color == SHADE_TEST => continue,
+                    render::HudItem::Rect { x, y, w, h, .. } => (x, y, w, h),
+                    render::HudItem::Image(i) => (i.x, i.y, i.w, i.h),
+                };
+                let what = format!("{target:?} x{scale} {item:?}");
+                assert!(x >= sx - 0.5 && x + w <= sx + sw + 0.5, "{what}");
+                assert!(y >= sy - 0.5 && y + h <= sy + sh + 0.5, "{what}");
+                if let Some([stx, sty, ..]) = stage {
+                    if x < stx {
+                        assert!(x + w <= stx, "into the stage: {what}");
+                    } else {
+                        assert!(y + h <= sty + 4.0, "over the turntable: {what}");
+                    }
+                }
+            }
+            // The car, its paint and Drive always show; the specs as room allows.
+            let text = h.hud_text();
+            for want in ["Corsair GTX", "Paint", "Drive this car", "Sports"] {
+                assert!(text.contains(want), "{target:?} x{scale}: {text}");
+            }
+            if scale <= 1.5 {
+                assert!(text.contains("Top speed"), "x{scale}: {text}");
+                assert!(stage.is_some(), "x{scale}: room for the turntable");
+            }
+            match stage {
+                Some(stage) => {
+                    let [x0, y0, x1, y1] = h.app.stage_ndc(stage, 16.0 / 9.0);
+                    let inside = |v: f32| (-1.0..=1.0).contains(&v);
+                    assert!(inside(x0) && inside(x1) && inside(y0) && inside(y1));
+                    assert!(x1 - x0 > 0.3 && y1 - y0 > 0.6, "{:?}", [x0, y0, x1, y1]);
+                    assert!(!turntable(&mut h).is_empty());
+                }
+                None => assert!(turntable(&mut h).is_empty()),
+            }
+        }
+    }
+}
+
+/// `draw::SHADE`, the dimming round the menu (it covers the whole target on purpose).
+const SHADE_TEST: [u8; 4] = [0, 0, 0, 110];
 
 #[test]
 fn v_cycles_through_every_builtin_and_wraps() {
@@ -1212,24 +1478,6 @@ fn about_page_credits_the_author() {
     let text = h.hud_text();
     let credit = text.find("Created by Adam Mathes").expect("credit");
     assert!(credit < text.find("BSD-3-Clause").unwrap(), "{text}");
-}
-
-#[test]
-fn vehicle_rows_shorten_their_stats_at_a_large_ui_scale() {
-    let mut h = Harness::new();
-    h.app.ui.force_ui_scale(2.0);
-    h.open(&[ItemId::Open(Page::Vehicle)]);
-    // The rows that fit (the page scrolls), each with the short strip.
-    let text = h.hud_text();
-    let shown: Vec<_> = roster::roster()
-        .iter()
-        .filter(|car| text.contains(&car.name))
-        .collect();
-    assert!(shown.len() >= 3, "{text}");
-    for car in shown {
-        assert!(!text.contains(&car.stats), "{text}");
-        assert!(text.contains(&car.short), "{text}");
-    }
 }
 
 #[test]

@@ -3,8 +3,9 @@
 //!
 //! ```text
 //! Pause:     Resume · Reset car · Vehicle › · Settings › · Quit (native only)
-//! Vehicle:   one row per built-in car (name, then class, kW/t, drive, gearbox), the one
-//!            driven marked; select to swap it in where you are
+//! Vehicle:   Car (left/right through every built-in car) · Paint (its palette) · Drive
+//!            this car; a turntable preview and the car's specs beside them, and Select on
+//!            any row swaps the car in where you are
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
 //! Drive:     Handling (Arcade / Light / Off)
 //! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
@@ -43,7 +44,7 @@ use super::menu::{Item, Unit, Widget};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Pause,
-    /// Pick a car: one row per [`crate::vehicles::BUILTIN`] entry.
+    /// Pick a car and its paint, with a turntable preview.
     Vehicle,
     Settings,
     Drive,
@@ -72,8 +73,13 @@ pub enum ItemId {
     ResetCar,
     Quit,
     Open(Page),
-    /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`].
+    /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`] (in the
+    /// paint chosen on the page).
     Vehicle(usize),
+    /// The Vehicle page's car being looked at: a [`crate::vehicles::BUILTIN`] index.
+    VehicleCar,
+    /// The Vehicle page's paint: an entry of the car's palette.
+    Paint,
     /// Look Y (and free-fly look Y) invert on a device.
     InvertLookY(DeviceKind),
     InvertLookX(DeviceKind),
@@ -131,7 +137,14 @@ pub struct PageCtx<'a> {
     pub text_entry: bool,
     /// The preset in effect (the saved one, else the one picked for the device).
     pub quality: Quality,
+    /// The Vehicle page's car (a [`crate::vehicles::BUILTIN`] index) and paint.
+    pub browse: [usize; 2],
 }
+
+/// Option names of the paint chooser, one per palette entry (the page draws swatches).
+pub const PAINT_NAMES: [&str; super::roster::MAX_PAINTS] = [
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
+];
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
 /// Names of [`MINIMAP_RANGES_M`].
@@ -197,10 +210,6 @@ pub fn note(page: Page) -> Option<&'static str> {
         Page::Bindings(_) => Some(
             "Select a row, then press the new input.\n\
              (hold): let go after a second. Other actions on that button act on release.",
-        ),
-        Page::Vehicle => Some(
-            "The marked car is the one you are driving.\n\
-             Select another to swap it in right where you are.",
         ),
         Page::Video => Some(
             "Quality sets shadows, bloom and glow; Deck targets 90 fps there.\n\
@@ -569,9 +578,30 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             );
         }
         Page::Vehicle => {
-            for (i, car) in super::roster::roster().iter().enumerate() {
-                add(ItemId::Vehicle(i), car.name.as_str(), Widget::Action);
-            }
+            let [car, paint] = ctx.browse;
+            let names = super::roster::names();
+            let car = car.min(names.len().saturating_sub(1));
+            add(
+                ItemId::VehicleCar,
+                "Car",
+                Widget::Choice {
+                    options: names,
+                    index: car,
+                },
+            );
+            let paints = super::roster::roster()
+                .get(car)
+                .map_or(1, |c| c.paints.len())
+                .clamp(1, PAINT_NAMES.len());
+            add(
+                ItemId::Paint,
+                "Paint",
+                Widget::Choice {
+                    options: &PAINT_NAMES[..paints],
+                    index: paint.min(paints - 1),
+                },
+            );
+            add(ItemId::Vehicle(car), "Drive this car", Widget::Action);
         }
         Page::About => {}
         Page::Conflict => {
@@ -612,6 +642,7 @@ mod tests {
             radio: &radio,
             text_entry: false,
             quality: Quality::Deck,
+            browse: [3, 1],
         };
         let mut items = Vec::new();
         build(Page::Pause, &ctx, &mut items);
@@ -630,13 +661,18 @@ mod tests {
             ]
         );
         build(Page::Vehicle, &ctx, &mut items);
-        assert_eq!(items.len(), crate::vehicles::BUILTIN.len());
-        for (i, item) in items.iter().enumerate() {
-            assert_eq!(item.id, ItemId::Vehicle(i));
-            assert_eq!(item.widget, Widget::Action);
-            let spec = crate::vehicles::builtin_spec(crate::vehicles::BUILTIN[i].0).unwrap();
-            assert_eq!(item.label, spec.name);
-        }
+        let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
+        assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(3)]);
+        let Widget::Choice { options, index } = items[0].widget else {
+            panic!("{:?}", items[0])
+        };
+        assert_eq!((options.len(), index), (crate::vehicles::BUILTIN.len(), 3));
+        assert_eq!(options[3], "Regent Coupe Cabrio");
+        let Widget::Choice { options, index } = items[1].widget else {
+            panic!("{:?}", items[1])
+        };
+        assert_eq!((options.len(), index), (7, 1), "the Regent's palette");
+        assert_eq!(items[2].widget, Widget::Action);
         assert!(note(Page::About)
             .unwrap()
             .contains("Created by Adam Mathes"));

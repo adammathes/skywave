@@ -3,7 +3,7 @@
 //!
 //! ```json
 //! { "version": 1,
-//!   "drive": { "handling": "arcade", "vehicle": "corsair_gtx" },
+//!   "drive": { "handling": "arcade", "vehicle": "corsair_gtx", "paint": 0 },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
@@ -223,6 +223,9 @@ pub struct Settings {
     /// `None` until one is picked. The game starts in it unless the scene names a car
     /// (`car=`).
     pub vehicle: Option<&'static str>,
+    /// The palette entry `vehicle` is painted in (0, its first, until one is picked on the
+    /// Vehicle page; an entry past its palette is the first).
+    pub paint: usize,
     /// The selected camera: changed on the Camera page and by cycling while driving, and
     /// the one the game starts in (a scene's `cam=` overrides it). Never `Orbit`.
     pub camera: CameraMode,
@@ -268,6 +271,7 @@ impl Default for Settings {
         Settings {
             handling: Handling::Arcade,
             vehicle: None,
+            paint: 0,
             camera: CameraMode::ChaseMid,
             cockpit_fov_deg: TUNING.cockpit_fov_deg,
             seat_height_cm: 0.0,
@@ -303,6 +307,8 @@ struct DriveSection {
     handling: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     vehicle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paint: Option<usize>,
 }
 
 impl Default for DriveSection {
@@ -310,6 +316,7 @@ impl Default for DriveSection {
         DriveSection {
             handling: Settings::default().handling.name().to_owned(),
             vehicle: None,
+            paint: None,
         }
     }
 }
@@ -458,6 +465,11 @@ impl Settings {
         };
         Settings {
             camera,
+            paint: if self.vehicle.is_some() {
+                self.paint.min(crate::ui::roster::MAX_PAINTS - 1)
+            } else {
+                0
+            },
             cockpit_fov_deg: fix(
                 self.cockpit_fov_deg,
                 COCKPIT_FOV_MIN,
@@ -501,6 +513,7 @@ impl Settings {
             "drive": DriveSection {
                 handling: self.handling.name().to_owned(),
                 vehicle: self.vehicle.map(str::to_owned),
+                paint: self.vehicle.map(|_| self.paint),
             },
             "camera": CameraSection::of(self),
             "video": Video {
@@ -555,6 +568,7 @@ impl Settings {
         let settings = Settings {
             handling: Handling::from_name(&drive.handling).unwrap_or(d.handling),
             vehicle: drive.vehicle.as_deref().and_then(builtin_vehicle),
+            paint: drive.paint.unwrap_or(0),
             camera: CameraMode::from_name(&camera.mode).unwrap_or(d.camera),
             cockpit_fov_deg: camera.cockpit_fov_deg,
             seat_height_cm: camera.seat_height_cm,
@@ -591,6 +605,7 @@ mod tests {
         let s = Settings {
             handling: Handling::Off,
             vehicle: Some("palisade_wagon"),
+            paint: 3,
             camera: CameraMode::Cockpit,
             cockpit_fov_deg: 71.0,
             seat_height_cm: 4.0,
