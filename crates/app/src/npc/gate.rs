@@ -306,7 +306,7 @@ fn sixty_through_a_red_light_touches_no_car() {
             }
         }
         for c in app.npcs.cars() {
-            let r = Rect::car(&app, c);
+            let r = Rect::car(app, c);
             if me.overlaps(&r) {
                 overlaps += 1;
                 first_overlap.get_or_insert((tick, c.id, c.speed, c.pos));
@@ -426,7 +426,7 @@ fn run_with_people(
             }
         }
         for car in app.npcs.cars() {
-            if me.overlaps(&Rect::car(&app, car)) {
+            if me.overlaps(&Rect::car(app, car)) {
                 t.cars += 1;
                 t.first_car.get_or_insert((k, car.id));
             }
