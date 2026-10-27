@@ -47,6 +47,12 @@ Design docs, BSD license, agent conventions, Cargo workspace skeleton compiling 
 - `tools/placec`: bbox + era → Place skeleton from public-domain sources (TIGER roads, USGS 3DEP elevation, FEMA/city footprints; `docs/adr/0005-reference-sources.md`); style heuristics; era backfill; provenance header. First target: a real California beach town, compared side-by-side with the procedural one.
 **Gate:** does the real place beat the generated one? What does the generator need to learn from it?
 
+## M8 — Basin City, 2001 (the second world)
+Scenario switching (World page, `?scenario=`, era filter by car year); region template `socal_basin`
+with the 2001 grammar and palette; the hero and traffic cars of 2001; the set pieces; the 2001 radio
+preset. Backlog: `docs/backlog/LA2001.md`. Gate: the owner drives the night race boulevard, the
+channel and the tunnel and it feels like the era.
+
 ## M7+ — Breadth (each its own gate)
 Scenarios `chicago_1977` and `north_shore_suburb_1986` (templates `great_lakes_city`, `north_shore_suburb`, rosters, presets); eras 90s/00s/10s/20s; more regions, then `tokyo_ward`; Steam build; cel/dither/CRT styles; destinations with directions; getting out of the car; YouTube source (web); mobile shells; photo-derived palettes for the compiler; threads for streaming.
 

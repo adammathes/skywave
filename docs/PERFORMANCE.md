@@ -173,7 +173,10 @@ triangles; Medium 585 draws, 465k and 1325k** (the busy numbers plus about 10%),
 fewer than three cars' and three people's instances more are in the forward pass than with
 traffic off. The traffic sim (step and populate, busy) and the pedestrian sim (busy) each
 have a median under 0.5 ms a step in a debug build (`app::npc`, `app::peds` and `traffic`
-budget tests).
+budget tests), the best of three 5 s windows. The p99 gate is loose, only for a tenfold
+regression: under 2 ms for the cars, under 5 ms for the pedestrians in `traffic` (whose
+p99 reaches 3.2 ms on a 2-core CI runner with the other pedestrian tests running beside
+it; the median stays near 0.2 ms).
 
 The coast's busiest block (the `coast-peds-noon` golden, 95 cars and 119 people live, 349
 more instances in the forward pass), same measurement, release: Deck 371 draws with traffic
