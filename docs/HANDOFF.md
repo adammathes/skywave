@@ -42,7 +42,7 @@ coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered 
 dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 22:50 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+- Done on `main` (2026-10-27 23:50 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
@@ -83,26 +83,35 @@ dispatching the next session, and updates statuses as PRs open and merge.
   world is a stub on the coast's template until M8 #2 lands); the player's own MP3 folders as
   stations in the native build (#39: `--music DIR`, else `music` beside the executable, else
   ~/Music; one station per folder, at most 64 added four a frame; removals stick through
-  `music-ignored.txt`; every track ends through a silent prebuffer tail).
+  `music-ignored.txt`; every track ends through a silent prebuffer tail); the controls card
+  (#41: keyboard and pad columns from the live bindings, 6 s at start for three sessions, H / F1
+  / Start held / Show controls in the pause menu, modal over the road like the map; the horn moved
+  from H to B); overlay modes (#40: F3 cycles Off / FPS / Full, saved on Settings › HUD; menus,
+  the map, the card and an unfocused window hide it; the FPS number drops under a station toast);
+  player–NPC car collisions without damage (#38: impulses by mass, restitution 0.2; the hit car
+  brakes, holds, steers back; its shove is capped to the road's measured room, 0.5 m side and
+  1.5 m back; head-on stops both; hits on grades stay level; probes at zero sidewalk reach and
+  zero people inside); the 2001 hero cars part 1 (#43: Halberd Coupe and Targa, Tanager AWD,
+  Destrier Coupe, Siskin Coupe; body kit, blower, targa, tall wing, twin rims; underglow on U;
+  `VehicleSpec::built`; the basin is years 1995–2001 with these as heroes); the Deck's "Skywave
+  Update" launcher written by `tools/install-deck.sh` (a08324f).
 - Open PRs: natural map edges (#20; goldens re-sited and accepted; the native junction draw gate
-  depended on runner speed, so the session is holding the world still while streaming,
-  re-measuring the gates and siting the junction goldens in budget; merges first, then every
-  other PR refreshes from main); car collisions without damage (#38, head ce84443, CI green,
-  the three blocker fixes being re-probed before merge); parking lots (#37, review sent: beach
-  stalls inside parcels and squeezed on bends, lot cars popping in view, stale goldens); overlay
-  modes (#40, review sent: a long station toast overlaps the FPS number at UI scale 2, hide when
-  unfocused); the controls card (#41, review sent: closing or scrolling the card also drove the
-  car and radio, the start card at TV scale, a horn migration collision, drop the PNGs); the
-  Deck (#42, reviewer pending until the session merges #39 in); 2001 hero cars part 1 (#43,
-  under review). Sessions building: handling feel (`vehicle/handling-feel`, NOTES 17). The
-  owner's board (above) is the queue of record for what comes next.
+  measured runner speed, so the session holds the world still while streaming, re-measures the
+  gates and sites the junction goldens in budget; merges on green after a look); parking lots
+  (#37; fixes verified except the hold for cars beside a parked player, beach stalls on park and
+  empty parcels, and a bend fix that removed a whole row at the golden's bend); the Deck (#42;
+  review sent: a partly tagged album splits, native rebuilds the library per folder, album keys
+  silence the radio, duplicate picks on Firefox/Safari; plus controls-card rows after #41).
+  Sessions building: handling feel (`vehicle/handling-feel`, NOTES 17); NPC cars see
+  pedestrians (`m4/npc-sees-peds`, the next zero-violence item). The owner's board (above) is
+  the queue of record for what comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #20, then #38, #40, #41, #37, #43, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
+- Next: merge #20, #37, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
