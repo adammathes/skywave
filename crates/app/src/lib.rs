@@ -420,6 +420,7 @@ impl App {
         let ground = [pos[0], y, pos[1]];
         app.drive = Drive::with_layout(app.drive.spec.clone(), app.drive.layout, ground, heading);
         app.drive.headlights = setup.headlights;
+        app.drive.underglow = setup.underglow;
         app.camera_from_scene = setup.camera.is_some();
         app.car_from_scene = setup.car_given;
         app.camera = CameraRig::new(setup.camera.unwrap_or(CameraMode::ChaseMid), &app.drive);

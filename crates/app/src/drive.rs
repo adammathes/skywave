@@ -96,8 +96,8 @@ const TAIL_CORONA: Corona = Corona {
 pub const CAR_LIGHTS: usize = 6;
 /// The underglow's lights: as bright (kcd) as a dim lamp and short-reaching, so they pool
 /// on the road round the car and no further.
-const UNDERGLOW_KCD: f32 = 0.25;
-const UNDERGLOW_RADIUS_M: f32 = 3.5;
+const UNDERGLOW_KCD: f32 = 0.8;
+const UNDERGLOW_RADIUS_M: f32 = 4.5;
 /// Instance tint of the cabin walls (the body shell inside out, so in the paint color): the
 /// inside of the roof and pillars reads as a dark lining, not as bright paint under the
 /// cabin light.
@@ -1105,7 +1105,12 @@ mod tests {
         for (l, p) in lights.iter().zip(&local) {
             assert!(l.radius > 1.0 && l.direction == [0.0; 3]);
             assert!(l.color[2] > l.color[0]);
-            assert!(p.x.abs() < 1e-4 && p.y < 0.0, "{p}");
+            // Low in the body, on the centerline.
+            let above_ground = p.y + d.spec.cg_height_m;
+            assert!(
+                p.x.abs() < 1e-4 && (0.2..0.6).contains(&above_ground),
+                "{p}"
+            );
         }
         assert!(local[0].z < local[1].z, "front then rear");
         // With the headlights too: beams, tail lamps, then the underglow.

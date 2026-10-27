@@ -214,6 +214,11 @@ pub struct CarLayout {
     pub underglow: Option<Underglow>,
 }
 
+/// How far over the tubes the underglow's lights sit (inside the body, which they do not
+/// shadow): from the tubes' own height the road beside the car would meet them edge-on and
+/// stay dark, m.
+const UNDERGLOW_LIFT_M: f32 = 0.35;
+
 /// Where a car's underglow lights the road from and in what color.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Underglow {
@@ -225,8 +230,8 @@ pub struct Underglow {
 
 impl Underglow {
     /// The glow of `tubes` (model space) under a car whose body is `offset` from it: the
-    /// tubes' color, and points on the centerline over the lowest tube, a quarter of the
-    /// tubes' run in from each end. `None` for no tubes.
+    /// tubes' color, and points on the centerline [`UNDERGLOW_LIFT_M`] over the lowest
+    /// tube, a quarter of the tubes' run in from each end. `None` for no tubes.
     fn of(tubes: &MeshData, offset: Vec3) -> Option<Underglow> {
         let e = tubes.emissive.first()?;
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
@@ -234,10 +239,10 @@ impl Underglow {
             lo = lo.min(Vec3::from(*p));
             hi = hi.max(Vec3::from(*p));
         }
-        let at = |t: f32| Vec3::new(0.0, lo.y, lo.z + (hi.z - lo.z) * t) + offset;
+        let at = |t: f32| Vec3::new(0.0, lo.y + UNDERGLOW_LIFT_M, lo.z + (hi.z - lo.z) * t);
         Some(Underglow {
             rgb: [e[0], e[1], e[2]].map(|c| f32::from(c) / 255.0),
-            lights: [at(0.25), at(0.75)],
+            lights: [at(0.25) + offset, at(0.75) + offset],
         })
     }
 }
