@@ -1353,6 +1353,9 @@ impl<'a, 'b> Parts<'a, 'b> {
 
     fn arch_lips(&mut self) {
         let b = self.b;
+        if b.lod > 1 {
+            return;
+        }
         let mat = if b.has(Detail::ChromeTrim) {
             self.m.chrome
         } else if b.has(Detail::BlackTrim) {

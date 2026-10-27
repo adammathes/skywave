@@ -144,7 +144,9 @@ impl<'a> Body<'a> {
             }
         }
         slots.push(Slot::ShoulderLow);
-        slots.push(Slot::ShoulderMid);
+        if spec.section.shoulder < 0.92 || lod < 2 {
+            slots.push(Slot::ShoulderMid);
+        }
         slots.extend([
             Slot::Ledge,
             Slot::GlassB,
@@ -267,10 +269,10 @@ impl<'a> Body<'a> {
     fn make_stations(&self) -> Vec<Station> {
         let spec = self.spec;
         let l = self.length;
-        let (n_base, gap, n_arc) = if self.lod == 0 {
-            (26, 0.04, 9)
-        } else {
-            (24, 0.07, 6)
+        let (n_base, gap, n_arc) = match self.lod {
+            0 => (26, 0.04, 9),
+            1 => (24, 0.07, 6),
+            _ => (8, 0.14, 3),
         };
         // (s, hard) candidates.
         let mut cand: Vec<(f32, bool)> = Vec::new();

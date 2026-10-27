@@ -31,6 +31,9 @@ use crate::{car, convert, lighttiles, vehicles, Part};
 pub const VARIANTS: u32 = 4;
 /// How far from the eye parked cars are drawn, m.
 pub const CAR_DRAW_RADIUS_M: f32 = 280.0;
+/// Parked cars nearer than this draw at level of detail 1 (3-5k triangles), farther at
+/// level 2 (~2k), m.
+pub const CAR_DETAIL_RADIUS_M: f32 = 80.0;
 /// Parked cars whose paint nibble (0..16) is under this wear their own palette's colors.
 const OWN_PAINT_NIBBLES: usize = 5;
 /// Most a parked car's dust and wear darkens it.
@@ -123,6 +126,8 @@ fn look_of(k: PropKind) -> Option<usize> {
 #[derive(Clone, Copy, Debug)]
 struct Entry {
     mesh: u16,
+    /// The mesh beyond [`CAR_DETAIL_RADIUS_M`] (a parked car's level 2; `mesh` otherwise).
+    far: u16,
     /// Vertex color multiplier (a parked car's wear).
     tint: [f32; 4],
     transform: [[f32; 4]; 4],
@@ -203,6 +208,7 @@ impl PropInstances {
             );
             let chunk = chunk_of([p.pos[0], p.pos[2]]);
             let mut tint = [1.0; 4];
+            let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
                 PropKind::ParkedCar { vehicle_class } => {
                     let s = world::props::parked_car_shape(vehicle_class) % shapes.len();
@@ -220,12 +226,16 @@ impl PropInstances {
                         Some(id) => id,
                         None => {
                             let own = if era.is_some() { 0 } else { paint };
-                            meshes.push(car::parked_mesh(&shapes[s], own, era)?);
-                            let id = (meshes.len() - 1) as u16;
+                            // Level 1, then level 2 right after it (`far` is `mesh + 1`).
+                            for lod in [1, 2] {
+                                meshes.push(car::parked_mesh(&shapes[s], own, era, lod)?);
+                            }
+                            let id = (meshes.len() - 2) as u16;
                             car_mesh[s][paint] = Some(id);
                             id
                         }
                     };
+                    far = id + 1;
                     let m = Mat4::from_rotation_translation(Quat::from_rotation_y(p.yaw), pos);
                     let b = Bounds::cube(pos + Vec3::Y, 2.8);
                     // Road dust and sun wear: a little darker and warmer, up to 14%.
@@ -257,6 +267,7 @@ impl PropInstances {
             };
             entries.push(Entry {
                 mesh,
+                far: if far == u16::MAX { mesh } else { far },
                 tint,
                 transform: transform.to_cols_array_2d(),
                 bounds,
@@ -302,31 +313,41 @@ impl PropInstances {
     ) -> usize {
         let mut n = 0;
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
-        for e in &self.entries {
-            if n == MAX_PROP_INSTANCES {
-                break;
+        let near2 = CAR_DETAIL_RADIUS_M * CAR_DETAIL_RADIUS_M;
+        // Two passes so each mesh's instances stay one run: everything near (and every
+        // prop with one level), then the far parked cars at their lower level.
+        for far in [false, true] {
+            for e in &self.entries {
+                if n == MAX_PROP_INSTANCES {
+                    return n;
+                }
+                let d2 = e.bounds.distance_squared(eye);
+                if d2 > e.reach2 || !live(e.chunk) {
+                    continue;
+                }
+                let lod_far = e.far != e.mesh && d2 > near2;
+                if lod_far != far {
+                    continue;
+                }
+                let mesh = if far { e.far } else { e.mesh };
+                let lights = if d2 < lit2 {
+                    light_set(lights, &e.bounds)
+                } else {
+                    LightSet::EMPTY
+                };
+                let glow = if e.mesh == self.lamp_mesh {
+                    lamp_glow
+                } else {
+                    1.0
+                };
+                out.push(MeshInstance {
+                    lights,
+                    glow,
+                    color: e.tint,
+                    ..MeshInstance::new(self.ids[usize::from(mesh)], e.transform)
+                });
+                n += 1;
             }
-            let d2 = e.bounds.distance_squared(eye);
-            if d2 > e.reach2 || !live(e.chunk) {
-                continue;
-            }
-            let lights = if d2 < lit2 {
-                light_set(lights, &e.bounds)
-            } else {
-                LightSet::EMPTY
-            };
-            let glow = if e.mesh == self.lamp_mesh {
-                lamp_glow
-            } else {
-                1.0
-            };
-            out.push(MeshInstance {
-                lights,
-                glow,
-                color: e.tint,
-                ..MeshInstance::new(self.ids[usize::from(e.mesh)], e.transform)
-            });
-            n += 1;
         }
         n
     }

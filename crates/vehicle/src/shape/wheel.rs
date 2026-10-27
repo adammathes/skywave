@@ -33,7 +33,8 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
             (-hw, r - 0.03),
             (-hw + 0.01, rr),
         ];
-        s.lathe(o, AXIS, &prof, 20, 0.0, (0.0, mid), m.tire);
+        let segs = if lod > 1 { 10 } else { 20 };
+        s.lathe(o, AXIS, &prof, segs, 0.0, (0.0, mid), m.tire);
         if parts.whitewalls {
             let k = (r - rr) * 0.5;
             s.annulus(
@@ -41,14 +42,16 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
                 AXIS,
                 rr + k * 0.4,
                 rr + k * 1.2,
-                14,
+                segs,
                 white,
             );
         }
         // Rims become a flat disc with a hub.
         let face = if hubcaps { m.chrome } else { m.rim };
-        s.disc([hw - 0.015, 0.0, 0.0], AXIS, rr, 20, face);
-        s.disc([hw - 0.01, 0.0, 0.0], AXIS, rr * 0.3, 8, m.trim);
+        s.disc([hw - 0.015, 0.0, 0.0], AXIS, rr, segs, face);
+        if lod == 1 {
+            s.disc([hw - 0.01, 0.0, 0.0], AXIS, rr * 0.3, 8, m.trim);
+        }
         s.disc([-hw + 0.015, 0.0, 0.0], scale(AXIS, -1.0), rr, 8, m.chassis);
         return s;
     }

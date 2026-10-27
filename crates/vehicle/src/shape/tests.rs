@@ -76,7 +76,7 @@ fn hash(car: &CarMesh) -> u64 {
 #[test]
 fn shapes_build_with_sane_meshes() {
     for spec in shapes() {
-        for lod in 0..2 {
+        for lod in 0..3 {
             let car = build_lod(&spec, 0, lod).unwrap();
             for (k, m) in car.meshes().iter().enumerate() {
                 let n = m.positions.len();
@@ -136,6 +136,13 @@ fn triangle_budgets() {
             "{} lod1 exterior {low}",
             spec.id
         );
+        // Parked cars far away.
+        let far = build_lod(&spec, 0, 2).unwrap().exterior_triangles();
+        assert!(
+            (1500..=2500).contains(&far),
+            "{} lod2 exterior {far}",
+            spec.id
+        );
     }
 }
 
@@ -160,7 +167,7 @@ fn lod1_is_at_most_40_percent() {
 #[test]
 fn wheels_fit_inside_the_arches() {
     for spec in shapes() {
-        for lod in 0..2 {
+        for lod in 0..3 {
             let car = build_lod(&spec, 0, lod).unwrap();
             let w = &spec.wheels;
             for c in car.wheel_centers {
@@ -801,7 +808,7 @@ fn every_option_builds() {
             s.seams.doors = if k % 2 == 0 { 4 } else { 2 };
             s.seams.creases.truncate(k % 2);
             s.details = details.iter().copied().skip(k * 3).take(4).collect();
-            for lod in 0..2 {
+            for lod in 0..3 {
                 for popups_up in [false, true] {
                     let opts = BuildOptions {
                         color_index: k,

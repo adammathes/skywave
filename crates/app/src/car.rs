@@ -471,18 +471,19 @@ impl CarModel {
 }
 
 /// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
-/// detail 1, as one mesh (body, glass, lamps off and four wheels), its origin on the ground
+/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps off and four wheels), its origin on the ground
 /// midway between the axles, nose toward `-z`.
 pub fn parked_mesh(
     shape: &ShapeSpec,
     paint: usize,
     era: Option<&'static str>,
+    lod: u8,
 ) -> Result<Mesh, String> {
     let car = shape::build_with(
         shape,
         &BuildOptions {
             color_index: paint,
-            lod: 1,
+            lod,
             popups_up: false,
             paint: era,
         },

@@ -134,7 +134,8 @@ pub struct BuildOptions {
     /// Palette entry for the paint (wraps).
     pub color_index: usize,
     /// 0 is full detail; 1 drops seams, interior detail, small parts and turns rims into
-    /// discs (≤ 40% of the triangles).
+    /// discs (≤ 40% of the triangles); 2 is a coarser loft with plainer wheels and no arch
+    /// lips (~2k exterior triangles) for parked cars far away.
     pub lod: u8,
     /// Pop-up headlamps raised.
     pub popups_up: bool,
@@ -186,7 +187,7 @@ pub fn build(spec: &ShapeSpec, color_index: usize) -> Result<CarMesh, ShapeError
     )
 }
 
-/// Builds level of detail `level` (0 or 1).
+/// Builds level of detail `level` (0, 1 or 2).
 pub fn build_lod(spec: &ShapeSpec, color_index: usize, level: u8) -> Result<CarMesh, ShapeError> {
     build_with(
         spec,
@@ -201,7 +202,7 @@ pub fn build_lod(spec: &ShapeSpec, color_index: usize, level: u8) -> Result<CarM
 /// Validates `spec` and builds it.
 pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, ShapeError> {
     spec.validate()?;
-    let lod = opts.lod.min(1);
+    let lod = opts.lod.min(2);
     if opts.paint.is_some_and(|p| params::parse_paint(p).is_none()) {
         return Err(ShapeError::BadColor { index: u32::MAX });
     }
