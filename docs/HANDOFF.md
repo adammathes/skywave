@@ -41,6 +41,9 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   convertibles; WebGPU→WebGL2 fallback with `?diag=1`; GPU performance pass (culling, quality
   presets with Steam Deck auto-pick, native `--stats`, `docs/PERFORMANCE.md`).
 - Open branches:
+  - `m4/roster` (M4 #2): eight more cars completing the 1980s roster of twelve, the `PickupBed`,
+    `SpareTire` and `TTop` shape details, the `Utility` class, `vehicle/tests/roster.rs` (bands,
+    distinctness, class orderings) and the parked-car class→shapes table in `app::propinst`.
   - `vehicle-picker` (c8c5770): in-game vehicle picker (`V`, Menu › Vehicle) and the "Created by
     Adam Mathes" credit on the About page and the web footer. Verified green on its base; needs a
     PR into `main` and a merge resolution against the radio and performance merges in

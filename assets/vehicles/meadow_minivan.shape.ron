@@ -1,0 +1,58 @@
+// Meadow Minivan body: a mid-80s front-drive minivan.
+//
+// Intent: one tall box with a short sloping nose. A small slot grille between flush
+// rectangular lamps, a stubby hood that runs straight into a long raked windshield, a
+// tall flat roof with a rack, three windows a side and an upright liftgate. Body-colored
+// bumpers, chrome belt molding, wheel covers. The second color is the wood-grain edition.
+// Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "meadow_minivan",
+    side: [
+        (0.00, 0.74), (0.05, 0.84), (0.30, 0.93), (0.98, 1.04), (1.04, 1.06),
+        (1.70, 1.62), (1.80, 1.65), (4.54, 1.64), (4.60, 1.61), (4.72, 1.08),
+        (4.75, 1.04),
+        (4.75, 0.34), (4.60, 0.26), (4.00, 0.22), (0.70, 0.20), (0.10, 0.25), (0.00, 0.34),
+    ],
+    plan: [
+        (0.00, 0.84), (0.08, 0.88), (0.40, 0.90), (4.60, 0.90), (4.75, 0.88),
+    ],
+    belt: [(1.04, 1.05), (4.72, 1.08)],
+    section: Section(shoulder: 0.95, tumblehome_deg: 8, greenhouse_frac: 0.88, crown: 0.03, tuck: 0.03),
+    glass: Glass(
+        windshield: (1.06, 1.70),
+        backlight: (4.60, 4.72),
+        side: [(1.78, 2.40), (2.50, 3.44), (3.54, 4.50)],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.19, arch_clearance: 0.05, front_x: 0.82, rear_x: 3.67, track: 1.52),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.30, 0.45)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Body, bumper_y: (0.32, 0.47)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.84, creases: [(0.10, 0.66, 4.70, 0.70)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true),
+    details: [ChromeTrim, RoofRack, Badge(Bar)],
+    color_details: [(1, WoodPanel)],
+    // Light blue, white (wood-grain), maroon, champagne, silver, dark blue, cream over brown.
+    palette: ["#8ea9c4", "#ebe8de", "#6b2430", "#cfbf9c", "#b9bbbd", "#2c3d62", "#e3d9bd/#6a4a32"],
+    accent: "#8a6a48",
+    interior: InteriorShape(
+        dash_height: 1.02,
+        dash_x: 1.40,
+        wheel_pos: (1.84, 0.88),
+        wheel_radius: 0.19,
+        column_angle_deg: 30,
+        mirror_pos: (1.62, 1.50),
+        seat: (2.32, 0.62),
+        driver_offset: 0.40,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: slate-blue cloth with lighter
+        // inserts and pale piping, blue-gray carpet, green-lit dials.
+        colors: ["#3a4250", "#556070", "#3a4452", "#c4c6ca", "#4a5462", "#9aa6b8"],
+        display: "#3cff7a",
+        insert: "#7a8698",
+        piping: "#d0d4da",
+        dash_top: "#4a5260",
+    ),
+)

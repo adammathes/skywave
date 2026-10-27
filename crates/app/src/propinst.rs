@@ -48,6 +48,61 @@ fn era_index(roll: u32) -> usize {
         .unwrap_or(0)
 }
 
+/// The built-in shapes a parked car of each `VehicleClass` (the low nibble of a Place
+/// `ParkedCar`'s class, in `vehicle::VehicleClass` order) is drawn as, with weights. Each
+/// list keeps to bodies within half a meter of the length of the class's collision box
+/// (`world::props::parked_car_size`); a class past the end (`Utility`, which the world
+/// does not park) parks as the wagon.
+const PARKED: [&[(&str, u32)]; 10] = [
+    &[("corsair_gtx", 3), ("halcyon_turbo", 3), ("pipit_hatch", 2)], // Sports
+    &[
+        ("bancroft_sedan", 3),
+        ("prescott_landau", 3),
+        ("palisade_wagon", 1),
+        ("buckboard_pickup", 2),
+    ], // Sedan
+    &[
+        ("palisade_wagon", 3),
+        ("meadow_minivan", 3),
+        ("drayman_van", 1),
+        ("buckboard_pickup", 1),
+    ], // Wagon
+    &[
+        ("seabreeze_convertible", 3),
+        ("halcyon_turbo", 2),
+        ("burro_4x4", 2),
+    ], // Coupe
+    &[("buckboard_pickup", 1)],                                      // Pickup
+    &[("meadow_minivan", 1), ("drayman_van", 1)],                    // Van
+    &[("pipit_hatch", 1)],                                           // Hatch
+    &[("seabreeze_convertible", 1)],                                 // Convertible
+    &[("regent_coupe_cabrio", 1), ("bancroft_sedan", 1)],            // Luxury
+    &[("corsair_gtx", 1), ("halcyon_turbo", 1)],                     // Muscle
+];
+
+/// The [`vehicles::BUILTIN_SHAPES`] index a parked car of `vehicle_class` is drawn as,
+/// picked from its [`PARKED`] list by `roll` (any number).
+fn parked_shape(vehicle_class: u8, roll: u32) -> usize {
+    let list = PARKED
+        .get(usize::from(vehicle_class & 15))
+        .copied()
+        .unwrap_or(&[("palisade_wagon", 1)]);
+    let total: u32 = list.iter().map(|e| e.1).sum();
+    let mut r = roll % total;
+    let mut id = list[0].0;
+    for &(name, w) in list {
+        if r < w {
+            id = name;
+            break;
+        }
+        r -= w;
+    }
+    vehicles::BUILTIN_SHAPES
+        .iter()
+        .position(|(file, _)| file.strip_suffix(".shape.ron") == Some(id))
+        .unwrap_or(0)
+}
+
 /// Instances farther than this from the eye are lit by the sun and sky only, m.
 pub const LIT_RADIUS_M: f32 = 160.0;
 /// Most prop instances a frame draws.
@@ -211,7 +266,7 @@ impl PropInstances {
             let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
                 PropKind::ParkedCar { vehicle_class } => {
-                    let s = world::props::parked_car_shape(vehicle_class) % shapes.len();
+                    let s = parked_shape(vehicle_class, (h >> 44) as u32) % shapes.len();
                     // A third in the car's own palette, the rest in the era's street colors.
                     let n_own = shapes[s].palette.len();
                     let nibble = usize::from(vehicle_class >> 4);
@@ -350,5 +405,43 @@ impl PropInstances {
             }
         }
         n
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parked_cars_fit_their_class_and_every_shape_parks() {
+        let shapes: Vec<_> = vehicles::BUILTIN_SHAPES
+            .iter()
+            .map(|(_, text)| vehicles::load_shape(text).unwrap())
+            .collect();
+        let mut parked = vec![false; shapes.len()];
+        for (class, list) in PARKED.iter().enumerate() {
+            let box_len = world::props::parked_car_size(class as u8)[0];
+            for &(id, w) in *list {
+                let k = shapes.iter().position(|s| s.id == id).expect(id);
+                assert!(w > 0);
+                assert!(
+                    (shapes[k].length() - box_len).abs() <= 0.5,
+                    "{id} ({} m) parks in a {box_len} m box",
+                    shapes[k].length()
+                );
+                parked[k] = true;
+            }
+            // Every entry is reachable.
+            let total: u32 = list.iter().map(|e| e.1).sum();
+            let picked: Vec<usize> = (0..total).map(|r| parked_shape(class as u8, r)).collect();
+            for &(id, _) in *list {
+                assert!(picked.iter().any(|&k| shapes[k].id == id), "{id}");
+            }
+        }
+        assert!(
+            parked.iter().all(|&p| p),
+            "every built-in shape parks somewhere"
+        );
+        assert_eq!(shapes[parked_shape(15, 7)].id, "palisade_wagon");
     }
 }
