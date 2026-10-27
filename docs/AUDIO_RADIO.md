@@ -18,7 +18,7 @@ A station's name is the real service's own channel name (a fact); the dash shows
 
 ### Sources
 1. **Files** (native + web). The player's own music: each folder with audio files in it becomes a station on the dial (loose dropped files: one station), next to the presets. Titles come from ID3v2 tags (`TIT2`/`TPE1`), else the file name. Playback order is a seeded shuffle so returning to a station resumes mid-"broadcast" (position = (the radio's clock + station offset) mod playlist length): stations feel like they were already playing while you were on another one. Web: built (below). Native: a music folder setting (default a `music` folder beside the executable, else the platform's Music directory) scanned at start, decoded with the MP3 decoder of the native radio (PR #15, `nanomp3-core`); it follows that PR, since main has no native player yet. No `symphonia` (MPL-2.0 is out).
-2. **Streams** (native + web). Internet radio over HTTPS (Icecast/SHOUTcast MP3/AAC). Native: HTTP client (`ureq`, MIT/Apache) feeding the MP3 decoder (PR #15); ICY metadata parsed for titles. Web: an `<audio>` element driven from JS glue (streams work without CORS for playback; titles need CORS-enabled stations, otherwise none). Presets ship with a handful of well-known public stations per era/format whose terms allow listening (e.g. listener-supported stations with public stream URLs); each preset records the homepage and the date checked. Nothing is rehosted.
+2. **Streams** (native + web). Internet radio over HTTPS (Icecast/SHOUTcast MP3/AAC). Native: a hand-written HTTP/1.0 GET over `rustls` feeding `nanomp3-core` (MP3 only; ADR 0006); ICY metadata parsed for titles. Web: an `<audio>` element driven from JS glue (streams work without CORS for playback; titles need CORS-enabled stations, otherwise none). Presets ship with a handful of well-known public stations per era/format whose terms allow listening (e.g. listener-supported stations with public stream URLs); each preset records the homepage and the date checked. Nothing is rehosted.
 3. **YouTube** (later, web only). Official IFrame Player API with user-supplied playlist IDs; the player element must remain visible (ToS), so it is rendered as the "radio display" in a corner of the page. No audio-only tricks.
 
 ### Switching
@@ -57,18 +57,18 @@ Checked on 2026-10-27, each twice from a cold start for a minute: every station 
 
 | Preset | Station | Format | Stream | Published at |
 |---|---|---|---|---|
-| `1984_socal` | Radio Paradise Mellow Mix | mellow rock and soft pop | `https://stream.radioparadise.com/mellow-128` (AAC 128) | Radio Paradise stream links |
+| `1984_socal` | Radio Paradise Mellow Mix | mellow rock and soft pop | `https://stream.radioparadise.com/mellow-128` (AAC 128), then `mellow-192` (MP3 192) | Radio Paradise stream links |
 | | Radio Paradise Main Mix | eclectic album rock | `.../mp3-128` (MP3 128) | |
 | | KXLU 88.9 FM | LA college radio: indie, punk, new wave | `https://kxlu.streamguys1.com/kxlu-hi` (MP3 320) | kxlu.com's stream links |
 | | Intergalactic FM CBS | italo, new wave and electro | `https://radio.intergalactic.fm/1A` (AAC 128) | its channel page |
 | | KUCI 88.9 FM | Irvine college radio: freeform and talk | `https://streamer.kuci.org/high` (MP3 320) | kuci.org/listen |
 | | KCSB 91.9 FM | Santa Barbara college radio: freeform and news | `https://kcsb.streamguys1.com/live` (MP3 128) | kcsb.org's stream list |
-| | Radio Paradise Global Mix | world music and eclectic grooves | `.../global-128` (AAC 128) | Radio Paradise stream links |
+| | Radio Paradise Global Mix | world music and eclectic grooves | `.../global-128` (AAC 128), then `global-192` (MP3 192) | Radio Paradise stream links |
 | `1977_chicago` | WFMU Rock'n'Soul Radio | soul, R&B and rock 'n' roll 45s | `https://stream{2,0}.wfmu.org/rocknsoul` (MP3 128) | WFMU's `wfmu_rock.pls` |
 | | Intergalactic FM Disco Fetish | disco, boogie and soul | `https://radio.intergalactic.fm/2A` (AAC 128) | its channel page |
 | | WDCB 90.9 FM | Chicago jazz and blues | `https://wdcb-ice.streamguys1.com/wdcb128` (MP3 128) | WDCB streaming support page |
 | | WHPK 88.5 FM | Hyde Park college radio | `https://whpk-stream.uchicago.edu/stream` (MP3 256) | whpk.org listen link |
-| | Radio Paradise Rock Mix | classic and album rock | `.../rock-128` (AAC 128) | Radio Paradise stream links |
+| | Radio Paradise Rock Mix | classic and album rock | `.../rock-128` (AAC 128), then `rock-192` (MP3 192) | Radio Paradise stream links |
 | | WFMU Give the Drummer Radio | soul, funk, jazz and world grooves | `https://stream0.wfmu.org/drummer` (MP3 128) | WFMU's `wfmu_drummer.pls` |
 | `1986_north_shore` | WNUR 89.3 FM | Evanston student freeform, jazz and rock | `https://stream.rcs.revma.com/w4pmmfkdx4zuv` (MP3 ~192) | wnur.org's own player |
 | | WMXM 88.9 FM | Lake Forest college radio: indie and freeform | `https://wmxm.streamguys1.com/live` (MP3 128) | wmxm.org's Listen Live |
@@ -113,11 +113,14 @@ No turn-signal click yet: there is no turn-signal action.
 ### Sinks
 - Native (`platform-native/src/sfx.rs`): a `cpal` output stream on the default device at 48 kHz (f32 preferred, any channel count; 256-frame buffers when the device allows, ≈5 ms). The callback owns the mixer; the main thread copies each frame's `AudioParams` into a mutex the callback only `try_lock`s, so the audio thread never waits. No device: silent, with a log line. ADR 0004.
 - Web (`platform-web/src/sfx.rs` and the `sfx` script in `web/index.html`): the mixer runs on the main thread after `App::frame`. The page's AudioWorklet (registered from a Blob URL) plays a 16k-frame ring fed by `postMessage`; each frame the game asks `skywaveSfx.wanted(dt)` how much to render (two blocks plus one animation frame ahead of what the context has played, measured with `AudioContext.currentTime`) and pushes a view of wasm memory that the glue copies. The context is created at 48 kHz (the worklet resamples linearly if the browser picks another rate) on the first key, pointer or touch gesture, and resumed by later ones. `window.skywaveAudio` exposes the state, the worklet, and pushed/consumed/underrun counters. No SharedArrayBuffer, so no COOP/COEP headers are needed.
-- Radio streams and files play outside this mixer (an `<audio>` element on the web); they only set the duck level.
+- Radio streams play outside this mixer (an `<audio>` element on the web; natively a ring the `cpal` callback adds after the mixer); they only set the duck level.
+
+### Native streams (`platform-native/src/radio`, ADR 0006)
+`radio::Player` takes the radio's commands each frame and hands back `PlayerEvent`s through a channel; the game's thread never waits. Each `Play` cuts the ring (the old station falls silent at once and its thread can no longer write) and starts a stream thread: `http` (one `GET` in HTTP/1.0 with `Icy-MetaData: 1`, `HTTP/1.x` or `ICY` status, redirects but never https to http, `HTTPS_PROXY`; DNS bounded at 5 s, the TLS handshake at the 10 s deadline), `icy` (metadata blocks split from the audio, `StreamTitle` kept), `decode` (`nanomp3-core`, mono doubled, linear resampling to 48 kHz), then the 4 s ring. `Started` once 0.25 s is buffered (the callback waits for as much before playing, and again after running dry). A stream that never started fails at once: refused, an HTTP error, not MP3 (AAC: the three Radio Paradise AAC stations list their channel's MP3 URL second, which native plays; Intergalactic FM publishes its channels in AAC only, and WMXM's server offers only CBC cipher suites, which rustls does not implement, so natively those three show NO SIGNAL and the dial moves on), or no audio within 10 s; `Radio` then tries the next URL, then NO SIGNAL, as on the web. A stream that played and dropped (hung up, or sent no decodable audio for 10 s) reconnects after 0.5, 1, 2, 4, 8 s (reset by 5 s of steady play), then fails. The callback adds the radio at its volume (already scaled by master and mute) with a soft knee above 0.9. The window title shows the station and its now-playing title. `--radio-off` (CI, benchmarks), or no audio device, drops the commands. `cargo test -p platform-native -- --ignored --nocapture every_preset_station_plays` plays 5 s of every preset station.
 
 ## Licensing
 - Users' files are theirs. Streams are the broadcasters'. We ship no audio. Presets are facts (URLs, names) and include a `terms_checked` date.
-- Decoders: on the web, the browser's. Natively, the MP3 decoder PR #15 brings (`nanomp3-core`); every decoder must pass `cargo deny` (BSD/MIT/Apache-2.0/Zlib/CC0), so no `symphonia` (MPL-2.0). `cpal` (Apache-2.0).
+- Decoders: on the web, the browser's. Natively, `nanomp3-core` (MIT/Apache-2.0) for MP3; no permissively licensed AAC decoder exists, so native plays MP3 only and AAC stations list an MP3 URL after their AAC one (ADR 0006). Every decoder must pass `cargo deny` (BSD/MIT/Apache-2.0/Zlib/CC0), so no `symphonia` (MPL-2.0). TLS: `rustls` + `ring` (Apache-2.0/ISC/MIT). `cpal` (Apache-2.0).
 - The YouTube integration follows the IFrame API terms (visible player, no downloading).
 
 ## Acceptance tests
