@@ -76,8 +76,9 @@ on the coast (seed 1), vertices plus indices, measured in `parked_car_meshes_sta
 |---|---|---|---|
 | Four shapes, every paint used (before the full roster) | 152 | 421k | 22.9 MB |
 | Twelve shapes, every paint used | 436 | 1.20M | 65.0 MB |
-| Twelve shapes, 2 palette + 4 era paints per shape per place (shipped) | 144 | 396k | 21.5 MB |
+| Twelve shapes, 2 palette + 4 era paints per shape per place | 144 | 396k | 21.5 MB |
 | The same plus NPC traffic (its era paints are the parked cars'; shares every mesh on the coast) | 144 | 396k | 21.5 MB |
+| Fourteen shapes (the Longbow Coupe and Appaloosa GT added; the exotics and open sports cars never park), traffic included (shipped) | 168 | 460k | 24.8 MB |
 
 Each place draws its six paints per shape from the era's weights by its seed, so the street
 mix still varies place to place. The test fails above 27 MB (about 1.2x the four-shape set),
