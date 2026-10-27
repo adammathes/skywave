@@ -619,6 +619,44 @@ fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
     assert_eq!(overlay_shown(&h), Some(Overlay::Fps));
 }
 
+#[test]
+fn the_full_overlay_lines_do_not_overlap() {
+    let mut h = Harness::new();
+    h.app.set_gpu_info(&GpuInfo {
+        name: "Test GPU".into(),
+        backend: "Vulkan".into(),
+        ..GpuInfo::default()
+    });
+    h.app.set_render_stats(RenderStats {
+        gpu_timing: true,
+        ..RenderStats::default()
+    });
+    h.app.ui.settings_mut().overlay = Overlay::Full;
+    h.frame();
+    let hud = h.app.ui().hud();
+    let [sx, ..] = HudLayout::safe_rect(1.0);
+    // The overlay's text at its left edge: each item's span of lines, top to bottom.
+    let mut spans: Vec<(f32, f32)> = hud
+        .items
+        .iter()
+        .filter_map(|item| match *item {
+            render::HudItem::Text {
+                x, y, scale, text, ..
+            } if x == sx => {
+                let lines = hud.str(text).lines().count() as f32;
+                Some((y, y + lines * render::font::LINE_HEIGHT as f32 * scale))
+            }
+            _ => None,
+        })
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(spans.len() >= 4, "{spans:?}");
+    assert!(h.hud_text().contains("Test GPU (Vulkan)"));
+    for w in spans.windows(2) {
+        assert!(w[0].1 <= w[1].0 + 1e-3, "lines overlap: {spans:?}");
+    }
+}
+
 /// The HUD's quads as rectangles in target pixels on a `target`-sized screen.
 fn quad_rects(hud: &render::Hud, target: (u32, u32)) -> Vec<[f32; 4]> {
     let layout = HudLayout::new(target, hud.ui_scale);

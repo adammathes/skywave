@@ -72,6 +72,8 @@ const ARROW_EDGE: [u8; 4] = [24, 16, 8, 255];
 const RIM: f32 = 4.0;
 const MINI_ARROW: f32 = 24.0;
 const FULL_ARROW: f32 = 26.0;
+/// Lines in the full overlay's stats block, under the graph.
+const STAT_LINES: f32 = 13.0;
 /// Room under the full map for its controls line, virtual units.
 pub(super) const FULL_MAP_FOOTER: f32 = 32.0;
 
@@ -935,7 +937,7 @@ impl Ui {
         let r = &self.render_stats;
         let gpu_line = r.gpu_timing as u32 as f32;
         let label_line = !self.gpu_label.is_empty() as u32 as f32;
-        let lines = 11.0 + gpu_line + label_line;
+        let lines = STAT_LINES + gpu_line + label_line;
         hud.rect(
             sx - 10.0,
             sy - 10.0,
@@ -1044,7 +1046,7 @@ impl Ui {
                 r.skipped_frames,
             ),
         );
-        let mut y = y + 11.0 * line;
+        let mut y = y + STAT_LINES * line;
         if r.gpu_timing {
             // Medians over the last 64 frames read back; the parts (each cascade; the
             // depth pre-pass, meshes and sky) where timestamps work inside passes.
