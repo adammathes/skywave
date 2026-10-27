@@ -980,6 +980,9 @@ pub fn ribbon(line: &[[f32; 2]], w: f32, mut f: impl FnMut([[f32; 2]; 4])) {
     }
 }
 
+/// A ribbon quad: `[a_left, b_left, b_right, a_right]`.
+type Quad = [[f32; 2]; 4];
+
 /// How lettering is built.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1035,7 +1038,7 @@ pub fn build(
     // Outward in the face's plane from the edge `a -> b` of a ribbon quad's outline.
     let out = |a: [f32; 2], b: [f32; 2]| f.v(a[1] - b[1], b[0] - a[0], 0.0);
     for line in s.lines() {
-        let mut ends: Option<([[f32; 2]; 4], [[f32; 2]; 4])> = None;
+        let mut ends: Option<(Quad, Quad)> = None;
         ribbon(line, s.width, |q| {
             quad(m, q.map(|p| at(p, top)), facing, paint);
             if finish == Finish::Channel {

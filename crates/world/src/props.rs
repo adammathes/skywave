@@ -1591,7 +1591,7 @@ fn neon_sign(
             None => fits(left).map(|i| (words.swap_remove(i), false)),
         };
     }
-    let with_neon = main.as_ref().map_or(true, |m| m.1);
+    let with_neon = main.as_ref().is_none_or(|m| m.1);
     if !parts.is_empty() {
         pictogram::extrude(m, &f, &parts, cx, pic_y, size, za, zb, true, &tints);
         if !lit_box && with_neon {
