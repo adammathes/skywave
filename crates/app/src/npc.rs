@@ -646,7 +646,7 @@ mod tests {
     /// busiest signalized crossing at busy density (7.1 NPC cars within 40 m and 11.8
     /// people within 30 m of it on average over 30 s at noon).
     pub(crate) const JUNCTION: &str =
-        "place=coast&car=corsair_gtx&cam=chase-mid&pos=513.0,541.8&yaw=-26.4";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=513.0,541.8&yaw=-26.4";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()

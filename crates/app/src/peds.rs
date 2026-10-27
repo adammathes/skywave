@@ -401,7 +401,7 @@ mod tests {
     /// signalized four-way approaches, the one with the most people about at busy density
     /// (90 after the warm-up at noon; downtown's crosswalk of the gate scenarios ties it).
     pub(crate) const STRIP: &str =
-        "place=coast&car=corsair_gtx&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(part_instances(&mut app, 1.0), in_reach(&app) * PARTS);
         // A vehicle switch keeps them.
         let hash = app.npcs.crowd.hash();
-        app.switch_vehicle("palisade_wagon").unwrap();
+        app.switch_vehicle("homestead_wagon").unwrap();
         assert_eq!(app.npcs.crowd.hash(), hash);
         assert_eq!(app.pedestrian_count(), n);
     }
