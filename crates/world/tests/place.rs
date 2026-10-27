@@ -667,3 +667,68 @@ fn far_terrain_lies_under_the_ground() {
         assert!(checked > 200_000, "{checked}");
     }
 }
+
+/// The coast's horizon: past its land sides ridges climb well above anything in the place
+/// (higher behind the eastern mountains than behind the northern and southern hills), its
+/// triangles all lie outside the place but for the cells along its sides, it meets the far
+/// terrain's samples exactly along the sides, and it leaves the open sea to the water.
+#[test]
+fn horizon_rises_past_the_land_and_leaves_the_sea() {
+    use world::mesh::terrain::HORIZON_RINGS_M;
+    use world::{ChunkPlan, Palette};
+    let pal = Palette::socal_1985();
+    let p = build_place(Seed(1), &template());
+    let plan = ChunkPlan::new(&p, &pal);
+    let far = plan.far_terrain(&p, &pal).unwrap();
+    let h = plan.horizon(&p, &pal).unwrap();
+    let ext = p.header.extent_m();
+    let tris = h.indices.len() / 3;
+    let top = |f: &dyn Fn([f32; 3]) -> bool| {
+        h.vertices
+            .iter()
+            .filter(|v| f(v.pos))
+            .map(|v| v.pos[1])
+            .fold(f32::NEG_INFINITY, f32::max)
+    };
+    let inside_top = p
+        .terrain
+        .heights
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let east = top(&|q| q[0] > ext[0] + 600.0 && q[2] > 0.0 && q[2] < ext[1]);
+    let north = top(&|q| q[2] < -600.0 && q[0] > 0.0 && q[0] < ext[0]);
+    println!("horizon: {tris} triangles; tops: place {inside_top:.0}, east {east:.0}, north {north:.0} m");
+    assert!((1000..=8000).contains(&tris), "{tris} triangles");
+    assert!(
+        east > inside_top + 100.0 && east > north,
+        "east {east}, north {north}"
+    );
+    assert!(north > 100.0, "north {north}");
+    let reach = HORIZON_RINGS_M[HORIZON_RINGS_M.len() - 1];
+    for t in h.indices.chunks_exact(3) {
+        let v = [0, 1, 2].map(|k| h.vertices[t[k] as usize].pos);
+        let c = [
+            (v[0][0] + v[1][0] + v[2][0]) / 3.0,
+            (v[0][2] + v[1][2] + v[2][2]) / 3.0,
+        ];
+        let out = c[0] < 0.0 || c[1] < 0.0 || c[0] > ext[0] || c[1] > ext[1];
+        assert!(out, "horizon triangle inside the place at {c:?}");
+        assert!(v
+            .iter()
+            .all(|q| q[0] >= -reach - 1.0 && q[0] <= ext[0] + reach + 1.0));
+        // West of the coast's headlands, open sea only.
+        if c[0] < -100.0 && c[1] > 400.0 && c[1] < ext[1] - 400.0 {
+            panic!("horizon land out at sea at {c:?}");
+        }
+    }
+    // Along the sides the horizon's samples are the far terrain's.
+    let on_side = |q: [f32; 3]| q[0] == 0.0 || q[2] == 0.0 || q[0] == ext[0] || q[2] == ext[1];
+    let mut shared = 0;
+    for v in h.vertices.iter().filter(|v| on_side(v.pos)) {
+        if far.vertices.iter().any(|f| f.pos == v.pos) {
+            shared += 1;
+        }
+    }
+    assert!(shared >= 4 * 64, "{shared} side samples shared");
+}

@@ -26,9 +26,9 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use place::{Place, ZoneId, SIDEWALK_WIDTH_M};
+use place::{Place, WaterKind, ZoneId, SIDEWALK_WIDTH_M};
 
-use crate::math::{clamp, floor, lerp, segment_distance, value_noise, V2, V3};
+use crate::math::{clamp, floor, lerp, segment_distance, sqrt, value_noise, V2, V3};
 use crate::mesh::{quad, Paint, Pattern, WorldMesh, WorldVertex};
 use crate::palette::{mix, shade, Palette, Rgb};
 use crate::roads::{profile_height, Network, DECK_CLEARANCE_M};
@@ -530,6 +530,7 @@ pub fn build(
                 WATER_SPLIT,
                 &mut m,
             );
+            surf(place, grid, pal, [cx, cz], res, seed, &mut m);
             let dst = out.at(center, MeshKind::Ground);
             let base = dst.vertices.len() as u32;
             dst.vertices.extend_from_slice(&m.vertices);
@@ -574,18 +575,19 @@ fn cell_height(h: [f32; 4], flip: bool, tx: f32, tz: f32) -> f32 {
     }
 }
 
-/// The far terrain: the whole place's ground and water as one coarse mesh, a sample every
-/// [`FAR_STEP_M`] (65×65 samples, 8192 triangles, for a 2 km place), colored by zone as
-/// [`build`] colors it, under the fine ground everywhere (see the module docs), and a
-/// water plane [`FAR_DROP_M`] under the water level in every chunk with water (one quad
-/// apiece, and the skirts out to sea).
-pub fn build_far(
-    place: &Place,
-    grid: &TerrainGrid,
-    colors: &CellColors,
-    pal: &Palette,
-    seed: u64,
-) -> WorldMesh {
+/// The far terrain's coarse grid: the fine sample columns and rows it keeps (every
+/// [`FAR_STEP_M`] and the last), its heights (each lowered under the fine ground around
+/// it, see the module docs) and each cell's diagonal.
+struct FarGrid {
+    /// Fine samples per coarse step.
+    step: usize,
+    xs: Vec<usize>,
+    zs: Vec<usize>,
+    heights: Vec<f32>,
+    flip: Vec<bool>,
+}
+
+fn far_grid(grid: &TerrainGrid) -> FarGrid {
     let step = floor(FAR_STEP_M / grid.cell + 0.5).max(1.0) as usize;
     let axis = |n: usize| {
         let mut v: Vec<usize> = (0..n).step_by(step).collect();
@@ -637,6 +639,35 @@ pub fn build_far(
             heights[j * nx + i] -= drop + FAR_DROP_M;
         }
     }
+    FarGrid {
+        step,
+        xs,
+        zs,
+        heights,
+        flip,
+    }
+}
+
+/// The far terrain: the whole place's ground and water as one coarse mesh, a sample every
+/// [`FAR_STEP_M`] (65×65 samples, 8192 triangles, for a 2 km place), colored by zone as
+/// [`build`] colors it, under the fine ground everywhere (see the module docs), and a
+/// water plane [`FAR_DROP_M`] under the water level in every chunk with water (one quad
+/// apiece, and the skirts out to sea).
+pub fn build_far(
+    place: &Place,
+    grid: &TerrainGrid,
+    colors: &CellColors,
+    pal: &Palette,
+    seed: u64,
+) -> WorldMesh {
+    let FarGrid {
+        step,
+        xs,
+        zs,
+        heights,
+        flip,
+    } = far_grid(grid);
+    let (nx, nz) = (xs.len(), zs.len());
     let pos = |i: usize, j: usize| grid.pos(xs[i], zs[j]);
     let normal = |i: usize, j: usize| {
         let (i0, i1) = (i.saturating_sub(1), (i + 1).min(nx - 1));
@@ -702,6 +733,226 @@ pub fn build_far(
         v.pos[1] -= FAR_DROP_M;
     }
     m
+}
+
+/// The surf on the shorelines of chunk `c`: along every segment of an ocean's or a lake's
+/// shoreline (its polygon less the place's sides) whose middle is in the chunk, with dry
+/// ground on one side and water on the other, a band of foam just seaward of the waterline
+/// and, on the ocean, a broken line of breakers further out; flat on the water, a hair
+/// above it.
+fn surf(
+    place: &Place,
+    grid: &TerrainGrid,
+    pal: &Palette,
+    c: [usize; 2],
+    res: usize,
+    seed: u64,
+    m: &mut WorldMesh,
+) {
+    let o = grid.pos(c[0] * res, c[1] * res);
+    let size = grid.cell * res as f32;
+    let (lo, hi) = (grid.pos(0, 0), grid.pos(grid.w - 1, grid.h - 1));
+    let on_side = |p: V2| {
+        let e = 0.5;
+        p.x < lo.x + e || p.y < lo.y + e || p.x > hi.x - e || p.y > hi.y - e
+    };
+    let wl = grid.water_level;
+    let y = wl + SURF_LIFT_M;
+    for body in &place.terrain.water {
+        let ocean = match body.kind {
+            WaterKind::Ocean => true,
+            WaterKind::Lake => false,
+            _ => continue,
+        };
+        let foam = Paint::new(mix(pal.water, pal.paint_white, 210), Pattern::Water);
+        let breakers = Paint::new(mix(pal.water, pal.paint_white, 130), Pattern::Water);
+        let n = body.polygon.len();
+        for k in 0..n {
+            let (a, b) = (
+                V2::from_array(body.polygon[k]),
+                V2::from_array(body.polygon[(k + 1) % n]),
+            );
+            let mid = a.lerp(b, 0.5);
+            let inside = mid.x >= o.x && mid.y >= o.y && mid.x < o.x + size && mid.y < o.y + size;
+            if !inside || (on_side(a) && on_side(b)) || (b - a).length() < 1e-3 {
+                continue;
+            }
+            // Seaward: the side of the segment under the water, the other side dry.
+            let t = (b - a).normalize();
+            let mut nrm = V2::new(-t.y, t.x);
+            let wet = |q: V2| grid.height_at(q.x, q.y) < wl;
+            let (l, r) = (wet(mid + nrm * 3.0), wet(mid - nrm * 3.0));
+            if l == r {
+                continue;
+            }
+            if r {
+                nrm = -nrm;
+            }
+            let band = |m: &mut WorldMesh, d0: f32, d1: f32, paint: Paint| {
+                let q = [a + nrm * d0, b + nrm * d0, b + nrm * d1, a + nrm * d1];
+                quad(m, q.map(|p| V3::new(p.x, y, p.y)), V3::Y, paint);
+            };
+            if ocean {
+                band(m, SURF_FOAM_M.0, SURF_FOAM_M.1, foam);
+                // Breakers only along some of the shore, never the same stretch twice.
+                if value_noise(seed ^ KEY_SURF, mid.x, mid.y, 40.0) > 0.45 {
+                    band(m, SURF_BREAK_M.0, SURF_BREAK_M.1, breakers);
+                }
+            } else {
+                band(
+                    m,
+                    SURF_FOAM_M.0,
+                    0.5 * (SURF_FOAM_M.0 + SURF_FOAM_M.1),
+                    foam,
+                );
+            }
+        }
+    }
+}
+
+/// The surf lies this far above the water (over it, under the beach's edge)...
+const SURF_LIFT_M: f32 = 0.03;
+/// ...the foam this far out from the waterline, and the breakers this far.
+const SURF_FOAM_M: (f32, f32) = (0.2, 3.5);
+const SURF_BREAK_M: (f32, f32) = (7.0, 9.0);
+const KEY_SURF: u64 = 0x5355_5246;
+
+/// How far out past the place's sides the horizon's rings of samples lie.
+pub const HORIZON_RINGS_M: [f32; 12] = [
+    24.0, 60.0, 110.0, 180.0, 270.0, 390.0, 540.0, 730.0, 970.0, 1270.0, 1650.0, 2150.0,
+];
+
+/// What lies past the place's sides, out to the horizon ([`crate::edges::beyond`]): one
+/// mesh on a grid that shares the far terrain's samples along the sides (so the two meet
+/// with no gap) and steps out by [`HORIZON_RINGS_M`]; past a corner the two sides blend by
+/// angle. Ridges behind mountains and hills, a low forest or flat yards; under the water
+/// (and left out) past the coast, where the water plane reaches out instead. Colored by
+/// kind, height and slope like the ground. Empty when no side is land.
+pub fn build_horizon(place: &Place, grid: &TerrainGrid, pal: &Palette, seed: u64) -> WorldMesh {
+    use crate::edges::beyond;
+    use place::{EdgeKind, EAST, NORTH, SOUTH, WEST};
+    let mut m = WorldMesh::default();
+    let kinds = place.terrain.edges;
+    if kinds.iter().all(|k| k.is_water() || *k == EdgeKind::Open) {
+        return m;
+    }
+    let fg = far_grid(grid);
+    let (fx, fz) = (fg.xs.len(), fg.zs.len());
+    let rings = HORIZON_RINGS_M.len();
+    let o = grid.pos(0, 0);
+    let end = grid.pos(grid.w - 1, grid.h - 1);
+    // The axes: the rings before the place, its far-terrain samples, the rings after.
+    let axis = |lo: f32, hi: f32, inner: &[f32]| {
+        let mut v: Vec<f32> = HORIZON_RINGS_M.iter().rev().map(|r| lo - r).collect();
+        v.extend_from_slice(inner);
+        v.extend(HORIZON_RINGS_M.iter().map(|r| hi + r));
+        v
+    };
+    let inner_x: Vec<f32> = fg.xs.iter().map(|&i| grid.pos(i, 0).x).collect();
+    let inner_z: Vec<f32> = fg.zs.iter().map(|&j| grid.pos(0, j).y).collect();
+    let (ax, az) = (axis(o.x, end.x, &inner_x), axis(o.y, end.y, &inner_z));
+    let (nx, nz) = (ax.len(), az.len());
+    let (i0, i1, j0, j1) = (rings, rings + fx - 1, rings, rings + fz - 1);
+    let wl = grid.water_level;
+    // Heights, and the side whose kind colors each sample.
+    let mut heights = vec![0.0f32; nx * nz];
+    let mut owner = vec![EdgeKind::Open; nx * nz];
+    for j in 0..nz {
+        for i in 0..nx {
+            let (ci, cj) = (i.clamp(i0, i1), j.clamp(j0, j1));
+            let base = fg.heights[(cj - j0) * fx + (ci - i0)];
+            let (bx, bz) = (ax[ci] - o.x, az[cj] - o.y);
+            let dx = (ax[i] - ax[ci]).abs();
+            let dz = (az[j] - az[cj]).abs();
+            let sx = if i < i0 { WEST } else { EAST };
+            let sz = if j < j0 { NORTH } else { SOUTH };
+            let (rise, kind) = match (dx > 0.0, dz > 0.0) {
+                (false, false) => (0.0, kinds[sz]),
+                (true, false) => (beyond(seed, sx, kinds[sx], bz, dx), kinds[sx]),
+                (false, true) => (beyond(seed, sz, kinds[sz], bx, dz), kinds[sz]),
+                (true, true) => {
+                    let s = sqrt(dx * dx + dz * dz);
+                    let w = smooth(dz / (dx + dz));
+                    let a = beyond(seed, sx, kinds[sx], bz, s);
+                    let b = beyond(seed, sz, kinds[sz], bx, s);
+                    (lerp(a, b, w), if w < 0.5 { kinds[sx] } else { kinds[sz] })
+                }
+            };
+            heights[j * nx + i] = base + rise;
+            owner[j * nx + i] = kind;
+        }
+    }
+    let normal = |i: usize, j: usize| {
+        let (a, b) = (i.saturating_sub(1), (i + 1).min(nx - 1));
+        let (c, d) = (j.saturating_sub(1), (j + 1).min(nz - 1));
+        let gx = (heights[j * nx + b] - heights[j * nx + a]) / (ax[b] - ax[a]);
+        let gz = (heights[d * nx + i] - heights[c * nx + i]) / (az[d] - az[c]);
+        V3::new(-gx, 1.0, -gz).normalize()
+    };
+    let paint = Paint::new(pal.lawn, Pattern::Terrain);
+    for j in 0..nz {
+        for i in 0..nx {
+            let (p, y) = (V2::new(ax[i], az[j]), heights[j * nx + i]);
+            let nrm = normal(i, j);
+            let rgb = horizon_rgb(owner[j * nx + i], y - wl, nrm, p, pal, seed);
+            m.vertices.push(WorldVertex {
+                pos: [p.x, y, p.y],
+                normal: nrm.to_array(),
+                uv: [p.x, p.y],
+                color: paint.with_rgb(rgb).color,
+                emissive: paint.emissive,
+            });
+        }
+    }
+    for cz in 0..nz - 1 {
+        for cx in 0..nx - 1 {
+            // The place's own cells are the far terrain's.
+            if (i0..i1).contains(&cx) && (j0..j1).contains(&cz) {
+                continue;
+            }
+            let v00 = (cz * nx + cx) as u32;
+            let (v10, v01, v11) = (v00 + 1, v00 + nx as u32, v00 + nx as u32 + 1);
+            let dry = [v00, v10, v01, v11]
+                .iter()
+                .any(|&v| heights[v as usize] > wl - HORIZON_WET_M);
+            if dry {
+                m.indices.extend_from_slice(&[v00, v11, v10, v00, v01, v11]);
+            }
+        }
+    }
+    m
+}
+
+/// Horizon cells all this far under the water are left out (the water plane covers them).
+const HORIZON_WET_M: f32 = 0.5;
+
+/// Hermite step over `[0, 1]`.
+fn smooth(t: f32) -> f32 {
+    let t = clamp(t, 0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The color of the land past a side of `kind`, `above` meters over the water: dry grass
+/// in the low hills going to scrub, bare rock up on the mountains, dark canopy over a
+/// forest, ballast and rust in the yards; then wet near the water, soil on steep slopes and
+/// mottled, as the ground is.
+fn horizon_rgb(kind: place::EdgeKind, above: f32, nrm: V3, p: V2, pal: &Palette, seed: u64) -> Rgb {
+    use place::EdgeKind;
+    let up = |a: f32, b: f32| (smooth((above - a) / (b - a)) * 256.0) as u32;
+    let rgb = match kind {
+        EdgeKind::Mountains => {
+            let rock = mix(shade(pal.soil, 170), pal.concrete_dark, 110);
+            mix(
+                mix(pal.lawn_dry, pal.scrub, up(20.0, 140.0)),
+                rock,
+                up(180.0, 420.0),
+            )
+        }
+        EdgeKind::Forest => mix(shade(pal.leaf_green, 140), shade(pal.palm_green, 120), 90),
+        EdgeKind::RailYards => mix(pal.concrete_dark, shade(pal.soil, 190), 110),
+        _ => mix(pal.lawn_dry, pal.scrub, up(10.0, 120.0)),
+    };
+    ground_rgb(rgb, above, 0.0, nrm, p, pal, seed)
 }
 
 /// The water plane of chunk `c` if any of its zone cells is water: a grid of `split` ×

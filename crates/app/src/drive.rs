@@ -982,7 +982,7 @@ mod tests {
                 };
                 let (y, _) = ground.level_at(p);
                 let mut d = Drive::new(id).unwrap();
-                let (spec, layout) = (d.spec.clone(), d.layout.clone());
+                let (spec, layout) = (d.spec.clone(), d.layout);
                 d = Drive::with_layout(spec, layout, [p[0], y, p[1]], heading);
                 let (sin, cos) = heading.sin_cos();
                 d.state.vel = [-sin * speed, 0.0, -cos * speed];
@@ -1018,7 +1018,7 @@ mod tests {
         let (y, _) = ground.level_at(p);
         assert!(y > place.terrain.water_level, "start on dry sand");
         let mut d = Drive::new(DEFAULT_VEHICLE).unwrap();
-        let (spec, layout) = (d.spec.clone(), d.layout.clone());
+        let (spec, layout) = (d.spec.clone(), d.layout);
         d = Drive::with_layout(spec, layout, [p[0], y, p[1]], FRAC_PI_2);
         let input = VehicleInput {
             throttle: 1.0,

@@ -326,6 +326,8 @@ pub struct PlaceSource {
     statics: Vec<StaticLight>,
     /// A terrain place's far terrain, in render vertices.
     far: Option<Mesh>,
+    /// ...and its horizon.
+    horizon: Option<Mesh>,
 }
 
 impl PlaceSource {
@@ -374,12 +376,16 @@ impl PlaceSource {
         let far = plan
             .far_terrain(&place, &palette)
             .map(|m| convert(&atlas_mesh(&m, MeshKind::Ground), Part::Base));
+        let horizon = plan
+            .horizon(&place, &palette)
+            .map(|m| convert(&atlas_mesh(&m, MeshKind::Ground), Part::Base));
         PlaceSource {
             place,
             palette,
             plan,
             statics,
             far,
+            horizon,
         }
     }
 
@@ -393,6 +399,13 @@ impl PlaceSource {
     /// town.
     pub fn far_terrain(&self) -> Option<&Mesh> {
         self.far.as_ref()
+    }
+
+    /// A terrain place's horizon ([`ChunkPlan::horizon`]): the land past its sides, ridges
+    /// rising into the haze, drawn always beside the far terrain. `None` for the test
+    /// town.
+    pub fn horizon(&self) -> Option<&Mesh> {
+        self.horizon.as_ref()
     }
 }
 

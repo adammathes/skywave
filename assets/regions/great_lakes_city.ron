@@ -22,6 +22,8 @@ RegionTemplate(
         canals: None,
     ),
 
+    // Edges: the lake east; the grid gives way to rail yards and industry west and north, and the
+    // expressway loops back along a ridge south.
     edges: Edges(north: RailYards, east: Lake, south: HighwayLoop, west: RailYards),
 
     elevation: Elevation(

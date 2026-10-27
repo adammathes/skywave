@@ -17,12 +17,12 @@ Chunk (on demand, ≤ 2 ms):  local streets → blocks → parcels → buildings
 ### 2. Zone map (macro)
 Zones drive everything downstream. Painted by rules on the coarse grid, then smoothed:
 - `Beach` on the band along the coast. `Strip` (the main drag) parallel to the beach 1–2 blocks inland for 800–1500 m centered on the bay.
-- `Downtown` 4–8 blocks behind the strip center; `Commercial` ringing it; `Residential` grid filling the plain; `Suburb` (curvy) on gentle slopes; `Hills` (winding roads, sparse houses) on steep terrain; `Farmland` on flat valley floor far from downtown; `Industrial` near the highway and the harbor; `Park` 2–4 patches including one on the shore; `Highway` corridor from the coast inland through a pass.
+- `Downtown` 4–8 blocks behind the strip center; `Commercial` ringing it; `Residential` grid filling the plain; `Suburb` (curvy) on gentle slopes; `Hills` (winding roads, sparse houses) on steep terrain; `Farmland` on flat valley floor far from downtown; `Industrial` near the highway and the harbor; `Park` 2–4 patches including one on the shore; `Highway` corridor round the town (stage 3). The edge bands take their own zones (see "Map edges").
 - Rules are weighted scores per cell (distance to coast, slope, distance to downtown seed) + noise; the template sets weights. Different seeds move the bay, the downtown and the pass.
 
 ### 3. Arterials and highway (macro)
 - Tensor field (Chen et al. 2008 style): a grid tensor aligned to the coast tangent in `Strip`/`Downtown`/`Residential`; radial tensor around downtown center; terrain-following tensor (perpendicular to gradient) in `Hills`; axis-aligned section grid in `Farmland` (1-mile sections subdivided to half/quarter miles).
-- Trace arterials as streamlines of the major eigenvector from seed points (strip ends, downtown, pass), with minimum spacing 250–400 m, snapping to existing nodes within 40 m, stopping at water. The beachfront road follows the beach band. One `Highway` is traced through the pass with limited access: on/off ramps at 2–4 arterial crossings, overpasses elsewhere (road profile includes height, bridges are implied by profile > terrain + 3 m).
+- Trace arterials as streamlines of the major eigenvector from seed points (strip ends, downtown, the highway's highest point), with minimum spacing 250–400 m, snapping to existing nodes within 40 m, stopping at water and at the edge bands. The beachfront road follows the beach band. One `Highway` is a bypass that loops: it leaves the coast at the harbor's end of the place, runs inland 60 m inside that side's band, turns along the foot of the hills (a fixed distance behind the smoothed shore, clear of downtown) and comes back to the coast along the other side, its two ends on the beachfront road. Town roads that stop just short of it join it at grade (up to five, 320 m apart); a road that crosses it on a straight, level stretch with shallow banks gets a diamond interchange, and other crossings are overpasses (road profile includes height, bridges are implied by profile > terrain + 3 m).
 - Graph cleanup: merge near nodes, remove dead-end stubs < 60 m except in `Suburb`/`Hills`, ensure connectivity.
 
 ### 4. Local streets (chunk)
@@ -53,6 +53,32 @@ Per parcel, choose `use`, `height`, `style` by zone + era distributions, then a 
 - Every stage derives its `Rng` from `core::hash64(seed, [stage_id, chunk_x, chunk_y])`.
 - Chunk generation is resumable in stages so the streaming budget can stop between stages.
 - Reference seeds `1..=8` have golden hashes per chunk in `crates/world/tests/golden.rs`; changing generation means updating goldens in a dedicated commit with a before/after screenshot.
+
+## Map edges
+Open-world games of the early polygon eras bounded their maps with water and mountains; so does every place
+here. A template's `edges` says what bounds each side (`crate::edges`, `place::EdgeKind`):
+
+| Kind | Inside the place | Past the side (the horizon mesh) |
+|---|---|---|
+| `Ocean`, `Lake` | the coast: beach and surf, the sea floor falling away | open water to the horizon |
+| `Bay` | the coast | water, and a far shore of hills 1.5–2.3 km out |
+| `Mountains` | a 90–140 m cliff wall rising over 80 m, crest at the side | ridges climbing to 300–600 m |
+| `Hills` | a 55–85 m wall over 48 m | rolling hills, ridges to ~170 m |
+| `HighwayLoop` | as `Hills`; the highway turns back along it | as `Hills` |
+| `Forest` | a 20–30 m wooded bluff (`Park` zone) | a low forest plateau |
+| `RailYards` | a 7–9 m embankment; 160 m of industry inside it | flat yards |
+
+The coast side must be water and the others land. A land side's wall stands in a roadless band (the wall,
+24 m of crest wander and a 28 m clear foot); roads, lots and points of interest stay in the playable
+rectangle inside the bands, so streets end at the foot of the hills, at the highway or at the beach. The
+wall rises from the higher of the ground and the ground at the band's foot, its face steeper than 1.5:1, so
+it turns a car by geometry: the raycast car stops at the toe even when launched at it at 45 m/s. Across the
+water the walls of the neighboring sides rise out of the sea as headlands. Water deeper than a car's hubs
+drags it to a stop; after 1.5 s in deep water it goes back to its start with a "Deep water: resetting" toast.
+`california_coast`: ocean west, mountains east, highway loops north and south. Tests: every road of seeds
+1–8 stays in the playable rectangle and the highway is one chain whose ends are on the beachfront road
+(`world/tests/place.rs`), the walls rise at least 50 m (85 m for mountains) from the band's foot, and the cars
+cannot climb them or drive out to sea (`app::drive` tests).
 
 ## Region templates
 A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).

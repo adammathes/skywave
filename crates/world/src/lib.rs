@@ -381,6 +381,15 @@ impl ChunkPlan {
         ))
     }
 
+    /// A terrain place's horizon ([`mesh::terrain::build_horizon`]): what continues past
+    /// its sides out to the horizon; `None` for the test town and for a place that is
+    /// water all round.
+    pub fn horizon(&self, place: &Place, palette: &Palette) -> Option<WorldMesh> {
+        let (g, _) = self.terrain.as_ref()?;
+        let m = mesh::terrain::build_horizon(place, g, palette, self.seed);
+        (!m.indices.is_empty()).then_some(m)
+    }
+
     /// The meshes `stage` writes in `chunk`, sorted by kind (empty ones left out): the
     /// same as [`build_chunk_meshes`] gives for that chunk and those kinds.
     pub fn build_stage(

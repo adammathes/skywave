@@ -23,6 +23,7 @@ RegionTemplate(
         canals: None,
     ),
 
+    // Edges: the lake east, the forest preserve west, the expressway looping back north and south.
     edges: Edges(north: HighwayLoop, east: Lake, south: HighwayLoop, west: Forest),
 
     elevation: Elevation(

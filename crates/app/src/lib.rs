@@ -752,7 +752,8 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
 }
 
 /// `place` to be streamed within `budget`: nothing built yet but a terrain place's far
-/// terrain (drawn always, under the chunks, out to the horizon), every static light known
+/// terrain and horizon (drawn always, under the chunks, out to the horizon), every static
+/// light known
 /// (and off until its chunk is drawn), room for every part the resident chunks can have.
 fn streamed_town(place: Place, budget: StreamBudget) -> Town {
     let source = PlaceSource::new(place, Palette::socal_1985());
@@ -761,7 +762,11 @@ fn streamed_town(place: Place, budget: StreamBudget) -> Town {
     let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());
     lights.set_active(|_| false);
     let light_chunks = statics.iter().map(|s| s.chunk).collect();
-    let meshes: Vec<Mesh> = source.far_terrain().cloned().into_iter().collect();
+    let meshes: Vec<Mesh> = [source.far_terrain(), source.horizon()]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
     let fixed = meshes.len();
     let capacity = fixed + streamer.capacity() * MAX_CHUNK_PARTS;
     let mut instances = Vec::with_capacity(capacity);
@@ -1639,14 +1644,19 @@ mod tests {
         assert!(resident.meshes[..world]
             .iter()
             .all(|m| m.vertices.len() <= 1 << 20));
-        // Streamed (the default): the far terrain drawn from the start, under the ring round
-        // the start as it fills, every chunk within budget.
+        // Streamed (the default): the far terrain and the horizon drawn from the start,
+        // under the ring round the start as it fills, every chunk within budget.
         let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
-        assert!(app.is_streamed() && app.world_instances == 1);
+        assert!(app.is_streamed() && app.world_instances == 2);
         let far = app.meshes()[0].indices.len() / 3;
         assert!(
             (8192..=10_000).contains(&far),
             "far terrain: {far} triangles"
+        );
+        let horizon = app.meshes()[1].indices.len() / 3;
+        assert!(
+            (1000..=8000).contains(&horizon),
+            "horizon: {horizon} triangles"
         );
         // On the ground at the start.
         let (start, heading) = app.start;
@@ -1670,9 +1680,9 @@ mod tests {
         assert!(stats.built >= 25, "{stats:?}");
         assert!(app.world_instances > 1 && app.world_instances < world);
         assert_eq!(
-            app.instances[0].mesh,
-            MeshId(0),
-            "the far terrain stays drawn"
+            [app.instances[0].mesh, app.instances[1].mesh],
+            [MeshId(0), MeshId(1)],
+            "the far terrain and the horizon stay drawn"
         );
         // Rolling forward along the road from the start, on the ground.
         let mut input = InputState::default();

@@ -48,6 +48,16 @@ outline (highways thick and light, arterials pale yellow, locals thin, alleys fa
 turned with the heading (or north-up), 100/150/250 m across, with the player arrow and a north badge; hidden
 under menus. The full map (MapToggle) fits the whole place into the safe area north-up, with the player
 arrow, POI labels (invented names), the time and the controls; it pans and zooms (1–8×) and is not a pause.
+Far terrain and horizon (`world::mesh::terrain`): a terrain place draws two static meshes behind the
+streamed chunks. The far terrain is the place's own ground and water at 32 m, sunk under the fine ground so a
+resident chunk always wins. The horizon continues past the place's sides on a grid that shares the far
+terrain's samples along them and steps out in widening rings to 2.15 km: ridges climbing to 300–600 m behind
+mountains, rolling hills behind hills and highway loops, a low forest, flat rail yards, a far shore across a
+bay, the sea floor (left out) past the coast, where the water plane runs on 3 km to the camera's far plane.
+Past a corner the two sides blend by angle, so headlands taper into the sea. The distance fog carries the
+ridgelines into the sky's haze; there is no rectangle to see. Chunks with an ocean or lake shore draw the
+surf on the water: a foam band at the waterline and, at sea, a broken line of breakers further out.
+
 WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky

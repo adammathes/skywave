@@ -25,6 +25,8 @@ RegionTemplate(
         canals: Some(Canals(chance: 0.8, fingers: (3, 4), spacing_m: 64, length_m: (180, 260), width_m: 16)),
     ),
 
+    // Edges: open ocean to the horizon west, mountains east; north and south the highway loops
+    // back along a ridge (crates/world/src/edges.rs).
     edges: Edges(north: HighwayLoop, east: Mountains, south: HighwayLoop, west: Ocean),
 
     elevation: Elevation(

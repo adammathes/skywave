@@ -3,18 +3,18 @@
 //! [`MacroMap::generate`] runs, in order:
 //! 1. coast: shoreline with bays and beach widths ([`Shore`]);
 //! 2. terrain parameters: plain width and rise, ridges;
-//! 3. layout: strip extent, downtown seed, highway centerline toward the pass, valleys,
-//!    the canal pocket;
+//! 3. layout, inside the edge bands ([`crate::edges`]): strip extent, downtown seed, the
+//!    highway's loop (from the coast along one side, round the foot of the hills, back
+//!    along the other side), valleys, the canal pocket;
 //! 4. heightfield at 4 m ([`terrain::heights`]), flattened where the canal pocket goes;
 //! 5. zones on 16 m cells: rules ([`zones::score`]), two majority passes, then the
 //!    structural zones on top (beach, strip, highway, canals, parks). The beach band is
 //!    measured from the true shoreline; the strip, downtown and canal pocket from the
 //!    smoothed one ([`Shore::road`]);
 //! 6. terrain smoothing by zone (urban zones blend toward a box-blurred copy, so roads sit
-//!    well), canals dug, and the highway corridor carved: a bed of at most 4.8% from the
-//!    coast inland ([`terrain::corridor_bed`]), through a valley cut into the hills before
-//!    the zones are painted ([`terrain::valley`]), so the highway climbs to a real pass in
-//!    cuts of tens of meters ([`terrain::carve_corridor`]);
+//!    well), canals dug, the highway corridor carved (a bed of at most 4.8% between its
+//!    coastal ends, [`terrain::corridor_bed`], [`terrain::carve_corridor`]), then the
+//!    walls of the land edges raised in their bands and the bands' zones painted;
 //! 7. pass (the highway's highest point) and points of interest.
 //!
 //! Grids: heights are `width × height` samples, 4 m apart, sample `(ix, iz)` at world
@@ -375,9 +375,8 @@ impl MacroMap {
         }
         corners.push(e1);
         let reach = (corners[1].0 - e0.0).min(corners[n + 1].0 - e1.0);
-        let radius = (0.45 * reach).min(RING_RADIUS_M);
+        let radius = (0.45 * reach).clamp(0.0, RING_RADIUS_M);
         let highway_c = resample_c(&fillet(&corners, radius), ZONE_CELL_M);
-        let start_v = v_start;
 
         let mut valleys: Vec<Valley> = Vec::new();
         if !ridges.is_empty() {
@@ -642,8 +641,8 @@ impl MacroMap {
         }
         map.pois.push(MacroPoi {
             kind: MacroPoiKind::Harbor,
-            pos: to_world(map.shore.point(start_v, 0.0)),
-            facing: seaward(start_v),
+            pos: to_world(map.shore.point(v_start, 0.0)),
+            facing: seaward(v_start),
         });
         let overlooks = overlooks(seed, t, &map);
         for p in overlooks {
