@@ -33,10 +33,14 @@ Pause close it (Pause does not open the menu over it). The wheel is read raw as 
 `VehicleNext` swaps in the next built-in car (wrapping after the last) where the car is: same spot and
 heading, at rest unless it was rolling under 5 m/s, odometer from zero, camera and headlights kept; the new
 car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the car the next session starts in
-unless the scene names one (`car=`). It is unbound on the pad by default: the pad path is the pause menu's
-Vehicle page (Resume · Vehicle › · Settings ›), one row per built-in car with its class, power to weight,
-driven wheels and gearbox, the car being driven marked and focused; selecting one swaps it in the same way and
-closes the menu.
+unless the scene names one (`car=`, with `paint=`). It is unbound on the pad by default: the pad path is the
+pause menu's Vehicle page (Resume · Vehicle › · Settings ›): Car (left/right through all twelve, wrapping;
+the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car turning on a
+turntable beside the panel and its stat strip and specs (class, era, peak power and torque, drive and
+gearbox, 0–60 mph and top speed, measured with the sim) under the rows. It opens on the car driven, in its
+paint; another car starts in its first paint. Select on any row swaps the car shown in, in the paint shown,
+the same way, and closes the menu; the car and paint become the `vehicle` and `paint` settings. At a UI scale
+over 1.5 there is no room for the turntable and the specs shorten to what fits.
 
 `Reset` puts the car at rest, upright, on the centerline of the nearest road lane (`world::lanes`: the
 place's lane table, or each road's lanes laid out from its cross section, driving on the right), heading

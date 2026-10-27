@@ -41,6 +41,17 @@ in the shader), with the content rotated by any angle and an optional circle or 
 edges anti-aliased in the fragment shader. The HUD bind group holds the font atlas and the map (two textures,
 two samplers); each quad's flags pick one, so images cost no extra draw call or texture switch.
 
+Vehicle select (`app::preview`): the pause menu's Vehicle page leaves a stage beside its panel (not dimmed),
+and the car being browsed turns slowly on a plain grey disc there, its real LOD0 exterior in the paint chosen.
+It is drawn in the main forward pass from its own camera without a second camera in the renderer: a scale
+model placed 0.5 m in front of the frame's camera, aimed down the ray to the stage's center and sized to
+fill it, so the frame's camera sees it as a turntable camera would see the full-size car. The player's car
+(and its lamps) and any traffic or prop within 4 m of the eye are not drawn under the page, so nothing that
+moves cuts into it. It is lit by the current sun, sky ambient and exposure, plus the cabin fill light after
+dark; no street lamps, and it neither casts nor receives a sun shadow (`MeshInstance::receives_shadow`, one
+bit in the instance's packed params that `forward.wgsl` reads to skip the cascade test). Cost: up to 10
+instances while the page is open, none otherwise; no pass or uniform.
+
 Map (`app::map`): the Place rasterized once at load into a 1024 px (longer side) image, north up: muted zone
 tints, parks, water with a darker shoreline, faint building footprints, roads by class with a 1 px darker
 outline (highways thick and light, arterials pale yellow, locals thin, alleys faint), POI dots; deterministic
