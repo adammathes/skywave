@@ -3,22 +3,26 @@
 //! Three passes per frame, all within WebGL2 limits (uniform buffers only, no compute, no
 //! storage buffers, no texture arrays):
 //!
-//! 1. **Shadow**: depth-only renders of every instance from the sun into three cascades
-//!    (0–40 m, 40–160 m, 160–600 m by default) side by side in one 3×1 depth atlas, each an
-//!    orthographic projection fitted to a slice of the camera frustum and snapped to texels.
+//! 1. **Shadow**: depth-only renders of the shadow-casting instances from the sun into
+//!    three cascades (0–40 m, 40–160 m, 160–600 m by default; two at low quality) side by
+//!    side in one 3×1 depth atlas, each an orthographic projection fitted to a slice of the
+//!    camera frustum and snapped to texels. The farthest may be kept from the frame before
+//!    ([`RenderQuality::far_cascade_interval`]).
 //! 2. **Forward**: the analytic sky (Preetham, sun and moon discs, stars), then meshes:
 //!    vertex color × atlas texel, Lambert sun with 3×3 PCF cascaded shadows, hemisphere sky
 //!    ambient, the point and spot lights of each instance's [`LightSet`] (up to
 //!    [`LIGHTS_PER_DRAW`] of the frame's [`MAX_LIGHTS`]), the vertex emissive channel and
-//!    aerial-perspective fog, into an `Rgba16Float` HDR target.
+//!    aerial-perspective fog, into an `Rgba16Float` HDR target at
+//!    [`RenderQuality::resolution_scale`] of the swapchain.
 //! 3. **Coronas**: an additive soft sprite over each light with a [`Corona`] and over the
 //!    sun and moon discs, faded by how much of it the scene's depth hides (see
 //!    `shaders/corona.wgsl`), in one instanced draw. Skipped when there are none.
-//! 4. **Bloom**: a soft-threshold, Karis-averaged 13-tap downsample into a five-level
-//!    half-resolution `Rgba16Float` chain, then 9-tap tent upsamples added back up it
+//! 4. **Bloom**: a soft-threshold, Karis-averaged 13-tap downsample into a chain of up to
+//!    five levels ([`RenderQuality::bloom_levels`]) starting at half the HDR target's size,
+//!    `Rgba16Float`, then 9-tap tent upsamples added back up it
 //!    (Jimenez 2014). Skipped when [`Sky::bloom_strength`] is 0.
-//! 5. **Tonemap**: exposure, bloom, AgX, a light vignette and an 8-bit dither from the HDR
-//!    target to the swapchain.
+//! 5. **Tonemap**: a bilinear upscale when the HDR target is scaled, exposure, bloom, AgX,
+//!    a light vignette and an 8-bit dither from the HDR target to the swapchain.
 //! 6. **HUD**: text, rectangles and images (the map uploaded once with
 //!    [`Renderer::upload_map`], discs, the player arrow) from [`SceneView::hud`] as
 //!    alpha-blended quads straight onto the swapchain, in one instanced draw: the HUD bind
@@ -37,16 +41,24 @@
 //! names the ones that reach it in its [`LightSet`], packed into its instance attributes;
 //! the caller does the culling (it knows its chunks), the shader loops over the set.
 //!
+//! **Culling.** Every instance is tested on the CPU against the camera frustum for the
+//! forward pass and against each cascade's box for the shadow pass (see [`cull`]), using
+//! the bounds of its mesh (computed in [`Renderer::add_mesh`]) or chunk part (computed when
+//! it is written); the survivors of each pass are packed into one instance buffer per
+//! frame. Nothing is allocated per frame. [`RenderStats`] counts submitted and drawn.
+//!
 //! The renderer knows nothing about the game; it draws a [`SceneView`] of plain data.
 //! Radiance is linear sRGB in kcd/m² (1 = 1000 cd/m²) throughout; see [`Sun`] and [`Sky`].
 
 mod atlas;
+pub mod cull;
 pub mod font;
 mod hud;
 mod light;
 mod mesh;
 mod pool;
 mod sky;
+mod timing;
 
 pub use atlas::{
     tile_uv, uv_unorm, TextureAtlas, Tile, ATLAS_MIP_LEVELS, ATLAS_SIZE, TILES_PER_ROW, TILE_INSET,
@@ -68,19 +80,29 @@ pub use pool::{
     MAX_CHUNK_PARTS, MAX_CHUNK_VERTICES,
 };
 pub use sky::{exposure_from_ev100, MOON_ANGULAR_RADIUS, SUN_ANGULAR_RADIUS};
+pub use timing::{GPU_PASSES, GPU_PASS_NAMES};
 
 use bytemuck::{Pod, Zeroable};
+use cull::{Aabb, Frustum};
 use glam::{Mat3, Mat4, Vec3, Vec4Swizzles};
 use hud::HudQuad;
 use sky::SkyModel;
 use std::future::Future;
 use std::task::{Context, Poll, Waker};
+use timing::GpuTimer;
 use wgpu::util::DeviceExt;
 
 /// Edge of one shadow cascade in texels, when the device allows a texture 3× as wide.
 pub const SHADOW_CASCADE_SIZE: u32 = 2048;
 /// Default far view depth of each cascade, meters.
 pub const DEFAULT_CASCADE_SPLITS: [f32; CASCADES] = [40.0, 160.0, 600.0];
+/// Far view depths of the two cascades drawn at [`RenderQuality::cascades`] 2, meters.
+pub const TWO_CASCADE_SPLITS: [f32; 2] = [50.0, 400.0];
+/// A farthest cascade kept over frames is fitted this much wider than its slice's sphere,
+/// so the camera can move and turn a little before the kept map stops covering the slice.
+const FAR_CASCADE_PAD: f32 = 0.08;
+/// Passes instances are culled for: the forward pass, then each cascade.
+const PASSES: usize = 1 + CASCADES;
 /// Fraction of each cascade over which it cross-fades into the next.
 pub const CASCADE_BLEND: f32 = 0.1;
 /// Casters this far beyond a cascade toward the sun still cast into it, meters.
@@ -161,6 +183,13 @@ pub struct MeshInstance {
     pub cabin: f32,
     /// The [`SceneView::lights`] that shade it (the sun always does).
     pub lights: LightSet,
+    /// Drawn into the shadow cascades. Off for what glows rather than blocks the sun (neon
+    /// and lamp lens meshes).
+    pub casts_shadow: bool,
+    /// Drawn after the other instances in the forward pass: a backdrop that nearer
+    /// geometry mostly hides (the far terrain), so the depth test rejects those pixels
+    /// before they are shaded.
+    pub late: bool,
 }
 
 impl MeshInstance {
@@ -174,6 +203,8 @@ impl MeshInstance {
             glow: 1.0,
             cabin: 0.0,
             lights: LightSet::EMPTY,
+            casts_shadow: true,
+            late: false,
         }
     }
 }
@@ -408,6 +439,75 @@ pub struct SceneView<'a> {
     pub lights: &'a [PointLight],
     /// Text and rectangles drawn over the frame ([`Hud::EMPTY`] for none).
     pub hud: Hud<'a>,
+    /// How much work the frame may cost; a change is applied before the frame (rebuilding
+    /// the shadow atlas or the scaled targets when their size changes).
+    pub quality: RenderQuality,
+}
+
+/// The quality knobs that trade GPU time for fidelity. [`RenderQuality::default`] is the
+/// full pipeline (three 2048² cascades, native resolution, five bloom levels, coronas).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderQuality {
+    /// Edge of one shadow cascade in texels (at most a third of the device's widest
+    /// texture).
+    pub shadow_size: u32,
+    /// Shadow cascades drawn: 3 ([`RendererOptions::cascade_splits`]) or 2
+    /// ([`TWO_CASCADE_SPLITS`]).
+    pub cascades: u32,
+    /// Size of the scene's color and depth targets as a fraction of the swapchain,
+    /// 0.5–1; the tonemap pass upscales bilinearly and the HUD stays at full size. Applies
+    /// to the HDR path only (the LDR fallback draws straight into the swapchain).
+    pub resolution_scale: f32,
+    /// Levels of the bloom chain, 1–[`BLOOM_LEVELS`].
+    pub bloom_levels: u32,
+    /// Coronas over lights, the sun and the moon.
+    pub coronas: bool,
+    /// The farthest cascade is drawn every this many frames (1: every frame) and kept in
+    /// between, while its map still covers the slice and the sun has not moved.
+    pub far_cascade_interval: u32,
+    /// Casters smaller than this many texels of a cascade (their bounds' diagonal) are
+    /// left out of it; 0 keeps all.
+    pub min_caster_texels: f32,
+}
+
+impl Default for RenderQuality {
+    fn default() -> RenderQuality {
+        RenderQuality {
+            shadow_size: SHADOW_CASCADE_SIZE,
+            cascades: CASCADES as u32,
+            resolution_scale: 1.0,
+            bloom_levels: BLOOM_LEVELS as u32,
+            coronas: true,
+            far_cascade_interval: 1,
+            min_caster_texels: 0.0,
+        }
+    }
+}
+
+impl RenderQuality {
+    /// Every knob inside its range; `max_shadow_size` is the device's limit.
+    pub fn sanitized(self, max_shadow_size: u32) -> RenderQuality {
+        let scale = if self.resolution_scale.is_finite() {
+            self.resolution_scale.clamp(0.5, 1.0)
+        } else {
+            1.0
+        };
+        RenderQuality {
+            shadow_size: self.shadow_size.clamp(256, max_shadow_size.max(256)),
+            cascades: self.cascades.clamp(2, CASCADES as u32),
+            resolution_scale: scale,
+            bloom_levels: self.bloom_levels.clamp(1, BLOOM_LEVELS as u32),
+            coronas: self.coronas,
+            far_cascade_interval: self.far_cascade_interval.clamp(1, 4),
+            min_caster_texels: self.min_caster_texels.max(0.0),
+        }
+    }
+
+    /// The scene's target size for a swapchain of `surface` pixels.
+    pub fn render_size(&self, surface: (u32, u32)) -> (u32, u32) {
+        let s = |v: u32| ((v as f32 * self.resolution_scale).round() as u32).clamp(1, v.max(1));
+        (s(surface.0), s(surface.1))
+    }
 }
 
 /// How the renderer stores the lit image before tonemapping.
@@ -430,6 +530,11 @@ pub struct RendererOptions {
     pub cascade_splits: [f32; CASCADES],
     /// The pooled chunk geometry, allocated here once ([`ChunkStore`]).
     pub chunk_pool: ChunkPoolConfig,
+    /// The quality the renderer starts with (each [`SceneView::quality`] replaces it).
+    pub quality: RenderQuality,
+    /// Frustum culling of instances (off draws every instance in every pass; for
+    /// comparisons).
+    pub culling: bool,
 }
 
 impl Default for RendererOptions {
@@ -438,6 +543,8 @@ impl Default for RendererOptions {
             hdr: HdrMode::Auto,
             cascade_splits: DEFAULT_CASCADE_SPLITS,
             chunk_pool: ChunkPoolConfig::NONE,
+            quality: RenderQuality::default(),
+            culling: true,
         }
     }
 }
@@ -459,8 +566,33 @@ pub struct RenderStats {
     pub lights_used: u32,
     /// Corona sprites submitted (before the depth test hides any).
     pub coronas: u32,
-    /// Mesh instances in the last frame's scene.
+    /// Mesh instances in the last frame's scene (submitted).
     pub instances: u32,
+    /// Of which drawn in the forward pass (inside the camera frustum).
+    pub instances_drawn: u32,
+    /// Instances drawn into each shadow cascade (0 for a cascade not drawn this frame).
+    pub shadow_instances: [u32; CASCADES],
+    /// Triangles drawn in the forward pass (meshes only) and in all cascades together.
+    pub triangles: u64,
+    pub shadow_triangles: u64,
+    /// Edge of one shadow cascade (texels), cascades in use, and of those the ones drawn
+    /// this frame (the others kept from an earlier frame).
+    pub shadow_size: u32,
+    pub cascades: u32,
+    pub cascades_drawn: u32,
+    /// Swapchain size and the scene's (scaled) target size, pixels.
+    pub surface_size: (u32, u32),
+    pub render_size: (u32, u32),
+    /// Bloom levels drawn (0 with bloom off or in LDR mode).
+    pub bloom_levels: u32,
+    /// GPU time of each pass ([`GPU_PASS_NAMES`]), microseconds, a frame or two old; all 0
+    /// unless [`Renderer::enable_gpu_timing`] succeeded.
+    pub gpu_us: [u32; GPU_PASSES],
+    /// GPU timestamps are being read.
+    pub gpu_timing: bool,
+    /// Times the size-dependent targets or the shadow atlas were rebuilt for a quality
+    /// change.
+    pub rebuilds: u32,
     /// HUD quads (glyphs and rectangles) drawn in the last frame.
     pub hud_quads: u32,
     /// HUD quads beyond [`MAX_HUD_QUADS`] left out of the last frame.
@@ -501,6 +633,8 @@ struct FrameUniform {
     screen: [f32; 4],
     cabin_light: [f32; 4],
     corona: [f32; 4],
+    render_size: [f32; 4],
+    shadow_params: [f32; 4],
     lights: [PackedLight; MAX_LIGHTS],
 }
 
@@ -739,10 +873,14 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    /// Model-space bounds, for culling.
+    bounds: Aabb,
 }
 
 /// Size-dependent render targets. `hdr` and `post` exist only in float mode.
 struct Targets {
+    /// Size of `hdr` and `depth`: the swapchain's, scaled in float mode.
+    size: (u32, u32),
     hdr: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     /// Reads `depth` for the corona pass's occlusion test.
@@ -780,6 +918,14 @@ pub struct Renderer {
     hdr: bool,
     cascade_splits: [f32; CASCADES],
     cascade_size: u32,
+    /// Largest cascade edge the device allows (a third of its widest texture).
+    max_cascade_size: u32,
+    quality: RenderQuality,
+    culling: bool,
+    /// The shadow atlas holds every cascade drawn as last fitted (false after a rebuild).
+    shadow_valid: bool,
+    /// The farthest cascade as last drawn, and the sun direction it was drawn for.
+    kept_far: Option<(CascadeFit, Vec3)>,
 
     frame_buffer: wgpu::Buffer,
     frame_group: wgpu::BindGroup,
@@ -787,10 +933,17 @@ pub struct Renderer {
     cascade_groups: [wgpu::BindGroup; CASCADES],
     shadow_view: wgpu::TextureView,
     forward_group: wgpu::BindGroup,
+    /// What the forward bind group is rebuilt from when the shadow atlas is.
+    forward_layout: wgpu::BindGroupLayout,
+    shadow_sampler: wgpu::Sampler,
+    atlas_view: wgpu::TextureView,
+    atlas_sampler: wgpu::Sampler,
     post: Option<Post>,
     targets: Targets,
 
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Clears one cascade's viewport (frames that keep another cascade).
+    shadow_clear_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
@@ -817,7 +970,15 @@ pub struct Renderer {
     chunk_indices: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
     instance_capacity: usize,
+    /// Every pass's instances packed one pass after another ([`PASSES`] × capacity).
     instance_staging: Vec<InstanceRaw>,
+    /// Per scene instance: bit `p` set when pass `p` draws it (culling scratch).
+    vis: Vec<u8>,
+    /// Per scene instance: its packed form, when any pass draws it.
+    raws: Vec<InstanceRaw>,
+    /// Scene instance indices in `instance_staging` order.
+    order: Vec<u32>,
+    timer: Option<GpuTimer>,
     stats: RenderStats,
 }
 
@@ -857,7 +1018,9 @@ impl Renderer {
         };
         let color_format = if hdr { HDR_FORMAT } else { surface_format };
         // Three cascades side by side must fit the device's widest texture.
-        let cascade_size = SHADOW_CASCADE_SIZE.min(device.limits().max_texture_dimension_2d / 3);
+        let max_cascade_size = device.limits().max_texture_dimension_2d / 3;
+        let quality = options.quality.sanitized(max_cascade_size);
+        let cascade_size = quality.shadow_size;
 
         let uniform_entry = |binding, visibility, min_size: usize| wgpu::BindGroupLayoutEntry {
             binding,
@@ -917,23 +1080,6 @@ impl Renderer {
             })
         });
 
-        let shadow_view = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("sun shadow cascades"),
-                size: wgpu::Extent3d {
-                    width: cascade_size * CASCADES as u32,
-                    height: cascade_size,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: SHADOW_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow compare"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -977,28 +1123,14 @@ impl Renderer {
                 sampler_entry(3, wgpu::SamplerBindingType::Filtering),
             ],
         });
-        let forward_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("forward"),
-            layout: &forward_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&shadow_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&atlas_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
-                },
-            ],
-        });
+        let (shadow_view, forward_group) = create_shadow_atlas(
+            &device,
+            cascade_size,
+            &forward_layout,
+            &shadow_sampler,
+            &atlas_view,
+            &atlas_sampler,
+        );
         let module = |label: &str, source: &str| {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
@@ -1065,6 +1197,28 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let shadow_clear_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("shadow clear"),
+                layout: Some(&shadow_pl),
+                vertex: wgpu::VertexState {
+                    module: &shadow_module,
+                    entry_point: Some("vs_shadow_clear"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: depth(
+                    SHADOW_FORMAT,
+                    true,
+                    wgpu::CompareFunction::Always,
+                    Default::default(),
+                ),
+                multisample: Default::default(),
+                fragment: None,
+                multiview_mask: None,
+                cache: None,
+            });
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sky"),
             layout: Some(&forward_pl),
@@ -1132,7 +1286,8 @@ impl Renderer {
                     entries: &[
                         texture_entry(0, filtered),
                         sampler_entry(1, wgpu::SamplerBindingType::Filtering),
-                        texture_entry(2, wgpu::TextureSampleType::Float { filterable: false }),
+                        // Filterable: a scaled target is upscaled with the bloom sampler.
+                        texture_entry(2, filtered),
                     ],
                 });
             let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1386,7 +1541,14 @@ impl Renderer {
             options.chunk_pool.index_bytes(),
             wgpu::BufferUsages::INDEX,
         );
-        let targets = create_targets(&device, post.as_ref(), &corona_layout, &depth_sampler, size);
+        let render_size = if hdr { quality.render_size(size) } else { size };
+        let targets = create_targets(
+            &device,
+            post.as_ref(),
+            &corona_layout,
+            &depth_sampler,
+            render_size,
+        );
 
         Renderer {
             device,
@@ -1396,15 +1558,25 @@ impl Renderer {
             hdr,
             cascade_splits: options.cascade_splits,
             cascade_size,
+            max_cascade_size,
+            quality,
+            culling: options.culling,
+            shadow_valid: false,
+            kept_far: None,
             frame_buffer,
             frame_group,
             cascade_buffer,
             cascade_groups,
             shadow_view,
             forward_group,
+            forward_layout,
+            shadow_sampler,
+            atlas_view,
+            atlas_sampler,
             post,
             targets,
             shadow_pipeline,
+            shadow_clear_pipeline,
             sky_pipeline,
             mesh_pipeline,
             hud_pipeline,
@@ -1427,9 +1599,88 @@ impl Renderer {
             chunk_indices,
             instance_buffer,
             instance_capacity,
-            instance_staging: Vec::with_capacity(instance_capacity),
+            instance_staging: Vec::with_capacity(PASSES * instance_capacity),
+            vis: Vec::with_capacity(instance_capacity),
+            raws: Vec::with_capacity(instance_capacity),
+            order: Vec::with_capacity(PASSES * instance_capacity),
+            timer: None,
             stats: RenderStats::default(),
         }
+    }
+
+    /// Starts reading GPU time per pass into [`RenderStats::gpu_us`], when the device was
+    /// created with [`wgpu::Features::TIMESTAMP_QUERY`]; false (and nothing changes)
+    /// otherwise. For stats runs: it allocates a little every frame.
+    pub fn enable_gpu_timing(&mut self) -> bool {
+        if self.timer.is_none() {
+            self.timer = GpuTimer::new(&self.device, &self.queue);
+        }
+        self.timer.is_some()
+    }
+
+    /// The quality in use (as sanitized for this device).
+    pub fn quality(&self) -> RenderQuality {
+        self.quality
+    }
+
+    /// Switches to `quality` (also done by [`Renderer::render`] from
+    /// [`SceneView::quality`]). Rebuilds the shadow atlas when the cascade size changes and
+    /// the scene's targets when the resolution scale does; otherwise free.
+    pub fn set_quality(&mut self, quality: RenderQuality) {
+        let q = quality.sanitized(self.max_cascade_size);
+        if q == self.quality {
+            return;
+        }
+        let old = std::mem::replace(&mut self.quality, q);
+        if q.shadow_size != old.shadow_size {
+            self.cascade_size = q.shadow_size;
+            let (view, group) = create_shadow_atlas(
+                &self.device,
+                self.cascade_size,
+                &self.forward_layout,
+                &self.shadow_sampler,
+                &self.atlas_view,
+                &self.atlas_sampler,
+            );
+            self.shadow_view = view;
+            self.forward_group = group;
+            self.stats.rebuilds += 1;
+        }
+        if (q.shadow_size, q.cascades, q.far_cascade_interval)
+            != (old.shadow_size, old.cascades, old.far_cascade_interval)
+        {
+            self.shadow_valid = false;
+            self.kept_far = None;
+        }
+        if q.resolution_scale != old.resolution_scale && self.hdr {
+            self.rebuild_targets();
+            self.stats.rebuilds += 1;
+        }
+    }
+
+    /// Turns instance culling on or off (off draws every instance in every pass).
+    pub fn set_culling(&mut self, on: bool) {
+        self.culling = on;
+    }
+
+    /// Size of the scene's color and depth targets, pixels.
+    pub fn render_size(&self) -> (u32, u32) {
+        self.targets.size
+    }
+
+    fn rebuild_targets(&mut self) {
+        let size = if self.hdr {
+            self.quality.render_size(self.size)
+        } else {
+            self.size
+        };
+        self.targets = create_targets(
+            &self.device,
+            self.post.as_ref(),
+            &self.corona_layout,
+            &self.depth_sampler,
+            size,
+        );
     }
 
     /// True when lighting goes through an `Rgba16Float` target and a tonemap pass; false
@@ -1468,9 +1719,13 @@ impl Renderer {
     pub fn reserve_instances(&mut self, count: usize) {
         if count > self.instance_capacity {
             self.instance_capacity = count.next_power_of_two();
-            self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
+            let packed = PASSES * self.instance_capacity;
+            self.instance_buffer = create_instance_buffer(&self.device, packed);
             self.instance_staging
-                .reserve(self.instance_capacity - self.instance_staging.len());
+                .reserve(packed - self.instance_staging.len());
+            self.order.reserve(packed - self.order.len());
+            self.vis.reserve(self.instance_capacity - self.vis.len());
+            self.raws.reserve(self.instance_capacity - self.raws.len());
         }
     }
 
@@ -1479,13 +1734,7 @@ impl Renderer {
         let size = (size.0.max(1), size.1.max(1));
         if size != self.size {
             self.size = size;
-            self.targets = create_targets(
-                &self.device,
-                self.post.as_ref(),
-                &self.corona_layout,
-                &self.depth_sampler,
-                size,
-            );
+            self.rebuild_targets();
         }
     }
 
@@ -1537,6 +1786,7 @@ impl Renderer {
             vertices,
             indices,
             index_count: mesh.indices.len() as u32,
+            bounds: Aabb::of_points(mesh.vertices.iter().map(|v| Vec3::from(v.pos))),
         });
         MeshId(self.meshes.len() as u32 - 1)
     }
@@ -1551,9 +1801,30 @@ impl Renderer {
     ///
     /// Allocates nothing on the heap or the GPU unless the instance count exceeds every
     /// earlier frame's (and [`Renderer::reserve_instances`]); in debug builds that is an
-    /// assertion failure after [`WARMUP_FRAMES`].
+    /// assertion failure after [`WARMUP_FRAMES`]. A changed [`SceneView::quality`] may
+    /// rebuild targets first (counted in [`RenderStats::rebuilds`]).
     pub fn render(&mut self, view: &wgpu::TextureView, scene: &SceneView) {
-        let (uniform, cascades) = self.frame_uniforms(scene);
+        self.set_quality(scene.quality);
+        if let Some(t) = &mut self.timer {
+            t.begin_frame(&self.device);
+        }
+        let view_m = Mat4::from_cols_array_2d(&scene.camera.view);
+        let proj = Mat4::from_cols_array_2d(&scene.camera.proj);
+        let sky = SkyModel::new(&scene.sun, &scene.sky);
+        let n = self.quality.cascades as usize;
+        let far = n - 1;
+        let mut fits = self.fit_shadows(view_m, proj, sky.sun_dir);
+        let draw_far = self.far_cascade_due(&fits[far], sky.sun_dir);
+        if draw_far {
+            self.kept_far = Some((fits[far], sky.sun_dir));
+        } else if let Some((kept, _)) = self.kept_far {
+            fits[far] = kept;
+            if n == 2 {
+                fits[2] = kept;
+            }
+        }
+        let drawn: [bool; CASCADES] = std::array::from_fn(|k| k < n && (k != far || draw_far));
+        let (uniform, cascades) = self.frame_uniforms_with(scene, &sky, &fits);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&uniform));
         self.queue
@@ -1569,13 +1840,7 @@ impl Renderer {
             self.stats.resources_created += 1;
         }
         let lights = scene.lights.len().min(MAX_LIGHTS);
-        self.instance_staging.clear();
-        self.instance_staging.extend(
-            scene
-                .instances
-                .iter()
-                .map(|inst| InstanceRaw::new(inst, lights)),
-        );
+        let ranges = self.cull_and_pack(scene, lights, proj * view_m, &fits, drawn);
         // Which lights any instance uses, for the stats.
         let mut used = [0u64; MAX_LIGHTS / 64];
         for inst in scene.instances {
@@ -1586,7 +1851,9 @@ impl Renderer {
             }
         }
         self.corona_staging.clear();
-        self.push_coronas(scene);
+        if self.quality.coronas {
+            self.push_coronas(scene);
+        }
         let coronas = self.corona_staging.len() as u32;
         if coronas > 0 {
             self.queue.write_buffer(
@@ -1608,34 +1875,63 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        // Passes that wrote their GPU timestamps.
+        let mut timed = 0u8;
+        let ts = |pass: usize, begin: bool, end: bool| {
+            self.timer.as_ref().and_then(|t| t.writes(pass, begin, end))
+        };
         let mut shadow_draws = 0;
+        let mut shadow_instances = [0u32; CASCADES];
+        let mut shadow_triangles = 0u64;
         {
+            // Every cascade drawn: clear the atlas. Some kept: clear only the drawn ones.
+            let all = (0..n).all(|k| drawn[k]);
+            let load = if all {
+                wgpu::LoadOp::Clear(1.0)
+            } else {
+                wgpu::LoadOp::Load
+            };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.shadow_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load,
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: ts(timing::PASS_SHADOW, true, true),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.shadow_pipeline);
             pass.set_bind_group(0, &self.frame_group, &[]);
             let res = self.cascade_size;
-            for (i, group) in self.cascade_groups.iter().enumerate() {
-                let x = i as u32 * res;
+            for (k, group) in self.cascade_groups.iter().enumerate() {
+                if !drawn[k] {
+                    continue;
+                }
+                let x = k as u32 * res;
                 pass.set_viewport(x as f32, 0.0, res as f32, res as f32, 0.0, 1.0);
                 // GL does not clip to the viewport; the scissor keeps cascades apart.
                 pass.set_scissor_rect(x, 0, res, res);
                 pass.set_bind_group(1, group, &[]);
-                shadow_draws += self.draw_instances(&mut pass, scene.instances);
+                if !all {
+                    pass.set_pipeline(&self.shadow_clear_pipeline);
+                    pass.draw(0..3, 0..1);
+                    shadow_draws += 1;
+                }
+                pass.set_pipeline(&self.shadow_pipeline);
+                let range = ranges[1 + k].clone();
+                shadow_instances[k] = range.len() as u32;
+                let (draws, tris) = self.draw_instances(&mut pass, scene.instances, range);
+                shadow_draws += draws;
+                shadow_triangles += tris;
             }
         }
+        timed |= 1 << timing::PASS_SHADOW;
         let mut forward_draws = 1;
+        let triangles;
         {
             let color = self.targets.hdr.as_ref().unwrap_or(view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1658,6 +1954,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: ts(timing::PASS_FORWARD, true, true),
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.frame_group, &[]);
@@ -1665,8 +1962,11 @@ impl Renderer {
             pass.set_pipeline(&self.sky_pipeline);
             pass.draw(0..3, 0..1);
             pass.set_pipeline(&self.mesh_pipeline);
-            forward_draws += self.draw_instances(&mut pass, scene.instances);
+            let (draws, tris) = self.draw_instances(&mut pass, scene.instances, ranges[0].clone());
+            forward_draws += draws;
+            triangles = tris;
         }
+        timed |= 1 << timing::PASS_FORWARD;
         if coronas > 0 {
             let color = self.targets.hdr.as_ref().unwrap_or(view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1680,6 +1980,7 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                timestamp_writes: ts(timing::PASS_CORONA, true, true),
                 ..Default::default()
             });
             pass.set_pipeline(&self.corona_pipeline);
@@ -1688,13 +1989,17 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.corona_buffer.slice(..));
             pass.draw(0..4, 0..coronas);
             forward_draws += 1;
+            timed |= 1 << timing::PASS_CORONA;
         }
-        let mut bloom_draws = 0;
+        let mut bloom_draws = 0u32;
+        let mut bloom_levels = 0;
         if let (Some(post), Some(targets)) = (&self.post, &self.targets.post) {
             if scene.sky.bloom_strength > 0.0 {
+                let levels = self.quality.bloom_levels as usize;
+                let last = 2 * levels as u32 - 2;
                 // Down the chain: the prefilter reads the HDR target, each later level the
                 // one before it.
-                for (k, level) in targets.bloom.iter().enumerate() {
+                for (k, level) in targets.bloom.iter().take(levels).enumerate() {
                     let (pipeline, group) = match k {
                         0 => (&post.prefilter, &targets.hdr_group),
                         _ => (&post.down, &targets.level_groups[k - 1]),
@@ -1706,22 +2011,35 @@ impl Renderer {
                         clear,
                         pipeline,
                         [&self.frame_group, group],
+                        ts(timing::PASS_BLOOM, k == 0, bloom_draws == last),
                     );
                     bloom_draws += 1;
                 }
                 // Back up: each level adds a tent-filtered copy of the (already summed)
                 // level below it.
-                for k in (0..BLOOM_LEVELS - 1).rev() {
+                for k in (0..levels - 1).rev() {
                     let groups = [&self.frame_group, &targets.level_groups[k + 1]];
                     let level = &targets.bloom[k];
-                    fullscreen_pass(&mut encoder, level, wgpu::LoadOp::Load, &post.up, groups);
+                    let writes = ts(timing::PASS_BLOOM, false, bloom_draws == last);
+                    fullscreen_pass(
+                        &mut encoder,
+                        level,
+                        wgpu::LoadOp::Load,
+                        &post.up,
+                        groups,
+                        writes,
+                    );
                     bloom_draws += 1;
                 }
+                bloom_levels = levels as u32;
+                timed |= 1 << timing::PASS_BLOOM;
             }
             let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
             let groups = [&self.frame_group, &targets.tonemap_group];
-            fullscreen_pass(&mut encoder, view, clear, &post.tonemap, groups);
+            let writes = ts(timing::PASS_TONEMAP, true, true);
+            fullscreen_pass(&mut encoder, view, clear, &post.tonemap, groups, writes);
             forward_draws += 1;
+            timed |= 1 << timing::PASS_TONEMAP;
         }
         self.hud_staging.clear();
         let hud_dropped = hud::build_quads(
@@ -1746,6 +2064,7 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                timestamp_writes: ts(timing::PASS_HUD, true, true),
                 ..Default::default()
             });
             pass.set_pipeline(&self.hud_pipeline);
@@ -1754,8 +2073,21 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.hud_buffer.slice(..));
             pass.draw(0..4, 0..hud_quads);
             forward_draws += 1;
+            timed |= 1 << timing::PASS_HUD;
+        }
+        if let Some(t) = &mut self.timer {
+            for p in 0..GPU_PASSES {
+                if timed & (1 << p) != 0 {
+                    t.mark(p);
+                }
+            }
+            t.resolve(&mut encoder);
         }
         self.queue.submit([encoder.finish()]);
+        if let Some(t) = &mut self.timer {
+            t.after_submit();
+        }
+        self.shadow_valid = true;
         self.stats.frames += 1;
         self.stats.shadow_draw_calls = shadow_draws;
         self.stats.bloom_draw_calls = bloom_draws;
@@ -1764,8 +2096,145 @@ impl Renderer {
         self.stats.lights_used = used.iter().map(|w| w.count_ones()).sum();
         self.stats.coronas = coronas;
         self.stats.instances = scene.instances.len() as u32;
+        self.stats.instances_drawn = ranges[0].len() as u32;
+        self.stats.shadow_instances = shadow_instances;
+        self.stats.triangles = triangles;
+        self.stats.shadow_triangles = shadow_triangles;
+        self.stats.shadow_size = self.cascade_size;
+        self.stats.cascades = n as u32;
+        self.stats.cascades_drawn = drawn.iter().filter(|&&d| d).count() as u32;
+        self.stats.surface_size = self.size;
+        self.stats.render_size = self.targets.size;
+        self.stats.bloom_levels = bloom_levels;
+        self.stats.gpu_timing = self.timer.is_some();
+        self.stats.gpu_us = self.timer.as_ref().map_or([0; GPU_PASSES], |t| t.last_us);
         self.stats.hud_quads = hud_quads;
         self.stats.hud_quads_dropped = hud_dropped;
+    }
+
+    /// The cascades fitted to the camera: three over the cascade splits, or two over
+    /// [`TWO_CASCADE_SPLITS`] (the third slot a copy of the second). A farthest cascade
+    /// that may be kept over frames gets [`FAR_CASCADE_PAD`] of extra room (its `radius`
+    /// stays the slice's).
+    fn fit_shadows(&self, view: Mat4, proj: Mat4, to_sun: Vec3) -> [CascadeFit; CASCADES] {
+        let n = self.quality.cascades as usize;
+        let splits = if n == 2 {
+            let [a, b] = TWO_CASCADE_SPLITS;
+            [a, b, b]
+        } else {
+            self.cascade_splits
+        };
+        let res = self.cascade_size;
+        let mut fits = fit_cascades(
+            view,
+            proj,
+            to_sun,
+            splits,
+            CASCADE_BLEND,
+            res,
+            CASTER_MARGIN,
+        );
+        if self.quality.far_cascade_interval > 1 {
+            let f = &mut fits[n - 1];
+            let padded = f.radius * (1.0 + FAR_CASCADE_PAD);
+            f.view_proj = sun_view_proj(to_sun, f.center, padded, CASTER_MARGIN, res);
+            f.texel = 2.0 * padded / res as f32;
+        }
+        if n == 2 {
+            fits[2] = fits[1];
+        }
+        fits
+    }
+
+    /// Whether the farthest cascade (`fit`, this frame's) must be drawn this frame: always
+    /// unless it may be kept ([`RenderQuality::far_cascade_interval`]), the kept map still
+    /// holds this frame's slice sphere and the sun has not moved since.
+    fn far_cascade_due(&self, fit: &CascadeFit, to_sun: Vec3) -> bool {
+        let interval = self.quality.far_cascade_interval;
+        if interval <= 1 || !self.shadow_valid {
+            return true;
+        }
+        let Some((kept, sun)) = &self.kept_far else {
+            return true;
+        };
+        let kept_half = 0.5 * kept.texel * self.cascade_size as f32;
+        let covered = kept.center.distance(fit.center) + fit.radius <= kept_half;
+        let still = sun.dot(to_sun) >= 1.0 - 1e-6;
+        !covered || !still || self.stats.frames.is_multiple_of(u64::from(interval))
+    }
+
+    /// Culls every instance for the forward pass (`view_proj`) and each drawn cascade, and
+    /// packs the survivors into `instance_staging`, the forward pass first (its `late`
+    /// instances last), then each cascade. Returns each pass's range of it.
+    fn cull_and_pack(
+        &mut self,
+        scene: &SceneView,
+        lights: usize,
+        view_proj: Mat4,
+        fits: &[CascadeFit; CASCADES],
+        drawn: [bool; CASCADES],
+    ) -> [std::ops::Range<usize>; PASSES] {
+        let camera = Frustum::from_matrix(view_proj);
+        let boxes = fits.map(|f| Frustum::from_matrix(f.view_proj));
+        let min_texels = self.quality.min_caster_texels;
+        self.vis.clear();
+        self.raws.clear();
+        for inst in scene.instances {
+            let mut bits = 0u8;
+            if let Some(b) = self.mesh_bounds(inst.mesh) {
+                let (c, h) = b.transformed(&Mat4::from_cols_array_2d(&inst.transform));
+                if !self.culling || camera.intersects(c, h) {
+                    bits |= 1;
+                }
+                if inst.casts_shadow {
+                    let diagonal = 2.0 * h.length();
+                    for k in 0..CASCADES {
+                        let big = diagonal >= min_texels * fits[k].texel;
+                        if drawn[k] && big && (!self.culling || boxes[k].intersects(c, h)) {
+                            bits |= 2 << k;
+                        }
+                    }
+                }
+            }
+            self.vis.push(bits);
+            self.raws.push(if bits != 0 {
+                InstanceRaw::new(inst, lights)
+            } else {
+                InstanceRaw::zeroed()
+            });
+        }
+        self.order.clear();
+        self.instance_staging.clear();
+        let mut ranges: [std::ops::Range<usize>; PASSES] = std::array::from_fn(|_| 0..0);
+        for (p, range) in ranges.iter_mut().enumerate() {
+            let start = self.order.len();
+            let bit = 1u8 << p;
+            // The forward pass draws `late` instances after the rest.
+            let sweeps: &[Option<bool>] = if p == 0 {
+                &[Some(false), Some(true)]
+            } else {
+                &[None]
+            };
+            for &late in sweeps {
+                for (i, inst) in scene.instances.iter().enumerate() {
+                    if self.vis[i] & bit != 0 && late.is_none_or(|l| inst.late == l) {
+                        self.order.push(i as u32);
+                        self.instance_staging.push(self.raws[i]);
+                    }
+                }
+            }
+            *range = start..self.order.len();
+        }
+        ranges
+    }
+
+    /// Model-space bounds of what `id` draws, or `None` when it draws nothing.
+    fn mesh_bounds(&self, id: MeshId) -> Option<Aabb> {
+        let b = match id.as_chunk_part() {
+            Some(_) => self.chunk_pool.part_bounds(id)?,
+            None => self.meshes.get(id.0 as usize)?.bounds,
+        };
+        (!b.is_empty()).then_some(b)
     }
 
     /// Fills `corona_staging` with the frame's coronas: one per light with a [`Corona`],
@@ -1825,51 +2294,70 @@ impl Renderer {
         }
     }
 
-    /// Issues one instanced draw per run of consecutive instances sharing a mesh and
-    /// returns the number of draws.
-    fn draw_instances(&self, pass: &mut wgpu::RenderPass<'_>, instances: &[MeshInstance]) -> u32 {
+    /// Issues one instanced draw per run of consecutive packed instances in `range` (of
+    /// `order` and the instance buffer) sharing a mesh; returns the number of draws and
+    /// of triangles.
+    fn draw_instances(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        instances: &[MeshInstance],
+        range: std::ops::Range<usize>,
+    ) -> (u32, u64) {
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        let mut draws = 0;
+        let order = &self.order[range.clone()];
+        let mesh_of = |k: usize| instances[order[k] as usize].mesh;
+        let (mut draws, mut triangles) = (0, 0u64);
         let mut start = 0;
-        while start < instances.len() {
-            let id = instances[start].mesh;
+        while start < order.len() {
+            let id = mesh_of(start);
             let mut end = start + 1;
-            while end < instances.len() && instances[end].mesh == id {
+            while end < order.len() && mesh_of(end) == id {
                 end += 1;
             }
+            let packed = (range.start + start) as u32..(range.start + end) as u32;
+            let copies = (end - start) as u64;
             if let Some([first, count]) = self.chunk_pool.draw_range(id) {
                 pass.set_vertex_buffer(0, self.chunk_vertices.slice(..));
                 pass.set_index_buffer(self.chunk_indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(first..first + count, 0, start as u32..end as u32);
+                pass.draw_indexed(first..first + count, 0, packed);
                 draws += 1;
+                triangles += u64::from(count / 3) * copies;
             } else if let Some(mesh) = self.meshes.get(id.0 as usize) {
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, start as u32..end as u32);
+                pass.draw_indexed(0..mesh.index_count, 0, packed);
                 draws += 1;
+                triangles += u64::from(mesh.index_count / 3) * copies;
             }
             start = end;
         }
-        draws
+        (draws, triangles)
     }
 
+    /// The frame's uniforms with freshly fitted cascades (what `render` uses, without
+    /// keeping a far cascade).
+    #[cfg(test)]
     fn frame_uniforms(&self, scene: &SceneView) -> (FrameUniform, [CascadeUniform; CASCADES]) {
+        let view = Mat4::from_cols_array_2d(&scene.camera.view);
+        let proj = Mat4::from_cols_array_2d(&scene.camera.proj);
+        let sky = SkyModel::new(&scene.sun, &scene.sky);
+        let fits = self.fit_shadows(view, proj, sky.sun_dir);
+        self.frame_uniforms_with(scene, &sky, &fits)
+    }
+
+    fn frame_uniforms_with(
+        &self,
+        scene: &SceneView,
+        sky: &SkyModel,
+        fits: &[CascadeFit; CASCADES],
+    ) -> (FrameUniform, [CascadeUniform; CASCADES]) {
         let view = Mat4::from_cols_array_2d(&scene.camera.view);
         let proj = Mat4::from_cols_array_2d(&scene.camera.proj);
         let view_proj = proj * view;
         let inv_view = view.inverse();
         let eye = inv_view.w_axis.xyz();
         let forward = -inv_view.z_axis.xyz().normalize_or(Vec3::Z);
-        let sky = SkyModel::new(&scene.sun, &scene.sky);
-        let fits = fit_cascades(
-            view,
-            proj,
-            sky.sun_dir,
-            self.cascade_splits,
-            CASCADE_BLEND,
-            self.cascade_size,
-            CASTER_MARGIN,
-        );
+        let rs = self.targets.size;
         let cascades = fits.map(|f| CascadeUniform {
             view_proj: f.view_proj.to_cols_array_2d(),
             _pad: [[0.0; 4]; 12],
@@ -1946,12 +2434,19 @@ impl Renderer {
             ],
             cabin_light: v4(Vec3::from(scene.sky.cabin_light).max(Vec3::ZERO), 0.0),
             corona: [
-                // Pixels per unit of view-space slope, vertically.
-                0.5 * self.size.1 as f32 * proj.y_axis.y.abs(),
-                CORONA_MIN_PX * self.size.1 as f32 / 720.0,
-                CORONA_MAX_PX * self.size.1 as f32 / 720.0,
+                // Pixels (of the scene's target) per unit of view-space slope, vertically.
+                0.5 * rs.1 as f32 * proj.y_axis.y.abs(),
+                CORONA_MIN_PX * rs.1 as f32 / 720.0,
+                CORONA_MAX_PX * rs.1 as f32 / 720.0,
                 0.0,
             ],
+            render_size: [
+                rs.0 as f32,
+                rs.1 as f32,
+                1.0 / rs.0 as f32,
+                1.0 / rs.1 as f32,
+            ],
+            shadow_params: [self.quality.cascades as f32, 0.0, 0.0, 0.0],
             lights: std::array::from_fn(|i| {
                 scene
                     .lights
@@ -2191,6 +2686,57 @@ impl ChunkStore for Renderer {
     }
 }
 
+/// The shadow atlas (three `size`² cascades side by side) and the forward bind group that
+/// samples it.
+fn create_shadow_atlas(
+    device: &wgpu::Device,
+    size: u32,
+    layout: &wgpu::BindGroupLayout,
+    shadow_sampler: &wgpu::Sampler,
+    atlas_view: &wgpu::TextureView,
+    atlas_sampler: &wgpu::Sampler,
+) -> (wgpu::TextureView, wgpu::BindGroup) {
+    let shadow_view = device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("sun shadow cascades"),
+            size: wgpu::Extent3d {
+                width: size * CASCADES as u32,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SHADOW_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("forward"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&shadow_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(atlas_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(atlas_sampler),
+            },
+        ],
+    });
+    (shadow_view, group)
+}
+
 fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("instances"),
@@ -2207,6 +2753,7 @@ fn fullscreen_pass(
     load: wgpu::LoadOp<wgpu::Color>,
     pipeline: &wgpu::RenderPipeline,
     groups: [&wgpu::BindGroup; 2],
+    timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
 ) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("fullscreen"),
@@ -2219,6 +2766,7 @@ fn fullscreen_pass(
                 store: wgpu::StoreOp::Store,
             },
         })],
+        timestamp_writes,
         ..Default::default()
     });
     pass.set_pipeline(pipeline);
@@ -2285,6 +2833,7 @@ fn create_targets(
     });
     let Some(post) = post else {
         return Targets {
+            size,
             hdr: None,
             depth,
             corona_group,
@@ -2336,6 +2885,7 @@ fn create_targets(
         bloom,
     };
     Targets {
+        size,
         hdr: Some(hdr),
         depth,
         corona_group,
@@ -2396,6 +2946,7 @@ mod tests {
         }
         for ep in [
             "vs_shadow",
+            "vs_shadow_clear",
             "vs_sky",
             "fs_sky",
             "fs_sky_ldr",
@@ -2424,7 +2975,7 @@ mod tests {
         // 16 KiB uniform block limit.
         assert_eq!(
             size_of::<FrameUniform>(),
-            5 * 64 + 27 * 16 + MAX_LIGHTS * 32
+            5 * 64 + 29 * 16 + MAX_LIGHTS * 32
         );
         assert_eq!(size_of::<PackedLight>(), 32);
         assert_eq!(size_of::<CoronaRaw>(), 32);
@@ -2488,6 +3039,8 @@ mod tests {
                 "screen",
                 "cabin_light",
                 "corona",
+                "render_size",
+                "shadow_params",
                 "lights",
             ]
         );
@@ -2705,6 +3258,7 @@ mod tests {
             instances,
             lights,
             hud: Hud::EMPTY,
+            quality: RenderQuality::default(),
         }
     }
 
@@ -2753,8 +3307,10 @@ mod tests {
             wgpu::TextureFormat::Rgba8Unorm,
         ] {
             for mode in [HdrMode::Float16, HdrMode::Ldr] {
+                // Every instance in every pass, so the counts below are the runs.
                 let options = RendererOptions {
                     hdr: mode,
+                    culling: false,
                     ..Default::default()
                 };
                 let mut r = Renderer::with_options(&device, &queue, format, (64, 48), options);
@@ -3377,5 +3933,326 @@ mod tests {
             assert!(aureole < 1.6 * sky.bloom_threshold, "{elev}: {aureole}");
             assert!(model.sun_disc.max_element() * sky.exposure > BLOOM_CLAMP);
         }
+    }
+
+    /// A renderer on the no-op device with room for full-size cascades.
+    fn full_renderer(options: RendererOptions) -> (wgpu::Device, Renderer) {
+        let limits = wgpu::Limits {
+            max_texture_dimension_2d: 8192,
+            ..wgpu::Limits::downlevel_webgl2_defaults()
+        };
+        let (device, queue) = noop_device(limits);
+        let r = Renderer::with_options(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            (64, 48),
+            options,
+        );
+        (device, r)
+    }
+
+    const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+    fn at(mesh: MeshId, p: Vec3) -> MeshInstance {
+        MeshInstance::new(mesh, Mat4::from_translation(p).to_cols_array_2d())
+    }
+
+    /// The test camera sits at (0, 10, 30) looking at the origin: instances out of its
+    /// frustum are not drawn in the forward pass, those in it are, and a caster out of
+    /// view between the sun and the ground still draws into the shadow cascade.
+    #[test]
+    fn culling_drops_what_no_pass_can_see() {
+        let (device, mut r) = full_renderer(RendererOptions::default());
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let to_sun = Vec3::new(0.3, 0.8, 0.5).normalize();
+        let instances = [
+            at(block, Vec3::ZERO),
+            at(block, Vec3::new(-5.0, 0.0, -20.0)),
+            // Behind the camera, on the side away from the sun.
+            at(block, Vec3::new(0.0, 0.0, 60.0)),
+            // Far off to the right, and past the far cascade.
+            at(block, Vec3::new(900.0, 0.0, 0.0)),
+            // Up toward the sun from the origin, above and behind the view.
+            at(block, to_sun * 45.0),
+        ];
+        render_frames(
+            &device,
+            &mut r,
+            FORMAT,
+            &test_scene(&instances),
+            &[(64, 48)],
+        );
+        let s = r.stats();
+        assert_eq!(s.instances, 5);
+        assert_eq!(s.instances_drawn, 2, "{s:?}");
+        let forward: Vec<u32> = r.order[..2].to_vec();
+        assert_eq!(forward, [0, 1]);
+        // The near cascade holds the visible blocks and the one between them and the sun.
+        let shadow = s.shadow_instances[0] as usize;
+        let c0 = &r.order[2..2 + shadow];
+        assert!(
+            c0.contains(&0) && c0.contains(&1) && c0.contains(&4),
+            "{c0:?}"
+        );
+        assert!(!r.order.contains(&3), "{:?}", r.order);
+        assert_eq!(s.triangles, 2 * 12);
+        // Off, every instance is drawn everywhere.
+        r.set_culling(false);
+        render_frames(
+            &device,
+            &mut r,
+            FORMAT,
+            &test_scene(&instances),
+            &[(64, 48)],
+        );
+        let s = r.stats();
+        assert_eq!(s.instances_drawn, 5);
+        assert_eq!(s.shadow_instances, [5; CASCADES]);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// Every caster that can shadow a cascade's slice is kept for that cascade: boxes at
+    /// each slice corner and up to 300 m toward the sun from it pass the cascade's cull;
+    /// a box well beside the slice does not.
+    #[test]
+    fn cascade_culling_keeps_every_caster_of_the_slice() {
+        use glam::camera::rh::{proj::directx, view};
+        let proj = directx::perspective(62f32.to_radians(), 16.0 / 9.0, 0.25, 3000.0);
+        let suns = [
+            Vec3::new(0.70, 0.55, 0.45),
+            Vec3::new(-0.2, 0.98, 0.1),
+            Vec3::new(0.9, 0.06, -0.4),
+        ];
+        for (s, to_sun) in suns.iter().enumerate() {
+            let to_sun = to_sun.normalize();
+            for k in 0..12 {
+                let yaw = k as f32 * 0.7 + s as f32;
+                let dir = Vec3::new(-yaw.sin(), -0.1, -yaw.cos());
+                let eye = Vec3::new(k as f32 * 13.1, 1.5, k as f32 * -7.3);
+                let v = view::look_to_mat4(eye, dir, Vec3::Y);
+                let fits = fit_cascades(
+                    v,
+                    proj,
+                    to_sun,
+                    DEFAULT_CASCADE_SPLITS,
+                    0.1,
+                    2048,
+                    CASTER_MARGIN,
+                );
+                for fit in &fits {
+                    let f = Frustum::from_matrix(fit.view_proj);
+                    let [n, far] = fit.depth_range;
+                    for p in slice_corners(v, proj, n, far) {
+                        for t in [0.0, 100.0, 300.0] {
+                            let c = p + to_sun * t;
+                            assert!(f.intersects(c, Vec3::splat(0.5)), "sun {s} k {k} t {t}");
+                        }
+                    }
+                    let side = (fit.center
+                        + to_sun.cross(Vec3::Y).normalize_or(Vec3::X) * 3.0 * fit.radius)
+                        - to_sun * fit.radius;
+                    assert!(!f.intersects(side, Vec3::splat(0.5)), "sun {s} k {k}");
+                }
+            }
+        }
+    }
+
+    /// Instances that do not cast are left out of the cascades; `late` ones are drawn
+    /// after the rest in the forward pass; casters a fraction of a far-cascade texel wide
+    /// are left out of it when the quality says so.
+    #[test]
+    fn shadow_flags_late_instances_and_small_casters() {
+        let (device, mut r) = full_renderer(RendererOptions {
+            culling: false,
+            ..Default::default()
+        });
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let ground = r.add_mesh(&Mesh::ground_quad(10.0, 10.0, [90, 120, 60, 255]));
+        let glow = MeshInstance {
+            casts_shadow: false,
+            ..at(block, Vec3::X)
+        };
+        let backdrop = MeshInstance {
+            late: true,
+            ..at(ground, Vec3::ZERO)
+        };
+        let tiny = MeshInstance::new(
+            block,
+            Mat4::from_scale_rotation_translation(
+                Vec3::splat(0.05),
+                glam::Quat::IDENTITY,
+                Vec3::ZERO,
+            )
+            .to_cols_array_2d(),
+        );
+        let instances = [backdrop, glow, at(block, Vec3::ZERO), tiny];
+        let mut scene = test_scene(&instances);
+        render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+        let s = r.stats();
+        assert_eq!(s.instances_drawn, 4);
+        assert_eq!(r.order[..4], [1, 2, 3, 0], "the backdrop last");
+        assert_eq!(s.shadow_instances, [3; CASCADES], "no glow");
+        scene.quality.min_caster_texels = 2.0;
+        render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+        let s = r.stats();
+        // 5 cm is over two texels of the near cascade only.
+        assert_eq!(s.shadow_instances, [3, 2, 2], "{s:?}");
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// At half resolution the scene's targets are half the swapchain, the HUD is laid out
+    /// for the full swapchain (the same quads as at full resolution) and coronas, bloom and
+    /// tonemap still validate.
+    #[test]
+    fn half_resolution_scale_keeps_the_hud_at_full_size() {
+        let (device, mut r) = full_renderer(RendererOptions::default());
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let instances = [at(block, Vec3::ZERO)];
+        let mut lights = lamps(4);
+        lights[0].corona = Corona {
+            radius: 1.0,
+            strength: 1.0,
+        };
+        let mut hud = HudBuilder::new();
+        hud.begin(1.0);
+        hud.rect(10.0, 10.0, 200.0, 30.0, [0, 0, 0, 160]);
+        hud.text(14.0, 14.0, 2.0, [255; 4], "60 fps");
+        let mut scene = test_scene_lit(&instances, &lights);
+        scene.sky.exposure = exposure_from_ev100(3.0);
+        scene.hud = hud.view();
+        render_frames(&device, &mut r, FORMAT, &scene, &[(640, 360)]);
+        let full: Vec<HudQuad> = r.hud_staging.clone();
+        assert_eq!(r.render_size(), (640, 360));
+        scene.quality.resolution_scale = 0.5;
+        render_frames(&device, &mut r, FORMAT, &scene, &[(640, 360)]);
+        let s = r.stats();
+        assert_eq!((s.surface_size, s.render_size), ((640, 360), (320, 180)));
+        assert_eq!(r.render_size(), (320, 180));
+        assert_eq!(s.rebuilds, 1);
+        assert!(s.coronas > 0 && s.bloom_levels == BLOOM_LEVELS as u32);
+        assert_eq!(
+            bytemuck::cast_slice::<HudQuad, u8>(&r.hud_staging),
+            bytemuck::cast_slice::<HudQuad, u8>(&full),
+            "the HUD does not scale"
+        );
+        let (u, _) = r.frame_uniforms(&scene);
+        assert_eq!(u.screen[..2], [640.0, 360.0]);
+        assert_eq!(u.render_size[..2], [320.0, 180.0]);
+        // A resize keeps the scale.
+        render_frames(&device, &mut r, FORMAT, &scene, &[(100, 50)]);
+        assert_eq!(r.render_size(), (50, 25));
+        assert_eq!(r.stats().rebuilds, 1, "a resize is not a quality rebuild");
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// Quality changes apply on the next frame: the cascade size rebuilds the atlas, two
+    /// cascades draw two, fewer bloom levels draw fewer passes, coronas can be switched
+    /// off, and a kept far cascade is drawn every other frame of a still camera.
+    #[test]
+    fn quality_changes_apply_on_the_next_frame() {
+        let (device, mut r) = full_renderer(RendererOptions::default());
+        assert_eq!(r.shadow_cascade_size(), SHADOW_CASCADE_SIZE);
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let instances = [at(block, Vec3::ZERO)];
+        let mut scene = test_scene(&instances);
+        scene.quality = RenderQuality {
+            shadow_size: 1024,
+            cascades: 2,
+            bloom_levels: 4,
+            coronas: false,
+            ..RenderQuality::default()
+        };
+        render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+        let s = r.stats();
+        assert_eq!(r.shadow_cascade_size(), 1024);
+        assert_eq!((s.shadow_size, s.cascades, s.cascades_drawn), (1024, 2, 2));
+        assert_eq!(s.shadow_instances[2], 0);
+        assert_eq!(s.bloom_draw_calls, 7);
+        assert_eq!(s.coronas, 0, "not even the sun's");
+        assert_eq!(s.rebuilds, 1);
+        let (u, _) = r.frame_uniforms(&scene);
+        assert_eq!(u.shadow_params[0], 2.0);
+        assert_eq!(u.cascade_far[1], TWO_CASCADE_SPLITS[1]);
+        assert_eq!(u.cascade_far[2], u.cascade_far[1]);
+
+        scene.quality = RenderQuality {
+            far_cascade_interval: 2,
+            ..RenderQuality::default()
+        };
+        let drawn: Vec<u32> = (0..6)
+            .map(|_| {
+                render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+                r.stats().cascades_drawn
+            })
+            .collect();
+        assert_eq!(r.stats().rebuilds, 2);
+        // Drawn whole after the change, then the far cascade every other frame.
+        assert_eq!(drawn[0], 3, "{drawn:?}");
+        assert!(drawn.windows(2).all(|w| w[0] + w[1] >= 5), "{drawn:?}");
+        assert_eq!(drawn.iter().filter(|&&d| d == 2).count(), 2, "{drawn:?}");
+        // A camera that jumps away cannot keep the old map, even on a frame that would.
+        while r.stats().cascades_drawn != 3 {
+            render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+        }
+        let mut moved = scene;
+        moved.camera.view = glam::camera::rh::view::look_at_mat4(
+            Vec3::new(500.0, 10.0, 30.0),
+            Vec3::new(500.0, 0.0, 0.0),
+            Vec3::Y,
+        )
+        .to_cols_array_2d();
+        render_frames(&device, &mut r, FORMAT, &moved, &[(64, 48)]);
+        assert_eq!(r.stats().cascades_drawn, 3);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// Not a check: the CPU cost of culling and packing 16k instances (a 128×128 grid 4 m
+    /// apart round the camera) for the forward pass and three cascades. Run with
+    /// `cargo test --release -p render -- --ignored --nocapture cull_cost`.
+    #[test]
+    #[ignore = "benchmark; prints numbers"]
+    fn cull_cost() {
+        let (device, mut r) = full_renderer(RendererOptions::default());
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let instances: Vec<MeshInstance> = (0..128 * 128)
+            .map(|i| {
+                at(
+                    block,
+                    Vec3::new(
+                        (i % 128) as f32 * 4.0 - 256.0,
+                        0.0,
+                        (i / 128) as f32 * 4.0 - 256.0,
+                    ),
+                )
+            })
+            .collect();
+        r.reserve_instances(instances.len());
+        let scene = test_scene(&instances);
+        render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+        let view = Mat4::from_cols_array_2d(&scene.camera.view);
+        let proj = Mat4::from_cols_array_2d(&scene.camera.proj);
+        let sky = SkyModel::new(&scene.sun, &scene.sky);
+        let fits = r.fit_shadows(view, proj, sky.sun_dir);
+        let runs = 50;
+        let t = std::time::Instant::now();
+        let mut kept = 0;
+        for _ in 0..runs {
+            let ranges = r.cull_and_pack(&scene, 0, proj * view, &fits, [true; CASCADES]);
+            kept = ranges.iter().map(|x| x.len()).sum::<usize>();
+        }
+        let ms = t.elapsed().as_secs_f64() * 1000.0 / f64::from(runs);
+        eprintln!(
+            "cull_and_pack: {} instances, {kept} kept over 4 passes: {ms:.3} ms ({:.1} ns each)",
+            instances.len(),
+            ms * 1e6 / instances.len() as f64
+        );
+        r.set_culling(false);
+        let t = std::time::Instant::now();
+        for _ in 0..runs {
+            r.cull_and_pack(&scene, 0, proj * view, &fits, [true; CASCADES]);
+        }
+        let ms = t.elapsed().as_secs_f64() * 1000.0 / f64::from(runs);
+        eprintln!("  the same packing everything into every pass (no culling): {ms:.3} ms");
     }
 }

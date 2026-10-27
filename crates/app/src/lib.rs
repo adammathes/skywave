@@ -483,6 +483,7 @@ impl App {
             instances: &self.instances,
             lights: self.lights.lights(),
             hud: self.ui.hud(),
+            quality: render::RenderQuality::default(),
         }
     }
 }
@@ -574,7 +575,8 @@ fn resident_town(place: &Place) -> Town {
     }
 }
 
-/// The instance drawing a world mesh or chunk part of role `role`.
+/// The instance drawing a world mesh or chunk part of role `role`. Neon, signals and lamp
+/// lenses glow rather than block the sun: they cast no shadow.
 fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
     MeshInstance {
         color: if role == PartRole::Glow {
@@ -582,6 +584,7 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
         } else {
             [1.0; 4]
         },
+        casts_shadow: role == PartRole::Tile,
         ..MeshInstance::new(mesh, Mat4::IDENTITY.to_cols_array_2d())
     }
 }
@@ -603,7 +606,11 @@ fn streamed_town(place: Place, budget: StreamBudget) -> Town {
     let mut roles = Vec::with_capacity(capacity);
     let mut bounds = Vec::with_capacity(capacity);
     for i in 0..fixed {
-        instances.push(world_instance(MeshId(i as u32), PartRole::Tile));
+        // Under the chunks everywhere: drawn after them, so they hide it before shading.
+        instances.push(MeshInstance {
+            late: true,
+            ..world_instance(MeshId(i as u32), PartRole::Tile)
+        });
         roles.push(PartRole::Tile);
         bounds.push(None);
     }
