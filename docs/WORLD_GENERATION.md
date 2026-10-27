@@ -72,6 +72,7 @@ planner's former code constants (`shipped_grammar_keeps_the_former_constants` in
 As built (B2, B4):
 ```
 Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules }
+            (+ lexicon: Lexicon, attached by the loader from assets/grammar/lexicon.ron)
 StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addenda }
   zones:    All | Only([ZoneId, ...])
   massing:  even_floors: ByUse<bool>, floor_h, ground_floor_h: (min, max), ground_share_max
@@ -89,7 +90,13 @@ StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addend
   addenda:  roof_vents: ByUse<(min, max)>, roof_units: ByUse<(min, max)>,
             bulkhead_floors, water_tank_1_in
 ByUse<T>    { residential, office, other }   other: commercial, industrial, civic, hotel, parking
-SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256, shop_lit_256 }
+SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256, shop_lit_256,
+              lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
+              wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
+TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
+              lines: [(Word(String) | Since, weight)], descriptors_out: [String] }
+Lexicon     { id, syllables: { onsets, nuclei, codas }, given, surnames, descriptors, trades,
+              lines }
 LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
 ```
 **Which rules.** A style may have several entries. A building takes the first entry, in file
@@ -141,6 +148,32 @@ building, from an `Rng` keyed by the building's door pick):
   `water_tank_1_in` of those a water tank.
 - **Signs** (terrain places). The awning is drawn from `awnings` by weight in listed order;
   `lit_box_256` and `shop_lit_256` are shares out of 256 of backlit-box signs and late shops.
+- **Shop signs** (the blade signs the detailing hangs on storefronts; `world::signs`). Each
+  draws a trade from `trades` by weight, a form from `forms` (`Name's`, `Name's Trade`,
+  `Descriptor Trade`, `Trade`), a name from the lexicon's given names and surnames, a
+  descriptor (never one in its trade's `descriptors_out`: pairs that would name a well-known
+  business), a pictogram from its trade's `pictograms`, a lettering style from `wordmarks`
+  and, `line_256` times in 256, a secondary line from its trade's `lines` (`SINCE` and a year
+  2-35 years before the era). `Descriptor Trade` that would say a word twice becomes
+  `Name's Trade`; a line that repeats the trade is dropped. `ChunkPlan` assigns them in prop
+  order and redraws (up to 24 times) any sign whose main line or name a sign within
+  `name_radius` already has. Every word comes from the lexicon (`assets/grammar/lexicon.ron`,
+  closed and reviewed; names are two or three syllables from its `syllables` tables), which
+  `app::places::load_grammar` attaches to the grammar after checking its `id` against
+  `signs.lexicon`. A grammar parsed without it gets plain blade signs (a pictogram, no words).
+  The blade puts the word first: bold stacked capitals up to 0.6 m tall (the stroke a fifth
+  of the cap), or the main line reading upward in script, inside a neon frame; a backlit
+  box (`lit_box_256`) letters dark on a lit panel. The pictogram (`signs::pictogram`, 32
+  generic shapes as 2D polygons, extruded 4 cm proud of both faces and outlined in neon)
+  goes above the word when the word leaves at least 0.4 m and the triangles for it, so short
+  words get one. A sign spends at most 360 triangles (`props::BLADE_TRIANGLES`): a word that
+  does not fit gives way to the trade, then to block capitals; the pictogram's neon goes
+  before the pictogram. Blades carry no second line (the carriers of B7 will).
+- **Letterforms** (`signs::letters`): stroke polylines on a 20-unit cap grid, ours, in four
+  styles (block capitals, condensed sans, connected script, slab serif), built as neon tubes,
+  dark strokes on a backlit box, extruded channel letters or flat paint. The sign bands and
+  billboards letter their (still syllable-built, `signs::business_name`) names in the block
+  capitals until B7 moves the band carriers onto the shop signs.
 - **Lots.** Strip malls with at least `front_min_yard` of open ground in front get nose-in
   stalls `stall_w` wide, a `front_fill` share of them taken; beach aisles take a stall with
   chance `aisle_fill` (terrain places). The test town's strip-mall lots use `stall_w` too.
