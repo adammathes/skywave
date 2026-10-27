@@ -1,7 +1,7 @@
 //! `shape-preview`: renders a `ShapeSpec` from four fixed angles into one PNG so a car can
 //! be looked at without a GPU.
 //!
-//! Usage: `cargo run -p shape-preview -- assets/vehicles/corsair_gtx.shape.ron out.png
+//! Usage: `cargo run -p shape-preview -- assets/vehicles/gannet_gt.shape.ron out.png
 //! [--color N] [--lod L] [--popups] [--view 0-3] [--zoom Z]`
 //!
 //! Panels, left to right: front three-quarter, side, rear three-quarter, cockpit from the
@@ -290,11 +290,11 @@ fn main() {
 mod tests {
     use super::*;
 
-    const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.shape.ron");
+    const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.shape.ron");
 
     #[test]
-    fn renders_the_corsair() {
-        let spec = load(CORSAIR).unwrap();
+    fn renders_the_gannet() {
+        let spec = load(GANNET).unwrap();
         let car = vehicle::shape::build(&spec, 0).unwrap();
         let panel = 96;
         let (w, h, rgb) = render(&spec, &car, panel);

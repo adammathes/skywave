@@ -61,7 +61,7 @@ mod sfx;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-/// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
+/// The first value of `key` in a URL query string such as `?seed=123&car=homestead_wagon`.
 /// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`, `map`,
 /// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu,
 /// `menu=vehicle` the pause menu's Vehicle page, `selftest=1` runs the determinism self-test
@@ -443,8 +443,8 @@ mod tests {
 
     #[test]
     fn reads_other_parameters() {
-        let q = "?seed=3&car=palisade_wagon&cam=cockpit&fly=1";
-        assert_eq!(query_param(q, "car"), Some("palisade_wagon"));
+        let q = "?seed=3&car=homestead_wagon&cam=cockpit&fly=1";
+        assert_eq!(query_param(q, "car"), Some("homestead_wagon"));
         assert_eq!(query_param(q, "cam"), Some("cockpit"));
         assert_eq!(query_param(q, "fly"), Some("1"));
         assert_eq!(query_param(q, "ca"), None);

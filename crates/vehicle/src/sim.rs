@@ -1152,8 +1152,8 @@ mod tests {
 
     // Tests that need a real spec parse it through serde.
     #[cfg(feature = "serde")]
-    fn corsair() -> VehicleSpec {
-        ron::from_str(include_str!("../../../assets/vehicles/corsair_gtx.ron")).unwrap()
+    fn gannet() -> VehicleSpec {
+        ron::from_str(include_str!("../../../assets/vehicles/gannet_gt.ron")).unwrap()
     }
 
     #[test]
@@ -1239,7 +1239,7 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn gear_ratios_carry_direction() {
-        let spec = corsair();
+        let spec = gannet();
         assert_eq!(overall_ratio(&spec, 1), 3.1 * 3.7);
         assert_eq!(overall_ratio(&spec, 5), 0.85 * 3.7);
         assert_eq!(overall_ratio(&spec, 6), 0.0, "no sixth gear");
@@ -1252,7 +1252,7 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn spawn_rests_on_the_ground_at_static_load() {
-        let spec = corsair();
+        let spec = gannet();
         let s = VehicleState::spawn(&spec, [10.0, 2.0, -5.0], 0.5 * crate::math::PI);
         assert_eq!(s.pos, [10.0, 2.0 + spec.cg_height_m, -5.0]);
         let f = s.forward();
@@ -1278,7 +1278,7 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn hash_sees_every_kind_of_field() {
-        let spec = corsair();
+        let spec = gannet();
         let base = VehicleState::spawn(&spec, [0.0; 3], 0.0);
         let h = base.hash();
         assert_eq!(h, base.hash());
@@ -1297,7 +1297,7 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn free_fall_is_gravity() {
-        let spec = corsair();
+        let spec = gannet();
         let mut s = VehicleState::spawn(&spec, [0.0, 100.0, 0.0], 0.0);
         let input = VehicleInput::default();
         let ground = FlatGround {
@@ -1316,7 +1316,7 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn knocks_move_the_body_and_the_wheels_follow() {
-        let spec = corsair();
+        let spec = gannet();
         let mut s = VehicleState::spawn(&spec, [0.0; 3], 0.0);
         s.vel = [0.0, 0.0, -10.0];
         for w in &mut s.wheels {
