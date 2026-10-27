@@ -49,14 +49,15 @@ pub const EMISSIVE_CAP: f32 = 5.0;
 /// night (brighter, AgX rolls a red lamp toward salmon).
 const CAR_LAMP_EXPOSED: f32 = 1.5;
 /// The same for the instruments: the radio display (scale 1.5) at ~0.9, just under the
-/// bloom threshold, the needles (4, orange) at ~2 with a faint halo, the dial faces (0.15)
-/// as a dim green backlight.
+/// bloom threshold, the needles (3, white with red tips) at ~1.8 with a faint halo, the dial
+/// faces (0.7) as a backlight in the car's display color.
 const INSTRUMENT_EXPOSED: f32 = 0.6;
 /// Cabin ambient (`Sky::cabin_light`) after exposure: by day the light through the glass,
 /// neutral; by night the dome and instrument backlight, warm and dim. A white surface in the
-/// cabin would read at this value; the dark 80s trims read a tenth of it.
+/// cabin would read at this value; the dark 80s trims read a tenth of it. At night it is a
+/// quarter of the day's, so the backlit dials and the radio are what glows.
 const CABIN_DAY_EXPOSED: f32 = 1.6;
-const CABIN_NIGHT_EXPOSED: f32 = 0.9;
+const CABIN_NIGHT_EXPOSED: f32 = 0.4;
 const CABIN_DAY_RGB: [f32; 3] = [0.96, 1.0, 1.04];
 const CABIN_NIGHT_RGB: [f32; 3] = [1.23, 0.96, 0.69];
 /// Moonless night sky luminance, kcd/m² (`Sky::night_luminance`; the renderer's default is
@@ -499,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cabin_reads_at_the_same_brightness_day_and_night() {
+    fn the_cabin_is_lit_by_day_and_dim_at_night() {
         let luma = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
         let exposed = |d: &Daylight| luma(cabin_light(d)) * exposure_from_ev100(d.ev100);
         let (noon, golden, night) = (at(12.0), at(17.0 + 40.0 / 60.0), at(22.5));

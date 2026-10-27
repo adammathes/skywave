@@ -338,17 +338,34 @@ fn park_props(poly: &[V2], out: &mut Vec<Prop>, seed: u64) {
     }
 }
 
-/// Shared geometry for building many props.
+/// Shared geometry for building many props, and how finely to build them.
 pub struct PropKit {
     sphere0: UnitSphere,
     sphere1: UnitSphere,
+    /// Build the [`instanced`] kinds at full detail (see [`PropKit::instanced`]).
+    fine: bool,
 }
 
 impl PropKit {
+    /// The kit for props meshed into chunks (the test town's): every kind in its light
+    /// shape, which the chunk budgets and the pinned mesh hashes assume.
     pub fn new() -> PropKit {
         PropKit {
             sphere0: UnitSphere::new(0),
             sphere1: UnitSphere::new(1),
+            fine: false,
+        }
+    }
+
+    /// The kit for the shared meshes the app draws as instances: the [`instanced`] kinds
+    /// at full detail (lobed trees, a cobra-head street light, furniture with its caps,
+    /// slats and insulators) and the street-clutter designs a bench or a trash can stands
+    /// for, picked by the prop's seed. A shape is built once and drawn many times, so it
+    /// may spend the art budgets (`docs/backlog/ART.md`) that a chunk cannot.
+    pub fn instanced() -> PropKit {
+        PropKit {
+            fine: true,
+            ..PropKit::new()
         }
     }
 }
@@ -363,6 +380,9 @@ impl Default for PropKit {
 pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
     let base = p.pos.at(p.y);
     let mut rng = Rng::new(Seed(u64::from(p.seed)), &[KEY_PROP]);
+    if kit.fine && build_fine(m, base, p, pal, kit, &mut rng) {
+        return;
+    }
     match p.kind {
         PropKind::StreetLight => street_light(m, base, p.dir, pal),
         PropKind::PalmTree => palm(m, base, pal, kit, &mut rng),
@@ -981,21 +1001,29 @@ pub fn instanced(kind: place::PropKind) -> bool {
     )
 }
 
-/// Which of the two parked-car shapes a Place `ParkedCar`'s `vehicle_class` (low 4 bits:
-/// the vehicle crate's `VehicleClass`) stands for: 0, the low sporty coupe (sports, coupe,
-/// convertible, muscle, hatch), or 1, the long wagon-sized body (the rest).
+/// Which of the four built-in parked-car shapes a Place `ParkedCar`'s `vehicle_class`
+/// (low 4 bits: the vehicle crate's `VehicleClass`) stands for: 0, the low sporty wedge
+/// (sports, hatch, muscle); 1, the long wagon-sized body (sedan, wagon, pickup, van); 2, the
+/// boxy mid-size convertible (coupe, convertible); 3, the big luxury coupe (luxury).
 pub fn parked_car_shape(vehicle_class: u8) -> usize {
     // VehicleClass order: Sports, Sedan, Wagon, Coupe, Pickup, Van, Hatch, Convertible,
     // Luxury, Muscle.
     match vehicle_class & 15 {
-        0 | 3 | 6 | 7 | 9 => 0,
+        0 | 6 | 9 => 0,
+        3 | 7 => 2,
+        8 => 3,
         _ => 1,
     }
 }
 
 /// Length, width and height of a parked car of `vehicle_class`, m: the built-in shapes'.
 pub fn parked_car_size(vehicle_class: u8) -> [f32; 3] {
-    [[4.3, 1.75, 1.15], [5.25, 1.9, 1.45]][parked_car_shape(vehicle_class)]
+    [
+        [4.3, 1.75, 1.15],
+        [5.25, 1.9, 1.45],
+        [4.62, 1.75, 1.30],
+        [5.2, 1.86, 1.36],
+    ][parked_car_shape(vehicle_class)]
 }
 
 /// A Place prop as a world prop: its facing from its yaw and its variation seed from the
@@ -1558,25 +1586,1090 @@ pub const PIER_HALF_WIDTH_M: f32 = 4.5;
 pub const PIER_HEAD_HALF_WIDTH_M: f32 = 9.0;
 pub const PIER_HEAD_M: f32 = 16.0;
 
+/// The [`instanced`] kinds at full detail ([`PropKit::instanced`]), each bench or trash
+/// can as one of its street-clutter designs; false for the other kinds, which have one
+/// shape.
+fn build_fine(
+    m: &mut WorldMesh,
+    base: V3,
+    p: &Prop,
+    pal: &Palette,
+    kit: &PropKit,
+    rng: &mut Rng,
+) -> bool {
+    match p.kind {
+        PropKind::StreetLight => cobra_light(m, base, p.dir, pal),
+        PropKind::Oak => lobed_oak(m, base, pal, kit, rng),
+        PropKind::PalmTree => fan_palm(m, base, pal, kit, rng),
+        PropKind::Eucalyptus => gum_tree(m, base, pal, kit, rng),
+        PropKind::Hydrant => full_hydrant(m, base, p.dir, pal),
+        // Each design takes a share of eighths: half the benches are plain, a quarter each
+        // at a bus stop or under a shelter; most trash cans are cans, some vending boxes
+        // and a planter now and then. (Which eighths: so that the app's few shared shapes
+        // per kind, `app::propinst`, come out in about these shares.)
+        PropKind::Bench => match rng.range(0, 8) {
+            0 | 5 | 6 | 7 => {
+                let (wood, iron) = bench_paints(pal, rng);
+                park_bench(m, &Frame::upright(base, p.dir.left()), wood, iron);
+            }
+            1 | 4 => bus_stop(m, base, p.dir, pal, rng),
+            _ => bench_shelter(m, base, p.dir, pal, rng),
+        },
+        PropKind::TrashCan => match rng.range(0, 8) {
+            0 | 1 | 3 => steel_can(m, base, pal, rng),
+            2 | 4 => wire_can(m, base, pal),
+            6 | 7 => news_boxes(m, base, p.dir, pal, rng),
+            _ => planter(m, base, pal, kit, rng),
+        },
+        PropKind::Mailbox => full_mailbox(m, base, p.dir, pal, rng),
+        PropKind::PowerPole => full_power_pole(m, base, p.dir, pal, rng),
+        PropKind::StopSign => full_stop_sign(m, base, p.dir, pal),
+        _ => return false,
+    }
+    true
+}
+
+/// A square-section bar `w` by `t` from `a` to `b`, its `w` side across `across`; `ends`
+/// closes it.
+#[allow(clippy::too_many_arguments)]
+fn bar(m: &mut WorldMesh, a: V3, b: V3, across: V3, w: f32, t: f32, ends: bool, paint: Paint) {
+    let axis = (b - a).normalize();
+    let u = (across - axis * across.dot(axis)).normalize();
+    let v = axis.cross(u);
+    let (hu, hv) = (u * (w * 0.5), v * (t * 0.5));
+    for (n, s) in [(hu, hv), (-hu, hv), (hv, hu), (-hv, hu)] {
+        quad(m, [a + n - s, b + n - s, b + n + s, a + n + s], n, paint);
+    }
+    if ends {
+        for (c, n) in [(a, -axis), (b, axis)] {
+            quad(
+                m,
+                [c - hu - hv, c + hu - hv, c + hu + hv, c - hu + hv],
+                n,
+                paint,
+            );
+        }
+    }
+}
+
+/// A round tube tapering from `r0` at `a` to `r1` at `b`.
+fn tube(m: &mut WorldMesh, a: V3, b: V3, r0: f32, r1: f32, sides: u32, paint: Paint) {
+    let f = frame_along(a, b - a);
+    frustum(m, &f, r0, r1, (b - a).length(), sides, false, false, paint);
+}
+
+/// An irregular leaf lump: a smooth [`UnitSphere`] stretched to `radii`, its surface pushed
+/// in and out by three waves in seeded directions so no two lumps share a silhouette.
+/// `shade` maps the unit normal to the vertex color, as in [`icosphere`].
+fn lump(
+    m: &mut WorldMesh,
+    sphere: &UnitSphere,
+    center: V3,
+    radii: V3,
+    rng: &mut Rng,
+    paint: Paint,
+    shade: impl Fn(V3) -> [u8; 3],
+) {
+    const AMP: f32 = 0.07;
+    const FREQ: f32 = 2.0;
+    let mut waves = [(V3::ZERO, 0.0f32); 3];
+    for w in &mut waves {
+        let (s0, c0) = sin_cos(rng.range_f32(0.0, TAU));
+        let (s1, c1) = sin_cos(rng.range_f32(-1.2, 1.2));
+        *w = (V3::new(c0 * c1, s1, s0 * c1), rng.range_f32(0.0, TAU));
+    }
+    let inv = V3::new(1.0 / radii.x, 1.0 / radii.y, 1.0 / radii.z);
+    for &[a, b, c] in &sphere.tris {
+        let first = m.vertices.len() as u32;
+        for u in [a, b, c] {
+            // Radius 1 + AMP * sum(sin), and its gradient for the normal.
+            let (mut k, mut g) = (1.0, V3::ZERO);
+            for &(d, phase) in &waves {
+                let (s, co) = sin_cos(FREQ * u.dot(d) + phase);
+                k += AMP * s;
+                g = g + d * (AMP * FREQ * co);
+            }
+            let n = u * k - (g - u * u.dot(g));
+            let n = V3::new(n.x * inv.x, n.y * inv.y, n.z * inv.z).normalize();
+            let p = center + V3::new(u.x * radii.x, u.y * radii.y, u.z * radii.z) * k;
+            m.vertices.push(crate::mesh::WorldVertex {
+                pos: p.to_array(),
+                normal: n.to_array(),
+                uv: [u.x, u.y],
+                color: paint.with_rgb(shade(n)).color,
+                emissive: paint.emissive,
+            });
+        }
+        m.indices.extend_from_slice(&[first, first + 1, first + 2]);
+    }
+}
+
+/// A street light at full detail: a base plate and a flared foot, a tapered pole that
+/// bends into a curved arm, and a cobra-head housing over the same lens as
+/// [`street_light`]'s (the photocell and the lamp heads key on that lens).
+fn cobra_light(m: &mut WorldMesh, base: V3, arm: V2, pal: &Palette) {
+    let metal = Paint::new(pal.metal_light, Pattern::Metal);
+    let concrete = Paint::new(pal.concrete, Pattern::Concrete);
+    let f = Frame::upright(base, arm);
+    let h = 7.4;
+    boxf(
+        m,
+        &f,
+        [-0.3, 0.0, -0.3],
+        [0.3, 0.06, 0.3],
+        face::NO_BOTTOM,
+        concrete,
+    );
+    lathe(
+        m,
+        &f,
+        &[[0.2, 0.06], [0.18, 0.4], [0.13, 0.55], [0.095, 0.6]],
+        8,
+        false,
+        false,
+        metal,
+    );
+    let top = h - 0.65;
+    frustum(
+        m,
+        &f.offset(0.0, 0.6, 0.0),
+        0.095,
+        0.065,
+        top - 0.6,
+        8,
+        false,
+        false,
+        metal,
+    );
+    // The arm: a quarter bend out of the pole top, then straight to the head.
+    let bend = 0.6;
+    let mut pts = [V3::ZERO; 6];
+    for (k, p) in pts.iter_mut().enumerate().take(5) {
+        let (s, c) = sin_cos(TAU * 0.25 * k as f32 / 4.0);
+        *p = f.p(bend * (1.0 - c), top + bend * s, 0.0);
+    }
+    pts[5] = f.p(1.75, top + bend + 0.02, 0.0);
+    for k in 0..5 {
+        let r = |t: f32| 0.065 - 0.02 * t;
+        tube(
+            m,
+            pts[k],
+            pts[k + 1],
+            r(k as f32 / 5.0),
+            r((k + 1) as f32 / 5.0),
+            6,
+            metal,
+        );
+    }
+    // The head: half-elliptic sections along the arm over a flat underside at `yb`.
+    let yb = h - 0.18;
+    let rings: [(f32, f32, f32); 5] = [
+        (1.68, 0.08, 0.1),
+        (1.85, 0.18, 0.2),
+        (2.2, 0.215, 0.24),
+        (2.5, 0.19, 0.19),
+        (2.7, 0.07, 0.08),
+    ];
+    let pt = |r: (f32, f32, f32), k: u32| {
+        let (s, c) = sin_cos(TAU * 0.5 * k as f32 / 4.0);
+        f.p(r.0, yb + r.2 * s, r.1 * c)
+    };
+    for w in rings.windows(2) {
+        for k in 0..4 {
+            let (s, c) = sin_cos(TAU * 0.5 * (k as f32 + 0.5) / 4.0);
+            let out = f.v(0.0, s, c);
+            quad(
+                m,
+                [pt(w[0], k), pt(w[1], k), pt(w[1], k + 1), pt(w[0], k + 1)],
+                out,
+                metal,
+            );
+        }
+        quad(
+            m,
+            [pt(w[0], 0), pt(w[1], 0), pt(w[1], 4), pt(w[0], 4)],
+            -f.y,
+            metal,
+        );
+    }
+    for (r, n) in [(rings[0], -f.x), (rings[4], f.x)] {
+        for k in 1..3 {
+            tri(m, pt(r, 0), pt(r, k), pt(r, k + 1), n, metal);
+        }
+        tri(m, pt(r, 0), pt(r, 3), pt(r, 4), n, metal);
+    }
+    let lens = Paint::new(pal.window_warm, Pattern::Glass).glowing(pal.sodium, Glow::Lamp);
+    quad(
+        m,
+        [
+            f.p(1.85, h - 0.19, -0.14),
+            f.p(2.5, h - 0.19, -0.14),
+            f.p(2.5, h - 0.19, 0.14),
+            f.p(1.85, h - 0.19, 0.14),
+        ],
+        -f.y,
+        lens,
+    );
+}
+
+/// Leaf colors of a canopy: `(dark underside, sunlit top)`, tinted per tree.
+fn canopy_tones(pal: &Palette, rng: &mut Rng) -> ([u8; 3], [u8; 3]) {
+    let tint = rng.range(0, 64);
+    (
+        shade(pal.leaf_green, 220 + tint),
+        mix(pal.leaf_light, pal.palm_green, tint * 2),
+    )
+}
+
+/// A canopy tree at full detail: a flared trunk forking into three or four limbs (two of
+/// them forking again), and a lobed crown of irregular lumps over the limb ends.
+fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut Rng) {
+    let bark = Paint::new(pal.bark, Pattern::Bark);
+    let trunk_h = rng.range_f32(2.3, 3.2);
+    lathe(
+        m,
+        &Frame::at(base),
+        &[
+            [0.32, 0.0],
+            [0.22, 0.3],
+            [0.19, trunk_h * 0.55],
+            [0.15, trunk_h],
+        ],
+        7,
+        false,
+        false,
+        bark,
+    );
+    let top = base + V3::new(0.0, trunk_h, 0.0);
+    let leaf = Paint::new(pal.leaf_green, Pattern::Foliage);
+    let (dark, light) = canopy_tones(pal, rng);
+    let tone = |n: V3| mix(dark, light, ((n.y * 0.5 + 0.5) * 250.0) as u32);
+    let main_r = rng.range_f32(1.8, 2.3);
+    let crown = top + V3::new(0.0, main_r * 0.85, 0.0);
+    let radii = V3::new(main_r, main_r * 0.75, main_r);
+    lump(m, &kit.sphere1, crown, radii, rng, leaf, tone);
+    let r = main_r * rng.range_f32(0.55, 0.7);
+    let crest = crown + V3::new(rng.range_f32(-0.5, 0.5), main_r * 0.6, 0.3);
+    lump(
+        m,
+        &kit.sphere1,
+        crest,
+        V3::new(r, r * 0.8, r),
+        rng,
+        leaf,
+        tone,
+    );
+    let limbs = rng.range(3, 5);
+    let spin = rng.range_f32(0.0, TAU);
+    for k in 0..limbs {
+        let a = spin + TAU * k as f32 / limbs as f32 + rng.range_f32(-0.3, 0.3);
+        let (s, c) = sin_cos(a);
+        let out = V3::new(c, 0.0, s);
+        let reach = rng.range_f32(1.3, 2.0);
+        let tip = top + out * reach + V3::new(0.0, rng.range_f32(1.0, 1.7), 0.0);
+        tube(m, top - V3::Y * 0.3, tip, 0.12, 0.06, 6, bark);
+        let r = rng.range_f32(1.2, 1.6);
+        let at = tip + V3::new(0.0, r * 0.3, 0.0);
+        lump(
+            m,
+            &kit.sphere1,
+            at,
+            V3::new(r, r * 0.78, r),
+            rng,
+            leaf,
+            tone,
+        );
+        if k < 2 {
+            // A fork off the limb with a smaller lump of its own.
+            let mid = top.lerp(tip, 0.5);
+            let side = V3::new(-s, 0.0, c) * if k == 0 { 1.0 } else { -1.0 };
+            let twig = mid + side * 0.9 + out * 0.3 + V3::new(0.0, 1.0, 0.0);
+            tube(m, mid, twig, 0.06, 0.03, 5, bark);
+            let r = rng.range_f32(0.9, 1.2);
+            lump(
+                m,
+                &kit.sphere1,
+                twig,
+                V3::new(r, r * 0.8, r),
+                rng,
+                leaf,
+                tone,
+            );
+        }
+    }
+}
+
+/// A fan palm at full detail: a bent trunk banded with frond scars, a skirt of dead fronds
+/// under the crown and two tiers of V-section fronds drooping toward their tips.
+fn fan_palm(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut Rng) {
+    let bark = shade(pal.bark, 300);
+    let height = rng.range_f32(9.0, 12.5);
+    let (ls, lc) = sin_cos(rng.range_f32(0.0, TAU));
+    let lean = V3::new(lc, 0.0, ls) * rng.range_f32(0.4, 1.4);
+    let spine = |t: f32| base + V3::new(0.0, height * t, 0.0) + lean * (t * t);
+    let segments = 10;
+    for k in 0..segments {
+        let (t0, t1) = (k as f32 / segments as f32, (k + 1) as f32 / segments as f32);
+        let (p0, p1) = (spine(t0), spine(t1));
+        let (r0, r1) = (0.24 - 0.08 * t0, 0.24 - 0.08 * t1);
+        let f = frame_along(p0, p1 - p0);
+        let h = (p1 - p0).length();
+        let tone = if k % 2 == 0 { bark } else { shade(bark, 236) };
+        // A ring band at the foot of each segment.
+        lathe(
+            m,
+            &f,
+            &[[r0 * 1.12, 0.0], [r0, h * 0.2], [r1, h]],
+            6,
+            false,
+            false,
+            Paint::new(tone, Pattern::Bark),
+        );
+    }
+    let crown = spine(1.0);
+    let frond = Paint::new(pal.palm_green, Pattern::Foliage);
+    icosphere(
+        m,
+        &kit.sphere0,
+        crown,
+        V3::new(0.45, 0.6, 0.45),
+        false,
+        frond,
+        |_| shade(pal.palm_green, 160),
+    );
+    let spin = rng.range_f32(0.0, TAU);
+    let dead = Paint::new(mix(pal.bark, pal.lawn_dry, 150), Pattern::Foliage);
+    for k in 0..6 {
+        let (s, c) = sin_cos(spin + TAU * (k as f32 + 0.5) / 6.0);
+        let (out, side) = (V3::new(c, 0.0, s), V3::new(-s, 0.0, c));
+        let a = crown + out * 0.25 - V3::Y * 0.15;
+        let b = a + out * 0.3 - V3::Y * rng.range_f32(0.8, 1.1);
+        let q = [
+            a - side * 0.2,
+            a + side * 0.2,
+            b + side * 0.1,
+            b - side * 0.1,
+        ];
+        quad(m, q, out, dead);
+        quad(m, q, -out, dead.with_rgb(shade(dead.rgb(), 180)));
+    }
+    let count = 13;
+    let widths = [0.1, 0.42, 0.55, 0.48, 0.3, 0.03];
+    for k in 0..count {
+        let a = spin + TAU * k as f32 / count as f32 + rng.range_f32(-0.12, 0.12);
+        let (s, c) = sin_cos(a);
+        let (out, side) = (V3::new(c, 0.0, s), V3::new(-s, 0.0, c));
+        // Odd fronds are the young upper tier: shorter, standing higher.
+        let young = k % 2 == 1;
+        let lift = if young {
+            rng.range_f32(0.9, 1.2)
+        } else {
+            rng.range_f32(0.3, 0.6)
+        };
+        let reach = rng.range_f32(0.9, 1.15) * if young { 0.85 } else { 1.0 };
+        let mut pts = [V3::ZERO; 6];
+        for (j, p) in pts.iter_mut().enumerate() {
+            let t = j as f32 * 0.8;
+            *p = crown + out * (t * 0.95 * reach) + V3::Y * (lift * t - 0.2 * t * t * reach);
+        }
+        let tone = rng.range(200, 290);
+        let top_paint = frond.with_rgb(shade(pal.palm_green, tone));
+        let under = frond.with_rgb(shade(pal.palm_green, tone * 3 / 5));
+        for j in 0..5 {
+            let (a, b) = (pts[j], pts[j + 1]);
+            // The leaflets fold down from the midrib, more toward the tip.
+            let (da, db) = (
+                V3::Y * -(0.08 + 0.05 * j as f32),
+                V3::Y * -(0.13 + 0.05 * j as f32),
+            );
+            let (la, lb) = (a + side * widths[j] + da, b + side * widths[j + 1] + db);
+            let (ra, rb) = (a - side * widths[j] + da, b - side * widths[j + 1] + db);
+            for half in [[a, b, lb, la], [a, ra, rb, b]] {
+                quad(m, half, V3::Y, top_paint);
+                quad(m, half, -V3::Y, under);
+            }
+        }
+    }
+}
+
+/// A eucalyptus at full detail: a tall, leaning, pale trunk flared at the foot, four limbs
+/// (two forking) and a sparse crown of tall irregular lobes with sky between them.
+fn gum_tree(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut Rng) {
+    let bark = Paint::new(mix(pal.bark, pal.stucco_white, 150), Pattern::Bark);
+    let height = rng.range_f32(14.0, 19.0);
+    let (ls, lc) = sin_cos(rng.range_f32(0.0, TAU));
+    let lean = V3::new(lc, 0.0, ls) * rng.range_f32(0.6, 1.8);
+    let spine = |t: f32| base + V3::new(0.0, height * t, 0.0) + lean * (t * t);
+    let segments = 7;
+    let r = |t: f32| 0.34 - 0.24 * t;
+    for k in 0..segments {
+        let (t0, t1) = (k as f32 / segments as f32, (k + 1) as f32 / segments as f32);
+        let (p0, p1) = (spine(t0), spine(t1));
+        let f = frame_along(p0, p1 - p0);
+        let h = (p1 - p0).length();
+        if k == 0 {
+            let profile = [[r(t0) * 1.35, 0.0], [r(t0) * 1.05, 0.5], [r(t1), h]];
+            lathe(m, &f, &profile, 7, false, false, bark);
+        } else {
+            frustum(m, &f, r(t0), r(t1), h, 7, false, false, bark);
+        }
+    }
+    let leaf = Paint::new(pal.leaf_green, Pattern::Foliage);
+    let tint = rng.range(0, 64);
+    let dark = shade(mix(pal.leaf_green, pal.teal, 80 + tint), 190);
+    let light = mix(mix(pal.leaf_light, pal.sky_blue, 70), pal.lawn_dry, tint);
+    let tone = |n: V3| mix(dark, light, ((n.y * 0.5 + 0.5) * 240.0) as u32);
+    let lobes = rng.range(7, 10);
+    let spin = rng.range_f32(0.0, TAU);
+    for k in 0..lobes {
+        let t = if k == 0 {
+            1.0
+        } else {
+            0.5 + 0.45 * (k as f32 / lobes as f32)
+        };
+        let (s, c) = sin_cos(spin + TAU * 0.38 * k as f32);
+        let reach = if k == 0 {
+            0.4
+        } else {
+            rng.range_f32(1.6, 3.2) * (1.15 - 0.5 * t)
+        };
+        let at = spine(t) + V3::new(c * reach, rng.range_f32(0.2, 1.2), s * reach);
+        if (1..=4).contains(&k) {
+            // A limb out to the lobe; the first two fork.
+            let from = spine(t - 0.12);
+            tube(m, from, at, 0.1, 0.04, 6, bark);
+            if k <= 2 {
+                let mid = from.lerp(at, 0.55);
+                let twig = mid + V3::new(-s * 1.1, 1.3, c * 1.1);
+                tube(m, mid, twig, 0.05, 0.02, 5, bark);
+            }
+        }
+        let rad = rng.range_f32(1.3, 2.0);
+        let tall = rng.range_f32(1.1, 1.5);
+        let radii = V3::new(rad, rad * tall, rad);
+        lump(m, &kit.sphere1, at, radii, rng, leaf, tone);
+    }
+}
+
+/// A hydrant at full detail: a flanged barrel and domed bonnet with an operating nut, two
+/// hose outlets and a pumper outlet with caps, the side caps on chains.
+fn full_hydrant(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette) {
+    let red = Paint::new(pal.hydrant_red, Pattern::Metal);
+    let chrome = Paint::new(pal.metal_light, Pattern::Metal);
+    let f = Frame::upright(base, dir);
+    lathe(
+        m,
+        &f,
+        &[
+            [0.17, 0.0],
+            [0.17, 0.05],
+            [0.125, 0.08],
+            [0.11, 0.14],
+            [0.11, 0.5],
+            [0.135, 0.52],
+            [0.135, 0.56],
+            [0.115, 0.58],
+            [0.07, 0.68],
+            [0.0, 0.71],
+        ],
+        8,
+        false,
+        false,
+        red,
+    );
+    let nut = f.offset(0.0, 0.67, 0.0);
+    frustum(m, &nut, 0.035, 0.03, 0.07, 5, true, false, chrome);
+    // Outlets: the two hose outlets across, the pumper toward the street.
+    let outlet = |m: &mut WorldMesh, axis: V3, y: f32, r: f32| {
+        let o = frame_along(f.p(0.0, y, 0.0), axis);
+        let profile = [
+            [r, 0.06],
+            [r, 0.13],
+            [r * 1.3, 0.14],
+            [r * 1.3, 0.2],
+            [r * 0.5, 0.21],
+        ];
+        lathe(m, &o, &profile[..3], 6, false, false, red);
+        lathe(m, &o, &profile[2..], 6, true, false, chrome);
+    };
+    outlet(m, f.z, 0.38, 0.04);
+    outlet(m, -f.z, 0.38, 0.04);
+    outlet(m, f.x, 0.34, 0.06);
+    // A chain from each side cap down and back up to the barrel.
+    let link = Paint::new(shade(pal.metal_dark, 300), Pattern::Metal);
+    for side in [1.0f32, -1.0] {
+        let p = [
+            f.p(0.03, 0.34, 0.19 * side),
+            f.p(0.06, 0.27, 0.16 * side),
+            f.p(0.07, 0.27, 0.125 * side),
+            f.p(0.06, 0.45, 0.108 * side),
+        ];
+        for k in 0..3 {
+            bar(m, p[k], p[k + 1], f.x, 0.014, 0.014, false, link);
+        }
+    }
+}
+
+/// Wood and iron paints of a bench, the slats in one of a few stains.
+fn bench_paints(pal: &Palette, rng: &mut Rng) -> (Paint, Paint) {
+    let stains = [
+        shade(pal.terracotta, 190),
+        shade(pal.bark, 330),
+        mix(pal.bark, pal.sand, 140),
+        shade(pal.palm_green, 150),
+    ];
+    let wood = Paint::new(stains[rng.range(0, 4) as usize], Pattern::Plain);
+    (wood, Paint::new(pal.metal_dark, Pattern::Metal))
+}
+
+/// A slatted bench with iron end frames and armrests in frame `f` (X along the seat, +Z
+/// the way it faces).
+fn park_bench(m: &mut WorldMesh, f: &Frame, wood: Paint, iron: Paint) {
+    for z0 in [0.15, 0.035, -0.08, -0.195] {
+        boxf(
+            m,
+            f,
+            [-0.95, 0.42, z0],
+            [0.95, 0.455, z0 + 0.09],
+            face::ALL,
+            wood,
+        );
+    }
+    // The back's slats, leaning back.
+    let tilt = f.y - f.z * 0.3;
+    for j in 0..3 {
+        let (y, z) = (0.56 + 0.13 * j as f32, -0.27 - 0.04 * j as f32);
+        bar(
+            m,
+            f.p(-0.95, y, z),
+            f.p(0.95, y, z),
+            tilt,
+            0.1,
+            0.03,
+            true,
+            wood,
+        );
+    }
+    for s in [-1.0f32, 1.0] {
+        let x = 0.82 * s;
+        let a = 0.92 * s;
+        let bars = [
+            (f.p(x, 0.0, 0.2), f.p(x, 0.42, 0.18)),
+            (f.p(x, 0.0, -0.2), f.p(x, 0.42, -0.22)),
+            (f.p(x, 0.42, -0.22), f.p(x, 0.92, -0.37)),
+            (f.p(x, 0.4, 0.24), f.p(x, 0.4, -0.24)),
+            (f.p(a, 0.42, 0.2), f.p(a, 0.64, 0.2)),
+            (f.p(a, 0.66, 0.27), f.p(a, 0.68, -0.28)),
+        ];
+        for (k, (p, q)) in bars.into_iter().enumerate() {
+            let across = if k == 3 { f.y } else { f.x };
+            let (w, t) = if k == 5 { (0.07, 0.03) } else { (0.05, 0.045) };
+            bar(m, p, q, across, w, t, true, iron);
+        }
+    }
+}
+
+/// A bench at a bus stop: the bench and, at one end, a route-sign post with a blank sign
+/// and a timetable case.
+fn bus_stop(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette, rng: &mut Rng) {
+    let f = Frame::upright(base, facing.left());
+    let (wood, iron) = bench_paints(pal, rng);
+    park_bench(m, &f, wood, iron);
+    let steel = Paint::new(pal.metal_light, Pattern::Metal);
+    let pole = f.offset(1.35, 0.0, 0.0);
+    frustum(m, &pole, 0.035, 0.035, 2.6, 6, true, false, steel);
+    let colors = [
+        pal.teal,
+        pal.navy,
+        shade(pal.palm_green, 170),
+        pal.hydrant_red,
+    ];
+    let band = Paint::new(colors[rng.range(0, 4) as usize], Pattern::Paint);
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let (x0, x1, y0, y1) = (1.12, 1.58, 2.0, 2.55);
+    boxf(m, &f, [x0, y0, 0.04], [x1, y1, 0.065], face::ALL, white);
+    for (z, back) in [(0.066, false), (0.039, true)] {
+        rect(m, &f, x0, y1 - 0.16, x1, y1, z, back, band);
+        // The route as a block of color on the white field.
+        rect(m, &f, 1.25, 2.12, 1.45, 2.3, z, back, band);
+    }
+    boxf(
+        m,
+        &f,
+        [1.25, 1.3, -0.05],
+        [1.45, 1.75, 0.07],
+        face::ALL,
+        steel,
+    );
+    let sheet = Paint::new(pal.stucco_cream, Pattern::Plain);
+    rect(m, &f, 1.28, 1.34, 1.42, 1.7, 0.071, false, sheet);
+}
+
+/// A bench under a small shelter: four posts, a glazed back and one glazed end, and a flat
+/// roof.
+fn bench_shelter(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette, rng: &mut Rng) {
+    let f = Frame::upright(base, facing.left());
+    let (wood, iron) = bench_paints(pal, rng);
+    park_bench(m, &f, wood, iron);
+    let frame = Paint::new(shade(pal.metal_dark, 330), Pattern::Metal);
+    let glass = Paint::new(mix(pal.glass, pal.sky_blue, 90), Pattern::Glass);
+    let (xh, zb, zf, top) = (1.3, -0.5, 0.6, 2.3);
+    for (x, z) in [(-xh, zb), (xh, zb), (-xh, zf), (xh, zf)] {
+        let (lo, hi) = ([x - 0.04, 0.0, z - 0.04], [x + 0.04, top, z + 0.04]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, frame);
+    }
+    let roof = [-xh - 0.15, top, zb - 0.15];
+    boxf(
+        m,
+        &f,
+        roof,
+        [xh + 0.15, top + 0.1, zf + 0.2],
+        face::ALL,
+        frame,
+    );
+    for y in [0.2, 2.1] {
+        let (lo, hi) = ([-xh, y, zb - 0.03], [xh, y + 0.05, zb + 0.03]);
+        boxf(m, &f, lo, hi, face::ALL, frame);
+    }
+    rect(m, &f, -xh, 0.25, xh, 2.1, zb, false, glass);
+    rect(m, &f, -xh, 0.25, xh, 2.1, zb, true, glass);
+    let end = Frame {
+        o: f.p(-xh, 0.0, 0.0),
+        x: f.z,
+        y: f.y,
+        z: -f.x,
+    };
+    rect(m, &end, zb, 0.25, zf - 0.2, 2.1, 0.0, false, glass);
+    rect(m, &end, zb, 0.25, zf - 0.2, 2.1, 0.0, true, glass);
+}
+
+/// A steel trash can with hoops round its body and a domed lid with a knob.
+fn steel_can(m: &mut WorldMesh, base: V3, pal: &Palette, rng: &mut Rng) {
+    let tones = [
+        shade(pal.teal, 170),
+        shade(pal.palm_green, 150),
+        shade(pal.navy, 200),
+        shade(pal.metal_dark, 300),
+    ];
+    let body = Paint::new(tones[rng.range(0, 4) as usize], Pattern::Metal);
+    let lid = Paint::new(pal.metal_dark, Pattern::Metal);
+    let f = Frame::at(base);
+    let mut profile = Vec::new();
+    profile.extend_from_slice(&[[0.26, 0.0], [0.27, 0.04]]);
+    for y in [0.16, 0.5, 0.82] {
+        profile.extend_from_slice(&[[0.27, y], [0.29, y + 0.02], [0.29, y + 0.06]]);
+    }
+    profile.push([0.27, 0.9]);
+    lathe(m, &f, &profile, 10, false, false, body);
+    let dome = [
+        [0.31, 0.9],
+        [0.31, 0.94],
+        [0.25, 1.0],
+        [0.12, 1.04],
+        [0.0, 1.05],
+    ];
+    lathe(m, &f, &dome, 10, false, false, lid);
+    frustum(
+        m,
+        &f.offset(0.0, 1.04, 0.0),
+        0.04,
+        0.035,
+        0.05,
+        6,
+        true,
+        false,
+        lid,
+    );
+}
+
+/// A wire-basket trash can: hoops and uprights round a dark liner.
+fn wire_can(m: &mut WorldMesh, base: V3, pal: &Palette) {
+    let wire = Paint::new(shade(pal.metal_dark, 330), Pattern::Metal);
+    let liner = Paint::new(shade(pal.metal_dark, 140), Pattern::Plain);
+    let f = Frame::at(base);
+    frustum(m, &f, 0.25, 0.25, 0.06, 12, false, false, wire);
+    lathe(
+        m,
+        &f,
+        &[[0.22, 0.04], [0.25, 0.84], [0.18, 0.86], [0.0, 0.87]],
+        10,
+        false,
+        false,
+        liner,
+    );
+    let r = |y: f32| 0.26 + 0.04 * y;
+    for y in [0.3, 0.6, 0.86] {
+        let band = [[r(y), y], [r(y + 0.04), y + 0.04]];
+        lathe(m, &f, &band, 12, false, false, wire);
+    }
+    for k in 0..12 {
+        let (s, c) = sin_cos(TAU * (k as f32 + 0.5) / 12.0);
+        let (lo, hi) = (V3::new(c, 0.0, s) * r(0.05), V3::new(c, 0.0, s) * r(0.86));
+        let a = base + lo + V3::Y * 0.05;
+        let b = base + hi + V3::Y * 0.86;
+        bar(m, a, b, V3::new(-s, 0.0, c), 0.015, 0.015, false, wire);
+    }
+}
+
+/// A pair of newspaper vending boxes on pedestals, their windows to the sidewalk.
+fn news_boxes(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette, rng: &mut Rng) {
+    let f = Frame::upright(base, facing.left());
+    let colors = [
+        pal.paint_yellow,
+        pal.hydrant_red,
+        pal.navy,
+        pal.teal,
+        pal.stucco_white,
+        shade(pal.palm_green, 170),
+    ];
+    let first = rng.range(0, 6);
+    let second = (first + rng.range(1, 6)) % 6;
+    let steel = Paint::new(pal.metal_dark, Pattern::Metal);
+    let glass = Paint::new(mix(pal.glass, pal.stucco_cream, 100), Pattern::Glass);
+    let paper = Paint::new(pal.stucco_cream, Pattern::Plain);
+    for (k, c) in [first, second].into_iter().enumerate() {
+        let body = Paint::new(colors[c as usize], Pattern::Paint);
+        let x = -0.29 + 0.58 * k as f32;
+        boxf(
+            m,
+            &f,
+            [x - 0.2, 0.0, -0.2],
+            [x + 0.2, 0.05, 0.2],
+            face::NO_BOTTOM,
+            steel,
+        );
+        let (lo, hi) = ([x - 0.04, 0.05, -0.04], [x + 0.04, 0.35, 0.04]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, steel);
+        let (lo, hi) = ([x - 0.24, 0.35, -0.2], [x + 0.24, 1.05, 0.2]);
+        boxf(m, &f, lo, hi, face::ALL, body);
+        let (lo, hi) = ([x - 0.25, 1.05, -0.22], [x + 0.25, 1.1, 0.21]);
+        boxf(
+            m,
+            &f,
+            lo,
+            hi,
+            face::ALL,
+            body.with_rgb(shade(body.rgb(), 200)),
+        );
+        // The front (-Z): a window on a folded paper, the coin box and the pull handle.
+        rect(m, &f, x - 0.15, 0.7, x + 0.15, 0.95, -0.201, true, paper);
+        rect(m, &f, x - 0.18, 0.62, x + 0.18, 0.98, -0.202, true, glass);
+        let (lo, hi) = ([x + 0.08, 0.46, -0.24], [x + 0.2, 0.58, -0.2]);
+        boxf(m, &f, lo, hi, face::ALL & !face::POS_Z, steel);
+        let (lo, hi) = ([x - 0.13, 0.53, -0.23], [x + 0.02, 0.56, -0.2]);
+        boxf(m, &f, lo, hi, face::ALL & !face::POS_Z, steel);
+    }
+}
+
+/// A sidewalk planter: a lipped square tub with a shrub and a few flowers.
+fn planter(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut Rng) {
+    let f = Frame::at(base);
+    let tub = if rng.range(0, 2) == 0 {
+        Paint::new(pal.terracotta, Pattern::Plain)
+    } else {
+        Paint::new(mix(pal.concrete, pal.sand, 90), Pattern::Concrete)
+    };
+    let (w, h) = (0.42, 0.5);
+    boxf(m, &f, [-w, 0.0, -w], [w, h, w], face::NO_BOTTOM, tub);
+    let lip = tub.with_rgb(shade(tub.rgb(), 230));
+    let (lo, hi) = ([-w - 0.04, h, -w - 0.04], [w + 0.04, h + 0.06, w + 0.04]);
+    boxf(m, &f, lo, hi, face::ALL, lip);
+    let soil = Paint::new(pal.soil, Pattern::Plain);
+    rect(
+        m,
+        &Frame {
+            o: base,
+            x: V3::X,
+            y: -V3::Z,
+            z: V3::Y,
+        },
+        -w + 0.03,
+        -w + 0.03,
+        w - 0.03,
+        w - 0.03,
+        h + 0.061,
+        false,
+        soil,
+    );
+    let leaf = Paint::new(pal.leaf_green, Pattern::Foliage);
+    let (dark, light) = canopy_tones(pal, rng);
+    let tone = |n: V3| mix(dark, light, ((n.y * 0.5 + 0.5) * 250.0) as u32);
+    let blooms = [pal.pastel_pink, pal.salmon, pal.paint_yellow, pal.lavender];
+    let bloom = Paint::new(blooms[rng.range(0, 4) as usize], Pattern::Foliage);
+    let spin = rng.range_f32(0.0, TAU);
+    for k in 0..3 {
+        let (s, c) = sin_cos(spin + TAU * k as f32 / 3.0);
+        let (out, side) = (V3::new(c, 0.0, s), V3::new(-s, 0.0, c));
+        let r = rng.range_f32(0.24, 0.3);
+        let radii = V3::new(r, r * 0.85, r);
+        let at = base + out * 0.13 + V3::Y * (h + 0.22 + 0.08 * k as f32);
+        lump(m, &kit.sphere1, at, radii, rng, leaf, tone);
+        // Two blooms on the lump's sunny shoulder.
+        for t in [-0.45, 0.45] {
+            let d = (out * 0.7 + V3::Y * 0.7 + side * t).normalize();
+            let p = at + V3::new(d.x * radii.x, d.y * radii.y, d.z * radii.z);
+            let r = V3::new(0.07, 0.06, 0.07);
+            icosphere(m, &kit.sphere0, p, r, false, bloom, |_| bloom.rgb());
+        }
+    }
+}
+
+/// A tunnel-top mailbox body in frame `f`: flat floor at `y0`, upright sides `half` either
+/// side of `x`, a half-round roof, from `z0` (back) to `z1` (the door).
+#[allow(clippy::too_many_arguments)]
+fn tunnel_box(
+    m: &mut WorldMesh,
+    f: &Frame,
+    x: f32,
+    y0: f32,
+    half: f32,
+    z0: f32,
+    z1: f32,
+    paint: Paint,
+) {
+    let wall = y0 + half * 0.9;
+    let mut ring = [(0.0f32, 0.0f32); 9];
+    ring[0] = (x - half, y0);
+    for k in 0..7 {
+        let (s, c) = sin_cos(TAU * 0.5 * (1.0 - k as f32 / 6.0));
+        ring[k + 1] = (x + half * c, wall + half * s);
+    }
+    ring[8] = (x + half, y0);
+    let center = (x, (y0 + wall) * 0.5);
+    for k in 0..9 {
+        let (a, b) = (ring[k], ring[(k + 1) % 9]);
+        let out = f.v(
+            (a.0 + b.0) * 0.5 - center.0,
+            (a.1 + b.1) * 0.5 - center.1,
+            0.0,
+        );
+        let q = [
+            f.p(a.0, a.1, z0),
+            f.p(b.0, b.1, z0),
+            f.p(b.0, b.1, z1),
+            f.p(a.0, a.1, z1),
+        ];
+        quad(m, q, out, paint);
+        let door = paint.with_rgb(shade(paint.rgb(), 235));
+        let c = |z: f32| f.p(center.0, center.1, z);
+        tri(m, c(z1), f.p(a.0, a.1, z1), f.p(b.0, b.1, z1), f.z, door);
+        tri(m, c(z0), f.p(a.0, a.1, z0), f.p(b.0, b.1, z0), -f.z, paint);
+    }
+}
+
+/// A curbside mailbox at full detail, one of four shapes: on a wooden post, on a curved
+/// steel post, a pair on a crossbar, or set into a stucco pillar.
+fn full_mailbox(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette, rng: &mut Rng) {
+    let wood = Paint::new(shade(pal.bark, 280), Pattern::Plain);
+    let tones = [
+        pal.metal_light,
+        pal.stucco_white,
+        pal.navy,
+        shade(pal.metal_dark, 300),
+    ];
+    let tin = Paint::new(tones[rng.range(0, 4) as usize], Pattern::Metal);
+    let steel = Paint::new(shade(pal.metal_dark, 260), Pattern::Metal);
+    let flag = Paint::new(pal.hydrant_red, Pattern::Paint);
+    // +Z toward the street.
+    let f = Frame::upright(base, facing.left());
+    // The box at `x` on a floor at `y`, with its door latch and its flag.
+    let mailbox = |m: &mut WorldMesh, x: f32, y: f32| {
+        tunnel_box(m, &f, x, y, 0.12, -0.26, 0.24, tin);
+        let (lo, hi) = ([x - 0.02, y + 0.1, 0.24], [x + 0.02, y + 0.14, 0.27]);
+        boxf(m, &f, lo, hi, face::ALL & !face::NEG_Z, steel);
+        let (lo, hi) = ([x + 0.12, y + 0.06, -0.13], [x + 0.135, y + 0.36, -0.1]);
+        boxf(m, &f, lo, hi, face::ALL & !face::NEG_X, flag);
+        let (lo, hi) = ([x + 0.12, y + 0.26, -0.24], [x + 0.13, y + 0.36, -0.13]);
+        boxf(m, &f, lo, hi, face::ALL & !face::NEG_X, flag);
+    };
+    match rng.range(0, 4) {
+        0 => {
+            boxf(
+                m,
+                &f,
+                [-0.05, 0.0, -0.05],
+                [0.05, 0.98, 0.05],
+                face::NO_BOTTOM,
+                wood,
+            );
+            let (lo, hi) = ([-0.1, 0.98, -0.28], [0.1, 1.02, 0.26]);
+            boxf(m, &f, lo, hi, face::ALL, wood);
+            mailbox(m, 0.0, 1.02);
+        }
+        1 => {
+            let foot = f.offset(0.0, 0.0, -0.32);
+            frustum(m, &foot, 0.09, 0.07, 0.04, 6, true, false, steel);
+            // A swan-neck post rising behind the box and bending over to carry it.
+            let mut pts = [V3::ZERO; 5];
+            pts[0] = f.p(0.0, 0.0, -0.32);
+            for (k, p) in pts.iter_mut().enumerate().skip(1) {
+                let (s, c) = sin_cos(TAU * 0.25 * (k - 1) as f32 / 3.0);
+                *p = f.p(0.0, 0.8 + 0.2 * s, -0.32 + 0.2 * (1.0 - c));
+            }
+            for k in 0..4 {
+                tube(m, pts[k], pts[k + 1], 0.035, 0.035, 6, steel);
+            }
+            let (lo, hi) = ([-0.06, 0.98, -0.2], [0.06, 1.02, 0.1]);
+            boxf(m, &f, lo, hi, face::ALL, steel);
+            mailbox(m, 0.0, 1.02);
+        }
+        2 => {
+            boxf(
+                m,
+                &f,
+                [-0.05, 0.0, -0.05],
+                [0.05, 0.98, 0.05],
+                face::NO_BOTTOM,
+                wood,
+            );
+            let (lo, hi) = ([-0.36, 0.98, -0.12], [0.36, 1.02, 0.12]);
+            boxf(m, &f, lo, hi, face::ALL, wood);
+            mailbox(m, -0.18, 1.02);
+            mailbox(m, 0.18, 1.02);
+        }
+        _ => {
+            let tones = [pal.stucco_white, pal.stucco_cream, pal.sand, pal.peach];
+            let pillar = Paint::new(tones[rng.range(0, 4) as usize], Pattern::Stucco);
+            let (lo, hi) = ([-0.24, 0.0, -0.3], [0.24, 1.2, 0.2]);
+            boxf(m, &f, lo, hi, face::NO_BOTTOM, pillar);
+            let cap = pillar.with_rgb(shade(pillar.rgb(), 225));
+            let (lo, hi) = ([-0.28, 1.2, -0.34], [0.28, 1.28, 0.24]);
+            boxf(m, &f, lo, hi, face::ALL, cap);
+            // The box set into the pillar, its door standing proud of the face.
+            tunnel_box(m, &f, 0.0, 0.82, 0.12, 0.1, 0.23, tin);
+            let plaque = Paint::new(shade(pal.metal_dark, 200), Pattern::Metal);
+            rect(m, &f, -0.12, 0.45, 0.12, 0.6, 0.201, false, plaque);
+        }
+    }
+}
+
+/// A pin insulator on a crossarm: a stem under stacked skirts.
+fn insulator(m: &mut WorldMesh, f: &Frame, paint: Paint) {
+    let profile = [
+        [0.015, 0.0],
+        [0.015, 0.05],
+        [0.06, 0.07],
+        [0.035, 0.1],
+        [0.055, 0.13],
+        [0.03, 0.16],
+        [0.0, 0.17],
+    ];
+    lathe(m, f, &profile, 6, false, false, paint);
+}
+
+/// A utility pole at full detail: a tapered pole, one or two braced crossarms of pin
+/// insulators and now and then a transformer with its bushings.
+fn full_power_pole(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette, rng: &mut Rng) {
+    let wood = Paint::new(shade(pal.bark, 240), Pattern::Bark);
+    let f = Frame::upright(base, along);
+    lathe(
+        m,
+        &f,
+        &[[0.16, 0.0], [0.14, 5.0], [0.11, 10.4], [0.0, 10.5]],
+        8,
+        false,
+        false,
+        wood,
+    );
+    let glass = Paint::new(mix(pal.mint, pal.concrete, 120), Pattern::Plain);
+    let steel = Paint::new(shade(pal.metal_dark, 280), Pattern::Metal);
+    let arms = 1 + rng.range(0, 2);
+    for (k, y) in [9.45f32, 8.6].into_iter().take(arms as usize).enumerate() {
+        let half = if k == 0 { 1.3 } else { 0.95 };
+        let (lo, hi) = ([-0.06, y, -half], [0.06, y + 0.12, half]);
+        boxf(m, &f, lo, hi, face::ALL, wood);
+        for s in [-1.0f32, 1.0] {
+            let (a, b) = (f.p(0.07, y - 0.6, 0.0), f.p(0.07, y, 0.65 * s));
+            bar(m, a, b, f.z, 0.04, 0.012, true, steel);
+        }
+        let pins: &[f32] = if k == 0 {
+            &[-1.15, -0.45, 0.45, 1.15]
+        } else {
+            &[-0.8, 0.8]
+        };
+        for &z in pins {
+            insulator(m, &f.offset(0.0, y + 0.12, z), glass);
+        }
+    }
+    if rng.range(0, 3) == 0 {
+        let can = Paint::new(shade(pal.concrete, 200), Pattern::Metal);
+        let (lo, hi) = ([-0.05, 7.4, 0.12], [0.05, 7.9, 0.2]);
+        boxf(m, &f, lo, hi, face::ALL, steel);
+        let at = f.offset(0.0, 7.2, 0.45);
+        frustum(m, &at, 0.26, 0.26, 0.85, 8, true, false, can);
+        let lid = [[0.28, 0.0], [0.28, 0.04], [0.0, 0.1]];
+        lathe(m, &at.offset(0.0, 0.85, 0.0), &lid, 8, false, false, can);
+        for x in [-0.12, 0.12] {
+            insulator(m, &at.offset(x, 0.9, 0.0), glass);
+        }
+    }
+}
+
+/// A stop sign at full detail: a square post in a ground sleeve, an octagon plate with a
+/// white border, an edge and a back, its mounting bolts and bracket, and the street-name
+/// blades on top.
+fn full_stop_sign(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
+    let post = Paint::new(pal.metal_light, Pattern::Metal);
+    let f = Frame::upright(base, facing.left());
+    let sleeve = Paint::new(pal.metal_dark, Pattern::Metal);
+    let (lo, hi) = ([-0.05, 0.0, -0.05], [0.05, 0.12, 0.05]);
+    boxf(m, &f, lo, hi, face::NO_BOTTOM, sleeve);
+    let (lo, hi) = ([-0.03, 0.0, -0.03], [0.03, 2.35, 0.03]);
+    boxf(m, &f, lo, hi, face::NO_BOTTOM, post);
+    let (lo, hi) = ([-0.06, 1.8, 0.03], [0.06, 2.3, 0.04]);
+    boxf(m, &f, lo, hi, face::ALL & !face::NEG_Z, post);
+    let red = Paint::new(pal.hydrant_red, Pattern::Paint);
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let center = f.p(0.0, 2.05, 0.0);
+    let oct = |r: f32, z: f32| -> [V3; 8] {
+        let mut out = [V3::ZERO; 8];
+        for (k, p) in out.iter_mut().enumerate() {
+            let (s, c) = sin_cos(TAU * (k as f32 + 0.5) / 8.0);
+            *p = center + f.x * (c * r) + f.y * (s * r) + f.z * z;
+        }
+        out
+    };
+    let (front, inner, back) = (oct(0.38, 0.05), oct(0.33, 0.052), oct(0.38, 0.04));
+    for k in 1..7 {
+        tri(m, front[0], front[k], front[k + 1], f.z, white);
+        tri(m, inner[0], inner[k], inner[k + 1], f.z, red);
+        tri(m, back[0], back[k], back[k + 1], -f.z, post);
+    }
+    for k in 0..8 {
+        let j = (k + 1) % 8;
+        let out = (front[k] + front[j]) * 0.5 - center - f.z * 0.05;
+        quad(m, [back[k], back[j], front[j], front[k]], out, post);
+    }
+    for y in [1.8, 2.3] {
+        let (lo, hi) = ([-0.015, y - 0.015, 0.052], [0.015, y + 0.015, 0.06]);
+        boxf(m, &f, lo, hi, face::ALL & !face::NEG_Z, post);
+    }
+    street_blades(m, &f, 2.62, pal);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn tris(kind: PropKind) -> usize {
+    fn build_one(kind: PropKind, seed: u32, kit: &PropKit) -> WorldMesh {
         let mut m = WorldMesh::default();
         let p = Prop {
             pos: V2::new(3.0, 4.0),
             y: CURB_M,
             dir: V2::new(0.6, 0.8),
             kind,
-            seed: 42,
+            seed,
         };
-        build(&mut m, &p, &Palette::socal_1985(), &PropKit::new());
+        build(&mut m, &p, &Palette::socal_1985(), kit);
         assert!(m
             .vertices
             .iter()
-            .all(|v| v.normal.iter().all(|c| c.is_finite())));
-        m.triangle_count()
+            .all(|v| v.normal.iter().chain(&v.pos).all(|c| c.is_finite())));
+        m
+    }
+
+    fn tris(kind: PropKind) -> usize {
+        build_one(kind, 42, &PropKit::new()).triangle_count()
     }
 
     #[test]
@@ -1598,6 +2691,65 @@ mod tests {
         ] {
             let n = tris(kind);
             assert!((20..=400).contains(&n), "{kind:?} {n}");
+        }
+        // The instanced shapes at full detail (`docs/backlog/ART.md` budgets), over enough
+        // seeds to meet every design.
+        let kit = PropKit::instanced();
+        for seed in 0..48 {
+            for kind in [
+                PropKind::Oak,
+                PropKind::PalmTree,
+                PropKind::Eucalyptus,
+                PropKind::StreetLight,
+                PropKind::Hydrant,
+                PropKind::Bench,
+                PropKind::TrashCan,
+                PropKind::Mailbox,
+                PropKind::PowerPole,
+                PropKind::StopSign,
+            ] {
+                let n = build_one(kind, seed, &kit).triangle_count();
+                let budget = match kind {
+                    PropKind::Oak | PropKind::PalmTree | PropKind::Eucalyptus => 600..=1200,
+                    PropKind::StreetLight => 100..=250,
+                    // Small street items (mailboxes, signs, hydrants) may be under 300.
+                    _ => 50..=2500,
+                };
+                assert!(budget.contains(&n), "{kind:?} seed {seed}: {n}");
+            }
+        }
+    }
+
+    /// The full-detail kit changes only the instanced kinds, and a street light's lens (the
+    /// photocell's and the lamp heads' key) not at all.
+    #[test]
+    fn full_detail_keeps_the_lens_and_the_baked_kinds() {
+        let (light, fine) = (PropKit::new(), PropKit::instanced());
+        let lens = |m: &WorldMesh| -> Vec<[u32; 3]> {
+            m.vertices
+                .iter()
+                .filter(|v| v.emissive[3] == Glow::Lamp as u8)
+                .map(|v| v.pos.map(f32::to_bits))
+                .collect()
+        };
+        let a = build_one(PropKind::StreetLight, 7, &light);
+        let b = build_one(PropKind::StreetLight, 7, &fine);
+        assert_eq!(lens(&a).len(), 4);
+        assert_eq!(lens(&a), lens(&b));
+        for kind in [
+            PropKind::ParkedCar { color: 3 },
+            PropKind::TrafficSignal { arm_dm: 60 },
+            PropKind::Fountain,
+            PropKind::Billboard,
+            PropKind::Hedge { len_dm: 60 },
+            PropKind::Fence { len_dm: 60 },
+            PropKind::StreetSign,
+            PropKind::NeonSign { palette: 1 },
+            PropKind::Pier { len_m: 30 },
+        ] {
+            let (a, b) = (build_one(kind, 9, &light), build_one(kind, 9, &fine));
+            assert_eq!(a.indices, b.indices, "{kind:?}");
+            assert!(a.vertices == b.vertices, "{kind:?}");
         }
     }
 }

@@ -33,8 +33,9 @@ ShapeSpec(
     seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.60, creases: [(0.25, 0.50, 4.25, 0.60)]),
     parts: Parts(mirrors: Door, handles: Flush, wipers: 1, exhaust: Dual, antenna: Mast, rims: Turbine, hubcaps: false),
     details: [Louvers, BlackTrim, SideStripe, Badge(Chevron)],
-    // Brushed silver, signal red, black, ivory, gunmetal, mustard.
-    palette: ["#b9bcc0", "#b3202a", "#1d1f22", "#e9e6dc", "#4a5058", "#d9a521"],
+    // Brushed silver, signal red, black, ivory, gunmetal, mustard, silver over charcoal,
+    // pearl white over red.
+    palette: ["#b9bcc0", "#b3202a", "#1d1f22", "#e9e6dc", "#4a5058", "#d9a521", "#c4c7cc/#363b43", "#ecebe6/#a8232c"],
     accent: "#1c1c1e",
     interior: InteriorShape(
         dash_height: 0.80,
@@ -47,8 +48,14 @@ ShapeSpec(
         driver_offset: 0.36,
         rear_seat: false,
         dials: 2,
-        // Dash, seats, carpet, headliner, trim, accent.
-        colors: ["#2b2b2d", "#4b4f57", "#26262a", "#6b6a66", "#38383b", "#9a2a22"],
+        // Dash, seats, carpet, headliner, trim, accent: charcoal and grey with red velour
+        // inserts, red carpet, brushed-metal applique, green-lit dials.
+        colors: ["#2b2c30", "#4a4e57", "#5a1c22", "#7a7974", "#3a3b40", "#c0302a"],
         display: "#3cff7a",
+        insert: "#9a2a30",
+        piping: "#b9bbc0",
+        dash_top: "#3c3e44",
+        applique: Brushed,
+        manual: true,
     ),
 )

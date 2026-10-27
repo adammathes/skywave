@@ -3,6 +3,7 @@
 extern crate std;
 
 use super::math::{cross, dot, sub};
+use super::params::parse_paint;
 use super::*;
 use crate::VehicleSpec;
 use alloc::string::ToString;
@@ -75,7 +76,7 @@ fn hash(car: &CarMesh) -> u64 {
 #[test]
 fn shapes_build_with_sane_meshes() {
     for spec in shapes() {
-        for lod in 0..2 {
+        for lod in 0..3 {
             let car = build_lod(&spec, 0, lod).unwrap();
             for (k, m) in car.meshes().iter().enumerate() {
                 let n = m.positions.len();
@@ -126,8 +127,22 @@ fn triangle_budgets() {
         let ext = car.exterior_triangles();
         let int = car.interior_triangles();
         std::println!("{}: exterior {ext}, interior {int}", spec.id);
-        assert!((3000..=6000).contains(&ext), "{} exterior {ext}", spec.id);
-        assert!((1500..=3000).contains(&int), "{} interior {int}", spec.id);
+        assert!((8000..=14000).contains(&ext), "{} exterior {ext}", spec.id);
+        assert!((4000..=8000).contains(&int), "{} interior {int}", spec.id);
+        // Parked and distant cars.
+        let low = build_lod(&spec, 0, 1).unwrap().exterior_triangles();
+        assert!(
+            (3000..=5000).contains(&low),
+            "{} lod1 exterior {low}",
+            spec.id
+        );
+        // Parked cars far away.
+        let far = build_lod(&spec, 0, 2).unwrap().exterior_triangles();
+        assert!(
+            (1500..=2500).contains(&far),
+            "{} lod2 exterior {far}",
+            spec.id
+        );
     }
 }
 
@@ -152,7 +167,7 @@ fn lod1_is_at_most_40_percent() {
 #[test]
 fn wheels_fit_inside_the_arches() {
     for spec in shapes() {
-        for lod in 0..2 {
+        for lod in 0..3 {
             let car = build_lod(&spec, 0, lod).unwrap();
             let w = &spec.wheels;
             for c in car.wheel_centers {
@@ -436,10 +451,10 @@ fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
     let expected: [u64; 4] = [
-        0x65e5_ccbe_1efa_0810,
-        0x8cc1_04fd_092c_d665,
-        0x60c1_e30c_9a8a_ade9,
-        0x27ee_0832_409e_fc1f,
+        0xd8c8_d201_ca40_efe2,
+        0xedbe_0c75_ff0b_96c9,
+        0x0cc6_c3d4_6210_49af,
+        0x6822_0560_3259_f8d7,
     ];
     let mut got = [0u64; 4];
     for (k, spec) in shapes().iter().enumerate() {
@@ -593,6 +608,97 @@ fn validate_rejects_bad_parts() {
         |s| s.color_details.push((9, Detail::WoodPanel)),
         ShapeError::ColorDetail,
     );
+    rejects(
+        CORSAIR,
+        |s| s.palette[0] = "#ffffff/".to_string(),
+        ShapeError::BadColor { index: 0 },
+    );
+    rejects(
+        CORSAIR,
+        |s| s.interior.insert = "red".to_string(),
+        ShapeError::Interior,
+    );
+}
+
+#[test]
+fn two_tone_paint_splits_at_the_crease() {
+    for (text, k) in [(CORSAIR, 6), (REGENT, 0), (PALISADE, 0)] {
+        let spec = load(text);
+        let (upper, lower) = parse_paint(&spec.palette[k]).unwrap();
+        let (upper, lower) = (rgb(upper), rgb(lower.unwrap()));
+        let stripe = hex(&spec.accent);
+        for lod in 0..2 {
+            let car = build_lod(&spec, k, lod).unwrap();
+            let m = &car.body;
+            let mean_y = |c: [u8; 4]| {
+                let ys: alloc::vec::Vec<f32> = m
+                    .colors
+                    .iter()
+                    .zip(&m.positions)
+                    .filter(|(&cc, _)| cc == c)
+                    .map(|(_, p)| p[1])
+                    .collect();
+                assert!(ys.len() > 20, "{} lod{lod}: {} vertices", spec.id, ys.len());
+                ys.iter().sum::<f32>() / ys.len() as f32
+            };
+            assert!(mean_y(upper) > mean_y(lower) + 0.15, "{} lod{lod}", spec.id);
+            if lod == 0 {
+                // The pinstripe in the crease's groove.
+                assert!(m.colors.contains(&stripe), "{}", spec.id);
+            }
+        }
+    }
+}
+
+#[test]
+fn era_paint_overrides_the_palette() {
+    let spec = load(PALISADE);
+    let total: u32 = ERA_1980S_PAINT.iter().map(|p| p.1).sum();
+    for &(paint, _) in &ERA_1980S_PAINT {
+        assert!(parse_paint(paint).is_some(), "{paint}");
+    }
+    // Every entry is reachable and the weights hold.
+    let mut seen = [0u32; ERA_1980S_PAINT.len()];
+    for r in 0..total {
+        let p = era_1980s_paint(r);
+        seen[ERA_1980S_PAINT.iter().position(|e| e.0 == p).unwrap()] += 1;
+    }
+    assert!(seen.iter().zip(&ERA_1980S_PAINT).all(|(&n, e)| n == e.1));
+    let opts = |paint| BuildOptions {
+        color_index: 0,
+        lod: 1,
+        popups_up: false,
+        paint,
+    };
+    let own = build_with(&spec, &opts(None)).unwrap();
+    let era = build_with(&spec, &opts(Some(era_1980s_paint(20)))).unwrap();
+    // Same geometry (a two-tone welds into a few more vertices, never more triangles).
+    assert_eq!(own.body.triangle_count(), era.body.triangle_count());
+    assert_ne!(own.body.colors, era.body.colors);
+    assert_eq!(own.interior, era.interior);
+    assert_eq!(
+        build_with(&spec, &opts(Some("blue"))),
+        Err(ShapeError::BadColor { index: u32::MAX })
+    );
+}
+
+#[test]
+fn whitewalls_are_white_on_the_outer_sidewall() {
+    let spec = load(REGENT);
+    assert!(spec.parts.whitewalls);
+    let white = rgb([226, 224, 216]);
+    for lod in 0..2 {
+        let car = build_lod(&spec, 0, lod).unwrap();
+        let w = &car.wheels[1];
+        let n = w.colors.iter().filter(|&&c| c == white).count();
+        assert!(n > 16, "lod{lod}: {n}");
+        // Outer face only.
+        assert!(w
+            .colors
+            .iter()
+            .zip(&w.positions)
+            .all(|(&c, p)| c != white || p[0] > 0.0));
+    }
 }
 
 /// Checks a car for broken geometry and wheel/arch fit.
@@ -621,7 +727,7 @@ fn assert_sane(car: &CarMesh, spec: &ShapeSpec, what: &str) {
         }
     }
     assert!(
-        car.exterior_triangles() <= 7000,
+        car.exterior_triangles() <= 14000,
         "{what}: {}",
         car.exterior_triangles()
     );
@@ -675,6 +781,9 @@ fn every_option_builds() {
             s.rear.bumper = bumpers[(k + 1) % bumpers.len()];
             s.parts.rims = rims[k % rims.len()];
             s.parts.hubcaps = k == 4;
+            s.parts.whitewalls = k % 2 == 1;
+            s.interior.manual = k % 2 == 0;
+            s.interior.applique = [Applique::None, Applique::Wood, Applique::Brushed][k % 3];
             s.parts.mirrors = if k % 2 == 0 {
                 Mirrors::Fender
             } else {
@@ -699,12 +808,13 @@ fn every_option_builds() {
             s.seams.doors = if k % 2 == 0 { 4 } else { 2 };
             s.seams.creases.truncate(k % 2);
             s.details = details.iter().copied().skip(k * 3).take(4).collect();
-            for lod in 0..2 {
+            for lod in 0..3 {
                 for popups_up in [false, true] {
                     let opts = BuildOptions {
                         color_index: k,
                         lod,
                         popups_up,
+                        paint: None,
                     };
                     let car = build_with(&s, &opts).unwrap();
                     assert_sane(&car, &s, &alloc::format!("{} variant {k} lod{lod}", s.id));
