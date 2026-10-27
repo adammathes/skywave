@@ -30,5 +30,9 @@
   "coast-night-golden": {
     "about": "The procedural coast's strip at night from the near chase camera, headlights on: sodium lamps with coronas, neon sign bands and blade signs, shop fills on the walks.",
     "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-near", "t": "22:30", "lights": "1", "still": "1", "stream": "1" }
+  },
+  "vehicle-select": {
+    "about": "The pause menu's Vehicle page at golden hour: the Regent on the turntable beside the panel, its paint swatches and specs.",
+    "params": { "menu": "vehicle", "car": "regent_coupe_cabrio", "t": "17:40", "still": "1", "stream": "0" }
   }
 }
