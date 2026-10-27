@@ -324,7 +324,9 @@ fn sixty_through_a_red_light_touches_no_car() {
         }
         for c in app.npcs.cars() {
             let r = Rect::car(c);
-            if me.overlaps(&r) {
+            // On the same level: the approach runs under the highway, whose cars pass
+            // over the player's footprint far above it.
+            if me.overlaps(&r) && (c.pos[1] - p.pos[1]).abs() < 4.0 {
                 overlaps += 1;
                 first_overlap.get_or_insert((tick, c.id, c.speed, c.pos));
             }
