@@ -62,7 +62,7 @@ fn era_index(roll: u32) -> usize {
 /// park: the street sees the everyday cars and the two common sports cars.
 const PARKED: [&[(&str, u32)]; 10] = [
     &[
-        ("corsair_gtx", 3),
+        ("gannet_gt", 3),
         ("halcyon_turbo", 3),
         ("pipit_hatch", 2),
         ("longbow_coupe", 2),
@@ -71,11 +71,11 @@ const PARKED: [&[(&str, u32)]; 10] = [
     &[
         ("bancroft_sedan", 3),
         ("prescott_landau", 3),
-        ("palisade_wagon", 1),
+        ("homestead_wagon", 1),
         ("buckboard_pickup", 2),
     ], // Sedan
     &[
-        ("palisade_wagon", 3),
+        ("homestead_wagon", 3),
         ("meadow_minivan", 3),
         ("drayman_van", 1),
         ("buckboard_pickup", 1),
@@ -90,11 +90,7 @@ const PARKED: [&[(&str, u32)]; 10] = [
     &[("pipit_hatch", 1)],                                // Hatch
     &[("seabreeze_convertible", 1)],                      // Convertible
     &[("regent_coupe_cabrio", 1), ("bancroft_sedan", 1)], // Luxury
-    &[
-        ("corsair_gtx", 1),
-        ("halcyon_turbo", 1),
-        ("appaloosa_gt", 1),
-    ], // Muscle
+    &[("gannet_gt", 1), ("halcyon_turbo", 1), ("appaloosa_gt", 1)], // Muscle
 ];
 
 /// The paints a place of `seed` parks shape `s` (with `n_own` palette entries) in: up to
@@ -125,7 +121,7 @@ fn parked_shape(vehicle_class: u8, roll: u32) -> usize {
     let list = PARKED
         .get(usize::from(vehicle_class & 15))
         .copied()
-        .unwrap_or(&[("palisade_wagon", 1)]);
+        .unwrap_or(&[("homestead_wagon", 1)]);
     let total: u32 = list.iter().map(|e| e.1).sum();
     let mut r = roll % total;
     let mut id = list[0].0;
@@ -553,7 +549,7 @@ mod tests {
                 s.id
             );
         }
-        assert_eq!(shapes[parked_shape(15, 7)].id, "palisade_wagon");
+        assert_eq!(shapes[parked_shape(15, 7)].id, "homestead_wagon");
     }
 
     #[test]

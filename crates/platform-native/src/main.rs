@@ -890,9 +890,9 @@ mod tests {
     #[test]
     fn parses_arguments() {
         assert_eq!(args(&[]), Ok(Options::default()));
-        let mut scene = SceneSetup::from_query("seed=42&car=palisade_wagon").unwrap();
+        let mut scene = SceneSetup::from_query("seed=42&car=homestead_wagon").unwrap();
         assert_eq!(
-            args(&["--stats", "--seed", "42", "--car", "palisade_wagon"]),
+            args(&["--stats", "--seed", "42", "--car", "homestead_wagon"]),
             Ok(Options {
                 scene: scene.clone(),
                 stats: true,
@@ -906,7 +906,7 @@ mod tests {
                 "--seed",
                 "42",
                 "--scene",
-                "car=palisade_wagon",
+                "car=homestead_wagon",
                 "--scene",
                 "t=22:30",
                 "--scene",
@@ -1175,7 +1175,7 @@ mod tests {
         };
         eprintln!("device: {name}");
         let size = (1280, 800);
-        let query = "?seed=1&place=coast&car=corsair_gtx&still=1&cam=chase-far&t=17:40&traffic=off";
+        let query = "?seed=1&place=coast&car=gannet_gt&still=1&cam=chase-far&t=17:40&traffic=off";
         let (mut app, mut r) = streamed(query, None, &device, &queue, size);
         let (texture, _) = target(&device, size);
         assert!(r.enable_gpu_timing());
@@ -1212,7 +1212,7 @@ mod tests {
             return;
         };
         let size = (1280, 800);
-        let query = "?seed=1&car=palisade_wagon&cam=chase-far&t=12:00&pos=-197.5,-150&yaw=0\
+        let query = "?seed=1&car=homestead_wagon&cam=chase-far&t=12:00&pos=-197.5,-150&yaw=0\
                      &still=1&stream=0&traffic=off";
         let (mut app, mut r) = streamed(query, None, &device, &queue, size);
         let (texture, _) = target(&device, size);
@@ -1319,7 +1319,7 @@ mod tests {
     /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
     /// warmed up (queued, oncoming and crossing cars and people on the walks in view). Not
     /// `still`: the world runs, so cars and people move between frames.
-    const JUNCTION: &str = "?seed=1&place=coast&car=corsair_gtx&cam=chase-mid&t=12:00\
+    const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
                             &pos=477.5,1001.2&yaw=347";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
@@ -1583,7 +1583,7 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(6);
         for (scene, params) in scenes {
-            let query = format!("?seed=1&place=coast&car=corsair_gtx&still=1&{params}");
+            let query = format!("?seed=1&place=coast&car=gannet_gt&still=1&{params}");
             let (mut app, mut r) = streamed(&query, None, &device, &queue, size);
             assert!(r.enable_gpu_timing(), "no timestamp queries");
             eprintln!("{scene}:");

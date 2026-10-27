@@ -3,7 +3,7 @@
 //!
 //! ```json
 //! { "version": 1,
-//!   "drive": { "handling": "arcade", "vehicle": "corsair_gtx", "paint": 0 },
+//!   "drive": { "handling": "arcade", "vehicle": "gannet_gt", "paint": 0 },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
@@ -329,8 +329,9 @@ impl Default for DriveSection {
     }
 }
 
-/// The [`BUILTIN`] id equal to `id`, if there is one.
+/// The [`BUILTIN`] id equal to `id` (or to the id it was renamed to), if there is one.
 pub fn builtin_vehicle(id: &str) -> Option<&'static str> {
+    let id = crate::vehicles::current_id(id);
     BUILTIN.iter().map(|(v, _)| *v).find(|v| *v == id)
 }
 
@@ -620,7 +621,7 @@ mod tests {
     fn settings_and_bindings_round_trip() {
         let s = Settings {
             handling: Handling::Off,
-            vehicle: Some("palisade_wagon"),
+            vehicle: Some("homestead_wagon"),
             paint: 3,
             camera: CameraMode::Cockpit,
             cockpit_fov_deg: 71.0,
@@ -719,8 +720,13 @@ mod tests {
         // An unknown car is forgotten; a missing one is none.
         let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "hovercar" } }"#);
         assert_eq!(s.vehicle, None);
-        let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "palisade_wagon" } }"#);
-        assert_eq!(s.vehicle, Some("palisade_wagon"));
+        let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "homestead_wagon" } }"#);
+        assert_eq!(s.vehicle, Some("homestead_wagon"));
+        // A car saved under its old id comes back under its new one.
+        for (old, new) in crate::vehicles::RENAMED {
+            let json = format!(r#"{{ "drive": {{ "vehicle": "{old}" }} }}"#);
+            assert_eq!(Settings::from_json(&json).0.vehicle, Some(new));
+        }
         assert!(!Settings::default()
             .to_json(&Bindings::default())
             .contains("vehicle"));

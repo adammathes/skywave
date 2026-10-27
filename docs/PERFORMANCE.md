@@ -289,8 +289,9 @@ draws, 750 in the median frame, 470k forward and 740k shadow triangles; Medium 1
 10% over), and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the
 pedestrian sim (busy) each have a median under 0.5 ms a step in a debug build
-(`app::npc`, `app::peds` and `traffic` budget tests), the best of three 5 s windows. The
-p99 gate is loose, only for a tenfold regression: under 2 ms for the cars, under 5 ms for
+(`app::npc` and the `traffic` budget tests), the best of three 5 s windows; the app's
+pedestrian wrapper (`app::peds`) gets 1 ms, because it runs beside the whole app test
+binary and a 2-core runner measured 0.56 ms. The p99 gate is loose, only for a tenfold regression: under 2 ms for the cars, under 5 ms for
 the pedestrians in `traffic` (whose p99 reaches 3.2 ms on a 2-core CI runner with the
 other pedestrian tests running beside it; the median stays near 0.2 ms).
 
