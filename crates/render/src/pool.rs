@@ -18,6 +18,7 @@
 //! WebGL2 has no base vertex, so indices are stored rebased to the slot's first vertex and
 //! a draw is a plain index range of the shared index buffer.
 
+use crate::cull::Aabb;
 use crate::mesh::{Mesh, Vertex};
 use crate::MeshId;
 
@@ -188,6 +189,8 @@ pub struct ChunkPool {
     page_used: Vec<bool>,
     /// Absolute `[first index, count]` of every slot's parts.
     parts: Vec<[u32; 2]>,
+    /// Model-space bounds of every slot's parts, for culling.
+    part_bounds: Vec<Aabb>,
     stats: PoolStats,
     rebased: Vec<u32>,
 }
@@ -204,6 +207,7 @@ impl ChunkPool {
             free: (0..config.slots).rev().collect(),
             page_used: vec![false; config.pages as usize],
             parts: vec![[0; 2]; n * MAX_CHUNK_PARTS],
+            part_bounds: vec![Aabb::EMPTY; n * MAX_CHUNK_PARTS],
             stats: PoolStats {
                 slots: config.slots,
                 pages: config.pages,
@@ -328,6 +332,14 @@ impl ChunkPool {
         for (t, &[first, count]) in table.iter_mut().zip(parts) {
             *t = [first_index + first, count];
         }
+        let bounds = &mut self.part_bounds[i * MAX_CHUNK_PARTS..][..parts.len()];
+        for (b, &[first, count]) in bounds.iter_mut().zip(parts) {
+            let run = &mesh.indices[first as usize..(first + count) as usize];
+            *b = Aabb::of_points(
+                run.iter()
+                    .map(|&k| glam::Vec3::from(mesh.vertices[k as usize].pos)),
+            );
+        }
         let bytes = (nv * size_of::<Vertex>() + ni * 4) as u64;
         self.slots[i] = Slot {
             live: true,
@@ -354,6 +366,15 @@ impl ChunkPool {
         let i = self.check(slot).ok()?;
         (part < usize::from(self.slots[i].part_count))
             .then(|| self.parts[i * MAX_CHUNK_PARTS + part])
+    }
+
+    /// The model-space bounds of what `id` draws, or `None` when it is not a written part
+    /// of a live slot.
+    pub fn part_bounds(&self, id: MeshId) -> Option<Aabb> {
+        let (slot, part) = id.as_chunk_part()?;
+        let i = self.check(slot).ok()?;
+        (part < usize::from(self.slots[i].part_count))
+            .then(|| self.part_bounds[i * MAX_CHUNK_PARTS + part])
     }
 }
 

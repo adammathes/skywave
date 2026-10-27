@@ -74,7 +74,7 @@ fn vs_corona(@builtin(vertex_index) index: u32, c: CoronaIn) -> CoronaOut {
     fade *= sqrt(clamp(radius_px / r, 0.0, 1.0));
 
     let ndc = p.xy / p.w;
-    let pix = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * frame.screen.xy;
+    let pix = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * frame.render_size.xy;
     let spread = clamp(0.2 * r, 1.0, 6.0);
     let seen = depth_clear(pix, limit)
         + depth_clear(pix + vec2<f32>(spread, 0.0), limit)
@@ -86,7 +86,7 @@ fn vs_corona(@builtin(vertex_index) index: u32, c: CoronaIn) -> CoronaOut {
         return out;
     }
     let corner = vec2<f32>(f32(index & 1u), f32(index >> 1u)) * 2.0 - 1.0;
-    out.clip = vec4<f32>(ndc + corner * (2.0 * r) * frame.screen.zw, 0.0, 1.0);
+    out.clip = vec4<f32>(ndc + corner * (2.0 * r) * frame.render_size.zw, 0.0, 1.0);
     out.local = corner;
     out.color = c.color.rgb * fade;
     return out;

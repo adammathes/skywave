@@ -7,12 +7,20 @@
 //! with the button or when the window loses focus. Platforms that refuse both just keep a
 //! free cursor; the raw motion still drives the look.
 //!
-//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--version]`.
+//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--frames N]
+//! [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--version]`.
 //! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
 //! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are
-//! `--scene seed=N` and `--scene car=ID`. `--stats` also prints the detected gamepads at
-//! startup and as they connect; otherwise that goes to the info log (`RUST_LOG=info`).
-//! `--version` prints the build's `git describe` (see `build.rs`) and exits.
+//! `--scene seed=N` and `--scene car=ID`. `--stats` prints the adapter, the surface and a
+//! line of frame statistics every second to stderr (format in `docs/PERFORMANCE.md`), with
+//! GPU time per pass where the adapter has timestamp queries; it also prints the detected
+//! gamepads at startup and as they connect (otherwise the info log has them,
+//! `RUST_LOG=info`). `--frames N` prints a summary after N frames, and with `--exit` quits
+//! there (scripted benchmarks). `--no-vsync` presents without waiting for the display
+//! (`AutoNoVsync`; the default is `AutoVsync`). `--quality low|deck|medium|high|ultra`
+//! forces a graphics preset for the session (not saved); `--no-cull` turns instance culling
+//! off (for comparisons). `--version` prints the build's `git describe` (see `build.rs`)
+//! and exits.
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::NATIVE` (13×13
 //! chunks, 4 ms a sim step); `--scene stream=0` builds it all at load instead.
@@ -32,9 +40,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use app::{App, InputMapper, Key, RawInput, SceneSetup, MOUSE_RIGHT};
+use app::{App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, MOUSE_RIGHT};
 use pad::Pads;
-use render::{Renderer, RendererOptions};
+use render::{RenderStats, Renderer, GPU_PASS_NAMES};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -48,23 +56,48 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 /// same figure the web build uses.
 const PIXELS_PER_NOTCH: f64 = 100.0;
 
-#[derive(Debug, PartialEq)]
+/// Frames left out of the `--frames` summary while the town streams in and caches warm.
+const SUMMARY_WARMUP_FRAMES: usize = 60;
+
+#[derive(Debug, Default, PartialEq)]
 struct Options {
     scene: SceneSetup,
     stats: bool,
     version: bool,
+    /// Print a summary after this many frames.
+    frames: Option<u32>,
+    /// Quit after `frames`.
+    exit: bool,
+    no_vsync: bool,
+    quality: Option<Quality>,
+    no_cull: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
-    let mut opts = Options {
-        scene: SceneSetup::default(),
-        stats: false,
-        version: false,
-    };
+    let mut opts = Options::default();
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--stats" => opts.stats = true,
+            "--exit" => opts.exit = true,
+            "--no-vsync" => opts.no_vsync = true,
+            "--no-cull" => opts.no_cull = true,
+            "--frames" => {
+                let v = args.next().ok_or("--frames needs a count")?;
+                let n = v
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|&n| n > 0)
+                    .ok_or_else(|| format!("--frames needs a positive count, not `{v}`"))?;
+                opts.frames = Some(n);
+            }
+            "--quality" => {
+                let v = args.next().ok_or("--quality needs a preset")?;
+                let q = Quality::from_name(&v).ok_or_else(|| {
+                    format!("--quality is one of low, deck, medium, high, ultra, not `{v}`")
+                })?;
+                opts.quality = Some(q);
+            }
             "-V" | "--version" => opts.version = true,
             "--seed" => {
                 let v = args.next().ok_or("--seed needs a value")?;
@@ -84,6 +117,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
+    }
+    if opts.exit && opts.frames.is_none() {
+        return Err("--exit needs --frames N".into());
     }
     Ok(opts)
 }
@@ -152,34 +188,134 @@ fn grab_cursor(window: &Window, on: bool) {
     window.set_cursor_visible(!on);
 }
 
-/// Frame-time statistics, printed to stderr once per second with `--stats`.
+/// Mean, 99th percentile and maximum of `ms` (sorted in place), ms.
+fn summarize(ms: &mut [f32]) -> (f32, f32, f32) {
+    if ms.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    ms.sort_by(f32::total_cmp);
+    let mean = ms.iter().sum::<f32>() / ms.len() as f32;
+    let p99 = ms[((ms.len() as f32 * 0.99).ceil() as usize).clamp(1, ms.len()) - 1];
+    (mean, p99, ms[ms.len() - 1])
+}
+
+/// What the renderer did in the last frame, as `--stats` prints it.
+fn render_line(r: &RenderStats) -> String {
+    let mut s = format!(
+        "inst={} fwd={} sh={}/{}/{} draws={} tris_fwd={}k tris_sh={}k shadow={}x{} drawn={} \
+         view={}x{} surface={}x{} bloom={}",
+        r.instances,
+        r.instances_drawn,
+        r.shadow_instances[0],
+        r.shadow_instances[1],
+        r.shadow_instances[2],
+        r.draw_calls,
+        r.triangles / 1000,
+        r.shadow_triangles / 1000,
+        r.shadow_size,
+        r.cascades,
+        r.cascades_drawn,
+        r.render_size.0,
+        r.render_size.1,
+        r.surface_size.0,
+        r.surface_size.1,
+        r.bloom_levels,
+    );
+    if r.gpu_timing {
+        let total: u32 = r.gpu_us.iter().sum();
+        let _ = write!(s, " | gpu_ms total={:.2}", total as f32 / 1000.0);
+        for (name, us) in GPU_PASS_NAMES.iter().zip(r.gpu_us) {
+            let _ = write!(s, " {name}={:.2}", us as f32 / 1000.0);
+        }
+    }
+    s
+}
+
+/// Frame-time statistics, printed to stderr once per second with `--stats`, and over the
+/// whole run (after warmup) with `--frames`. Sample buffers are reused; the run's grows
+/// only with `--frames`.
 #[derive(Default)]
 struct Stats {
     frames: u32,
     total: Duration,
-    min: Option<Duration>,
-    max: Duration,
+    /// This second's frame times and CPU submit times, ms.
+    frame_ms: Vec<f32>,
+    cpu_ms: Vec<f32>,
+    /// Every frame of a `--frames` run, ms (frame, CPU).
+    run: Vec<(f32, f32)>,
 }
 
 impl Stats {
-    fn record(&mut self, dt: Duration) -> Option<String> {
+    fn new(frames: Option<u32>) -> Stats {
+        Stats {
+            frame_ms: Vec::with_capacity(1024),
+            cpu_ms: Vec::with_capacity(1024),
+            run: Vec::with_capacity(frames.map_or(0, |n| n as usize)),
+            ..Stats::default()
+        }
+    }
+
+    /// Records a frame of `dt` with `cpu` spent recording and submitting it; once a
+    /// second returns the line to print.
+    fn record(&mut self, dt: Duration, cpu: Duration, keep_run: bool) -> Option<String> {
+        let ms = |d: Duration| (d.as_secs_f64() * 1000.0) as f32;
         self.frames += 1;
         self.total += dt;
-        self.min = Some(self.min.map_or(dt, |m| m.min(dt)));
-        self.max = self.max.max(dt);
+        self.frame_ms.push(ms(dt));
+        self.cpu_ms.push(ms(cpu));
+        if keep_run {
+            self.run.push((ms(dt), ms(cpu)));
+        }
         if self.total < Duration::from_secs(1) {
             return None;
         }
-        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        let (avg, p99, max) = summarize(&mut self.frame_ms);
+        let (cpu_avg, cpu_p99, _) = summarize(&mut self.cpu_ms);
         let line = format!(
-            "frames {:4}  avg {:6.2} ms  min {:6.2} ms  max {:6.2} ms",
+            "frames={} fps={:.1} frame_ms avg={avg:.2} p99={p99:.2} max={max:.2} \
+             cpu_ms avg={cpu_avg:.2} p99={cpu_p99:.2}",
             self.frames,
-            ms(self.total) / f64::from(self.frames),
-            ms(self.min.unwrap_or_default()),
-            ms(self.max),
+            f64::from(self.frames) / self.total.as_secs_f64(),
         );
-        *self = Stats::default();
+        self.frames = 0;
+        self.total = Duration::ZERO;
+        self.frame_ms.clear();
+        self.cpu_ms.clear();
         Some(line)
+    }
+
+    /// The whole run after [`SUMMARY_WARMUP_FRAMES`].
+    fn summary(&mut self) -> String {
+        let skip = SUMMARY_WARMUP_FRAMES.min(self.run.len().saturating_sub(1));
+        self.frame_ms.clear();
+        self.cpu_ms.clear();
+        for &(f, c) in &self.run[skip..] {
+            self.frame_ms.push(f);
+            self.cpu_ms.push(c);
+        }
+        let n = self.frame_ms.len();
+        let (avg, p99, max) = summarize(&mut self.frame_ms);
+        let (cpu_avg, cpu_p99, _) = summarize(&mut self.cpu_ms);
+        self.frame_ms.clear();
+        self.cpu_ms.clear();
+        format!(
+            "frames={n} (after {skip} warmup) fps={:.1} frame_ms avg={avg:.2} p99={p99:.2} \
+             max={max:.2} cpu_ms avg={cpu_avg:.2} p99={cpu_p99:.2}",
+            if avg > 0.0 { 1000.0 / avg } else { 0.0 },
+        )
+    }
+}
+
+/// The adapter as `--stats` prints it and the overlay shows it.
+fn gpu_info(info: &wgpu::AdapterInfo, surface: (u32, u32)) -> GpuInfo {
+    GpuInfo {
+        name: info.name.clone(),
+        backend: format!("{:?}, {} {}", info.backend, info.driver, info.driver_info)
+            .trim_end()
+            .to_owned(),
+        integrated: info.device_type == wgpu::DeviceType::IntegratedGpu,
+        linux: cfg!(target_os = "linux"),
+        surface,
     }
 }
 
@@ -193,7 +329,7 @@ struct Gpu {
 }
 
 impl Gpu {
-    fn new(event_loop: &ActiveEventLoop, app: &App) -> Result<Gpu, String> {
+    fn new(event_loop: &ActiveEventLoop, app: &mut App, opts: &Options) -> Result<Gpu, String> {
         let attrs = Window::default_attributes()
             .with_title("Skywave")
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
@@ -210,9 +346,18 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| e.to_string())?;
-        log::info!("adapter: {:?}", adapter.get_info());
+        let info = adapter.get_info();
+        log::info!("adapter: {info:?}");
+        // GPU time per pass, for `--stats` only.
+        let timestamps = wgpu::Features::TIMESTAMP_QUERY;
+        let features = if opts.stats && adapter.features().contains(timestamps) {
+            timestamps
+        } else {
+            wgpu::Features::empty()
+        };
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("skywave"),
+            required_features: features,
             // Same budget as the web build, so desktop never relies on more than WebGL2 has.
             required_limits:
                 wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
@@ -232,13 +377,45 @@ impl Gpu {
         {
             config.format = srgb;
         }
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        config.present_mode = if opts.no_vsync {
+            wgpu::PresentMode::AutoNoVsync
+        } else {
+            wgpu::PresentMode::AutoVsync
+        };
         surface.configure(&device, &config);
 
-        let options = RendererOptions {
-            chunk_pool: app.chunk_pool_config(),
-            ..RendererOptions::default()
+        let gpu = gpu_info(&info, (config.width, config.height));
+        app.set_gpu_info(&gpu);
+        app.force_quality(opts.quality);
+        let options = render::RendererOptions {
+            culling: !opts.no_cull,
+            ..app.renderer_options()
         };
+        if opts.stats {
+            let logical = size.to_logical::<f64>(window.scale_factor());
+            eprintln!(
+                "adapter: {} | {} | {:?}",
+                gpu.name, gpu.backend, info.device_type
+            );
+            eprintln!(
+                "surface: {}x{} px (scale factor {}, {}x{} logical) {:?} present {:?} \
+                 (supported {:?})",
+                config.width,
+                config.height,
+                window.scale_factor(),
+                logical.width.round(),
+                logical.height.round(),
+                config.format,
+                config.present_mode,
+                surface.get_capabilities(&adapter).present_modes,
+            );
+            eprintln!(
+                "quality: {} {:?} culling {}",
+                app.ui().quality().name(),
+                options.quality,
+                if options.culling { "on" } else { "off" },
+            );
+        }
         let mut renderer = Renderer::with_options(
             &device,
             &queue,
@@ -252,6 +429,17 @@ impl Gpu {
         renderer.reserve_instances(app.max_instances());
         let map = app.map_image();
         renderer.upload_map(map.w, map.h, &map.rgba);
+        if opts.stats {
+            let on = renderer.enable_gpu_timing();
+            eprintln!(
+                "gpu timing: {}",
+                if on {
+                    "timestamp queries per pass"
+                } else {
+                    "unavailable (no TIMESTAMP_QUERY on this adapter)"
+                }
+            );
+        }
         Ok(Gpu {
             window,
             surface,
@@ -272,25 +460,30 @@ impl Gpu {
         self.renderer.resize((width, height));
     }
 
-    fn draw(&mut self, app: &mut App, alpha: f32) {
+    /// Draws a frame; returns the CPU time spent building and submitting it (the scene
+    /// view and the renderer, not waiting for the swapchain).
+    fn draw(&mut self, app: &mut App, alpha: f32) -> Duration {
         app.sync_chunks(&mut self.renderer);
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
-                return;
+                return Duration::ZERO;
             }
             other => {
                 log::warn!("skipping frame: {other:?}");
-                return;
+                return Duration::ZERO;
             }
         };
         let view = frame.texture.create_view(&Default::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
+        let start = Instant::now();
         self.renderer.render(&view, &app.scene_view(alpha, aspect));
+        let cpu = start.elapsed();
         self.window.pre_present_notify();
         self.queue.present(frame);
+        cpu
     }
 
     fn stats(&self) -> render::RenderStats {
@@ -312,6 +505,8 @@ struct Shell {
     /// Origin of the streaming clock.
     started: Instant,
     stats: Stats,
+    /// Frames drawn so far (for `--frames`).
+    frames_drawn: u32,
     error: Option<String>,
     /// The sound sink, if a device opened.
     sfx: Option<sfx::Sfx>,
@@ -334,7 +529,7 @@ impl ApplicationHandler for Shell {
         if self.gpu.is_some() {
             return;
         }
-        match Gpu::new(event_loop, &self.app) {
+        match Gpu::new(event_loop, &mut self.app, &self.opts) {
             Ok(gpu) => self.gpu = Some(gpu),
             Err(e) => {
                 self.error = Some(e);
@@ -401,13 +596,36 @@ impl ApplicationHandler for Shell {
                     event_loop.exit();
                     return;
                 }
-                if let Some(gpu) = &mut self.gpu {
-                    gpu.draw(&mut self.app, steps.alpha);
-                    self.app.set_render_stats(gpu.stats());
+                let Some(gpu) = &mut self.gpu else {
+                    return;
+                };
+                let cpu = gpu.draw(&mut self.app, steps.alpha);
+                let render = gpu.stats();
+                self.app.set_render_stats(render);
+                self.app.set_cpu_submit_ms(cpu.as_secs_f32() * 1000.0);
+                self.frames_drawn += 1;
+                let keep = self.opts.frames.is_some();
+                if (self.opts.stats || keep) && !dt.is_zero() {
+                    if let Some(line) = self.stats.record(dt, cpu, keep) {
+                        if self.opts.stats {
+                            eprintln!(
+                                "[stats] t={:.0}s {line} | {} | present={:?} quality={}",
+                                self.started.elapsed().as_secs_f64(),
+                                render_line(&render),
+                                gpu.config.present_mode,
+                                self.app.ui().quality().name(),
+                            );
+                        }
+                    }
                 }
-                if self.opts.stats && !dt.is_zero() {
-                    if let Some(line) = self.stats.record(dt) {
-                        eprintln!("{line}");
+                if Some(self.frames_drawn) == self.opts.frames {
+                    eprintln!(
+                        "[summary] {} | {}",
+                        self.stats.summary(),
+                        render_line(&render)
+                    );
+                    if self.opts.exit {
+                        event_loop.exit();
                     }
                 }
             }
@@ -440,7 +658,9 @@ fn main() -> ExitCode {
                 eprintln!("skywave: {e}");
             }
             eprintln!(
-                "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--version]"
+                "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] \
+                 [--frames N [--exit]] [--no-vsync] [--quality low|deck|medium|high|ultra] \
+                 [--no-cull] [--version]"
             );
             return if e.is_empty() {
                 ExitCode::SUCCESS
@@ -476,6 +696,7 @@ fn main() -> ExitCode {
     app.set_can_quit(true);
     app.set_stream_budget(app::stream::StreamBudget::NATIVE);
     app.set_settings_store(Box::new(settings::FileStore::from_env()));
+    let opts_frames = opts.frames;
     let mut shell = Shell {
         app,
         opts,
@@ -486,7 +707,8 @@ fn main() -> ExitCode {
         gpu: None,
         last_frame: None,
         started: Instant::now(),
-        stats: Stats::default(),
+        stats: Stats::new(opts_frames),
+        frames_drawn: 0,
         error: None,
         sfx: sfx::Sfx::start(),
     };
@@ -513,21 +735,14 @@ mod tests {
 
     #[test]
     fn parses_arguments() {
-        assert_eq!(
-            args(&[]),
-            Ok(Options {
-                scene: SceneSetup::default(),
-                stats: false,
-                version: false
-            })
-        );
+        assert_eq!(args(&[]), Ok(Options::default()));
         let mut scene = SceneSetup::from_query("seed=42&car=palisade_wagon").unwrap();
         assert_eq!(
             args(&["--stats", "--seed", "42", "--car", "palisade_wagon"]),
             Ok(Options {
                 scene: scene.clone(),
                 stats: true,
-                version: false
+                ..Options::default()
             })
         );
         scene.set("t", "22:30").unwrap();
@@ -545,8 +760,7 @@ mod tests {
             ]),
             Ok(Options {
                 scene,
-                stats: false,
-                version: false
+                ..Options::default()
             })
         );
         assert_eq!(args(&["--version"]).map(|o| o.version), Ok(true));
@@ -560,6 +774,50 @@ mod tests {
         assert!(args(&["--seed", "x"]).is_err());
         assert!(args(&["--fast"]).is_err());
         assert_eq!(args(&["--help"]), Err(String::new()));
+    }
+
+    #[test]
+    fn parses_benchmark_flags() {
+        let o = args(&[
+            "--stats",
+            "--frames",
+            "600",
+            "--exit",
+            "--no-vsync",
+            "--quality",
+            "deck",
+            "--no-cull",
+            "--scene",
+            "place=coast",
+        ])
+        .unwrap();
+        assert!(o.stats && o.exit && o.no_vsync && o.no_cull);
+        assert_eq!(o.frames, Some(600));
+        assert_eq!(o.quality, Some(Quality::Deck));
+        assert!(args(&["--frames"]).is_err());
+        assert!(args(&["--frames", "0"]).is_err());
+        assert!(args(&["--frames", "x"]).is_err());
+        assert!(args(&["--exit"]).is_err(), "--exit needs --frames");
+        assert!(args(&["--quality", "potato"]).is_err());
+        assert!(!args(&["--frames", "3"]).unwrap().exit);
+    }
+
+    #[test]
+    fn summaries_take_mean_p99_and_max() {
+        let mut ms: Vec<f32> = (1..=100).map(|i| i as f32).collect();
+        assert_eq!(summarize(&mut ms), (50.5, 99.0, 100.0));
+        assert_eq!(summarize(&mut []), (0.0, 0.0, 0.0));
+        let mut s = Stats::new(Some(200));
+        for i in 0..200 {
+            let dt = Duration::from_millis(if i < 60 { 50 } else { 10 });
+            s.record(dt, Duration::from_millis(1), true);
+        }
+        let line = s.summary();
+        assert!(
+            line.starts_with("frames=140 (after 60 warmup) fps=100.0"),
+            "{line}"
+        );
+        assert!(line.contains("frame_ms avg=10.00 p99=10.00"), "{line}");
     }
 
     #[test]
@@ -669,13 +927,144 @@ mod tests {
 
     #[test]
     fn stats_report_once_per_second() {
-        let mut s = Stats::default();
-        let mut lines = 0;
+        let mut s = Stats::new(None);
+        let mut lines = Vec::new();
         for _ in 0..240 {
-            if s.record(Duration::from_millis(10)).is_some() {
-                lines += 1;
+            if let Some(l) = s.record(Duration::from_millis(10), Duration::from_millis(2), false) {
+                lines.push(l);
             }
         }
-        assert_eq!(lines, 2);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("fps=100.0"), "{}", lines[0]);
+        assert!(lines[0].contains("cpu_ms avg=2.00"), "{}", lines[0]);
+        assert!(s.run.is_empty());
+        let r = RenderStats {
+            instances: 10,
+            instances_drawn: 4,
+            gpu_timing: true,
+            gpu_us: [1000, 2000, 0, 500, 250, 50],
+            ..RenderStats::default()
+        };
+        let line = render_line(&r);
+        assert!(line.starts_with("inst=10 fwd=4 "), "{line}");
+        assert!(
+            line.contains("gpu_ms total=3.80 shadow=1.00 forward=2.00"),
+            "{line}"
+        );
+    }
+
+    /// Not a check: prints what culling and each preset leave the GPU on the streamed
+    /// coast at the native budget (instances and triangles per pass, from the renderer's
+    /// stats on wgpu's no-op device) and what culling costs the CPU. Run with
+    /// `cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast`;
+    /// `docs/PERFORMANCE.md` quotes it.
+    #[test]
+    #[ignore = "benchmark; prints numbers"]
+    fn culling_on_the_coast() {
+        let limits = render_limits();
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::NOOP,
+            backend_options: wgpu::BackendOptions {
+                noop: wgpu::NoopBackendOptions {
+                    enable: true,
+                    limits: Some(limits.clone()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .unwrap();
+        let mut app =
+            App::from_setup(&SceneSetup::from_query("?seed=1&place=coast").unwrap()).unwrap();
+        app.set_stream_budget(app::stream::StreamBudget::NATIVE);
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let size = (1280, 800);
+        let mut r =
+            render::Renderer::with_options(&device, &queue, format, size, app.renderer_options());
+        for m in app.meshes() {
+            r.add_mesh(m);
+        }
+        r.reserve_instances(app.max_instances());
+        let mut mapper = InputMapper::default();
+        let started = Instant::now();
+        let clock = || started.elapsed().as_secs_f64();
+        while !app.stream_idle() {
+            app.frame(&mut mapper, 1.0 / 60.0, &clock);
+            app.sync_chunks(&mut r);
+        }
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let runs = [
+            ("high, no culling", Quality::High, false),
+            ("high", Quality::High, true),
+            ("medium", Quality::Medium, true),
+            ("deck", Quality::Deck, true),
+            ("low", Quality::Low, true),
+        ];
+        for (label, q, culling) in runs {
+            app.force_quality(Some(q));
+            r.set_culling(culling);
+            let mut best = f64::INFINITY;
+            let mut total = 0.0;
+            // Shadow work alternates when the far cascade is kept: the most per cascade
+            // over the run, and the mean triangles a frame.
+            let mut shadow_max = [0; 3];
+            let mut shadow_tris = 0u64;
+            const FRAMES: u32 = 40;
+            for _ in 0..FRAMES {
+                let t = Instant::now();
+                r.render(&view, &app.scene_view(1.0, 1.6));
+                let dt = t.elapsed().as_secs_f64();
+                best = best.min(dt);
+                total += dt;
+                let s = r.stats();
+                for (m, n) in shadow_max.iter_mut().zip(s.shadow_instances) {
+                    *m = (*m).max(n);
+                }
+                shadow_tris += s.shadow_triangles;
+            }
+            let s = r.stats();
+            eprintln!(
+                "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
+                 shadow {}k a frame | draws {} | cpu render() avg {:.2} ms best {:.2} ms",
+                s.instances,
+                s.instances_drawn,
+                shadow_max,
+                s.cascades,
+                s.triangles / 1000,
+                shadow_tris / u64::from(FRAMES) / 1000,
+                s.draw_calls,
+                total / f64::from(FRAMES) * 1000.0,
+                best * 1000.0,
+            );
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+    }
+
+    /// The native shell's device limits, with room for full-size cascades.
+    fn render_limits() -> wgpu::Limits {
+        wgpu::Limits {
+            max_texture_dimension_2d: 16384,
+            ..wgpu::Limits::downlevel_webgl2_defaults()
+        }
     }
 }

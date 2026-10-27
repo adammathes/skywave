@@ -287,7 +287,8 @@ fn cascade_visibility(index: i32, world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) 
 }
 
 // Picks the cascade by view depth and cross-fades into the next one over the last
-// `cascade_far.w` of each cascade; shadows fade out at the end of the last one.
+// `cascade_far.w` of each cascade; shadows fade out at the end of the last one (with two
+// cascades, `cascade_far.z` equals `cascade_far.y`, so the third is never picked).
 fn sun_visibility(world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) -> f32 {
     let depth = dot(world_pos - frame.camera_pos.xyz, frame.camera_fwd.xyz);
     let far = frame.cascade_far.xyz;
@@ -308,7 +309,7 @@ fn sun_visibility(world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) -> f32 {
     var vis = cascade_visibility(index, world_pos, n, ndl);
     if t > 0.0 {
         var next = 1.0;
-        if index < 2 {
+        if index < i32(frame.shadow_params.x) - 1 {
             next = cascade_visibility(index + 1, world_pos, n, ndl);
         }
         vis = mix(vis, next, t);

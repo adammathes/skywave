@@ -32,9 +32,9 @@ use crate::map::view::{
 };
 use crate::map::MapPoi;
 use crate::radio::{self, CarRadio};
-use crate::settings::{Handling, Settings, SettingsStore};
+use crate::settings::{GpuInfo, Handling, Quality, Settings, SettingsStore};
 use crate::App;
-use render::{Hud, HudBuilder, HudLayout, RenderStats, Sky};
+use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
 use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 
 /// Seconds a remap capture waits for an input before giving up.
@@ -123,6 +123,17 @@ pub struct Ui {
     radio: CarRadio,
     /// The platform can ask the user for a line of text (the "Add stream URL" item).
     text_entry: bool,
+    /// The preset [`Quality::auto`] picked for this device (Medium until the platform
+    /// says what the GPU is).
+    auto_quality: Quality,
+    /// A preset the command line forced this session (not saved; a choice on the Video
+    /// page replaces it).
+    forced_quality: Option<Quality>,
+    /// CPU time the platform spent recording and submitting the last frame, ms (0:
+    /// not measured).
+    cpu_submit_ms: f32,
+    /// Adapter and backend, for the overlay.
+    gpu_label: String,
 }
 
 impl Default for Ui {
@@ -159,6 +170,26 @@ impl Ui {
             forced_ui_scale: None,
             radio: CarRadio::new(),
             text_entry: false,
+            auto_quality: Quality::Medium,
+            forced_quality: None,
+            cpu_submit_ms: 0.0,
+            gpu_label: String::new(),
+        }
+    }
+
+    /// The graphics preset in effect: forced, else saved, else picked for the device.
+    pub fn quality(&self) -> Quality {
+        self.forced_quality
+            .or(self.settings.quality)
+            .unwrap_or(self.auto_quality)
+    }
+
+    /// What the renderer may spend this frame: the preset at the resolution scale setting
+    /// (a forced preset brings its own scale).
+    pub fn render_quality(&self) -> RenderQuality {
+        match self.forced_quality {
+            Some(q) => q.render(q.resolution_scale()),
+            None => self.quality().render(self.settings.resolution_scale),
         }
     }
 
@@ -335,6 +366,7 @@ impl Ui {
             can_quit: self.can_quit,
             radio: &self.radio,
             text_entry: self.text_entry,
+            quality: self.quality(),
         }
     }
 
@@ -444,6 +476,13 @@ impl Ui {
             Effect::Choose(ItemId::RadioPreset, i) => {
                 radio::choose_preset(&mut self.settings.radio, i);
                 self.radio_settings_changed();
+            }
+            Effect::Choose(ItemId::Quality, i) => {
+                let q = Quality::ALL[i.min(Quality::ALL.len() - 1)];
+                self.settings.quality = Some(q);
+                self.settings.resolution_scale = q.resolution_scale();
+                self.forced_quality = None;
+                self.dirty = true;
             }
             Effect::Choose(..) => {}
             Effect::Activate(id) => self.activate(id),
@@ -1039,6 +1078,38 @@ impl App {
     /// The renderer's counters for the last frame, for the performance overlay.
     pub fn set_render_stats(&mut self, stats: RenderStats) {
         self.ui.render_stats = stats;
+    }
+
+    /// CPU time the platform spent in the last frame's `scene_view` and
+    /// `Renderer::render` (recording and submitting), ms, for the overlay.
+    pub fn set_cpu_submit_ms(&mut self, ms: f32) {
+        self.ui.cpu_submit_ms = ms;
+    }
+
+    /// What the GPU is: picks the preset for a player who has not chosen one
+    /// ([`Quality::auto`]) and labels the overlay. Call once, before the first frame.
+    pub fn set_gpu_info(&mut self, gpu: &GpuInfo) {
+        self.ui.auto_quality = Quality::auto(gpu);
+        self.ui.gpu_label = if gpu.backend.is_empty() {
+            gpu.name.clone()
+        } else {
+            format!("{} ({})", gpu.name, gpu.backend)
+        };
+    }
+
+    /// Uses preset `q` this session whatever is saved (`None` goes back to the setting).
+    pub fn force_quality(&mut self, q: Option<Quality>) {
+        self.ui.forced_quality = q;
+    }
+
+    /// The renderer's construction options for this app: its chunk pool and the
+    /// quality in effect (each frame's `SceneView::quality` keeps it current).
+    pub fn renderer_options(&self) -> render::RendererOptions {
+        render::RendererOptions {
+            chunk_pool: self.chunk_pool_config(),
+            quality: self.ui.render_quality(),
+            ..render::RendererOptions::default()
+        }
     }
 
     /// Opens the settings menu (over the pause menu), e.g. at startup for screenshots.

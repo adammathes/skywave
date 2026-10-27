@@ -416,7 +416,12 @@ pub(crate) fn probe_frame(
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 let view = frame.texture.create_view(&Default::default());
-                renderer.render(&view, &SceneView::probe(instances, &[]));
+                // At the renderer's own quality, so the first real frame rebuilds nothing.
+                let scene = SceneView {
+                    quality: renderer.quality(),
+                    ..SceneView::probe(instances, &[])
+                };
+                renderer.render(&view, &scene);
                 gpu.queue.present(frame);
                 return Ok(());
             }
@@ -659,10 +664,18 @@ async fn start(
     gpu.surface.configure(&gpu.device, &config);
     let app = app.get_or_insert_with(|| build_app(setup, query));
     app.set_target_size(size.0, size.1);
+    // Per attempt: a fallback to WebGL2 may land on another adapter.
+    let info = gpu.adapter.get_info();
+    app.set_gpu_info(&app::GpuInfo {
+        name: info.name.clone(),
+        backend: backend.label().to_owned(),
+        integrated: info.device_type == wgpu::DeviceType::IntegratedGpu,
+        linux: false,
+        surface: size,
+    });
     let options = RendererOptions {
         hdr: hdr_mode(&gpu.adapter),
-        chunk_pool: app.chunk_pool_config(),
-        ..RendererOptions::default()
+        ..app.renderer_options()
     };
     let mut renderer =
         Renderer::with_options(&gpu.device, &gpu.queue, config.format, size, options);
@@ -1051,8 +1064,12 @@ impl State {
         };
         let view = frame.texture.create_view(&Default::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
+        let started = self.performance.as_ref().map(|p| p.now());
         self.renderer
             .render(&view, &self.app.scene_view(steps.alpha, aspect));
+        if let (Some(p), Some(t)) = (&self.performance, started) {
+            self.app.set_cpu_submit_ms((p.now() - t) as f32);
+        }
         self.queue.present(frame);
         self.app.set_render_stats(self.renderer.stats());
 

@@ -13,9 +13,10 @@ Not a DOS game, not flat boxes on a plane. A street must have: curbs with a gutt
 
 ## Pipeline (forward, HDR)
 ```
-shadow pass    sun CSM, 3 cascades (0–40 m, 40–160 m, 160–600 m), 2048² each, PCF 3×3
+shadow pass    sun CSM, 3 cascades (0–40 m, 40–160 m, 160–600 m), 2048² each (by preset: 2–3, 1024–3072²), PCF 3×3;
+               casters culled per cascade on the CPU, the far cascade optionally kept every other frame
 depth prepass  (optional on web; on for native)  → used by fog/SSAO later
-main pass      → HDR Rgba16Float: Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
+main pass      → HDR Rgba16Float at the resolution scale (50–100%), instances frustum-culled on the CPU: Lambert diffuse + simple specular (Blinn-Phong, low) for cars/water,
                sun with CSM shadow, sky ambient (hemisphere: sky color up, ground color down),
                up to 8 point/spot lights per draw picked from the frame's 256 (uniform array, 32 bytes each;
                each instance carries its 8 light indices, culled on the CPU by the app per tile),
@@ -23,8 +24,8 @@ main pass      → HDR Rgba16Float: Lambert diffuse + simple specular (Blinn-Pho
 sky            analytic sky model (Preetham or Hosek-Wilkie fit, evaluated in the shader per pixel) + sun disc + moon + stars at night
 transparents   water (planar reflection, phase 2), windows glow quads
 coronas        additive soft sprites over lamp heads, car lamps, neon, the sun and moon; occlusion from 5 depth samples
-bloom          threshold on emissive/bright, 5-level downsample/upsample (Rgba16Float, half-res)
-tonemap        AgX or ACES-fitted, exposure from time-of-day curve (no auto-exposure in v1), then sRGB; optional
+bloom          threshold on emissive/bright, 4–5-level downsample/upsample (Rgba16Float, from half the scaled target)
+tonemap        bilinear upscale of a scaled target, AgX or ACES-fitted, exposure from time-of-day curve (no auto-exposure in v1), then sRGB; optional
                style post (cel/dither/CRT) here
 HUD            2D pass: minimap and full map, speed, station, menu text (bitmap font + map texture)
 ```
@@ -70,7 +71,22 @@ Chunk meshes: pooled vertex/index buffers made once at load (`render::ChunkPool`
 | Web | Chrome/Firefox/Safari, integrated GPU, 1080p | WebGPU, WebGL2 fallback; this is what CI tests |
 | Steam Deck | SteamOS (Linux x86_64), RDNA2 iGPU, 1280×800 @ 60, Vulkan | gamepad-only, every menu navigable with a stick and two buttons; 16:10 HUD layout |
 | TV via Deck dock | 1080p/4K output, viewed from 3 m | UI scale setting (1×–2×), large-text HUD, safe-area margins; same binary |
-A resolution-scale setting (50–100%) and a shadow/bloom quality tier keep the Deck at 60 at native res.
+A resolution-scale setting (50–100%) and a quality preset keep the Deck at its refresh rate (60 Hz LCD, 90 Hz OLED: 11.1 ms) at native res.
+
+## Quality presets
+Settings → Video → Quality; `app::Quality` maps each to a `render::RenderQuality` carried in every `SceneView` (the
+renderer rebuilds the shadow atlas or the scaled targets when their size changes). Unchosen, the game picks **Deck**
+on the Deck's APU / an AMD integrated GPU / a 1280×800 Linux surface and **Medium** elsewhere; the choice is saved.
+
+| Preset | Cascades | Size | Far cascade | Skip casters under | Resolution | Bloom levels | Coronas |
+|---|---|---|---|---|---|---|---|
+| Low | 2 (50/400 m) | 1024² | every other frame | 3 texels | 75% | 4 | off |
+| Deck | 2 (50/400 m) | 1536² | every other frame | 2 texels | 100% | 4 | on |
+| Medium (default) | 3 | 1536² | every other frame | 2 texels | 100% | 5 | on |
+| High | 3 | 2048² | every frame | — | 100% | 5 | on |
+| Ultra | 3 | 3072² (device permitting) | every frame | — | 100% | 5 | on |
+
+The cost model, the reasoning behind each knob and how to measure on hardware are in `docs/PERFORMANCE.md`.
 
 **Web start-up and fallback** (`crates/platform-web`). WebGPU is tried first where `navigator.gpu` exists. The device is requested with no optional features and with `Limits::downlevel_defaults()` (WebGL2's own limits on GL), the texture size raised to the adapter's and every value clamped to what the adapter reports, so no browser can reject the request for asking too much. The canvas is configured with its preferred 8-bit format (the shaders encode sRGB), FIFO, opaque; the float path is used only where the adapter reports `Rgba16Float` as renderable, blendable and filterable. Surface configuration, renderer construction and a probe frame (`SceneView::probe`: sky, low sun, one mesh, presented to the canvas) run inside validation, out-of-memory and internal error scopes; an uncaptured-error handler and a device-lost callback catch the rest. Any failure before the first frame (no adapter, `requestDevice` rejected, no surface configuration or no texture from the canvas, a scope reporting an error, the device lost) destroys the device and starts again on WebGL2 on a fresh canvas (a canvas never changes context kind), with the reason in the console and the page footer. A crash (wasm trap) during the WebGPU start is caught by the page, which starts a fresh wasm instance on WebGL2. `?gl=1` goes straight to WebGL2, `?gpu=1` uses WebGPU with no fallback, and the F3 overlay and the footer name the backend.
 
@@ -82,7 +98,7 @@ The corona pass is optional: its pipeline is built in its own error scope and co
 Cel: quantized Lambert + edge detect from depth/normal. Dither/CRT: ordered dither to palette, scanline/curvature post. VHS: chroma shift, blur. All in the post pass; off by default.
 
 ## Debug
-A debug overlay (toggle) showing frame time graph, draw calls, chunk budget use, light count, and camera/sun parameters, drawn with the HUD font. Screenshot command writes a PNG (native) or triggers canvas download (web).
+A debug overlay (F3) showing frame time graph, draw calls, CPU submit time, instances submitted and drawn per pass, triangles, cascades and their size, scene and swapchain size, GPU time per pass (timestamp queries, native), light count, the adapter, and camera/sun parameters, drawn with the HUD font. Native `--stats` prints the same once a second (`docs/PERFORMANCE.md`). Screenshot command writes a PNG (native) or triggers canvas download (web).
 
 ## Acceptance tests
 - Renders under WebGL2 (CI screenshot, SwiftShader) and WebGPU (manual; headless Chromium can run it on SwiftShader's Vulkan with `--enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader`) with identical scene content.
