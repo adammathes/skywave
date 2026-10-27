@@ -35,34 +35,38 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 08:15 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+- Done on `main` (2026-10-27 12:30 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   7 working stations per era and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
-  pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass
-  (culling, quality presets, Deck auto-pick, `--stats`, `docs/PERFORMANCE.md`); vehicle picker and
-  the credit line; art pass (era cabins, detailed exteriors, colored parked cars with LOD2, props);
-  the full twelve-car 1980s roster (M4 #2); light collision physics with rocking parked cars;
-  traffic lane graph (M4 #1), NPC car movement (M4 #4), pedestrian figure (M4 #3) and pedestrian
-  behaviour (M4 #5), all simulation-only in `crates/traffic`; reference-sources ADR 0005 and the
-  buildings backlog; facade grammar loader (B1, B2); CI gates stabilised (median step budget, no
-  worst-piece assert, one CI run per PR).
+  pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
+  vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
+  physics; the hill-launch fix (wheel rays meet the ground's tangent plane); traffic lane graph
+  (M4 #1), NPC car movement (M4 #4), pedestrian figure (M4 #3) and behaviour (M4 #5) in
+  `crates/traffic`; NPC traffic drawn in the game with Settings › World › Traffic and passing-car
+  sound (M4 #6); vehicle select screen with turntable preview and paint picker (M4 #7); reference
+  sources ADR 0005; facade grammar loader (B1, B2); three-band facades with real storefronts (B4);
+  sign pictograms, stroke letterforms and the closed lexicon on blade signs (B5, B6); chunk pool
+  raised to 1211 web / 1617 native pages; CI gates stabilised.
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
-  NPC traffic drawn in the app with a density setting (M4 #6); sign pictograms and the invented-name
-  lexicon (B5+B6). Branches in progress: `m2/map-edges` (NOTES #3), `bldg/facade-bands` (B4),
-  `m4/vehicle-select` (M4 #7).
+  natural map edges (#20, approved, blocked until #24 lands, then re-pins two traffic hashes);
+  pedestrian hardening (#24, fourth review round: a car along or turning across a crossing must
+  never reach anyone; the adversarial probe sweep over every crossing, seeds 1-4, is becoming the
+  standing test); the M4 gate (#25, approved, needs a main merge). Branches in progress:
+  `m4/peds-in-app` (pedestrians drawn), `bldg/awnings-rooflines` (B8, B9).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
-  `--stats` output is wanted; NOTES 4(a) life beyond traffic (window lights, parked cars that come
-  and go); buildings B7-B15.
-- M4 #8 (gate scenarios, density tests, gate screenshots, gate notes in `docs/MILESTONES.md`) is
-  in its PR; the M4 gate waits on the owner.
-- Next: pedestrians drawn in the app (figure instancing); B8 awnings and B9 rooflines after B4;
-  B10 parking lots after map edges; M5 (release polish, Deck verification); M6 place compiler;
-  M7+ scenarios.
+  `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
+  come and go); buildings B7, B10-B15.
+- M4 gate facts for the owner (from #25): NPC cars yield at junctions; no player–NPC collision
+  yet (reversing into a queue passes through; ignored test with numbers); NPC cars do not see
+  pedestrians; static wheels, no brake lights; traffic sparse near the start.
+- Next: merge #24 → #20 → B10 parking lots; pedestrians drawn (in progress); B7 facade sign bands
+  on the lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
-  origin/main...origin/<branch>` with probe tests on an exported copy; a PR that regenerates
-  goldens merges before PRs touching the same scenes; a session merges `origin/main` itself when
-  GitHub reports a conflict; two PRs that change the same function signature within an hour can
-  both be green and still break main (the traffic tests after the grammar loader): after a merge
-  that changes a shared signature, refresh the other open PRs before merging them.
+  origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
+  the probe is re-run on every round until it counts zero; a PR that regenerates goldens merges
+  before PRs touching the same scenes, and after each such merge every open PR refreshes from
+  main; CI's pull_request event sometimes does not fire for a session-created PR, so a branch
+  update from main (or any push) is used to start it; two PRs that change the same signature
+  within an hour can both be green and still break main.
 
 ## Pitfalls met so far
 - Software-rendered screenshots take minutes per scene; never run several at once on one box.
