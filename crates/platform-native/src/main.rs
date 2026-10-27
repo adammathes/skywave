@@ -17,10 +17,19 @@
 //! gamepads at startup and as they connect (otherwise the info log has them,
 //! `RUST_LOG=info`). `--frames N` prints a summary after N frames, and with `--exit` quits
 //! there (scripted benchmarks). `--no-vsync` presents without waiting for the display
-//! (`AutoNoVsync`; the default is `AutoVsync`). `--quality low|deck|medium|high|ultra`
+//! (`AutoNoVsync`; the default is `AutoVsync`) and, for benchmarks, draws the whole world
+//! every frame with no frame-rate cap. `--quality low|deck|medium|high|ultra`
 //! forces a graphics preset for the session (not saved); `--no-cull` turns instance culling
 //! off and `--no-prepass` the depth pre-pass (for comparisons). `--version` prints the build's `git describe` (see `build.rs`)
 //! and exits.
+//!
+//! Frames are drawn no more often than Settings › Video › Frame rate allows (the panel's
+//! rate, or every Nth refresh: the loop sleeps to deadlines N refreshes apart and
+//! presents with vsync). Unfocused, the game pauses and the loop runs at most
+//! [`app::pacing::BACKGROUND_FPS`] times a second; hidden (where the system says so), it
+//! draws nothing. Each frame
+//! draws only what changed (`render::Renderer::draw`): nothing when nothing did, the
+//! tonemap and HUD over the kept world when only the HUD did.
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::NATIVE` (13×13
 //! chunks, 4 ms a sim step); `--scene stream=0` builds it all at load instead.
@@ -40,6 +49,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use app::pacing::{frame_interval, Pacer};
 use app::{App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, MOUSE_RIGHT};
 use pad::Pads;
 use render::{RenderStats, Renderer, GPU_PARTS, GPU_PART_NAMES, GPU_PASSES, GPU_PASS_NAMES};
@@ -48,7 +58,7 @@ use winit::dpi::LogicalSize;
 use winit::event::{
     DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
 };
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
@@ -58,6 +68,24 @@ const PIXELS_PER_NOTCH: f64 = 100.0;
 
 /// Frames left out of the `--frames` summary while the town streams in and caches warm.
 const SUMMARY_WARMUP_FRAMES: usize = 60;
+
+/// A frame due within this many seconds is slept to in the redraw itself (precise); one
+/// due later is left to the event loop's timer (which may wake a millisecond off).
+const SLEEP_SLACK: f64 = 0.002;
+
+/// The panel's refresh rate when the monitor does not say, Hz.
+const DEFAULT_PANEL_HZ: f64 = 60.0;
+
+/// Sleeps until `pacer` has a frame due at `interval` seconds by `now` (seconds, any
+/// origin), then starts it.
+fn sleep_until_due(pacer: &mut Pacer, interval: f64, now: impl Fn() -> f64) {
+    let wait = pacer.wait(now(), interval);
+    if wait > 0.0 {
+        std::thread::sleep(Duration::from_secs_f64(wait));
+    }
+    // A sleep never ends early; the slack only absorbs rounding.
+    pacer.due(now(), interval, 1e-4);
+}
 
 /// `--stats` prints the GPU table over this many seconds.
 const GPU_TABLE_SECONDS: u64 = 5;
@@ -102,7 +130,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--quality" => {
                 let v = args.next().ok_or("--quality needs a preset")?;
                 let q = Quality::from_name(&v).ok_or_else(|| {
-                    format!("--quality is one of low, deck, medium, high, ultra, not `{v}`")
+                    format!(
+                        "--quality is one of low, battery, deck, medium, high, ultra, not `{v}`"
+                    )
                 })?;
                 opts.quality = Some(q);
             }
@@ -228,6 +258,13 @@ fn render_line(r: &RenderStats) -> String {
         r.surface_size.0,
         r.surface_size.1,
         r.bloom_levels,
+    );
+    // A frame that kept the world (Ui) or drew nothing (Skip) leaves the counts above as
+    // the last world frame's.
+    let _ = write!(
+        s,
+        " | last={:?} world={} ui={} skip={}",
+        r.last_work, r.frames, r.ui_frames, r.skipped_frames
     );
     if r.gpu_timing {
         let total: u32 = r.gpu_us.iter().sum();
@@ -455,6 +492,8 @@ struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
+    /// The monitor's refresh rate, Hz.
+    panel_hz: f64,
 }
 
 impl Gpu {
@@ -518,6 +557,11 @@ impl Gpu {
 
         let gpu = gpu_info(&info, (config.width, config.height));
         app.set_gpu_info(&gpu);
+        let panel_hz = window
+            .current_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map_or(DEFAULT_PANEL_HZ, |mhz| f64::from(mhz) / 1000.0);
+        app.set_panel_hz(panel_hz);
         app.force_quality(opts.quality);
         let options = render::RendererOptions {
             culling: !opts.no_cull,
@@ -548,6 +592,16 @@ impl Gpu {
                 if options.culling { "on" } else { "off" },
                 if opts.no_prepass {
                     ", depth pre-pass forced off"
+                } else {
+                    ""
+                },
+            );
+            eprintln!(
+                "frame rate: {} = {:.0} fps (panel {panel_hz:.0} Hz){}",
+                app.frame_rate().name(),
+                app.frame_rate().fps(panel_hz),
+                if opts.no_vsync {
+                    "; --no-vsync: uncapped, the world drawn every frame"
                 } else {
                     ""
                 },
@@ -586,6 +640,7 @@ impl Gpu {
             queue,
             config,
             renderer,
+            panel_hz,
         })
     }
 
@@ -597,38 +652,77 @@ impl Gpu {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         self.renderer.resize((width, height));
+        // A new swapchain shows nothing yet, even at the same size (Windows sends one
+        // restoring from minimized).
+        self.renderer.screen_lost();
     }
 
-    /// Draws a frame; returns the CPU time spent building and submitting it (the scene
-    /// view and the renderer, not waiting for the swapchain).
-    fn draw(&mut self, app: &mut App, alpha: f32, no_prepass: bool) -> Duration {
+    /// Draws what changed since the last frame (the whole world every frame when
+    /// `always`) and presents it, if anything did; `no_prepass` turns the depth pre-pass
+    /// off. Returns the CPU time spent building and submitting it (the scene view and the
+    /// renderer, not waiting for the swapchain) and whether a frame was presented.
+    fn draw(
+        &mut self,
+        app: &mut App,
+        alpha: f32,
+        always: bool,
+        no_prepass: bool,
+    ) -> (Duration, bool) {
         app.sync_chunks(&mut self.renderer);
         // A car driven for the first time this session (and the saved one, at startup).
         for mesh in app.take_new_meshes() {
             self.renderer.add_mesh(&mesh);
         }
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return Duration::ZERO;
-            }
-            other => {
-                log::warn!("skipping frame: {other:?}");
-                return Duration::ZERO;
-            }
-        };
-        let view = frame.texture.create_view(&Default::default());
+        if always {
+            self.renderer.screen_lost();
+        }
         let aspect = self.config.width as f32 / self.config.height as f32;
         let start = Instant::now();
+        let mut waited = Duration::ZERO;
+        let mut reconfigured = false;
+        let (surface, device, config) = (&self.surface, &self.device, &self.config);
+        let mut acquire = || {
+            let t = Instant::now();
+            let texture = surface.get_current_texture();
+            waited = t.elapsed();
+            match texture {
+                wgpu::CurrentSurfaceTexture::Success(t)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                    let view = t.texture.create_view(&Default::default());
+                    Some((t, view))
+                }
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                    surface.configure(device, config);
+                    reconfigured = true;
+                    None
+                }
+                other => {
+                    log::warn!("skipping frame: {other:?}");
+                    None
+                }
+            }
+        };
         let mut scene = app.scene_view(alpha, aspect);
         scene.quality.depth_prepass &= !no_prepass;
-        self.renderer.render(&view, &scene);
-        let cpu = start.elapsed();
+        let frame = if always {
+            let frame = acquire();
+            if let Some((_, view)) = &frame {
+                self.renderer.render(view, &scene);
+            }
+            frame.map(|(t, _)| t)
+        } else {
+            self.renderer.draw(&scene, acquire).1
+        };
+        let cpu = start.elapsed().saturating_sub(waited);
+        if reconfigured {
+            self.renderer.screen_lost();
+        }
+        let Some(frame) = frame else {
+            return (cpu, false);
+        };
         self.window.pre_present_notify();
         self.queue.present(frame);
-        cpu
+        (cpu, true)
     }
 
     fn stats(&self) -> render::RenderStats {
@@ -643,6 +737,13 @@ struct Shell {
     pads: Pads,
     /// Window focus: pads and mouse motion only count while focused.
     focused: bool,
+    /// The window is hidden (minimized, or covered where the system says so): nothing is
+    /// drawn.
+    occluded: bool,
+    /// When the next frame may start (the frame-rate cap, the background rate).
+    pacer: Pacer,
+    /// The last frame was presented (the display paces the next at the panel's rate).
+    presented: bool,
     /// The cursor is grabbed for mouse look.
     grabbed: bool,
     gpu: Option<Gpu>,
@@ -658,6 +759,31 @@ struct Shell {
 }
 
 impl Shell {
+    /// Seconds since the start: the pacing clock.
+    fn now(&self) -> f64 {
+        self.started.elapsed().as_secs_f64()
+    }
+
+    /// Seconds between frames: the frame-rate cap, or the background rate; 0 when the
+    /// display paces them (vsync at the panel's rate) or nothing does (`--no-vsync`).
+    fn interval(&self) -> f64 {
+        if self.opts.no_vsync {
+            return 0.0;
+        }
+        let focused = self.focused && !self.occluded;
+        let hz = self.gpu.as_ref().map_or(DEFAULT_PANEL_HZ, |g| g.panel_hz);
+        match frame_interval(self.app.frame_rate(), hz, focused) {
+            Some(s) => s,
+            None if self.presented => 0.0,
+            // Nothing presented to wait on: poll at the panel's rate.
+            None => 1.0 / hz,
+        }
+    }
+
+    fn note_focus(&mut self) {
+        self.app.set_focused(self.focused && !self.occluded);
+    }
+
     fn set_grab(&mut self, on: bool) {
         if self.grabbed == on {
             return;
@@ -695,10 +821,19 @@ impl ApplicationHandler for Shell {
                 self.focused = false;
                 self.input.release_all();
                 self.set_grab(false);
+                self.note_focus();
             }
             WindowEvent::Focused(true) => {
                 self.focused = true;
                 self.pads.resync(&mut self.input);
+                self.note_focus();
+            }
+            WindowEvent::Occluded(hidden) => {
+                self.occluded = hidden;
+                if let (false, Some(gpu)) = (hidden, &mut self.gpu) {
+                    gpu.renderer.screen_lost();
+                }
+                self.note_focus();
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if let Some(b) = mouse_button(button) {
@@ -728,6 +863,15 @@ impl ApplicationHandler for Shell {
                 }
             }
             WindowEvent::RedrawRequested => {
+                let interval = self.interval();
+                if self.pacer.wait(self.now(), interval) > SLEEP_SLACK {
+                    // Early for the cap: `about_to_wait` asks again when it is due.
+                    return;
+                }
+                let started = self.started;
+                sleep_until_due(&mut self.pacer, interval, || {
+                    started.elapsed().as_secs_f64()
+                });
                 let now = Instant::now();
                 let dt = self.last_frame.map_or(Duration::ZERO, |t| now - t);
                 self.last_frame = Some(now);
@@ -744,7 +888,13 @@ impl ApplicationHandler for Shell {
                 let Some(gpu) = &mut self.gpu else {
                     return;
                 };
-                let cpu = gpu.draw(&mut self.app, steps.alpha, self.opts.no_prepass);
+                if self.occluded {
+                    self.presented = false;
+                    return;
+                }
+                let (no_vsync, no_prepass) = (self.opts.no_vsync, self.opts.no_prepass);
+                let (cpu, presented) = gpu.draw(&mut self.app, steps.alpha, no_vsync, no_prepass);
+                self.presented = presented;
                 let render = gpu.stats();
                 self.app.set_render_stats(render);
                 self.app.set_cpu_submit_ms(cpu.as_secs_f32() * 1000.0);
@@ -796,8 +946,18 @@ impl ApplicationHandler for Shell {
         }
     }
 
-    fn about_to_wait(&mut self, _: &ActiveEventLoop) {
-        if let Some(gpu) = &self.gpu {
+    /// Asks for the next frame when it is due, else sleeps until then (input events wake
+    /// the loop in between and are sampled by that frame).
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(gpu) = &self.gpu else {
+            return;
+        };
+        let wait = self.pacer.wait(self.now(), self.interval());
+        if wait > SLEEP_SLACK {
+            let early = Duration::from_secs_f64(wait - 0.5 * SLEEP_SLACK);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + early));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
             gpu.window.request_redraw();
         }
     }
@@ -813,7 +973,7 @@ fn main() -> ExitCode {
             }
             eprintln!(
                 "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] \
-                 [--frames N [--exit]] [--no-vsync] [--quality low|deck|medium|high|ultra] \
+                 [--frames N [--exit]] [--no-vsync] [--quality low|battery|deck|medium|high|ultra] \
                  [--no-cull] [--no-prepass] [--version]"
             );
             return if e.is_empty() {
@@ -857,6 +1017,9 @@ fn main() -> ExitCode {
         input: InputMapper::default(),
         pads,
         focused: true,
+        occluded: false,
+        pacer: Pacer::default(),
+        presented: false,
         grabbed: false,
         gpu: None,
         last_frame: None,
@@ -882,6 +1045,8 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use app::FrameRate;
+    use render::FrameWork;
 
     fn args(list: &[&str]) -> Result<Options, String> {
         parse_args(list.iter().map(|s| s.to_string()))
@@ -1400,25 +1565,7 @@ mod tests {
         runs: &[(&str, Quality, bool)],
         frames: u32,
     ) -> Vec<(Quality, Counts)> {
-        let limits = render_limits();
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::NOOP,
-            backend_options: wgpu::BackendOptions {
-                noop: wgpu::NoopBackendOptions {
-                    enable: true,
-                    limits: Some(limits.clone()),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_limits: limits,
-            ..Default::default()
-        }))
-        .unwrap();
+        let (device, queue) = noop_device();
         let size = (1280, 800);
         let (mut app, mut r) = streamed(query, stream, &device, &queue, size);
         eprintln!(
@@ -1652,6 +1799,230 @@ mod tests {
         });
         let view = texture.create_view(&Default::default());
         (texture, view)
+    }
+
+    /// wgpu's no-op device with [`render_limits`]: records every pass, draws nothing.
+    fn noop_device() -> (wgpu::Device, wgpu::Queue) {
+        let limits = render_limits();
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::NOOP,
+            backend_options: wgpu::BackendOptions {
+                noop: wgpu::NoopBackendOptions {
+                    enable: true,
+                    limits: Some(limits.clone()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .unwrap()
+    }
+
+    /// Pixels a frame of `work` writes at least once, from the renderer's counters: the
+    /// shadow cascades drawn, the scene's target (before overdraw), the bloom chain, the
+    /// tonemap; HUD quads not counted. A frame that keeps the world writes the tonemap.
+    fn pixels_written(s: &RenderStats, work: FrameWork) -> u64 {
+        let px = |(w, h): (u32, u32)| u64::from(w) * u64::from(h);
+        let tonemap = px(s.surface_size);
+        match work {
+            FrameWork::Skip => 0,
+            FrameWork::Ui => tonemap,
+            FrameWork::World => {
+                let shadow = u64::from(s.cascades_drawn) * px((s.shadow_size, s.shadow_size));
+                // Level k is the target over 2^(k+1), drawn down then up the chain.
+                let bloom: u64 = (0..s.bloom_levels)
+                    .map(|k| 2 * px((s.render_size.0 >> (k + 1), s.render_size.1 >> (k + 1))))
+                    .sum();
+                shadow + px(s.render_size) + bloom + tonemap
+            }
+        }
+    }
+
+    /// What one phase of [`idle_frames_draw_the_world_once`] drew.
+    #[derive(Debug, Default, PartialEq)]
+    struct Drawn {
+        world: u32,
+        ui: u32,
+        skip: u32,
+        /// Pixels written over the run ([`pixels_written`]).
+        pixels: u64,
+    }
+
+    /// `frames` frames at 90 Hz of the scene `query` the way the shells draw them (App,
+    /// then `Renderer::draw` on the no-op device at 1280×800), after at least `settle`
+    /// frames run but not drawn (and until nothing is left to stream); `setup` runs on the
+    /// app first and `hold` is held throughout.
+    /// Returns what each frame drew and the mean CPU time of `Renderer::draw`'s plan on the
+    /// frames that drew nothing.
+    fn draw_frames(
+        query: &str,
+        setup: impl FnOnce(&mut App),
+        hold: Option<Key>,
+        settle: u32,
+        frames: u32,
+    ) -> (Drawn, Duration) {
+        let (device, queue) = noop_device();
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let size = (1280, 800);
+        let mut r =
+            render::Renderer::with_options(&device, &queue, format, size, app.renderer_options());
+        for m in app.meshes() {
+            r.add_mesh(m);
+        }
+        r.reserve_instances(app.max_instances());
+        setup(&mut app);
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let mut mapper = InputMapper::default();
+        if let Some(key) = hold {
+            mapper.press(RawInput::Key(key));
+        }
+        let mut t = 0.0;
+        let mut drawn = Drawn::default();
+        let mut skip_time = Duration::ZERO;
+        let mut settled = 0;
+        while settled < settle || !app.stream_idle() {
+            t += 1.0 / 90.0;
+            app.frame(&mut mapper, 1.0 / 90.0, &|| t);
+            app.sync_chunks(&mut r);
+            for m in app.take_new_meshes() {
+                r.add_mesh(&m);
+            }
+            settled += 1;
+        }
+        for _ in 0..frames {
+            t += 1.0 / 90.0;
+            let steps = app.frame(&mut mapper, 1.0 / 90.0, &|| t);
+            app.sync_chunks(&mut r);
+            for m in app.take_new_meshes() {
+                r.add_mesh(&m);
+            }
+            let scene = app.scene_view(steps.alpha, 1.6);
+            let started = Instant::now();
+            let acquire = || Some(((), target.create_view(&Default::default())));
+            let work = r.draw(&scene, acquire).0;
+            drawn.pixels += pixels_written(&r.stats(), work);
+            match work {
+                FrameWork::World => drawn.world += 1,
+                FrameWork::Ui => drawn.ui += 1,
+                FrameWork::Skip => {
+                    drawn.skip += 1;
+                    skip_time += started.elapsed();
+                }
+            }
+            let _ = device.poll(wgpu::PollType::Poll);
+        }
+        assert_eq!(
+            u64::from(drawn.world),
+            r.stats().frames,
+            "world passes recorded"
+        );
+        let plan = skip_time / drawn.skip.max(1);
+        (drawn, plan)
+    }
+
+    /// The idle path, through the app and the renderer's recording: the world is drawn
+    /// once over 120 paused frames and once over 120 frames of a still scene (the car at
+    /// rest, the clock stopped, no traffic), and on every frame while driving.
+    #[test]
+    fn idle_frames_draw_the_world_once() {
+        // The test town, built at load; the clock fixed at noon; no traffic.
+        const STILL: &str = "?stream=0&t=12:00&traffic=off";
+        // Three seconds for the car to settle on its springs, not drawn.
+        const SETTLE: u32 = 270;
+        let pause = |app: &mut App| app.open_menu(app::ui::Page::Pause);
+        let (paused, _) = draw_frames(STILL, pause, None, SETTLE, 120);
+        eprintln!("paused: {paused:?}");
+        assert_eq!(paused.world, 1, "{paused:?}");
+        let (still, plan) = draw_frames(STILL, |_| {}, None, SETTLE, 120);
+        eprintln!("still: {still:?}, plan {plan:?} a frame drawn nothing");
+        assert_eq!(still.world, 1, "{still:?}");
+        let (driving, _) = draw_frames(STILL, |_| {}, Some(Key::KeyW), 0, 120);
+        eprintln!("driving: {driving:?}");
+        assert_eq!(driving.world, 120, "{driving:?}");
+    }
+
+    /// What deciding to draw nothing costs the CPU on the streamed coast (seed 1, the
+    /// start, clock and traffic stopped): `Renderer::plan` comparing the scene's instances
+    /// and lights with the last world frame's and building the HUD's quads. Run with
+    /// `cargo test --release -p platform-native -- --ignored --nocapture idle_cost`;
+    /// `docs/PERFORMANCE.md` quotes it.
+    #[test]
+    #[ignore = "benchmark; prints numbers"]
+    fn idle_cost_on_the_coast() {
+        let query = "?seed=1&place=coast&t=17:40&traffic=off";
+        let (drawn, plan) = draw_frames(query, |_| {}, None, 270, 600);
+        eprintln!("coast, still: {drawn:?}; plan {plan:?} a frame drawn nothing");
+        let pause = |app: &mut App| app.open_menu(app::ui::Page::Pause);
+        let query = "?seed=1&place=coast&t=17:40&traffic=busy";
+        let (drawn, plan) = draw_frames(query, pause, None, 270, 600);
+        eprintln!("coast, busy traffic, paused: {drawn:?}; plan {plan:?} a frame drawn nothing");
+    }
+
+    /// The frame-rate cap as the shell sleeps to it, for two seconds at each cap of a
+    /// 90 Hz and a 60 Hz panel: the median time between frames within 2% of the cap's
+    /// interval and about as many frames as it allows. Frames more than 10% off are
+    /// printed, not failed: on a loaded test machine a scheduler stall makes one late and
+    /// the grid's catch-up the next one early.
+    #[test]
+    fn capped_frames_are_evenly_paced() {
+        for (hz, rate) in [
+            (90.0, FrameRate::Half),
+            (90.0, FrameRate::Third),
+            (60.0, FrameRate::Half),
+        ] {
+            let interval = app::pacing::frame_interval(rate, hz, true).unwrap();
+            let start = Instant::now();
+            let now = || start.elapsed().as_secs_f64();
+            let mut pacer = Pacer::default();
+            let mut times = Vec::with_capacity(128);
+            while now() < 2.0 {
+                sleep_until_due(&mut pacer, interval, now);
+                times.push(now());
+                // Some work, as a frame would do.
+                std::thread::sleep(Duration::from_micros(500));
+            }
+            let mut gaps: Vec<f64> = times.windows(2).map(|w| w[1] - w[0]).collect();
+            let off: Vec<&f64> = gaps
+                .iter()
+                .filter(|dt| (*dt - interval).abs() > 0.1 * interval)
+                .collect();
+            eprintln!(
+                "{hz} Hz {rate:?}: {} frames, more than 10% off: {off:?}",
+                times.len()
+            );
+            gaps.sort_by(f64::total_cmp);
+            let median = gaps[gaps.len() / 2];
+            assert!(
+                (median - interval).abs() <= 0.02 * interval,
+                "{hz} Hz {rate:?}: median {median}"
+            );
+            let expected = 2.0 / interval;
+            assert!(
+                (times.len() as f64 - expected).abs() <= 0.1 * expected,
+                "{hz} Hz {rate:?}: {} frames",
+                times.len()
+            );
+        }
     }
 
     /// The native shell's device limits, with room for full-size cascades.
