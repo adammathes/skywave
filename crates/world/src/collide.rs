@@ -1433,7 +1433,10 @@ fn respond(state: &mut VehicleState, spec: &VehicleSpec, c: &Contact) -> Option<
     ];
     sim::knock(spec, state, [0.0; 3], scale3(lost, spec.mass_kg));
 
-    // The side that hit dips: a spin about the horizontal axis across the normal.
+    // The side that hit dips: a spin about the horizontal axis across the normal. It sits
+    // outside the impulse model and adds a little energy, capped at ROCK_MAX (0.4 rad/s, a
+    // dip of 1-2 degrees); the springs and dampers take it straight back out, and it is what
+    // makes a hit read as a bump rather than a stop.
     let rock = (ROCK_PER_MPS * closing).min(ROCK_MAX);
     state.ang_vel = add3(state.ang_vel, scale3([-n[2], 0.0, n[0]], rock));
     Some(Bump {

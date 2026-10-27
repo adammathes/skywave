@@ -1065,20 +1065,27 @@ pub fn inv_mass_at(spec: &VehicleSpec, state: &VehicleState, r: [f32; 3], n: [f3
 }
 
 /// A knock from outside the sim (`world::collide`): `impulse`, N·s in world space, at
-/// offset `r` from the center of mass. Changes the body's velocity and spin; the wheels
-/// roll on at the new forward speed (a hit scrubs the tires), so they do not drive the car
-/// back into what it hit or hold it there.
+/// offset `r` from the center of mass. Changes the body's velocity and spin; when the
+/// forward speed changes the wheels roll on at the new one (a hit scrubs the tires), so
+/// they do not drive the car back into what it hit, and a braked or locked wheel is not
+/// left spinning backward.
 pub fn knock(spec: &VehicleSpec, state: &mut VehicleState, r: [f32; 3], impulse: [f32; 3]) {
     let dv = scale(impulse, 1.0 / spec.mass_kg);
     state.vel = add(state.vel, dv);
     let dw = inv_inertia(spec, state.rot, cross(r, impulse));
     state.ang_vel = add(state.ang_vel, dw);
     let fwd = rotate(state.rot, [0.0, 0.0, -1.0]);
-    let d_spin = dot(dv, fwd) / WHEEL_RADIUS_M;
-    for w in &mut state.wheels {
-        w.spin += d_spin;
+    // A curb's upward kick barely changes the forward speed: the wheels keep their spin.
+    if abs(dot(dv, fwd)) > KNOCK_SPIN_MPS {
+        let spin = dot(state.vel, fwd) / WHEEL_RADIUS_M;
+        for w in &mut state.wheels {
+            w.spin = spin;
+        }
     }
 }
+
+/// Change of forward speed, m/s, past which a knock sets the wheels rolling at the new speed.
+const KNOCK_SPIN_MPS: f32 = 0.01;
 
 /// A parked car's sway, Hz, and its damping ratio: a knock dies away in about a second.
 const ROCK_HZ: f32 = 1.4;

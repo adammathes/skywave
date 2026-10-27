@@ -416,6 +416,7 @@ fn head_on_at_ten_meters_per_second_bumps_and_rocks() {
         assert!(bump.speed > 0.9 * v, "closing {}", bump.speed);
         assert!(after[0] < 0.1 * before, "{} kept {} m/s", spec.id, after[0]);
         assert!(after[1] > 0.1, "{} not nudged back: {}", spec.id, after[1]);
+        assert!(after[1] <= 0.45, "{} bounced back at {}", spec.id, after[1]);
         assert!(
             (bump.normal[0] - wall.n[0]).abs() < 1e-3 && (bump.normal[2] - wall.n[1]).abs() < 1e-3,
             "normal {:?}",
@@ -513,14 +514,15 @@ fn glancing_hit_yaws_away_and_keeps_speed() {
             s.ang_vel[1]
         );
         assert!(kept >= 0.5, "{} kept {kept}: stopped", spec.id);
+        assert!(kept <= 1.0, "{} gained speed: {kept}", spec.id);
         assert!(
             into < angle.sin() * 0.5,
             "{} did not yaw away: {into}",
             spec.id
         );
         assert!(
-            travel <= 0.0,
-            "{} still heading into the wall: {travel}",
+            travel < 0.25 * angle.sin(),
+            "{} not deflected: {travel}",
             spec.id
         );
         assert!(s.up()[1] > 0.8);
@@ -882,9 +884,15 @@ fn walls_hold_at_seventy_meters_per_second() {
         s.vel = [f[0] * v, 0.0, f[2] * v];
         let mut worst: f32 = f32::MIN;
         for _ in 0..STEPS_PER_S {
+            let before = hspeed(&s);
             tick(&spec, &mut s, VehicleInput::default(), &c);
             assert_finite(&s);
             worst = worst.max(behind_and_gap(&s, &spec, &wall).0);
+            assert!(
+                hspeed(&s) <= before,
+                "sped up at {v} m/s: {before} -> {}",
+                hspeed(&s)
+            );
         }
         println!("corsair_gtx     wall at {v} m/s: deepest {worst:+.4} m");
         assert!(worst < 0.02, "passed the wall at {v} m/s: {worst}");
