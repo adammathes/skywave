@@ -31,6 +31,10 @@
     "about": "Busy NPC traffic at a signalized strip junction on the coast at noon, from the mid chase camera waiting at the stop line (traffic warmed up 20 s before the frame).",
     "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-mid", "t": "12:00", "pos": "477.5,1001.2", "yaw": "347", "traffic": "busy", "still": "1", "stream": "1" }
   },
+  "coast-peds-noon": {
+    "about": "Busy pedestrians on the coast's busiest block at noon, from the mid chase camera on the road: people walking, standing about and in groups on both walks (the crowd warmed up 60 s before the frame).",
+    "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-mid", "t": "12:00", "pos": "872.0,942.5", "yaw": "1", "traffic": "busy", "still": "1", "stream": "1" }
+  },
   "coast-night-golden": {
     "about": "The procedural coast's strip at night from the near chase camera, headlights on: sodium lamps with coronas, neon sign bands and blade signs, shop fills on the walks.",
     "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-near", "t": "22:30", "lights": "1", "still": "1", "stream": "1" }
