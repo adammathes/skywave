@@ -581,6 +581,8 @@ impl App {
             })
         });
         next.set_settings_store(store);
+        // The same session: the controls card greeted it already.
+        next.ui.drop_start_controls();
         next.ui.world_loaded();
         *self = next;
         Ok(())
