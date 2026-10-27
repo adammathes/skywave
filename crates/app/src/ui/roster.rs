@@ -19,8 +19,8 @@ pub const MAX_PAINTS: usize = 12;
 /// `(id, seconds from rest to 60 mph, top speed in mph)` of every built-in car, as the sim
 /// measures them (see the module docs).
 const MEASURED: [(&str, f32, f32); 20] = [
-    ("corsair_gtx", 5.60, 155.0),
-    ("palisade_wagon", 12.60, 110.0),
+    ("gannet_gt", 5.60, 155.0),
+    ("homestead_wagon", 12.60, 110.0),
     ("seabreeze_convertible", 12.51, 106.0),
     ("regent_coupe_cabrio", 9.88, 122.0),
     ("halcyon_turbo", 6.83, 146.0),
@@ -46,7 +46,7 @@ const MEASURED: [(&str, f32, f32); 20] = [
 pub struct RosterEntry {
     /// The [`BUILTIN`] id.
     pub id: &'static str,
-    /// The spec's name ("Palisade Wagon").
+    /// The spec's name ("Homestead Wagon").
     pub name: String,
     /// Class, power to weight, driven wheels and gearbox: [`stat_strip`].
     pub stats: String,
@@ -223,19 +223,19 @@ mod tests {
             assert!(r[i].name.is_ascii(), "the HUD font is ASCII");
         }
         assert_eq!(index_of("hovercar"), None);
-        let wagon = &r[index_of("palisade_wagon").unwrap()];
-        assert_eq!(wagon.name, "Palisade Wagon");
+        let wagon = &r[index_of("homestead_wagon").unwrap()];
+        assert_eq!(wagon.name, "Homestead Wagon");
         assert!(wagon.short.ends_with(" kW/t  RWD"), "{}", wagon.short);
         assert!(wagon.stats.starts_with("Wagon   "), "{}", wagon.stats);
         assert!(wagon.stats.ends_with("RWD   3-spd auto"), "{}", wagon.stats);
-        let sports = &r[index_of("corsair_gtx").unwrap()];
+        let sports = &r[index_of("gannet_gt").unwrap()];
         assert!(sports.stats.starts_with("Sports   "), "{}", sports.stats);
         assert!(
             sports.stats.ends_with("RWD   5-spd auto"),
             "{}",
             sports.stats
         );
-        let mut manual = vehicles::builtin_spec("corsair_gtx").unwrap();
+        let mut manual = vehicles::builtin_spec("gannet_gt").unwrap();
         manual.auto = false;
         assert!(stat_strip(&manual).ends_with("5-spd manual"));
     }
@@ -310,14 +310,14 @@ mod tests {
             );
             assert_eq!(car.era, "1980s");
         }
-        // docs/VEHICLES.md: the Corsair 5.6 s and 70 m/s, the Regent 9.9 s and 55 m/s.
-        let corsair = &r[index_of("corsair_gtx").unwrap()];
+        // docs/VEHICLES.md: the Gannet 5.6 s and 70 m/s, the Regent 9.9 s and 55 m/s.
+        let gannet = &r[index_of("gannet_gt").unwrap()];
         assert!(
-            (corsair.zero_to_60_s - 5.6).abs() < 0.2,
+            (gannet.zero_to_60_s - 5.6).abs() < 0.2,
             "{}",
-            corsair.zero_to_60_s
+            gannet.zero_to_60_s
         );
-        assert!((corsair.top_mph * MPS_PER_MPH - 70.0).abs() < 1.5);
+        assert!((gannet.top_mph * MPS_PER_MPH - 70.0).abs() < 1.5);
         // The Basilisk is the quickest and the fastest.
         let basilisk = &r[index_of("basilisk_v12").unwrap()];
         assert!(r.iter().all(|c| c.zero_to_60_s >= basilisk.zero_to_60_s));

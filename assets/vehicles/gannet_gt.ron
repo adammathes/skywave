@@ -1,15 +1,15 @@
-// Corsair GTX: 1980s sports car evoking a low stainless-steel wedge with gull-wing doors.
+// Gannet GT: 1980s sports car evoking a low stainless-steel wedge with gull-wing doors.
 //
 // Intent: light, low and eager. Quick off the line but never brutal; the fun is in the
 // tight steering and a light rear that steps out a little when you lift mid-corner
 // (oversteer_bias > 0, slightly rear-light weight split). Stiff, well-damped springs and
 // a firm anti-roll bar keep the body flat, so the cabin reads "sports car" within seconds.
-// Compare palisade_wagon.ron, which is tuned to be the opposite on every axis.
+// Compare homestead_wagon.ron, which is tuned to be the opposite on every axis.
 //
 // Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
 VehicleSpec(
-    id: "corsair_gtx",
-    name: "Corsair GTX",
+    id: "gannet_gt",
+    name: "Gannet GT",
     era: Eighties,
     year: 1981,
     class: Sports,
@@ -52,5 +52,5 @@ VehicleSpec(
         gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
         radio: "digital_green",
     ),
-    shape: "corsair_gtx.shape.ron",
+    shape: "gannet_gt.shape.ron",
 )

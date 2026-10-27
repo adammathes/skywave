@@ -14,7 +14,7 @@ Scenario(
   radio: "1984_socal",                 // assets/radio/<id>.ron: the dial starts on it
   palette: "socal_1985",               // a world::Palette
   default_time: (17, 40),              // the clock a world starts at, running
-  default_vehicle: "corsair_gtx",      // the car it starts in unless one was picked
+  default_vehicle: "gannet_gt",      // the car it starts in unless one was picked
   years: (1979, 1987),                 // the era: cars of these years are everyday cars
   heroes: [],                          // rare-by-age cars kept on the road (weight >= 0.05)
   stub: false,                         // optional: a world still being built ("coming")

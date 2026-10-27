@@ -3,14 +3,14 @@
 Cars are data. A vehicle is a `VehicleSpec` (RON file in `assets/vehicles/`), a `ShapeSpec` for the parametric mesh, and nothing else. The sim, the renderer, the NPC system and the menu all read the same file.
 
 ## Rules
-- **Inspired by, never copied.** Each car evokes a 1980s archetype (proportions, stance, era details) without reproducing a real model's design. No real brand or model names anywhere, including comments and commit messages. Names are invented, era-flavored (e.g. "Corsair GTX", "Palisade Wagon").
+- **Inspired by, never copied.** Each car evokes a 1980s archetype (proportions, stance, era details) without reproducing a real model's design. No real brand or model names anywhere, including comments and commit messages. Names are invented, era-flavored (e.g. "Gannet GT", "Homestead Wagon").
 - Cars must feel different. Specs encode that difference; the sim must make it legible within 5 seconds of driving.
 - Specs are tuned for fun first, plausibility second, simulation fidelity a distant third.
 
 ## `VehicleSpec` (RON)
 ```
 VehicleSpec(
-  id: "corsair_gtx", name: "Corsair GTX", era: 1980s, year: 1981,          // the model year its archetype is dated to, 1900–2100
+  id: "gannet_gt", name: "Gannet GT", era: 1980s, year: 1981,          // the model year its archetype is dated to, 1900–2100
   class: Sports,                                                            // Sports|Sedan|Wagon|Coupe|Pickup|Van|Hatch|Convertible|Luxury|Muscle|Utility
   mass_kg: 1250, dims_m: (4.3, 1.75, 1.15), wheelbase_m: 2.45, track_m: 1.5,
   cg_height_m: 0.45, cg_fore_aft: 0.48,                                     // fraction of wheelbase from front axle
@@ -24,7 +24,7 @@ VehicleSpec(
   aero: Aero(cd: 0.34, frontal_m2: 1.9, downforce_coef: 0.02),
   feel: Feel(oversteer_bias: 0.2, body_roll: 0.6, engine_sound: "v8_flatplane", shift_jerk: 0.3),
   interior: Interior(dash: "sport_80s", gauges: [Speedo(0,160,mph), Tach(0,8000)], radio: "digital_green"),
-  shape: "corsair_gtx.shape.ron",
+  shape: "gannet_gt.shape.ron",
 )
 ```
 
@@ -43,8 +43,8 @@ or golden.
 |---|---|---|---|---|---|
 | Prescott Landau | 1979 | Pipit Hatch | 1981 | Seabreeze Convertible | 1985 |
 | Bancroft Sedan | 1980 | Buckboard Pickup | 1982 | Burro 4x4 | 1985 |
-| Drayman Van | 1980 | Palisade Wagon | 1983 | Halcyon Turbo | 1986 |
-| Corsair GTX | 1981 | Meadow Minivan | 1984 | Regent Coupe Cabrio | 1987 |
+| Drayman Van | 1980 | Homestead Wagon | 1983 | Halcyon Turbo | 1986 |
+| Gannet GT | 1981 | Meadow Minivan | 1984 | Regent Coupe Cabrio | 1987 |
 | Avocet V8 | 1984 | Basilisk V12 | 1985 | Avocet Spider | 1986 |
 | Longbow Coupe | 1984 | Appaloosa GT | 1985 | Basilisk Roadster | 1986 |
 | Longbow Convertible | 1986 | Appaloosa Convertible | 1987 | | |
@@ -75,7 +75,7 @@ Outputs for feel: speed, RPM, gear, wheel slip (audio + tire marks later), g-for
 A `ShapeSpec` (`assets/vehicles/<id>.shape.ron`, Rust type names as RON struct names, `deny_unknown_fields`) is a few curves lofted into a body of a little more than early-2000s-console density (8–14k exterior triangles, 4–8k in the cabin). Shape space: `x` m from the nose growing rearward, `y` m above the ground, widths are half-widths; the loft is symmetric. Not a toy: panel seams, mirrors, rims, lights and trim must read from 30 m.
 ```
 ShapeSpec(
-  id: "corsair_gtx",                          // matches the VehicleSpec id
+  id: "gannet_gt",                          // matches the VehicleSpec id
   side: [(x, y)...],         // silhouette: top nose→tail (x increasing), then underside back to x = 0; 6–48 points
   plan: [(x, halfwidth)...], // top-down half outline, x from 0 to the length; 2–32 points
   belt: [(x, y)...],         // beltline where the glass starts, held flat beyond its ends
@@ -119,14 +119,14 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 
 | Car | Exterior | Interior | LOD1 | LOD2 |
 |---|---|---|---|---|
-| Corsair | 12,034 | 6,448 | 3,342 | 1,966 |
+| Gannet | 12,034 | 6,448 | 3,342 | 1,966 |
 | Halcyon | 11,952 | 6,508 | 3,350 | 2,086 |
 | Pipit | 11,154 | 7,116 | 3,162 | 1,910 |
 | Seabreeze | 12,014 | 6,886 | 3,266 | 1,974 |
 | Regent | 11,898 | 6,854 | 3,300 | 1,960 |
 | Bancroft | 12,058 | 7,092 | 3,574 | 2,210 |
 | Prescott | 12,690 | 7,272 | 3,654 | 2,302 |
-| Palisade | 13,486 | 7,016 | 3,946 | 2,366 |
+| Homestead | 13,486 | 7,016 | 3,946 | 2,366 |
 | Meadow | 11,566 | 7,140 | 3,438 | 2,026 |
 | Buckboard | 11,614 | 6,352 | 3,228 | 1,984 |
 | Drayman | 12,220 | 6,472 | 3,336 | 1,872 |
@@ -142,7 +142,7 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
-Parked cars (`app::propinst`) are LOD1 of the built-in shapes within 80 m and LOD2 beyond, drawn out to 280 m. The Place gives each a `VehicleClass`; `propinst::PARKED` turns it into a weighted pick among shapes within half a meter of that class's collision box (`world::props::parked_car_size`): sporty cars the Corsair, Halcyon, Pipit, Longbow Coupe or Appaloosa GT; sedans the Bancroft, Prescott, Palisade or Buckboard; wagons the Palisade, Meadow, Drayman or Buckboard; coupes the Seabreeze, Halcyon or Burro; luxury cars the Regent or Bancroft (and a list for each other class but `Utility`, which parks as the wagon). The exotics (Basilisk, Avocet) and the sports cars' open versions never park, and NPC traffic draws from the same fourteen shapes (`vehicles::TRAFFIC_SHAPES`, the first fourteen of `BUILTIN_SHAPES`): they are the player's. Each place parks a shape in at most six paints, two from its palette and four era colors drawn by the era's weights from the place seed, which keeps the parked-car meshes at 24.8 MB on the coast (`docs/PERFORMANCE.md`). Their paint is the car's own palette for a third of them and otherwise the era's street colors, `shape::ERA_1980S_PAINT` (weighted: tan, white, silver and burgundy most, then browns, blues, black, red, the two-tones silver over blue and champagne over brown, greens, creams, gold), passed as `BuildOptions::paint`; each instance gets a slight dust and wear tint.
+Parked cars (`app::propinst`) are LOD1 of the built-in shapes within 80 m and LOD2 beyond, drawn out to 280 m. The Place gives each a `VehicleClass`; `propinst::PARKED` turns it into a weighted pick among shapes within half a meter of that class's collision box (`world::props::parked_car_size`): sporty cars the Gannet, Halcyon, Pipit, Longbow Coupe or Appaloosa GT; sedans the Bancroft, Prescott, Homestead or Buckboard; wagons the Homestead, Meadow, Drayman or Buckboard; coupes the Seabreeze, Halcyon or Burro; luxury cars the Regent or Bancroft (and a list for each other class but `Utility`, which parks as the wagon). The exotics (Basilisk, Avocet) and the sports cars' open versions never park, and NPC traffic draws from the same fourteen shapes (`vehicles::TRAFFIC_SHAPES`, the first fourteen of `BUILTIN_SHAPES`): they are the player's. Each place parks a shape in at most six paints, two from its palette and four era colors drawn by the era's weights from the place seed, which keeps the parked-car meshes at 24.8 MB on the coast (`docs/PERFORMANCE.md`). Their paint is the car's own palette for a third of them and otherwise the era's street colors, `shape::ERA_1980S_PAINT` (weighted: tan, white, silver and burgundy most, then browns, blues, black, red, the two-tones silver over blue and champagne over brown, greens, creams, gold), passed as `BuildOptions::paint`; each instance gets a slight dust and wear tint.
 
 In the game (`app::car`): LOD0 and LOD1 are built when a car is first driven (at startup, or on the first switch to it from the pause menu's Vehicle page or `VehicleNext`, see `docs/CONTROLS_INPUT.md`), with pop-ups down and up, and kept for the session: switching back reuses its mesh ids, so a session registers at most one set per built-in car. Another paint
 (the Vehicle page's paint chooser; the `paint` setting and scene key) registers only what the paint changes,
@@ -158,7 +158,7 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `basilisk_roadster` | the Basilisk with its roof cut away | Convertible | 1,540 kg, same V12, more drag; 4.7 s, 77 m/s, 1.18 g |
 | `avocet_v8` | mid-engined V8 two-seater: pop-ups, side strakes into rear intakes, louvred engine lid, four round tail lamps, five-spoke alloys | Sports | 1,300 kg, ~210 kW flat-plane V8, 5-speed, RWD; light, rev-hungry, sharp turn-in, tail-happy on a lift; 5.1 s, 75 m/s, 1.15 g |
 | `avocet_spider` | the Avocet with its roof off, top under a boot | Convertible | 1,340 kg, same V8, more drag; 5.3 s, 73 m/s, 1.14 g |
-| `corsair_gtx` | gull-wing stainless wedge | Sports | 1,250 kg, ~173 kW, 5-speed, RWD; quick, light rear, pop-up lights; 5.6 s, 70 m/s, 1.08 g |
+| `gannet_gt` | gull-wing stainless wedge | Sports | 1,250 kg, ~173 kW, 5-speed, RWD; quick, light rear, pop-up lights; 5.6 s, 70 m/s, 1.08 g |
 | `longbow_coupe` | front-engined American V8 sports car: long nose, pop-ups, clamshell hood, big glass hatch, slotted rims | Sports | 1,450 kg, ~185 kW V8, 4-speed, RWD; fat torque, huge grip, stiff, mild understeer; 5.9 s, 68 m/s, 1.10 g |
 | `longbow_convertible` | the Longbow as a convertible with a short trunk lid | Convertible | 1,510 kg, same V8, softer, more drag; 6.1 s, 67 m/s, 1.09 g |
 | `appaloosa_gt` | mid-80s pony-car notchback with a small V8: quad lamps, hood scoop, turbine-look alloys | Coupe (on purpose: as a Sports car its 63 m/s would break the Sports > Coupe top-speed ordering against the Halcyon) | 1,400 kg, ~157 kW V8, 5-speed, RWD; the softest sports car: launches hard, leans, lets the tail out; 6.3 s, 63 m/s, 0.95 g |
@@ -171,7 +171,7 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `prescott_landau` | mid-size sedan with a landau vinyl roof and opera windows | Sedan | 1,500 kg, ~110 kW V6, 3-speed, RWD; soft, light steering, nimbler than the Bancroft; 11.4 s, 51 m/s, 0.86 g |
 | `burro_4x4` | small two-door four-wheel-drive utility, spare on the tailgate | Utility | 1,350 kg, ~79 kW four, 5-speed, AWD; short, tall, tippy, scrabbles off the line; 12.1 s, 42 m/s, 0.77 g |
 | `seabreeze_convertible` | boxy mid-size convertible on a front-drive compact platform, white over tan | Convertible | 1,250 kg, ~97 kW four, 3-speed, FWD; soft, bobbing, comfortable understeer; 12.5 s, 48 m/s, 0.83 g |
-| `palisade_wagon` | wood-panel family wagon | Wagon | 1,750 kg, ~110 kW V8, 3-speed, RWD; slow, understeer, lots of body roll; 12.6 s, 49 m/s, 0.76 g |
+| `homestead_wagon` | wood-panel family wagon | Wagon | 1,750 kg, ~110 kW V8, 3-speed, RWD; slow, understeer, lots of body roll; 12.6 s, 49 m/s, 0.76 g |
 | `drayman_van` | full-size panel van | Van | 1,900 kg, ~104 kW six, 3-speed, RWD; tall, tippy, the lowest top speed; 13.5 s, 37 m/s, 0.70 g |
 | `meadow_minivan` | front-drive minivan, wood-grain edition | Van | 1,450 kg, ~86 kW four, 3-speed, FWD; tall, roomy, wallowy; 15.0 s, 44 m/s, 0.73 g |
 
@@ -183,8 +183,8 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Each spec loads and validates (positive mass, monotone gears, torque curve sane).
 - Straight-line: 0–60 mph times within a band per car (`tests/roster.rs`: Sports 4–8 s, Wagon 10–16 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, and a band for each roster car); top speed ordering Sports > Coupe > Sedan > Wagon > Van (every car of a class beats every car of the next).
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
-- Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Corsair, Longbow) beats both Appaloosas.
-- Distinct: all twenty differ pairwise by at least 0.05 s in 0–60 (the Palisade and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
+- Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Gannet, Longbow) beats both Appaloosas.
+- Distinct: all twenty differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Determinism: scripted 10 s input replay produces identical state hashes.
 - Mesh: every shape builds, is manifold enough (no NaN normals), exterior 8k–14k triangles, interior 4k–8k, LOD1 exterior 3k–5k, wheels fit arches, LOD1 ≤ 40% of LOD0; two-tone paint splits low/high with a pinstripe; whitewalls only on the outer sidewall; era paints parse, are weighted as listed and change only the paint; a pickup bed is open over its whole length at every LOD with its floor well under the rail; a spare tire hangs behind the tail; a T-top puts glass in the roof. Convertibles: no body or glass triangle over the cabin between the header and the boot, above the belt (top down), a framed windshield and a boot, a raised top that covers the cabin, and much more sky from the seat than a hardtop.

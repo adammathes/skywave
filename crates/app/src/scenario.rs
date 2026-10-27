@@ -11,7 +11,7 @@
 //!   radio: "1984_socal",                 // assets/radio/<id>.ron
 //!   palette: "socal_1985",               // a world::Palette
 //!   default_time: (17, 40),              // the clock a world starts at, HH, MM
-//!   default_vehicle: "corsair_gtx",      // the car it starts in unless one was picked
+//!   default_vehicle: "gannet_gt",      // the car it starts in unless one was picked
 //!   years: (1979, 1987),                 // the era: cars of these years are everyday cars
 //!   heroes: [],                          // cars rare by age but kept on the road
 //!   stub: false,                         // optional: a world still being built ("coming")
@@ -380,7 +380,7 @@ mod tests {
             ("\"california_coast_80s.ron\"", "\"atlantis.ron\""),
             ("\"socal_1985\"", "\"atlantis\""),
             ("\"1984_socal\"", "\"atlantis\""),
-            ("\"corsair_gtx\"", "\"hovercar\""),
+            ("\"gannet_gt\"", "\"hovercar\""),
             ("heroes: []", "heroes: [\"hovercar\"]"),
         ] {
             let broken = text.replace(from, to);

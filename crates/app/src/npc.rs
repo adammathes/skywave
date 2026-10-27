@@ -622,7 +622,7 @@ mod tests {
 
     /// The coast junction of the `coast-traffic-noon` golden, waiting at the stop line.
     pub(crate) const JUNCTION: &str =
-        "place=coast&car=corsair_gtx&cam=chase-mid&pos=477.5,1001.2&yaw=347";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=477.5,1001.2&yaw=347";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
