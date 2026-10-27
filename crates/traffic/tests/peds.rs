@@ -91,10 +91,11 @@ fn places() -> &'static [Built] {
                 .map(|&(region, ron)| {
                     scope.spawn(move || {
                         let t: RegionTemplate = ron::from_str(ron).expect("parse");
-                        let place = build_place(Seed(1), &t);
+                        let grammar = grammar();
+                        let place = build_place(Seed(1), &t, &grammar);
                         let lanes = LaneGraph::new(&place);
                         let walks = WalkGraph::new(&place, &lanes);
-                        let collider = WorldCollider::build(&place);
+                        let collider = WorldCollider::build(&place, &grammar);
                         Built {
                             name: format!("{region} seed 1"),
                             place,
@@ -108,6 +109,14 @@ fn places() -> &'static [Built] {
             jobs.into_iter().map(|j| j.join().expect("build")).collect()
         })
     })
+}
+
+/// The shipped coast grammar: `build_place` dresses buildings from it.
+fn grammar() -> world::Grammar {
+    ron::from_str(include_str!(
+        "../../../assets/grammar/california_coast_80s.ron"
+    ))
+    .expect("parse grammar")
 }
 
 fn coast() -> &'static Built {
