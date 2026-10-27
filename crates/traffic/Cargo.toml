@@ -1,0 +1,17 @@
+[package]
+name = "traffic"
+description = "Skywave traffic: the lane graph built from a place's roads (lanes, turn tables, stop lines, signal timers)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+skywave-core.workspace = true
+place.workspace = true
+
+[dev-dependencies]
+# The coast tests build the real place from assets/regions/.
+world.workspace = true
+ron.workspace = true

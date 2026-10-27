@@ -82,6 +82,9 @@ pub const CAR_LIGHTS: usize = 4;
 /// inside of the roof and pillars reads as a dark lining, not as bright paint under the
 /// cabin light.
 const CABIN_WALL_TINT: f32 = 0.3;
+/// A car switched to while the old one rolls slower than this keeps its velocity; faster,
+/// it starts at rest, m/s.
+pub const KEEP_SPEED_MPS: f32 = 5.0;
 /// Below this the car counts as fallen out of the world and is put back at its start, m.
 const FLOOR_Y: f32 = -100.0;
 
@@ -276,6 +279,34 @@ impl Drive {
         self.prev = self.state;
         self.roll = [0.0; 4];
         self.prev_roll = [0.0; 4];
+    }
+
+    /// Swaps in the car `spec` (with its body `layout`) where this one is: on the ground
+    /// under it, level, facing the same way; at rest, unless this one was rolling slower
+    /// than [`KEEP_SPEED_MPS`], whose velocity it keeps. The odometer starts again; the
+    /// headlights, the assists and the respawn point stay.
+    pub fn switch_car(&mut self, spec: VehicleSpec, layout: CarLayout, ground: &DriveGround) {
+        let pose = self.pose(1.0);
+        let f = pose.forward();
+        let heading = (-f.x).atan2(-f.z);
+        let p = pose.pos;
+        // Seen from the body's height, so the car stays on the deck it is on.
+        let (y, _) = ground.level_from([p.x, p.z], p.y + 0.5);
+        let mut next = Drive::with_layout(spec, layout, [p.x, y, p.z], heading);
+        next.assists = self.assists;
+        next.headlights = self.headlights;
+        next.start_ground = self.start_ground;
+        next.start_heading = self.start_heading;
+        let speed = self.state.speed_mps;
+        if speed.abs() < KEEP_SPEED_MPS {
+            next.state.vel = self.state.vel;
+            next.state.speed_mps = speed;
+            for w in &mut next.state.wheels {
+                w.spin = speed / vehicle::sim::WHEEL_RADIUS_M;
+            }
+            next.prev = next.state;
+        }
+        *self = next;
     }
 
     /// Once per frame, before the steps: the switches that act on a press.

@@ -464,6 +464,10 @@ impl Gpu {
     /// view and the renderer, not waiting for the swapchain).
     fn draw(&mut self, app: &mut App, alpha: f32) -> Duration {
         app.sync_chunks(&mut self.renderer);
+        // A car driven for the first time this session (and the saved one, at startup).
+        for mesh in app.take_new_meshes() {
+            self.renderer.add_mesh(&mesh);
+        }
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,

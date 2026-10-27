@@ -93,6 +93,13 @@ impl Sound {
         }
     }
 
+    /// The player switched to the car `drive` drives: its engine's voice and its width
+    /// from now on.
+    pub fn set_car(&mut self, drive: &Drive) {
+        self.profile = EngineProfile::from_name(&drive.spec.feel.engine_sound);
+        self.half_width = 0.5 * drive.spec.dims_m[1];
+    }
+
     /// After every sim step: counts a new wall hit and a new curb kick, each with how hard
     /// and on which side of the car it was, so the bump plays to scale.
     pub fn note_step(&mut self, impact: &world::Impact) {
