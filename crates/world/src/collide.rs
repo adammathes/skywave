@@ -678,10 +678,17 @@ impl WorldCollider {
     /// The ground a wheel of [`WHEEL_RADIUS_M`] centered over `[x, z]` rests on, seen from
     /// height `y_from`.
     pub fn ground_from(&self, p: [f32; 2], y_from: f32) -> GroundSample {
+        self.ground_and_step(p, y_from).0
+    }
+
+    /// [`Self::ground_from`], and whether a step's edge rather than the ground under `p`
+    /// gave it.
+    fn ground_and_step(&self, p: [f32; 2], y_from: f32) -> (GroundSample, bool) {
         let (u, y0) = self.under(p, y_from);
         let surface = self.surface_of(u);
         let mut y = y0;
         let mut normal = self.normal_of(u, p);
+        let mut stepped = false;
         let r = WHEEL_RADIUS_M;
         for &i in self.cell_items(&self.step_bins, p) {
             let s = &self.steps[i as usize];
@@ -703,9 +710,10 @@ impl WorldCollider {
             if touch > y {
                 y = touch;
                 normal = [dx / r, h / r, dz / r];
+                stepped = true;
             }
         }
-        GroundSample { y, normal, surface }
+        (GroundSample { y, normal, surface }, stepped)
     }
 
     /// The rise from `before` to `now` across whatever step lies between them: the ground
@@ -770,13 +778,20 @@ impl Ground for WorldCollider {
         if dir[1] > -1e-6 {
             return None;
         }
-        // The ground is flat between steps: intersect at the height under the origin, then
-        // once more at the height under that first hit (for tilted rays).
-        let g0 = self.ground_from([origin[0], origin[2]], origin[1]);
-        let t0 = (origin[1] - g0.y) / -dir[1];
+        // Intersect the ground's tangent plane under the origin, then once more the plane
+        // under that first hit (a Newton step each; exact on planar ground). Matching the
+        // height under the origin alone does not converge on a slope as steep as the ray is
+        // tilted: on a 45° hill a wheel ray along the ground's normal read the wheel as
+        // buried, and the bump stop flung the car. A step's edge is the height a wheel
+        // touches it at, not a surface: that stays a level plane at the touch height.
+        let level =
+            |g: &GroundSample, stepped: bool| if stepped { [0.0, 1.0, 0.0] } else { g.normal };
+        let o = [origin[0], origin[2]];
+        let (g0, s0) = self.ground_and_step(o, origin[1]);
+        let t0 = plane_t(origin, dir, o, g0.y, level(&g0, s0));
         let at = [origin[0] + dir[0] * t0, origin[2] + dir[2] * t0];
-        let g = self.ground_from(at, origin[1]);
-        let t = (origin[1] - g.y) / -dir[1];
+        let (g, s) = self.ground_and_step(at, origin[1]);
+        let t = plane_t(origin, dir, at, g.y, level(&g, s));
         if t > max_len {
             return None;
         }
@@ -786,6 +801,17 @@ impl Ground for WorldCollider {
             friction: g.surface.friction(),
         })
     }
+}
+
+/// Distance along the ray `origin + t * dir` (pointing down) to the plane through
+/// `[at[0], y, at[1]]` with unit normal `n`; to the level plane at `y` where the ray grazes
+/// that one. For a level `n` both are bit-identical to `(origin[1] - y) / -dir[1]`.
+fn plane_t(origin: [f32; 3], dir: [f32; 3], at: [f32; 2], y: f32, n: [f32; 3]) -> f32 {
+    let den = dir[0] * n[0] + dir[1] * n[1] + dir[2] * n[2];
+    if den > -0.1 {
+        return (origin[1] - y) / -dir[1];
+    }
+    ((at[0] - origin[0]) * n[0] + (y - origin[1]) * n[1] + (at[1] - origin[2]) * n[2]) / den
 }
 
 /// Asphalt ribbons and junctions, then sidewalk strips and corners, as the road meshes lay
