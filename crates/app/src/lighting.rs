@@ -295,8 +295,18 @@ impl Bounds {
 /// The nearest [`LIGHTS_PER_DRAW`] of `lights` that reach `bounds` (by distance to the
 /// box, then to its center, then order), as a light set. Allocates nothing.
 pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
+    light_set_ranked(lights, bounds, 0..0)
+}
+
+/// [`light_set`], the lights in `second` (the NPC cars' low beams) taking only the slots
+/// the others leave: no beam crowds out a street lamp or the player's headlights.
+pub fn light_set_ranked(
+    lights: &[PointLight],
+    bounds: &Bounds,
+    second: core::ops::Range<usize>,
+) -> LightSet {
     // Insertion into a short sorted array: most boxes are reached by a handful of lights.
-    let mut best = [(f32::INFINITY, f32::INFINITY, 0usize); LIGHTS_PER_DRAW];
+    let mut best = [(false, f32::INFINITY, f32::INFINITY, 0usize); LIGHTS_PER_DRAW];
     let mut n = 0;
     let center = bounds.center();
     for (i, l) in lights.iter().enumerate().take(MAX_LIGHTS) {
@@ -304,8 +314,14 @@ pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
             continue;
         }
         let p = Vec3::from(l.position);
-        let key = (bounds.distance_squared(p), center.distance_squared(p), i);
-        let worse = |a: &(f32, f32, usize), b: &(f32, f32, usize)| (a.0, a.1) > (b.0, b.1);
+        let key = (
+            second.contains(&i),
+            bounds.distance_squared(p),
+            center.distance_squared(p),
+            i,
+        );
+        type Key = (bool, f32, f32, usize);
+        let worse = |a: &Key, b: &Key| (a.0, a.1, a.2) > (b.0, b.1, b.2);
         if n == LIGHTS_PER_DRAW && !worse(&best[n - 1], &key) {
             continue;
         }
@@ -318,7 +334,7 @@ pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
         n = (n + 1).min(LIGHTS_PER_DRAW);
     }
     let mut set = LightSet::EMPTY;
-    for &(_, _, i) in &best[..n] {
+    for &(_, _, _, i) in &best[..n] {
         set.push(i);
     }
     set
@@ -334,6 +350,8 @@ pub struct FrameLights {
     order: Vec<(f32, u32)>,
     lights: [PointLight; MAX_LIGHTS],
     len: usize,
+    /// The lights that only fill slots the others leave ([`light_set_ranked`]).
+    second: core::ops::Range<usize>,
 }
 
 impl FrameLights {
@@ -344,6 +362,7 @@ impl FrameLights {
             statics,
             lights: [PointLight::omni([0.0; 3], [0.0; 3], 0.0); MAX_LIGHTS],
             len: 0,
+            second: 0..0,
         }
     }
 
@@ -373,6 +392,7 @@ impl FrameLights {
     /// (the street lamps' photocell), all of them when they fit, else those nearest `eye`,
     /// the farthest fading out toward the first left out.
     pub fn gather(&mut self, eye: Vec3, statics_on: bool, dynamic: &[PointLight]) {
+        self.second = 0..0;
         let n = dynamic.len().min(MAX_LIGHTS);
         self.lights[..n].copy_from_slice(&dynamic[..n]);
         self.len = n;
@@ -417,12 +437,22 @@ impl FrameLights {
         }
     }
 
+    /// Ranks the gathered lights in `second` below the rest in every light set (the NPC
+    /// cars' low beams, among the dynamic lights). Call after [`FrameLights::gather`].
+    pub fn set_second(&mut self, second: core::ops::Range<usize>) {
+        self.second = second.start.min(self.len)..second.end.min(self.len);
+    }
+
+    /// The light set of an instance covering `bounds` ([`light_set_ranked`]).
+    pub fn set_for(&self, bounds: &Bounds) -> LightSet {
+        light_set_ranked(self.lights(), bounds, self.second.clone())
+    }
+
     /// Sets each instance's light set from its bounds (`None`: lit by the sun and sky only).
     /// `bounds` and `instances` pair up; extra instances are left alone.
     pub fn assign(&self, bounds: &[Option<Bounds>], instances: &mut [MeshInstance]) {
-        let lights = self.lights();
         for (inst, b) in instances.iter_mut().zip(bounds) {
-            inst.lights = b.map_or(LightSet::EMPTY, |b| light_set(lights, &b));
+            inst.lights = b.map_or(LightSet::EMPTY, |b| self.set_for(&b));
         }
     }
 }

@@ -77,10 +77,11 @@ on the coast (seed 1), vertices plus indices, measured in `parked_car_meshes_sta
 | Four shapes, every paint used (before the full roster) | 152 | 421k | 22.9 MB |
 | Twelve shapes, every paint used | 436 | 1.20M | 65.0 MB |
 | Twelve shapes, 2 palette + 4 era paints per shape per place (shipped) | 144 | 396k | 21.5 MB |
+| The same plus NPC traffic (its era paints are the parked cars'; shares every mesh on the coast) | 144 | 396k | 21.5 MB |
 
 Each place draws its six paints per shape from the era's weights by its seed, so the street
 mix still varies place to place. The test fails above 27 MB (about 1.2x the four-shape set),
-always, not only under `SKYWAVE_ENFORCE_BUDGETS`. The lasting fix is paint as a per-instance
+always, not only under `SKYWAVE_ENFORCE_BUDGETS`, and counts the meshes the traffic builds for itself (`app::npc`: only shape and paint pairs the place does not park; none on the coast). The lasting fix is paint as a per-instance
 attribute (`docs/IDEAS.md`).
 
 ## Quality presets
@@ -115,8 +116,52 @@ cascades and every-other-frame far cascade stay well inside the goldens' toleran
 
 `cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast` streams the
 coast at the native budget (13×13 chunks) and renders it at 1280×800 on wgpu's no-op
-device, printing the renderer's counts per preset. From this container (seed 1, the start
-on the strip, chase camera):
+device, printing the renderer's counts per preset, without traffic and with busy traffic
+(warmed up 20 s, 77 cars live). From this container (seed 1, the start on the strip,
+chase camera, 17:40), 2026-10-27, with the twelve-car roster and NPC traffic (M4 #6):
+
+```
+traffic off: 0 cars
+high, no culling: instances 2829 fwd 2829 shadow [2766, 2766, 2766] (3 cascades) | tris fwd 3221k shadow 9601k a frame | draws 4748
+            high: instances 2829 fwd 837 shadow [80, 402, 1193] (3 cascades) | tris fwd 828k shadow 1863k a frame | draws 1183
+          medium: instances 2829 fwd 837 shadow [80, 403, 1299] (3 cascades) | tris fwd 828k shadow 1278k a frame | draws 655
+            deck: instances 2829 fwd 837 shadow [100, 1085, 0] (2 cascades) | tris fwd 828k shadow 723k a frame | draws 477
+             low: instances 2829 fwd 837 shadow [100, 1057, 0] (2 cascades) | tris fwd 828k shadow 717k a frame | draws 476
+traffic busy: 77 cars
+high, no culling: instances 2899 fwd 2899 shadow [2836, 2836, 2836] (3 cascades) | tris fwd 3365k shadow 10035k a frame | draws 4896
+            high: instances 2899 fwd 838 shadow [82, 406, 1208] (3 cascades) | tris fwd 830k shadow 1906k a frame | draws 1201
+          medium: instances 2899 fwd 838 shadow [82, 406, 1320] (3 cascades) | tris fwd 830k shadow 1311k a frame | draws 661
+            deck: instances 2899 fwd 838 shadow [102, 1105, 0] (2 cascades) | tris fwd 830k shadow 749k a frame | draws 480
+             low: instances 2899 fwd 838 shadow [102, 1080, 0] (2 cascades) | tris fwd 830k shadow 746k a frame | draws 479
+```
+
+From the start few cars are in view (one in the forward pass here): cars appear and vanish
+only out of the camera's view, so most of the pool is off screen.
+
+**Traffic in view.** `traffic_at_a_junction_within_budget` (`platform-native`, not ignored:
+it runs in CI, about 50 s in a debug build, 10 s in release) streams the junction of the
+`coast-traffic-noon` golden at the web budget, busy traffic warmed up 20 s with queued,
+oncoming and crossing cars in view, and renders Deck and Medium with traffic off and busy:
+
+| Junction, 1280×800 | Forward instances | Draws | Forward tris | Shadow tris |
+|---|---|---|---|---|
+| Deck, traffic off | 395 | 273 | 394k | 614k |
+| Deck, busy (76 cars, 4 in the forward pass) | 399 | 281 | 408k | 671k |
+| Medium, traffic off | 395 | 396 | 394k | 1109k |
+| Medium, busy | 399 | 414 | 408k | 1201k |
+
+Cars of one mesh share one instanced draw, so four cars cost eight draws at Deck (their
+level-1 meshes in the forward pass and the cascades), about 3.5k triangles each forward and
+again per cascade. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 310 draws, 450k
+forward and 740k shadow triangles; Medium 455 draws, 450k and 1320k** (the busy numbers plus
+about 10%), and if fewer than three NPC cars are in the forward pass. The traffic sim (step
+and populate, busy) has a median under 0.5 ms a step in a debug build (`app::npc` and
+`traffic` budget tests).
+
+The scene itself had grown since the first measurement (below: 725k forward triangles and
+436 draws at Deck), before traffic, with the detailed cars and props.
+
+The first measurement (same command, no traffic, an earlier `main`):
 
 ```
 high, no culling: instances 2828 fwd 2828 shadow [2765, 2765, 2765] (3 cascades) | tris fwd 2878k shadow 8572k a frame | draws 4452
