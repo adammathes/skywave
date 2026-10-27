@@ -11,6 +11,7 @@ VehicleSpec(
     id: "burro_4x4",
     name: "Burro 4x4",
     era: Eighties,
+    year: 1985,
     class: Utility,
 
     mass_kg: 1350,

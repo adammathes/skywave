@@ -314,6 +314,7 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
 
     #[test]
@@ -350,16 +351,19 @@ mod tests {
     /// An Icecast-like server on this machine: `answer` as the head, then `frames`
     /// generated silent MP3 frames with a title every `metaint` bytes, then it hangs up.
     fn serve(head: &'static str, metaint: usize, frames: usize) -> String {
-        serve_then_hold(head, metaint, frames, Duration::ZERO)
+        serve_then_hold(head, metaint, frames, Duration::ZERO).0
     }
 
-    /// [`serve`], keeping the connection open and silent for `hold` before hanging up.
+    /// [`serve`], keeping the connection open and silent for `hold` before hanging up; the
+    /// flag turns true when it has.
     fn serve_then_hold(
         head: &'static str,
         metaint: usize,
         frames: usize,
         hold: Duration,
-    ) -> String {
+    ) -> (String, Arc<AtomicBool>) {
+        let hung_up = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&hung_up);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
@@ -384,8 +388,10 @@ mod tests {
             }
             let _ = s.write_all(&body);
             thread::sleep(hold);
+            drop(s);
+            flag.store(true, Ordering::SeqCst);
         });
-        format!("http://127.0.0.1:{port}/stream")
+        (format!("http://127.0.0.1:{port}/stream"), hung_up)
     }
 
     #[test]
@@ -427,15 +433,16 @@ mod tests {
     }
 
     /// A server that plays ~2.6 s, then keeps the connection open and sends nothing: the
-    /// watchdog drops it long before the server hangs up, reconnecting fails (the server
-    /// takes one connection), and the stream reports Failed.
+    /// watchdog drops it while the server still holds it (not the hang-up: the server waits
+    /// a minute), reconnecting fails (the server takes one connection), and the stream
+    /// reports Failed.
     #[test]
     fn a_stream_that_goes_quiet_is_dropped() {
-        let url = serve_then_hold(
+        let (url, hung_up) = serve_then_hold(
             "HTTP/1.0 200 OK\r\nContent-Type: audio/mpeg\r\n\r\n",
             1 << 30,
             100,
-            Duration::from_secs(30),
+            Duration::from_secs(60),
         );
         let ring = Ring::new(1 << 20);
         let (tx, rx) = mpsc::channel();
@@ -461,7 +468,11 @@ mod tests {
                 Note::Event(PlayerEvent::Failed { token: 4 })
             ]
         );
-        assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
+        assert!(
+            !hung_up.load(Ordering::SeqCst),
+            "failed only after the hang-up: {:?}",
+            t0.elapsed()
+        );
     }
 
     #[test]

@@ -7,12 +7,14 @@
 //! with the button or when the window loses focus. Platforms that refuse both just keep a
 //! free cursor; the raw motion still drives the look.
 //!
-//! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--frames N]
-//! [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--radio-off]
+//! Usage: `skywave [--seed N] [--car ID] [--scenario ID] [--scene KEY=VALUE]... [--stats]
+//! [--frames N] [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--radio-off]
 //! [--music DIR] [--version]`.
 //! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
-//! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are
-//! `--scene seed=N` and `--scene car=ID`. `--stats` prints the adapter, the surface and a
+//! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N`, `--car ID` and `--scenario ID`
+//! are `--scene seed=N`, `--scene car=ID` and `--scene scenario=ID` (a world,
+//! `assets/scenarios/`; without one or a place the game starts in the world last picked on
+//! the World page, and picking another there reloads the game in it). `--stats` prints the adapter, the surface and a
 //! line of frame statistics every second to stderr (format in `docs/PERFORMANCE.md`), with
 //! GPU time per pass where the adapter has timestamp queries; it also prints the detected
 //! gamepads at startup and as they connect (otherwise the info log has them,
@@ -59,7 +61,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use app::pacing::{frame_interval, Pacer};
-use app::{App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, MOUSE_RIGHT};
+use app::{
+    App, GpuInfo, InputMapper, Key, Quality, RawInput, SceneSetup, SettingsStore, MOUSE_RIGHT,
+};
 use pad::Pads;
 use render::{RenderStats, Renderer, GPU_PARTS, GPU_PART_NAMES, GPU_PASSES, GPU_PASS_NAMES};
 use winit::application::ApplicationHandler;
@@ -162,6 +166,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--car" => {
                 let v = args.next().ok_or("--car needs a vehicle id")?;
                 opts.scene.set("car", &v)?;
+            }
+            "--scenario" => {
+                let v = args.next().ok_or("--scenario needs a world id")?;
+                opts.scene.set("scenario", &v)?;
             }
             "--scene" => {
                 let kv = args.next().ok_or("--scene needs key=value")?;
@@ -625,21 +633,9 @@ impl Gpu {
                 },
             );
         }
-        let mut renderer = Renderer::with_options(
-            &device,
-            &queue,
-            config.format,
-            (config.width, config.height),
-            options,
-        );
-        for mesh in app.meshes() {
-            renderer.add_mesh(mesh);
-        }
-        renderer.reserve_instances(app.max_instances());
-        let map = app.map_image();
-        renderer.upload_map(map.w, map.h, &map.rgba);
+        let (renderer, timing) = build_renderer(&device, &queue, &config, app, opts);
         if opts.stats {
-            let on = renderer.enable_gpu_timing();
+            let on = timing;
             eprintln!(
                 "gpu timing: {}",
                 if on && renderer.stats().gpu_parts {
@@ -660,6 +656,11 @@ impl Gpu {
             renderer,
             panel_hz,
         })
+    }
+
+    /// A new renderer for `app`, which just moved to another world.
+    fn reload(&mut self, app: &App, opts: &Options) {
+        self.renderer = build_renderer(&self.device, &self.queue, &self.config, app, opts).0;
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -746,6 +747,33 @@ impl Gpu {
     fn stats(&self) -> render::RenderStats {
         self.renderer.stats()
     }
+}
+
+/// A renderer for `app` with what it draws from uploaded (its meshes, instance room, map
+/// and stills), and with `--stats` GPU timing on where the adapter has it (true then).
+fn build_renderer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    config: &wgpu::SurfaceConfiguration,
+    app: &App,
+    opts: &Options,
+) -> (Renderer, bool) {
+    let options = render::RendererOptions {
+        culling: !opts.no_cull,
+        ..app.renderer_options()
+    };
+    let size = (config.width, config.height);
+    let mut renderer = Renderer::with_options(device, queue, config.format, size, options);
+    for mesh in app.meshes() {
+        renderer.add_mesh(mesh);
+    }
+    renderer.reserve_instances(app.max_instances());
+    let map = app.map_image();
+    renderer.upload_map(map.w, map.h, &map.rgba);
+    let (w, h, rgba) = app.stills();
+    renderer.upload_stills(w, h, rgba);
+    let timing = opts.stats && renderer.enable_gpu_timing();
+    (renderer, timing)
 }
 
 struct Shell {
@@ -951,6 +979,20 @@ impl ApplicationHandler for Shell {
                     event_loop.exit();
                     return;
                 }
+                if let Some(world) = self.app.take_world_pick() {
+                    match self.app.switch_world(&self.opts.scene, world) {
+                        Ok(()) => {
+                            // The new world's radio starts off: silence the old one's.
+                            if let Some(player) = &mut self.radio {
+                                player.command(&audio::RadioCommand::Stop);
+                            }
+                            if let Some(gpu) = &mut self.gpu {
+                                gpu.reload(&self.app, &self.opts);
+                            }
+                        }
+                        Err(e) => log::warn!("{e}; staying in this world"),
+                    }
+                }
                 let Some(gpu) = &mut self.gpu else {
                     return;
                 };
@@ -1038,7 +1080,7 @@ fn main() -> ExitCode {
                 eprintln!("skywave: {e}");
             }
             eprintln!(
-                "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] \
+                "usage: skywave [--seed N] [--car ID] [--scenario ID] [--scene KEY=VALUE]... [--stats] \
                  [--frames N [--exit]] [--no-vsync] [--quality low|battery|deck|medium|high|ultra] \
                  [--no-cull] [--no-prepass] [--radio-off] [--music DIR] [--version]"
             );
@@ -1066,7 +1108,9 @@ fn main() -> ExitCode {
     } else {
         log::info!("{}", pads.summary());
     }
-    let mut app = match App::from_setup(&opts.scene) {
+    let store = settings::FileStore::from_env();
+    let scene = opts.scene.clone().with_saved_world(store.load().as_deref());
+    let mut app = match App::from_setup(&scene) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("skywave: {e}");
@@ -1075,7 +1119,7 @@ fn main() -> ExitCode {
     };
     app.set_can_quit(true);
     app.set_stream_budget(app::stream::StreamBudget::NATIVE);
-    app.set_settings_store(Box::new(settings::FileStore::from_env()));
+    app.set_settings_store(Box::new(store));
     let opts_frames = opts.frames;
     // The radio plays through the sound sink: without a device (or with --radio-off) its
     // commands are dropped, as on a web page without the player glue.
@@ -1168,6 +1212,11 @@ mod tests {
         assert!(args(&["--scene", "zoom=2"]).is_err());
         assert!(args(&["--seed"]).is_err());
         assert!(args(&["--car"]).is_err());
+        assert!(args(&["--scenario"]).is_err());
+        let world = args(&["--scenario", "inland_basin_2001"]).unwrap().scene;
+        assert_eq!((world.scenario, world.place), (1, app::PlaceKey::Coast));
+        let unknown = args(&["--scenario", "atlantis"]).unwrap().scene;
+        assert!(unknown.unknown_scenario && unknown.scenario == 0);
         assert!(args(&["--seed", "x"]).is_err());
         assert!(args(&["--fast"]).is_err());
         assert_eq!(args(&["--help"]), Err(String::new()));

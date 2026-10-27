@@ -10,6 +10,7 @@ VehicleSpec(
     id: "bancroft_sedan",
     name: "Bancroft Sedan",
     era: Eighties,
+    year: 1980,
     class: Sedan,
 
     mass_kg: 1750,

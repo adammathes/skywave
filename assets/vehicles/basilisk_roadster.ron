@@ -8,6 +8,7 @@ VehicleSpec(
     id: "basilisk_roadster",
     name: "Basilisk Roadster",
     era: Eighties,
+    year: 1986,
     class: Convertible,
 
     mass_kg: 1540,
