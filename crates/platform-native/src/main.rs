@@ -1237,34 +1237,38 @@ mod tests {
         }
     }
 
-    /// The coast junction of the `coast-traffic-noon` golden, busy traffic warmed up and
-    /// held still (queued, oncoming and crossing cars in view).
+    /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
+    /// warmed up and held still (queued, oncoming and crossing cars and people on the walks
+    /// in view).
     const JUNCTION: &str = "?seed=1&place=coast&car=corsair_gtx&cam=chase-mid&t=12:00\
                             &pos=477.5,1001.2&yaw=347&still=1";
 
-    /// Deck and Medium at [`JUNCTION`] with busy traffic: at most this many draws, forward
-    /// and shadow triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus
-    /// about 10%.
+    /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
+    /// draws, forward and shadow triangles a frame (`docs/PERFORMANCE.md`): the measured
+    /// numbers plus about 10%.
     const JUNCTION_BUDGET: [(Quality, u32, u64, u64); 2] = [
         (Quality::Deck, DECK_DRAWS, DECK_TRIS, DECK_SHADOW),
         (Quality::Medium, MEDIUM_DRAWS, MEDIUM_TRIS, MEDIUM_SHADOW),
     ];
-    // Measured over 4 frames driving at 100 km/h (4 NPC cars in the forward pass, 76 live):
-    // the most draws in a frame (the first, which draws every cascade; at Deck the depth
-    // pre-pass draws the forward pass's meshes twice), forward triangles, and shadow
-    // triangles a frame (the far cascade is kept while its map covers the view):
-    // Deck 950 draws, 410k forward and 381k shadow triangles; Medium 1025, 410k, 790k.
-    const DECK_DRAWS: u32 = 1050;
-    const DECK_TRIS: u64 = 450_000;
+    // Measured over 4 frames driving at 100 km/h (debug and release agree; 186 car and
+    // figure-part instances in the forward pass: 4 cars and 14 people of 76 cars and 41
+    // people live): the most draws in a frame (the first, which draws every cascade; at
+    // Deck the depth pre-pass draws the forward pass's meshes twice), forward triangles,
+    // and shadow triangles a frame (the far cascade is kept while its map covers the view):
+    // Deck 1145 draws, 425k forward and 382k shadow triangles; Medium 1141, 425k, 793k.
+    const DECK_DRAWS: u32 = 1260;
+    const DECK_TRIS: u64 = 465_000;
     const DECK_SHADOW: u64 = 420_000;
-    const MEDIUM_DRAWS: u32 = 1130;
-    const MEDIUM_TRIS: u64 = 450_000;
+    const MEDIUM_DRAWS: u32 = 1255;
+    const MEDIUM_TRIS: u64 = 465_000;
     const MEDIUM_SHADOW: u64 = 870_000;
+    /// Instances one pedestrian adds: a figure's parts.
+    const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 
-    /// What busy traffic in view costs the GPU at a coast junction on the no-op device,
-    /// streamed at the web budget: the cars are drawn (more instances in the forward pass
-    /// than without traffic), and under `SKYWAVE_ENFORCE_BUDGETS` Deck and Medium stay
-    /// within [`JUNCTION_BUDGET`].
+    /// What busy traffic and pedestrians in view cost the GPU at a coast junction on the
+    /// no-op device, streamed at the web budget: the cars and people are drawn (at least
+    /// three cars and three figures' parts more in the forward pass than without them), and
+    /// under `SKYWAVE_ENFORCE_BUDGETS` Deck and Medium stay within [`JUNCTION_BUDGET`].
     #[test]
     fn traffic_at_a_junction_within_budget() {
         let runs = [
@@ -1279,9 +1283,9 @@ mod tests {
             started.elapsed().as_secs_f64()
         );
         for ((q, a), (_, b)) in off.iter().zip(&busy) {
-            let cars = b.instances_drawn - a.instances_drawn;
-            eprintln!("{q:?}: {cars} NPC cars in the forward pass");
-            assert!(cars >= 3, "{q:?}: {cars} cars in view");
+            let npcs = b.instances_drawn - a.instances_drawn;
+            eprintln!("{q:?}: {npcs} NPC car and figure-part instances in the forward pass");
+            assert!(npcs >= 3 + 3 * FIGURE_PARTS, "{q:?}: {npcs} in view");
             let &(_, draws, fwd, shadow) = JUNCTION_BUDGET.iter().find(|j| j.0 == *q).unwrap();
             if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
                 assert!(b.draws <= draws, "{q:?}: {} draws", b.draws);
@@ -1335,7 +1339,11 @@ mod tests {
         .unwrap();
         let size = (1280, 800);
         let (mut app, mut r) = streamed(query, stream, &device, &queue, size);
-        eprintln!("{query}: {} cars", app.traffic_count());
+        eprintln!(
+            "{query}: {} cars, {} people",
+            app.traffic_count(),
+            app.pedestrian_count()
+        );
         let view = target(&device, size);
         let mut out = Vec::new();
         for &(label, q, culling) in runs {

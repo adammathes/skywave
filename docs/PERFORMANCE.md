@@ -109,6 +109,15 @@ mix still varies place to place. The test fails above 27 MB (about 1.2x the four
 always, not only under `SKYWAVE_ENFORCE_BUDGETS`, and counts the meshes the traffic builds for itself (`app::npc`: only shape and paint pairs the place does not park; none on the coast). The lasting fix is paint as a per-instance
 attribute (`docs/IDEAS.md`).
 
+## Pedestrian figure meshes
+
+Pedestrians are instances of eight figures per place, 13 part meshes each, built the first
+time traffic is on (`app::peds`). On the coast (seed 1): 104 meshes, 8.3k triangles,
+266 kB (vertices plus indices), measured in `figure_meshes_stay_within_budget`, which fails
+above **3 MB** always. Each figure added costs a draw per part in view per pass, not
+memory: eight is the trade between a varied crowd and the draw budget below (twelve
+figures drew about 50 more at Deck on the busiest block).
+
 ## Quality presets
 
 Settings → Video → Quality. `Settings::quality` is `None` until the player picks one; then
@@ -228,26 +237,40 @@ only out of the camera's view, so most of the pool is off screen.
 
 **Traffic in view.** `traffic_at_a_junction_within_budget` (`platform-native`, not ignored:
 it runs in CI, about 50 s in a debug build, 10 s in release) streams the junction of the
-`coast-traffic-noon` golden at the web budget, busy traffic warmed up 20 s with queued,
-oncoming and crossing cars in view, and renders Deck and Medium with traffic off and busy:
+`coast-traffic-noon` golden at the web budget, busy traffic and pedestrians warmed up with
+queued, oncoming and crossing cars and people on the walks in view, and renders Deck and
+Medium with traffic off and busy:
 
 | Junction, 1280×800 | Forward instances | Draws | Forward tris | Shadow tris |
 |---|---|---|---|---|
 | Deck, traffic off | 395 | 273 | 394k | 614k |
-| Deck, busy (76 cars, 4 in the forward pass) | 399 | 281 | 408k | 671k |
+| Deck, busy cars only (76 cars, 4 in the forward pass; before pedestrians) | 399 | 281 | 408k | 671k |
+| Deck, busy cars and people (41 people, 14 in the forward pass) | 581 | 385 | 422k | 672k |
 | Medium, traffic off | 395 | 396 | 394k | 1109k |
-| Medium, busy | 399 | 414 | 408k | 1201k |
+| Medium, busy cars only (before pedestrians) | 399 | 414 | 408k | 1201k |
+| Medium, busy cars and people | 581 | 530 | 422k | 1204k |
 
 Cars of one mesh share one instanced draw, so four cars cost eight draws at Deck (their
 level-1 meshes in the forward pass and the cascades), about 3.5k triangles each forward and
-again per cascade. Those numbers are the last frame of a still camera. Since the GPU cuts
-the test drives the camera (as above) and counts the most draws in a frame and the mean
-shadow triangles: busy, **Deck 950 draws, 410k forward, 381k shadow; Medium 1025, 410k,
-790k**. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1050 draws, 450k forward
-and 420k shadow triangles; Medium 1130 draws, 450k and 870k** (about 10% over), and if
-fewer than three NPC cars are in the forward pass. The traffic sim (step
-and populate, busy) has a median under 0.5 ms a step in a debug build (`app::npc` and
-`traffic` budget tests).
+again per cascade. A person is 13 part instances of about 1k triangles in all; people drawn
+as one figure share its 13 draws per pass, so the draws grow with the figures in view (at
+most 8 × 13 per pass), not the people, and only people within 40 m cast shadows. Those
+numbers are the last frame of a still camera. Since the GPU cuts the test drives the camera
+(as above) and counts the most draws in a frame and the mean shadow triangles: busy, **Deck
+1145 draws, 425k forward, 382k shadow; Medium 1141, 425k, 793k** (at Deck the depth
+pre-pass draws the forward pass's meshes twice; the most draws come in the first frame,
+which draws every cascade). Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1260
+draws, 465k forward and 420k shadow triangles; Medium 1255 draws, 465k and 870k** (about
+10% over), and if fewer than three cars' and three people's instances more are in the
+forward pass than with traffic off. The traffic sim (step and populate, busy) and the
+pedestrian sim (busy) each have a median under 0.5 ms a step in a debug build
+(`app::npc`, `app::peds` and `traffic` budget tests).
+
+The coast's busiest block (the `coast-peds-noon` golden, 95 cars and 119 people live, 349
+more instances in the forward pass), same measurement before the GPU cuts (a still
+camera, the last frame), release: Deck 371 draws with traffic off, 528 busy; Medium 623
+and 859. Forward triangles 857k and 886k, shadow 1191k and 1243k at Deck. With twelve
+figures it was 580 at Deck, and 632 with every person casting a shadow.
 
 The scene itself had grown since the first measurement (below: 725k forward triangles and
 436 draws at Deck), before traffic, with the detailed cars and props.

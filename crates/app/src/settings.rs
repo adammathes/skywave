@@ -255,7 +255,7 @@ pub struct Settings {
     pub debug_overlay: bool,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
     pub clock_speed: f32,
-    /// NPC traffic density (a scene's `traffic=` overrides it for the session).
+    /// NPC traffic and pedestrian density (a scene's `traffic=` overrides it for the session).
     pub traffic: traffic::Density,
     /// The minimap at the bottom left.
     pub minimap: bool,
