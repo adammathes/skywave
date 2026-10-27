@@ -593,6 +593,12 @@ What could not be verified without a GPU here:
 - **Dynamic casters in the far cascade**: a moving NPC car anywhere in it makes it redraw
   on its interval; a separate small map (or leaving cars beyond 100 m out of it) would let
   it be kept while traffic moves.
+- **Downtown junctions at Busy**: on the map-edges coast the downtown junction at
+  1143.0,1072.5 heading -76 (towers both sides) draws far past the junction budget, busy:
+  Medium 1714–1778 draws, 951–1005 in the median frame, 1.14–1.23M forward and 2.0–2.1M
+  shadow triangles; Deck 2015–2044, 1294–1305, 1.14–1.23M, 1.19M (against Medium 555
+  median draws and 470k forward triangles when it was set). The towers' facades and
+  shadows, not the cars: measure there first.
 - **Mailbox vs FIFO** on gamescope for latency at 90 Hz.
 - **Far terrain detail level** (a coarser mesh at Low) and **chunk facade LOD beyond 400 m**
   (`docs/RENDERING.md`), not implemented.
