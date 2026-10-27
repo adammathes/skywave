@@ -1,5 +1,6 @@
-//! The traffic's per-frame paths allocate nothing: busy traffic in the test town at night
-//! (low beams, glowing lamps, voices), the sim stepped and the scene drawn every frame.
+//! The traffic's per-frame paths allocate nothing: busy traffic and pedestrians in the test
+//! town at night (low beams, glowing lamps, voices, posed figures), the sims stepped and the
+//! scene drawn every frame.
 //! `cargo test -p app --test traffic`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -41,6 +42,7 @@ fn stepping_and_drawing_traffic_allocates_nothing() {
     app.update(&input, 1.0 / 60.0);
     app.scene_view(0.5, 16.0 / 9.0);
     assert!(app.traffic_count() > 50, "{}", app.traffic_count());
+    assert!(app.pedestrian_count() > 20, "{}", app.pedestrian_count());
     let before = allocations();
     let mut drawn = 0;
     for frame in 0..600 {
