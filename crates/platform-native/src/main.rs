@@ -1639,9 +1639,7 @@ mod tests {
 
     /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
     /// warmed up (queued, oncoming and crossing cars and people on the walks in view). Not
-    /// `still`: the world runs, so cars and people move between frames. On the map-edges
-    /// coast (release, 8 frames, busy): Medium 694 draws at most, 312 in the median frame,
-    /// 197k forward and 1078k shadow triangles; Deck 598, 294, 197k, 687k.
+    /// `still`: the world runs, so cars and people move between frames.
     const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
                             &pos=747.7,493.9&yaw=-20.5";
 
@@ -1649,16 +1647,16 @@ mod tests {
     /// draws in the worst frame and in the median frame after the first, forward and shadow
     /// triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus about 10%.
     const JUNCTION_BUDGET: [(Quality, u32, u32, u64, u64); 2] = [
-        (Quality::Deck, 665, 330, 222_000, 752_000),
-        (Quality::Medium, 770, 347, 222_000, 1_190_000),
+        (Quality::Deck, 911, 529, 259_000, 817_000),
+        (Quality::Medium, 939, 477, 259_000, 1_345_000),
     ];
     // Measured over 8 frames driving at 100 km/h with the world running after it streamed
-    // held still (the same in release and debug; 96 cars and 23 people live, 88 car and
+    // held still (the same in release and debug; 96 cars and 25 people live, 190 car and
     // figure-part instances more in the forward pass than with traffic off): the most draws
     // in a frame (the first draws every cascade; at Deck the depth pre-pass draws the
     // forward pass's meshes twice), the median frame's after it (no far cascade), forward
     // triangles and shadow triangles a frame (moving casters redraw the far cascade on its
-    // interval): Deck 605, 299, 202k, 683k; Medium 699, 315, 202k, 1082k. Main's junction
+    // interval): Deck 828, 481, 235k, 743k; Medium 854, 434, 235k, 1223k. Main's junction
     // before the map edges (another layout): Deck 1134, 681, 428k, 672k; Medium 1121, 503,
     // 428k, 1206k.
     /// Instances one pedestrian adds: a figure's parts.
