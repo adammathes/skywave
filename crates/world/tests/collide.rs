@@ -15,9 +15,12 @@ use world::props::PropKind;
 use world::{resolve, WorldCollider};
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 
 fn grammar() -> world::Grammar {
-    ron::from_str(GRAMMAR).expect("parse grammar")
+    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
+    g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
+    g
 }
 
 const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");

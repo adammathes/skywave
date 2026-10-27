@@ -14,9 +14,12 @@ use world::procgen::{
 use world::template::RegionTemplate;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 
 fn grammar() -> world::Grammar {
-    ron::from_str(GRAMMAR).expect("parse grammar")
+    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
+    g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
+    g
 }
 
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");

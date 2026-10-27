@@ -19,6 +19,9 @@ use core::fmt;
 
 use place::{BuildingUse, Era, StyleTag, ZoneId};
 
+use crate::signs::letters::LetterStyle;
+use crate::signs::lexicon::{Form, Lexicon, LexiconError};
+use crate::signs::pictogram::Pictogram;
 use crate::template::{CountRange, Range};
 
 /// Every style a grammar must give rules for, in `StyleTag` order.
@@ -50,6 +53,10 @@ pub struct Grammar {
     pub styles: Vec<StyleRules>,
     pub signs: SignRules,
     pub lots: LotRules,
+    /// The words `signs.lexicon` names (`assets/grammar/lexicon.ron`), parsed beside the
+    /// grammar and attached by its loader; not part of the grammar file.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub lexicon: Lexicon,
 }
 
 /// A value per kind of use.
@@ -417,6 +424,45 @@ pub struct SignRules {
     pub lit_box_256: u32,
     /// Shops open late.
     pub shop_lit_256: u32,
+    /// The id of the lexicon the wordmarks draw their words from.
+    pub lexicon: String,
+    /// What the shops with signs sell, with integer weights, and how each is pictured.
+    pub trades: Vec<TradeRule>,
+    /// Wordmark forms with integer weights.
+    pub forms: Vec<(Form, u32)>,
+    /// Lettering styles with integer weights.
+    pub wordmarks: Vec<(LetterStyle, u32)>,
+    /// Signs that carry a secondary line (from their trade's `lines`).
+    pub line_256: u32,
+    /// No two signs closer than this share a wordmark or a name, m.
+    pub name_radius: f32,
+}
+
+/// One trade a sign may advertise.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct TradeRule {
+    /// A word of the lexicon's `trades`.
+    pub trade: String,
+    pub weight: u32,
+    /// Its pictograms with integer weights; empty for wordmark-only signs.
+    pub pictograms: Vec<(Pictogram, u32)>,
+    /// Its secondary lines with integer weights.
+    pub lines: Vec<(Line, u32)>,
+    /// Descriptors it never takes: pairs that would name a well-known business.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub descriptors_out: Vec<String>,
+}
+
+/// A secondary line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Line {
+    /// A word of the lexicon's `lines`.
+    Word(String),
+    /// `SINCE` and a year before the era.
+    Since,
 }
 
 impl SignRules {
@@ -459,7 +505,7 @@ pub struct LotRules {
 }
 
 /// Why [`Grammar::validate`] rejected a grammar. `field` names are dotted RON paths.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GrammarError {
     EmptyTemplate,
     /// No rules for a style in a zone.
@@ -471,6 +517,14 @@ pub enum GrammarError {
     Bad {
         style: Option<StyleTag>,
         field: &'static str,
+    },
+    /// The attached lexicon is broken.
+    Lexicon(LexiconError),
+    /// `signs.lexicon` is not the attached lexicon's id, or a sign rule names a word the
+    /// lexicon lacks.
+    Word {
+        field: &'static str,
+        word: String,
     },
 }
 
@@ -486,6 +540,10 @@ impl fmt::Display for GrammarError {
                 field,
             } => write!(f, "{s:?}: {field} is invalid"),
             GrammarError::Bad { style: None, field } => write!(f, "{field} is invalid"),
+            GrammarError::Lexicon(e) => write!(f, "lexicon: {e}"),
+            GrammarError::Word { field, word } => {
+                write!(f, "{field}: {word:?} is not in the lexicon")
+            }
         }
     }
 }
@@ -540,6 +598,54 @@ impl Grammar {
         }
         if s.shop_lit_256 > 256 {
             return Err(bad("signs.shop_lit_256"));
+        }
+        self.lexicon.validate().map_err(GrammarError::Lexicon)?;
+        let word = |field, word: &str| GrammarError::Word {
+            field,
+            word: word.into(),
+        };
+        if s.lexicon != self.lexicon.id {
+            return Err(word("signs.lexicon", &s.lexicon));
+        }
+        if s.trades.iter().map(|t| t.weight).sum::<u32>() == 0 {
+            return Err(bad("signs.trades"));
+        }
+        for t in &s.trades {
+            if !self.lexicon.trades.contains(&t.trade) {
+                return Err(word("signs.trades", &t.trade));
+            }
+            if t.pictograms.iter().any(|p| p.1 == 0) || t.lines.iter().any(|l| l.1 == 0) {
+                return Err(bad("signs.trades"));
+            }
+            if let Some(d) = t
+                .descriptors_out
+                .iter()
+                .find(|d| !self.lexicon.descriptors.contains(d))
+            {
+                return Err(word("signs.trades.descriptors_out", d));
+            }
+            if t.descriptors_out.len() >= self.lexicon.descriptors.len() {
+                return Err(bad("signs.trades"));
+            }
+            for (l, _) in &t.lines {
+                if let Line::Word(w) = l {
+                    if !self.lexicon.lines.contains(w) {
+                        return Err(word("signs.trades.lines", w));
+                    }
+                }
+            }
+        }
+        if s.forms.iter().map(|f| f.1).sum::<u32>() == 0 {
+            return Err(bad("signs.forms"));
+        }
+        if s.wordmarks.iter().map(|w| w.1).sum::<u32>() == 0 {
+            return Err(bad("signs.wordmarks"));
+        }
+        if s.line_256 > 256 {
+            return Err(bad("signs.line_256"));
+        }
+        if !s.name_radius.is_finite() || s.name_radius < 0.0 {
+            return Err(bad("signs.name_radius"));
         }
         let l = &self.lots;
         if !positive(l.front_min_yard) {
@@ -652,11 +758,14 @@ fn range(r: Range) -> bool {
     r.0.is_finite() && r.1.is_finite() && r.0 >= 0.0 && r.0 <= r.1
 }
 
-/// The shipped coast grammar, for this crate's tests.
+/// The shipped coast grammar with its lexicon, for this crate's tests.
 #[cfg(test)]
 pub(crate) fn coast_80s() -> Grammar {
     let text = include_str!("../../../assets/grammar/california_coast_80s.ron");
-    ron::from_str(text).expect("parse")
+    let mut g: Grammar = ron::from_str(text).expect("parse");
+    let lexicon = include_str!("../../../assets/grammar/lexicon.ron");
+    g.lexicon = ron::from_str(lexicon).expect("parse lexicon");
+    g
 }
 
 #[cfg(test)]
@@ -952,8 +1061,16 @@ mod tests {
         let g = coast_80s();
         let text =
             ron::ser::to_string_pretty(&g, ron::ser::PrettyConfig::default()).expect("serialize");
-        let back: Grammar = ron::from_str(&text).expect("parse back");
+        let mut back: Grammar = ron::from_str(&text).expect("parse back");
+        // The lexicon is a file of its own.
+        assert_eq!(back.lexicon, Lexicon::default());
+        back.lexicon = g.lexicon.clone();
         assert_eq!(back, g);
+        let lex = ron::ser::to_string_pretty(&g.lexicon, Default::default()).expect("serialize");
+        assert_eq!(
+            ron::from_str::<Lexicon>(&lex).expect("parse back"),
+            g.lexicon
+        );
     }
 
     #[test]
@@ -1068,5 +1185,14 @@ mod tests {
         let mut g = coast_80s();
         g.lots.front_fill = (0.8, 0.2);
         assert!(g.validate().is_err());
+        let mut g = coast_80s();
+        g.signs.trades[0].trade = "WIDGETS".into();
+        assert!(matches!(g.validate(), Err(GrammarError::Word { .. })));
+        let mut g = coast_80s();
+        g.signs.lexicon = "elsewhere".into();
+        assert!(matches!(g.validate(), Err(GrammarError::Word { .. })));
+        let mut g = coast_80s();
+        g.lexicon.trades.clear();
+        assert!(matches!(g.validate(), Err(GrammarError::Lexicon(_))));
     }
 }

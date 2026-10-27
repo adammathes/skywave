@@ -52,8 +52,8 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 ## Performance follow-ups noted during M2
 - Parcels: a face spanning several chunks is rebuilt by every chunk it touches (worst chunk ~7 ms vs the 2 ms target). Cache built faces in the plan, keyed by face id, so each chunk only slices.
 - Streaming stages: buildings and light tiles on dense chunks exceeded the step budget; now built in ~2 ms pieces (done).
-- Web chunk pool is 4.94M vertices (~208 MB of GPU buffers) to hold the densest 11×11 coast area with buildings. Reduce per-building vertices (blank unseen facades, LOD by distance) to bring it back under 128 MB.
-- With the detailing's street lamps the light tiles' cuts add ~15% to the lit chunks. Cutting tiles by whole triangles (no clipping) on terrain places, or fewer, larger tiles, would win most of it back.
+- Web chunk pool is 4.96M vertices (~208 MB of GPU buffers) to hold the densest 11×11 coast area with buildings. Reduce per-building vertices (blank unseen facades, LOD by distance) to bring it back under 128 MB.
+- With the detailing's street lamps the densest 11×11 coast area took 1078 of the web pool's then 1099 pages: the light tiles' cuts add ~15% to the lit chunks. Cutting tiles by whole triangles (no clipping) on terrain places, or fewer, larger tiles, would win most of it back.
 
 - Parked-car paint as a per-instance attribute: the instancer already carries a per-instance
   wear tint, so passing the body color (and a two-tone's lower color) the same way would let
