@@ -14,6 +14,8 @@ use alloc::vec::Vec;
 const UP: V3 = [0.0, 1.0, 0.0];
 const BACK: V3 = [0.0, 0.0, 1.0];
 const RIGHT: V3 = [1.0, 0.0, 0.0];
+/// Width of a dial's bezel ring outside the face, m.
+const BEZEL_W: f32 = 0.008;
 /// Half thickness of piping and pleat lines, m.
 const PIPE: f32 = 0.0045;
 
@@ -517,7 +519,9 @@ impl<'a, 'b> Interior<'a, 'b> {
         ];
         self.soup
             .quad_dir(fq[0], fq[1], fq[2], fq[3], m.cluster, tilt);
-        let r = (0.36 / (2.0 * n_dials as f32) - 0.012).min(0.068);
+        // The dial and its bezel ring (`BEZEL_W` wide) stay inside the face's 0.065 m
+        // half-height, under the brow.
+        let r = (0.36 / (2.0 * n_dials as f32) - 0.012).min(0.065 - BEZEL_W - 0.004);
         let segs = if lod0 { 24 } else { 8 };
         let mut dials = [Dial::default(); 3];
         for (k, dial) in dials.iter_mut().enumerate().take(n_dials) {
@@ -532,14 +536,14 @@ impl<'a, 'b> Interior<'a, 'b> {
                     tilt,
                     &[
                         (0.0, r),
-                        (0.006, r + 0.002),
-                        (0.011, r + 0.006),
-                        (0.012, r + 0.011),
-                        (0.002, r + 0.014),
+                        (0.005, r + 0.002),
+                        (0.008, r + 0.004),
+                        (0.009, r + 0.007),
+                        (0.002, r + BEZEL_W),
                     ],
                     segs,
                     0.0,
-                    (0.0, r + 0.02),
+                    (0.0, r + 0.015),
                     m.bezel,
                 );
                 self.soup.annulus(
