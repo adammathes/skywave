@@ -1122,7 +1122,10 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
                 text.contains(&car.name) && text.contains(&car.engine),
                 "{text}"
             );
-            assert!(text.contains(&format!("{} of 12", i + 1)), "{text}");
+            assert!(
+                text.contains(&format!("{} of {}", i + 1, builtin.len())),
+                "{text}"
+            );
             // Exactly one car on the disc: the browsed one's meshes, in its first paint.
             let meshes = turntable(&mut h);
             let spec = crate::vehicles::builtin_spec(builtin[i].0).unwrap();
@@ -1159,11 +1162,12 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
     assert_eq!(h.app.take_new_meshes().count(), new);
     // Left goes back round the other way.
     h.pad(PadButton::DpadLeft);
-    assert_eq!(browsed(&h), (11, 0));
+    let last = builtin.len() - 1;
+    assert_eq!(browsed(&h), (last, 0));
     // The paint row and Drive keep the car; Back leaves without driving it.
     h.pad(PadButton::DpadDown);
     h.pad(PadButton::DpadDown);
-    assert_eq!(h.item(2).id, ItemId::Vehicle(11));
+    assert_eq!(h.item(2).id, ItemId::Vehicle(last));
     h.pad(PadButton::East);
     assert_eq!(h.page(), Page::Pause);
     assert!(turntable(&mut h).is_empty(), "the page is closed");
@@ -1271,7 +1275,8 @@ fn the_vehicle_page_fits_the_deck_and_a_tv() {
     let r = roster::roster();
     let longest = (0..r.len()).max_by_key(|&i| r[i].name.len()).unwrap();
     let most = (0..r.len()).max_by_key(|&i| r[i].paints.len()).unwrap();
-    assert_eq!(r[longest].name, "Seabreeze Convertible");
+    // The Seabreeze and the Appaloosa Convertible tie.
+    assert_eq!(r[longest].name.len(), "Seabreeze Convertible".len());
     assert_eq!(r[most].paints.len(), roster::MAX_PAINTS.min(8));
     for target in [(1280, 800), (1920, 1080)] {
         for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
@@ -1578,7 +1583,7 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
     assert_eq!(h.app.audio_params().tunes, 0);
     h.key(Key::BracketRight);
     assert!(h.app.ui().radio().toast().is_some());
-    assert!(h.hud_text().contains("181.FM Yacht Rock"));
+    assert!(h.hud_text().contains("Radio Paradise Mellow Mix"));
     // The dial sweeps (in the mixer, at the radio's volume), then the station plays.
     assert_eq!(h.app.audio_params().tunes, 1);
     assert_eq!(h.app.audio_params().tune_volume, 0.8);
@@ -1613,11 +1618,21 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
     assert!(matches!(h.app.radio().state(), RadioState::Error { .. }));
     h.key(Key::BracketRight);
     assert_eq!(h.app.radio().station(), Some(1));
-    // A new session resumes the station.
+    // A new session starts with the radio off, whatever the last one saved; power brings
+    // the same station back.
     let mut fresh = App::new(Seed(1));
     fresh.set_settings_store(Box::new(store.clone()));
     let mut input = InputMapper::default();
     fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    assert!(!fresh.radio().is_on());
+    assert!(fresh
+        .radio_commands()
+        .all(|c| !matches!(c, RadioCommand::Play { .. })));
+    input.press(RawInput::Key(Key::Backslash));
+    fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    input.release(RawInput::Key(Key::Backslash));
+    fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    assert!(fresh.radio().is_on());
     assert_eq!(fresh.radio().station(), Some(1));
     // Off is saved too.
     h.key(Key::Backslash);
@@ -1714,7 +1729,7 @@ fn streams_can_be_added_by_url() {
 
 #[test]
 fn the_dash_shows_the_station_in_the_cockpit() {
-    let count = |h: &Harness| h.hud_text().matches("181.FM").count();
+    let count = |h: &Harness| h.hud_text().matches("Radio P").count();
     let mut h = Harness::new();
     h.app.set_target_size(1280, 720);
     h.key(Key::BracketRight);

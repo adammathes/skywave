@@ -104,6 +104,11 @@ impl CarRadio {
         &self.radio
     }
 
+    #[cfg(test)]
+    fn radio_mut(&mut self) -> &mut Radio {
+        &mut self.radio
+    }
+
     pub fn preset(&self) -> &RadioPreset {
         &self.presets[self.preset]
     }
@@ -151,8 +156,9 @@ impl CarRadio {
         }
     }
 
-    /// Starts the radio from the settings (once): the last station restored, back on if it
-    /// was on.
+    /// Starts the radio from the settings (once): the last station restored, the radio off.
+    /// The radio never comes on by itself: a session starts silent whatever the last one
+    /// ended with, and the power key resumes the last station.
     pub fn start(&mut self, s: &RadioSettings) {
         if self.started {
             return;
@@ -161,10 +167,6 @@ impl CarRadio {
         self.apply(s);
         if let Some(id) = &s.last_station {
             self.radio.restore(id);
-        }
-        if s.on {
-            self.radio.power_on();
-            self.on_tuned();
         }
     }
 
@@ -427,8 +429,8 @@ mod tests {
         let first = r.radio().channels()[0].clone();
         let t = r.toast().unwrap();
         assert_eq!(t, ToastLines::Station(1, 7, &first));
-        assert_eq!(t.title().to_string(), "1/7  181.FM Yacht Rock");
-        assert_eq!(t.detail().to_string(), "yacht rock and smooth soft rock");
+        assert_eq!(t.title().to_string(), "1/7  Radio Paradise Mellow Mix");
+        assert_eq!(t.detail().to_string(), "mellow rock and soft pop");
         assert_eq!(r.radio().tunes(), 1);
         r.tick(audio::TUNE_SECONDS);
         let cmds: Vec<_> = r.commands().collect();
@@ -460,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn start_restores_the_last_station_and_power() {
+    fn start_restores_the_last_station_but_stays_off() {
         let mut r = CarRadio::new();
         let s = RadioSettings {
             on: true,
@@ -469,11 +471,20 @@ mod tests {
             ..RadioSettings::default()
         };
         r.start(&s);
+        // Off, silent, no toast: nothing plays until the power key, even though the last
+        // session ended with the radio on.
+        assert!(!r.radio().is_on());
+        assert!(r.toast().is_none());
+        // Only the volume goes to the player; nothing plays.
+        assert!(r
+            .commands()
+            .all(|c| !matches!(c, RadioCommand::Play { .. })));
+        // Power resumes the station that was playing.
+        r.radio_mut().toggle_power();
         assert_eq!(
             r.radio().channel().map(|c| c.id.as_str()),
             Some("radioparadise_main")
         );
-        assert!(r.toast().is_some());
         // Starting twice does nothing more.
         r.commands().for_each(drop);
         r.start(&RadioSettings::default());
@@ -485,13 +496,13 @@ mod tests {
         let mut r = CarRadio::new();
         let mut s = RadioSettings::default();
         s.presets.insert(SCENARIO.into(), "1986_north_shore".into());
-        s.set_enabled("181fm_awesome80s", false);
+        s.set_enabled("wmxm", false);
         s.add_custom("https://example.org/live").unwrap();
         r.apply(&s);
         assert_eq!(r.preset_index(), 2);
-        assert_eq!(r.rows().len(), 8, "every station and the added stream");
+        assert_eq!(r.rows().len(), 7, "every station and the added stream");
         let ids: Vec<&str> = r.radio().channels().iter().map(|c| c.id.as_str()).collect();
-        assert!(!ids.contains(&"181fm_awesome80s") && ids.contains(&"custom_1"));
+        assert!(!ids.contains(&"wmxm") && ids.contains(&"custom_1"));
         s.presets.insert(SCENARIO.into(), "no_such_preset".into());
         r.apply(&s);
         assert_eq!(r.preset_index(), 0);
@@ -509,11 +520,11 @@ mod tests {
         let mut r = CarRadio::new();
         r.start(&RadioSettings::default());
         press(&mut r, Action::RadioNext);
-        // "181.FM Yacht Rock" is 17 characters.
-        assert_eq!(r.dash(40).unwrap().to_string(), "181.FM Yacht Rock");
-        assert_eq!(r.dash(8).unwrap().to_string(), "181.FM Y");
+        // "Radio Paradise Mellow Mix" is 25 characters.
+        assert_eq!(r.dash(40).unwrap().to_string(), "Radio Paradise Mellow Mix");
+        assert_eq!(r.dash(8).unwrap().to_string(), "Radio Pa");
         r.tick(1.0 + 2.0 / SCROLL_CHARS_PER_S);
-        assert_eq!(r.dash(8).unwrap().to_string(), "1.FM Yac");
+        assert_eq!(r.dash(8).unwrap().to_string(), "dio Para");
         let wrap = DashText {
             text: "ABCDE",
             start: 3,

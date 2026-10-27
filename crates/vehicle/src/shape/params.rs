@@ -176,6 +176,10 @@ pub enum Rims {
     Alloy5,
     Mesh,
     Turbine,
+    /// A deep polished lip round a sunken face with five round holes.
+    Dish,
+    /// A flat face with a ring of long slots.
+    Slotted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -240,6 +244,13 @@ pub enum Detail {
     SpareTire,
     /// Two tinted glass roof panels either side of a body-colored center bar (hardtops).
     TTop,
+    /// Horizontal fins along the doors over a dark intake ahead of each rear wheel (a
+    /// mid-engined car's radiator feed).
+    SideStrakes,
+    /// A tapered flush duct in each flank ahead of the rear wheel, dark inside.
+    NacaDucts,
+    /// Slats across the deck lid behind the cabin: a mid-engined car's engine cover.
+    EngineLouvers,
 }
 
 /// Where a convertible's fabric top is.

@@ -18,10 +18,10 @@ pub const MAX_PAINTS: usize = 12;
 
 /// `(id, seconds from rest to 60 mph, top speed in mph)` of every built-in car, as the sim
 /// measures them (see the module docs).
-const MEASURED: [(&str, f32, f32); 12] = [
+const MEASURED: [(&str, f32, f32); 20] = [
     ("corsair_gtx", 5.60, 155.0),
     ("palisade_wagon", 12.60, 110.0),
-    ("seabreeze_convertible", 12.51, 87.0),
+    ("seabreeze_convertible", 12.51, 106.0),
     ("regent_coupe_cabrio", 9.88, 122.0),
     ("halcyon_turbo", 6.83, 146.0),
     ("pipit_hatch", 8.78, 108.0),
@@ -30,7 +30,15 @@ const MEASURED: [(&str, f32, f32); 12] = [
     ("meadow_minivan", 14.98, 98.0),
     ("buckboard_pickup", 9.06, 104.0),
     ("drayman_van", 13.52, 83.0),
-    ("burro_4x4", 12.13, 85.0),
+    ("burro_4x4", 12.13, 93.0),
+    ("basilisk_v12", 4.53, 177.0),
+    ("basilisk_roadster", 4.68, 172.0),
+    ("avocet_v8", 5.12, 168.0),
+    ("avocet_spider", 5.27, 162.0),
+    ("longbow_coupe", 5.92, 152.0),
+    ("longbow_convertible", 6.10, 149.0),
+    ("appaloosa_gt", 6.34, 141.0),
+    ("appaloosa_convertible", 6.63, 134.0),
 ];
 
 /// One row of the Vehicle page.
@@ -233,7 +241,8 @@ mod tests {
     }
 
     /// Full throttle from rest on flat ground: seconds to 60 mph (`NaN` if never) and the
-    /// speed it settles at, m/s (when a second adds under 0.01 m/s, or after 150 s).
+    /// speed it settles at, m/s (when a second without a shift adds under 0.01 m/s, or
+    /// after 150 s).
     fn straight_line(spec: &VehicleSpec) -> (f32, f32) {
         const STEPS_PER_S: usize = 120;
         let ground = vehicle::FlatGround {
@@ -250,13 +259,20 @@ mod tests {
         let mut s = VehicleState::spawn(spec, [0.0; 3], 0.0);
         let mut t60 = f32::NAN;
         let mut second_ago = 0.0;
+        let (mut gear, mut shifted) = (s.gear, 0);
         for i in 0..150 * STEPS_PER_S {
             vehicle::step(spec, &mut s, &input, &assists, &ground);
             if t60.is_nan() && s.speed_mps >= 60.0 * MPS_PER_MPH {
                 t60 = (i + 1) as f32 * DT;
             }
+            if s.gear != gear {
+                (gear, shifted) = (s.gear, i);
+            }
             if (i + 1) % STEPS_PER_S == 0 {
-                if !t60.is_nan() && s.speed_mps - second_ago < 0.01 {
+                // A second with a shift's torque cut in it can add next to nothing short
+                // of the top speed.
+                let settled = i - shifted > 2 * STEPS_PER_S;
+                if !t60.is_nan() && s.speed_mps - second_ago < 0.01 && settled {
                     break;
                 }
                 second_ago = s.speed_mps;
@@ -286,7 +302,7 @@ mod tests {
         let r = roster();
         for car in r {
             assert!((4.0..20.0).contains(&car.zero_to_60_s), "{}", car.id);
-            assert!((70.0..170.0).contains(&car.top_mph), "{}", car.id);
+            assert!((70.0..190.0).contains(&car.top_mph), "{}", car.id);
             assert!(
                 !car.paints.is_empty() && car.paints.len() <= MAX_PAINTS,
                 "{}",
@@ -302,6 +318,10 @@ mod tests {
             corsair.zero_to_60_s
         );
         assert!((corsair.top_mph * MPS_PER_MPH - 70.0).abs() < 1.5);
+        // The Basilisk is the quickest and the fastest.
+        let basilisk = &r[index_of("basilisk_v12").unwrap()];
+        assert!(r.iter().all(|c| c.zero_to_60_s >= basilisk.zero_to_60_s));
+        assert!(r.iter().all(|c| c.top_mph <= basilisk.top_mph));
         let regent = &r[index_of("regent_coupe_cabrio").unwrap()];
         assert!(
             (regent.zero_to_60_s - 9.9).abs() < 0.2,

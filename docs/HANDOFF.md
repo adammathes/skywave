@@ -35,8 +35,8 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 16:00 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
-  7 working stations per era and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
+- Done on `main` (2026-10-27 17:35 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+  ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
   physics; the hill-launch fix (wheel rays meet the ground's tangent plane); traffic lane graph
@@ -49,30 +49,36 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   scenarios, density tests, two gate goldens, gate notes in `docs/backlog/M4.md`); pedestrians
   drawn in the game (#27: crowd beside the traffic, 8 figures × 13 parts instanced, Traffic
   setting drives both, golden `coast-peds-noon`); awnings, canopies, rooflines and rooftop units
-  (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof).
+  (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof); pedestrian hardening
+  (#24: four review rounds, 2040-run crossing sweep at zero reached, 0.4 m step-aside clearance);
+  the radio starts off every session (ce560a3) and the 181.FM presets are gone (7ca473c, pre-roll
+  ads); the M8 spec for the second world, Basin City 2001 (`docs/backlog/LA2001.md`); the 1980s sports cars
+  and their open versions (#28: 20 cars, exotics player-only, `TRAFFIC_SHAPES`); ad-free radio
+  presets (#30: 7 / 6 / 6 listener-supported, public and college stations, each cold-start
+  checked; the checker gained --listen/--save/--url and ad-sign warnings).
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
-  natural map edges (#20, approved, blocked until #24 lands, then re-pins two traffic hashes);
-  pedestrian hardening (#24, fourth review round: a car along or turning across a crossing must
-  never reach anyone; the adversarial probe sweep over every crossing, seeds 1-4, is becoming the
-  standing test; review round 4 passed; CI red on main's new gate test "nobody crossing in
-  three minutes": fixed at 5656b0a, walkers wait for stragglers only on crossings, step-aside
-  clearance 0.4 m, step gate p99 5 ms; merges on green CI). Sessions building: parking lots
+  natural map edges (#20, approved; refreshing on main after #24, then merges on green);
+  Sessions building: parking lots
   (`bldg/parking-lots`, B10); era sports cars with open-top variants
   (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
-  ad-free presets and the player's own MP3 folders as stations (`m3/music-2`, NOTES 9; no
-  synthetic music, the owner declined); idle frames, frame cap, Battery preset
+  the player's own MP3 folders as stations (`m3/music-2-files`, NOTES 9c; no synthetic music,
+  the owner declined); idle frames, frame cap, Battery preset
   (`perf/idle-and-cap`, NOTES 10a); GPU timestamps per pass and per-frame cuts
-  (`perf/gpu-time`, NOTES 10b). Pedestrian follow-up to dispatch after #24: body-radius
-  clearance, public `Pedestrian::height`, turn curves in the lane cover, chained dodges,
-  standing in the road (probe: scratchpad `pr24d-probe_round4.rs`).
+  (`perf/gpu-time`, NOTES 10b); pedestrian follow-ups (`m4/peds-followups`: body-width gap in
+  the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
+  road); scenario switching and the era filter (`m8/scenarios`, M8 #1); the rename of
+  `corsair_gtx` and `palisade_wagon` (real model names, `m4/rename-real-names`). PRs in review:
+  lamps (#29, NPC brake lights, high beams, auto headlights); idle frames and the frame cap
+  (#31); GPU timestamps and the Deck depth pre-pass (#32).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; no player–NPC collision
   yet (reversing into a queue passes through; ignored test with numbers); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #24 → #20 → B10 parking lots; pedestrians drawn (in progress); B7 facade sign bands
-  on the lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
+- Next: merge #20, #29, #31, #32, the car rename, the MP3-folder stations; M8 waves (region template `socal_basin` and the 2001 grammar after #20,
+  hero cars after #28, traffic cars, set pieces, the 2001 preset); B7 facade sign bands on the
+  lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
   the probe is re-run on every round until it counts zero; a PR that regenerates goldens merges
