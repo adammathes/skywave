@@ -16,6 +16,7 @@ mod lighttiles;
 pub mod map;
 mod places;
 mod propinst;
+pub mod radio;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -171,6 +172,10 @@ pub struct App {
     /// The sound's view of the game, and what it made of the last frame.
     sound: sound::Sound,
     audio: audio::synth::AudioParams,
+    /// Width over height of the last frame drawn (for placing the dash's radio text).
+    aspect: f32,
+    /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
+    target: Option<(u32, u32)>,
 }
 
 impl App {
@@ -278,6 +283,8 @@ impl App {
             props,
             sound,
             audio: audio::synth::AudioParams::default(),
+            aspect: 16.0 / 9.0,
+            target: None,
         })
     }
 
@@ -422,6 +429,7 @@ impl App {
     pub fn scene_view(&mut self, alpha: f32, aspect: f32) -> SceneView<'_> {
         let alpha = alpha.clamp(0.0, 1.0);
         let aspect = aspect.max(1e-3);
+        self.aspect = aspect;
         let (view, proj) = if self.fly {
             let cam = self.prev.lerp(&self.curr, alpha);
             let proj = directx::perspective(FLY_FOV_DEG.to_radians(), aspect, 0.25, 3000.0);

@@ -7,6 +7,7 @@ use app::{
     pad_table, App, InputMapper, Key, RawInput, SceneSetup, SettingsStore, MOUSE_BUTTONS,
     MOUSE_RIGHT,
 };
+use audio::RadioCommand;
 use render::{HdrMode, MeshId, MeshInstance, Probe, Renderer, RendererOptions, SceneView};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -45,6 +46,65 @@ struct State {
     errors: ErrorLog,
     /// The corona check's outcome has been reported.
     corona_reported: bool,
+    /// The page's radio player glue, when it has one.
+    radio: Option<RadioGlue>,
+    /// The radio's commands of this frame (reused).
+    radio_cmds: Vec<RadioCommand>,
+    /// What the glue was last told the radio's state is: kind, station, live, blocked.
+    radio_reported: (u8, Option<usize>, bool, bool),
+}
+
+/// `window.skywaveRadio` (web/index.html): plays what the radio asks for, reports back.
+struct RadioGlue {
+    this: JsValue,
+    command: js_sys::Function,
+    take_event: js_sys::Function,
+    report: js_sys::Function,
+}
+
+impl RadioGlue {
+    fn find(window: &web_sys::Window) -> Option<RadioGlue> {
+        let this = js_sys::Reflect::get(window, &JsValue::from_str("skywaveRadio")).ok()?;
+        let func = |name: &str| {
+            js_sys::Reflect::get(&this, &JsValue::from_str(name))
+                .ok()?
+                .dyn_into::<js_sys::Function>()
+                .ok()
+        };
+        Some(RadioGlue {
+            command: func("command")?,
+            take_event: func("takeEvent")?,
+            report: func("report")?,
+            this,
+        })
+    }
+
+    /// Hands one command to the player; `name` is the station's, for the page's media
+    /// metadata.
+    fn send(&self, cmd: &RadioCommand, name: &str) {
+        let (kind, url, token, value) = match cmd {
+            RadioCommand::Play { url, token } => ("play", url.as_str(), *token, 0.0),
+            RadioCommand::Stop => ("stop", "", 0, 0.0),
+            RadioCommand::Volume(v) => ("volume", "", 0, *v),
+            RadioCommand::TuneNoise { seconds } => ("noise", "", 0, *seconds),
+        };
+        let args = js_sys::Array::of5(
+            &JsValue::from_str(kind),
+            &JsValue::from_str(url),
+            &JsValue::from_f64(f64::from(token)),
+            &JsValue::from_f64(f64::from(value)),
+            &JsValue::from_str(name),
+        );
+        if let Err(e) = self.command.apply(&self.this, &args) {
+            log::warn!("skywave: the radio player refused a command: {e:?}");
+        }
+    }
+
+    /// The player's next report, if any.
+    fn take_event(&self) -> Option<audio::PlayerEvent> {
+        let v = self.take_event.call0(&self.this).ok()?;
+        crate::parse_player_event(&v.as_string()?)
+    }
 }
 
 /// Settings in the page's `localStorage`. Browsers that refuse storage (private modes,
@@ -428,6 +488,8 @@ fn build_app(setup: &SceneSetup, query: &str) -> App {
         App::from_setup(&default_car).expect("the default car is built in")
     });
     app.set_settings_store(Box::new(LocalStore));
+    // The page can ask for a stream URL (window.prompt).
+    app.set_text_entry(true);
     if crate::menu_from_query(query) {
         app.open_settings();
     }
@@ -533,6 +595,12 @@ pub async fn run(
         config.format
     );
     page.note("backend", backend.label());
+    // Found per started instance: a restart on WebGL2 in a fresh copy of the glue finds the
+    // page's one player again (its listeners live in the page, registered once).
+    let radio = RadioGlue::find(&window);
+    if radio.is_none() {
+        log::info!("skywave: no radio player on this page; the radio stays silent");
+    }
 
     let state = Rc::new(RefCell::new(State {
         canvas,
@@ -554,6 +622,9 @@ pub async fn run(
         page,
         errors: gpu.errors,
         corona_reported: false,
+        radio,
+        radio_cmds: Vec::with_capacity(8),
+        radio_reported: (0, None, false, false),
     }));
     listen_keys(&window, &state)?;
     listen_mouse(&window, &state)?;
@@ -587,6 +658,7 @@ async fn start(
     let build = Scopes::push(&gpu.device);
     gpu.surface.configure(&gpu.device, &config);
     let app = app.get_or_insert_with(|| build_app(setup, query));
+    app.set_target_size(size.0, size.1);
     let options = RendererOptions {
         hdr: hdr_mode(&gpu.adapter),
         chunk_pool: app.chunk_pool_config(),
@@ -876,6 +948,48 @@ impl State {
         }
     }
 
+    /// The radio's side of the frame: the player's reports in, this frame's commands out,
+    /// the state to the page when it changed, and the stream URL prompt when asked for.
+    fn pump_radio(&mut self) {
+        if self.app.take_stream_url_request() {
+            if let Some(window) = web_sys::window() {
+                let answer = window.prompt_with_message("Stream URL (https://...)");
+                if let Ok(Some(url)) = answer {
+                    self.app.add_stream_url(&url);
+                }
+            }
+            // Key releases during the modal prompt never arrived.
+            self.input.release_all();
+        }
+        let Some(glue) = &self.radio else {
+            // Nobody plays: drop the commands.
+            self.app.radio_commands().for_each(drop);
+            return;
+        };
+        while let Some(event) = glue.take_event() {
+            self.app.radio_event(event);
+        }
+        self.radio_cmds.extend(self.app.radio_commands());
+        let name = self.app.radio().channel().map_or("", |c| c.name.as_str());
+        for cmd in &self.radio_cmds {
+            glue.send(cmd, name);
+        }
+        self.radio_cmds.clear();
+        let r = self.app.radio();
+        let kind = match r.state() {
+            audio::RadioState::Off => 0,
+            audio::RadioState::Tuning { .. } => 1,
+            audio::RadioState::Playing { .. } => 2,
+            audio::RadioState::Error { .. } => 3,
+        };
+        let key = (kind, r.station(), r.is_live(), r.is_blocked());
+        if key != self.radio_reported {
+            let text = crate::radio_state_text(r);
+            let _ = glue.report.call1(&glue.this, &JsValue::from_str(&text));
+            self.radio_reported = key;
+        }
+    }
+
     fn frame(&mut self, now_ms: f64) {
         let dt = self.last_ms.map_or(0.0, |last| (now_ms - last) / 1000.0);
         self.last_ms = Some(now_ms);
@@ -891,6 +1005,7 @@ impl State {
                     self.config.height = h;
                     self.surface.configure(&self.device, &self.config);
                     self.renderer.resize((w, h));
+                    self.app.set_target_size(w, h);
                 }
             }
             self.poll_gamepads(&window);
@@ -903,6 +1018,7 @@ impl State {
         if let Some(sfx) = &mut self.sfx {
             sfx.frame(self.app.audio_params(), dt);
         }
+        self.pump_radio();
         self.app.sync_chunks(&mut self.renderer);
         let idle = self.app.stream_idle();
         if self.stream_idle != Some(idle) {

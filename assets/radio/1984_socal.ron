@@ -1,0 +1,131 @@
+// Radio preset: 1984 SoCal. Real, listener-supported internet stations whose stream URLs
+// their broadcasters publish for listening (SomaFM's .pls playlists, Radio Paradise's
+// stream links); names are the services' own channel names. Nothing is rehosted.
+// tools/check-streams.mjs answered audio for every URL on the date in `terms_checked`;
+// `verified` turns true after the owner's first listen. Format: crates/audio/src/station.rs,
+// docs/AUDIO_RADIO.md.
+RadioPreset(
+    id: "1984_socal",
+    title: "1984 SoCal",
+    scenario: "socal_beach_1984",
+    stations: [
+        Station(
+            id: "somafm_seventies",
+            name: "SomaFM Left Coast 70s",
+            era: "1970s",
+            format: "mellow 70s album rock",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/seventies-128-mp3",
+                    "https://ice6.somafm.com/seventies-128-mp3",
+                    "https://ice5.somafm.com/seventies-128-mp3",
+                ],
+                homepage: "https://somafm.com/seventies/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "radioparadise_mellow",
+            name: "Radio Paradise Mellow Mix",
+            era: "mixed",
+            format: "mellow rock and soft pop",
+            source: Stream(
+                urls: ["https://stream.radioparadise.com/mellow-128"],
+                homepage: "https://radioparadise.com/",
+                codec: Aac,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "somafm_u80s",
+            name: "SomaFM Underground 80s",
+            era: "1980s",
+            format: "early 80s synthpop and new wave",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/u80s-128-mp3",
+                    "https://ice6.somafm.com/u80s-128-mp3",
+                    "https://ice5.somafm.com/u80s-128-mp3",
+                ],
+                homepage: "https://somafm.com/u80s/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "radioparadise_main",
+            name: "Radio Paradise Main Mix",
+            era: "mixed",
+            format: "eclectic album rock",
+            source: Stream(
+                urls: ["https://stream.radioparadise.com/mp3-128"],
+                homepage: "https://radioparadise.com/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "somafm_secretagent",
+            name: "SomaFM Secret Agent",
+            era: "1960s",
+            format: "spy-film lounge and downtempo",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/secretagent-128-mp3",
+                    "https://ice6.somafm.com/secretagent-128-mp3",
+                    "https://ice5.somafm.com/secretagent-128-mp3",
+                ],
+                homepage: "https://somafm.com/secretagent/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "somafm_illstreet",
+            name: "SomaFM Illinois Street Lounge",
+            era: "1960s",
+            format: "bachelor pad lounge and exotica",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/illstreet-128-mp3",
+                    "https://ice6.somafm.com/illstreet-128-mp3",
+                    "https://ice5.somafm.com/illstreet-128-mp3",
+                ],
+                homepage: "https://somafm.com/illstreet/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "somafm_bossa",
+            name: "SomaFM Bossa Beyond",
+            era: "1960s",
+            format: "bossa nova and samba",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/bossa-128-mp3",
+                    "https://ice6.somafm.com/bossa-128-mp3",
+                    "https://ice5.somafm.com/bossa-128-mp3",
+                ],
+                homepage: "https://somafm.com/bossa/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+    ],
+)

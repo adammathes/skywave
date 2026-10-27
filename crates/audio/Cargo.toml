@@ -1,6 +1,6 @@
 [package]
 name = "audio"
-description = "Skywave's sound: the mixer and the synthesized engine, tire, wind and ambience sounds."
+description = "Skywave's sound: the mixer and the synthesized engine, tire, wind and ambience sounds, and the radio's stations, presets and switching state machine."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,3 +8,5 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ron.workspace = true
+serde = { workspace = true, features = ["std"] }
