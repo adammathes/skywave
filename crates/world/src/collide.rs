@@ -1456,7 +1456,17 @@ fn respond(state: &mut VehicleState, spec: &VehicleSpec, c: &Contact) -> Option<
         impulse = add3(impulse, scale3(t, -jt));
     }
     sim::knock(spec, state, r, impulse);
+    scrub_and_dip(state, spec, n, closing);
+    Some(Bump {
+        speed: closing,
+        normal: n,
+        at: rotate_inv(state.rot, r),
+    })
+}
 
+/// After a hit closing at `closing` along `n`: the speed loss and the dip toward what was
+/// hit, for walls, posts, boxes and other cars alike.
+fn scrub_and_dip(state: &mut VehicleState, spec: &VehicleSpec, n: V3, closing: f32) {
     // The speed loss, across the normal only, so the nudge back survives it.
     let keep = 1.0 - SCRUB * (closing / SCRUB_SPEED).min(1.0);
     let along = dot3(state.vel, n);
@@ -1473,11 +1483,6 @@ fn respond(state: &mut VehicleState, spec: &VehicleSpec, c: &Contact) -> Option<
     // makes a hit read as a bump rather than a stop.
     let rock = (ROCK_PER_MPS * closing).min(ROCK_MAX);
     state.ang_vel = add3(state.ang_vel, scale3([-n[2], 0.0, n[0]], rock));
-    Some(Bump {
-        speed: closing,
-        normal: n,
-        at: rotate_inv(state.rot, r),
-    })
 }
 
 /// A hit on the car, for sound and tests.
@@ -1634,6 +1639,130 @@ impl Rocking {
             .find(|car| car.on && car.c == c)
             .map(|car| car.rock.tilt)
     }
+}
+
+/// A car the player's can hit that moves (an NPC car, `docs/VEHICLES.md` item 6): its body
+/// box, the ground velocity `[x, z]` of the box's center, m/s, its yaw rate (rad/s, the
+/// vehicle sim's convention: positive turns left, about `+y`) and its mass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OtherCar {
+    pub body: BoxSolid,
+    pub vel: [f32; 2],
+    pub spin: f32,
+    pub mass_kg: f32,
+}
+
+/// What [`hit_car`] did: the hit on the player's car, and the change it made to the other
+/// car's ground velocity (at its box's center) and yaw rate.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CarHit {
+    pub bump: Bump,
+    pub dv: [f32; 2],
+    pub dspin: f32,
+}
+
+/// Restitution between two cars: they part at this share of the closing speed...
+const CAR_RESTITUTION: f32 = 0.2;
+/// ...the player's car at most this fast, m/s: a hard hit is a thud, not a bounce.
+const CAR_REBOUND_MAX_MPS: f32 = 1.0;
+/// The most one hit changes the other car's speed, m/s, and its yaw rate, rad/s: past it
+/// the other car's tires take the rest, so a hit at 100 km/h shoves it, never launches it.
+const SHOVE_MAX_MPS: f32 = 4.0;
+const SPIN_MAX: f32 = 0.6;
+/// Gap left between the two bodies after the push apart, m.
+const CAR_SKIN_M: f32 = 0.002;
+
+/// The player's car against another car that moves: the footprints are the parked-car
+/// box test's, the answer the wall's with a second body. The player's car is pushed out
+/// along the contact normal; then an impulse exchanges momentum by the two masses (and
+/// inertias, at the contact point) with [`CAR_RESTITUTION`] and light friction along the
+/// contact. The other car's share is capped at [`SHOVE_MAX_MPS`] and [`SPIN_MAX`]; the
+/// player's car still leaves at the other car's new speed less a rebound, so it never
+/// drives on into it. Then the speed loss and the dip a wall gives. `None` when the boxes
+/// do not touch; a touch that is not closing is a hit of speed 0 that changes nothing but
+/// the push apart.
+pub fn hit_car(state: &mut VehicleState, spec: &VehicleSpec, other: &OtherCar) -> Option<CarHit> {
+    let fp = Footprint::new(state, spec);
+    let c = box_contact(&fp, &other.body)?;
+    let n = [c.n[0], 0.0, c.n[1]];
+    state.pos[0] += c.n[0] * (c.depth + CAR_SKIN_M);
+    state.pos[2] += c.n[1] * (c.depth + CAR_SKIN_M);
+    let y = state.pos[1].clamp(c.y0, c.y1.max(c.y0));
+    let r = sub3([c.p[0], y, c.p[1]], state.pos);
+    let at = rotate_inv(state.rot, r);
+    // The other car: a box on the ground, spinning about its center.
+    let m2 = other.mass_kg;
+    let [l2, w2] = [2.0 * other.body.half[0], 2.0 * other.body.half[1]];
+    let i2 = m2 * (l2 * l2 + w2 * w2) / 12.0;
+    let r2 = [c.p[0] - other.body.c[0], c.p[1] - other.body.c[1]];
+    let point2 = |vel: [f32; 2], spin: f32| [vel[0] + spin * r2[1], vel[1] - spin * r2[0]];
+    // Turning moment of a unit ground push `d` at the contact point, about the other car.
+    let arm = |d: [f32; 2]| r2[1] * d[0] - r2[0] * d[1];
+    let inv2 = |d: [f32; 2]| 1.0 / m2 + arm(d) * arm(d) / i2;
+
+    let v1 = add3(state.vel, cross3(state.ang_vel, r));
+    let v2 = point2(other.vel, other.spin);
+    let rel = [v1[0] - v2[0], v1[2] - v2[1]];
+    let vn = dot2(rel, c.n);
+    if vn >= 0.0 {
+        return Some(CarHit {
+            bump: Bump {
+                speed: 0.0,
+                normal: n,
+                at,
+            },
+            ..CarHit::default()
+        });
+    }
+    let closing = -vn;
+    let inv1 = sim::inv_mass_at(spec, state, r, n);
+    let j = (1.0 + CAR_RESTITUTION) * closing / (inv1 + inv2(c.n));
+    // Friction along the sliding direction, within the friction cone.
+    let vt = [rel[0] - c.n[0] * vn, rel[1] - c.n[1] * vn];
+    let vt_len = sqrt(dot2(vt, vt));
+    let t = if vt_len > 1e-6 {
+        [vt[0] / vt_len, vt[1] / vt_len]
+    } else {
+        [0.0, 0.0]
+    };
+    let jt = if vt_len > 1e-6 {
+        let inv1t = sim::inv_mass_at(spec, state, r, [t[0], 0.0, t[1]]);
+        (vt_len / (inv1t + inv2(t))).min(FRICTION * j)
+    } else {
+        0.0
+    };
+    // The other car's share: pushed away along the normal, dragged along the slide.
+    let push = [-c.n[0] * j + t[0] * jt, -c.n[1] * j + t[1] * jt];
+    let mut dv = [push[0] / m2, push[1] / m2];
+    let dv_len = sqrt(dot2(dv, dv));
+    if dv_len > SHOVE_MAX_MPS {
+        dv = [
+            dv[0] * SHOVE_MAX_MPS / dv_len,
+            dv[1] * SHOVE_MAX_MPS / dv_len,
+        ];
+    }
+    let dspin = (arm(push) / i2).clamp(-SPIN_MAX, SPIN_MAX);
+    // The player's car leaves the other car's new speed at the contact by the rebound.
+    let v2 = point2(
+        [other.vel[0] + dv[0], other.vel[1] + dv[1]],
+        other.spin + dspin,
+    );
+    let closing_now = -dot2([v1[0] - v2[0], v1[2] - v2[1]], c.n);
+    let rebound = (CAR_RESTITUTION * closing).min(CAR_REBOUND_MAX_MPS);
+    let jn = ((closing_now + rebound) / inv1).max(0.0);
+    let impulse = [c.n[0] * jn - t[0] * jt, 0.0, c.n[1] * jn - t[1] * jt];
+    sim::knock(spec, state, r, impulse);
+    scrub_and_dip(state, spec, n, closing);
+    state.speed_mps = dot3(state.vel, rotate(state.rot, [0.0, 0.0, -1.0]));
+    Some(CarHit {
+        bump: Bump {
+            speed: closing,
+            normal: n,
+            at,
+        },
+        dv,
+        dspin,
+    })
 }
 
 fn bin_slice(bins: &Bins, cell: usize) -> &[u32] {

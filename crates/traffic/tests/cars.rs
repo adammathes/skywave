@@ -499,6 +499,234 @@ fn the_player_stopping_dead_is_never_hit_and_is_passed() {
     );
 }
 
+/// The player shoves a car running at 10 m/s with a car behind it: forward, sideways and
+/// a little yaw. It stands on its brakes (stopped within 2 s, then standing 1-2 s), then
+/// drives on and steers back onto its lane line,
+/// moving continuously the whole time; the car behind queues behind it and never touches.
+#[test]
+fn a_shoved_car_brakes_stands_and_steers_back() {
+    let _quiet = shared();
+    let g = straight();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    let a = t.spawn_at(&g, 0, 120.0, 10.0).expect("room");
+    let b = t.spawn_at(&g, 0, 80.0, 10.0).expect("room");
+    let find = |t: &Traffic, id: u32| *t.cars().iter().find(|c| c.id == id).unwrap();
+    let hit = 4 * HZ as u64;
+    let (mut stood, mut moving_again, mut back) = (None, None, None);
+    let (mut widest, mut most_yaw, mut closest) = (0.0f32, 0.0f32, f32::INFINITY);
+    for tick in 0..30 * HZ as u64 {
+        if tick == hit {
+            let i = t.cars().iter().position(|c| c.id == a).unwrap();
+            t.shove(i, [2.0, 1.5], 0.4);
+        }
+        let before = find(&t, a);
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        assert_no_contact(t.cars(), "shoved");
+        let (ca, cb) = (find(&t, a), find(&t, b));
+        let moved =
+            ((ca.pos[0] - before.pos[0]).powi(2) + (ca.pos[2] - before.pos[2]).powi(2)).sqrt();
+        let slide = (before.slide[0].powi(2) + before.slide[1].powi(2)).sqrt();
+        let most = (ca.speed.max(before.speed) + slide) / HZ as f32 * 1.05 + 0.01;
+        assert!(moved <= most, "jumped {moved:.3} m at tick {tick}");
+        let turn = (ca.heading - before.heading).abs();
+        assert!(turn < 0.01, "turned {turn:.4} rad in a step at tick {tick}");
+        closest = closest.min(ca.s - cb.s - CAR_LEN_M);
+        if tick <= hit {
+            continue;
+        }
+        let since = (tick - hit) as f32 / HZ as f32;
+        widest = widest.max(ca.pos[2].abs());
+        most_yaw = most_yaw.max((ca.heading - EAST).abs());
+        if stood.is_none() && ca.speed == 0.0 {
+            stood = Some(since);
+        }
+        if stood.is_some() && moving_again.is_none() && ca.speed > 0.0 {
+            moving_again = Some(since);
+        }
+        if moving_again.is_some() && back.is_none() && ca.shove == [0.0; 2] && ca.yaw == 0.0 {
+            back = Some(since);
+            assert!(ca.pos[2].abs() < 1e-4 && (ca.heading - EAST).abs() < 1e-4);
+        }
+    }
+    println!(
+        "shoved: stood at {stood:?} s, moving again at {moving_again:?} s, back on its lane \
+         at {back:?} s; widest {widest:.2} m off it, yaw at most {most_yaw:.3} rad; the car \
+         behind came within {closest:.2} m"
+    );
+    let stood = stood.expect("the car stopped");
+    let moving_again = moving_again.expect("the car drove on");
+    // From 14.7 m/s (its own speed and the shove's) at 8 m/s².
+    assert!(stood < 2.0, "stopped {stood} s after");
+    let stand = moving_again - stood;
+    assert!((1.0..=2.05).contains(&stand), "stood {stand} s");
+    assert!(widest < 1.0 && most_yaw < 0.3, "{widest} m, {most_yaw} rad");
+    assert!(back.expect("back on its lane") < 20.0);
+    assert!(closest > 0.3, "{closest}");
+}
+
+/// The player's car (the real sim, a hatch-sized coupe) rear-ends the last of two cars
+/// standing at a red at 20 km/h and brakes, met with the game's own collision
+/// (`world::collide::hit_car`, then `Traffic::shove`). The car hit is shoved less than a
+/// meter without touching the car ahead, brakes and is off its brakes within 3 s; on the
+/// green it drives off and steers back onto its lane. The bodies never overlap.
+#[test]
+fn rear_ending_a_queue_at_twenty_shoves_the_last_car() {
+    use vehicle::{Assists, FlatGround, VehicleInput, VehicleSpec, VehicleState};
+    use world::collide::{hit_car, BoxSolid, OtherCar};
+    let _quiet = shared();
+    let spec: VehicleSpec =
+        ron::from_str(include_str!("../../../assets/vehicles/gannet_gt.ron")).expect("spec");
+    let flat = FlatGround {
+        y: 0.0,
+        friction: 1.0,
+    };
+    let g = crossing();
+    let len = g.lanes[0].length_m;
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(3));
+    // Lane 0 is red from 30 s to 60 s of the cycle.
+    let red_from = 30 * HZ as u64;
+    let ahead = t.spawn_at(&g, 0, len - 1.0, 0.0).expect("room");
+    let last = t
+        .spawn_at(&g, 0, len - 1.0 - CAR_LEN_M - 2.5, 0.0)
+        .expect("room");
+    let start = g.pose(0, len - 45.0);
+    let mut car = VehicleState::spawn(&spec, start.pos, EAST);
+    let v = 20.0 / 3.6;
+    let find = |t: &Traffic, id: u32| *t.cars().iter().find(|c| c.id == id).unwrap();
+    let (mut hit, mut shoved, mut held, mut off_brakes, mut overlaps) =
+        (None, 0.0f32, false, None, 0);
+    let mut from = [0.0; 3];
+    let mut gone = None;
+    for tick in red_from..red_from + 45 * HZ as u64 {
+        let input = if hit.is_none() {
+            let gap = v - car.speed_mps;
+            VehicleInput {
+                throttle: (0.3 + gap * 0.5).clamp(0.0, 1.0),
+                brake: if gap < -0.5 { 0.5 } else { 0.0 },
+                ..VehicleInput::default()
+            }
+        } else {
+            VehicleInput {
+                brake: if car.speed_mps > 0.2 { 1.0 } else { 0.0 },
+                handbrake: car.speed_mps <= 0.2,
+                ..VehicleInput::default()
+            }
+        };
+        vehicle::step(&spec, &mut car, &input, &Assists::default(), &flat);
+        for i in 0..t.cars().len() {
+            let c = t.cars()[i];
+            let other = OtherCar {
+                body: BoxSolid {
+                    c: [c.pos[0], c.pos[2]],
+                    u: c.dir,
+                    half: [CAR_LEN_M * 0.5, CAR_HALF_W_M],
+                    y0: 0.25,
+                    y1: 1.35,
+                    kind: world::props::PropKind::ParkedCar { color: 0 },
+                },
+                vel: [
+                    c.dir[0] * c.speed + c.slide[0],
+                    c.dir[1] * c.speed + c.slide[1],
+                ],
+                spin: c.spin,
+                mass_kg: 1300.0,
+            };
+            if let Some(h) = hit_car(&mut car, &spec, &other) {
+                if h.bump.speed > 0.0 {
+                    t.shove(i, h.dv, h.dspin);
+                    if hit.is_none() {
+                        assert_eq!(c.id, last, "hit the car ahead");
+                        hit = Some((tick, h.bump.speed));
+                        from = c.pos;
+                    }
+                }
+            }
+        }
+        let f = car.forward();
+        let player = Player {
+            pos: car.pos,
+            heading: traffic::math::atan2(-f[0], -f[2]),
+            speed: car.speed_mps.abs(),
+            half_len: 0.5 * spec.dims_m[0],
+            half_w: 0.5 * spec.dims_m[1],
+        };
+        let me = player_box(&player);
+        overlaps += t
+            .cars()
+            .iter()
+            .filter(|c| overlap(&car_box(c), &me))
+            .count();
+        t.step(&g, &scripted(tick, player));
+        assert_no_contact(t.cars(), "rear-ended");
+        let c = find(&t, last);
+        if let Some((at, _)) = hit {
+            held |= c.hold > 0;
+            if tick < red_from + 30 * HZ as u64 {
+                let d = ((c.pos[0] - from[0]).powi(2) + (c.pos[2] - from[2]).powi(2)).sqrt();
+                shoved = shoved.max(d);
+            }
+            if held && c.hold == 0 && off_brakes.is_none() {
+                off_brakes = Some((tick - at) as f32 / HZ as f32);
+            }
+            if gone.is_none() && c.seg != 0 {
+                gone = Some((c.shove, c.yaw, find(&t, ahead).seg));
+            }
+        }
+    }
+    println!(
+        "rear-ended at 20 km/h: hit {hit:?}, shoved {shoved:.2} m, off the brakes after \
+         {off_brakes:?} s, {overlaps} steps overlapping, on through the junction with \
+         {gone:?}, the player at {:.2} m/s",
+        car.speed_mps
+    );
+    let (_, closing) = hit.expect("reached the queue");
+    assert!((v - 1.0..v + 0.5).contains(&closing), "{closing} m/s");
+    assert!(held && shoved < 1.0, "{held} {shoved}");
+    assert!(off_brakes.expect("off the brakes") <= 3.0);
+    let (shove, yaw, _) = gone.expect("drove off on the green");
+    assert!(shove == [0.0; 2] && yaw == 0.0, "{shove:?} {yaw}");
+    assert_eq!(overlaps, 0);
+    assert!(car.speed_mps.abs() < 0.3);
+}
+
+/// The player's car stands across a one-lane road: the cars coming queue behind it and
+/// none passes through or touches it.
+#[test]
+fn the_player_parked_across_a_lane_holds_the_queue() {
+    let _quiet = shared();
+    let g = straight();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(9));
+    for k in 0..5 {
+        t.spawn_at(&g, 0, 200.0 - 30.0 * k as f32, 12.0)
+            .expect("room");
+    }
+    let player = Player {
+        pos: [400.0, 0.0, 0.3],
+        heading: 0.0,
+        speed: 0.0,
+        half_len: 2.3,
+        half_w: 0.9,
+    };
+    for tick in 0..60 * HZ as u64 {
+        t.step(&g, &scripted(tick, player));
+        assert_no_contact(t.cars(), "across");
+        for c in t.cars() {
+            assert!(
+                !overlap(&car_box(c), &player_box(&player)),
+                "car {} touched the player at tick {tick}",
+                c.id
+            );
+            assert!(c.pos[0] < 400.0, "car {} passed through", c.id);
+        }
+    }
+    let mut s: Vec<f32> = t.cars().iter().map(|c| c.s).collect();
+    s.sort_by(f32::total_cmp);
+    let head = 400.0 - 0.9 - s[s.len() - 1];
+    println!("player across the lane: the head of the queue {head:.2} m short (front)");
+    assert!(t.cars().iter().all(|c| c.speed < 0.01), "the queue stands");
+    assert!(head > 0.5 && head < 5.0, "{head}");
+}
+
 #[test]
 fn a_player_waiting_at_a_red_does_not_stop_the_green() {
     let _quiet = shared();

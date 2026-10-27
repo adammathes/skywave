@@ -249,15 +249,15 @@ New golden scenes: `coast-traffic-night` (busy, 22:30, the strip junction, headl
 
 **Deferred** (known, not in this milestone's build): pedestrians are not drawn in the game
 (figure instancing is next); NPC cars do not see pedestrians (turning traffic at signals,
-unsignalized crossings); no player–NPC collision (the player drives through NPC cars; they never
-drive into it); NPC wheels do not turn; no brake lights; traffic sparse near the player.
+unsignalized crossings); NPC wheels do not turn; no brake lights; traffic sparse near the player.
+Player–NPC collision came after the gate (NOTES 14, `m4/car-collision`): a push both ways, the
+NPC car brakes, waits and drives on; reversing into a queue stops against it.
 
 **For the human at the gate**
 - Does the coast feel alive but calm with traffic on? Is Normal the right default, and is Busy
   busy enough (it rarely fills the junction in front of you)?
-- Does it matter that you can drive through an NPC car? The fix is a soft push both ways
-  (`docs/NPCS.md`: a bumper-car push, no damage); until then reversing into a queue goes
-  through it. Should it be in M5?
+- NPC cars are now solid (after the gate, NOTES 14): a bump both ways, no damage. Does a hit
+  feel right: the thud, how far the car is shoved, how long it waits before driving on?
 - NPC cars at night: are the low beams and lamps right, and how much do brake lights and turning
   wheels matter?
 - Pedestrians: draw them next (before M5), and should cars yield to them at crossings first?

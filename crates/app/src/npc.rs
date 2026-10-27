@@ -17,6 +17,10 @@
 //!   camera's view cone, the clock and the density, then steps and populates. The pose of
 //!   every car before the step is kept, so drawing interpolates like the player's car.
 //!   With traffic off and no car left the sim does not run.
+//! - **Collision.** Before each traffic step, [`Npcs::collide`] meets the player's car
+//!   with every NPC car near it, each as its shape's body box ([`CarBody`]) and mass, through
+//!   `world::collide::hit_car`: the player's car bumps and slows, the NPC car is shoved
+//!   ([`traffic::Traffic::shove`]), brakes, stands a moment and steers back to its lane.
 //! - **Draw.** One instance per live car within [`DRAW_RADIUS_M`], level 1 within
 //!   [`DETAIL_RADIUS_M`] and level 2 beyond, ordered by mesh so each mesh is one instanced
 //!   draw, lit by the frame's lights round it. Its lamps glow with the lights on.
@@ -102,6 +106,56 @@ const TWILIGHT_S: f32 = 1500.0;
 /// Light-culling half size round a car and the height of its middle, m.
 const CAR_HALF_M: f32 = 2.8;
 
+/// An NPC car's body as the player's car hits it: its shape's box (the body from nose to
+/// tail and its widest point) and its car's mass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CarBody {
+    /// How far the box's center sits behind the car's ground point (the drawn mesh's
+    /// origin, midway between the axles), m.
+    pub back: f32,
+    /// Half length and half width, m.
+    pub half: [f32; 2],
+    /// Roof height above the ground, m.
+    pub height: f32,
+    pub mass_kg: f32,
+}
+
+impl CarBody {
+    /// The body of the built-in shape `shape`, with its car's mass.
+    pub fn of(shape: &shape::ShapeSpec) -> Result<CarBody, String> {
+        let spec = vehicles::builtin_spec(&shape.id)?;
+        let len = shape.length();
+        let mid = 0.5 * (shape.wheels.front_x + shape.wheels.rear_x);
+        let half_w = shape.plan.iter().fold(0.0f32, |m, p| m.max(p.1));
+        let height = shape.side.iter().fold(0.0f32, |m, p| m.max(p.1));
+        Ok(CarBody {
+            back: 0.5 * len - mid,
+            half: [0.5 * len, half_w],
+            height,
+            mass_kg: spec.mass_kg,
+        })
+    }
+
+    /// The box around car `c`, as the world collider takes it.
+    pub fn solid(&self, c: &traffic::Car) -> world::collide::BoxSolid {
+        world::collide::BoxSolid {
+            c: [
+                c.pos[0] - c.dir[0] * self.back,
+                c.pos[2] - c.dir[1] * self.back,
+            ],
+            u: c.dir,
+            half: self.half,
+            y0: c.pos[1] + BODY_CLEARANCE_M,
+            y1: c.pos[1] + self.height,
+            kind: world::props::PropKind::ParkedCar { color: 0 },
+        }
+    }
+}
+
+/// Height of an NPC car's underside above the ground, m (the player's car's body box
+/// starts as high).
+const BODY_CLEARANCE_M: f32 = 0.25;
+
 /// A car's pose at the start of the step, to interpolate from.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Snap {
@@ -127,6 +181,8 @@ pub struct Npcs {
     built_bytes: usize,
     /// Per shape, its head lamps' centers in the mesh's frame.
     heads: Vec<[Vec3; 2]>,
+    /// Per shape, its body as the player's car hits it.
+    bodies: Vec<CarBody>,
     /// Scratch for drawing in mesh order: mesh id and car slot.
     order: Vec<(u32, u16)>,
     /// Per-step sim time, ms, smoothed, for the overlay.
@@ -160,6 +216,11 @@ impl Npcs {
         let traffic = Traffic::new(&graph, budget, seed);
         let cap = budget.cars;
         let crowd = peds::Crowd::new(place, &graph, seed);
+        let bodies = vehicles::BUILTIN_SHAPES[..vehicles::TRAFFIC_SHAPES]
+            .iter()
+            .map(|(_, text)| vehicles::load_shape(text).and_then(|sh| CarBody::of(&sh)))
+            .collect::<Result<_, _>>()
+            .expect("the built-in traffic shapes load");
         Npcs {
             graph,
             place_seed: place.header.seed,
@@ -171,6 +232,7 @@ impl Npcs {
             ids: Vec::new(),
             built_bytes: 0,
             heads: Vec::new(),
+            bodies,
             order: Vec::with_capacity(cap),
             step_ms: 0.0,
             warm: 0,
@@ -293,6 +355,51 @@ impl Npcs {
         };
         self.traffic.step(&self.graph, &inputs);
         self.traffic.populate(&self.graph, &inputs);
+    }
+
+    /// The body of car `c`, as the player's car hits it.
+    pub fn body(&self, c: &traffic::Car) -> CarBody {
+        self.bodies[usize::from(c.shape)]
+    }
+
+    /// The player's car (`state`, of `spec`) against every NPC car near it, after its step
+    /// and before the traffic's: each contact pushes it out and exchanges an impulse
+    /// (`world::collide::hit_car`), and an NPC car hit while closing is shoved and stands
+    /// on its brakes ([`traffic::Traffic::shove`]). The hardest hit, if any car touched.
+    pub fn collide(
+        &mut self,
+        state: &mut vehicle::VehicleState,
+        spec: &vehicle::VehicleSpec,
+    ) -> Option<world::Bump> {
+        let [len, wid, _] = spec.dims_m;
+        let reach = 0.5 * (len + wid) + 4.0;
+        let mut hardest: Option<world::Bump> = None;
+        for i in 0..self.traffic.cars().len() {
+            let c = self.traffic.cars()[i];
+            if (c.pos[0] - state.pos[0]).abs() > reach || (c.pos[2] - state.pos[2]).abs() > reach {
+                continue;
+            }
+            let b = self.bodies[usize::from(c.shape)];
+            let other = world::collide::OtherCar {
+                body: b.solid(&c),
+                vel: [
+                    c.dir[0] * c.speed + c.slide[0],
+                    c.dir[1] * c.speed + c.slide[1],
+                ],
+                spin: c.spin,
+                mass_kg: b.mass_kg,
+            };
+            let Some(hit) = world::collide::hit_car(state, spec, &other) else {
+                continue;
+            };
+            if hit.bump.speed > 0.0 {
+                self.traffic.shove(i, hit.dv, hit.dspin);
+            }
+            if hardest.is_none_or(|h| hit.bump.speed > h.speed) {
+                hardest = Some(hit.bump);
+            }
+        }
+        hardest
     }
 
     /// One pedestrian step after [`Npcs::step`], at the signal tick it reached.

@@ -639,6 +639,9 @@ impl App {
                 drive::vehicle_input(input)
             };
             self.drive.step(car_input, &self.ground);
+            if let Some(hit) = self.npcs.collide(&mut self.drive.state, &self.drive.spec) {
+                self.drive.note_car_hit(hit);
+            }
             self.sound.note_step(&self.drive.impact);
             if self.npcs.active() {
                 let t = now();

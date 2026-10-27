@@ -71,12 +71,14 @@ impl Rect {
         }
     }
 
-    fn car(c: &traffic::Car) -> Rect {
+    /// NPC car `c`'s body as the player's car meets it: its shape's box.
+    fn car(app: &App, c: &traffic::Car) -> Rect {
+        let b = app.npcs.body(c);
         Rect {
-            c: [c.pos[0], c.pos[2]],
+            c: [c.pos[0] - c.dir[0] * b.back, c.pos[2] - c.dir[1] * b.back],
             f: c.dir,
-            hl: 0.5 * traffic::cars::CAR_LEN_M,
-            hw: traffic::cars::CAR_HALF_W_M,
+            hl: b.half[0],
+            hw: b.half[1],
         }
     }
 
@@ -127,7 +129,7 @@ fn overlapping(app: &App) -> usize {
     app.npcs
         .cars()
         .iter()
-        .filter(|c| me.overlaps(&Rect::car(c)))
+        .filter(|c| me.overlaps(&Rect::car(app, c)))
         .count()
 }
 
@@ -304,7 +306,7 @@ fn sixty_through_a_red_light_touches_no_car() {
             }
         }
         for c in app.npcs.cars() {
-            let r = Rect::car(c);
+            let r = Rect::car(&app, c);
             if me.overlaps(&r) {
                 overlaps += 1;
                 first_overlap.get_or_insert((tick, c.id, c.speed, c.pos));
@@ -424,7 +426,7 @@ fn run_with_people(
             }
         }
         for car in app.npcs.cars() {
-            if me.overlaps(&Rect::car(car)) {
+            if me.overlaps(&Rect::car(&app, car)) {
                 t.cars += 1;
                 t.first_car.get_or_insert((k, car.id));
             }
@@ -574,13 +576,11 @@ fn driving_slowly_into_the_crowd_on_a_corner() {
 }
 
 /// The player waits first at the arterial junction's red with a queue formed behind it,
-/// then backs up into the queue at a walking pace: the NPC cars never overlap it.
-///
-/// Fails today: the player's car does not collide with NPC cars (`docs/NPCS.md`, "Not
-/// yet"), and a queued car has nowhere to go, so the player backs straight into it.
+/// then backs up into the queue at a walking pace: it bumps the first car of the queue
+/// and stops against it. No NPC car's body ever overlaps the player's footprint, the car
+/// it hit is shoved less than a meter and stands on its brakes.
 #[test]
-#[ignore = "no player-NPC collision yet: the player backs into the stopped queue"]
-fn reversing_into_a_queue_touches_no_car() {
+fn reversing_into_a_queue_stops_against_it() {
     let c = coast();
     let lane = lane_ending_at(&c.lanes, APPROACH_END);
     let line = end_line(&c.lanes, lane);
@@ -601,16 +601,19 @@ fn reversing_into_a_queue_touches_no_car() {
             car.seg == lane && car.speed < 0.1 && s < mine && mine - s < 10.0
         });
         if let (Some(car), true) = (queued, red(tick) && red(tick + 10 * 120)) {
-            break mine - along(&c.lanes, lane, car.pos);
+            break (car.id, car.pos, mine - along(&c.lanes, lane, car.pos));
         }
         let hold = follow(&app, line.pos, line.dir, 0.0);
         step(&mut app, &hold);
         waited += 1;
         assert!(waited < 180 * 120, "no queue in three minutes");
     };
+    let (id, at, behind) = behind;
+    let half = app.traffic_player().half_len;
     let mut cars = 0;
     let mut first = None;
     let mut backed = 0.0f32;
+    let (mut hits, mut held, mut shoved) = (0, false, 0.0f32);
     for k in 0..8 * 120 {
         let input = follow(
             &app,
@@ -620,22 +623,115 @@ fn reversing_into_a_queue_touches_no_car() {
         );
         step(&mut app, &input);
         backed = backed.max(mine - along(&c.lanes, lane, app.traffic_player().pos));
+        hits += usize::from(app.drive.impact.hit.speed > 0.0);
+        if let Some(car) = app.npcs.cars().iter().find(|car| car.id == id) {
+            held |= car.hold > 0;
+            shoved = shoved.max((car.pos[0] - at[0]).hypot(car.pos[2] - at[2]));
+        }
         let n = overlapping(&app);
         cars += n;
         if n > 0 {
             first.get_or_insert(k);
         }
     }
+    let speed = app.drive.state.speed_mps;
     eprintln!(
         "reversing into a queue: waited {:.1} s, the car behind {behind:.1} m back (centers), \
-         backed {backed:.1} m, {cars} car-steps overlapping (first at step {first:?})",
+         backed {backed:.2} m, {hits} steps hitting, the car shoved {shoved:.2} m, \
+         {cars} car-steps overlapping (first at step {first:?}), {speed:.2} m/s after",
         waited as f32 / 120.0
     );
+    // It reached the queue and stopped there: short of where the cars' centers would meet
+    // less both cars' half lengths, never through it.
+    assert!(hits > 0, "never touched the queue");
     assert!(
-        backed > behind,
-        "backed {backed:.1} m, the queue {behind:.1} m back"
+        backed > behind - 2.0 * half - 1.5 && backed < behind - 2.0 * half + 0.5,
+        "backed {backed:.2} m, the queue {behind:.1} m back"
     );
+    assert!(held, "the car hit did not brake");
+    assert!(shoved < 1.0, "the car hit moved {shoved:.2} m");
+    assert!(speed.abs() < 0.3, "{speed} m/s");
     assert_eq!(cars, 0, "first at step {first:?}");
+}
+
+/// A tiny seeded generator for the bumping drive's choices.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> f32 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+    }
+}
+
+/// A minute of driving at busy traffic round a coast junction, every half second steering
+/// at the nearest NPC car with a random pedal (forward or reverse): many bumps, never a
+/// non-finite number, never a launch, and no hit leaves the player's car faster than it
+/// was going the step before by more than the rebound.
+#[test]
+fn a_minute_of_random_bumping_stays_finite_and_grounded() {
+    let mut app = app(&format!("{}&t=12:00&traffic=busy", super::tests::JUNCTION));
+    let mut rng = Lcg(7);
+    let (mut throttle, mut reverse) = (0.5f32, false);
+    let y0 = app.drive.state.pos[1];
+    let (mut hits, mut new_hits, mut in_contact) = (0, 0, false);
+    let (mut max_up, mut max_rise, mut worst) = (0.0f32, 0.0f32, f32::NEG_INFINITY);
+    for k in 0..60 * 120 {
+        if k % 60 == 0 {
+            throttle = 0.2 + 0.6 * rng.next();
+            reverse = rng.next() < 0.25;
+        }
+        let p = app.traffic_player();
+        let target = app
+            .npcs
+            .cars()
+            .iter()
+            .map(|car| ([car.pos[0] - p.pos[0], car.pos[2] - p.pos[2]], car))
+            .filter(|(d, _)| dot(*d, *d) < 40.0 * 40.0)
+            .min_by(|a, b| dot(a.0, a.0).total_cmp(&dot(b.0, b.0)))
+            .map(|(d, _)| d);
+        let mut input = InputState::default();
+        if let Some(d) = target {
+            let want = (-d[0]).atan2(-d[1]);
+            let err = wrap(want - p.heading);
+            let steer = if reverse { -err } else { err };
+            input.set(Action::Steer, (1.5 * steer).clamp(-1.0, 1.0));
+        }
+        let pedal = if reverse {
+            Action::Brake
+        } else {
+            Action::Throttle
+        };
+        input.set(pedal, throttle);
+        let before = app.drive.state.vel;
+        let hspeed = |v: [f32; 3]| v[0].hypot(v[2]);
+        step(&mut app, &input);
+        let s = &app.drive.state;
+        let all = s.pos.iter().chain(&s.rot).chain(&s.vel).chain(&s.ang_vel);
+        assert!(all.clone().all(|v| v.is_finite()), "non-finite at step {k}");
+        for car in app.npcs.cars() {
+            assert!(car.pos.iter().all(|v| v.is_finite()) && car.heading.is_finite());
+        }
+        max_up = max_up.max(s.vel[1].abs());
+        max_rise = max_rise.max(s.pos[1] - y0);
+        let impact = app.drive.impact;
+        if impact.hit.speed > 0.0 {
+            hits += 1;
+            new_hits += usize::from(!in_contact);
+            worst = worst.max(hspeed(s.vel) - hspeed(before));
+        }
+        in_contact = impact.hit.speed > 0.0;
+    }
+    eprintln!(
+        "random bumping: {hits} steps hitting ({new_hits} hits), worst speed gained in a hit \
+         {worst:.2} m/s, up at most {max_up:.2} m/s, rose at most {max_rise:.2} m"
+    );
+    assert!(new_hits >= 5, "{new_hits} hits");
+    assert!(worst <= 1.0, "{worst} m/s gained in a hit");
+    assert!(max_up < 2.0 && max_rise < 1.5, "{max_up} m/s, {max_rise} m");
 }
 
 /// The car-count band each of Low, Normal and Busy holds at every step of 120 s, of the

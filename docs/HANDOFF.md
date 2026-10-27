@@ -81,8 +81,8 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
-- M4 gate facts for the owner (from #25): NPC cars yield at junctions; no player–NPC collision
-  yet (reversing into a queue passes through; ignored test with numbers); NPC cars do not see
+- M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
+  (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
 - Next: merge #20, #29; M8 waves (region template `socal_basin` and the 2001 grammar after #20,
   hero cars after #28, traffic cars, set pieces, the 2001 preset); B7 facade sign bands on the

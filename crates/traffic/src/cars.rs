@@ -27,6 +27,9 @@
 //! - **Lane changes** where the graph has parallel lanes (same road, same direction): to
 //!   reach the lane the chosen turn leaves from, or to pass a slower car when going
 //!   straight. The switch is instant in the graph and eased sideways in the pose.
+//! - **Hit by the player** ([`Traffic::shove`]): the push along the car's way goes into its
+//!   speed, the rest slides and turns the drawn car off its path; a real knock has it brake
+//!   to a stop and stand a moment, then it drives on and steers back to its lane.
 //!
 //! [`Traffic::populate`] spawns and despawns cars by density in a ring around the player,
 //! always out of the camera's view. Everything is deterministic (one seeded PCG, IEEE
@@ -59,6 +62,19 @@ const MIN_GAP: f32 = 0.3;
 const PLAYER_GAP: f32 = 0.6;
 /// The contact backstop pads a moving car's body by this (m).
 const BODY_MARGIN_M: f32 = 0.05;
+/// A car the player knocks (changing its speed by at least this, m/s; a lighter touch only
+/// nudges it) brakes hard to a stop and stands 1 to 2 s (the driver's share from its id)...
+const HOLD_DV: f32 = 0.5;
+const HOLD_S: (u32, u32) = (SIM_HZ, SIM_HZ * 2);
+/// ...while its shove (sideways and back from where it drives) slides out at this (m/s²)
+/// and its yaw rate at this (rad/s²)...
+const SLIDE_DECEL: f32 = 8.0;
+const SPIN_DECEL: f32 = 3.0;
+/// ...then it steers back to its lane: the shove eases out by this per meter driven, the
+/// yaw with it in proportion (so the car never crabs), or by this (rad per meter) once the
+/// shove is gone.
+const SHOVE_RETURN: f32 = 0.15;
+const YAW_RETURN: f32 = 0.05;
 /// Lateral acceleration through turns (m/s²) and the slowest turn speed (m/s).
 const A_LAT: f32 = 2.2;
 const MIN_TURN_MPS: f32 = 3.0;
@@ -207,6 +223,15 @@ pub struct Car {
     /// changed from while it lasts ([`NONE`] after): the car still blocks it.
     pub offset: [f32; 2],
     pub ghost: u32,
+    /// A shove from the player's car: the ground offset `[x, z]` of the drawn car from its
+    /// place on the graph and the yaw off its path (rad, positive turns left), both eased
+    /// out as it drives on; the slide and the yaw rate still moving them (m/s, rad/s); and
+    /// ticks left standing on the brakes. All zero for a car never hit.
+    pub shove: [f32; 2],
+    pub yaw: f32,
+    pub slide: [f32; 2],
+    pub spin: f32,
+    pub hold: u32,
     pub stop: StopState,
     /// Ticks left to wait at a stop sign; the tick the wait ended.
     pub wait: u32,
@@ -789,6 +814,11 @@ impl Traffic {
             headway,
             offset: [0.0; 2],
             ghost: NONE,
+            shove: [0.0; 2],
+            yaw: 0.0,
+            slide: [0.0; 2],
+            spin: 0.0,
+            hold: 0,
             stop: StopState::Approach,
             wait: 0,
             stop_tick: 0,
@@ -1278,6 +1308,9 @@ impl Traffic {
             max_ds = max_ds.min(gap - PLAYER_GAP);
         }
         let player = player.unwrap_or(f32::INFINITY);
+        if c.hold > 0 {
+            a = -B_MAX;
+        }
         (a.clamp(-B_MAX, A_MAX), max_ds, player)
     }
 
@@ -1344,10 +1377,20 @@ impl Traffic {
             let k = (off - step) / off;
             [c.offset[0] * k, c.offset[1] * k]
         };
-        if ds > 0.0 || c.offset != old.offset {
+        let shoved = c.hold > 0 || c.shove != [0.0; 2] || c.yaw != 0.0 || c.spin != 0.0;
+        if shoved {
+            unshove(&mut c, ds);
+        }
+        if ds > 0.0 || c.offset != old.offset || shoved {
             self.place(g, &mut c);
             if self.bumps(i, &old, &c, ps) {
-                self.cars[i] = Car { speed: 0.0, ..old };
+                self.cars[i] = Car {
+                    speed: 0.0,
+                    slide: [0.0; 2],
+                    spin: 0.0,
+                    hold: c.hold,
+                    ..old
+                };
                 return;
             }
         }
@@ -1570,11 +1613,15 @@ impl Traffic {
             d = front.dir;
         }
         c.pos = [
-            (f[0] + rear[0]) * 0.5 + c.offset[0],
+            (f[0] + rear[0]) * 0.5 + c.offset[0] + c.shove[0],
             (f[1] + rear[1]) * 0.5,
-            (f[2] + rear[2]) * 0.5 + c.offset[1],
+            (f[2] + rear[2]) * 0.5 + c.offset[1] + c.shove[1],
         ];
-        if d != c.dir {
+        if c.yaw != 0.0 {
+            let (sn, cs) = sin_cos(c.yaw);
+            c.heading = heading(d) + c.yaw;
+            c.dir = [d[0] * cs + d[1] * sn, d[1] * cs - d[0] * sn];
+        } else if d != c.dir {
             c.heading = heading(d);
             c.dir = d;
         }
@@ -1720,6 +1767,28 @@ impl Traffic {
         }
     }
 
+    /// The player's car hit car `i` (an index into [`Traffic::cars`]): its ground velocity
+    /// changes by `dv` (`[x, z]`, m/s) and its yaw rate by `dspin` (rad/s). What is along
+    /// its way (and keeps it at or above standstill) goes into its speed on its path, which
+    /// the car ahead and the stop line still limit; the rest slides it off its path. Either
+    /// way, knocked by [`HOLD_DV`] or more, it stands on the brakes for 1 to 2 s; then it
+    /// drives on and steers back to its lane.
+    pub fn shove(&mut self, i: usize, dv: [f32; 2], dspin: f32) {
+        let c = &mut self.cars[i];
+        let along = dot(dv, c.dir);
+        let speed = (c.speed + along).max(0.0);
+        let taken = speed - c.speed;
+        c.speed = speed;
+        c.slide = [
+            c.slide[0] + dv[0] - c.dir[0] * taken,
+            c.slide[1] + dv[1] - c.dir[1] * taken,
+        ];
+        c.spin += dspin;
+        if len2(dv) >= HOLD_DV {
+            c.hold = HOLD_S.0 + (c.id % 8) * (HOLD_S.1 - HOLD_S.0) / 8;
+        }
+    }
+
     /// A hash of every car, bit for bit, in pool order.
     pub fn hash(&self) -> u64 {
         let f = |x: f32| u64::from(x.to_bits());
@@ -1737,9 +1806,62 @@ impl Traffic {
                 u64::from(c.ghost),
             ];
             h = hash64(h, &w);
+            // Only a car the player has hit has these, so traffic never hit hashes as
+            // before they existed.
+            if c.hold > 0 || c.shove != [0.0; 2] || c.yaw != 0.0 || c.slide != [0.0; 2] {
+                let w = [
+                    f(c.shove[0]) | f(c.shove[1]) << 32,
+                    f(c.slide[0]) | f(c.slide[1]) << 32,
+                    f(c.yaw) | f(c.spin) << 32,
+                    u64::from(c.hold),
+                ];
+                h = hash64(h, &w);
+            }
         }
         h
     }
+}
+
+/// One step of a shoved car `c` that drives `ds` on its path: the slide and the yaw rate
+/// carry it on while they last, then, off the brakes and moving, it steers back toward
+/// its lane in proportion to the distance driven.
+fn unshove(c: &mut Car, ds: f32) {
+    c.shove = [c.shove[0] + c.slide[0] * DT, c.shove[1] + c.slide[1] * DT];
+    c.yaw += c.spin * DT;
+    let v = len2(c.slide);
+    c.slide = if v <= SLIDE_DECEL * DT {
+        [0.0; 2]
+    } else {
+        let k = (v - SLIDE_DECEL * DT) / v;
+        [c.slide[0] * k, c.slide[1] * k]
+    };
+    c.spin = if c.spin.abs() <= SPIN_DECEL * DT {
+        0.0
+    } else {
+        c.spin - SPIN_DECEL * DT * c.spin.signum()
+    };
+    if c.hold > 0 {
+        // The hold runs once the car stands.
+        if c.speed == 0.0 {
+            c.hold -= 1;
+        }
+        return;
+    }
+    let off = len2(c.shove);
+    let back = SHOVE_RETURN * ds;
+    if off > back {
+        let k = (off - back) / off;
+        c.shove = [c.shove[0] * k, c.shove[1] * k];
+        c.yaw *= k;
+        return;
+    }
+    c.shove = [0.0; 2];
+    let turn = YAW_RETURN * ds;
+    c.yaw = if c.yaw.abs() <= turn {
+        0.0
+    } else {
+        c.yaw - turn * c.yaw.signum()
+    };
 }
 
 #[cfg(test)]
