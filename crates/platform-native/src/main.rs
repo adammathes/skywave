@@ -1649,16 +1649,18 @@ mod tests {
     /// draws in the worst frame and in the median frame after the first, forward and shadow
     /// triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus about 10%.
     const JUNCTION_BUDGET: [(Quality, u32, u32, u64, u64); 2] = [
-        (Quality::Deck, 1250, 750, 470_000, 740_000),
-        (Quality::Medium, 1235, 555, 470_000, 1_325_000),
+        (Quality::Deck, 665, 330, 222_000, 752_000),
+        (Quality::Medium, 770, 347, 222_000, 1_190_000),
     ];
-    // Measured over 8 frames driving at 100 km/h with the world running (release; a debug
-    // build lands within 2%: 1151, 696, 429k, 674k at Deck; 224 car and figure-part instances in the forward pass of 74 cars and 41 people
-    // live): the most draws in a frame (the first draws every cascade; at Deck the depth
-    // pre-pass draws the forward pass's meshes twice), the median frame's after it (no far
-    // cascade), forward triangles and shadow triangles a frame (moving casters redraw the
-    // far cascade on its interval): Deck 1134, 681, 428k, 672k; Medium 1121, 503, 428k,
-    // 1206k. Main's median frame before the pre-pass: Deck 385, Medium 530.
+    // Measured over 8 frames driving at 100 km/h with the world running after it streamed
+    // held still (the same in release and debug; 96 cars and 23 people live, 88 car and
+    // figure-part instances more in the forward pass than with traffic off): the most draws
+    // in a frame (the first draws every cascade; at Deck the depth pre-pass draws the
+    // forward pass's meshes twice), the median frame's after it (no far cascade), forward
+    // triangles and shadow triangles a frame (moving casters redraw the far cascade on its
+    // interval): Deck 605, 299, 202k, 683k; Medium 699, 315, 202k, 1082k. Main's junction
+    // before the map edges (another layout): Deck 1134, 681, 428k, 672k; Medium 1121, 503,
+    // 428k, 1206k.
     /// Instances one pedestrian adds: a figure's parts.
     const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 

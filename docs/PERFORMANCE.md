@@ -372,10 +372,15 @@ So Medium's draws are unchanged: the old count's frame parity skipped the far ca
 ~600 draws, which it redraws every other frame now too. Deck's frames gain the ~300
 pre-pass draws, depth-only, for the junction's 2121k → 784k shaded fragments (overdraw
 2.71 → 1.00, lavapipe): about 1.3 M fragments of the full forward shader against ~0.3k draws
-and 428k depth-only triangles. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1250
-draws, 750 in the median frame, 470k forward and 740k shadow triangles; Medium 1235, 555,
-470k and 1325k** (about
-10% over), and if fewer than three cars' and three people's instances more are in the
+and 428k depth-only triangles. Those numbers are main's junction before the map edges. On the map-edges coast the
+junction moved (the old point is the beachfront there) to 737.1,464.8, an approach within
+budget with a queue in frame, and the test streams the place with the world held still, so
+the traffic it measures no longer depends on how many frames streaming took on the machine
+(it did: 88 car and figure-part instances in release, 32 in debug, at one site). There,
+busy, the same in release and debug: **Deck 605 draws, 299 in the median frame, 202k
+forward, 683k shadow; Medium 699, 315, 202k, 1082k**. Under `SKYWAVE_ENFORCE_BUDGETS` it
+fails above **Deck 665 draws, 330 in the median frame, 222k forward and 752k shadow
+triangles; Medium 770, 347, 222k and 1190k** (about 10% over), and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the
 pedestrian sim (busy) each have a median under 0.5 ms a step in a debug build
 (`app::npc` and the `traffic` budget tests), the best of three 5 s windows; the app's
