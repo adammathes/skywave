@@ -24,7 +24,7 @@ The latest `main` plays in the browser at `https://<owner>.github.io/skywave/` (
 ## Steam Deck
 In Desktop Mode, open Konsole and run:
 ```
-curl -fsSL https://raw.githubusercontent.com/adammathes/skywave/claude/intelligent-hypatia-vnrj1a/tools/install-deck.sh | bash
+curl -fsSL https://raw.githubusercontent.com/adammathes/skywave/main/tools/install-deck.sh | bash
 ```
 (The URL names the working branch for now; it moves to `main` later.) The script puts the nightly
 AppImage in `~/Applications/Skywave/`, adds a menu entry, and prints the steps to add it to Steam

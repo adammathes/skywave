@@ -2,7 +2,7 @@
 # Installs (or updates) Skywave on a Steam Deck or any x86_64 Linux desktop, for the current
 # user only: no sudo, nothing outside $HOME.
 #
-#   curl -fsSL https://raw.githubusercontent.com/adammathes/skywave/claude/intelligent-hypatia-vnrj1a/tools/install-deck.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/adammathes/skywave/main/tools/install-deck.sh | bash
 #   bash install-deck.sh --tag v0.2.0      # a tagged release instead of the nightly build
 #
 # It downloads Skywave-x86_64.AppImage into ~/Applications/Skywave/, checks it against the
