@@ -1495,27 +1495,33 @@ impl<'a, 'b> Parts<'a, 'b> {
         }
     }
 
-    /// The intake ahead of each rear wheel, `(s0, s1, y0, y1)`: from mid-door to the arch,
-    /// between the wheel center and the belt ledge.
-    fn intake_box(&self) -> (f32, f32, f32, f32) {
+    /// The intake ahead of each rear wheel, `(s0, s1, y0)`: from mid-door to the arch,
+    /// from just over the wheel center up to [`Self::intake_top`].
+    fn intake_box(&self) -> (f32, f32, f32) {
         let b = self.b;
         let s1 = b.axle[1] - b.ra - 0.05;
         let s0 = (s1 - 1.0).max(b.axle[0] + b.ra + 0.3);
-        let y0 = b.wy + 0.04;
-        let y1 = (b.frame(s1).y_ledge - 0.07).max(y0 + 0.1);
-        (s0, s1, y0, y1)
+        (s0, s1, b.wy + 0.04)
+    }
+
+    /// The top of `b`'s intake at `s`: 7 cm under the belt ledge there, so it follows a
+    /// belt that climbs along the flank.
+    fn intake_top(b: &Body, s: f32) -> f32 {
+        (b.frame(s).y_ledge - 0.07).max(b.wy + 0.14)
     }
 
     /// [`Self::side_patch`] cut into `n` pieces along the car and three up it, so it
     /// follows a side that bulges between its ends and curves in toward the shoulder.
+    /// `lo` and `hi` give its lower and upper edge at `(s, t)`, `t` running 0 to 1 from
+    /// `s0` to `s1`.
     #[allow(clippy::too_many_arguments)]
     fn side_patch_n(
         &mut self,
         sx: f32,
         s0: f32,
         s1: f32,
-        y0: [f32; 2],
-        y1: [f32; 2],
+        lo: impl Fn(f32, f32) -> f32,
+        hi: impl Fn(f32, f32) -> f32,
         lift: f32,
         mat: Mat,
         n: usize,
@@ -1523,16 +1529,17 @@ impl<'a, 'b> Parts<'a, 'b> {
         const ROWS: usize = 3;
         for k in 0..n {
             let (t0, t1) = (k as f32 / n as f32, (k + 1) as f32 / n as f32);
-            let lo = [lerp(y0[0], y0[1], t0), lerp(y0[0], y0[1], t1)];
-            let hi = [lerp(y1[0], y1[1], t0), lerp(y1[0], y1[1], t1)];
+            let (sa, sb) = (lerp(s0, s1, t0), lerp(s0, s1, t1));
+            let l = [lo(sa, t0), lo(sb, t1)];
+            let h = [hi(sa, t0), hi(sb, t1)];
             for r in 0..ROWS {
                 let (r0, r1) = (r as f32 / ROWS as f32, (r + 1) as f32 / ROWS as f32);
                 self.side_patch(
                     sx,
-                    lerp(s0, s1, t0),
-                    lerp(s0, s1, t1),
-                    [lerp(lo[0], hi[0], r0), lerp(lo[1], hi[1], r0)],
-                    [lerp(lo[0], hi[0], r1), lerp(lo[1], hi[1], r1)],
+                    sa,
+                    sb,
+                    [lerp(l[0], h[0], r0), lerp(l[1], h[1], r0)],
+                    [lerp(l[0], h[0], r1), lerp(l[1], h[1], r1)],
                     lift,
                     mat,
                 );
@@ -1541,23 +1548,29 @@ impl<'a, 'b> Parts<'a, 'b> {
     }
 
     fn side_strakes(&mut self) {
-        let (s0, s1, y0, y1) = self.intake_box();
+        let (s0, s1, y0) = self.intake_box();
         let n = if self.b.lod == 2 { 3 } else { 5 };
         let pieces = if self.lod0() { 3 } else { 1 };
-        let m = self.m;
+        let (b, m) = (self.b, self.m);
+        let top: Vec<f32> = (0..=pieces)
+            .map(|j| Self::intake_top(b, lerp(s0, s1, j as f32 / pieces as f32)))
+            .collect();
         for sx in [-1.0f32, 1.0] {
             // The dark mouth behind the fins, set into the flank's last third.
             let s_mouth = lerp(s0, s1, 0.62);
-            self.side_patch_n(sx, s_mouth, s1, [y0, y0], [y1, y1], 0.002, m.grille, pieces);
+            let top_at = |s: f32, _| Self::intake_top(b, s);
+            self.side_patch_n(sx, s_mouth, s1, |_, _| y0, top_at, 0.002, m.grille, pieces);
             for k in 0..n {
-                let y = lerp(y0, y1, (k as f32 + 0.5) / n as f32);
-                let mat = self.b.paint_at(m, s1, y);
-                // Each fin stands out more toward the intake.
+                let u = (k as f32 + 0.5) / n as f32;
+                // Each fin keeps its share of the intake's height and stands out more
+                // toward the intake.
                 for j in 0..pieces {
                     let (t0, t1) = (j as f32 / pieces as f32, (j + 1) as f32 / pieces as f32);
                     let (sa, sb) = (lerp(s0, s1, t0), lerp(s0, s1, t1));
-                    let a = self.p(sa, sx * (self.side(sa, y) + lerp(0.004, 0.014, t0)), y);
-                    let b = self.p(sb, sx * (self.side(sb, y) + lerp(0.004, 0.014, t1)), y);
+                    let (ya, yb) = (lerp(y0, top[j], u), lerp(y0, top[j + 1], u));
+                    let mat = self.b.paint_at(m, sb, yb);
+                    let a = self.p(sa, sx * (self.side(sa, ya) + lerp(0.004, 0.014, t0)), ya);
+                    let b = self.p(sb, sx * (self.side(sb, yb) + lerp(0.004, 0.014, t1)), yb);
                     self.body.beam(a, b, UP, 0.016, 0.007, mat);
                 }
             }
@@ -1565,16 +1578,21 @@ impl<'a, 'b> Parts<'a, 'b> {
     }
 
     fn naca_ducts(&mut self) {
-        let (_, s1, _, y1) = self.intake_box();
+        let (_, s1, _) = self.intake_box();
         let s0 = s1 - 0.6;
         let m = self.m;
+        let b = self.b;
         let pieces = if self.lod0() { 6 } else { 2 };
-        let (top, lo) = (y1 + 0.03, [y1 - 0.01, y1 - 0.14]);
+        // Everything hangs off the belt ledge at each station: the top 4 cm under it, the
+        // lower edge 8 cm under it at the front, 21 cm at the rear.
+        let ledge = move |s: f32| b.frame(s).y_ledge;
+        let top = move |s: f32, _: f32| ledge(s) - 0.04;
+        let lo = move |s: f32, t: f32| ledge(s) - lerp(0.08, 0.21, t);
         for sx in [-1.0f32, 1.0] {
             // Narrow at the front, opening rearward, with a dark lip along its lower edge.
-            self.side_patch_n(sx, s0, s1, lo, [top, top], 0.003, m.grille, pieces);
+            self.side_patch_n(sx, s0, s1, lo, top, 0.003, m.grille, pieces);
             if self.lod0() {
-                let under = [lo[0] - 0.012, lo[1] - 0.012];
+                let under = move |s: f32, t: f32| lo(s, t) - 0.012;
                 self.side_patch_n(sx, s0, s1, under, lo, 0.004, m.trim, pieces);
             }
         }

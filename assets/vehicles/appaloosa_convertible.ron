@@ -38,7 +38,7 @@ VehicleSpec(
     feel: Feel(oversteer_bias: 0.18, body_roll: 0.7, engine_sound: "v8_lazy", shift_jerk: 0.3),
     interior: Interior(
         dash: "sport_80s",
-        gauges: [Speedo(0, 140, mph), Tach(0, 7000)],
+        gauges: [Speedo(0, 160, mph), Tach(0, 7000)],
         radio: "digital_blue",
     ),
     shape: "appaloosa_convertible.shape.ron",

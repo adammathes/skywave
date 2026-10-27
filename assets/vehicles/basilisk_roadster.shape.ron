@@ -1,11 +1,11 @@
 // Basilisk Roadster body: the Basilisk V12 with its roof cut away.
 //
 // Intent: the coupe's wedge nose, flanks and wing, open from the windshield header back:
-// a black boot over the folded top behind the seats, then a louvred engine deck and the
-// tall rear wing on two struts. The doors are long trapezoids (the
-// seam only); tapered ducts are cut into the flanks ahead of rear haunches that flare out
-// past the doors. Pop-up lamps, body-colored bumpers, black trim and deep-dish rims with
-// five round holes. Engine behind the seats. Generic period cues only.
+// a black boot over the folded top behind the seats, then a low louvred engine deck, a
+// wide lamp band across the tail and the tall rear wing on two struts. Plain door seams
+// (the doors do not open); tapered ducts are cut into the flanks ahead of rear haunches
+// that flare out past the doors. Pop-up lamps, body-colored bumpers, black trim and
+// deep-dish rims with five round holes. Engine behind the seats. Generic period cues only.
 //
 // Units are meters; x runs rearward from the nose, y up from the ground. Layout:
 // docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
@@ -13,15 +13,15 @@ ShapeSpec(
     id: "basilisk_roadster",
     side: [
         (0.00, 0.45), (0.05, 0.54), (1.42, 0.80), (1.50, 0.81),
-        (2.16, 1.06), (2.22, 0.81), (3.00, 0.895), (3.36, 0.93), (4.04, 0.93),
-        (4.14, 0.89),
+        (2.16, 1.06), (2.22, 0.81), (3.00, 0.87), (3.36, 0.885), (4.04, 0.88),
+        (4.14, 0.84),
         (4.14, 0.30), (3.96, 0.20), (3.50, 0.15), (0.70, 0.14), (0.14, 0.18), (0.00, 0.27),
     ],
     plan: [
-        (0.00, 0.70), (0.12, 0.83), (0.50, 0.90), (1.10, 0.93), (2.30, 0.93), (2.80, 0.99),
-        (3.30, 1.00), (3.95, 1.00), (4.14, 0.97),
+        (0.00, 0.70), (0.12, 0.83), (0.50, 0.90), (1.10, 0.92), (2.30, 0.92), (2.85, 1.03),
+        (3.95, 1.03), (4.14, 1.00),
     ],
-    belt: [(1.50, 0.76), (2.22, 0.79), (3.00, 0.885), (3.36, 0.92), (4.14, 0.925)],
+    belt: [(1.50, 0.76), (2.22, 0.79), (3.00, 0.86), (3.36, 0.875), (4.14, 0.875)],
     section: Section(shoulder: 0.95, tumblehome_deg: 30, greenhouse_frac: 0.60, crown: 0.03, tuck: 0.05),
     glass: Glass(
         windshield: (1.52, 2.14),
@@ -31,7 +31,7 @@ ShapeSpec(
     ),
     wheels: Wheels(radius: 0.31, width: 0.26, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.43, track: 1.56),
     front: Front(lights: PopUp, grille: None, bumper: Body, bumper_y: (0.25, 0.35)),
-    rear: Rear(lights: Dual, spoiler: Wing, bumper: Body, bumper_y: (0.30, 0.42)),
+    rear: Rear(lights: FullWidth, spoiler: Wing, bumper: Body, bumper_y: (0.30, 0.48)),
     seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.55, creases: [(0.20, 0.52, 4.10, 0.66)]),
     parts: Parts(mirrors: Door, handles: Flush, wipers: 1, exhaust: Dual, antenna: None, rims: Dish, hubcaps: false),
     details: [NacaDucts, EngineLouvers, BlackTrim, Badge(Diamond)],

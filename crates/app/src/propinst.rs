@@ -512,6 +512,12 @@ mod tests {
             .iter()
             .map(|(_, text)| vehicles::load_shape(text).unwrap())
             .collect();
+        // The shapes that never park are the ones traffic leaves out.
+        let tail: Vec<&str> = shapes[vehicles::TRAFFIC_SHAPES..]
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(tail, UNPARKED);
         let mut parked = vec![false; shapes.len()];
         for (class, list) in PARKED.iter().enumerate() {
             let [box_len, box_w, _] = world::props::parked_car_size(class as u8);

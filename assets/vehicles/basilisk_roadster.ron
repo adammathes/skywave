@@ -11,7 +11,7 @@ VehicleSpec(
     class: Convertible,
 
     mass_kg: 1540,
-    dims_m: (4.14, 2.00, 1.06),    // length, width, height
+    dims_m: (4.14, 2.06, 1.06),    // length, width, height
     wheelbase_m: 2.45,
     track_m: 1.56,
     cg_height_m: 0.42,

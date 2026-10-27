@@ -2,7 +2,8 @@
 //
 // Intent: cheap thrills. A light car with a torquey small V8, a live axle and soft,
 // tall tires: it launches hard, squirms a little, leans into corners and lets the tail
-// out easily. The softest of the sports cars, and the most fun to throw around.
+// out easily. The softest of the sports cars, and the most fun to throw around. Class
+// Coupe on purpose: it is slower than the Halcyon, which a Sports car may not be.
 //
 // Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
 VehicleSpec(
@@ -38,7 +39,7 @@ VehicleSpec(
     feel: Feel(oversteer_bias: 0.18, body_roll: 0.6, engine_sound: "v8_lazy", shift_jerk: 0.3),
     interior: Interior(
         dash: "sport_80s",
-        gauges: [Speedo(0, 140, mph), Tach(0, 7000)],
+        gauges: [Speedo(0, 160, mph), Tach(0, 7000)],
         radio: "digital_blue",
     ),
     shape: "appaloosa_gt.shape.ron",
