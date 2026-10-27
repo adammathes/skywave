@@ -204,7 +204,7 @@ struct End {
 
 /// Edge `e`'s profile polyline from `a` to `b`: node positions at the ends, interior
 /// samples at least [`MIN_SAMPLE_M`] apart (as `world::roads` lays it).
-fn raw_line(place: &Place, e: &place::Edge) -> Vec<[f32; 3]> {
+pub(crate) fn raw_line(place: &Place, e: &place::Edge) -> Vec<[f32; 3]> {
     let nodes = &place.roads.nodes;
     let (na, nb) = (&nodes[e.a as usize], &nodes[e.b as usize]);
     let prof = &e.profile;
