@@ -25,7 +25,11 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
+    /// The renderer's HDR mode, for the renderer of a world loaded later.
+    hdr: HdrMode,
     app: App,
+    /// The scene the session started in: a world picked on the World page loads as it.
+    setup: SceneSetup,
     input: InputMapper,
     /// `Gamepad.index` of "the" pad (see `crate::choose_pad`).
     pad: Option<u32>,
@@ -498,8 +502,23 @@ fn build_app(setup: &SceneSetup, query: &str) -> App {
         app.open_settings();
     } else if crate::vehicle_menu_from_query(query) {
         app.open_menu(app::ui::Page::Vehicle);
+    } else if crate::worlds_menu_from_query(query) {
+        app.open_menu(app::ui::Page::Worlds);
     }
     app
+}
+
+/// Uploads what `app` draws from (its meshes, instance room, map and stills) into a
+/// fresh `renderer`.
+fn load_renderer(renderer: &mut Renderer, app: &App) {
+    for mesh in app.meshes() {
+        renderer.add_mesh(mesh);
+    }
+    renderer.reserve_instances(app.max_instances());
+    let map = app.map_image();
+    renderer.upload_map(map.w, map.h, &map.rgba);
+    let (w, h, rgba) = app.stills();
+    renderer.upload_stills(w, h, rgba);
 }
 
 /// Starts the game on `canvas` in the scene the URL query describes (`app::scene`).
@@ -543,10 +562,12 @@ pub async fn run(
         let _ = on_first_frame.call1(&JsValue::NULL, &JsValue::from_str("diag"));
         return Ok(());
     }
-    let setup = SceneSetup::from_query(&query).unwrap_or_else(|e| {
-        log::warn!("skywave: {e}; starting the default scene");
-        SceneSetup::default()
-    });
+    let setup = SceneSetup::from_query(&query)
+        .unwrap_or_else(|e| {
+            log::warn!("skywave: {e}; starting the default scene");
+            SceneSetup::default()
+        })
+        .with_saved_world(LocalStore.load().as_deref());
     if let Some(detail) = option_str(&options, "failure") {
         let note = crate::fallback(
             BackendChoice::Auto,
@@ -563,7 +584,7 @@ pub async fn run(
     let mut canvas = canvas;
     let mut app = None;
     let mut first_attempt = true;
-    let (gpu, config, renderer) = loop {
+    let (gpu, config, renderer, hdr) = loop {
         if !first_attempt {
             canvas = replace_canvas(&canvas)?;
         }
@@ -572,7 +593,10 @@ pub async fn run(
         let failure = match open_gpu(&canvas, backend).await {
             Ok(gpu) => match start(&gpu, &window, &canvas, backend, &setup, &query, &mut app).await
             {
-                Ok((config, renderer)) => break (gpu, config, renderer),
+                Ok((config, renderer)) => {
+                    let hdr = hdr_mode(&gpu.adapter);
+                    break (gpu, config, renderer, hdr);
+                }
                 Err(failure) => {
                     // Frees the attempt's buffers now (dropping a browser device does not).
                     gpu.device.destroy();
@@ -615,7 +639,9 @@ pub async fn run(
         queue: gpu.queue,
         config,
         renderer,
+        hdr,
         app,
+        setup,
         input: InputMapper::default(),
         pad: None,
         pads_ok: true,
@@ -682,12 +708,7 @@ async fn start(
         Renderer::with_options(&gpu.device, &gpu.queue, config.format, size, options);
     // The app outlives a failed attempt but its `take_new_meshes` queue (the saved car)
     // is only drained by the frame loop, after an attempt succeeds: nothing is lost here.
-    for mesh in app.meshes() {
-        renderer.add_mesh(mesh);
-    }
-    renderer.reserve_instances(app.max_instances());
-    let map = app.map_image();
-    renderer.upload_map(map.w, map.h, &map.rgba);
+    load_renderer(&mut renderer, app);
     let build = build.pop();
 
     let frame = Scopes::push(&gpu.device);
@@ -1035,6 +1056,9 @@ impl State {
             sfx.frame(self.app.audio_params(), dt);
         }
         self.pump_radio();
+        if let Some(world) = self.app.take_world_pick() {
+            self.switch_world(world);
+        }
         self.app.sync_chunks(&mut self.renderer);
         // A car driven for the first time this session (and the saved one, at startup).
         for mesh in self.app.take_new_meshes() {
@@ -1083,6 +1107,29 @@ impl State {
         if let Some(cb) = self.on_first_frame.take() {
             let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(self.backend.label()));
         }
+    }
+
+    /// Loads world `world` (picked on the World page) as the session's scene there, with a
+    /// new renderer for it; the old world's radio is silenced. A world that fails to load
+    /// leaves the game where it was.
+    fn switch_world(&mut self, world: usize) {
+        if let Some(glue) = &self.radio {
+            glue.send(&RadioCommand::Stop, "");
+        }
+        if let Err(e) = self.app.switch_world(&self.setup, world) {
+            log::warn!("skywave: {e}; staying in this world");
+            return;
+        }
+        let options = RendererOptions {
+            hdr: self.hdr,
+            ..self.app.renderer_options()
+        };
+        let size = (self.config.width, self.config.height);
+        self.renderer =
+            Renderer::with_options(&self.device, &self.queue, self.config.format, size, options);
+        load_renderer(&mut self.renderer, &self.app);
+        self.stream_idle = None;
+        self.radio_reported = (u8::MAX, None, false, false);
     }
 
     /// Reports, once each, how the corona check came out and whatever the device said

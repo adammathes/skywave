@@ -521,7 +521,7 @@ impl App {
     }
 
     /// The world the World page picked (an index into [`scenario::BUILTIN`]), once: the
-    /// platform loads it with [`App::switch_world`] and builds a renderer for the result.
+    /// platform loads it with [`App::switch_world`] and builds a new renderer for it.
     pub fn take_world_pick(&mut self) -> Option<usize> {
         self.world_pick.take()
     }
@@ -531,14 +531,15 @@ impl App {
         self.ui.scenario()
     }
 
-    /// This app's successor in world `scenario`: the scene `base` (the one the session
-    /// started with) moved there ([`SceneSetup::for_world`]), with this app's settings
-    /// store (so the settings and the saved car carry over), its platform options (quit,
-    /// text entry, the stream budget, the GPU, a forced preset or UI scale) and target
-    /// size. Everything else of this app (its place, chunks, parked cars, traffic, meshes)
-    /// is dropped with it; the platform builds a new renderer for the new app as at
-    /// start-up. The radio starts again off; the platform stops whatever it was playing.
-    pub fn switch_world(mut self, base: &SceneSetup, scenario: usize) -> Result<App, String> {
+    /// Replaces this app with one in world `scenario`: the scene `base` (the one the
+    /// session started with) moved there ([`SceneSetup::for_world`]), with this app's
+    /// settings store (so the settings and the saved car carry over), its platform options
+    /// (quit, text entry, the stream budget, the GPU, a forced preset or UI scale) and
+    /// target size. Everything else (the place, its chunks, parked cars, traffic, meshes)
+    /// is dropped; the platform then builds a new renderer for it as at start-up
+    /// ([`App::meshes`], [`App::map_image`], [`App::stills`]). The radio starts again off;
+    /// the platform stops whatever it was playing. On an error nothing changes.
+    pub fn switch_world(&mut self, base: &SceneSetup, scenario: usize) -> Result<(), String> {
         self.ui.save_if_dirty();
         let mut next = App::from_setup(&base.for_world(scenario))?;
         if let Some(s) = &self.stream {
@@ -556,7 +557,8 @@ impl App {
         });
         next.set_settings_store(store);
         next.ui.world_loaded();
-        Ok(next)
+        *self = next;
+        Ok(())
     }
 
     /// `Reset`: the car back on the nearest lane, at rest ([`Drive::reset`]), the camera
@@ -1892,7 +1894,7 @@ mod tests {
         assert!(used.used > 0 && used.used <= used.slots, "{used:?}");
         let mut seen = vec![first];
         for world in [1, 0] {
-            app = app.switch_world(&base, world).unwrap();
+            app.switch_world(&base, world).unwrap();
             assert_eq!(app.scenario(), world);
             seen.push(footprint(&app));
             let stats = play(&mut app);

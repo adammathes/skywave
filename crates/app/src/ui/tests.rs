@@ -1817,8 +1817,9 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     );
 
     // The platform's load: the same settings in the other world, its place, the radio off.
-    let old = std::mem::replace(&mut h.app, App::new(Seed(1)));
-    h.app = old.switch_world(&crate::SceneSetup::default(), 1).unwrap();
+    h.app
+        .switch_world(&crate::SceneSetup::default(), 1)
+        .unwrap();
     h.frame();
     assert_eq!(h.app.scenario(), 1);
     assert!(
