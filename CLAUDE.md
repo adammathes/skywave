@@ -3,7 +3,8 @@
 Skywave is a chill, single-player, first-person driving game: period-correct cars,
 a coherent seed-generated (or real-data-compiled) American place, low-poly geometry
 lit like it is 2026, real music on the radio. Read `docs/VISION.md` first, then the
-doc for the area you are touching. `docs/MILESTONES.md` says what is in scope now.
+doc for the area you are touching. `docs/MILESTONES.md` says what is in scope now;
+`docs/HANDOFF.md` says where the work stands and how a new session resumes it.
 
 ## Non-negotiables
 - **License:** BSD-3-Clause. Dependencies must be BSD/MIT/Apache-2.0/Zlib/CC0/Unlicense
