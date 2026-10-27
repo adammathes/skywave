@@ -55,6 +55,13 @@ const NEEDLE_TIP_AT: f32 = 0.62;
 /// Scale ticks per dial and their glow.
 const DIAL_TICKS: usize = 9;
 const TICK_GLOW: f32 = 1.6;
+/// Headlight tell-tales on the first dial's face below the hub (where the needle never
+/// sweeps): low beams green on the left, high beams blue on the right, their glow, and
+/// their half size and distance from the hub as shares of the dial's radius.
+const TELLTALE_RGB: [[u8; 3]; 2] = [[40, 255, 70], [40, 110, 255]];
+const TELLTALE_GLOW: f32 = 4.0;
+const TELLTALE_HALF: f32 = 0.1;
+const TELLTALE_AT: [f32; 2] = [0.22, 0.55];
 /// Vertex tint for the grille's egg-crate atlas pattern (the shape's grille color is near
 /// black, which would hide the tintable pattern), linear unorm8.
 const GRILLE_TINT: [u8; 4] = [96, 96, 98, 255];
@@ -351,6 +358,8 @@ pub struct CarMeshes {
     pub needles: [MeshId; 3],
     /// Every dial's scale ticks, body space.
     pub dial_ticks: MeshId,
+    /// The headlight tell-tales, low and high beams, body space.
+    pub telltales: [MeshId; 2],
 }
 
 /// The player's car, built.
@@ -360,6 +369,7 @@ pub struct CarModel {
     pub lods: [CarLod; 2],
     pub needles: [Mesh; 3],
     pub dial_ticks: Mesh,
+    pub telltales: [Mesh; 2],
     /// Triangles of LOD0 as built: exterior (body, parts, glass, lamps, four wheels) and
     /// interior (cabin and steering wheel).
     pub exterior_triangles: usize,
@@ -437,6 +447,9 @@ impl CarModel {
         Ok(CarModel {
             needles: core::array::from_fn(|k| needle_mesh(layout.dials[k].radius)),
             dial_ticks: dial_ticks_mesh(&layout.dials[..layout.dial_count]),
+            telltales: core::array::from_fn(|k| {
+                telltale_mesh(&layout.dials[..layout.dial_count.min(1)], k)
+            }),
             exterior_triangles: car0.exterior_triangles(),
             interior_triangles: car0.interior_triangles(),
             layout,
@@ -476,6 +489,7 @@ impl CarModel {
                 add(&self.needles[2]),
             ],
             dial_ticks: add(&self.dial_ticks),
+            telltales: [add(&self.telltales[0]), add(&self.telltales[1])],
         }
     }
 
@@ -575,6 +589,51 @@ fn parked_mesh_and_lamps(
         add(&w);
     }
     Ok((out, heads))
+}
+
+/// How far a brake overlay's lenses stand off the parked mesh's, at levels of detail 1 and
+/// 2, m: enough to win the depth test over the lens under them at the distance each level
+/// is drawn.
+const BRAKE_OVERLAY_LIFT_M: [f32; 2] = [0.006, 0.03];
+
+/// The brake lamps of `shape`'s [`parked_mesh`] at level of detail `lod` (1 or 2), lit:
+/// its tail lenses alone at [`BRAKE_GLOW`], each lifted off its lens along the normal, in
+/// the same frame. Drawn over the car (with the car-lamp glow) while it brakes, so the
+/// parked mesh needs no braking copy.
+pub fn brake_overlay_mesh(shape: &ShapeSpec, lod: u8) -> Result<Mesh, String> {
+    let car = shape::build_with(
+        shape,
+        &BuildOptions {
+            color_index: 0,
+            lod,
+            popups_up: false,
+            paint: None,
+        },
+    )
+    .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
+    let mid = 0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]);
+    let lamps = convert(&car.lights, Vec3::new(0.0, 0.0, -mid), Surface::Plain);
+    let lift = BRAKE_OVERLAY_LIFT_M[usize::from(lod.clamp(1, 2) - 1)];
+    let tail = |v: &Vertex| lamp_group(v.emissive) == LampGroup::Tail;
+    let mut out = Mesh::default();
+    let mut map = vec![u32::MAX; lamps.vertices.len()];
+    for t in lamps.indices.chunks_exact(3) {
+        if !t.iter().all(|&i| tail(&lamps.vertices[i as usize])) {
+            continue;
+        }
+        for &i in t {
+            if map[i as usize] == u32::MAX {
+                let mut v = lamps.vertices[i as usize];
+                v.pos = (Vec3::from(v.pos) + Vec3::from(v.normal) * lift).to_array();
+                let e = v.emissive;
+                v.emissive = render::emissive([e[0], e[1], e[2]], BRAKE_GLOW);
+                map[i as usize] = out.vertices.len() as u32;
+                out.vertices.push(v);
+            }
+            out.indices.push(map[i as usize]);
+        }
+    }
+    Ok(out)
 }
 
 /// How a shape mesh's uvs map into the atlas.
@@ -775,6 +834,34 @@ fn dial_ticks_mesh(dials: &[DialLayout]) -> Mesh {
                 .extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
         }
     }
+    m
+}
+
+/// Tell-tale `k` (0 low beams, 1 high beams) on the first of `dials` (none without one):
+/// a glowing square on the face below the hub, body space.
+fn telltale_mesh(dials: &[DialLayout], k: usize) -> Mesh {
+    let mut m = Mesh::default();
+    let Some(d) = dials.first() else {
+        return m;
+    };
+    let rgb = TELLTALE_RGB[k];
+    let glow = render::emissive(rgb, TELLTALE_GLOW);
+    let color = [rgb[0], rgb[1], rgb[2], 255];
+    let right = d.up.cross(d.normal);
+    let side = if k == 0 { -1.0 } else { 1.0 };
+    let c = d.center + d.normal * TICK_LIFT_M + right * (side * TELLTALE_AT[0] * d.radius)
+        - d.up * (TELLTALE_AT[1] * d.radius);
+    let h = (TELLTALE_HALF * d.radius).max(0.002);
+    for p in [
+        c - right * h - d.up * h,
+        c + right * h - d.up * h,
+        c + right * h + d.up * h,
+        c - right * h + d.up * h,
+    ] {
+        m.vertices
+            .push(Vertex::new(p.to_array(), d.normal.to_array(), color).with_emissive(glow));
+    }
+    m.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
     m
 }
 
@@ -1082,8 +1169,8 @@ mod tests {
             MeshId(n - 1)
         });
         // Per LOD: one body (no pop-ups), its inside, glass, interior, wheel, steering
-        // wheel, 4 lamp states; then 3 needles and the ticks.
-        assert_eq!(n, 2 * 10 + 4);
+        // wheel, 4 lamp states; then 3 needles, the ticks and 2 tell-tales.
+        assert_eq!(n, 2 * 10 + 6);
         assert_eq!(ids.lods[0].body[0], ids.lods[0].body[1]);
         let (_, corsair) = model("corsair_gtx");
         let mut n = 0;
@@ -1091,7 +1178,7 @@ mod tests {
             n += 1;
             MeshId(n - 1)
         });
-        assert_eq!(n, 2 * 11 + 4);
+        assert_eq!(n, 2 * 11 + 6);
         assert_ne!(ids.lods[0].body[0], ids.lods[0].body[1]);
     }
 }

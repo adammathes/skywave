@@ -145,14 +145,16 @@ oncoming and crossing cars in view, and renders Deck and Medium with traffic off
 
 | Junction, 1280×800 | Forward instances | Draws | Forward tris | Shadow tris |
 |---|---|---|---|---|
-| Deck, traffic off | 395 | 273 | 394k | 614k |
-| Deck, busy (76 cars, 4 in the forward pass) | 399 | 281 | 408k | 671k |
-| Medium, traffic off | 395 | 396 | 394k | 1109k |
-| Medium, busy | 399 | 414 | 408k | 1201k |
+| Deck, traffic off | 395 | 273 | 397k | 616k |
+| Deck, busy (76 cars, 6 in the forward pass, some braking) | 401 | 283 | 410k | 673k |
+| Medium, traffic off | 395 | 396 | 397k | 1114k |
+| Medium, busy | 401 | 416 | 410k | 1206k |
 
 Cars of one mesh share one instanced draw, so four cars cost eight draws at Deck (their
 level-1 meshes in the forward pass and the cascades), about 3.5k triangles each forward and
-again per cascade. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 310 draws, 450k
+again per cascade. Braking cars add their shape's brake lamp overlay (a few dozen
+triangles, forward pass only, one instanced draw per shape and level in view): two draws
+here. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 310 draws, 450k
 forward and 740k shadow triangles; Medium 455 draws, 450k and 1320k** (the busy numbers plus
 about 10%), and if fewer than three NPC cars are in the forward pass. The traffic sim (step
 and populate, busy) has a median under 0.5 ms a step in a debug build (`app::npc` and

@@ -41,6 +41,8 @@ pub enum Action {
     RadioPrev,
     RadioOff,
     Headlights,
+    /// High beams on/off (they switch the headlights on with them).
+    HighBeams,
     Horn,
     /// Swap to the next built-in vehicle, in place.
     VehicleNext,
@@ -84,7 +86,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 35;
+    pub const COUNT: usize = 36;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -98,6 +100,7 @@ impl Action {
         Action::RadioPrev,
         Action::RadioOff,
         Action::Headlights,
+        Action::HighBeams,
         Action::Horn,
         Action::VehicleNext,
         Action::Reset,
@@ -207,6 +210,7 @@ impl Action {
             Action::RadioPrev => "RadioPrev",
             Action::RadioOff => "RadioOff",
             Action::Headlights => "Headlights",
+            Action::HighBeams => "HighBeams",
             Action::Horn => "Horn",
             Action::VehicleNext => "VehicleNext",
             Action::Reset => "Reset",

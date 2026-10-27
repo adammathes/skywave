@@ -492,6 +492,7 @@ impl CameraRig {
             Action::LookBack,
             Action::CameraCycle,
             Action::Headlights,
+            Action::HighBeams,
             Action::Horn,
             Action::TimeScrub,
         ]

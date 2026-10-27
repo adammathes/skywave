@@ -579,7 +579,8 @@ mod tests {
         .unwrap();
         let npc = npcs.built_bytes();
         eprintln!("traffic: {built} more meshes, {npc} bytes");
-        assert!(cars.len() + built <= 12 * (OWN_PAINTS + ERA_PAINTS) * 2);
+        // Plus each shape's brake lamp overlay at both levels.
+        assert!(cars.len() + built <= 12 * (OWN_PAINTS + ERA_PAINTS + 1) * 2);
         assert!(
             bytes + npc <= PARKED_MESH_BYTES_MAX,
             "{bytes} bytes of parked cars and {npc} of traffic"

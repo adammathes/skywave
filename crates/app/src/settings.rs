@@ -3,7 +3,8 @@
 //!
 //! ```json
 //! { "version": 1,
-//!   "drive": { "handling": "arcade", "vehicle": "corsair_gtx", "paint": 0 },
+//!   "drive": { "handling": "arcade", "headlights": "auto", "vehicle": "corsair_gtx",
+//!              "paint": 0 },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
@@ -220,6 +221,9 @@ pub const SEAT_STEP_CM: f32 = 1.0;
 pub struct Settings {
     /// The assists preset.
     pub handling: Handling,
+    /// Headlights: Auto (on at dusk, off at dawn, the switch overrides them in between) or
+    /// Manual (the switch alone).
+    pub headlights_auto: bool,
     /// The car picked on the Vehicle page or with `VehicleNext`: a [`BUILTIN`] id, or
     /// `None` until one is picked. The game starts in it unless the scene names a car
     /// (`car=`).
@@ -273,6 +277,7 @@ impl Default for Settings {
     fn default() -> Settings {
         Settings {
             handling: Handling::Arcade,
+            headlights_auto: true,
             vehicle: None,
             paint: 0,
             camera: CameraMode::ChaseMid,
@@ -309,6 +314,7 @@ pub const VOLUME_STEP: f32 = 0.05;
 #[serde(default)]
 struct DriveSection {
     handling: String,
+    headlights: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     vehicle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -319,9 +325,19 @@ impl Default for DriveSection {
     fn default() -> DriveSection {
         DriveSection {
             handling: Settings::default().handling.name().to_owned(),
+            headlights: headlights_name(Settings::default().headlights_auto).to_owned(),
             vehicle: None,
             paint: None,
         }
+    }
+}
+
+/// Stable name of the headlights setting: `auto` or `manual`.
+pub fn headlights_name(auto: bool) -> &'static str {
+    if auto {
+        "auto"
+    } else {
+        "manual"
     }
 }
 
@@ -520,6 +536,7 @@ impl Settings {
             "version": SETTINGS_VERSION,
             "drive": DriveSection {
                 handling: self.handling.name().to_owned(),
+                headlights: headlights_name(self.headlights_auto).to_owned(),
                 vehicle: self.vehicle.map(str::to_owned),
                 paint: self.vehicle.map(|_| self.paint),
             },
@@ -578,6 +595,7 @@ impl Settings {
         let d = Settings::default();
         let settings = Settings {
             handling: Handling::from_name(&drive.handling).unwrap_or(d.handling),
+            headlights_auto: drive.headlights != headlights_name(false),
             vehicle: drive.vehicle.as_deref().and_then(builtin_vehicle),
             paint: drive.paint.unwrap_or(0),
             camera: CameraMode::from_name(&camera.mode).unwrap_or(d.camera),
@@ -616,6 +634,7 @@ mod tests {
     fn settings_and_bindings_round_trip() {
         let s = Settings {
             handling: Handling::Off,
+            headlights_auto: false,
             vehicle: Some("palisade_wagon"),
             paint: 3,
             camera: CameraMode::Cockpit,
