@@ -47,13 +47,13 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   worst-piece assert, one CI run per PR).
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
   NPC traffic drawn in the app with a density setting (M4 #6); sign pictograms and the invented-name
-  lexicon (B5+B6). Branches in progress: `m2/map-edges` (NOTES #3), `bldg/facade-bands` (B4),
+  lexicon (B5+B6). Branches in progress: `m2/map-edges` (NOTES #3), `bldg/awnings-rooflines` (B8+B9; B4 merged as #21),
   `m4/vehicle-select` (M4 #7).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output is wanted; NOTES 4(a) life beyond traffic (window lights, parked cars that come
   and go); buildings B7-B15.
 - Next: M4 #8 (non-violence scenarios, density tests, gate screenshots) once #6 merges; pedestrians
-  drawn in the app (figure instancing) after #6; B8 awnings and B9 rooflines after B4; B10 parking
+  drawn in the app (figure instancing) after #6; B11 window AC and B13 fire escapes after B8+B9 (all in `world::buildings`); B10 parking
   lots after map edges; M5 (release polish, Deck verification); M6 place compiler; M7+ scenarios.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy; a PR that regenerates

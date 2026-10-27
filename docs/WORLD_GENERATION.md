@@ -69,7 +69,7 @@ planner's former code constants (`shipped_grammar_keeps_the_former_constants` in
 `crates/world/src/grammar.rs`); the three-band facade's (B4) are starting values from
 `docs/backlog/BUILDINGS.md`.
 
-As built (B2, B4):
+As built (B2, B4, B8, B9):
 ```
 Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules }
 StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addenda }
@@ -84,12 +84,16 @@ StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addend
   body:     window: ByUse<Window { w_share, w: (min, max), head, h_max }>,
             kinds: ByUse<WindowKinds { punched, paired, ribbon, bay, picture }>  (weights),
             window_h_min, sill_ground, sill_upper
-  top:      parapet_h: ByUse<f32>, kinds: TopKinds { parapet, cornice, stepped }  (weights),
-            cornice_d
-  addenda:  roof_vents: ByUse<(min, max)>, roof_units: ByUse<(min, max)>,
+  top:      parapet_h: ByUse<f32>, cornice_d,
+            kinds: TopKinds { parapet, cornice, stepped, shaped, false_front, bracketed,
+                              mansard }  (weights)
+  addenda:  roof_vents: ByUse<(min, max)>  (a count),
+            roof_units, exhaust_fans, skylights: ByUse<(min, max)>  (per 1000 m² of roof),
             bulkhead_floors, water_tank_1_in
 ByUse<T>    { residential, office, other }   other: commercial, industrial, civic, hotel, parking
-SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256, shop_lit_256 }
+SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], lit_box_256,
+              shop_lit_256 }
+Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
 LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
 ```
 **Which rules.** A style may have several entries. A building takes the first entry, in file
@@ -127,8 +131,12 @@ building, from an `Rng` keyed by the building's door pick):
   narrow ones), ribbon (glass bay to bay with mullions on the bay lines; upper floors and
   door-less ground floors), bay (a projecting glazed box; upper floors) or picture (one wide
   one). The **top** of a flat roof is drawn from `top.kinds`: the plain parapet, a cornice
-  projecting `cornice_d`, or a parapet stepped up over the street front's
-  middle.
+  projecting `cornice_d`, a parapet stepped up or shaped (shoulders and a curved crown)
+  over the street front's middle, a false front (the street wall carried up 1.2–2.4 m;
+  one storey only, taller buildings get the plain parapet), a deep cornice on brackets
+  along the street front (two storeys or more, else the plain cornice), or a shingled
+  mansard all round, 1.1 m down the wall and 0.7 m out (two storeys or more, else the
+  plain parapet: a one-storey front's signs reach the top of its wall).
 - **Windows.** Bays of `bay_w` (1.5× on facades more than 30 m from a road, then widened until
   the triangle budget fits); a window is `clamp(bay_w · w_share, w)` wide and
   `min(upper floor − head, h_max)` tall, at least `window_h_min`; sills `sill_ground` above the
@@ -136,11 +144,24 @@ building, from an `Rng` keyed by the building's door pick):
 - **Triangles.** The planner aims for 2,000 triangles a building
   (`buildings::PLAIN_TRIANGLE_TARGET`); a building with a base band may use the 3,500 ceiling
   of `docs/backlog/ART.md` (`BUILDING_TRIANGLE_BUDGET`).
-- **Roofs.** `roof_vents` and `roof_units` are inclusive counts per flat roof (`(0, 0)` draws
-  nothing); buildings of `bulkhead_floors` or more get a stair bulkhead, and one in
-  `water_tank_1_in` of those a water tank.
-- **Signs** (terrain places). The awning is drawn from `awnings` by weight in listed order;
-  `lit_box_256` and `shop_lit_256` are shares out of 256 of backlit-box signs and late shops.
+- **Roofs.** `roof_vents` is an inclusive count per flat roof (`(0, 0)` draws nothing).
+  `roof_units` (packaged units: a cabinet on a curb with a duct elbow into the roof),
+  `exhaust_fans` and `skylights` are rates per 1000 m² of footprint: a rate drawn from the
+  range times the area, rounded at random, at least one when the range is above zero, at
+  most 6 units, 3 fans and 8 skylights. They are counted at planning (`BuildingPlan::roof`,
+  so the triangle estimate covers them) and placed toward the back of the roof, in the
+  street front's frame, so the parapet hides most of them from the street; a strip mall's
+  1.8 m parapet hides them all. Buildings of `bulkhead_floors` or more get a stair
+  bulkhead, and one in `water_tank_1_in` of those a water tank.
+- **Signs** (terrain places). The awning over each run of storefronts is drawn from
+  `awnings` by weight in listed order: a striped or solid canvas shed, a flat stucco
+  canopy, a vinyl bullnose, a ribbed aluminum shed, a shingled mansard pent, or none; its
+  lowest edge stays 2.4 m over the floor. A strip mall's canopy is drawn from
+  `mall_canopies`: a shingled mansard on posts (0.9–1.5 m tall, 2–3 m out, the tenants'
+  letters on a raceway at its foot) or the flat canopy (any other kind). Where the shop is
+  open late the awning's or canopy's underside glows at window strength, the spill of the
+  light the detailing puts in front of it. `lit_box_256` and `shop_lit_256` are shares out
+  of 256 of backlit-box signs and late shops.
 - **Lots.** Strip malls with at least `front_min_yard` of open ground in front get nose-in
   stalls `stall_w` wide, a `front_fill` share of them taken; beach aisles take a stall with
   chance `aisle_fill` (terrain places). The test town's strip-mall lots use `stall_w` too.
@@ -148,7 +169,8 @@ building, from an `Rng` keyed by the building's door pick):
 Still in code, to move with the tasks that change them: the palette (`world::Palette` and
 `buildings::look`), which styles get carports, walkways and step-backs, the step-back floors
 (`STEP_BACK_FLOORS`, also read by the building generator), the triangle budget, and every
-builder's own dimensions (sign bands, awnings, the stepped parapet, the belt course). A value moves into
+builder's own dimensions (sign bands, awnings and canopies, the parapet and cornice
+shapes, rooftop units, the belt course). A value moves into
 the grammar when a task first needs to vary it; a fitted value names its source
 (`CREDITS.md`).
 

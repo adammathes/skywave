@@ -378,8 +378,10 @@ fn lights_are_the_lamps_signs_and_shops() {
             LightKind::Neon => {
                 neon += 1;
                 let by_sign = signs.iter().any(|s| (*s - q).length() < 2.0);
+                // 1.2 m out from its sign, which on a strip mall's mansard canopy stands up
+                // to 3 m out from the wall.
                 assert!(
-                    wall < 2.0 || by_sign,
+                    wall < 4.5 || by_sign,
                     "neon light at {:?} by no sign",
                     l.pos
                 );

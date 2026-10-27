@@ -14,8 +14,11 @@
 // `cornice_d`, the 4–5 m ground floor) are starting values from docs/backlog/BUILDINGS.md
 // ("The grammar", the 1980s SoCal table): bulkhead 0.4–0.6 m, display glass to 2.6–3.0 m,
 // transom 0.5–0.9 m, recessed entries 1.0–1.8 m in pre-war fronts and flush in remodeled
-// ones. A fitted number replaces one of these with a comment naming its source and item
-// (see CREDITS.md).
+// ones. B8 and B9 (awning and canopy weights, top kinds, rooftop units, exhaust fans and
+// skylights per 1000 m² of roof) are starting values from the same table: packaged units
+// 2–4 per 1000 m² on strip malls and commercial roofs, mansard canopies on strip malls and
+// remodeled fronts, false fronts on one-storey fronts. A fitted number replaces one of
+// these with a comment naming its source and item (see CREDITS.md).
 Grammar(
     era: Eighties,
     template: "california_coast",
@@ -70,12 +73,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8),
-                kinds: TopKinds(parapet: 3, cornice: 1, stepped: 1),
+                kinds: TopKinds(
+                    parapet: 3, cornice: 1, stepped: 1, shaped: 0,
+                    false_front: 1, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.3,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -129,12 +137,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8),
-                kinds: TopKinds(parapet: 3, cornice: 1, stepped: 1),
+                kinds: TopKinds(
+                    parapet: 3, cornice: 1, stepped: 1, shaped: 1,
+                    false_front: 2, bracketed: 0, mansard: 1,
+                ),
                 cornice_d: 0.3,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -188,12 +201,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 0, cornice: 1, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 1, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 1, mansard: 0,
+                ),
                 cornice_d: 0.24,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -247,12 +265,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 0, cornice: 1, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 2, stepped: 0, shaped: 0,
+                    false_front: 1, bracketed: 2, mansard: 0,
+                ),
                 cornice_d: 0.24,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -306,12 +329,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 3),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 3, shaped: 1,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -365,12 +393,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1.8, office: 1.8, other: 1.8),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (3, 6)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -424,12 +457,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -483,12 +521,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -542,12 +585,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -601,12 +649,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -660,12 +713,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -719,12 +777,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -778,12 +841,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 1, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 0,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (2, 4)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0.5, 1), other: (1, 2)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -837,12 +905,17 @@ Grammar(
             ),
             top: Top(
                 parapet_h: ByUse(residential: 1, office: 1, other: 1),
-                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                kinds: TopKinds(
+                    parapet: 2, cornice: 0, stepped: 0, shaped: 0,
+                    false_front: 0, bracketed: 0, mansard: 1,
+                ),
                 cornice_d: 0.2,
             ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
-                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                roof_units: ByUse(residential: (0, 0), office: (2, 4), other: (1, 2)),
+                exhaust_fans: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
+                skylights: ByUse(residential: (0, 0), office: (0, 0), other: (0, 0)),
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
             ),
@@ -850,8 +923,19 @@ Grammar(
     ],
 
     signs: SignRules(
-        // Striped, solid, a flat canopy, none: equally often.
-        awnings: [(Striped, 1), (Solid, 1), (Canopy, 1), (None, 1)],
+        // Over a run of storefronts: canvas sheds (striped, solid) most, then vinyl
+        // bullnoses, aluminum sheds, flat stucco canopies, shingled mansards (80s remodels).
+        awnings: [
+            (Striped, 3),
+            (Solid, 3),
+            (Bullnose, 2),
+            (Aluminum, 2),
+            (Canopy, 2),
+            (Mansard, 1),
+            (None, 2),
+        ],
+        // Along a strip mall: the shingled mansard on posts, else a flat stucco canopy.
+        mall_canopies: [(Mansard, 3), (Canopy, 2)],
         lit_box_256: 70,
         shop_lit_256: 115,
     ),

@@ -173,8 +173,8 @@ Visual tasks attach before/after screenshots of the four fixed coast cameras and
 | B5 | Pictogram library: 32 shapes as 2D polygons, extrude and neon-outline builders, a preview sheet in `tools/shape-preview`; tests for triangle budget and closed outlines | `world::signs`, tools | — |
 | B6 | Lexicon and wordmarks: phonotactic name tables, descriptors, trades, forms; stroke letterforms in four styles replacing the 5-pixel font on shop signs; uniqueness within a radius | `world::signs`, `assets/grammar/lexicon.ron` | B2 |
 | B7 | Sign carriers: band, blade, pole, rooftop, window lettering, ghost sign; night switching and flicker | `world::buildings` (sign fns), `world::procgen::detail` | B5, B6 |
-| B8 | Awnings and canopies: shed (striped, solid), bullnose, mansard shingle canopy, flat stucco canopy, aluminum; per-era weights | `world::buildings` (awning fns) | B4 |
-| B9 | Rooflines and rooftop units: parapet kinds, bracketed cornice, false front; packaged units with ducts by roof area | `world::buildings` (top, roof clutter) | B2 |
+| B8 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars", Signs). Awnings and canopies: shed (striped, solid), bullnose, mansard shingle canopy, flat stucco canopy, aluminum; per-era weights | `world::buildings` (awning fns) | B4 |
+| B9 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars", top and Roofs). Rooflines and rooftop units: parapet kinds, bracketed cornice, false front; packaged units with ducts by roof area | `world::buildings` (top, roof clutter) | B2 |
 | B10 | Parking lots: `LotRules` layout on front and rear lots, stripes, wheel stops, poles, islands, curb cuts; parked-car placement on stalls | `world::procgen` (parcels/props), `world::mesh` ground | B2 |
 | B11 | Window AC, through-wall units, grilles, burglar bars, wear bands | `world::buildings` (addenda) | B4 |
 | B12 | SoCal beach town pass: tune the grammar until the four coast cameras read as a 1985 beach town; owner look | `assets/grammar/` | B3–B11 |

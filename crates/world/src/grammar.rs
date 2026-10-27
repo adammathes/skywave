@@ -319,11 +319,28 @@ pub struct TopKinds {
     pub cornice: u16,
     /// A parapet stepped up over the middle of the street front.
     pub stepped: u16,
+    /// A curved parapet, shoulders and a crown, over the middle of the street front.
+    pub shaped: u16,
+    /// A false front: the street wall carried up well above the roof (one storey only;
+    /// taller buildings get the plain parapet).
+    pub false_front: u16,
+    /// A cornice on brackets along the street front.
+    pub bracketed: u16,
+    /// A shingled mansard all round the roof edge.
+    pub mansard: u16,
 }
 
 impl TopKinds {
-    pub fn weights(&self) -> [u16; 3] {
-        [self.parapet, self.cornice, self.stepped]
+    pub fn weights(&self) -> [u16; 7] {
+        [
+            self.parapet,
+            self.cornice,
+            self.stepped,
+            self.shaped,
+            self.false_front,
+            self.bracketed,
+            self.mansard,
+        ]
     }
 }
 
@@ -349,26 +366,40 @@ pub fn pick(weights: &[u16], r: u32) -> Option<usize> {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Addenda {
-    /// Vent hoods and pipes.
+    /// Vent hoods and plumbing vents, a count.
     pub roof_vents: ByUse<CountRange>,
-    /// Packaged rooftop units.
-    pub roof_units: ByUse<CountRange>,
+    /// Packaged rooftop units (a cabinet on a curb, a duct elbow into the roof) per
+    /// 1000 m² of roof, drawn per building; a roof with a range above zero gets one at
+    /// least.
+    pub roof_units: ByUse<Range>,
+    /// Exhaust fans per 1000 m² of roof.
+    pub exhaust_fans: ByUse<Range>,
+    /// Skylights per 1000 m² of roof.
+    pub skylights: ByUse<Range>,
     /// Buildings of this many floors or more get a stair bulkhead...
     pub bulkhead_floors: u8,
     /// ...and one in this many of those a water tank (on a roof over 9 m each way).
     pub water_tank_1_in: u32,
 }
 
-/// The awning over a storefront.
+/// The awning over a storefront, or the canopy along a strip mall's front.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Awning {
+    /// A striped canvas shed awning with a valance.
     Striped = 0,
+    /// The same in one color.
     Solid = 1,
-    /// A flat canopy.
+    /// A flat stucco canopy with a trim fascia.
     Canopy = 2,
     None = 3,
+    /// A quarter-round vinyl awning.
+    Bullnose = 4,
+    /// A shallow ribbed aluminum shed with a deep fascia.
+    Aluminum = 5,
+    /// A shingled mansard canopy (on posts along a strip mall).
+    Mansard = 6,
 }
 
 /// The signage a terrain place's detailing gives its buildings.
@@ -376,8 +407,12 @@ pub enum Awning {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SignRules {
-    /// Awning kinds with integer weights; listed order is draw order.
+    /// Awning kinds over a run of storefronts, with integer weights; listed order is draw
+    /// order.
     pub awnings: Vec<(Awning, u32)>,
+    /// The canopy along a strip mall's front, the same way (`Mansard` or `Canopy`; any
+    /// other kind is drawn as `Canopy`).
+    pub mall_canopies: Vec<(Awning, u32)>,
     /// Signs that are backlit boxes rather than neon letters.
     pub lit_box_256: u32,
     /// Shops open late.
@@ -387,16 +422,25 @@ pub struct SignRules {
 impl SignRules {
     /// The awning `r` (any number; reduced modulo the total weight) picks.
     pub fn awning(&self, r: u64) -> Awning {
-        let total: u64 = self.awnings.iter().map(|&(_, w)| u64::from(w)).sum();
-        let mut r = r % total.max(1);
-        for &(a, w) in &self.awnings {
-            if r < u64::from(w) {
-                return a;
-            }
-            r -= u64::from(w);
-        }
-        Awning::None
+        draw(&self.awnings, r)
     }
+
+    /// The strip-mall canopy `r` picks.
+    pub fn mall_canopy(&self, r: u64) -> Awning {
+        draw(&self.mall_canopies, r)
+    }
+}
+
+fn draw(list: &[(Awning, u32)], r: u64) -> Awning {
+    let total: u64 = list.iter().map(|&(_, w)| u64::from(w)).sum();
+    let mut r = r % total.max(1);
+    for &(a, w) in list {
+        if r < u64::from(w) {
+            return a;
+        }
+        r -= u64::from(w);
+    }
+    Awning::None
 }
 
 /// Parked cars in front lots and beach aisles.
@@ -482,6 +526,14 @@ impl Grammar {
         let s = &self.signs;
         if s.awnings.iter().map(|&(_, w)| u64::from(w)).sum::<u64>() == 0 {
             return Err(bad("signs.awnings"));
+        }
+        if s.mall_canopies
+            .iter()
+            .map(|&(_, w)| u64::from(w))
+            .sum::<u64>()
+            == 0
+        {
+            return Err(bad("signs.mall_canopies"));
         }
         if s.lit_box_256 > 256 {
             return Err(bad("signs.lit_box_256"));
@@ -570,7 +622,9 @@ impl StyleRules {
         )?;
         let a = &self.addenda;
         check(all(&a.roof_vents, |c| c.0 <= c.1), "addenda.roof_vents")?;
-        check(all(&a.roof_units, |c| c.0 <= c.1), "addenda.roof_units")?;
+        check(all(&a.roof_units, |&r| range(r)), "addenda.roof_units")?;
+        check(all(&a.exhaust_fans, |&r| range(r)), "addenda.exhaust_fans")?;
+        check(all(&a.skylights, |&r| range(r)), "addenda.skylights")?;
         check(a.water_tank_1_in >= 1, "addenda.water_tank_1_in")?;
         Ok(())
     }
@@ -688,11 +742,15 @@ mod tests {
                 other: one,
             },
         };
-        let (top_kinds, cornice_d) = match style {
-            S::StuccoBox => ((3, 1, 1), 0.3),
-            S::Brick => ((0, 1, 0), 0.24),
-            S::Deco => ((1, 0, 3), 0.2),
-            _ => ((1, 0, 0), 0.2),
+        // B9: parapet, cornice, stepped, shaped, false front, bracketed, mansard.
+        let (top_kinds, cornice_d) = match (style, industrial) {
+            (S::StuccoBox, true) => ([3, 1, 1, 0, 1, 0, 0], 0.3),
+            (S::StuccoBox, _) => ([3, 1, 1, 1, 2, 0, 1], 0.3),
+            (S::Brick, true) => ([1, 1, 0, 0, 0, 1, 0], 0.24),
+            (S::Brick, _) => ([1, 2, 0, 0, 1, 2, 0], 0.24),
+            (S::Deco, _) => ([1, 0, 3, 1, 0, 0, 0], 0.2),
+            (S::Motel, _) => ([2, 0, 0, 0, 0, 0, 1], 0.2),
+            _ => ([1, 0, 0, 0, 0, 0, 0], 0.2),
         };
         let by = |f: &dyn Fn(BuildingUse) -> f32| ByUse {
             residential: f(BuildingUse::Residential),
@@ -801,9 +859,13 @@ mod tests {
             top: Top {
                 parapet_h: parapet,
                 kinds: TopKinds {
-                    parapet: top_kinds.0,
-                    cornice: top_kinds.1,
-                    stepped: top_kinds.2,
+                    parapet: top_kinds[0],
+                    cornice: top_kinds[1],
+                    stepped: top_kinds[2],
+                    shaped: top_kinds[3],
+                    false_front: top_kinds[4],
+                    bracketed: top_kinds[5],
+                    mansard: top_kinds[6],
                 },
                 cornice_d,
             },
@@ -814,10 +876,29 @@ mod tests {
                     office: (2, 4),
                     other: (2, 4),
                 },
+                // B9: per 1000 m² of roof.
                 roof_units: ByUse {
-                    residential: (0, 0),
-                    office: (1, 2),
-                    other: (1, 2),
+                    residential: (0.0, 0.0),
+                    office: (2.0, 4.0),
+                    other: if motel { (1.0, 2.0) } else { (2.0, 4.0) },
+                },
+                exhaust_fans: ByUse {
+                    residential: (0.0, 0.0),
+                    office: if motel { (0.0, 0.0) } else { (0.5, 1.0) },
+                    other: if motel { (0.0, 0.0) } else { (1.0, 2.0) },
+                },
+                skylights: ByUse {
+                    residential: (0.0, 0.0),
+                    office: if style == S::Warehouse {
+                        (2.0, 4.0)
+                    } else {
+                        (0.0, 0.0)
+                    },
+                    other: match style {
+                        S::StripMall => (3.0, 6.0),
+                        S::Warehouse => (2.0, 4.0),
+                        _ => (0.0, 0.0),
+                    },
                 },
                 bulkhead_floors: 4,
                 water_tank_1_in: 2,
@@ -839,10 +920,22 @@ mod tests {
         }
         assert_eq!(g.signs.lit_box_256, 70);
         assert_eq!(g.signs.shop_lit_256, 115);
-        // The former draw: `(h >> 8) % 4` in Striped, Solid, Canopy, None order.
-        for r in 0..64u64 {
-            assert_eq!(g.signs.awning(r) as u64, r % 4);
-        }
+        // Weights in listed order (B8).
+        let awnings: Vec<Awning> = (0..15u64).map(|r| g.signs.awning(r)).collect();
+        use Awning as A;
+        let want = [
+            [A::Striped; 3].as_slice(),
+            &[A::Solid; 3],
+            &[A::Bullnose; 2],
+            &[A::Aluminum; 2],
+            &[A::Canopy; 2],
+            &[A::Mansard],
+            &[A::None; 2],
+        ]
+        .concat();
+        assert_eq!(awnings, want);
+        assert_eq!(g.signs.mall_canopy(0), A::Mansard);
+        assert_eq!(g.signs.mall_canopy(4), A::Canopy);
         assert_eq!(
             g.lots,
             LotRules {
@@ -965,6 +1058,12 @@ mod tests {
         ));
         let mut g = coast_80s();
         g.signs.awnings.clear();
+        assert!(g.validate().is_err());
+        let mut g = coast_80s();
+        g.signs.mall_canopies.clear();
+        assert!(g.validate().is_err());
+        let mut g = coast_80s();
+        g.styles[0].addenda.skylights.other = (2.0, 1.0);
         assert!(g.validate().is_err());
         let mut g = coast_80s();
         g.lots.front_fill = (0.8, 0.2);
