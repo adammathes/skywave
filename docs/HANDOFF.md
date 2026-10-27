@@ -35,7 +35,7 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 12:30 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+- Done on `main` (2026-10-27 13:40 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   7 working stations per era and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
@@ -45,13 +45,15 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   sound (M4 #6); vehicle select screen with turntable preview and paint picker (M4 #7); reference
   sources ADR 0005; facade grammar loader (B1, B2); three-band facades with real storefronts (B4);
   sign pictograms, stroke letterforms and the closed lexicon on blade signs (B5, B6); chunk pool
-  raised to 1211 web / 1617 native pages; CI gates stabilised.
+  raised to 1211 web / 1617 native pages; CI gates stabilised; the M4 gate (#25: non-violence
+  scenarios, density tests, two gate goldens, gate notes in `docs/backlog/M4.md`).
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
   natural map edges (#20, approved, blocked until #24 lands, then re-pins two traffic hashes);
   pedestrian hardening (#24, fourth review round: a car along or turning across a crossing must
   never reach anyone; the adversarial probe sweep over every crossing, seeds 1-4, is becoming the
-  standing test); the M4 gate (#25, approved, needs a main merge). Branches in progress:
-  `m4/peds-in-app` (pedestrians drawn), `bldg/awnings-rooflines` (B8, B9).
+  standing test); pedestrians drawn in the game (#27, CI green, under review, adds golden
+  `coast-peds-noon`); awnings, canopies, rooflines and rooftop units (#26, B8 and B9, under
+  review, re-pins hashes and two coast goldens; merges after #27, then refreshes from main).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.

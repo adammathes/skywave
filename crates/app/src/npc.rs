@@ -521,6 +521,9 @@ pub fn view(eye: Vec3, forward: Vec3, fov_y_rad: f32, aspect: f32) -> View {
 }
 
 #[cfg(test)]
+mod gate;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{App, InputState, SceneSetup};
