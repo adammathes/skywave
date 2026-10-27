@@ -1,0 +1,58 @@
+// Pipit Hatch body: an early-80s three-door compact hatchback.
+//
+// Intent: small, square and eager. A short flat nose with a slot grille between single
+// rectangular lamps, a low hood, an upright windshield, a long flat roof and a steep
+// hatch glass over a short squared tail. Black plastic bumpers, black window frames and
+// arch lips, a tape stripe low on the doors, a lip on the hatch and five-spoke alloys.
+// Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "pipit_hatch",
+    side: [
+        (0.00, 0.62), (0.04, 0.70), (0.25, 0.75), (0.98, 0.84), (1.04, 0.86),
+        (1.62, 1.34), (1.70, 1.36), (3.02, 1.35), (3.10, 1.32), (3.70, 0.99),
+        (3.80, 0.96), (3.85, 0.91),
+        (3.85, 0.30), (3.72, 0.22), (3.20, 0.18), (0.60, 0.17), (0.10, 0.22), (0.00, 0.30),
+    ],
+    plan: [
+        (0.00, 0.74), (0.06, 0.80), (0.30, 0.82), (3.60, 0.82), (3.80, 0.81), (3.85, 0.79),
+    ],
+    belt: [(1.04, 0.86), (3.70, 0.94)],
+    section: Section(shoulder: 0.94, tumblehome_deg: 13, greenhouse_frac: 0.84, crown: 0.03, tuck: 0.03),
+    glass: Glass(
+        windshield: (1.06, 1.62),
+        backlight: (3.10, 3.70),
+        side: [(1.72, 2.62), (2.72, 3.24)],
+    ),
+    wheels: Wheels(radius: 0.29, width: 0.18, arch_clearance: 0.04, front_x: 0.72, rear_x: 3.12, track: 1.40),
+    front: Front(lights: Rect, grille: Slot, bumper: Rubber, bumper_y: (0.24, 0.40)),
+    rear: Rear(lights: Dual, spoiler: Lip, bumper: Rubber, bumper_y: (0.26, 0.42)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.86, creases: [(0.10, 0.60, 3.80, 0.64)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 1, exhaust: Single, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, SideStripe, Badge(Bar)],
+    // Signal red, white, black, silver, sunflower yellow, pale blue, white over gray.
+    palette: ["#c0262a", "#eeece6", "#1d1e21", "#b6b9bc", "#e3b52a", "#93aecb", "#eeece6/#5a5d63"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 0.86,
+        dash_x: 1.30,
+        wheel_pos: (1.68, 0.70),
+        wheel_radius: 0.18,
+        column_angle_deg: 24,
+        mirror_pos: (1.52, 1.28),
+        seat: (2.14, 0.38),
+        driver_offset: 0.36,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: graphite cloth with teal inserts and
+        // light gray piping, charcoal carpet, orange-lit dials.
+        colors: ["#2c2e33", "#3c4048", "#2a2c31", "#a6a8ac", "#363940", "#2f9a94"],
+        display: "#ff8a2a",
+        insert: "#2f8f8a",
+        piping: "#c9ccd2",
+        dash_top: "#3a3d43",
+        manual: true,
+    ),
+)
