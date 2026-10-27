@@ -19,7 +19,7 @@ use super::names::{self, action_label, device_label, device_noun};
 use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
-use crate::settings::Quality;
+use crate::settings::{FrameRate, Quality};
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -656,6 +656,20 @@ impl Ui {
                 Widget::Choice { index, .. } if item.id == ItemId::Paint => {
                     self.draw_swatches(hud, right, y, index, focused);
                 }
+                Widget::Choice { index, .. } if item.id == ItemId::FrameRate => {
+                    let hz = self.panel_hz();
+                    match FrameRate::ALL.get(index) {
+                        Some(&f) if index > 0 => {
+                            let fps = f.fps(hz);
+                            let args = format_args!("< {fps:.0} fps >");
+                            text_right(hud, right, ty, S, fg, false, args);
+                        }
+                        _ => {
+                            let args = format_args!("< Panel ({hz:.0}) >");
+                            text_right(hud, right, ty, S, fg, false, args);
+                        }
+                    }
+                }
                 Widget::Choice { options, index } => {
                     let name = options.get(index).copied().unwrap_or("?");
                     text_right(hud, right, ty, S, fg, false, format_args!("< {name} >"));
@@ -1052,7 +1066,8 @@ impl Ui {
                  peds {} people  step {:.3} ms\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
-                 hud {} quads  ({} dropped)",
+                 hud {} quads  ({} dropped)\n\
+                 frame {:?}  world {}  ui {}  skip {}",
                 if r.backend.is_empty() { "?" } else { r.backend },
                 r.draw_calls,
                 r.shadow_draw_calls,
@@ -1094,6 +1109,10 @@ impl Ui {
                 cz,
                 r.hud_quads,
                 r.hud_quads_dropped,
+                r.last_work,
+                r.frames,
+                r.ui_frames,
+                r.skipped_frames,
             ),
         );
         let mut y = y + 11.0 * line;
