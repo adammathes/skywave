@@ -496,12 +496,14 @@ mod tests {
         app.npcs.set_density(Density::Busy);
         app.npcs.warm_up_unseen(&inputs);
         part_instances(&mut app, 1.0);
+        let era = app.npcs.crowd.peds.era();
         let mut checked = 0;
         for (i, p) in app.npcs.crowd.peds.pedestrians().iter().enumerate() {
             if p.alive {
                 checked += 1;
                 let v = app.npcs.crowd.variants[variant_of(p.seed)].height_m;
-                let h = p.height_m();
+                let h = FigureSpec::from_seed(p.seed, era).height_m.clamp(1.4, 2.1);
+                assert_eq!(p.height_m(), h, "person {}", p.id);
                 let drawn = app.npcs.crowd.scale(i) * v;
                 assert!(
                     (drawn - h).abs() < 1e-4,

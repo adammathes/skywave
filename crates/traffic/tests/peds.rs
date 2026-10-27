@@ -74,6 +74,10 @@ const REGIONS: [(&str, &str); 3] = [
 /// commit with the reason.
 const COAST_SEED1_30S_HASH: u64 = 0xbd35_4fe9_2956_6f85;
 
+/// Size ceiling for a place's sidewalk graph (16×16 chunks), about 1.3 times the largest
+/// region's at seed 1 (2.9 MiB; the coast's 2.2 MiB, 0.55 MiB of it the turn curves).
+const MAX_WALK_BYTES: usize = 4 * 1024 * 1024;
+
 /// Most walk samples `world` lays another road's asphalt over (where two roads squeeze
 /// together it draws one's pavement across the other's sidewalk).
 const MAX_WALK_ON_ASPHALT: f32 = 0.03;
@@ -260,6 +264,12 @@ fn walks_lie_on_sidewalks_and_crossings_on_the_road() {
         );
         assert!(bad < MAX_WALK_ON_ASPHALT, "{}: {bad}", b.name);
         assert!(road > 0.85, "{}: {road}", b.name);
+        assert!(
+            g.bytes() <= MAX_WALK_BYTES,
+            "{}: {} bytes",
+            b.name,
+            g.bytes()
+        );
         assert!(g.crossings.iter().any(|c| c.signal), "{}", b.name);
         for c in &g.crossings {
             assert!(c.lane == NONE || b.lanes.lanes[c.lane as usize].end_node == c.node);
@@ -1693,6 +1703,15 @@ fn crossing_scripts(
         8.0,
         Box::new(move |_| car_at(a, d, 0.0)),
     ));
+    // Creeping along it onto the curb queue for 20 s, slower than the sim counts as moving
+    // and slower than it counts as creeping.
+    for (speed, back) in [(0.04f32, 3.5f32), (0.2, 6.0)] {
+        scripts.push((
+            format!("crossing {c} creep {speed} m/s"),
+            20.0,
+            Box::new(move |t| car_at(at(a, -back + speed * t), d, speed)),
+        ));
+    }
     // Along the crosswalk at 2 m/s to its middle, 3 s there, and back out in reverse
     // (2 m/s² up to 2 m/s).
     let half = 0.5 * l;
