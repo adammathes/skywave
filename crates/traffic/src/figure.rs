@@ -102,7 +102,8 @@ pub enum Hair {
     Full,
 }
 
-/// Linear RGBA colors (the renderer's vertex color encoding).
+/// Linear RGBA colors (the renderer's vertex color encoding), converted from the sRGB
+/// palette tables; the skin-contrast check (`off_skin`) compares those sRGB values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     pub skin: [u8; 4],
@@ -236,7 +237,7 @@ impl FigureSpec {
             }
             Outfit::Sundress => {
                 bottom = top;
-                shoes = SANDALS[pick(&mut r, SANDALS.len())];
+                shoes = off_skin(&SANDALS, pick(&mut r, SANDALS.len()), skin);
             }
             Outfit::JeansJacket => {
                 trim = SHIRTS[pick(&mut r, SHIRTS.len())];
@@ -254,7 +255,8 @@ impl FigureSpec {
                     Era::Eighties => tops[pick(&mut r, tops.len())],
                 };
             }
-            Outfit::Beach => shoes = SANDALS[pick(&mut r, SANDALS.len())],
+            // Sandal soles stand apart from the skin, so the feet don't read as bare.
+            Outfit::Beach => shoes = off_skin(&SANDALS, pick(&mut r, SANDALS.len()), skin),
         }
         let height_m = 1.5 + 0.45 * (r.next_f32() + r.next_f32()) * 0.5;
         let build = (r.next_f32() + r.next_f32()) * 0.5;
@@ -751,8 +753,9 @@ pub fn build(spec: &FigureSpec) -> Figure {
         if spec.outfit == Outfit::Sundress {
             let skirt = [
                 st(0.05, 0.097 * hipf, 0.064, 0.0),
-                st(-0.06, 0.118 * hipf, 0.088, 0.0),
-                st(-0.17, 0.13 * hipf, 0.108, 0.0),
+                // Full enough at the hem that a striding thigh stays inside.
+                st(-0.06, 0.12 * hipf, 0.095, -0.004),
+                st(-0.165, 0.138 * hipf, 0.135, -0.014),
             ];
             let skirt = scaled(&skirt, h, gw, gw);
             let (pts, cols) = dress(
@@ -1512,7 +1515,12 @@ impl Skeleton {
         self.posture(&mut j, 0.3 * crouch);
         let out = 0.3 * sin(PI * t);
         self.arms(&mut j, [arm; 2], out, [0.3 + 0.6 * crouch; 2]);
-        let lift = (y - (stand - c)).max(0.0) * 0.7;
+        // Feet tuck only while airborne; crouch and landing keep them planted.
+        let lift = if t > 0.3 && t < 0.7 {
+            (y - (stand - c)).max(0.0) * 0.7
+        } else {
+            0.0
+        };
         let tx = self.track();
         let toe = -0.4 * smooth(0.0, 0.05 * h, lift);
         self.leg(&mut j, 0, -tx, lift, self.heel_m, toe);
@@ -1707,6 +1715,15 @@ mod tests {
                 sk.hop(1.0, side),
             ] {
                 assert!((j.root[1] - stand.root[1]).abs() < 0.01);
+                sk.pose(&j, &mut xf);
+                let feet = lowest(&f, &xf, Part::FootL).min(lowest(&f, &xf, Part::FootR));
+                assert!(feet.abs() < 0.01, "starts or ends {feet} m off the ground");
+            }
+            // Crouching and landing, the feet stay planted.
+            for t in [0.15, 0.3, 0.7, 0.85] {
+                sk.pose(&sk.hop(t, side), &mut xf);
+                let feet = lowest(&f, &xf, Part::FootL).min(lowest(&f, &xf, Part::FootR));
+                assert!(feet.abs() < 0.01, "hop at {t}: {feet}");
             }
             // Mid-hop the figure is off the ground; mid-step it looks at the car.
             sk.pose(&sk.hop(0.5, side), &mut xf);
