@@ -57,6 +57,59 @@ Per parcel, choose `use`, `height`, `style` by zone + era distributions, then a 
 ## Region templates
 A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
+## Facade grammars
+A `world::grammar::Grammar` is data (RON, `assets/grammar/<template>_<era>.ron`, ADR 0002):
+the numbers and weights the building planner and the detailing read, one file per region
+template and era (`docs/backlog/BUILDINGS.md`). `app::places::grammar()` parses and
+validates it once; `build_place`, `ChunkPlan::new`, `build_chunk_meshes` and
+`WorldCollider::build` take it beside the palette. The geometry builders stay in
+`world::buildings`; a grammar says how big, how many and how often. Today one grammar,
+`california_coast_80s.ron`, dresses every place (the test town too); its values are the
+planner's former code constants, so it reproduces the earlier look bit for bit
+(`shipped_grammar_is_the_former_constants` in `crates/world/src/grammar.rs`).
+
+As built (B2):
+```
+Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules }
+StyleRules  { style: StyleTag, massing, base, body, top, addenda }   one per StyleTag, exactly
+  massing:  even_floors: ByUse<bool>, floor_h, ground_floor_h: (min, max), ground_share_max
+  base:     plinth_h: ByUse<f32>, bay_w: ByUse<f32>, door: ByUse<(w, h)>
+  body:     window: ByUse<Window { w_share, w: (min, max), head, h_max }>,
+            window_h_min, sill_ground, sill_upper
+  top:      parapet_h: ByUse<f32>
+  addenda:  roof_vents: ByUse<(min, max)>, roof_units: ByUse<(min, max)>,
+            bulkhead_floors, water_tank_1_in
+ByUse<T>    { residential, office, other }   other: commercial, industrial, civic, hotel, parking
+SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256, shop_lit_256 }
+LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
+```
+How the planner reads it, for a building of style `s` and use `u` (rules `r = grammar.style(s)`,
+every `ByUse` taken at `u`):
+- **Floors.** Wall top `height_m`; the roof sits `parapet_h` below it (none on pitched roofs, at
+  most 30% of the height), the walls start `plinth_h` above the lot. With `even_floors` every
+  floor is the same; otherwise the ground floor is
+  `clamp(span − (floors − 1) · floor_h, ground_floor_h).min(span · ground_share_max)` and the
+  upper floors share the rest.
+- **Windows.** Bays of `bay_w` (1.5× on facades more than 30 m from a road, then widened until
+  the triangle budget fits); a window is `clamp(bay_w · w_share, w)` wide and
+  `min(upper floor − head, h_max)` tall, at least `window_h_min`; sills `sill_ground` above the
+  plinth and `sill_upper` above each upper floor. Doors are `door`.
+- **Roofs.** `roof_vents` and `roof_units` are inclusive counts per flat roof (`(0, 0)` draws
+  nothing); buildings of `bulkhead_floors` or more get a stair bulkhead, and one in
+  `water_tank_1_in` of those a water tank.
+- **Signs** (terrain places). The awning is drawn from `awnings` by weight in listed order;
+  `lit_box_256` and `shop_lit_256` are shares out of 256 of backlit-box signs and late shops.
+- **Lots** (terrain places). Strip malls with at least `front_min_yard` of open ground in front
+  get nose-in stalls `stall_w` wide, a `front_fill` share of them taken; beach aisles take a
+  stall with chance `aisle_fill`.
+
+Still in code, to move with the tasks that change them: the palette (`world::Palette` and
+`buildings::look`), which styles get storefronts, carports, walkways and step-backs, the
+step-back floors (`STEP_BACK_FLOORS`, also read by the building generator), the triangle
+budget, and every builder's own dimensions (sign bands, awnings, cornices). A value moves into
+the grammar when a task first needs to vary it; a fitted value names its source
+(`CREDITS.md`).
+
 ## Known hard parts (plan for them)
 - Junction geometry at odd angles (use a generic polygon junction with per-edge trimming; no special cases per count).
 - Roads on slopes: cut/fill the terrain to the road profile within road width + 4 m shoulder.

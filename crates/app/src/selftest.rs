@@ -35,7 +35,8 @@ pub struct SelfTest {
 impl SelfTest {
     pub fn run() -> SelfTest {
         let place = place::Place::test_grid();
-        let meshes = world::build_chunk_meshes(&place, &Palette::socal_1985());
+        let meshes =
+            world::build_chunk_meshes(&place, &Palette::socal_1985(), crate::places::grammar());
         let mut app = App::new(Seed(1));
         run_drive(&mut app);
         SelfTest {
