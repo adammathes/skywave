@@ -145,7 +145,7 @@ const CORNER_DODGE_M: f32 = 0.3;
 const ALONG_MIN: f32 = 0.3;
 /// A person within this of the footprint (or in a moving car's way) gets out of it, to a
 /// spot at least this far off; nobody walks into it.
-const SPOT_CLEAR_M: f32 = 0.25;
+const SPOT_CLEAR_M: f32 = 0.4;
 /// Watched zone (walkers do not walk toward the car's path in it): farther ahead and wider.
 const WATCH_BASE_M: f32 = 10.0;
 const WATCH_S: f32 = 2.5;

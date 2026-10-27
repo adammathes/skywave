@@ -1658,7 +1658,7 @@ fn nobody_is_reached_by_a_scripted_car() {
     for (name, r) in results.iter().flatten() {
         let bad = r.inside > 0
             || r.in_lane > 0
-            || r.off_walk > 0.1
+            || r.off_walk > 0.15
             || r.longest_move > 2.05
             || r.fastest > 4.05;
         if bad {
@@ -1684,8 +1684,9 @@ fn nobody_is_reached_by_a_scripted_car() {
     );
     assert_eq!(sum.inside, 0);
     assert_eq!(sum.in_lane, 0);
-    // A few centimeters for how the walks' straight bands meet at their nodes.
-    assert!(sum.off_walk <= 0.1, "{}", sum.off_walk);
+    // A few centimeters for how the walks' straight bands meet at their nodes (around a
+    // corner people may step 0.3 m past a corner's room, still on the sidewalk).
+    assert!(sum.off_walk <= 0.15, "{}", sum.off_walk);
     // A few centimeters over for the walker's own step during the move and rounding.
     assert!(sum.longest_move <= 2.05, "{}", sum.longest_move);
     assert!(sum.fastest <= 4.05, "{}", sum.fastest);
