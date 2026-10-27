@@ -22,7 +22,10 @@
 //! HUD:       Minimap · Rotate with car · Minimap zoom
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
 //!            Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
-//! Stations:  one on/off row per station of the preset and per added stream
+//!            · [web: Add music folder, or Pick music folder again] · [Remove music
+//!            folders, when there are some]
+//! Stations:  one on/off row per station of the preset, per added stream and per music
+//!            folder, then "Remove <folder>" per music folder
 //! World:     Time of day · Clock speed · Traffic
 //! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
@@ -122,6 +125,10 @@ pub enum ItemId {
     Station(usize),
     AddStream,
     ClearStreams,
+    AddMusic,
+    ClearMusic,
+    /// Row `i` of `CarRadio::rows`, a music folder: take it off the dial for good.
+    RemoveFolder(usize),
     KeepExisting,
     UseNew,
 }
@@ -136,6 +143,10 @@ pub struct PageCtx<'a> {
     pub radio: &'a CarRadio,
     /// The platform can ask the user for a line of text (a stream URL).
     pub text_entry: bool,
+    /// The platform can ask the user for a music folder, and whether last session's must
+    /// be picked again.
+    pub music_picker: bool,
+    pub music_again: bool,
     /// The preset in effect (the saved one, else the one picked for the device).
     pub quality: Quality,
     /// The Vehicle page's car (a [`crate::vehicles::BUILTIN`] index) and paint.
@@ -503,6 +514,12 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     Widget::Toggle(ctx.settings.radio.is_enabled(&row.id)),
                 );
             }
+            for (i, row) in ctx.radio.rows().iter().enumerate() {
+                if ctx.radio.files().iter().any(|c| c.id == row.id) {
+                    // Drawn as "Remove <name>" from the row.
+                    add(ItemId::RemoveFolder(i), "", Widget::Action);
+                }
+            }
         }
         Page::Hud => {
             let s = ctx.settings;
@@ -556,6 +573,14 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             }
             if !s.radio.custom.is_empty() {
                 add(ItemId::ClearStreams, "Remove added streams", Widget::Action);
+            }
+            if ctx.music_again {
+                add(ItemId::AddMusic, "Pick music folder again", Widget::Action);
+            } else if ctx.music_picker {
+                add(ItemId::AddMusic, "Add music folder", Widget::Action);
+            }
+            if !ctx.radio.files().is_empty() || ctx.music_again {
+                add(ItemId::ClearMusic, "Remove music folders", Widget::Action);
             }
         }
         Page::World => {
@@ -654,6 +679,8 @@ mod tests {
             can_quit: false,
             radio: &radio,
             text_entry: false,
+            music_picker: false,
+            music_again: false,
             quality: Quality::Deck,
             browse: [3, 1],
         };
