@@ -3964,7 +3964,7 @@ mod tests {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             });
-            let mut draw = |r: &mut Renderer, scene: &SceneView| {
+            let draw = |r: &mut Renderer, scene: &SceneView| {
                 let acquire = || Some(((), target.create_view(&Default::default())));
                 r.draw(scene, acquire).0
             };
