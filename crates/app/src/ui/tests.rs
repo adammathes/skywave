@@ -2350,6 +2350,14 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         h.app.settings(),
         &Settings {
             scenario: Some("inland_basin_2001"),
+            radio: audio::RadioSettings {
+                // The deck's place: the library's first track, loaded, not playing.
+                deck: audio::DeckSettings {
+                    track: Some("h1/Night Shift/Coastline/01 Sunset Drive.mp3".into()),
+                    ..audio::DeckSettings::default()
+                },
+                ..settings.radio.clone()
+            },
             ..settings
         }
     );
