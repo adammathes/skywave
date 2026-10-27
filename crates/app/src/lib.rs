@@ -25,6 +25,7 @@ mod lighttiles;
 pub mod map;
 pub mod npc;
 pub mod pacing;
+mod peds;
 mod places;
 pub mod preview;
 mod propinst;
@@ -628,7 +629,7 @@ impl App {
         self.drive.frame(input);
         let none = InputState::default();
         let dt = SIM_DT as f32;
-        let mut traffic_s = 0.0;
+        let (mut traffic_s, mut peds_s) = (0.0, 0.0);
         for _ in 0..steps.count {
             self.prev = self.curr;
             let car_input = if self.fly {
@@ -651,12 +652,24 @@ impl App {
             } else {
                 self.npcs.step(&inputs);
             }
+            if self.npcs.crowd.active() {
+                let t = now();
+                // Signed: a reversing car's danger zone is behind it (the cars' is not).
+                let player = traffic::Player {
+                    speed: self.drive.state.speed_mps,
+                    ..self.traffic_player()
+                };
+                let inp = npc::StepInputs { player, ..inputs };
+                self.npcs.step_peds(&inp);
+                peds_s += now() - t;
+            }
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);
             self.ticks += 1;
         }
         self.npcs.note_time(traffic_s * 1000.0, steps.count);
+        self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
         steps
     }
 
@@ -692,6 +705,11 @@ impl App {
         self.npcs.count()
     }
 
+    /// Live pedestrians.
+    pub fn pedestrian_count(&self) -> usize {
+        self.npcs.crowd.count()
+    }
+
     /// The traffic density from the scene or the setting; the NPC cars' meshes are built
     /// and queued for [`App::take_new_meshes`] the first time it is on.
     fn apply_traffic(&mut self, density: traffic::Density) {
@@ -711,7 +729,7 @@ impl App {
     /// Runs the traffic's whole warm-up now: while the scene loads, before its first frame.
     fn finish_warm_up(&mut self) {
         let inputs = self.traffic_inputs();
-        self.npcs.warm_up(&inputs, u32::MAX);
+        self.npcs.warm_up_unseen(&inputs);
     }
 
     /// Fingerprint of the simulation state, for determinism checks.
@@ -733,8 +751,9 @@ impl App {
                 u64::from(self.drive.headlights),
             ],
         );
-        // The traffic only while it runs, so a scene without it hashes as before.
-        if self.npcs.active() {
+        // The traffic and pedestrians only while they run, so a scene without them hashes
+        // as before.
+        if self.npcs.active() || self.npcs.crowd.active() {
             hash64(h, &[self.npcs.hash()])
         } else {
             h
@@ -835,9 +854,18 @@ impl App {
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs
             .push(alpha, eye, &self.lights, npc_glow, &mut self.instances);
+        // Whole people only: none near the vehicle preview (below), none cut in half there.
+        let clear = if self.preview.is_some() {
+            preview::CLEAR_M + peds::REACH_M
+        } else {
+            0.0
+        };
+        self.npcs
+            .crowd
+            .push(alpha, eye, clear, &self.lights, &mut self.instances);
         if self.preview.is_some() {
             // Nothing that moves or stands by the eye cuts into the turntable: drop the
-            // traffic and props near it (in place, keeping their order).
+            // traffic, people and props near it (in place, keeping their order).
             let mut keep = self.world_instances;
             for k in self.world_instances..self.instances.len() {
                 let at = Vec3::from_slice(&self.instances[k].transform[3][..3]);
@@ -890,6 +918,9 @@ fn paint_of(index: usize, paint: usize) -> usize {
         0
     }
 }
+
+/// Instances one pedestrian draws: a part each.
+pub const FIGURE_PARTS: usize = traffic::figure::PARTS;
 
 /// Most dynamic lights a frame has: the player's car's, then the traffic's.
 const DYNAMIC_LIGHTS: usize = drive::CAR_LIGHTS + npc::NPC_LIGHTS;

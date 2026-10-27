@@ -647,6 +647,11 @@ fn uv_bounds(m: &MeshData, pick: impl Fn(usize) -> bool) -> ([f32; 2], [f32; 2])
     (lo, hi)
 }
 
+/// `m` as a render mesh in the white tile, as built (a pedestrian figure's part).
+pub(crate) fn plain_mesh(m: &MeshData) -> Mesh {
+    convert(m, Vec3::ZERO, Surface::Plain)
+}
+
 /// `m` as a render mesh, every position moved by `offset`.
 fn convert(m: &MeshData, offset: Vec3, surface: Surface) -> Mesh {
     let grille = grille_color();

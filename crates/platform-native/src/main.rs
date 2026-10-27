@@ -1131,31 +1131,36 @@ mod tests {
         }
     }
 
-    /// The coast junction of the `coast-traffic-noon` golden, busy traffic warmed up and
-    /// held still (queued, oncoming and crossing cars in view).
+    /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
+    /// warmed up and held still (queued, oncoming and crossing cars and people on the walks
+    /// in view).
     const JUNCTION: &str = "?seed=1&place=coast&car=corsair_gtx&cam=chase-mid&t=12:00\
                             &pos=477.5,1001.2&yaw=347&still=1";
 
-    /// Deck and Medium at [`JUNCTION`] with busy traffic: at most this many draws, forward
-    /// and shadow triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus
-    /// about 10%.
+    /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
+    /// draws, forward and shadow triangles a frame (`docs/PERFORMANCE.md`): the measured
+    /// numbers plus about 10%.
     const JUNCTION_BUDGET: [(Quality, u32, u64, u64); 2] = [
         (Quality::Deck, DECK_DRAWS, DECK_TRIS, DECK_SHADOW),
         (Quality::Medium, MEDIUM_DRAWS, MEDIUM_TRIS, MEDIUM_SHADOW),
     ];
-    // Measured (debug and release agree; 4 NPC cars in the forward pass, 76 live):
-    // Deck 281 draws, 408k forward and 671k shadow triangles; Medium 414, 408k, 1201k.
-    const DECK_DRAWS: u32 = 310;
-    const DECK_TRIS: u64 = 450_000;
+    // Measured (debug and release agree; 186 car and figure-part instances in the forward
+    // pass: 4 cars and 14 people of 76 cars and 41 people live): Deck 385 draws, 422k
+    // forward and 672k shadow triangles; Medium 530, 422k, 1204k. (Cars alone: Deck 281,
+    // 408k, 671k; Medium 414, 408k, 1201k.)
+    const DECK_DRAWS: u32 = 425;
+    const DECK_TRIS: u64 = 465_000;
     const DECK_SHADOW: u64 = 740_000;
-    const MEDIUM_DRAWS: u32 = 455;
-    const MEDIUM_TRIS: u64 = 450_000;
-    const MEDIUM_SHADOW: u64 = 1_320_000;
+    const MEDIUM_DRAWS: u32 = 585;
+    const MEDIUM_TRIS: u64 = 465_000;
+    const MEDIUM_SHADOW: u64 = 1_325_000;
+    /// Instances one pedestrian adds: a figure's parts.
+    const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 
-    /// What busy traffic in view costs the GPU at a coast junction on the no-op device,
-    /// streamed at the web budget: the cars are drawn (more instances in the forward pass
-    /// than without traffic), and under `SKYWAVE_ENFORCE_BUDGETS` Deck and Medium stay
-    /// within [`JUNCTION_BUDGET`].
+    /// What busy traffic and pedestrians in view cost the GPU at a coast junction on the
+    /// no-op device, streamed at the web budget: the cars and people are drawn (at least
+    /// three cars and three figures' parts more in the forward pass than without them), and
+    /// under `SKYWAVE_ENFORCE_BUDGETS` Deck and Medium stay within [`JUNCTION_BUDGET`].
     #[test]
     fn traffic_at_a_junction_within_budget() {
         let runs = [
@@ -1170,9 +1175,9 @@ mod tests {
             started.elapsed().as_secs_f64()
         );
         for ((q, a), (_, b)) in off.iter().zip(&busy) {
-            let cars = b.instances_drawn - a.instances_drawn;
-            eprintln!("{q:?}: {cars} NPC cars in the forward pass");
-            assert!(cars >= 3, "{q:?}: {cars} cars in view");
+            let npcs = b.instances_drawn - a.instances_drawn;
+            eprintln!("{q:?}: {npcs} NPC car and figure-part instances in the forward pass");
+            assert!(npcs >= 3 + 3 * FIGURE_PARTS, "{q:?}: {npcs} in view");
             let &(_, draws, fwd, shadow) = JUNCTION_BUDGET.iter().find(|j| j.0 == *q).unwrap();
             if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
                 assert!(b.draws <= draws, "{q:?}: {} draws", b.draws);
@@ -1227,7 +1232,11 @@ mod tests {
                 r.add_mesh(&m);
             }
         }
-        eprintln!("{query}: {} cars", app.traffic_count());
+        eprintln!(
+            "{query}: {} cars, {} people",
+            app.traffic_count(),
+            app.pedestrian_count()
+        );
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
