@@ -48,7 +48,9 @@ pub const CAR_HALF_W_M: f32 = 0.9;
 const DT: f32 = 1.0 / SIM_HZ as f32;
 /// Brake lamps: slowing faster than this lights them (m/s²)...
 pub const BRAKE_LAMP_DECEL: f32 = 0.6;
-/// ...and they stay lit while the car keeps slowing, or creeps under this speed (m/s)...
+/// ...and they stay lit while the car keeps slowing faster than this (m/s²), or creeps
+/// under this speed (m/s)...
+const BRAKE_LAMP_HOLD: f32 = 0.2;
 const CREEP_MPS: f32 = 1.0;
 /// ...and does not speed up faster than this (m/s²): pulling away. A car standing (at or
 /// under `STANDING_MPS`) and not pulling away shows them however gently it stopped.
@@ -1765,7 +1767,7 @@ impl Traffic {
 /// Whether a car that was `old` and now goes `speed` shows its brake lamps.
 fn brake_lamps(old: &Car, speed: f32) -> bool {
     let dv = speed - old.speed;
-    let held = speed < old.speed || (speed < CREEP_MPS && dv <= PULL_AWAY * DT);
+    let held = dv < -BRAKE_LAMP_HOLD * DT || (speed < CREEP_MPS && dv <= PULL_AWAY * DT);
     let standing = speed <= STANDING_MPS && dv <= PULL_AWAY * DT;
     dv < -BRAKE_LAMP_DECEL * DT || standing || (old.braking && held)
 }
