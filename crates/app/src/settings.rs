@@ -3,7 +3,7 @@
 //!
 //! ```json
 //! { "version": 1,
-//!   "drive": { "handling": "arcade" },
+//!   "drive": { "handling": "arcade", "vehicle": "corsair_gtx" },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false },
@@ -23,6 +23,7 @@ use crate::camera::{CameraMode, TUNING};
 use crate::daylight::CLOCK_SPEEDS;
 use crate::input::Bindings;
 use crate::map::view::{DEFAULT_MINIMAP_RANGE, MINIMAP_RANGES_M};
+use crate::vehicles::BUILTIN;
 
 /// The settings format version written by [`Settings::to_json`].
 pub const SETTINGS_VERSION: u32 = 1;
@@ -107,6 +108,10 @@ pub const SEAT_STEP_CM: f32 = 1.0;
 pub struct Settings {
     /// The assists preset.
     pub handling: Handling,
+    /// The car picked on the Vehicle page or with `VehicleNext`: a [`BUILTIN`] id, or
+    /// `None` until one is picked. The game starts in it unless the scene names a car
+    /// (`car=`).
+    pub vehicle: Option<&'static str>,
     /// The selected camera: changed on the Camera page and by cycling while driving, and
     /// the one the game starts in (a scene's `cam=` overrides it). Never `Orbit`.
     pub camera: CameraMode,
@@ -147,6 +152,7 @@ impl Default for Settings {
     fn default() -> Settings {
         Settings {
             handling: Handling::Arcade,
+            vehicle: None,
             camera: CameraMode::ChaseMid,
             cockpit_fov_deg: TUNING.cockpit_fov_deg,
             seat_height_cm: 0.0,
@@ -178,14 +184,22 @@ pub const VOLUME_STEP: f32 = 0.05;
 #[serde(default)]
 struct DriveSection {
     handling: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vehicle: Option<String>,
 }
 
 impl Default for DriveSection {
     fn default() -> DriveSection {
         DriveSection {
             handling: Settings::default().handling.name().to_owned(),
+            vehicle: None,
         }
     }
+}
+
+/// The [`BUILTIN`] id equal to `id`, if there is one.
+pub fn builtin_vehicle(id: &str) -> Option<&'static str> {
+    BUILTIN.iter().map(|(v, _)| *v).find(|v| *v == id)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -358,7 +372,10 @@ impl Settings {
         let input: Value = serde_json::from_str(&bindings.to_json()).unwrap_or(Value::Null);
         let doc = serde_json::json!({
             "version": SETTINGS_VERSION,
-            "drive": DriveSection { handling: self.handling.name().to_owned() },
+            "drive": DriveSection {
+                handling: self.handling.name().to_owned(),
+                vehicle: self.vehicle.map(str::to_owned),
+            },
             "camera": CameraSection::of(self),
             "video": Video {
                 ui_scale: self.ui_scale,
@@ -407,6 +424,7 @@ impl Settings {
         let d = Settings::default();
         let settings = Settings {
             handling: Handling::from_name(&drive.handling).unwrap_or(d.handling),
+            vehicle: drive.vehicle.as_deref().and_then(builtin_vehicle),
             camera: CameraMode::from_name(&camera.mode).unwrap_or(d.camera),
             cockpit_fov_deg: camera.cockpit_fov_deg,
             seat_height_cm: camera.seat_height_cm,
@@ -440,6 +458,7 @@ mod tests {
     fn settings_and_bindings_round_trip() {
         let s = Settings {
             handling: Handling::Off,
+            vehicle: Some("palisade_wagon"),
             camera: CameraMode::Cockpit,
             cockpit_fov_deg: 71.0,
             seat_height_cm: 4.0,
@@ -512,6 +531,14 @@ mod tests {
             r#"{ "drive": { "handling": "rails" }, "camera": { "mode": "drone" } }"#,
         );
         assert_eq!(s, Settings::default());
+        // An unknown car is forgotten; a missing one is none.
+        let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "hovercar" } }"#);
+        assert_eq!(s.vehicle, None);
+        let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "palisade_wagon" } }"#);
+        assert_eq!(s.vehicle, Some("palisade_wagon"));
+        assert!(!Settings::default()
+            .to_json(&Bindings::default())
+            .contains("vehicle"));
         let (_, b) = Settings::from_json(r#"{ "input": {} }"#);
         assert_eq!(b, Some(Bindings::default()));
     }

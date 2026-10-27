@@ -14,6 +14,7 @@ mod draw;
 mod menu;
 mod names;
 mod pages;
+pub mod roster;
 
 pub use menu::{Effect, Item, MenuInput, MenuNav, Nav, Repeat, Unit, Widget};
 pub use pages::{ItemId, Page};
@@ -37,6 +38,8 @@ use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 pub const CAPTURE_TIMEOUT: f32 = 8.0;
 /// Seconds a status message stays up.
 const TOAST_SECONDS: f32 = 2.5;
+/// Seconds the new car's name stays up after a switch.
+pub const VEHICLE_TOAST_SECONDS: f32 = 2.0;
 /// Miles per hour in one meter per second.
 const MPH_PER_MPS: f32 = 2.236_936;
 /// Frame times kept for the overlay's graph.
@@ -70,6 +73,8 @@ pub enum Toast {
     Southpaw,
     SwapTriggers,
     Reset(DeviceKind),
+    /// Switched to the built-in car with this index (its name).
+    Vehicle(usize),
 }
 
 /// What the minimap and the full map show, set once when the place loads.
@@ -88,6 +93,10 @@ pub struct Ui {
     bindings_changed: bool,
     /// The Camera page picked another camera.
     camera_changed: bool,
+    /// The Vehicle page picked the built-in car with this index; the app switches to it.
+    vehicle_pick: Option<usize>,
+    /// The car being driven, an index into `vehicles::BUILTIN` (marked on the Vehicle page).
+    vehicle: usize,
     /// Something changed since the last save.
     dirty: bool,
     store: Option<Box<dyn SettingsStore>>,
@@ -127,6 +136,8 @@ impl Ui {
             bindings: Bindings::default(),
             bindings_changed: false,
             camera_changed: false,
+            vehicle_pick: None,
+            vehicle: 0,
             dirty: false,
             store: None,
             menu: None,
@@ -254,6 +265,41 @@ impl Ui {
     /// Takes the "camera picked on the Camera page" flag: true once after every pick.
     fn take_camera_changed(&mut self) -> bool {
         std::mem::take(&mut self.camera_changed)
+    }
+
+    /// Takes the car the Vehicle page picked, once.
+    fn take_vehicle_pick(&mut self) -> Option<usize> {
+        self.vehicle_pick.take()
+    }
+
+    /// The car being driven: an index into [`crate::vehicles::BUILTIN`].
+    pub fn vehicle(&self) -> usize {
+        self.vehicle
+    }
+
+    /// The Vehicle page opens on the car being driven.
+    fn focus_current_vehicle(&mut self) {
+        if let Some(menu) = &mut self.menu {
+            if menu.page() == Page::Vehicle {
+                menu.set_focus(self.vehicle);
+            }
+        }
+    }
+
+    /// The app now drives the built-in car `index`. With `remember`, it becomes the vehicle
+    /// setting (saved now, so the next session starts in it); with `toast`, its name shows
+    /// for [`VEHICLE_TOAST_SECONDS`].
+    pub(crate) fn vehicle_switched(&mut self, index: usize, remember: bool, toast: bool) {
+        self.vehicle = index;
+        let id = crate::vehicles::BUILTIN.get(index).map(|(id, _)| *id);
+        if remember && id.is_some() && self.settings.vehicle != id {
+            self.settings.vehicle = id;
+            self.dirty = true;
+            self.save_if_dirty();
+        }
+        if toast {
+            self.toast = Some((Toast::Vehicle(index), VEHICLE_TOAST_SECONDS));
+        }
     }
 
     /// The player cycled to camera `mode` while driving: remember it (and save now, so the
@@ -400,6 +446,7 @@ impl Ui {
 
     fn apply(&mut self, effect: Effect, clock: &mut Clock, mapper: &mut InputMapper) {
         match effect {
+            Effect::Opened(Page::Vehicle) => self.focus_current_vehicle(),
             Effect::None | Effect::Moved | Effect::Opened(_) => {}
             Effect::Toggle(id, on) => self.set_toggle(id, on),
             Effect::Slide(id, v) => self.set_slider(id, v, clock),
@@ -553,6 +600,11 @@ impl Ui {
     fn activate(&mut self, id: ItemId) {
         match id {
             ItemId::Resume => self.close(),
+            ItemId::Vehicle(i) => {
+                // Back to the road to see it.
+                self.vehicle_pick = Some(i);
+                self.close();
+            }
             ItemId::Quit => {
                 self.close();
                 self.quit = true;
@@ -757,6 +809,16 @@ impl App {
         if self.ui.take_camera_changed() {
             self.camera.set_mode(self.ui.settings.camera);
         }
+        if let Some(i) = self.ui.take_vehicle_pick() {
+            self.switch_to(i, true);
+        } else if state.just_pressed(Action::VehicleNext)
+            && !was_open
+            && !self.ui.is_open()
+            && !self.ui.full_map_open()
+            && !self.still
+        {
+            self.cycle_vehicle();
+        }
         self.apply_clock_speed();
         self.apply_settings();
         let steps = if self.ui.is_open() {
@@ -838,11 +900,19 @@ impl App {
     }
 
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next
-    /// [`App::frame`]) and saves there from now on.
+    /// [`App::frame`]) and saves there from now on. The saved vehicle replaces the car the
+    /// app was built with unless a scene named that one (`car=`); its meshes then wait in
+    /// [`App::take_new_meshes`].
     pub fn set_settings_store(&mut self, store: Box<dyn SettingsStore>) {
         self.ui.set_store(store);
         if !self.camera_from_scene {
             self.camera.set_mode(self.ui.settings.camera);
+        }
+        if !self.car_from_scene {
+            let saved = self.ui.settings.vehicle.and_then(roster::index_of);
+            if let Some(i) = saved.filter(|&i| i != self.ui.vehicle) {
+                self.switch_to(i, false);
+            }
         }
         self.apply_clock_speed();
         self.apply_settings();
@@ -876,7 +946,13 @@ impl App {
 
     /// Opens the settings menu (over the pause menu), e.g. at startup for screenshots.
     pub fn open_settings(&mut self) {
-        self.ui.open(Page::Settings, &InputState::default());
+        self.open_menu(Page::Settings);
+    }
+
+    /// Opens the menu on `page` (over the pause menu), e.g. at startup for screenshots.
+    pub fn open_menu(&mut self, page: Page) {
+        self.ui.open(page, &InputState::default());
+        self.ui.focus_current_vehicle();
         self.ui.rebuild(&self.time.clock);
     }
 

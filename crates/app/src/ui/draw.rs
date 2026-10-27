@@ -15,6 +15,7 @@ use crate::map::view::{MapGeom, Minimap, MINIMAP_DIAMETER};
 use super::menu::{Unit, Widget};
 use super::names::{self, action_label, device_label, device_noun};
 use super::pages::{self, ItemId, Page};
+use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
 
 /// What the UI shows besides its own state.
@@ -417,6 +418,24 @@ impl Ui {
                     );
                 }
             }
+            if let ItemId::Vehicle(i) = item.id {
+                // The stat strip on the right (shorter, or none, where the row is narrow),
+                // a dot before the car being driven.
+                if let Some(car) = roster::roster().get(i) {
+                    let room = right - (px + PAD) - width(item.label, S) - 24.0;
+                    let stats = [car.stats.as_str(), car.short.as_str()]
+                        .into_iter()
+                        .find(|t| width(t, S) <= room);
+                    if let Some(stats) = stats {
+                        text_right(hud, right, ty, S, dim, false, format_args!("{stats}"));
+                    }
+                }
+                if i == self.vehicle {
+                    let dot = if focused { ON_ACCENT } else { GOOD };
+                    let cy = y + (ROW_H - 4.0) * 0.5;
+                    hud.image(HudImage::disc(px + 24.0, cy, 5.0, dot));
+                }
+            }
         }
         if scroll > 0 {
             hud.text(px + pw - 26.0, rows_top - 14.0, S, DIM, "^");
@@ -751,6 +770,10 @@ impl Display for ToastText {
             Toast::Southpaw => f.write_str("Sticks swapped"),
             Toast::SwapTriggers => f.write_str("Throttle and brake on the right stick"),
             Toast::Reset(d) => write!(f, "{} reset to defaults", device_label(d)),
+            Toast::Vehicle(i) => match roster::roster().get(i) {
+                Some(car) => f.write_str(&car.name),
+                None => Ok(()),
+            },
         }
     }
 }

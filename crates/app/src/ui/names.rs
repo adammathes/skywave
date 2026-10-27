@@ -32,6 +32,7 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::RadioOff, _) => "Radio off",
         (Action::Headlights, _) => "Headlights",
         (Action::Horn, _) => "Horn",
+        (Action::VehicleNext, _) => "Next vehicle",
         (Action::MapToggle, _) => "Map",
         (Action::MapZoom, N) => "Map zoom out",
         (Action::MapZoom, P) => "Map zoom in",

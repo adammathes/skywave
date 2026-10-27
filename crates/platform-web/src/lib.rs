@@ -14,7 +14,7 @@
 //! lock keep a free cursor, and `movementX/Y` still drive the look.
 //!
 //! Settings and bindings are kept in `localStorage` (key `skywave.settings`). `?menu=1`
-//! opens the settings menu at startup.
+//! opens the settings menu at startup, `?menu=vehicle` the Vehicle page.
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::WEB`, timed with
 //! `performance.now()`; `window.skywaveStreamIdle` turns true when nothing is left to
@@ -31,7 +31,8 @@ mod web;
 
 /// The first value of `key` in a URL query string such as `?seed=123&car=palisade_wagon`.
 /// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`, `map`,
-/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu and
+/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu,
+/// `menu=vehicle` the pause menu's Vehicle page, and
 /// `selftest=1` runs the determinism self-test instead of the game.
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
@@ -44,6 +45,12 @@ pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 /// screenshots of the menu.
 pub fn menu_from_query(query: &str) -> bool {
     query_param(query, "menu") == Some("1")
+}
+
+/// True when the URL query asks to open the Vehicle page at startup (`menu=vehicle`), for
+/// screenshots of it.
+pub fn vehicle_menu_from_query(query: &str) -> bool {
+    query_param(query, "menu") == Some("vehicle")
 }
 
 /// Picks "the" gamepad from the connected ones, given as `(index, has standard mapping)`.
@@ -122,6 +129,9 @@ mod tests {
         assert!(!menu_from_query("?menu=0"));
         assert!(!menu_from_query("?mymenu=1"));
         assert!(!menu_from_query(""));
+        assert!(vehicle_menu_from_query("?still=1&menu=vehicle"));
+        assert!(!vehicle_menu_from_query("?menu=1"));
+        assert!(!menu_from_query("?menu=vehicle"));
     }
 
     #[test]

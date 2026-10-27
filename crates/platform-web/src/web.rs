@@ -152,6 +152,8 @@ pub async fn run(
     app.set_settings_store(Box::new(LocalStore));
     if crate::menu_from_query(&query) {
         app.open_settings();
+    } else if crate::vehicle_menu_from_query(&query) {
+        app.open_menu(app::ui::Page::Vehicle);
     }
     let options = RendererOptions {
         chunk_pool: app.chunk_pool_config(),
@@ -478,6 +480,10 @@ impl State {
             sfx.frame(self.app.audio_params(), dt);
         }
         self.app.sync_chunks(&mut self.renderer);
+        // A car driven for the first time this session (and the saved one, at startup).
+        for mesh in self.app.take_new_meshes() {
+            self.renderer.add_mesh(&mesh);
+        }
         let idle = self.app.stream_idle();
         if self.stream_idle != Some(idle) {
             // For screenshot tools: nothing left to stream (always true with `stream=0`).
