@@ -962,24 +962,99 @@ mod tests {
     /// wgpu's no-op device) and what culling costs the CPU, without traffic and with busy
     /// traffic. Run with
     /// `cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast`;
-    /// `docs/PERFORMANCE.md` quotes it. Under `SKYWAVE_ENFORCE_BUDGETS` it checks the Deck
-    /// and Medium presets with busy traffic against the budget there ([`COAST_BUDGET`]).
+    /// `docs/PERFORMANCE.md` quotes it. [`traffic_at_a_junction_within_budget`] is the
+    /// enforced check.
     #[test]
     #[ignore = "benchmark; prints numbers"]
     fn culling_on_the_coast() {
+        let runs = [
+            ("high, no culling", Quality::High, false),
+            ("high", Quality::High, true),
+            ("medium", Quality::Medium, true),
+            ("deck", Quality::Deck, true),
+            ("low", Quality::Low, true),
+        ];
         for traffic in ["off", "busy"] {
-            culling_on_the_coast_with(traffic);
+            let query = format!("?seed=1&place=coast&t=17:40&traffic={traffic}");
+            let stream = app::stream::StreamBudget::NATIVE;
+            eprintln!("traffic {traffic}:");
+            render_counts(&query, Some(stream), &runs, 40);
         }
     }
 
-    /// Deck and Medium on the coast with busy traffic: at most this many draws, forward
-    /// and shadow triangles a frame (`docs/PERFORMANCE.md`).
-    const COAST_BUDGET: [(Quality, u32, u64, u64); 2] = [
-        (Quality::Deck, 500, 880_000, 800_000),
-        (Quality::Medium, 700, 880_000, 1_400_000),
-    ];
+    /// The coast junction of the `coast-traffic-noon` golden, busy traffic warmed up and
+    /// held still (queued, oncoming and crossing cars in view).
+    const JUNCTION: &str = "?seed=1&place=coast&car=corsair_gtx&cam=chase-mid&t=12:00\
+                            &pos=477.5,1001.2&yaw=347&still=1";
 
-    fn culling_on_the_coast_with(traffic: &str) {
+    /// Deck and Medium at [`JUNCTION`] with busy traffic: at most this many draws, forward
+    /// and shadow triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus
+    /// about 10%.
+    const JUNCTION_BUDGET: [(Quality, u32, u64, u64); 2] = [
+        (Quality::Deck, DECK_DRAWS, DECK_TRIS, DECK_SHADOW),
+        (Quality::Medium, MEDIUM_DRAWS, MEDIUM_TRIS, MEDIUM_SHADOW),
+    ];
+    // Measured (debug and release agree; 4 NPC cars in the forward pass, 76 live):
+    // Deck 281 draws, 408k forward and 671k shadow triangles; Medium 414, 408k, 1201k.
+    const DECK_DRAWS: u32 = 310;
+    const DECK_TRIS: u64 = 450_000;
+    const DECK_SHADOW: u64 = 740_000;
+    const MEDIUM_DRAWS: u32 = 455;
+    const MEDIUM_TRIS: u64 = 450_000;
+    const MEDIUM_SHADOW: u64 = 1_320_000;
+
+    /// What busy traffic in view costs the GPU at a coast junction on the no-op device,
+    /// streamed at the web budget: the cars are drawn (more instances in the forward pass
+    /// than without traffic), and under `SKYWAVE_ENFORCE_BUDGETS` Deck and Medium stay
+    /// within [`JUNCTION_BUDGET`].
+    #[test]
+    fn traffic_at_a_junction_within_budget() {
+        let runs = [
+            ("medium", Quality::Medium, true),
+            ("deck", Quality::Deck, true),
+        ];
+        let started = Instant::now();
+        let off = render_counts(&format!("{JUNCTION}&traffic=off"), None, &runs, 4);
+        let busy = render_counts(&format!("{JUNCTION}&traffic=busy"), None, &runs, 4);
+        eprintln!(
+            "junction benchmark took {:.1} s",
+            started.elapsed().as_secs_f64()
+        );
+        for ((q, a), (_, b)) in off.iter().zip(&busy) {
+            let cars = b.instances_drawn - a.instances_drawn;
+            eprintln!("{q:?}: {cars} NPC cars in the forward pass");
+            assert!(cars >= 3, "{q:?}: {cars} cars in view");
+            let &(_, draws, fwd, shadow) = JUNCTION_BUDGET.iter().find(|j| j.0 == *q).unwrap();
+            if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
+                assert!(b.draws <= draws, "{q:?}: {} draws", b.draws);
+                assert!(b.triangles <= fwd, "{q:?}: {} triangles", b.triangles);
+                assert!(
+                    b.shadow_triangles <= shadow,
+                    "{q:?}: {} shadow",
+                    b.shadow_triangles
+                );
+            }
+        }
+    }
+
+    /// One preset's counts over a run of frames.
+    struct Counts {
+        instances_drawn: u32,
+        draws: u32,
+        triangles: u64,
+        /// Mean a frame (a kept far cascade draws none on alternate frames).
+        shadow_triangles: u64,
+    }
+
+    /// Streams the scene `query` until idle (at `stream`, else the web budget), then
+    /// renders `frames` frames per run on the no-op device at 1280×800, printing and
+    /// returning each run's counts.
+    fn render_counts(
+        query: &str,
+        stream: Option<app::stream::StreamBudget>,
+        runs: &[(&str, Quality, bool)],
+        frames: u32,
+    ) -> Vec<(Quality, Counts)> {
         let limits = render_limits();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::NOOP,
@@ -999,9 +1074,10 @@ mod tests {
             ..Default::default()
         }))
         .unwrap();
-        let query = format!("?seed=1&place=coast&t=17:40&traffic={traffic}");
-        let mut app = App::from_setup(&SceneSetup::from_query(&query).unwrap()).unwrap();
-        app.set_stream_budget(app::stream::StreamBudget::NATIVE);
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        if let Some(budget) = stream {
+            app.set_stream_budget(budget);
+        }
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let size = (1280, 800);
         let mut r =
@@ -1020,7 +1096,7 @@ mod tests {
                 r.add_mesh(&m);
             }
         }
-        eprintln!("traffic {traffic}: {} cars", app.traffic_count());
+        eprintln!("{query}: {} cars", app.traffic_count());
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
@@ -1036,14 +1112,8 @@ mod tests {
             view_formats: &[],
         });
         let view = target.create_view(&Default::default());
-        let runs = [
-            ("high, no culling", Quality::High, false),
-            ("high", Quality::High, true),
-            ("medium", Quality::Medium, true),
-            ("deck", Quality::Deck, true),
-            ("low", Quality::Low, true),
-        ];
-        for (label, q, culling) in runs {
+        let mut out = Vec::new();
+        for &(label, q, culling) in runs {
             app.force_quality(Some(q));
             r.set_culling(culling);
             let mut best = f64::INFINITY;
@@ -1052,8 +1122,7 @@ mod tests {
             // over the run, and the mean triangles a frame.
             let mut shadow_max = [0; 3];
             let mut shadow_tris = 0u64;
-            const FRAMES: u32 = 40;
-            for _ in 0..FRAMES {
+            for _ in 0..frames {
                 let t = Instant::now();
                 r.render(&view, &app.scene_view(1.0, 1.6));
                 let dt = t.elapsed().as_secs_f64();
@@ -1066,15 +1135,6 @@ mod tests {
                 shadow_tris += s.shadow_triangles;
             }
             let s = r.stats();
-            let budget = COAST_BUDGET.iter().find(|b| b.0 == q && culling);
-            if let (Some(&(_, draws, fwd, shadow)), "busy") = (budget, traffic) {
-                if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
-                    let sh = shadow_tris / u64::from(FRAMES);
-                    assert!(s.draw_calls <= draws, "{label}: {} draws", s.draw_calls);
-                    assert!(s.triangles <= fwd, "{label}: {} triangles", s.triangles);
-                    assert!(sh <= shadow, "{label}: {sh} shadow triangles");
-                }
-            }
             eprintln!(
                 "{label:>16}: instances {} fwd {} shadow {:?} ({} cascades) | tris fwd {}k \
                  shadow {}k a frame | draws {} | cpu render() avg {:.2} ms best {:.2} ms",
@@ -1083,13 +1143,23 @@ mod tests {
                 shadow_max,
                 s.cascades,
                 s.triangles / 1000,
-                shadow_tris / u64::from(FRAMES) / 1000,
+                shadow_tris / u64::from(frames) / 1000,
                 s.draw_calls,
-                total / f64::from(FRAMES) * 1000.0,
+                total / f64::from(frames) * 1000.0,
                 best * 1000.0,
             );
+            out.push((
+                q,
+                Counts {
+                    instances_drawn: s.instances_drawn,
+                    draws: s.draw_calls,
+                    triangles: s.triangles,
+                    shadow_triangles: shadow_tris / u64::from(frames),
+                },
+            ));
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
+        out
     }
 
     /// The native shell's device limits, with room for full-size cascades.

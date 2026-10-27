@@ -4,11 +4,14 @@
 //!
 //! - **Setup.** [`Npcs::new`] builds the lane graph and the pool (sized for
 //!   [`Density::Busy`]) at scene setup. The first time traffic is on, [`Npcs::build_meshes`]
-//!   makes the meshes: every built-in shape in each of [`PAINTS`] street colors at levels
-//!   of detail 1 and 2 ([`car::parked_mesh`], lamps lit so the instance's glow switches
-//!   them); a session with traffic off never builds them. A scene with traffic is warmed
-//!   up for [`WARMUP_S`] before its first frame, so the streets round the start already
-//!   have cars.
+//!   finds the meshes: every built-in shape in the place's four era street colors for it
+//!   (`propinst::place_paints`, the parked cars' own) at levels of detail 1 and 2, the
+//!   parked cars' meshes where the place parks that shape and paint, built
+//!   ([`car::parked_mesh`]) only where it does not; a session with traffic off never
+//!   builds any. Lamps are built lit so the instance's glow switches them.
+//! - **Warm-up.** Whenever traffic is switched on, [`WARMUP_S`] of it runs with the player
+//!   and the view held still, so the streets round the car already have cars: all at once
+//!   while the scene loads, else [`WARMUP_BATCH`] steps a frame until done.
 //! - **Step.** Each sim step feeds the player's car (the obstacle every NPC car sees), the
 //!   camera's view cone, the clock and the density, then steps and populates. The pose of
 //!   every car before the step is kept, so drawing interpolates like the player's car.
@@ -37,7 +40,7 @@ use traffic::{
 };
 use vehicle::shape;
 
-use crate::lighting::{light_set, Bounds};
+use crate::lighting::{Bounds, FrameLights};
 use crate::{car, drive, vehicles};
 
 /// Every density, in the order the World page offers them.
@@ -59,11 +62,15 @@ pub fn density_from_name(name: &str) -> Option<Density> {
     DENSITIES.into_iter().find(|&d| density_name(d) == name)
 }
 
-/// NPC paints: the most common of the era's street colors (`shape::ERA_1980S_PAINT`, 86%
-/// of its weight), each car's picked by its paint seed with their weights.
-pub const PAINTS: usize = 8;
-/// Seconds of traffic run before the first frame of a scene with traffic.
+/// NPC paints per shape: the place's era paints for it (the parked cars'), each car's
+/// picked by its paint seed.
+pub const PAINTS: usize = crate::propinst::ERA_PAINTS;
+/// Seconds of traffic run when it is switched on...
 pub const WARMUP_S: f32 = 20.0;
+const WARMUP_STEPS: u32 = (WARMUP_S as u32) * skywave_core::SIM_HZ;
+/// ...at most this many steps a frame once the game is running: a second of sim, about
+/// 10 ms of CPU, for 20 frames.
+pub const WARMUP_BATCH: u32 = 120;
 /// NPC cars are drawn this far from the eye, m (as far as parked cars)...
 pub const DRAW_RADIUS_M: f32 = crate::propinst::CAR_DRAW_RADIUS_M;
 /// ...at level of detail 1 this near, level 2 beyond, m.
@@ -96,21 +103,28 @@ struct Snap {
 /// The traffic of one place (see the module docs).
 pub struct Npcs {
     graph: LaneGraph,
+    /// The place's seed, which picks its parked-car paints.
+    place_seed: u64,
     traffic: Traffic,
     /// A pool with no car, to start over from when traffic is switched off.
     empty: Traffic,
     signals: SignalClock,
     density: Density,
     prev: Vec<Snap>,
-    /// Mesh ids, `(shape * PAINTS + paint) * 2 + lod - 1`, once built and registered.
+    /// Mesh ids, `(shape * PAINTS + paint) * 2 + lod - 1`, once found or built.
     ids: Vec<MeshId>,
+    /// Bytes of the meshes built for the traffic alone (not shared with parked cars).
+    built_bytes: usize,
     /// Per shape, its head lamps' centers in the mesh's frame.
     heads: Vec<[Vec3; 2]>,
-    /// Scratch for drawing in mesh order: mesh index and car slot.
-    order: Vec<(u16, u16)>,
+    /// Scratch for drawing in mesh order: mesh id and car slot.
+    order: Vec<(u32, u16)>,
     /// Per-step sim time, ms, smoothed, for the overlay.
     step_ms: f32,
-    warmed: bool,
+    /// Warm-up steps still to run.
+    warm: u32,
+    /// The car id each traffic voice follows ([`traffic::cars::Car::id`]), or `u32::MAX`.
+    voice_ids: [u32; TRAFFIC_VOICES],
 }
 
 /// What a step needs from the game.
@@ -133,16 +147,19 @@ impl Npcs {
         let cap = budget.cars;
         Npcs {
             graph,
+            place_seed: place.header.seed,
             empty: traffic.clone(),
             traffic,
             signals: SignalClock::default(),
             density: Density::Off,
             prev: Vec::with_capacity(cap),
             ids: Vec::new(),
+            built_bytes: 0,
             heads: Vec::new(),
             order: Vec::with_capacity(cap),
             step_ms: 0.0,
-            warmed: false,
+            warm: 0,
+            voice_ids: [u32::MAX; TRAFFIC_VOICES],
         }
     }
 
@@ -151,28 +168,45 @@ impl Npcs {
         !self.ids.is_empty()
     }
 
-    /// Builds the cars' meshes and registers each with `register`, which returns its id.
-    pub fn build_meshes(&mut self, mut register: impl FnMut(Mesh) -> MeshId) -> Result<(), String> {
+    /// Finds the cars' meshes among `parked`'s and builds the rest, registering each
+    /// with `register`, which returns its id.
+    pub fn build_meshes(
+        &mut self,
+        parked: Option<&crate::propinst::PropInstances>,
+        mut register: impl FnMut(Mesh) -> MeshId,
+    ) -> Result<(), String> {
         let shapes: Vec<shape::ShapeSpec> = vehicles::BUILTIN_SHAPES
             .iter()
             .map(|(_, text)| vehicles::load_shape(text))
             .collect::<Result<_, _>>()?;
         let mut ids = Vec::with_capacity(shapes.len() * PAINTS * 2);
         let mut heads = Vec::with_capacity(shapes.len());
-        for s in &shapes {
-            for (p, &(paint, _)) in shape::ERA_1980S_PAINT[..PAINTS].iter().enumerate() {
+        let mut bytes = 0;
+        for (k, sh) in shapes.iter().enumerate() {
+            heads.push(car::parked_headlamps(sh)?);
+            let (_, era) = crate::propinst::place_paints(self.place_seed, k, sh.palette.len());
+            for &e in &era {
+                if let Some(pair) = parked.and_then(|p| p.car_ids(k, e)) {
+                    ids.extend(pair);
+                    continue;
+                }
                 for lod in [1, 2] {
-                    let (m, h) = car::parked_mesh_and_lamps(s, 0, Some(paint), lod)?;
-                    if p == 0 && lod == 1 {
-                        heads.push(h);
-                    }
+                    let m = car::parked_mesh(sh, 0, Some(shape::ERA_1980S_PAINT[e].0), lod)?;
+                    bytes += m.vertices.len() * core::mem::size_of::<render::Vertex>()
+                        + m.indices.len() * core::mem::size_of::<u32>();
                     ids.push(register(m));
                 }
             }
         }
         self.ids = ids;
         self.heads = heads;
+        self.built_bytes = bytes;
         Ok(())
+    }
+
+    /// Bytes of mesh built for the traffic alone (the rest are the parked cars').
+    pub fn built_bytes(&self) -> usize {
+        self.built_bytes
     }
 
     /// Most cars ever live, so most instances a frame draws.
@@ -199,11 +233,15 @@ impl Npcs {
         self.step_ms
     }
 
-    /// Keeps `density` of cars from the next step; off drops every car at once.
+    /// Keeps `density` of cars from the next step; off drops every car at once, and
+    /// switching on again starts a warm-up.
     pub fn set_density(&mut self, density: Density) {
         if density == Density::Off && self.density != Density::Off {
             self.traffic = self.empty.clone();
             self.prev.clear();
+            self.warm = 0;
+        } else if density != Density::Off && self.density == Density::Off {
+            self.warm = WARMUP_STEPS;
         }
         self.density = density;
     }
@@ -236,16 +274,15 @@ impl Npcs {
         self.traffic.populate(&self.graph, &inputs);
     }
 
-    /// Runs [`WARMUP_S`] of steps the first time it is called with traffic on, the player
-    /// and the view held still.
-    pub fn warm_up(&mut self, inp: &StepInputs) {
-        if self.warmed || self.density == Density::Off {
-            return;
-        }
-        self.warmed = true;
-        for _ in 0..(WARMUP_S * skywave_core::SIM_HZ as f32) as u32 {
+    /// Runs up to `max` of the warm-up's steps still due, the player and the view held
+    /// still. Returns how many ran.
+    pub fn warm_up(&mut self, inp: &StepInputs, max: u32) -> u32 {
+        let n = self.warm.min(max);
+        for _ in 0..n {
             self.step(inp);
         }
+        self.warm -= n;
+        n
     }
 
     /// Notes `ms` of traffic sim for `steps` steps, for the overlay.
@@ -281,17 +318,17 @@ impl Npcs {
 
     /// The mesh index of car `c` at the near or far level.
     fn mesh_index(c: &traffic::Car, far: bool) -> usize {
-        (usize::from(c.shape) * PAINTS + paint_of(c.paint)) * 2 + usize::from(far)
+        (usize::from(c.shape) * PAINTS + c.paint as usize % PAINTS) * 2 + usize::from(far)
     }
 
     /// Appends an instance for every car within [`DRAW_RADIUS_M`] of `eye`, `alpha` of the
-    /// way through the step, in mesh order, lit by the nearest of `lights` when close;
+    /// way through the step, in mesh order, lit by the frame's `lights` when close;
     /// lamps glow by `lamp_glow` on cars with their lights on. Returns how many.
     pub fn push(
         &mut self,
         alpha: f32,
         eye: Vec3,
-        lights: &[PointLight],
+        lights: &FrameLights,
         lamp_glow: f32,
         out: &mut Vec<MeshInstance>,
     ) -> usize {
@@ -307,7 +344,8 @@ impl Npcs {
         for (i, c) in self.traffic.cars().iter().enumerate() {
             let d2 = Vec3::from(c.pos).distance_squared(eye);
             if d2 <= draw2 {
-                order.push((Self::mesh_index(c, d2 > near2) as u16, i as u16));
+                let mesh = self.ids[Self::mesh_index(c, d2 > near2)];
+                order.push((mesh.0, i as u16));
             }
         }
         order.sort_unstable();
@@ -318,14 +356,14 @@ impl Npcs {
             let transform = Mat4::from_rotation_translation(Quat::from_rotation_y(heading), pos);
             let bounds = Bounds::cube(pos + Vec3::Y, CAR_HALF_M);
             let lights = if bounds.distance_squared(eye) < lit2 {
-                light_set(lights, &bounds)
+                lights.set_for(&bounds)
             } else {
                 LightSet::EMPTY
             };
             out.push(MeshInstance {
                 lights,
                 glow: if c.lights { lamp_glow } else { 0.0 },
-                ..MeshInstance::new(self.ids[usize::from(mesh)], transform.to_cols_array_2d())
+                ..MeshInstance::new(MeshId(mesh), transform.to_cols_array_2d())
             });
         }
         let n = order.len();
@@ -372,10 +410,11 @@ impl Npcs {
     }
 
     /// The engines of the nearest [`TRAFFIC_VOICES`] moving cars within [`HEAR_RADIUS_M`] of
-    /// the listener at `ear` facing `forward` and moving at `velocity` (m/s), nearest in
-    /// the first voice; the rest silent.
+    /// the listener at `ear` facing `forward` and moving at `velocity` (m/s); the rest
+    /// silent. A car keeps its voice while it stays among the nearest, so its pitch never
+    /// jumps to another car's when two swap rank.
     pub fn voices(
-        &self,
+        &mut self,
         alpha: f32,
         ear: Vec3,
         forward: Vec3,
@@ -397,9 +436,31 @@ impl Npcs {
             best[k] = (d2, i);
             n = (n + 1).min(TRAFFIC_VOICES);
         }
+        // Each chosen car to the voice it had, the rest to voices freed this frame.
+        let cars = self.traffic.cars();
+        let chosen = &best[..n];
+        let mut slot_of = [usize::MAX; TRAFFIC_VOICES];
+        let mut taken = [false; TRAFFIC_VOICES];
+        for (k, &(_, i)) in chosen.iter().enumerate() {
+            if let Some(v) = self.voice_ids.iter().position(|&id| id == cars[i].id) {
+                slot_of[k] = v;
+                taken[v] = true;
+            }
+        }
+        for slot in slot_of[..n].iter_mut().filter(|s| **s == usize::MAX) {
+            let free = (0..TRAFFIC_VOICES).find(|&v| !taken[v]).unwrap_or(0);
+            taken[free] = true;
+            *slot = free;
+        }
+        let mut ids = [u32::MAX; TRAFFIC_VOICES];
+        for (k, &(_, i)) in chosen.iter().enumerate() {
+            ids[slot_of[k]] = cars[i].id;
+        }
+        self.voice_ids = ids;
         let right = Vec3::new(-forward.z, 0.0, forward.x).normalize_or_zero();
         let mut out = [TrafficVoice::default(); TRAFFIC_VOICES];
-        for (v, &(_, i)) in out.iter_mut().zip(&best[..n]) {
+        for (k, &(_, i)) in chosen.iter().enumerate() {
+            let v = &mut out[slot_of[k]];
             let c = &self.traffic.cars()[i];
             let (pos, _) = self.pose(i, alpha);
             let rel = pos + Vec3::Y * 0.5 - ear;
@@ -418,20 +479,6 @@ impl Npcs {
         }
         out
     }
-}
-
-/// Which of [`PAINTS`] a car's paint seed lands on, by the era's weights.
-pub fn paint_of(seed: u32) -> usize {
-    let w = &shape::ERA_1980S_PAINT[..PAINTS];
-    let total: u32 = w.iter().map(|p| p.1).sum();
-    let mut r = seed % total;
-    for (k, &(_, weight)) in w.iter().enumerate() {
-        if r < weight {
-            return k;
-        }
-        r -= weight;
-    }
-    0
 }
 
 /// Head lights come on [`TWILIGHT_S`] after sunset at `latitude_deg` on `day_of_year`, and
@@ -478,6 +525,10 @@ mod tests {
     use super::*;
     use crate::{App, InputState, SceneSetup};
 
+    /// The coast junction of the `coast-traffic-noon` golden, waiting at the stop line.
+    pub(crate) const JUNCTION: &str =
+        "place=coast&car=corsair_gtx&cam=chase-mid&pos=477.5,1001.2&yaw=347";
+
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
     }
@@ -498,15 +549,6 @@ mod tests {
             assert_eq!(density_from_name(density_name(d)), Some(d));
         }
         assert_eq!(density_from_name("jam"), None);
-        let w = shape::ERA_1980S_PAINT[..PAINTS].iter().map(|p| p.1);
-        let total: u32 = w.sum();
-        let mut seen = [0u32; PAINTS];
-        for seed in 0..total {
-            seen[paint_of(seed)] += 1;
-        }
-        for (k, n) in seen.iter().enumerate() {
-            assert_eq!(*n, shape::ERA_1980S_PAINT[k].1, "paint {k} by its weight");
-        }
     }
 
     #[test]
@@ -518,12 +560,8 @@ mod tests {
             let mut app = app(query);
             assert_eq!(app.npcs.density(), Density::Busy);
             assert!(app.npcs.graph.lanes.len() > 50, "{query}: a lane graph");
-            assert_eq!(
-                app.traffic_count(),
-                0,
-                "nothing runs before the first frame"
-            );
-            app.update(&InputState::default(), 1.0 / 60.0);
+            // Warmed up while the scene loaded, before the first frame.
+            assert_eq!(app.npcs.warm, 0);
             let n = app.traffic_count();
             eprintln!("{query}: {n} cars after the warm-up");
             assert!(n >= 20, "{query}: {n} cars after the warm-up");
@@ -687,36 +725,135 @@ mod tests {
             hz(&w)
         );
         // To the listener's right when it faces across the car's path.
-        let side = app.npcs.voices(1.0, at - right * 10.0, fwd, Vec3::ZERO);
-        assert!(side[0].pan > 0.5, "{:?}", side[0]);
-        assert!(side[0].gain >= side[1].gain);
+        let ear = at - right * 10.0;
+        let side = app.npcs.voices(1.0, ear, fwd, Vec3::ZERO);
+        let slot = app
+            .npcs
+            .voice_ids
+            .iter()
+            .position(|&id| id == c.id)
+            .unwrap();
+        assert!(side[slot].pan > 0.5, "{:?}", side[slot]);
+        // Each car keeps its voice from frame to frame while the cars go by.
+        let inputs = app.traffic_inputs();
+        for _ in 0..240 {
+            let before = app.npcs.voice_ids;
+            app.npcs.step(&inputs);
+            app.npcs.voices(1.0, ear, fwd, Vec3::ZERO);
+            for (v, id) in app.npcs.voice_ids.iter().enumerate() {
+                let was = before.iter().position(|b| b == id);
+                assert!(
+                    *id == u32::MAX || was.is_none() || was == Some(v),
+                    "{id} moved"
+                );
+            }
+        }
     }
 
-    /// The in-game traffic step (step and populate, 96 busy cars on the coast) within its
-    /// budget: best of five windows' means under 0.5 ms in this build, asserted only under
-    /// `SKYWAVE_ENFORCE_BUDGETS`.
+    /// Switched on from Settings mid-game, the warm-up runs a batch a frame, never more.
+    #[test]
+    fn traffic_switched_on_in_game_warms_up_a_batch_a_frame() {
+        let mut app = app("place=town&t=12:00&stream=0");
+        let mut mapper = crate::InputMapper::default();
+        app.set_settings_store(Box::new(crate::MemoryStore::default()));
+        app.ui.settings_mut().traffic = Density::Off;
+        app.frame(&mut mapper, 1.0 / 60.0, &|| 0.0);
+        assert_eq!(app.traffic_count(), 0);
+        app.ui.settings_mut().traffic = Density::Busy;
+        let mut frames = 0;
+        let mut left = WARMUP_STEPS;
+        loop {
+            let ticks = app.npcs.signals.tick;
+            app.frame(&mut mapper, 1.0 / 60.0, &|| 0.0);
+            let stepped = app.npcs.signals.tick - ticks;
+            assert!(
+                stepped <= u64::from(WARMUP_BATCH) + 4,
+                "{stepped} steps in a frame"
+            );
+            frames += 1;
+            if app.npcs.warm == 0 {
+                break;
+            }
+            assert_eq!(app.npcs.warm, left - WARMUP_BATCH);
+            left = app.npcs.warm;
+        }
+        assert_eq!(frames, WARMUP_STEPS.div_ceil(WARMUP_BATCH));
+        assert!(app.traffic_count() > 20, "{}", app.traffic_count());
+    }
+
+    /// The in-game traffic step (step and populate, busy cars on the coast) within its
+    /// budget, gated like the traffic crate's (#17): the best of three windows' median
+    /// under 0.5 ms and p99 under 2 ms in this build, asserted only under
+    /// `SKYWAVE_ENFORCE_BUDGETS`. The median is what the sim costs when the machine is not
+    /// busy; a shared runner stealing slices moves the tail, not it.
     #[test]
     fn the_traffic_step_is_within_budget() {
         let mut app = app("place=coast&t=12:00&traffic=busy&still=1");
-        app.update(&InputState::default(), 0.0);
         let inputs = app.traffic_inputs();
-        let mut means = Vec::new();
-        for _ in 0..5 {
-            let start = std::time::Instant::now();
-            let steps = 240;
-            for _ in 0..steps {
+        let mut windows = Vec::new();
+        let mut times = Vec::with_capacity(600);
+        for _ in 0..3 {
+            times.clear();
+            for _ in 0..600 {
+                let start = std::time::Instant::now();
                 app.npcs.step(&inputs);
+                times.push(start.elapsed().as_secs_f64() * 1e3);
             }
-            means.push(start.elapsed().as_secs_f64() * 1e3 / f64::from(steps));
+            times.sort_by(f64::total_cmp);
+            windows.push((times[times.len() / 2], times[times.len() * 99 / 100]));
         }
-        let best = means.iter().copied().fold(f64::INFINITY, f64::min);
+        let median = windows.iter().map(|w| w.0).fold(f64::INFINITY, f64::min);
+        let p99 = windows.iter().map(|w| w.1).fold(f64::INFINITY, f64::min);
         eprintln!(
-            "traffic step: {} cars, {best:.3} ms per step (windows {means:.3?})",
+            "traffic step: {} cars, median {median:.3} ms, p99 {p99:.3} ms (windows {windows:.3?})",
             app.traffic_count()
         );
         assert!(app.traffic_count() >= 60, "{}", app.traffic_count());
         if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
-            assert!(best < 0.5, "{best:.3} ms per step");
+            assert!(median < 0.5, "median {median:.3} ms per step");
+            assert!(p99 < 2.0, "p99 {p99:.3} ms per step");
+        }
+    }
+
+    /// At a busy junction at night the NPC beams never crowd out the player's headlights
+    /// or a street lamp: in every light set, a beam is there only when every other light
+    /// reaching the instance is there too.
+    #[test]
+    fn npc_beams_only_take_slots_the_other_lights_leave() {
+        let mut app = app(&format!("{JUNCTION}&t=22:30&lights=1&traffic=busy&still=1"));
+        let world = app.world_instances;
+        let eye = app.camera.pose(&app.drive, 1.0).eye;
+        let mut scratch = [PointLight::omni([0.0; 3], [0.0; 3], 0.0); NPC_LIGHTS];
+        let m = app.npcs.lights(1.0, eye, &mut scratch);
+        assert!(m >= 4, "{m} beams at night");
+        // The player's four lamps, then the beams.
+        let beams = 4..4 + m;
+        let view = app.scene_view(1.0, 16.0 / 9.0);
+        assert!(view.lights[beams.clone()].iter().all(|l| l.radius == 60.0));
+        // The player's car is lit by its own beams first.
+        for inst in &view.instances[world..world + 4] {
+            let set = inst.lights.indices();
+            assert!(set.contains(&0) && set.contains(&1), "{:?}", inst.lights);
+        }
+        // The invariant, against the ranking rule itself.
+        let bounds: Vec<_> = app.bounds[..world].iter().flatten().copied().collect();
+        for b in &bounds {
+            let set = app.lights.set_for(b);
+            let has_beam = set
+                .indices()
+                .iter()
+                .any(|&i| beams.contains(&usize::from(i)));
+            if has_beam {
+                let reaching = app
+                    .lights
+                    .lights()
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, l)| !beams.contains(i) && b.reached_by(l));
+                for (i, _) in reaching {
+                    assert!(set.indices().contains(&(i as u8)), "light {i} crowded out");
+                }
+            }
         }
     }
 }

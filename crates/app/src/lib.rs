@@ -373,6 +373,7 @@ impl App {
         app.traffic_scene = setup.traffic_density();
         if let Some(d) = app.traffic_scene {
             app.apply_traffic(d);
+            app.finish_warm_up();
         }
         Ok(app)
     }
@@ -518,8 +519,9 @@ impl App {
     /// [`App::update`], timing the traffic sim by `now` (seconds, any origin) for the
     /// overlay.
     fn advance(&mut self, input: &InputState, dt_real: f64, now: &dyn Fn() -> f64) -> Steps {
+        // Traffic switched on mid-game warms up a batch a frame, not all in one.
         let inputs = self.traffic_inputs();
-        self.npcs.warm_up(&inputs);
+        self.npcs.warm_up(&inputs, npc::WARMUP_BATCH);
         if self.still {
             return Steps {
                 count: 0,
@@ -608,7 +610,7 @@ impl App {
     fn apply_traffic(&mut self, density: traffic::Density) {
         if density != traffic::Density::Off && !self.npcs.has_meshes() {
             let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
-            let built = self.npcs.build_meshes(|m| {
+            let built = self.npcs.build_meshes(self.props.as_ref(), |m| {
                 pending.push(m);
                 next += 1;
                 MeshId(next - 1)
@@ -617,6 +619,12 @@ impl App {
             self.mesh_count = next;
         }
         self.npcs.set_density(density);
+    }
+
+    /// Runs the traffic's whole warm-up now: while the scene loads, before its first frame.
+    fn finish_warm_up(&mut self) {
+        let inputs = self.traffic_inputs();
+        self.npcs.warm_up(&inputs, u32::MAX);
     }
 
     /// Fingerprint of the simulation state, for determinism checks.
@@ -695,29 +703,25 @@ impl App {
         dynamic[n..n + m].copy_from_slice(&npc_lights[..m]);
         self.lights
             .gather(eye, daylight.streetlights_on, &dynamic[..n + m]);
+        self.lights.set_second(n..n + m);
         let (world, car) = self.instances.split_at_mut(self.world_instances);
         self.lights.assign(&self.bounds, world);
         let reach = 0.5 * self.drive.layout.dims.iter().fold(0.0f32, |a, &b| a.max(b));
         let around = Bounds::cube(self.drive.pose(alpha).pos, reach);
-        let set = lighting::light_set(self.lights.lights(), &around);
+        let set = self.lights.set_for(&around);
         for inst in car {
             inst.lights = set;
         }
         if let Some(props) = &self.props {
             let stream = self.stream.as_deref();
             let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
-            let lights = self.lights.lights();
+            let lights = &self.lights;
             let rocking = &self.drive.rocking;
             props.push(eye, live, lights, lamp_glow, rocking, &mut self.instances);
         }
         let npc_glow = lighting::car_glow(&daylight).lamps;
-        self.npcs.push(
-            alpha,
-            eye,
-            self.lights.lights(),
-            npc_glow,
-            &mut self.instances,
-        );
+        self.npcs
+            .push(alpha, eye, &self.lights, npc_glow, &mut self.instances);
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),

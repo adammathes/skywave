@@ -269,6 +269,12 @@ impl Ui {
         full.pan(dir, dt, &geom, rect);
     }
 
+    /// The settings, to change in tests as the menu would.
+    #[cfg(test)]
+    pub(crate) fn settings_mut(&mut self) -> &mut Settings {
+        &mut self.settings
+    }
+
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -1168,6 +1174,8 @@ impl App {
         }
         self.apply_clock_speed();
         self.apply_settings();
+        // Loading: traffic the saved setting switched on warms up before the first frame.
+        self.finish_warm_up();
     }
 
     /// The handling preset drives the car's assists; the camera settings reach the rig.

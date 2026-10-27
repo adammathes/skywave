@@ -484,8 +484,13 @@ pub fn parked_mesh(
     parked_mesh_and_lamps(shape, paint, era, lod).map(|(m, _)| m)
 }
 
+/// The head lamps' centers of `shape`'s [`parked_mesh`], left and right, in its frame.
+pub fn parked_headlamps(shape: &ShapeSpec) -> Result<[Vec3; 2], String> {
+    parked_mesh_and_lamps(shape, 0, None, 2).map(|(_, h)| h)
+}
+
 /// [`parked_mesh`] and its head lamps' centers, left and right, in the mesh's frame.
-pub fn parked_mesh_and_lamps(
+fn parked_mesh_and_lamps(
     shape: &ShapeSpec,
     paint: usize,
     era: Option<&'static str>,
