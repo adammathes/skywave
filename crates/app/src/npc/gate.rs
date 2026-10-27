@@ -186,8 +186,12 @@ fn along(g: &LaneGraph, lane: u32, p: [f32; 3]) -> f32 {
 }
 
 /// The end of the approach the junction scenario runs: a straight two-lane arterial
-/// (14 m/s) into a signalized four-way junction on the coast's north side.
-const APPROACH_END: [f32; 2] = [807.95, 1760.15];
+/// (14 m/s, one 252 m lane) into a signalized four-way junction on the coast's north
+/// side. Moved with the map edges (the old point is off every lane there): of the
+/// signalized four-way approaches straight for 200 m or more, the one with the most NPC
+/// cars about its junction at busy density (13.6 within 40 m on average over 30 s at
+/// noon; the next has 11.0).
+const APPROACH_END: [f32; 2] = [735.73, 461.05];
 
 /// The signalized lane whose end lies at `end`.
 fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
@@ -349,9 +353,11 @@ fn sixty_through_a_red_light_touches_no_car() {
     assert!(app.drive.state.upset_s == 0.0);
 }
 
-/// The end of a signalized approach downtown whose crosswalk people use the most (ten
-/// people in two minutes at busy density with the player waiting at its stop line).
-const DOWNTOWN_END: [f32; 2] = [695.43, 981.20];
+/// The end of a signalized approach downtown whose crosswalk people use the most. Moved
+/// with the map edges: of the signalized four-way approaches, the one with the most people
+/// about at busy density (91 after the warm-up, 10.1 within 30 m of the junction on
+/// average over 30 s at noon).
+const DOWNTOWN_END: [f32; 2] = [855.18, 826.82];
 
 /// A pedestrian sim beside the app (seeded like the place), fed the app's player and
 /// camera at busy density.
