@@ -1,6 +1,6 @@
 [package]
 name = "traffic"
-description = "Skywave traffic: the lane graph built from a place's roads (lanes, turn tables, stop lines, signal timers)."
+description = "Skywave traffic: the lane graph built from a place's roads (lanes, turn tables, stop lines, signal timers), the sidewalk graph and pedestrians."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

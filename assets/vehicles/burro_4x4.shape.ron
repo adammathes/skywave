@@ -1,0 +1,57 @@
+// Burro 4x4 body: a mid-80s small two-door four-wheel-drive utility.
+//
+// Intent: short, tall and upright on big tires. Round lamps either side of a wide grille,
+// a short flat hood, an upright windshield, a tall boxy roof with a rack, big side glass,
+// a vertical liftgate with the spare wheel on it, black steel bumpers, black trim, mud
+// flaps, a tape stripe and white five-spoke wheels. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "burro_4x4",
+    side: [
+        (0.00, 0.98), (0.05, 1.04), (1.10, 1.10), (1.16, 1.12), (1.48, 1.76),
+        (1.56, 1.78), (3.95, 1.77), (3.99, 1.75), (4.10, 1.18), (4.13, 1.14),
+        (4.15, 1.10),
+        (4.15, 0.50), (4.00, 0.45), (3.60, 0.42), (1.20, 0.40), (0.10, 0.44), (0.00, 0.52),
+    ],
+    plan: [
+        (0.00, 0.82), (0.06, 0.85), (0.30, 0.86), (4.00, 0.86), (4.15, 0.85),
+    ],
+    belt: [(1.16, 1.12), (4.15, 1.16)],
+    section: Section(shoulder: 0.96, tumblehome_deg: 6, greenhouse_frac: 0.90, crown: 0.03, tuck: 0.03),
+    glass: Glass(
+        windshield: (1.18, 1.48),
+        backlight: (3.99, 4.10),
+        side: [(1.56, 2.30), (2.40, 3.86)],
+    ),
+    wheels: Wheels(radius: 0.38, width: 0.22, arch_clearance: 0.05, front_x: 0.86, rear_x: 3.26, track: 1.46),
+    front: Front(lights: Round, grille: Wide, bumper: Rubber, bumper_y: (0.44, 0.60)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Rubber, bumper_y: (0.46, 0.60)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.86, creases: [(0.10, 0.82, 4.10, 0.86)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [SpareTire, BlackTrim, MudFlaps, SideStripe, RoofRack, Badge(Diamond)],
+    // Red, white, black, tan, navy, sand over brown, yellow.
+    palette: ["#b0262a", "#ecebe4", "#1d1e21", "#c9b48e", "#22304e", "#d8c7a0/#5e4430", "#d9b02a"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 1.10,
+        dash_x: 1.42,
+        wheel_pos: (1.80, 0.98),
+        wheel_radius: 0.19,
+        column_angle_deg: 30,
+        mirror_pos: (1.62, 1.64),
+        seat: (2.26, 0.78),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, khaki cloth with an
+        // olive insert and orange piping, brown carpet, amber-lit dials.
+        colors: ["#26262a", "#7a7458", "#3e3a2e", "#b8b4a0", "#4a4838", "#e07a2a"],
+        display: "#ffae3b",
+        insert: "#5e6044",
+        piping: "#e07a2a",
+        dash_top: "#303034",
+        manual: true,
+    ),
+)

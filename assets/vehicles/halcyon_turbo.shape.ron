@@ -1,0 +1,62 @@
+// Halcyon Turbo body: a mid-80s wedge sports coupe.
+//
+// Intent: a long, low nose that rises in one line from a thin bumper to a very raked
+// windshield, pop-up lamps in the hood's leading edge, a short roof with two tinted glass
+// panels, then a long sloping hatch glass to a short deck with a lip and a band of
+// three-section lamps. Body-colored bumpers, black pillars and trim, a pinstripe at the
+// waist and five-spoke alloys. Front engine, rear drive: the nose is long, the tail short.
+// Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "halcyon_turbo",
+    side: [
+        (0.00, 0.50), (0.05, 0.58), (0.40, 0.66), (1.40, 0.82), (1.46, 0.84),
+        (2.06, 1.26), (2.14, 1.28), (2.70, 1.26), (3.80, 0.97), (4.30, 0.95),
+        (4.40, 0.91),
+        (4.40, 0.32), (4.20, 0.22), (3.70, 0.18), (0.70, 0.16), (0.14, 0.20), (0.00, 0.30),
+    ],
+    plan: [
+        (0.00, 0.70), (0.10, 0.79), (0.40, 0.84), (0.90, 0.85), (3.70, 0.85), (4.25, 0.84),
+        (4.40, 0.82),
+    ],
+    belt: [(1.46, 0.83), (3.80, 0.92)],
+    section: Section(shoulder: 0.94, tumblehome_deg: 22, greenhouse_frac: 0.72, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.48, 2.04),
+        backlight: (2.74, 3.78),
+        side: [(1.54, 2.62), (2.70, 3.36)],
+    ),
+    wheels: Wheels(radius: 0.30, width: 0.20, arch_clearance: 0.05, front_x: 0.92, rear_x: 3.34, track: 1.44),
+    front: Front(lights: PopUp, grille: Slot, bumper: Body, bumper_y: (0.28, 0.40)),
+    rear: Rear(lights: Triple, spoiler: Lip, bumper: Body, bumper_y: (0.30, 0.44)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.62, creases: [(0.20, 0.52, 4.35, 0.62)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [TTop, BlackTrim, Badge(Diamond)],
+    // Pearl white, black, signal red, silver over charcoal, dark blue metallic, gunmetal,
+    // red over black.
+    palette: ["#efeee9", "#18191c", "#b51f26", "#c3c6ca/#3a3e45", "#26385e", "#4c5259", "#b51f26/#1c1d20"],
+    accent: "#c8a24a",
+    interior: InteriorShape(
+        dash_height: 0.80,
+        dash_x: 1.72,
+        wheel_pos: (2.10, 0.60),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (1.90, 1.13),
+        seat: (2.52, 0.34),
+        driver_offset: 0.36,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: charcoal and dove-gray velour with
+        // blue inserts and blue piping, brushed applique, orange-lit dials.
+        colors: ["#25272c", "#5a5d64", "#2d3038", "#8a8c90", "#3b3e45", "#e0a030"],
+        display: "#ff9a30",
+        insert: "#5a6e9c",
+        piping: "#4a64a8",
+        dash_top: "#33363c",
+        applique: Brushed,
+        manual: true,
+    ),
+)

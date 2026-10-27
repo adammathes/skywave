@@ -117,10 +117,12 @@ impl<'a, 'b> Parts<'a, 'b> {
                         self.side_molding();
                     }
                 }
-                Detail::VinylRoof if hardtop => self.vinyl_roof(),
+                Detail::VinylRoof if hardtop => self.vinyl_roof(false),
+                Detail::LandauRoof if hardtop => self.vinyl_roof(true),
                 Detail::RallyStripes if self.lod0() => self.rally_stripes(),
                 Detail::MudFlaps => self.mud_flaps(),
                 Detail::RoofRack if hardtop => self.roof_rack(),
+                Detail::SpareTire => self.spare_tire(),
                 Detail::Badge(shape) if self.lod0() => {
                     self.badge(shape, true);
                     self.badge(shape, false);
@@ -1717,11 +1719,27 @@ impl<'a, 'b> Parts<'a, 'b> {
         (g.windshield.1 + 0.02, g.backlight.0 - 0.02)
     }
 
-    fn vinyl_roof(&mut self) {
+    /// The roof cover, or with `landau` its rear half only, wrapping down the blind rear
+    /// pillars behind the last side window.
+    fn vinyl_roof(&mut self, landau: bool) {
         let (s0, s1) = self.roof_spans();
+        let s0 = if landau { (s0 + s1) * 0.5 } else { s0 };
         let f = self.b.frame((s0 + s1) * 0.5);
         let x = f.z_re - 0.01;
-        self.surface_patch(s0, s1, -x, x, 0.004, self.m.accent.uv(Uv::Top), 4);
+        let vinyl = self.m.accent.uv(Uv::Top);
+        self.surface_patch(s0, s1, -x, x, 0.004, vinyl, 4);
+        if !landau {
+            return;
+        }
+        let g = &self.b.spec.glass;
+        let a = g.side.last().map_or(s0, |w| w.1 + 0.015);
+        let c = s1 + 0.02;
+        let (fa, fc) = (self.b.frame(a), self.b.frame(c));
+        let low = [fa.y_ledge + 0.012, fc.y_ledge + 0.012];
+        let high = [fa.y_edge - 0.03, (fc.y_edge - 0.03).max(low[1] + 0.02)];
+        for sx in [-1.0f32, 1.0] {
+            self.side_patch(sx, a, c, low, high, 0.004, vinyl);
+        }
     }
 
     fn rally_stripes(&mut self) {
@@ -1810,6 +1828,60 @@ impl<'a, 'b> Parts<'a, 'b> {
                     self.m.trim,
                 );
             }
+        }
+    }
+
+    /// A spare wheel standing off the tail on a bracket, its tread showing round a cover
+    /// in the accent color with a bright center ring.
+    fn spare_tire(&mut self) {
+        let b = self.b;
+        let wh = &b.spec.wheels;
+        let r = wh.radius * 0.92;
+        let y = b.spec.rear.bumper_y.1 + r + 0.02;
+        let z0 = b.length - b.axle[0] + 0.07;
+        let z1 = z0 + wh.width * 0.9;
+        let segs = match b.lod {
+            0 => 20,
+            1 => 12,
+            _ => 8,
+        };
+        self.body.aabb(
+            [-0.06, y - 0.06, z0 - 0.08],
+            [0.06, y + 0.06, z0],
+            self.m.trim,
+        );
+        self.body.cylinder(
+            [0.0, y, z0],
+            [0.0, y, z1],
+            r,
+            segs,
+            true,
+            false,
+            self.m.tire,
+        );
+        // The cover: a band over the outer half of the tread and a flat face.
+        let zc = (z0 + z1) * 0.5;
+        let cover = self.m.accent;
+        self.body.cylinder(
+            [0.0, y, zc],
+            [0.0, y, z1 + 0.012],
+            r + 0.008,
+            segs,
+            false,
+            false,
+            cover,
+        );
+        self.body
+            .disc([0.0, y, z1 + 0.012], BACK, r + 0.008, segs, cover);
+        if self.lod0() {
+            self.body.annulus(
+                [0.0, y, z1 + 0.014],
+                BACK,
+                r * 0.3,
+                r * 0.36,
+                segs,
+                self.m.chrome,
+            );
         }
     }
 

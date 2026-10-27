@@ -1,0 +1,47 @@
+// Bancroft Sedan: an early-80s full-size rear-drive sedan with a big V8.
+//
+// Intent: quiet and planted. Plenty of low-down torque through a four-speed automatic with
+// an overdrive, so it rolls away without fuss and cruises at low revs. Heavy and long,
+// with soft but well-controlled springs: it settles rather than floats, leans moderately
+// and understeers gently. Steering is light and slow. The family car that gets there.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "bancroft_sedan",
+    name: "Bancroft Sedan",
+    era: Eighties,
+    class: Sedan,
+
+    mass_kg: 1750,
+    dims_m: (5.30, 1.92, 1.40),    // length, width, height
+    wheelbase_m: 2.94,
+    track_m: 1.58,
+    cg_height_m: 0.56,
+    cg_fore_aft: 0.44,             // 56% front
+
+    // A 5 L V8: ~125 kW, most of its torque by 2000 rpm.
+    engine: Engine(
+        idle_rpm: 600,
+        redline_rpm: 4600,
+        torque_nm: [(800, 270), (2000, 330), (2800, 345), (3600, 325), (4200, 290), (4600, 262)],
+    ),
+    gears: [2.74, 1.57, 1.0, 0.70],   // four-speed automatic with overdrive
+    final_drive: 2.73,
+    reverse: 2.3,
+    shift_ms: 450,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.98, grip_long: 0.92, load_sens: 0.11, slip_peak_deg: 9.0),
+    suspension: Susp(spring_n_m: 25000, damper: 2200, travel_m: 0.20, antiroll: 0.18),
+    steering: Steer(max_deg: 30, speed_sens: 0.5, return_rate: 6.0),
+    brakes: Brakes(max_nm: 4000, bias_front: 0.66, abs: false, handbrake_nm: 2400),
+    aero: Aero(cd: 0.39, frontal_m2: 2.25, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.15, body_roll: 0.7, engine_sound: "v8_lazy", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "luxury_80s",
+        gauges: [Speedo(0, 85, mph)],
+        radio: "digital_blue",
+    ),
+    shape: "bancroft_sedan.shape.ron",
+)

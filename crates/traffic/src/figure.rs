@@ -1529,6 +1529,54 @@ impl Skeleton {
     }
 }
 
+/// Seat height of the place's benches above the ground they stand on (`world::props`).
+pub const SEAT_M: f32 = 0.46;
+
+/// [`Skeleton::phase_rate`] for a figure `height_m` tall at `speed`, without building it:
+/// a behaviour advances a figure's gait phase by this times `dt` knowing only its seed's
+/// height ([`FigureSpec::height_m`]).
+pub fn phase_rate(height_m: f32, speed: f32) -> f32 {
+    let v = speed.clamp(0.6, 2.0);
+    let stride = height_m * (0.42 + 0.23 * v);
+    lerp(1.0 / IDLE_PERIOD_S, v / stride, smooth(0.15, 0.7, speed))
+}
+
+/// How far ahead of its seat point a figure `height_m` tall stands before it sits down
+/// ([`Skeleton::sit`] at `t = 0`).
+pub fn sit_reach(height_m: f32) -> f32 {
+    0.85 * 0.225 * height_m
+}
+
+impl Skeleton {
+    /// Sitting down on a bench seat [`SEAT_M`] high at `t` (0 standing, 1 seated): the
+    /// pelvis goes back and down onto the seat with a forward lean on the way, the hands
+    /// come to rest on the thighs. The figure's origin is the seat point; at `t = 0` it
+    /// stands [`sit_reach`] ahead of it (`-z`), on the feet that stay planted throughout,
+    /// so a behaviour switches the origin from the feet to the seat as sitting starts.
+    pub fn sit(&self, t: f32) -> Joints {
+        let t = t.clamp(0.0, 1.0);
+        let u = smooth(0.0, 1.0, t);
+        let h = self.height_m;
+        let reach = sit_reach(h);
+        let dip = sin(PI * t);
+        let mut j = Joints {
+            root: [
+                0.0,
+                lerp(self.stand_height(), SEAT_M + 0.05 * h, u),
+                lerp(-reach, 0.0, u),
+            ],
+            rot: [[0.0; 3]; PARTS],
+        };
+        self.posture(&mut j, 0.35 * dip - 0.05 * u);
+        self.arms(&mut j, [0.45 * u; 2], 0.05 * u, [0.2 + 0.8 * u; 2]);
+        let tx = self.track();
+        let heel = self.heel_m - reach;
+        self.leg(&mut j, 0, -tx, 0.0, heel, 0.0);
+        self.leg(&mut j, 1, tx, 0.0, heel, 0.0);
+        j
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1563,6 +1611,32 @@ mod tests {
             .iter()
             .map(|&p| xf[k].apply(p)[1])
             .fold(f32::MAX, f32::min)
+    }
+
+    #[test]
+    fn sitting_lands_on_the_seat_with_the_feet_down() {
+        for seed in 0..40 {
+            let f = figure(seed, ERAS[seed as usize % 2]);
+            let sk = &f.skeleton;
+            assert_eq!(
+                phase_rate(sk.height_m, 1.3).to_bits(),
+                sk.phase_rate(1.3).to_bits()
+            );
+            let mut xf = [Xform::IDENTITY; PARTS];
+            for i in 0..=20 {
+                let j = sk.sit(i as f32 / 20.0);
+                sk.pose(&j, &mut xf);
+                for foot in [Part::FootL, Part::FootR] {
+                    let y = lowest(&f, &xf, foot);
+                    assert!((-0.02..0.03).contains(&y), "seed {seed} t {i}: foot at {y}");
+                }
+                assert!(xf.iter().all(|x| x.pos.iter().all(|v| v.is_finite())));
+            }
+            let seat = sk.sit(1.0);
+            assert!(seat.root[2].abs() < 1e-6);
+            assert!((seat.root[1] - SEAT_M - 0.05 * sk.height_m).abs() < 1e-4);
+            assert!((sk.sit(0.0).root[2] + sit_reach(sk.height_m)).abs() < 1e-6);
+        }
     }
 
     #[test]

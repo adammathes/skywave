@@ -13,8 +13,9 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
     Ok(spec)
 }
 
-/// The vehicle specs compiled into the game, as `(id, RON text)`.
-pub const BUILTIN: [(&str, &str); 4] = [
+/// The vehicle specs compiled into the game, as `(id, RON text)`: the 1980s roster, in the
+/// order the Vehicle page lists it.
+pub const BUILTIN: [(&str, &str); 12] = [
     (
         "corsair_gtx",
         include_str!("../../../assets/vehicles/corsair_gtx.ron"),
@@ -30,6 +31,38 @@ pub const BUILTIN: [(&str, &str); 4] = [
     (
         "regent_coupe_cabrio",
         include_str!("../../../assets/vehicles/regent_coupe_cabrio.ron"),
+    ),
+    (
+        "halcyon_turbo",
+        include_str!("../../../assets/vehicles/halcyon_turbo.ron"),
+    ),
+    (
+        "pipit_hatch",
+        include_str!("../../../assets/vehicles/pipit_hatch.ron"),
+    ),
+    (
+        "bancroft_sedan",
+        include_str!("../../../assets/vehicles/bancroft_sedan.ron"),
+    ),
+    (
+        "prescott_landau",
+        include_str!("../../../assets/vehicles/prescott_landau.ron"),
+    ),
+    (
+        "meadow_minivan",
+        include_str!("../../../assets/vehicles/meadow_minivan.ron"),
+    ),
+    (
+        "buckboard_pickup",
+        include_str!("../../../assets/vehicles/buckboard_pickup.ron"),
+    ),
+    (
+        "drayman_van",
+        include_str!("../../../assets/vehicles/drayman_van.ron"),
+    ),
+    (
+        "burro_4x4",
+        include_str!("../../../assets/vehicles/burro_4x4.ron"),
     ),
 ];
 
@@ -53,7 +86,7 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 
 /// The car body shapes compiled into the game, as `(file name, RON text)`; a
 /// `VehicleSpec::shape` names one.
-pub const BUILTIN_SHAPES: [(&str, &str); 4] = [
+pub const BUILTIN_SHAPES: [(&str, &str); 12] = [
     (
         "corsair_gtx.shape.ron",
         include_str!("../../../assets/vehicles/corsair_gtx.shape.ron"),
@@ -69,6 +102,38 @@ pub const BUILTIN_SHAPES: [(&str, &str); 4] = [
     (
         "regent_coupe_cabrio.shape.ron",
         include_str!("../../../assets/vehicles/regent_coupe_cabrio.shape.ron"),
+    ),
+    (
+        "halcyon_turbo.shape.ron",
+        include_str!("../../../assets/vehicles/halcyon_turbo.shape.ron"),
+    ),
+    (
+        "pipit_hatch.shape.ron",
+        include_str!("../../../assets/vehicles/pipit_hatch.shape.ron"),
+    ),
+    (
+        "bancroft_sedan.shape.ron",
+        include_str!("../../../assets/vehicles/bancroft_sedan.shape.ron"),
+    ),
+    (
+        "prescott_landau.shape.ron",
+        include_str!("../../../assets/vehicles/prescott_landau.shape.ron"),
+    ),
+    (
+        "meadow_minivan.shape.ron",
+        include_str!("../../../assets/vehicles/meadow_minivan.shape.ron"),
+    ),
+    (
+        "buckboard_pickup.shape.ron",
+        include_str!("../../../assets/vehicles/buckboard_pickup.shape.ron"),
+    ),
+    (
+        "drayman_van.shape.ron",
+        include_str!("../../../assets/vehicles/drayman_van.shape.ron"),
+    ),
+    (
+        "burro_4x4.shape.ron",
+        include_str!("../../../assets/vehicles/burro_4x4.shape.ron"),
     ),
 ];
 
@@ -187,6 +252,35 @@ mod tests {
         assert!(regent.steering.return_rate < seabreeze.steering.return_rate);
         assert!(regent.feel.body_roll > seabreeze.feel.body_roll);
         assert_eq!((seabreeze.gear_count(), regent.gear_count()), (3, 4));
+    }
+
+    #[test]
+    fn the_roster_covers_the_eras_body_styles() {
+        use VehicleClass::*;
+        let specs: Vec<VehicleSpec> = BUILTIN
+            .iter()
+            .map(|(id, _)| builtin_spec(id).unwrap())
+            .collect();
+        assert_eq!(specs.len(), 12);
+        for class in [
+            Sports,
+            Coupe,
+            Hatch,
+            Sedan,
+            Wagon,
+            Van,
+            Pickup,
+            Convertible,
+            Utility,
+        ] {
+            assert!(specs.iter().any(|s| s.class == class), "{class:?}");
+        }
+        for (k, s) in specs.iter().enumerate() {
+            assert_eq!(s.era, Era::Eighties, "{}", s.id);
+            assert!(specs[k + 1..]
+                .iter()
+                .all(|o| o.id != s.id && o.name != s.name));
+        }
     }
 
     #[test]

@@ -7,6 +7,7 @@ use super::params::parse_paint;
 use super::*;
 use crate::VehicleSpec;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 
 const CORSAIR: &str = include_str!("../../../../assets/vehicles/corsair_gtx.shape.ron");
 const PALISADE: &str = include_str!("../../../../assets/vehicles/palisade_wagon.shape.ron");
@@ -23,8 +24,43 @@ fn load(text: &str) -> ShapeSpec {
     s
 }
 
-fn shapes() -> [ShapeSpec; 4] {
-    [load(CORSAIR), load(PALISADE), load(SEABREEZE), load(REGENT)]
+/// The rest of the 1980s roster, as `(shape, spec)` texts.
+macro_rules! car {
+    ($id:literal) => {
+        (
+            include_str!(concat!("../../../../assets/vehicles/", $id, ".shape.ron")),
+            include_str!(concat!("../../../../assets/vehicles/", $id, ".ron")),
+        )
+    };
+}
+const ROSTER: [(&str, &str); 8] = [
+    car!("pipit_hatch"),
+    car!("halcyon_turbo"),
+    car!("bancroft_sedan"),
+    car!("prescott_landau"),
+    car!("meadow_minivan"),
+    car!("buckboard_pickup"),
+    car!("drayman_van"),
+    car!("burro_4x4"),
+];
+const PICKUP: &str = ROSTER[5].0;
+const UTILITY: &str = ROSTER[7].0;
+const WEDGE: &str = ROSTER[1].0;
+
+/// Every built-in shape with its vehicle spec: the first four cars, then the roster.
+fn pairs() -> Vec<(&'static str, &'static str)> {
+    let mut v = alloc::vec![
+        (CORSAIR, CORSAIR_SPEC),
+        (PALISADE, PALISADE_SPEC),
+        (SEABREEZE, SEABREEZE_SPEC),
+        (REGENT, REGENT_SPEC),
+    ];
+    v.extend(ROSTER);
+    v
+}
+
+fn shapes() -> Vec<ShapeSpec> {
+    pairs().iter().map(|p| load(p.0)).collect()
 }
 
 fn convertibles() -> [ShapeSpec; 2] {
@@ -404,19 +440,17 @@ fn body_faces_point_outward() {
             vol += dot(a, cross(b, c)) as f64 / 6.0;
         }
         let l = spec.length() as f64;
+        let w = 2.0 * spec.plan.iter().fold(0.0f32, |m, p| m.max(p.1)) as f64;
+        let h = spec.side.iter().fold(0.0f32, |m, p| m.max(p.1)) as f64;
         assert!(vol > l * 1.6 * 0.9 * 0.5, "{}: body volume {vol}", spec.id);
-        assert!(vol < l * 2.0 * 1.5, "{}: body volume {vol}", spec.id);
+        assert!(vol < l * w * h, "{}: body volume {vol}", spec.id);
     }
 }
 
 #[test]
 fn shapes_match_their_vehicle_specs() {
-    for (shape, text) in [
-        (load(CORSAIR), CORSAIR_SPEC),
-        (load(PALISADE), PALISADE_SPEC),
-        (load(SEABREEZE), SEABREEZE_SPEC),
-        (load(REGENT), REGENT_SPEC),
-    ] {
+    for (shape, text) in pairs() {
+        let shape = load(shape);
         let v: VehicleSpec = ron::from_str(text).unwrap();
         assert_eq!(v.shape, shape.id.to_string() + ".shape.ron");
         let w = &shape.wheels;
@@ -450,13 +484,21 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 4] = [
+    let expected: [u64; 12] = [
         0xd8c8_d201_ca40_efe2,
         0xedbe_0c75_ff0b_96c9,
         0x0cc6_c3d4_6210_49af,
         0x6822_0560_3259_f8d7,
+        0x8b31_0cd0_4e92_d9fa,
+        0x6328_65fb_668f_a6c4,
+        0xc77e_f92e_8538_9720,
+        0x6f63_02d2_bd07_7f33,
+        0x7c7f_2b14_9b07_4886,
+        0x20d6_8a6d_7a68_c29d,
+        0xcb4f_4a0e_9805_3593,
+        0x5b64_028a_975b_f878,
     ];
-    let mut got = [0u64; 4];
+    let mut got = [0u64; 12];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -465,6 +507,91 @@ fn builds_are_deterministic() {
         std::println!("{}: {:#018x}", spec.id, got[k]);
     }
     assert_eq!(got, expected, "mesh hashes changed");
+}
+
+/// Body vertices over the middle of a pickup's bed, between the bulkhead and the tailgate,
+/// and above the rail.
+fn over_the_bed(spec: &ShapeSpec, m: &MeshData) -> usize {
+    let (s0, s1) = spec.bed().unwrap();
+    let rail = super::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
+    let ax = spec.wheels.front_x;
+    m.positions
+        .iter()
+        .filter(|p| {
+            let s = p[2] + ax;
+            s > s0 + 0.02 && s < s1 - 0.02 && p[0].abs() < 0.6 && p[1] > rail - 0.02
+        })
+        .count()
+}
+
+#[test]
+fn a_pickup_bed_is_open_and_lined() {
+    let spec = load(PICKUP);
+    let (s0, s1) = spec.bed().unwrap();
+    assert!(s1 - s0 > 2.0, "a long bed: {s0}..{s1}");
+    for lod in 0..3 {
+        let car = build_lod(&spec, 0, lod).unwrap();
+        assert_eq!(over_the_bed(&spec, &car.body), 0, "lod{lod}: bed covered");
+        // The floor is down in the bed, well under the rail (and over the underside).
+        let ax = spec.wheels.front_x;
+        let rail = super::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
+        let floor = car
+            .body
+            .positions
+            .iter()
+            .filter(|p| p[2] + ax > s0 - 0.01 && p[2] + ax < s1 + 0.01 && p[0].abs() < 0.7)
+            .filter(|p| p[1] > 0.5)
+            .fold(f32::MAX, |m, p| m.min(p[1]));
+        assert!(floor < rail - 0.35, "lod{lod}: floor {floor}, rail {rail}");
+    }
+    // Without the detail the same top is a closed deck.
+    let mut closed = spec.clone();
+    closed.details.retain(|&d| d != Detail::PickupBed);
+    assert!(over_the_bed(&spec, &build(&closed, 0).unwrap().body) > 20);
+}
+
+#[test]
+fn a_spare_tire_hangs_on_the_tail() {
+    let spec = load(UTILITY);
+    let tail = spec.length() - spec.wheels.front_x;
+    for lod in 0..3 {
+        let car = build_lod(&spec, 0, lod).unwrap();
+        let behind = car
+            .body
+            .positions
+            .iter()
+            .filter(|p| p[2] > tail + 0.15)
+            .count();
+        assert!(behind > 20, "lod{lod}: {behind} vertices behind the tail");
+        let mut bare = spec.clone();
+        bare.details.retain(|&d| d != Detail::SpareTire);
+        let car = build_lod(&bare, 0, lod).unwrap();
+        assert!(car.body.positions.iter().all(|p| p[2] < tail + 0.15));
+    }
+}
+
+#[test]
+fn a_t_top_puts_glass_in_the_roof() {
+    let spec = load(WEDGE);
+    let g = &spec.glass;
+    let ax = spec.wheels.front_x;
+    let roof_glass = |car: &CarMesh| {
+        car.glass
+            .positions
+            .iter()
+            .filter(|p| p[2] + ax > g.windshield.1 + 0.02 && p[2] + ax < g.backlight.0 - 0.02)
+            .filter(|p| p[1] > 1.2)
+            .count()
+    };
+    for lod in 0..2 {
+        assert!(
+            roof_glass(&build_lod(&spec, 0, lod).unwrap()) > 8,
+            "lod{lod}"
+        );
+    }
+    let mut solid = spec.clone();
+    solid.details.retain(|&d| d != Detail::TTop);
+    assert_eq!(roof_glass(&build(&solid, 0).unwrap()), 0);
 }
 
 #[test]
@@ -618,6 +745,18 @@ fn validate_rejects_bad_parts() {
         |s| s.interior.insert = "red".to_string(),
         ShapeError::Interior,
     );
+    // A bed needs a top at the belt behind the cab, a meter of it, and a hardtop.
+    rejects(
+        CORSAIR,
+        |s| s.details.push(Detail::PickupBed),
+        ShapeError::Bed,
+    );
+    rejects(PICKUP, |s| s.glass.backlight = (4.0, 4.2), ShapeError::Bed);
+    rejects(
+        PICKUP,
+        |s| s.roof.kind = RoofKind::Convertible { top: Top::Down },
+        ShapeError::OpenTop,
+    );
 }
 
 #[test]
@@ -759,6 +898,7 @@ fn every_option_builds() {
         Detail::WoodPanel,
         Detail::ChromeTrim,
         Detail::VinylRoof,
+        Detail::LandauRoof,
         Detail::RallyStripes,
         Detail::MudFlaps,
         Detail::RoofRack,
@@ -768,6 +908,8 @@ fn every_option_builds() {
         Detail::Badge(BadgeShape::Bar),
         Detail::Badge(BadgeShape::Chevron),
         Detail::WoodApplique,
+        Detail::TTop,
+        Detail::SpareTire,
         Detail::CorneringLamps,
     ];
     for base in shapes() {
