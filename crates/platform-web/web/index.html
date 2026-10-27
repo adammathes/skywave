@@ -239,7 +239,8 @@
   // Browsers play sound only after a user gesture: a refused play() is reported as blocked
   // (the game shows "Press any key for radio") and retried on the next key, click or touch.
   // A stream that neither plays nor errors within STALL_MS is reported as failed, so the
-  // game moves on instead of sitting in silence. "file" plays one of the player's own music
+  // game moves on instead of sitting in silence (files report their errors, and a slow
+  // machine may take longer to start one). "file" plays one of the player's own music
   // files (window.skywaveMusic below) by its key from `value` seconds in, through the same
   // element: it streams the file from disk and decodes as it plays, where decodeAudioData
   // would hold a whole track as PCM (~100 MB for five minutes); its end is reported as
@@ -301,7 +302,7 @@
       } catch { /* optional */ }
     };
     const gesture = () => {
-      if (blocked && blocked === token) { blocked = 0; note("retry after a gesture"); arm(token); tryPlay(token); }
+      if (blocked && blocked === token) { blocked = 0; note("retry after a gesture"); if (!blobUrl) arm(token); tryPlay(token); }
     };
     for (const t of ["keydown", "mousedown", "touchstart"]) window.addEventListener(t, gesture, true);
     window.skywaveRadio = {
@@ -321,7 +322,9 @@
           } else audio.src = url;
           audio.volume = volume;
           metadata(name);
-          arm(t);
+          // A stream can hang without an error; a file on disk reports one, and a slow
+          // machine may take longer than STALL_MS to start it.
+          if (kind === "play") arm(t);
           tryPlay(t);
         } else if (kind === "stop") stop();
         else if (kind === "volume") { volume = Math.min(1, Math.max(0, value)); audio.volume = volume; }
