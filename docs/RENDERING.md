@@ -41,6 +41,17 @@ in the shader), with the content rotated by any angle and an optional circle or 
 edges anti-aliased in the fragment shader. The HUD bind group holds the font atlas and the map (two textures,
 two samplers); each quad's flags pick one, so images cost no extra draw call or texture switch.
 
+Vehicle select (`app::preview`): the pause menu's Vehicle page leaves a stage beside its panel (not dimmed),
+and the car being browsed turns slowly on a plain grey disc there, its real LOD0 exterior in the paint chosen.
+It is drawn in the main forward pass from its own camera without a second camera in the renderer: a scale
+model placed 0.5 m in front of the frame's camera, aimed down the ray to the stage's center and sized to
+fill it, so the frame's camera sees it as a turntable camera would see the full-size car. The player's car
+(and its lamps) and any traffic or prop within 4 m of the eye are not drawn under the page, so nothing that
+moves cuts into it. It is lit by the current sun, sky ambient and exposure, plus the cabin fill light after
+dark; no street lamps, and it neither casts nor receives a sun shadow (`MeshInstance::receives_shadow`, one
+bit in the instance's packed params that `forward.wgsl` reads to skip the cascade test). Cost: up to 10
+instances while the page is open, none otherwise; no pass or uniform.
+
 Map (`app::map`): the Place rasterized once at load into a 1024 px (longer side) image, north up: muted zone
 tints, parks, water with a darker shoreline, faint building footprints, roads by class with a 1 px darker
 outline (highways thick and light, arterials pale yellow, locals thin, alleys faint), POI dots; deterministic
@@ -68,11 +79,11 @@ First person cockpit (eye position from the spec; head sways with suspension and
 | Player car exterior (LOD0) | 8–14k |
 | Player car interior | 4–8k |
 | Parked / NPC cars | 3–5k within 80 m (LOD1), ~2k beyond (LOD2) |
-| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300 |
+| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300; a shop's blade sign (frame, word, pictogram, both faces) ≤ 360 (`props::BLADE_TRIANGLES`) |
 | Buildings | ≤ 3.5k (ceiling): `world::buildings` plans each to 2,000 and adds what a street front's base band costs, up to the ceiling |
 | Chunk vertex cap | 256k vertices (384k comes with the building pass, when a chunk needs it) |
 
-Chunk meshes: pooled vertex/index buffers made once at load (`render::ChunkPool`): a fixed number of chunk slots over buffers cut into pages of 4096 vertices and 6144 indices; a written slot holds a run of consecutive pages, as many as its chunk needs (the test town's chunks range from 80 to 95k vertices, so equal-sized slots would waste most of the pool). Up to 256k vertices (`render::MAX_CHUNK_VERTICES`) and 32 draws per chunk (32-bit indices, rebased per slot since WebGL2 has no base vertex). Web: 121 slots, 4.5M vertices (189 MB); native: 225 slots, 6M vertices (252 MB), sized to the procedural coast with its buildings (its densest 11×11 chunks take 1091 of the web pool's 1099 pages, the whole place 1459 of the native pool's 1465, with the three-band facades; that leaves 8 and 6 pages, so the next building task must budget for the pool, or bring the per-building LOD that lets it grow, and test it). A full pool is an error, never a new buffer. Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 400 web, ≤ 1000 native. Vertex: position f32×3, normal f32×3, uv u16×2 (atlas), color rgba8, emissive rgba8 (36 bytes; emissive alpha bit 7 = window flag, low 7 bits = intensity 0..8×). Props and cars use 2 LODs (full within 80 m, half beyond); chunks beyond 400 m drop facade detail to silhouettes.
+Chunk meshes: pooled vertex/index buffers made once at load (`render::ChunkPool`): a fixed number of chunk slots over buffers cut into pages of 4096 vertices and 6144 indices; a written slot holds a run of consecutive pages, as many as its chunk needs (the test town's chunks range from 80 to 95k vertices, so equal-sized slots would waste most of the pool). Up to 256k vertices (`render::MAX_CHUNK_VERTICES`) and 32 draws per chunk (32-bit indices, rebased per slot since WebGL2 has no base vertex). Web: 121 slots, 4.96M vertices (208 MB); native: 225 slots, 6.62M vertices (278 MB), sized to the procedural coast with its buildings and stroke-lettered signs plus about 10% headroom (its densest 11×11 chunks take 1101 of the web pool's 1211 pages, the whole place 1470 of the native pool's 1617; the three-band facades had left 8 and 6 pages and the signs' letters needed 10 and 5 more, so the pools grew from 4.5M and 6M vertices, +19 MB and +26 MB of buffers). The next building task re-measures with `every_coast_chunk_fits_the_pool_and_the_far_terrain_is_small` and keeps inside the headroom, or brings the per-building LOD that lets it shrink. A full pool is an error, never a new buffer. Vehicles and props: instanced draws (per-instance transform + color). Target draw calls per frame ≤ 400 web, ≤ 1000 native. Vertex: position f32×3, normal f32×3, uv u16×2 (atlas), color rgba8, emissive rgba8 (36 bytes; emissive alpha bit 7 = window flag, low 7 bits = intensity 0..8×). Props and cars use 2 LODs (full within 80 m, half beyond); chunks beyond 400 m drop facade detail to silhouettes.
 
 ## Platform tiers
 | Tier | Target | Notes |

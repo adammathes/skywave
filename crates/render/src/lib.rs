@@ -186,6 +186,10 @@ pub struct MeshInstance {
     /// Drawn into the shadow cascades. Off for what glows rather than blocks the sun (neon
     /// and lamp lens meshes).
     pub casts_shadow: bool,
+    /// Darkened where the sun's shadow cascades say something blocks it. Off for what is
+    /// not in the world's light (the vehicle select's turntable model, just in front of the
+    /// camera).
+    pub receives_shadow: bool,
     /// Drawn after the other instances in the forward pass: a backdrop that nearer
     /// geometry mostly hides (the far terrain), so the depth test rejects those pixels
     /// before they are shaded.
@@ -204,6 +208,7 @@ impl MeshInstance {
             cabin: 0.0,
             lights: LightSet::EMPTY,
             casts_shadow: true,
+            receives_shadow: true,
             late: false,
         }
     }
@@ -825,7 +830,8 @@ struct InstanceRaw {
     normal: [[f32; 4]; 3],
     color: [f32; 4],
     /// x glow (emissive multiplier) as f32 bits, y cabin-light share as unorm16 | the light
-    /// set's length << 16, zw the set's light indices, a byte each, low byte first.
+    /// set's length << 16 | [`NO_SUN_SHADOW`] when it receives no shadow, zw the set's
+    /// light indices, a byte each, low byte first.
     params: [u32; 4],
 }
 
@@ -847,6 +853,10 @@ impl InstanceRaw {
     }
 }
 
+/// Bit of `params.y` (just past the light count) that skips the sun's shadow test
+/// ([`MeshInstance::receives_shadow`] off); `forward.wgsl` reads it.
+const NO_SUN_SHADOW: u32 = 1 << 24;
+
 /// The packed `params` of [`InstanceRaw`].
 fn instance_params(inst: &MeshInstance, lights: usize) -> [u32; 4] {
     let mut words = [0u32; 2];
@@ -858,9 +868,14 @@ fn instance_params(inst: &MeshInstance, lights: usize) -> [u32; 4] {
         }
     }
     let cabin = (inst.cabin.clamp(0.0, 1.0) * 65535.0).round() as u32;
+    let shadow = if inst.receives_shadow {
+        0
+    } else {
+        NO_SUN_SHADOW
+    };
     [
         inst.glow.max(0.0).to_bits(),
-        cabin | (n as u32) << 16,
+        cabin | (n as u32) << 16 | shadow,
         words[0],
         words[1],
     ]
@@ -3550,6 +3565,15 @@ mod tests {
         inst.glow = -1.0;
         inst.cabin = 2.0;
         assert_eq!(instance_params(&inst, 4), [0, 65535, 0, 0]);
+        // No sun shadow: the bit past the light count, which the shader reads as 256 in
+        // the count's word, leaving the count itself alone.
+        inst.receives_shadow = false;
+        inst.lights = LightSet::from_indices(&[1, 2]);
+        let p = instance_params(&inst, 4);
+        assert_eq!(p[1], 65535 | 2 << 16 | NO_SUN_SHADOW);
+        assert_eq!(((p[1] >> 16) & 255, (p[1] >> 16) & 256), (2, 256));
+        let wgsl = include_str!("../shaders/forward.wgsl");
+        assert!(wgsl.contains("(in.lights.x & 256u) == 0u"));
         let mut set = LightSet::EMPTY;
         assert!(set.is_empty() && !set.push(MAX_LIGHTS) && set.push(MAX_LIGHTS - 1));
         assert_eq!(set.indices(), &[255]);

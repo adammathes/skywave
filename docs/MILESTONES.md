@@ -243,8 +243,7 @@ New golden scenes: `coast-traffic-night` (busy, 22:30, the strip junction, headl
 **Deferred** (known, not in this milestone's build): pedestrians are not drawn in the game
 (figure instancing is next); NPC cars do not see pedestrians (turning traffic at signals,
 unsignalized crossings); no player–NPC collision (the player drives through NPC cars; they never
-drive into it); NPC wheels do not turn; no brake lights; traffic sparse near the player; the
-vehicle select screen (M4 #7) is still on its branch.
+drive into it); NPC wheels do not turn; no brake lights; traffic sparse near the player.
 
 **For the human at the gate**
 - Does the coast feel alive but calm with traffic on? Is Normal the right default, and is Busy
@@ -255,4 +254,5 @@ vehicle select screen (M4 #7) is still on its branch.
 - NPC cars at night: are the low beams and lamps right, and how much do brake lights and turning
   wheels matter?
 - Pedestrians: draw them next (before M5), and should cars yield to them at crossings first?
-- Do all twelve cars feel different and era-right? (Vehicle select lands with M4 #7.)
+- Do all twelve cars feel different and era-right? Does the vehicle select screen (pause menu,
+  Vehicle page) make picking one pleasant?
