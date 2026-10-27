@@ -16,15 +16,28 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Radio off | button | \ | D-pad down |
 | Headlights | button | L | D-pad up (tap) |
 | High beams (`HighBeams`) | button | K | D-pad up held 1 s |
-| Horn | button | H | Left stick click |
+| Underglow (`Underglow`) | button | U | — |
+| Horn | button | B (H until the controls card took it) | Left stick click |
 | Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
 | Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
 | Map toggle | button | M | Back / Share |
 | Map zoom (full map) | axis −1..1 | − / = (and the mouse wheel) | L1 / R1 |
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
-| Pause/menu | button | Esc | Start / Options |
+| Pause/menu | button | Esc | Start / Options (tap) |
 | Screenshot | button | F12 | — |
-| Debug overlay | button | F3 | — |
+| Performance overlay (`DebugOverlay`) | button | F3 | — |
+| Controls card (`Controls`) | button | H, F1 | Start / Options held 1 s (also pause menu › Show controls) |
+
+F3 cycles the performance overlay Off → FPS → Full → Off. FPS is the frame rate alone (one decimal, the
+same average the full overlay shows) in the top left corner, which the driving HUD leaves empty; Full is
+every counter and the frame graph. The mode is saved (`hud.overlay`: `"off"`, `"fps"` or `"full"`; default
+off) and is also on Settings › HUD › Performance overlay. Any menu (pause, settings, vehicle select,
+worlds), the full map and the controls card hide the overlay while open and bring it back when they close,
+without changing the mode. F3 still cycles the saved mode under a menu, so it can be set from there; it
+shows once the menu closes. The window in the background hides it too. While a station toast is up the FPS
+number sits below its two lines (a long station name reaches the corner at large UI scales). Holding F3
+and pressing C (Camera cycle) toggles the free-fly camera; the F3 press that starts the chord also moves
+the overlay one mode.
 
 While the full map is open the sim keeps running, but the car gets no driving input (it coasts): the menu
 directions (arrows, d-pad, left stick) pan the map, Map zoom and the wheel zoom it, and Map toggle, Back or
@@ -63,7 +76,10 @@ Bindings page says so under its rows); that is what keeps a tap and a hold apart
 `Headlights` toggles the low beams (pop-up lamps rise and fall with it). `HighBeams` with the headlights
 on toggles the high beams (a taller, brighter, longer spot, 40 kcd per lamp to 140 m, against the low beam's
 14 kcd to 60 m); with them off it switches them on on high beams. The high beams stay selected while the
-headlights are switched off and on again with `Headlights`.
+headlights are switched off and on again with `Headlights`. `Underglow` switches a car's underglow on and
+off (off at the start; it stays switched across a change of car and lights nothing on a car without one):
+its neon tubes glow and two short-reaching lights pool its color on the road round the car. It is a
+keyboard switch only by default; the pad can bind it on the Bindings page.
 On the pad both share D-pad up: a tap is the headlights, a hold of 1 s or more (`Binding::long`, as for
 `Reset`) the high beams, so the headlights act on release there. The cockpit dash shows a green tell-tale
 on the first dial while the headlights are on and a blue one beside it with the high beams. Settings ›
@@ -75,6 +91,44 @@ pedal and coasting leave them dark), and whenever the car stands with the brake 
 brake-to-reverse has picked.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
+
+## The controls card
+`Controls` shows a card of every action (but the free-fly camera's) with its keyboard and its
+controller inputs side by side, read from the live bindings, so a remap shows at once. Rows are grouped
+Drive (steer, throttle, brake, handbrake, horn, reset car, next car), Camera (cycle, look around, look
+back), Lights (headlights, high beams), Radio (on/off, next, previous), Menus (pause, map, map zoom, time
+of day, move, select, back) and Help (the card itself, the performance overlay, screenshot). Each input is
+named once, " / " between them, "-" for none; a row whose inputs are directions names them by family
+(`Arrows`, `D-pad`, `LS`, `RS`, `Mouse`), so Steer reads "A / D / Arrows" and "LS". Pad inputs use the
+names the Bindings page uses (A/B/X/Y, LB/RB, LT/RT, LS/RS, D-pad up/down/left/right, Start, Select);
+the HUD font is ASCII, so there are no arrow glyphs.
+
+- **At the start:** when a running game starts (never in a still scene, so screenshot goldens and the
+  self-test are untouched) the card shows for 6 s with the footer "H or F1: controls" (the pad's input when
+  the pad was used last), then goes. Any input dismisses it sooner and still does its job (a trigger
+  drives, Esc opens the pause menu); the card's own key only dismisses it. After the player has dismissed
+  it in 3 separate sessions it stops showing at the start (`hud.controls_dismissed` in the settings
+  counts them). While the start card has more lines than fit (UI scale over 1), up and down scroll it
+  and its 6 s start again instead of dismissing it. Settings › HUD › Show controls at start (default on) turns the start card off; switching it
+  back on gives it its 3 sessions again. After the start, only the key or the menu item shows it.
+- **On the key:** H or F1 on the keyboard; on the pad, Start held 1 s (`Binding::long`), so a tap of Start
+  is still the pause menu (which now opens on release) and play stays gamepad-only. Like every long
+  press, the card comes up when Start is let go after the second, not while it is still held. The pause
+  menu's Show controls item shows the same card over the menu, which stays paused under it.
+- **Closing:** its key again, Back (B / Esc) or Pause; up and down scroll it while it has more lines than
+  fit, and nothing else closes it (steering, A, Space and the other menu directions do not). The key that
+  closes it does nothing else (Esc does not also open the pause menu); M closes it and opens the map. Over
+  the pause menu it closes back to the menu.
+- It pauses nothing, but like the full map it takes the keys and sticks while it is up: the car coasts,
+  and the radio, light, reset and car keys wait until it is gone. While it is up it takes the driving
+  HUD's place and the performance overlay (F3) hides.
+- **Layout:** two columns, Keyboard and Controller, beside the row names while the safe area is wide
+  enough (UI scale 1 and 1.25). Only at scale 1 is it one screen (at any resolution: the HUD is a 16:9
+  box scaled to fit); from 1.25 on it scrolls. From 1.5 on (a TV at 2) each row's inputs go on a line
+  under its name, keyboard left and controller right.
+
+A bindings file written before `Controls` existed loads with the horn moved to B if it was still on its
+old default H alone and no other driving action reads B; otherwise the card keeps only its default inputs no other action has taken (F1).
 
 ## Per-axis options (mandatory, every analog action)
 `invert` (Y invert on look is the canonical case and must work on gamepad and mouse), `sensitivity` (0.25–4×), `deadzone` (0–0.3), `curve` (1.0 linear to 2.5), `swap` presets (triggers↔stick for throttle/brake, left↔right sticks, southpaw). Stored per device kind (keyboard/mouse vs gamepad). A reset-to-default per action and per device.

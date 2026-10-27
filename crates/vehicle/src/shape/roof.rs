@@ -50,6 +50,9 @@ impl<'a, 'b> OpenTop<'a, 'b> {
             if self.b.has(Detail::TTop) {
                 self.t_top();
             }
+            if let Some(r) = self.b.targa {
+                self.targa(r);
+            }
             return;
         };
         self.door_caps();
@@ -183,6 +186,43 @@ impl<'a, 'b> OpenTop<'a, 'b> {
                     at(sa, xb, 0.008),
                 ];
                 self.body.quad_dir(q[0], q[1], q[2], q[3], self.m.trim, UP);
+            }
+        }
+    }
+
+    /// A targa's open roof between `s0` (the windshield header) and `s1` (the hoop): black
+    /// seals down the header's rear edge and the hoop's front edge, and a thin black frame
+    /// along the top of the side glass.
+    fn targa(&mut self, (s0, s1): (f32, f32)) {
+        let b = self.b;
+        let (i_rr, i_c) = (b.idx(Slot::RoofRail), b.idx(Slot::Center));
+        let trim = self.m.trim;
+        for (s, dir) in [(s0, 1.0f32), (s1, -1.0)] {
+            let (pts, _) = b.ring_plain(s);
+            for j in i_rr..i_c {
+                let (p, q) = (pts[j], pts[j + 1]);
+                for sx in [-1.0f32, 1.0] {
+                    let a = b.p(s, sx * p[0], p[1]);
+                    let c = b.p(s, sx * q[0], q[1]);
+                    let down = |v: V3| [v[0], v[1] - 0.035, v[2]];
+                    self.body
+                        .quad_dir(a, c, down(c), down(a), trim, [0.0, 0.0, dir]);
+                }
+            }
+        }
+        if !self.lod0() {
+            return;
+        }
+        let sts = self.stations(s0, s1, 0.05);
+        for sx in [-1.0f32, 1.0] {
+            for k in 0..sts.len() - 1 {
+                let rail = |s: f32| {
+                    let (pts, _) = b.ring_plain(s);
+                    let p = pts[i_rr];
+                    b.p(s, sx * p[0], p[1])
+                };
+                let (a, c) = (rail(sts[k]), rail(sts[k + 1]));
+                self.body.beam(a, c, UP, 0.008, 0.008, trim);
             }
         }
     }

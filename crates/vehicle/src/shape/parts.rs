@@ -3,9 +3,10 @@
 
 use super::body::Body;
 use super::math::*;
-use super::mesh::{Mat, Soup, Uv};
+use super::mesh::{emissive, Mat, Soup, Uv};
 use super::params::{
     BadgeShape, Bumper, Detail, Exhaust, Grille, Handles, HeadLights, Mirrors, Spoiler, TailLights,
+    TubeColor,
 };
 use super::Materials;
 use alloc::vec::Vec;
@@ -13,6 +14,10 @@ use alloc::vec::Vec;
 const UP: V3 = [0.0, 1.0, 0.0];
 const FWD: V3 = [0.0, 0.0, -1.0];
 const BACK: V3 = [0.0, 0.0, 1.0];
+/// How low a body kit's air dam, skirts and valance come, m above the ground.
+const KIT_GROUND: f32 = 0.09;
+/// Underglow tube glow, intensity scale.
+const UNDERGLOW_GLOW: f32 = 3.0;
 
 pub struct Parts<'a, 'b> {
     pub b: &'a Body<'b>,
@@ -20,6 +25,8 @@ pub struct Parts<'a, 'b> {
     pub popups_up: bool,
     pub body: Soup,
     pub lights: Soup,
+    /// The underglow tubes, lit (`Detail::Underglow`).
+    pub underglow: Soup,
 }
 
 /// A face band (nose or tail) to hang lamps and grilles on.
@@ -40,6 +47,7 @@ impl<'a, 'b> Parts<'a, 'b> {
             popups_up,
             body: Soup::new(35.0),
             lights: Soup::new(35.0),
+            underglow: Soup::new(35.0),
         }
     }
 
@@ -126,6 +134,10 @@ impl<'a, 'b> Parts<'a, 'b> {
                 Detail::SideStrakes => self.side_strakes(),
                 Detail::NacaDucts => self.naca_ducts(),
                 Detail::EngineLouvers => self.engine_louvers(),
+                Detail::BodyKit => self.body_kit(),
+                Detail::Blower => self.blower(),
+                // The far level is for parked cars, which never light it.
+                Detail::Underglow(color) if self.b.lod < 2 => self.underglow(color),
                 Detail::Badge(shape) if self.lod0() => {
                     self.badge(shape, true);
                     self.badge(shape, false);
@@ -137,21 +149,11 @@ impl<'a, 'b> Parts<'a, 'b> {
 
     // ---------------------------------------------------------------- bumpers
 
-    fn bumper(&mut self, front: bool) {
-        let spec = self.b.spec;
-        let (kind, (y0, y1)) = if front {
-            (spec.front.bumper, spec.front.bumper_y)
-        } else {
-            (spec.rear.bumper, spec.rear.bumper_y)
-        };
-        let mat = match kind {
-            Bumper::Chrome => self.m.chrome,
-            Bumper::Body => self.m.paint_low,
-            Bumper::Rubber => self.m.rubber,
-        };
+    /// A path round the nose (`front`) or the tail at height `ym`, from the left side to the
+    /// right, standing `out` proud of the face at the center, with each point's outward and
+    /// up directions: what a bumper, an air dam or a valance is swept along.
+    fn wrap_path(&self, front: bool, ym: f32, out: f32) -> (Vec<V3>, Vec<V3>, Vec<V3>) {
         let l = self.b.length;
-        let ym = (y0 + y1) * 0.5;
-        let hh = (y1 - y0) * 0.5;
         let face = if front { 0.0 } else { l };
         let inward = if front { 1.0 } else { -1.0 };
         let wrap = 0.30f32.min(if front {
@@ -168,7 +170,6 @@ impl<'a, 'b> Parts<'a, 'b> {
             plan.push((s, -x));
         }
         let corner = self.side(face, ym);
-        let out = 0.035;
         plan.push((face - inward * out * 0.8, -(corner * 0.9)));
         plan.push((face - inward * out * 1.05, 0.0));
         let n = plan.len();
@@ -190,6 +191,29 @@ impl<'a, 'b> Parts<'a, 'b> {
             us.push(o);
         }
         let vs: Vec<V3> = path.iter().map(|_| UP).collect();
+        (path, us, vs)
+    }
+
+    fn bumper(&mut self, front: bool) {
+        let spec = self.b.spec;
+        let (kind, (y0, y1)) = if front {
+            (spec.front.bumper, spec.front.bumper_y)
+        } else {
+            (spec.rear.bumper, spec.rear.bumper_y)
+        };
+        let mat = match kind {
+            Bumper::Chrome => self.m.chrome,
+            Bumper::Body => self.m.paint_low,
+            Bumper::Rubber => self.m.rubber,
+        };
+        let l = self.b.length;
+        let ym = (y0 + y1) * 0.5;
+        let hh = (y1 - y0) * 0.5;
+        let face = if front { 0.0 } else { l };
+        let inward = if front { 1.0 } else { -1.0 };
+        let (path, us, vs) = self.wrap_path(front, ym, 0.035);
+        let corner = self.side(face, ym);
+        let out = 0.035;
         let prof: Vec<(f32, f32)> = if self.lod0() {
             alloc::vec![
                 (-0.03, -hh),
@@ -1426,35 +1450,43 @@ impl<'a, 'b> Parts<'a, 'b> {
                 self.body
                     .beam(a, b, norm([0.0, 1.0, 0.6]), 0.035, 0.008, m.paint);
             }
-            Spoiler::Wing => {
-                let s = l - 0.18;
-                let f = self.b.frame(s);
-                let y = f.yt + 0.17;
-                for sx in [-1.0f32, 1.0] {
-                    let x = sx * f.z_re * 0.7;
-                    let y0 = f.top_y(x.abs());
-                    self.body.beam(
-                        self.p(s, x, y0),
-                        self.p(s + 0.03, x, y),
-                        FWD,
-                        0.01,
-                        0.05,
-                        m.trim,
-                    );
-                }
-                let a = self.p(s + 0.02, -f.z_re * 0.95, y + 0.01);
-                let b = self.p(s + 0.02, f.z_re * 0.95, y + 0.01);
-                self.body
-                    .beam(a, b, norm([0.0, 1.0, 0.25]), 0.12, 0.012, m.paint);
-                for sx in [-1.0f32, 1.0] {
-                    let x = sx * f.z_re * 0.95;
-                    self.body.aabb(
-                        [x - 0.006, y - 0.04, s - 0.11 - self.b.axle[0]],
-                        [x + 0.006, y + 0.06, s + 0.15 - self.b.axle[0]],
-                        m.paint,
-                    );
-                }
-            }
+            Spoiler::Wing => self.wing(0.17, 0.7, 0.12, 0.06, 0.15),
+            // Higher, on uprights set further in, with a deeper blade and bigger plates.
+            Spoiler::TallWing => self.wing(0.36, 0.55, 0.14, 0.1, 0.2),
+        }
+    }
+
+    /// A rear wing `rise` over the deck at its uprights: uprights at `stance` of the deck's
+    /// half-width, a blade of half-chord `chord` across 95% of it, and end plates reaching
+    /// `plate` above the blade and `plate_back` behind its leading edge.
+    fn wing(&mut self, rise: f32, stance: f32, chord: f32, plate: f32, plate_back: f32) {
+        let m = self.m;
+        let s = self.b.length - 0.18;
+        let f = self.b.frame(s);
+        let y = f.yt + rise;
+        for sx in [-1.0f32, 1.0] {
+            let x = sx * f.z_re * stance;
+            let y0 = f.top_y(x.abs());
+            self.body.beam(
+                self.p(s, x, y0),
+                self.p(s + 0.03, x, y),
+                FWD,
+                0.01,
+                0.05,
+                m.trim,
+            );
+        }
+        let a = self.p(s + 0.02, -f.z_re * 0.95, y + 0.01);
+        let b = self.p(s + 0.02, f.z_re * 0.95, y + 0.01);
+        self.body
+            .beam(a, b, norm([0.0, 1.0, 0.25]), chord, 0.012, m.paint);
+        for sx in [-1.0f32, 1.0] {
+            let x = sx * f.z_re * 0.95;
+            self.body.aabb(
+                [x - 0.006, y - 0.04, s - 0.11 - self.b.axle[0]],
+                [x + 0.006, y + plate, s + plate_back - self.b.axle[0]],
+                m.paint,
+            );
         }
     }
 
@@ -1635,6 +1667,213 @@ impl<'a, 'b> Parts<'a, 'b> {
             let up = norm([0.0, 1.0, -0.8]);
             self.body
                 .beam(self.p(s, -w, y), self.p(s, w, y), up, 0.016, 0.004, m.trim);
+        }
+    }
+
+    /// The body kit: an air dam under the nose with a black splitter and two dark intakes,
+    /// skirts along the sills between the arches, a valance under the tail over a dark
+    /// diffuser with fins. All in the lower paint, all lower than the car's own sills.
+    fn body_kit(&mut self) {
+        let spec = self.b.spec;
+        let m = self.m;
+        let paint = m.paint_low;
+        let lod0 = self.lod0();
+        for front in [true, false] {
+            let bumper = if front {
+                spec.front.bumper_y
+            } else {
+                spec.rear.bumper_y
+            };
+            let (y0, y1) = (KIT_GROUND, bumper.0 + 0.02);
+            if y1 - y0 < 0.04 {
+                continue;
+            }
+            let (ym, hh) = ((y0 + y1) * 0.5, (y1 - y0) * 0.5);
+            let (path, us, vs) = self.wrap_path(front, ym, 0.03);
+            let prof = [(-0.03, -hh), (0.03, -hh), (0.034, hh), (-0.03, hh)];
+            self.body.sweep(&path, &us, &vs, &prof, true, paint);
+            let face = if front { 0.0 } else { self.b.length };
+            let dir = if front { -1.0 } else { 1.0 };
+            let half = self.side(face, ym) * 0.9;
+            let z = face - self.b.axle[0] + dir * 0.067;
+            if front {
+                // The splitter lip and two intakes either side of the center.
+                self.body.aabb(
+                    [-half, y0 - 0.012, z - 0.04],
+                    [half, y0 + 0.004, z + 0.03],
+                    m.trim,
+                );
+                for sx in [-1.0f32, 1.0] {
+                    let (xa, xb) = (sx * half * 0.3, sx * half * 0.75);
+                    let (ya, yb) = (y0 + hh * 0.5, y1 - hh * 0.45);
+                    let zf = z + 0.001;
+                    let (xa, xb) = if sx < 0.0 { (xb, xa) } else { (xa, xb) };
+                    self.body.quad_dir(
+                        [xa, ya, zf],
+                        [xb, ya, zf],
+                        [xb, yb, zf],
+                        [xa, yb, zf],
+                        m.grille,
+                        FWD,
+                    );
+                }
+            } else {
+                // A dark diffuser under the valance with fins standing down out of it.
+                let zd = z - dir * 0.04;
+                self.body.aabb(
+                    [-half * 0.8, y0 - 0.015, zd - 0.12],
+                    [half * 0.8, y0, zd],
+                    m.trim,
+                );
+                let n = if lod0 { 5 } else { 3 };
+                for k in 0..n {
+                    let x = lerp(-half * 0.6, half * 0.6, k as f32 / (n - 1) as f32);
+                    self.body.aabb(
+                        [x - 0.005, y0 - 0.035, zd - 0.12],
+                        [x + 0.005, y0 - 0.015, zd],
+                        m.trim,
+                    );
+                }
+            }
+        }
+        // Skirts between the arches, from under the sill to a crisp top edge.
+        let b = self.b;
+        let (s0, s1) = (b.axle[0] + b.ra + 0.03, b.axle[1] - b.ra - 0.03);
+        if s1 - s0 < 0.3 {
+            return;
+        }
+        let pieces = if lod0 { 4 } else { 1 };
+        let lo = move |s: f32, _: f32| b.frame(s).yb - 0.03;
+        let hi = move |s: f32, _: f32| b.frame(s).yb + 0.1;
+        for sx in [-1.0f32, 1.0] {
+            self.side_patch_n(sx, s0, s1, lo, hi, 0.03, paint, pieces);
+            // Top ledge back to the body, and the bottom.
+            for (y, up) in [(hi(s0, 0.0), 1.0f32), (lo(s0, 0.0), -1.0)] {
+                let at = |s: f32, lift: f32| self.p(s, sx * (self.side(s, y) + lift), y);
+                let (a, c) = (at(s0, 0.0), at(s1, 0.0));
+                let (d, e) = (at(s0, 0.03), at(s1, 0.03));
+                self.body.quad_dir(a, c, e, d, paint, [0.0, up, 0.0]);
+            }
+        }
+    }
+
+    /// A supercharger standing through the hood over the engine: a polished case on a
+    /// black plate, two carburetor stacks on it and a butterfly scoop over them, its mouth
+    /// dark and facing forward.
+    fn blower(&mut self) {
+        let m = self.m;
+        let s = self.b.spec.glass.windshield.0 * 0.55;
+        let f = self.b.frame(s);
+        let y = f.top_y(0.0);
+        let z = s - self.b.axle[0];
+        // A plate set in the hood, the ribbed case, then the stacks.
+        self.body.aabb(
+            [-0.21, y - 0.01, z - 0.27],
+            [0.21, y + 0.012, z + 0.27],
+            m.trim,
+        );
+        self.body
+            .aabb([-0.15, y, z - 0.21], [0.15, y + 0.15, z + 0.21], m.chrome);
+        let lod0 = self.lod0();
+        if lod0 {
+            for k in 0..4 {
+                let yy = y + 0.03 + 0.03 * k as f32;
+                self.body.aabb(
+                    [-0.155, yy, z - 0.215],
+                    [0.155, yy + 0.008, z + 0.215],
+                    m.chrome.shade(0.75),
+                );
+            }
+        }
+        let segs = if lod0 { 12 } else { 6 };
+        for dz in [-0.1f32, 0.1] {
+            self.body.cylinder(
+                [0.0, y + 0.15, z + dz],
+                [0.0, y + 0.23, z + dz],
+                0.07,
+                segs,
+                false,
+                false,
+                m.chrome,
+            );
+        }
+        // The scoop: a polished wedge rising rearward over the stacks, its mouth dark.
+        let (yb, yf, yr) = (y + 0.22, y + 0.33, y + 0.37);
+        let (zf, zr, w) = (z - 0.2, z + 0.2, 0.15);
+        let q = |x: f32, yy: f32, zz: f32| [x, yy, zz];
+        let mat = m.chrome;
+        self.body.quad_dir(
+            q(-w, yf, zf),
+            q(w, yf, zf),
+            q(w, yr, zr),
+            q(-w, yr, zr),
+            mat,
+            UP,
+        );
+        for sx in [-1.0f32, 1.0] {
+            let x = sx * w;
+            self.body.quad_dir(
+                q(x, yb, zf),
+                q(x, yf, zf),
+                q(x, yr, zr),
+                q(x, yb, zr),
+                mat,
+                [sx, 0.0, 0.0],
+            );
+        }
+        self.body.quad_dir(
+            q(-w, yb, zr),
+            q(w, yb, zr),
+            q(w, yr, zr),
+            q(-w, yr, zr),
+            mat,
+            BACK,
+        );
+        self.body.quad_dir(
+            q(-w, yb, zf),
+            q(w, yb, zf),
+            q(w, yf, zf),
+            q(-w, yf, zf),
+            m.grille,
+            FWD,
+        );
+        if lod0 {
+            // Butterfly flaps across the mouth.
+            for k in 0..3 {
+                let yy = lerp(yb, yf, (k as f32 + 0.5) / 3.0);
+                self.body.beam(
+                    [-w, yy, zf - 0.005],
+                    [w, yy, zf - 0.005],
+                    UP,
+                    0.004,
+                    0.014,
+                    m.trim,
+                );
+            }
+        }
+    }
+
+    /// Glowing tubes under each sill between the arches and across under the nose and the
+    /// tail, inboard of the body's edge so only their glow shows, into `underglow`.
+    fn underglow(&mut self, color: TubeColor) {
+        let mat = Mat::new([20, 20, 22, 255]).glow(emissive(color.rgb(), UNDERGLOW_GLOW));
+        let b = self.b;
+        let r = 0.012;
+        let segs = if self.lod0() { 6 } else { 4 };
+        let (s0, s1) = (b.axle[0] + b.ra + 0.05, b.axle[1] - b.ra - 0.05);
+        let y = |s: f32| (b.frame(s).yb - 0.02).max(KIT_GROUND + 0.02);
+        let x = |s: f32| b.frame(s).w - 0.09;
+        for sx in [-1.0f32, 1.0] {
+            let a = self.p(s0, sx * x(s0), y(s0));
+            let c = self.p(s1, sx * x(s1), y(s1));
+            self.underglow.cylinder(a, c, r, segs, true, false, mat);
+        }
+        for s in [b.axle[0] - b.ra - 0.06, b.axle[1] + b.ra + 0.06] {
+            let s = clamp(s, 0.08, b.length - 0.08);
+            let w = x(s) * 0.85;
+            let a = self.p(s, -w, y(s));
+            let c = self.p(s, w, y(s));
+            self.underglow.cylinder(a, c, r, segs, true, false, mat);
         }
     }
 

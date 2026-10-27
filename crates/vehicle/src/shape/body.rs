@@ -127,6 +127,8 @@ pub struct Body<'a> {
     pub convertible: bool,
     /// A pickup's open bed: the top is left out over this range (`bed.rs` lines it).
     pub bed: Option<(f32, f32)>,
+    /// A targa's opening: the roof rails and the roof are left out over this range.
+    pub targa: Option<(f32, f32)>,
 }
 
 impl<'a> Body<'a> {
@@ -206,6 +208,7 @@ impl<'a> Body<'a> {
             details,
             convertible: spec.roof.convertible(),
             bed,
+            targa: spec.targa(),
         };
         if seams {
             body.door_seams = body.door_lines();
@@ -230,6 +233,9 @@ impl<'a> Body<'a> {
         let i_ledge = self.idx(Slot::Ledge);
         if self.bed.is_some_and(within) {
             return j >= i_ledge;
+        }
+        if self.targa.is_some_and(within) {
+            return j >= self.idx(Slot::RoofRail);
         }
         if !self.convertible {
             return false;
@@ -429,13 +435,13 @@ impl<'a> Body<'a> {
                 order: 0,
             });
         }
-        // A convertible's opening (or a pickup's bed) must start and end on a station, even
+        // A convertible's opening (or a pickup's bed, or a targa's) must start and end on a station, even
         // over an arch: a plain station close by gives way to it.
         let mut open = Vec::new();
         if spec.roof.convertible() {
             open.extend([g.windshield.1, g.backlight.0]);
         }
-        if let Some((s0, s1)) = self.bed {
+        if let Some((s0, s1)) = self.bed.or(self.targa) {
             open.extend([s0, s1]);
         }
         for s in open {

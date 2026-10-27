@@ -200,6 +200,9 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     let mut expected = Vec::new();
     reachable(Page::Pause, &h.app, &mut expected);
     assert_eq!(visited, expected);
+    // The pause menu's Controls item among them.
+    let controls = h.ui().items().iter().position(|i| i.id == ItemId::Controls);
+    assert!(visited.contains(&(Page::Pause, controls.expect("Controls item"))));
     // Pause, Settings, Controls, 2 × (device, bindings, axes, 8 axes), Video, World, About.
     let mut pages: Vec<Page> = visited.iter().map(|v| v.0).collect();
     pages.dedup();
@@ -256,8 +259,10 @@ fn invert_y_toggle_flips_gamepad_look_and_persists() {
     assert!(h.input.state().axis(Action::FlyLookY) < -0.5);
     h.input.axis(RawInput::PadAxis(PadAxis::RightY), 0.0);
 
-    // Leaving the menu saves; the JSON round-trips into a fresh app and its mapper.
-    assert!(store.load().is_none());
+    // Leaving the menu saves (until then only the start card's dismissal was); the JSON
+    // round-trips into a fresh app and its mapper.
+    let early = store.load().and_then(|t| Settings::from_json(&t).1);
+    assert!(early.is_none_or(|b| !b.axis_options(pad, Action::LookY).invert));
     h.pad(PadButton::Start);
     assert!(!h.app.menu_open());
     let saved = store.load().expect("saved on close");
@@ -495,13 +500,18 @@ fn hud_shows_speed_time_and_the_overlay() {
     assert!(mph > 5.0, "{mph}");
     assert!(h.hud_text().contains(&format!("{mph:.0}")));
 
-    // F3 toggles the overlay, which shows the renderer's counters and a frame graph.
+    // F3 cycles the overlay: the frame rate alone, then the renderer's counters and a
+    // frame graph, then nothing.
     h.app.set_render_stats(RenderStats {
         backend: "WebGL2",
         draw_calls: 123,
         instances: 45,
         ..RenderStats::default()
     });
+    h.key(Key::F3);
+    assert_eq!(h.app.settings().overlay, Overlay::Fps);
+    let text = h.hud_text();
+    assert!(text.contains("60.0") && !text.contains("draws"), "{text}");
     h.key(Key::F3);
     let text = h.hud_text();
     assert!(text.contains("WebGL2  draws 123"), "{text}");
@@ -518,9 +528,231 @@ fn hud_shows_speed_time_and_the_overlay() {
         .filter(|i| matches!(i, render::HudItem::Rect { .. }))
         .count();
     assert!(rects >= FRAME_HISTORY, "graph bars: {rects}");
-    assert!(h.app.settings().debug_overlay);
+    assert_eq!(h.app.settings().overlay, Overlay::Full);
     h.key(Key::F3);
-    assert!(!h.hud_text().contains("draws"));
+    assert_eq!(h.app.settings().overlay, Overlay::Off);
+    let text = h.hud_text();
+    assert!(!text.contains("draws") && !text.contains("60.0"), "{text}");
+}
+
+#[test]
+fn the_overlay_mode_persists_and_is_on_the_hud_page() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    h.key(Key::F3);
+    let saved = store.0.borrow().clone().expect("saved");
+    assert_eq!(Settings::from_json(&saved).0.overlay, Overlay::Fps);
+    let mut again = Harness::with_store(&store);
+    assert_eq!(again.app.settings().overlay, Overlay::Fps);
+    // Settings › HUD offers the same three, in cycle order.
+    again.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    again.focus_on(ItemId::DebugOverlay);
+    let item = again.item(again.focus());
+    assert_eq!(
+        item.widget,
+        Widget::Choice {
+            options: &pages::OVERLAY_NAMES,
+            index: 1
+        }
+    );
+    again.pad(PadButton::DpadRight);
+    assert_eq!(again.app.settings().overlay, Overlay::Full);
+    again.pad(PadButton::Start);
+    let saved = store.0.borrow().clone().expect("saved");
+    assert_eq!(Settings::from_json(&saved).0.overlay, Overlay::Full);
+}
+
+/// Which overlay the HUD shows: the full one's counters, or the FPS one's lone number at
+/// the safe area's left edge.
+fn overlay_shown(h: &Harness) -> Option<Overlay> {
+    if h.hud_text().contains("steps/frame") {
+        return Some(Overlay::Full);
+    }
+    let hud = h.app.ui().hud();
+    let [sx, ..] = HudLayout::safe_rect(hud.ui_scale);
+    let fps = hud.items.iter().any(|item| {
+        matches!(*item, render::HudItem::Text { x, text, .. }
+            if x == sx && hud.str(text).parse::<f32>().is_ok())
+    });
+    fps.then_some(Overlay::Fps)
+}
+
+#[test]
+fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
+    let mut h = Harness::new();
+    h.app.ui.settings_mut().overlay = Overlay::Full;
+    h.frame();
+    assert_eq!(overlay_shown(&h), Some(Overlay::Full));
+    // The pause page, each page it opens (vehicle select, settings, worlds) and each page
+    // under settings.
+    let submenus = |h: &Harness, page| {
+        let mut items = Vec::new();
+        pages::build(page, &h.app.ui.page_ctx(&h.app.time.clock), &mut items);
+        items
+            .iter()
+            .filter_map(|i| match i.widget {
+                Widget::Submenu(p) => Some(p),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut paths = vec![vec![]];
+    for page in submenus(&h, Page::Pause) {
+        paths.push(vec![ItemId::Open(page)]);
+    }
+    for page in submenus(&h, Page::Settings) {
+        paths.push(vec![ItemId::Open(Page::Settings), ItemId::Open(page)]);
+    }
+    for page in [Page::Vehicle, Page::Settings, Page::Worlds, Page::Hud] {
+        assert!(
+            paths.iter().any(|p| p.last() == Some(&ItemId::Open(page))),
+            "{page:?} covered"
+        );
+    }
+    for path in &paths {
+        h.open(path);
+        assert!(h.app.menu_open());
+        assert_eq!(overlay_shown(&h), None, "under {path:?}");
+        h.pad(PadButton::Start);
+        assert!(!h.app.menu_open());
+        assert_eq!(overlay_shown(&h), Some(Overlay::Full), "after {path:?}");
+        assert_eq!(h.app.settings().overlay, Overlay::Full, "mode kept");
+    }
+    h.key(Key::KeyM);
+    assert!(h.app.ui().full_map_open());
+    assert_eq!(overlay_shown(&h), None, "under the map");
+    h.key(Key::KeyM);
+    assert_eq!(overlay_shown(&h), Some(Overlay::Full), "after the map");
+
+    // F3 under a menu cycles the saved mode, which shows once the menu closes.
+    h.open(&[ItemId::Open(Page::Settings)]);
+    h.key(Key::F3);
+    assert_eq!(h.app.settings().overlay, Overlay::Off);
+    h.key(Key::F3);
+    assert_eq!(h.app.settings().overlay, Overlay::Fps);
+    assert_eq!(overlay_shown(&h), None);
+    h.pad(PadButton::Start);
+    assert_eq!(overlay_shown(&h), Some(Overlay::Fps));
+
+    // In the background it is hidden too, and back in front it returns.
+    h.app.set_focused(false);
+    h.frame();
+    assert_eq!(overlay_shown(&h), None, "unfocused");
+    assert_eq!(h.app.settings().overlay, Overlay::Fps);
+    h.app.set_focused(true);
+    h.frame();
+    assert_eq!(overlay_shown(&h), Some(Overlay::Fps), "focused again");
+}
+
+#[test]
+fn the_full_overlay_lines_do_not_overlap() {
+    let mut h = Harness::new();
+    h.app.set_gpu_info(&GpuInfo {
+        name: "Test GPU".into(),
+        backend: "Vulkan".into(),
+        ..GpuInfo::default()
+    });
+    h.app.set_render_stats(RenderStats {
+        gpu_timing: true,
+        ..RenderStats::default()
+    });
+    h.app.ui.settings_mut().overlay = Overlay::Full;
+    h.frame();
+    let hud = h.app.ui().hud();
+    let [sx, ..] = HudLayout::safe_rect(1.0);
+    // The overlay's text at its left edge: each item's span of lines, top to bottom.
+    let mut spans: Vec<(f32, f32)> = hud
+        .items
+        .iter()
+        .filter_map(|item| match *item {
+            render::HudItem::Text {
+                x, y, scale, text, ..
+            } if x == sx => {
+                let lines = hud.str(text).lines().count() as f32;
+                Some((y, y + lines * render::font::LINE_HEIGHT as f32 * scale))
+            }
+            _ => None,
+        })
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(spans.len() >= 4, "{spans:?}");
+    assert!(h.hud_text().contains("Test GPU (Vulkan)"));
+    for w in spans.windows(2) {
+        assert!(w[0].1 <= w[1].0 + 1e-3, "lines overlap: {spans:?}");
+    }
+}
+
+/// The HUD's quads as rectangles in target pixels on a `target`-sized screen.
+/// Text is measured at the whole target pixels per font pixel the HUD really draws.
+fn quad_rects(hud: &render::Hud, target: (u32, u32)) -> Vec<[f32; 4]> {
+    let layout = HudLayout::new(target, hud.ui_scale);
+    let box_px = |x: f32, y: f32, w: f32, h: f32| {
+        let [x0, y0] = layout.to_pixels(x, y);
+        let [x1, y1] = layout.to_pixels(x + w, y + h);
+        [x0, y0, x1, y1]
+    };
+    hud.items
+        .iter()
+        .map(|item| match *item {
+            render::HudItem::Text {
+                x, y, scale, text, ..
+            } => {
+                let px = layout.font_pixels(scale) as f32;
+                let [x0, y0] = layout.to_pixels(x, y);
+                let w = render::font::text_width(hud.str(text)) as f32 * px;
+                [x0, y0, x0 + w, y0 + render::font::LINE_HEIGHT as f32 * px]
+            }
+            render::HudItem::Rect { x, y, w, h, .. } => box_px(x, y, w, h),
+            render::HudItem::Image(m) => box_px(m.x, m.y, m.w, m.h),
+        })
+        .collect()
+}
+
+#[test]
+fn the_fps_corner_overlaps_no_other_hud_quad() {
+    let overlaps =
+        |a: [f32; 4], b: [f32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    for scale in [1.0, 1.5, 2.0] {
+        let mut h = Harness::new();
+        h.app.ui.settings_mut().ui_scale = scale;
+        // A station toast with a long name (an added stream is named after its host),
+        // tuned to with the radio key.
+        h.app.set_text_entry(true);
+        h.app
+            .add_stream_url("https://listen.example-community-radio.org/stream");
+        for _ in 0..64 {
+            if h.hud_text().contains("example-community-radio") {
+                break;
+            }
+            h.key(Key::BracketRight);
+        }
+        assert!(h
+            .hud_text()
+            .contains("Stream listen.example-community-radio.org"));
+        // A toast over the minimap, the clock and the speed are all up.
+        h.app.ui.car_reset();
+        h.frame();
+        let driving = h.app.ui().hud().items.len();
+        assert!(h.app.ui().toast().is_some());
+        assert!(h.app.ui().radio().toast().is_some());
+        h.app.ui.settings_mut().overlay = Overlay::Fps;
+        h.frame();
+        let hud = h.app.ui().hud();
+        assert_eq!(hud.items.len(), driving + 2, "the number and its shadow");
+        // The Deck's 16:10 panel, a 1080p TV and a 4K one.
+        for target in [(1280, 800), (1920, 1080), (3840, 2160)] {
+            let rects = quad_rects(&hud, target);
+            let (others, fps) = rects.split_at(driving);
+            for (i, f) in fps.iter().enumerate() {
+                for (j, o) in others.iter().enumerate() {
+                    assert!(
+                        !overlaps(*f, *o),
+                        "fps quad {i} {f:?} over HUD quad {j} {o:?} at {scale}x {target:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -937,7 +1169,7 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     let idle = p.engine.rpm;
     // Throttle revs it; the horn key sounds the horn.
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 1.0);
-    h.input.press(RawInput::Key(Key::KeyH));
+    h.input.press(RawInput::Key(Key::KeyB));
     for _ in 0..60 {
         h.frame();
     }
@@ -948,7 +1180,7 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     );
     assert!(p.horn && p.speed_mps > 1.0);
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
-    h.input.release(RawInput::Key(Key::KeyH));
+    h.input.release(RawInput::Key(Key::KeyB));
     // Audio page: the master volume down a step, mute on; a menu pauses the sound.
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
     assert!(h.app.audio_params().paused);
@@ -1173,7 +1405,8 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
 
 #[test]
 fn the_vehicle_page_cycles_every_car_on_one_turntable() {
-    let builtin = &crate::vehicles::BUILTIN;
+    // The coast's cars: the 1980s roster, the first of the built-in ones.
+    let builtin = &crate::vehicles::BUILTIN[..crate::scenario::lineup(0).cars.len()];
     let mut h = Harness::new();
     assert!(turntable(&mut h).is_empty(), "driving");
     h.open(&[ItemId::Open(Page::Vehicle)]);
@@ -1470,7 +1703,8 @@ const SHADE_TEST: [u8; 4] = [0, 0, 0, 110];
 
 #[test]
 fn v_cycles_through_every_builtin_and_wraps() {
-    let builtin = &crate::vehicles::BUILTIN;
+    // The coast's cars: the 1980s roster, the first of the built-in ones.
+    let builtin = &crate::vehicles::BUILTIN[..crate::scenario::lineup(0).cars.len()];
     let mut h = Harness::new();
     let before = h.app.mesh_count();
     let new: usize = builtin[1..].iter().map(|(id, _)| car_mesh_count(id)).sum();
@@ -2087,6 +2321,8 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         h.app.settings(),
         &Settings {
             scenario: Some("inland_basin_2001"),
+            // The first press dismissed the start's controls card, once for both worlds.
+            controls_dismissed: 1,
             ..settings
         }
     );
@@ -2150,3 +2386,5 @@ fn the_vehicle_page_lists_this_worlds_cars() {
     }
     assert_eq!(browsed(&h), (0, 0));
 }
+
+mod controls;

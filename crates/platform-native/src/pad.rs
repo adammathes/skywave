@@ -322,13 +322,16 @@ mod tests {
             PadEvent::Button(Button::DPadRight, 1.0, true),
             PadEvent::Button(Button::Start, 1.0, true),
         ]);
-        assert!(s.pressed(Action::RadioNext) && s.pressed(Action::Pause));
+        assert!(s.pressed(Action::RadioNext));
+        // Start pauses on release: held, it is the controls card.
+        let s = feed(&[PadEvent::Button(Button::Start, 0.0, false)]);
+        assert!(s.just_pressed(Action::Pause));
     }
 
     #[test]
     fn a_disconnect_releases_only_the_pad() {
         let mut m = InputMapper::default();
-        m.press(RawInput::Key(app::Key::KeyH));
+        m.press(RawInput::Key(app::Key::KeyB));
         apply(&mut m, PadEvent::Button(Button::RightTrigger2, 1.0, true));
         apply(&mut m, PadEvent::Axis(Axis::LeftStickX, 1.0));
         assert!(m.sample(0.01).axis(Action::Throttle) > 0.9);

@@ -7,7 +7,9 @@
 #
 # It downloads Skywave-x86_64.AppImage into ~/Applications/Skywave/, checks it against the
 # release's SHA256SUMS.txt, adds a menu entry (which Steam's "Add a Non-Steam Game" list
-# shows), and prints the steps to put it in the Steam library. Run it again to update.
+# shows), and prints the steps to put it in the Steam library. Run it again to update, or add
+# the "Skywave Update" entry it also writes as a second non-Steam game: launching that from
+# Gaming Mode runs this installer again, so no command is ever typed twice.
 #
 # Testing hook: SKYWAVE_INSTALL_FAKE=<file> copies that file instead of downloading
 # (no checksum), and SKYWAVE_INSTALL_FAKE_ICON=<png> does the same for the icon.
@@ -125,6 +127,31 @@ Terminal=false
 Categories=Game;Simulation;
 DESKTOP
 mv -f "$desktop.tmp" "$desktop"
+
+# 4. The updater: a one-line script that fetches this installer again with the same tag, and a
+#    menu entry for it, so it can be added to Steam once and run from Gaming Mode. It shows
+#    nothing while it runs; the game's pause menu shows the version it got.
+updater="$dir/update.sh"
+cat > "$updater.tmp" <<UPDATER
+#!/usr/bin/env bash
+# Updates Skywave to the latest $tag build. Written by install-deck.sh; run it or launch
+# "Skywave Update" from Steam.
+curl -fsSL "https://raw.githubusercontent.com/$repo/main/tools/install-deck.sh" | bash -s -- --tag "$tag"
+UPDATER
+chmod 755 "$updater.tmp"
+mv -f "$updater.tmp" "$updater"
+cat > "$apps/skywave-update.desktop.tmp" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Skywave Update
+Comment=Download the latest Skywave build
+Exec="$updater"
+Path=$dir
+Icon=$icon
+Terminal=false
+Categories=Game;Utility;
+DESKTOP
+mv -f "$apps/skywave-update.desktop.tmp" "$apps/skywave-update.desktop"
 command -v update-desktop-database > /dev/null && update-desktop-database "$apps" 2> /dev/null || true
 
 # Prints "skywave <git describe>"; it needs FUSE, so an empty answer is not an error.
@@ -135,6 +162,7 @@ cat <<DONE
 
 Skywave ${version:-($tag)} is installed.
   Game:       $app
+  Updater:    $updater
   Menu entry: $desktop
   Settings:   $config/skywave/settings.json
 
@@ -150,7 +178,9 @@ Put it in your Steam library (once; updates keep the same path):
 The Deck's controls act as a standard gamepad and Skywave is gamepad-first, so no
 controller layout is needed. Press Start (Menu) for settings.
 
-To update, run this installer again. To uninstall, delete
-  $dir and $desktop
-and remove the shortcut in Steam.
+To update without typing: add "Skywave Update" as a second non-Steam game the same way
+(step 3 lists it too) and launch it from Gaming Mode when you want the latest build; it
+quits when done. Or run this installer again. To uninstall, delete
+  $dir, $desktop and $apps/skywave-update.desktop
+and remove the shortcuts in Steam.
 DONE

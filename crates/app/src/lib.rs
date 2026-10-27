@@ -420,6 +420,7 @@ impl App {
         let ground = [pos[0], y, pos[1]];
         app.drive = Drive::with_layout(app.drive.spec.clone(), app.drive.layout, ground, heading);
         app.drive.headlights = setup.headlights;
+        app.drive.underglow = setup.underglow;
         app.camera_from_scene = setup.camera.is_some();
         app.car_from_scene = setup.car_given;
         app.camera = CameraRig::new(setup.camera.unwrap_or(CameraMode::ChaseMid), &app.drive);
@@ -562,6 +563,8 @@ impl App {
             })
         });
         next.set_settings_store(store);
+        // The same session: the controls card greeted it already.
+        next.ui.drop_start_controls();
         next.ui.world_loaded();
         *self = next;
         Ok(())
@@ -721,6 +724,12 @@ impl App {
                 drive::vehicle_input(input)
             };
             self.drive.step(car_input, &self.ground);
+            if let Some(hit) =
+                self.npcs
+                    .collide(&mut self.drive.state, &self.drive.spec, &self.ground)
+            {
+                self.drive.note_car_hit(hit);
+            }
             self.sound.note_step(&self.drive.impact);
             if self.npcs.active() {
                 let t = now();
@@ -1963,8 +1972,25 @@ mod tests {
         }
         // Back in the first world it holds what it held at the start: nothing carried over.
         assert_eq!(seen[2], seen[0]);
-        // The stub shares the coast's place, so the second world holds the same too.
-        assert_eq!(seen[1], seen[0]);
+        // The stub shares the coast's place, so the second world holds the same too, but
+        // for the meshes of the car it starts in.
+        let car_meshes = |id: &str| {
+            let spec = vehicles::builtin_spec(id).unwrap();
+            let shape = vehicles::builtin_shape(&spec).unwrap();
+            let mut n = 0;
+            car::CarModel::build(&spec, &shape).unwrap().register(|_| {
+                n += 1;
+                render::MeshId(n)
+            });
+            n as usize
+        };
+        let (coast, basin) = (scenario::get(0), scenario::get(1));
+        let starts = car_meshes(&basin.default_vehicle) as isize
+            - car_meshes(&coast.default_vehicle) as isize;
+        assert_eq!(seen[1].0 as isize - seen[0].0 as isize, starts);
+        let rest =
+            |f: &(usize, usize, usize, ChunkPoolConfig, usize, usize)| (f.1, f.2, f.3, f.4, f.5);
+        assert_eq!(rest(&seen[1]), rest(&seen[0]));
     }
 
     #[test]

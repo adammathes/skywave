@@ -1,8 +1,9 @@
-//! Performance bands for the whole 1980s roster (`docs/VEHICLES.md`, "Launch roster"),
-//! driven with the real specs from `assets/vehicles/`: every car's 0–60 mph time in its
-//! band, all twenty distinct in 0–60, top speed and skidpad grip, the class orderings, the
-//! mid-engined exotics ahead of everything and the pony car behind the other sports cars, and
-//! nothing rolls at full lock or needs more than 60 m to stop. Run with `--nocapture` for
+//! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster" and the 2001
+//! hero cars), driven with the real specs from `assets/vehicles/`: every car's 0–60 mph time
+//! in its band, all of them distinct in 0–60, top speed and skidpad grip, the class
+//! orderings, the mid-engined exotics ahead of everything and the pony car behind the other
+//! sports cars, the 2001 heroes' launches, and nothing rolls at full lock or needs more than
+//! 60 m to stop. Run with `--nocapture` for
 //! the table: `cargo test -p vehicle --test roster -- --nocapture`.
 #![cfg(feature = "serde")]
 
@@ -29,7 +30,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 20] = [
+const ROSTER: [Entry; 25] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -50,6 +51,12 @@ const ROSTER: [Entry; 20] = [
     (car!("longbow_convertible"), (5.6, 6.8)),
     (car!("appaloosa_gt"), (5.8, 7.2)),
     (car!("appaloosa_convertible"), (6.0, 7.4)),
+    // The 2001 heroes: the era's band is 4.5-6.5 s.
+    (car!("halberd_coupe"), (5.5, 6.1)),
+    (car!("halberd_targa"), (5.7, 6.3)),
+    (car!("tanager_awd"), (5.0, 5.8)),
+    (car!("destrier_coupe"), (5.9, 6.5)),
+    (car!("siskin_coupe"), (6.1, 6.5)),
 ];
 
 /// The mid-engined exotics, which out-accelerate and outrun every other car, and the pony
@@ -321,5 +328,57 @@ fn nothing_rolls_at_full_lock_and_everything_stops() {
         let d = stopped.expect("stops");
         println!("{id:22} 60-0 mph without assists {d:.1} m");
         assert!(d < 60.0, "{id} stops in {d} m");
+    }
+}
+
+/// Full throttle from rest for `secs`: the peak slip ratio of any driven wheel once it is
+/// rolling (past 1 m/s, so a stopped car's first creep does not count).
+fn launch_slip(spec: &VehicleSpec, assists: &Assists, secs: f32) -> f32 {
+    let driven: &[usize] = match spec.drive {
+        vehicle::Drive::Front => &[0, 1],
+        vehicle::Drive::Rear => &[2, 3],
+        vehicle::Drive::All => &[0, 1, 2, 3],
+    };
+    let mut s = spawn(spec);
+    let mut peak: f32 = 0.0;
+    for _ in 0..(secs * STEPS_PER_S as f32) as usize {
+        step(spec, &mut s, &input(1.0, 0.0, 0.0), assists, &GROUND);
+        if s.speed_mps > 1.0 {
+            for &k in driven {
+                peak = peak.max(s.wheels[k].slip_ratio);
+            }
+        }
+    }
+    peak
+}
+
+/// The 2001 heroes' launches: the blown muscle coupe lights up its rear tires off the line
+/// whatever the assists (more than any other car), the all-wheel-drive coupe leaves without
+/// a chirp even with every assist off.
+#[test]
+fn the_muscle_coupe_wheelspins_and_the_awd_coupe_launches() {
+    let presets = [Assists::OFF, Assists::LIGHT, Assists::ARCADE];
+    let slips: Vec<(&str, [f32; 3])> = ROSTER
+        .iter()
+        .map(|&((id, text), _)| {
+            let spec = load(text);
+            let s = presets.map(|a| launch_slip(&spec, &a, 1.5));
+            println!(
+                "{id:22} launch slip: off {:.3}  light {:.3}  arcade {:.3}",
+                s[0], s[1], s[2]
+            );
+            (id, s)
+        })
+        .collect();
+    let of = |id: &str| slips.iter().find(|c| c.0 == id).unwrap().1;
+    let (muscle, awd) = (of("destrier_coupe"), of("tanager_awd"));
+    for k in 0..presets.len() {
+        assert!(muscle[k] > 0.5, "the muscle coupe hooks up: {muscle:?}");
+        assert!(awd[k] < 0.1, "the AWD coupe spins its tires: {awd:?}");
+        for (id, s) in &slips {
+            if *id != "destrier_coupe" {
+                assert!(muscle[k] > s[k], "{id} spins more than the muscle coupe");
+            }
+        }
     }
 }

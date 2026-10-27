@@ -1,0 +1,47 @@
+// Halberd Coupe: a mid-90s front-engined inline-six twin-turbo grand tourer, 2+2.
+//
+// Intent: long-legged and smooth. The six is soft off idle, then both turbos come in and
+// it pulls in one long surge to the redline; six close gears, a planted, heavy-ish front
+// end and a tail that steps out only when asked. Fast but not an exotic: the 80s
+// mid-engined cars still out-sprint it.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "halberd_coupe",
+    name: "Halberd Coupe",
+    era: Nineties,
+    year: 1997,
+    class: Sports,
+
+    mass_kg: 1520,
+    dims_m: (4.52, 1.81, 1.26),    // length, width, height
+    wheelbase_m: 2.55,
+    track_m: 1.53,
+    cg_height_m: 0.47,
+    cg_fore_aft: 0.49,             // 51% front
+
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 6800,
+        torque_nm: [(1000, 180), (2200, 250), (3200, 315), (4400, 325), (5600, 310), (6800, 250)],
+    ),
+    gears: [3.83, 2.36, 1.69, 1.31, 1.0, 0.79],
+    final_drive: 3.27,
+    reverse: 3.3,
+    shift_ms: 200,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.3, grip_long: 1.22, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 34000, damper: 3400, travel_m: 0.15, antiroll: 0.42),
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 11.0),
+    brakes: Brakes(max_nm: 3800, bias_front: 0.6, abs: true, handbrake_nm: 3000),
+    aero: Aero(cd: 0.32, frontal_m2: 1.95, downforce_coef: 0.03),
+    feel: Feel(oversteer_bias: 0.16, body_roll: 0.3, engine_sound: "default", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 180, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "halberd_coupe.shape.ron",
+)

@@ -43,6 +43,8 @@ pub enum Action {
     Headlights,
     /// High beams on/off with the headlights on; with them off, headlights on with high beams.
     HighBeams,
+    /// The underglow on/off, on a car that has one.
+    Underglow,
     Horn,
     /// Swap to the next built-in vehicle, in place.
     VehicleNext,
@@ -56,6 +58,8 @@ pub enum Action {
     Pause,
     Screenshot,
     DebugOverlay,
+    /// Show or hide the controls card (a long press on the pad).
+    Controls,
     MenuUp,
     MenuDown,
     MenuLeft,
@@ -86,7 +90,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 36;
+    pub const COUNT: usize = 38;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -101,6 +105,7 @@ impl Action {
         Action::RadioOff,
         Action::Headlights,
         Action::HighBeams,
+        Action::Underglow,
         Action::Horn,
         Action::VehicleNext,
         Action::Reset,
@@ -110,6 +115,7 @@ impl Action {
         Action::Pause,
         Action::Screenshot,
         Action::DebugOverlay,
+        Action::Controls,
         Action::MenuUp,
         Action::MenuDown,
         Action::MenuLeft,
@@ -211,6 +217,7 @@ impl Action {
             Action::RadioOff => "RadioOff",
             Action::Headlights => "Headlights",
             Action::HighBeams => "HighBeams",
+            Action::Underglow => "Underglow",
             Action::Horn => "Horn",
             Action::VehicleNext => "VehicleNext",
             Action::Reset => "Reset",
@@ -220,6 +227,7 @@ impl Action {
             Action::Pause => "Pause",
             Action::Screenshot => "Screenshot",
             Action::DebugOverlay => "DebugOverlay",
+            Action::Controls => "Controls",
             Action::MenuUp => "MenuUp",
             Action::MenuDown => "MenuDown",
             Action::MenuLeft => "MenuLeft",
