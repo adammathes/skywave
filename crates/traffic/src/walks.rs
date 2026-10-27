@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 use place::{BuildingUse, Place, PropKind, RoadClass, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::hash64;
 
-use crate::lanes::{raw_line, Control, LaneGraph, NONE};
+use crate::lanes::{lane_width, raw_line, Control, LaneGraph, NONE};
 use crate::math::{dir, dist2, dot, len2, right, sin_cos, unit2};
 use crate::signal::Light;
 
@@ -52,6 +52,8 @@ const ROOM_BACK_M: f32 = SIDEWALK_WIDTH_M - WALK_LINE_M - 0.05;
 const ROOM_CROSSING_M: f32 = 1.2;
 /// sin(5 degrees): closer to straight than this, curbs continue each other (`world`).
 const STRAIGHT_SIN: f32 = 0.087;
+/// cos(5 degrees): two road ends this close to opposite continue each other.
+const STRAIGHT_COS: f32 = 0.996;
 /// Ends meeting closer than this (cosine; about 30 degrees) merge (`world`): no corners and
 /// no crossings at such a node; the walks there stop this far back.
 const MERGE_COS: f32 = 0.866;
@@ -60,9 +62,13 @@ const MERGE_CUT_M: f32 = 20.0;
 /// (`world::roads` markings).
 const CROSSWALK_M: f32 = 2.3;
 const MIN_MARKED_M: f32 = 12.0;
-/// Crossing chain: the curb vertex just onto the curb top, the road vertex just past the
-/// gutter edge.
-const CURB_STEP_M: f32 = 0.1;
+/// Crossing chain: the curb vertex (where people wait) at least just behind the 0.2 m curb
+/// top and `WAIT_CLEAR_M` outside every lane; the road vertex just past
+/// the gutter edge.
+const CURB_STEP_M: f32 = 0.35;
+const WAIT_CLEAR_M: f32 = 0.8;
+/// Walk lines stay this far outside every lane (normally they are over 2 m out).
+const WALK_LANE_CLEAR_M: f32 = 1.0;
 const ROAD_STEP_M: f32 = 0.35;
 /// Grid cell for spawning and spot lookup.
 pub const CELL_M: f32 = 32.0;
@@ -190,6 +196,8 @@ pub struct WalkGraph {
     pub cell_links: Vec<u32>,
     pub cell_spot_start: Vec<u32>,
     pub cell_spots: Vec<u32>,
+    /// The lanes' painted bands, for [`WalkGraph::in_lane`].
+    lane_cover: Cover,
 }
 
 /// A road end at a node, as `world::roads` sees it.
@@ -595,6 +603,53 @@ impl WalkGraph {
             .map(|(i, r)| Path::new(r, trim[i][0], trim[i][1]))
             .collect();
 
+        // A walk cut back further than its edge is long (a short stub, often where a chunk
+        // border splits a road just past a junction) carries the rest of the cut on through
+        // the straight two-road node at its far end into the next edge; the corner then
+        // joins that edge's walk. `owner[edge][side][end]` is the walk end that stands in.
+        let mut owner = alloc::vec![[[(NONE, 0usize, 0usize); 2]; 2]; edges.len()];
+        let mut gone = alloc::vec![[false; 2]; edges.len()];
+        for i in 0..edges.len() {
+            for side in 0..2 {
+                for end in 0..2 {
+                    let (mut e, mut sd, mut en) = (i, side, end);
+                    let mut c = cut[i][side][end];
+                    for _ in 0..4 {
+                        let len = paths[e].len();
+                        if c < len - 0.5 {
+                            break;
+                        }
+                        let far = 1 - en;
+                        let node = if far == 0 { edges[e].a } else { edges[e].b };
+                        let ends = &incident[node as usize];
+                        let at_far = |x: &End| x.edge as usize == e && usize::from(x.at_b) == far;
+                        let (Some(me), Some(next)) = (
+                            ends.iter().find(|x| at_far(x)),
+                            ends.iter().find(|x| !at_far(x)),
+                        ) else {
+                            break;
+                        };
+                        let n = next.edge as usize;
+                        if ends.len() != 2
+                            || merging[node as usize]
+                            || dot(me.dir, next.dir) > -STRAIGHT_COS
+                            || !edges[n].sidewalk
+                            || n == e
+                        {
+                            break;
+                        }
+                        gone[e][sd] = true;
+                        let sd2 = if (far == 1) != next.at_b { sd } else { 1 - sd };
+                        let en2 = usize::from(next.at_b);
+                        c -= len;
+                        cut[n][sd2][en2] = cut[n][sd2][en2].max(c);
+                        (e, sd, en) = (n, sd2, en2);
+                    }
+                    owner[i][side][end] = (e as u32, sd, en);
+                }
+            }
+        }
+
         // Crosswalks: (edge, end) → distance from that end.
         let mut crosswalk = alloc::vec![[None::<f32>; 2]; edges.len()];
         for (node, ends) in incident.iter().enumerate() {
@@ -630,6 +685,9 @@ impl WalkGraph {
             let len = path.len();
             let hw = e.width_m * 0.5;
             for side in 0..2 {
+                if gone[i][side] {
+                    continue;
+                }
                 let sigma = if side == 0 { 1.0 } else { -1.0 };
                 let t = sigma * (hw + WALK_LINE_M);
                 let s0 = cut[i][side][0];
@@ -676,8 +734,11 @@ impl WalkGraph {
         }
         // Corners.
         for &(a, c, how) in &corners {
-            let from = walk_end[a.edge as usize][a.left_side()][usize::from(a.at_b)];
-            let to = walk_end[c.edge as usize][c.right_side()][usize::from(c.at_b)];
+            let end_of = |e: &End, side: usize| {
+                let (oe, os, on) = owner[e.edge as usize][side][usize::from(e.at_b)];
+                walk_end[oe as usize][os][on]
+            };
+            let (from, to) = (end_of(&a, a.left_side()), end_of(&c, c.right_side()));
             if from == NONE || to == NONE || from == to {
                 continue;
             }
@@ -712,6 +773,19 @@ impl WalkGraph {
             b.link(prev, to, LinkKind::Walk, NONE, NONE, 0);
         }
         // Crossings.
+        let lane_segs: Vec<CoverSeg> = lanes
+            .lanes
+            .iter()
+            .enumerate()
+            .flat_map(|(l, lane)| {
+                let half = 0.5 * lane_width(&edges[lane.edge as usize], lane.forward);
+                lanes
+                    .points(l as u32)
+                    .windows(2)
+                    .map(move |w| (w[0], w[1], half, l as u32))
+            })
+            .collect();
+        let lane_cover = Cover::new(&lane_segs, WAIT_CLEAR_M + 0.2);
         let mut crossings: Vec<Crossing> = Vec::new();
         for (i, e) in edges.iter().enumerate() {
             for end in 0..2 {
@@ -734,10 +808,23 @@ impl WalkGraph {
                     .position(|l| l.end_node == node && l.edge == i as u32 && l.forward == at_b)
                     .map_or(NONE, |k| k as u32);
                 let signal = lane != NONE && lanes.lanes[lane as usize].control == Control::Signal;
-                let curb0 = b.node(path.p3(s, hw + CURB_STEP_M, CURB_M));
+                // Where people wait: behind the curb top, and farther back where any lane
+                // (as the lane graph lays it, which can stray from the drawn curb near a
+                // junction) comes closer than `WAIT_CLEAR_M`.
+                let wait = |sigma: f32| {
+                    let mut t = hw + CURB_STEP_M;
+                    while t < hw + WALK_LINE_M - 0.3
+                        && lane_cover.clearance(path.p3(s, sigma * t, 0.0)) < WAIT_CLEAR_M
+                    {
+                        t += 0.1;
+                    }
+                    t
+                };
+                let (t0, t1) = (wait(1.0), wait(-1.0));
+                let curb0 = b.node(path.p3(s, t0, CURB_M));
                 let road0 = b.node(path.p3(s, hw - ROAD_STEP_M, 0.0));
                 let road1 = b.node(path.p3(s, -(hw - ROAD_STEP_M), 0.0));
-                let curb1 = b.node(path.p3(s, -(hw + CURB_STEP_M), CURB_M));
+                let curb1 = b.node(path.p3(s, -t1, CURB_M));
                 let k = crossings.len() as u32;
                 let edge = i as u32;
                 b.link(f0, curb0, LinkKind::Spur, edge, k, 0);
@@ -755,6 +842,31 @@ impl WalkGraph {
                 });
             }
         }
+        // Where two roads overlap, `world` lays one's pavement across the other's sidewalk:
+        // walks running over another road's pavement are dropped (the walk ends there).
+        let road_segs: Vec<CoverSeg> = raws
+            .iter()
+            .enumerate()
+            .flat_map(|(i, r)| {
+                let hw = edges[i].width_m * 0.5;
+                r.windows(2).map(move |w| (w[0], w[1], hw, i as u32))
+            })
+            .collect();
+        let cover = Cover::new(&road_segs, COVER_MARGIN_M);
+        let nodes = &b.nodes;
+        // The same for walks into a lane (where the lane graph's lanes and the drawn road
+        // disagree near a junction): a walk keeps `WALK_LANE_CLEAR_M` outside every lane.
+        let into_lane = |a: [f32; 3], c: [f32; 3]| {
+            let steps = (dist2(a, c) as i32 + 1).max(1);
+            (0..=steps).any(|k| {
+                let q = crate::math::lerp3(a, c, k as f32 / steps as f32);
+                lane_cover.clearance(q) < WALK_LANE_CLEAR_M
+            })
+        };
+        b.links.retain(|l| {
+            let (a, c) = (nodes[l.a as usize], nodes[l.b as usize]);
+            l.kind != LinkKind::Walk || !(cover.over_road(a, c, l.edge) || into_lane(a, c))
+        });
         for l in &mut b.links {
             let (pa, pb) = (b.nodes[l.a as usize], b.nodes[l.b as usize]);
             let mid = [(pa[0] + pb[0]) * 0.5, (pa[2] + pb[2]) * 0.5];
@@ -790,6 +902,7 @@ impl WalkGraph {
             adj,
             links: b.links,
             crossings,
+            lane_cover,
             ..WalkGraph::default()
         };
         g.grid();
@@ -911,6 +1024,125 @@ impl WalkGraph {
             + self.links.len() * size_of::<Link>()
             + self.crossings.len() * size_of::<Crossing>()
             + self.spots.len() * size_of::<Spot>()
+            + self.lane_cover.start.len() * 4
+            + self.lane_cover.segs.len() * size_of::<CoverSeg>()
+    }
+
+    /// Whether `p` is inside a lane's painted band, at its level (where the lane graph's
+    /// lanes and the world's road ends differ near a junction, a walk's edge can be).
+    pub fn in_lane(&self, p: [f32; 3]) -> bool {
+        self.lane_cover.near(p).iter().any(|&(s0, s1, half, _)| {
+            let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
+            let y = s0[1] + (s1[1] - s0[1]) * t;
+            d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
+        })
+    }
+}
+
+/// The roads' pavement, as centerline segments with their half widths in a grid.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Cover {
+    origin: [f32; 2],
+    size: [i32; 2],
+    start: Vec<u32>,
+    segs: Vec<CoverSeg>,
+}
+
+/// A centerline segment, its road's half width and the road edge.
+type CoverSeg = ([f32; 3], [f32; 3], f32, u32);
+
+/// Cover grid cell, m.
+const COVER_CELL_M: f32 = 16.0;
+/// A walk this close to another road's centerline (past its half width) is on it; heights
+/// further apart than `COVER_DY_M` are different levels (a bridge).
+const COVER_MARGIN_M: f32 = 0.3;
+const COVER_DY_M: f32 = 1.5;
+
+impl Cover {
+    /// The segments `segs`, each filed under the cells within its half width plus `grow`.
+    fn new(segs: &[CoverSeg], grow: f32) -> Cover {
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        let mut reach = 0.0f32;
+        for &(a, b, half, _) in segs {
+            for p in [a, b] {
+                lo = [lo[0].min(p[0]), lo[1].min(p[2])];
+                hi = [hi[0].max(p[0]), hi[1].max(p[2])];
+            }
+            reach = reach.max(half + grow);
+        }
+        if segs.is_empty() {
+            (lo, hi) = ([0.0; 2], [0.0; 2]);
+        }
+        let origin = [lo[0] - reach - COVER_CELL_M, lo[1] - reach - COVER_CELL_M];
+        let size = [
+            ((hi[0] - origin[0] + reach) / COVER_CELL_M) as i32 + 2,
+            ((hi[1] - origin[1] + reach) / COVER_CELL_M) as i32 + 2,
+        ];
+        let cell = |x: f32, z: f32| {
+            (
+                ((x - origin[0]) / COVER_CELL_M) as i32,
+                ((z - origin[1]) / COVER_CELL_M) as i32,
+            )
+        };
+        let mut items: Vec<(usize, CoverSeg)> = Vec::new();
+        for &seg in segs {
+            let (a, b, half, _) = seg;
+            let g = half + grow;
+            let (x0, z0) = cell(a[0].min(b[0]) - g, a[2].min(b[2]) - g);
+            let (x1, z1) = cell(a[0].max(b[0]) + g, a[2].max(b[2]) + g);
+            for z in z0..=z1 {
+                for x in x0..=x1 {
+                    items.push(((z * size[0] + x) as usize, seg));
+                }
+            }
+        }
+        let cells = (size[0] * size[1]) as usize;
+        let of: Vec<usize> = items.iter().map(|x| x.0).collect();
+        let (start, order) = bucket(cells, &of);
+        let segs = order.iter().map(|&k| items[k as usize].1).collect();
+        Cover {
+            origin,
+            size,
+            start,
+            segs,
+        }
+    }
+
+    /// The segments filed under the cell holding `p`.
+    fn near(&self, p: [f32; 3]) -> &[CoverSeg] {
+        let x = ((p[0] - self.origin[0]) / COVER_CELL_M) as i32;
+        let z = ((p[2] - self.origin[1]) / COVER_CELL_M) as i32;
+        if x < 0 || z < 0 || x >= self.size[0] || z >= self.size[1] {
+            return &[];
+        }
+        let c = (z * self.size[0] + x) as usize;
+        &self.segs[self.start[c] as usize..self.start[c + 1] as usize]
+    }
+
+    /// How far `p` is outside every segment's band (negative inside one), up to the
+    /// grow distance the cover was built with.
+    fn clearance(&self, p: [f32; 3]) -> f32 {
+        let mut best = f32::MAX;
+        for &(s0, s1, half, _) in self.near(p) {
+            best = best.min(seg_dist(xz(p), xz(s0), xz(s1)).0 - half);
+        }
+        best
+    }
+
+    /// Whether the walk from `a` to `b` (along road `own`) runs over another road.
+    fn over_road(&self, a: [f32; 3], b: [f32; 3], own: u32) -> bool {
+        let steps = (dist2(a, b) as i32 + 1).max(1);
+        (0..=steps).any(|k| {
+            let p = crate::math::lerp3(a, b, k as f32 / steps as f32);
+            self.near(p).iter().any(|&(s0, s1, hw, e)| {
+                if e == own {
+                    return false;
+                }
+                let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
+                let y = s0[1] + (s1[1] - s0[1]) * t;
+                d < hw + COVER_MARGIN_M && (p[1] - CURB_M - y).abs() < COVER_DY_M
+            })
+        })
     }
 }
 

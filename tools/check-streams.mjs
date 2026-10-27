@@ -19,8 +19,9 @@
 //   node tools/check-streams.mjs --listen 60     # read 60 s per URL (of audio and of wall
 //                                                # time) instead of 5, printing the ICY
 //                                                # titles as they change
-//   node tools/check-streams.mjs --listen 60 --save out/  # and keep the audio (ICY blocks
-//                                                # removed) as out/<id>-<n>.mp3|aac to listen
+//   node tools/check-streams.mjs --listen 60 --save /tmp/listen  # and keep the audio (ICY
+//                                                # blocks removed) as <dir>/<id>-<n>.mp3|aac
+//                                                # to listen to (never inside the repository)
 //   node tools/check-streams.mjs --url https://x/stream --kbps 128  # a candidate URL
 //
 // Listening sends `Icy-MetaData: 1` (to read the titles), which the page's player does not.
@@ -29,7 +30,7 @@
 // to the first byte, URL; then a `warn` line for each ad sign. Exits 1 if any URL failed.
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -50,10 +51,20 @@ const opt = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const LISTEN = opt("--listen") !== undefined ? Number(opt("--listen")) : 0;
+const LISTEN = args.includes("--listen") ? Number(opt("--listen")) : 0;
+if (!(LISTEN >= 0 && Number.isFinite(LISTEN)) || (args.includes("--listen") && !(LISTEN > 0))) {
+  console.error("check-streams: --listen wants a number of seconds, e.g. --listen 60");
+  process.exit(2);
+}
 const SECONDS = LISTEN > 0 ? LISTEN : 5;
 const TIMEOUT_MS = Number(opt("--timeout") ?? (LISTEN > 0 ? (LISTEN + 20) * 1000 : 15_000));
-const SAVE = opt("--save");
+const SAVE = opt("--save") && resolve(opt("--save"));
+const repo = resolve(here, "..");
+if (SAVE && (SAVE === repo || SAVE.startsWith(repo + sep))) {
+  // Recorded broadcasts are not ours to commit.
+  console.error("check-streams: --save must be outside the repository (e.g. /tmp/listen)");
+  process.exit(2);
+}
 const filters = args.filter((a, i) => !a.startsWith("--") && !VALUED.includes(args[i - 1]));
 
 /// Signs of server-side ad insertion: the stitching servers commercial aggregators put in
@@ -65,7 +76,7 @@ const AD_MARKS = [
   [/^x-ad/i, /./, "ad header"],
   [/^location$/i, /adswizz|tritondigital|streamtheworld|spacial|aw_0_|cdnstream/i, "ad-insertion CDN"],
   [/^url$/, /adswizz|tritondigital|streamtheworld|aw_0_|cdnstream/i, "ad-insertion CDN"],
-  [/^title$/, /adw_ad|insertionType|preroll|advert|commercial break|after this break/i, "ad marker in the ICY title"],
+  [/^title$/, /adw_ad|insertionType|preroll|\badvertisement\b|commercial break|after this break/i, "ad marker in the ICY title"],
 ];
 
 function adSigns(pairs) {
@@ -149,11 +160,21 @@ async function check(url, kbps) {
   let bytes = 0;
   try {
     const headers = LISTEN > 0 ? { ...HEADERS, "Icy-MetaData": "1" } : HEADERS;
-    const res = await fetch(url, { signal: ctl.signal, redirect: "follow", headers });
+    // Redirects by hand, so every hop's Location is checked for ad-insertion hosts.
+    let res;
+    let at = url;
+    for (let hop = 0; ; hop++) {
+      res = await fetch(at, { signal: ctl.signal, redirect: "manual", headers });
+      const next = res.headers.get("location");
+      if (!(res.status >= 300 && res.status < 400 && next) || hop >= 8) break;
+      signs.push(...adSigns([["location", next]]));
+      await res.body?.cancel().catch(() => {});
+      at = new URL(next, at).href;
+    }
     ms = Math.round(performance.now() - t0);
     status = res.status;
     type = res.headers.get("content-type") || "";
-    signs.push(...adSigns([...res.headers.entries(), ["url", res.url]]));
+    signs.push(...adSigns([...res.headers.entries(), ["url", at]]));
     const metaint = Number(res.headers.get("icy-metaint") || 0);
     const st = { metaint, left: metaint, meta: null, buf: [], title: null };
     const since = () => Math.round((performance.now() - t0) / 100) / 10;

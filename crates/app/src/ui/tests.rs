@@ -1612,11 +1612,21 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
     assert!(matches!(h.app.radio().state(), RadioState::Error { .. }));
     h.key(Key::BracketRight);
     assert_eq!(h.app.radio().station(), Some(1));
-    // A new session resumes the station.
+    // A new session starts with the radio off, whatever the last one saved; power brings
+    // the same station back.
     let mut fresh = App::new(Seed(1));
     fresh.set_settings_store(Box::new(store.clone()));
     let mut input = InputMapper::default();
     fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    assert!(!fresh.radio().is_on());
+    assert!(fresh
+        .radio_commands()
+        .all(|c| !matches!(c, RadioCommand::Play { .. })));
+    input.press(RawInput::Key(Key::Backslash));
+    fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    input.release(RawInput::Key(Key::Backslash));
+    fresh.frame(&mut input, DT, &crate::tests::wall_clock);
+    assert!(fresh.radio().is_on());
     assert_eq!(fresh.radio().station(), Some(1));
     // Off is saved too.
     h.key(Key::Backslash);

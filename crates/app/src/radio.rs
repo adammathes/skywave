@@ -104,6 +104,11 @@ impl CarRadio {
         &self.radio
     }
 
+    #[cfg(test)]
+    fn radio_mut(&mut self) -> &mut Radio {
+        &mut self.radio
+    }
+
     pub fn preset(&self) -> &RadioPreset {
         &self.presets[self.preset]
     }
@@ -151,8 +156,9 @@ impl CarRadio {
         }
     }
 
-    /// Starts the radio from the settings (once): the last station restored, back on if it
-    /// was on.
+    /// Starts the radio from the settings (once): the last station restored, the radio off.
+    /// The radio never comes on by itself: a session starts silent whatever the last one
+    /// ended with, and the power key resumes the last station.
     pub fn start(&mut self, s: &RadioSettings) {
         if self.started {
             return;
@@ -161,10 +167,6 @@ impl CarRadio {
         self.apply(s);
         if let Some(id) = &s.last_station {
             self.radio.restore(id);
-        }
-        if s.on {
-            self.radio.power_on();
-            self.on_tuned();
         }
     }
 
@@ -460,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn start_restores_the_last_station_and_power() {
+    fn start_restores_the_last_station_but_stays_off() {
         let mut r = CarRadio::new();
         let s = RadioSettings {
             on: true,
@@ -469,11 +471,20 @@ mod tests {
             ..RadioSettings::default()
         };
         r.start(&s);
+        // Off, silent, no toast: nothing plays until the power key, even though the last
+        // session ended with the radio on.
+        assert!(!r.radio().is_on());
+        assert!(r.toast().is_none());
+        // Only the volume goes to the player; nothing plays.
+        assert!(r
+            .commands()
+            .all(|c| !matches!(c, RadioCommand::Play { .. })));
+        // Power resumes the station that was playing.
+        r.radio_mut().toggle_power();
         assert_eq!(
             r.radio().channel().map(|c| c.id.as_str()),
             Some("radioparadise_main")
         );
-        assert!(r.toast().is_some());
         // Starting twice does nothing more.
         r.commands().for_each(drop);
         r.start(&RadioSettings::default());
