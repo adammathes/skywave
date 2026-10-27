@@ -37,9 +37,9 @@ pub const START_GROUND: [f32; 3] = [-92.0, 0.0, 4.9];
 pub const START_HEADING_RAD: f32 = -FRAC_PI_2;
 
 /// Most instances one car adds per frame: body, glass, lamps, four wheels, then in the
-/// cockpit the cabin walls, the cabin, the steering wheel, the dial ticks and up to three
-/// needles.
-pub const MAX_CAR_INSTANCES: usize = 14;
+/// cockpit the cabin walls, the cabin, the steering wheel, the dial ticks, up to three
+/// needles and the two headlight tell-tales.
+pub const MAX_CAR_INSTANCES: usize = 16;
 
 /// Headlights: one spot per headlamp, from just behind its lens (inside the lamp, so the
 /// car's own nose is not lit), aimed this far below the car's forward axis, degrees...
@@ -66,6 +66,17 @@ const HEADLIGHT_CORONA: Corona = Corona {
     radius: 0.6,
     strength: 0.8,
 };
+/// High beams: aimed this far below the axis, degrees, half as squashed (a taller beam
+/// that lights the road far ahead and the fronts beside it), this bright per lamp, kcd,
+/// reaching this far, m, with a bigger halo.
+const HIGH_BEAM_PITCH_DEG: f32 = 0.5;
+const HIGH_BEAM_SQUASH: f32 = 2.0;
+pub const HIGH_BEAM_KCD: f32 = 40.0;
+const HIGH_BEAM_RADIUS_M: f32 = 140.0;
+const HIGH_BEAM_CORONA: Corona = Corona {
+    radius: 0.9,
+    strength: 1.0,
+};
 /// Tail lamps light nothing much; they are coronas only (radius-0 lights), red, as bright
 /// (kcd, as the corona reads it) with the headlights on and under braking...
 const TAIL_RGB: [f32; 3] = [1.0, 0.04, 0.02];
@@ -85,6 +96,8 @@ const CABIN_WALL_TINT: f32 = 0.3;
 /// A car switched to while the old one rolls slower than this keeps its velocity; faster,
 /// it starts at rest, m/s.
 pub const KEEP_SPEED_MPS: f32 = 5.0;
+/// At or under this the car is standing, for the brake lamps, m/s.
+const STANDING_MPS: f32 = 0.05;
 /// Below this the car counts as fallen out of the world and is put back at its start, m.
 const FLOOR_Y: f32 = -100.0;
 /// A reset looks this far for a lane; with none that close the car goes back to its
@@ -221,6 +234,13 @@ pub struct Drive {
     /// Parked cars this car has knocked, swaying until they settle (for drawing).
     pub rocking: world::collide::Rocking,
     pub headlights: bool,
+    /// High beams selected: the head lamps throw [`high_beam`]s while they are on.
+    pub high_beams: bool,
+    /// The headlights follow dusk and dawn (Settings › Drive › Headlights: Auto): they
+    /// switch when it gets dark or light, and the switch overrides them in between.
+    pub auto_headlights: bool,
+    /// Whether it was dark at the last frame, `None` until the next frame decides.
+    pub auto_dark: Option<bool>,
     /// Held this frame (for the audio task).
     pub horn: bool,
     /// Rolling angle of each wheel, rad, kept for drawing (the sim keeps only the rate),
@@ -268,6 +288,9 @@ impl Drive {
             impact: world::Impact::default(),
             rocking: world::collide::Rocking::default(),
             headlights: false,
+            high_beams: false,
+            auto_headlights: false,
+            auto_dark: None,
             horn: false,
             roll: [0.0; 4],
             prev_roll: [0.0; 4],
@@ -323,6 +346,9 @@ impl Drive {
         let mut next = Drive::with_layout(spec, layout, [p.x, y, p.z], heading);
         next.assists = self.assists;
         next.headlights = self.headlights;
+        next.high_beams = self.high_beams;
+        next.auto_headlights = self.auto_headlights;
+        next.auto_dark = self.auto_dark;
         next.start_ground = self.start_ground;
         next.start_heading = self.start_heading;
         let speed = self.state.speed_mps;
@@ -337,10 +363,20 @@ impl Drive {
         *self = next;
     }
 
-    /// Once per frame, before the steps: the switches that act on a press.
-    pub fn frame(&mut self, input: &InputState) {
+    /// Once per frame, before the steps: the switches that act on a press, and with
+    /// [`Drive::auto_headlights`] the headlights following `dark` when it changes. High
+    /// beams switched on switch the headlights on too.
+    pub fn frame(&mut self, input: &InputState, dark: bool) {
+        if self.auto_headlights && self.auto_dark != Some(dark) {
+            self.headlights = dark;
+        }
+        self.auto_dark = Some(dark);
         if input.just_pressed(Action::Headlights) {
             self.headlights = !self.headlights;
+        }
+        if input.just_pressed(Action::HighBeams) {
+            self.high_beams = !self.headlights || !self.high_beams;
+            self.headlights = true;
         }
         self.horn = input.pressed(Action::Horn);
     }
@@ -352,6 +388,11 @@ impl Drive {
         if hit.speed > self.impact.hit.speed {
             self.impact.hit = hit;
         }
+    }
+
+    /// The high beams are lit: selected, with the headlights on.
+    pub fn high_beams_lit(&self) -> bool {
+        self.headlights && self.high_beams
     }
 
     /// One fixed step with the driver asking for `input`.
@@ -446,9 +487,20 @@ impl Drive {
         self.wheel_locals(alpha).map(|w| body * w)
     }
 
-    /// Whether the brake lamps are lit: the driver asked for brake in the last step.
+    /// Whether the brake lamps are lit: the driver asked the service brakes for anything
+    /// in the last step (the brake pedal, or in reverse the throttle, which brakes there;
+    /// reversing on the brake pedal and coasting leave them dark), or held the brake
+    /// standing still, whatever gear brake-to-reverse picked (waiting at a light).
     pub fn braking(&self) -> bool {
-        self.input.brake > 0.0
+        if self.state.speed_mps.abs() < STANDING_MPS && self.input.brake > 0.0 {
+            return true;
+        }
+        let pedal = if self.state.gear < 0 {
+            self.input.throttle
+        } else {
+            self.input.brake
+        };
+        pedal > 0.0
     }
 
     /// Steering-wheel-to-body transform `alpha` of the way through the step.
@@ -524,15 +576,30 @@ impl Drive {
             for (k, n) in needles.iter().enumerate().take(self.layout.dial_count) {
                 out.push(inside(ids.needles[k], body * *n));
             }
+            let [low, high] = ids.telltales;
+            if self.headlights {
+                out.push(inside(low, body));
+            }
+            if self.high_beams_lit() {
+                out.push(inside(high, body));
+            }
         }
     }
 
     /// The car's lights: the headlight beams (two spots, from the left and right headlamps
-    /// along the car's nose, pitched down) when the headlights are on, then the tail lamps'
-    /// coronas while they are lit (headlights on or braking). Returns them and how many.
+    /// along the car's nose, pitched down; high beams when selected) when the headlights are
+    /// on, then the tail lamps' coronas while they are lit (headlights on or braking).
+    /// Returns them and how many.
     pub fn lights(&self, alpha: f32) -> ([PointLight; CAR_LIGHTS], usize) {
         let pose = self.pose(alpha);
-        let at = |lamp: Vec3| headlight(&pose, lamp);
+        let high = self.high_beams_lit();
+        let at = |lamp: Vec3| {
+            if high {
+                high_beam(&pose, lamp)
+            } else {
+                headlight(&pose, lamp)
+            }
+        };
         let tail_kcd = if self.braking() { BRAKE_KCD } else { TAIL_KCD };
         let tail = |lamp: Vec3| PointLight {
             corona: TAIL_CORONA,
@@ -555,6 +622,20 @@ impl Drive {
             (false, false) => 0,
         };
         (out, n)
+    }
+}
+
+/// The high beam of the head lamp at body point `lamp` of a car at `pose`: the low beam
+/// aimed higher, taller, brighter and reaching further.
+pub fn high_beam(pose: &Pose, lamp: Vec3) -> PointLight {
+    let pitch = HIGH_BEAM_PITCH_DEG.to_radians();
+    PointLight {
+        direction: (pose.rot * Vec3::new(0.0, -pitch.sin(), -pitch.cos())).to_array(),
+        color: HEADLIGHT_COLOR.map(|c| c * HIGH_BEAM_KCD),
+        radius: HIGH_BEAM_RADIUS_M,
+        cone_squash: HIGH_BEAM_SQUASH,
+        corona: HIGH_BEAM_CORONA,
+        ..headlight(pose, lamp)
     }
 }
 
@@ -619,7 +700,103 @@ mod tests {
             lods: [lod(10), lod(30)],
             needles: [MeshId(50), MeshId(51), MeshId(52)],
             dial_ticks: MeshId(53),
+            telltales: [MeshId(54), MeshId(55)],
         }
+    }
+
+    /// Braking bakes the brake group far above the tail group, and in full sun the lit
+    /// brake lens is past the bloom threshold at the cap while the tail lamp (lights off)
+    /// is dark; the brake pedal lights them, reversing on it and coasting do not, and the
+    /// throttle braking a reversing car does.
+    #[test]
+    fn brake_lamps_outshine_the_tail_lamps_and_reversing_leaves_them_dark() {
+        let spec = vehicles::builtin_spec("gannet_gt").unwrap();
+        let shape = vehicles::builtin_shape(&spec).unwrap();
+        let model = CarModel::build(&spec, &shape).unwrap();
+        // Mean tail-group emissive scale of a lamp state.
+        let tail = |m: &render::Mesh| {
+            let s: Vec<f32> = m
+                .vertices
+                .iter()
+                .filter(|v| crate::car::lamp_group(v.emissive) == crate::car::LampGroup::Tail)
+                .map(|v| render::emissive_scale(v.emissive).0)
+                .collect();
+            s.iter().sum::<f32>() / s.len().max(1) as f32
+        };
+        let lights = &model.lods[0].lights;
+        let (lit, brake, dark_brake) = (
+            tail(&lights[1][0]),
+            tail(&lights[1][1]),
+            tail(&lights[0][1]),
+        );
+        assert!(
+            brake > 3.0 * lit && dark_brake == brake,
+            "{lit} {brake} {dark_brake}"
+        );
+        let noon = crate::lighting::TimeOfDay {
+            clock: crate::daylight::Clock::new(crate::lighting::DEFAULT_DAY_OF_YEAR, 12.0 * 3600.0),
+            ..Default::default()
+        }
+        .daylight();
+        let k = crate::lighting::EMISSIVE_BOOST
+            * crate::lighting::car_glow(&noon).lamps
+            * render::exposure_from_ev100(noon.ev100);
+        let (brake_noon, tail_noon) = (brake * k, lit * k);
+        assert!(
+            (2.0..3.0).contains(&brake_noon) && tail_noon < 1.0,
+            "brake lens at {brake_noon}, tail at {tail_noon} after exposure at noon"
+        );
+
+        // Standing on the brake, the lamps stay lit after brake-to-reverse picks reverse.
+        let mut d = Drive::new("gannet_gt").unwrap();
+        let ground = flat();
+        let mut reversed = false;
+        for _ in 0..120 {
+            d.step(
+                VehicleInput {
+                    brake: 1.0,
+                    ..VehicleInput::default()
+                },
+                &ground,
+            );
+            if d.state.speed_mps.abs() < STANDING_MPS {
+                reversed |= d.state.gear < 0;
+                assert!(
+                    d.braking(),
+                    "standing on the brake in gear {}",
+                    d.state.gear
+                );
+            }
+        }
+        assert!(reversed, "brake-to-reverse picked reverse while standing");
+
+        let ground = flat();
+        let mut d = Drive::new("gannet_gt").unwrap();
+        let pedal = |throttle: f32, brake: f32| VehicleInput {
+            throttle,
+            brake,
+            ..VehicleInput::default()
+        };
+        for _ in 0..240 {
+            d.step(throttle(1.0), &ground);
+        }
+        assert!(!d.braking(), "driving");
+        d.step(VehicleInput::default(), &ground);
+        assert!(!d.braking(), "coasting");
+        let mut out = Vec::new();
+        for _ in 0..600 {
+            d.step(pedal(0.0, 1.0), &ground);
+            if d.state.gear >= 0 {
+                assert!(d.braking(), "braking at {}", d.state.speed_mps);
+                out.clear();
+                d.push_instances(1.0, &ids(), Cabin::Outside, CarGlow::default(), &mut out);
+                assert_eq!(out[2].mesh, ids().lods[0].lights[0][1]);
+            }
+        }
+        assert!(d.state.gear < 0 && d.state.speed_mps < -1.0, "reversing");
+        assert!(!d.braking(), "reversing on the brake pedal");
+        d.step(pedal(1.0, 0.0), &ground);
+        assert!(d.braking(), "the throttle brakes a reversing car");
     }
 
     #[test]
@@ -775,7 +952,7 @@ mod tests {
         input.set(Action::Headlights, 1.0);
         input.set_just_pressed(Action::Headlights, true);
         input.set(Action::Horn, 1.0);
-        d.frame(&input);
+        d.frame(&input, false);
         assert!(d.headlights && d.horn);
         let (lights, n) = d.lights(1.0);
         assert_eq!(n, 4);
@@ -832,7 +1009,7 @@ mod tests {
         assert!(beam(25.0) > 0.1 * ten, "{}", beam(25.0) / ten);
         assert!(beam(25.0) < beam(15.0));
         input.set_just_pressed(Action::Headlights, false);
-        d.frame(&input);
+        d.frame(&input, false);
         assert!(d.headlights, "holding the button does not toggle again");
 
         out.clear();

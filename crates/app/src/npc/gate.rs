@@ -578,7 +578,7 @@ fn driving_slowly_into_the_crowd_on_a_corner() {
 /// The player waits first at the arterial junction's red with a queue formed behind it,
 /// then backs up into the queue at a walking pace: it bumps the first car of the queue
 /// and stops against it. No NPC car's body ever overlaps the player's footprint, the car
-/// it hit is shoved less than a meter and stands on its brakes.
+/// it hit is shoved less than a meter and stands on its brakes, its brake lamps lit.
 #[test]
 fn reversing_into_a_queue_stops_against_it() {
     let c = coast();
@@ -613,7 +613,7 @@ fn reversing_into_a_queue_stops_against_it() {
     let mut cars = 0;
     let mut first = None;
     let mut backed = 0.0f32;
-    let (mut hits, mut held, mut shoved) = (0, false, 0.0f32);
+    let (mut hits, mut held, mut lit, mut shoved) = (0, false, false, 0.0f32);
     for k in 0..8 * 120 {
         let input = follow(
             &app,
@@ -626,6 +626,7 @@ fn reversing_into_a_queue_stops_against_it() {
         hits += usize::from(app.drive.impact.hit.speed > 0.0);
         if let Some(car) = app.npcs.cars().iter().find(|car| car.id == id) {
             held |= car.hold > 0;
+            lit |= car.hold > 0 && car.braking;
             shoved = shoved.max((car.pos[0] - at[0]).hypot(car.pos[2] - at[2]));
         }
         let n = overlapping(&app);
@@ -648,7 +649,10 @@ fn reversing_into_a_queue_stops_against_it() {
         backed > behind - 2.0 * half - 1.5 && backed < behind - 2.0 * half + 0.5,
         "backed {backed:.2} m, the queue {behind:.1} m back"
     );
-    assert!(held, "the car hit did not brake");
+    assert!(
+        held && lit,
+        "the car hit did not brake ({held}, lamps {lit})"
+    );
     assert!(shoved < 1.0, "the car hit moved {shoved:.2} m");
     assert!(speed.abs() < 0.3, "{speed} m/s");
     assert_eq!(cars, 0, "first at step {first:?}");
