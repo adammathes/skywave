@@ -1,0 +1,55 @@
+// Drayman Van body: an early-80s full-size panel van.
+//
+// Intent: a tall steel box on a short nose. A wide chrome grille between rectangular
+// lamps, a stubby hood half under the windshield, a tall flat roof with a ladder rack,
+// glass only in the front doors and the twin rear doors, long blank flanks with a tape
+// stripe, chrome bumpers and steel wheels. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "drayman_van",
+    side: [
+        (0.00, 0.92), (0.05, 1.00), (0.60, 1.08), (0.72, 1.12), (1.20, 1.92),
+        (1.30, 1.98), (4.84, 1.98), (4.88, 1.95), (4.93, 1.30), (4.95, 1.26),
+        (4.95, 0.42), (4.80, 0.36), (4.20, 0.33), (1.00, 0.32), (0.12, 0.36), (0.00, 0.44),
+    ],
+    plan: [
+        (0.00, 0.94), (0.08, 0.98), (0.40, 0.99), (4.85, 0.99), (4.95, 0.97),
+    ],
+    belt: [(0.72, 1.12), (4.95, 1.22)],
+    section: Section(shoulder: 0.97, tumblehome_deg: 4, greenhouse_frac: 0.92, crown: 0.03, tuck: 0.03),
+    glass: Glass(
+        windshield: (0.74, 1.22),
+        backlight: (4.88, 4.93),
+        side: [(1.28, 1.96)],
+    ),
+    wheels: Wheels(radius: 0.36, width: 0.22, arch_clearance: 0.05, front_x: 0.92, rear_x: 3.92, track: 1.66),
+    front: Front(lights: Rect, grille: Wide, bumper: Chrome, bumper_y: (0.40, 0.58)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Chrome, bumper_y: (0.42, 0.58)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.80, creases: [(0.10, 0.86, 4.90, 0.90)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: false),
+    details: [ChromeTrim, SideStripe, RoofRack, Badge(Bar)],
+    // White, tan, brown, dark blue, light blue, silver, cream over brown.
+    palette: ["#ecebe4", "#c9b48e", "#5e4430", "#25365a", "#8fa7bd", "#b9bbbd", "#e3d9bd/#5e4430"],
+    accent: "#a8262a",
+    interior: InteriorShape(
+        dash_height: 1.18,
+        dash_x: 1.10,
+        wheel_pos: (1.46, 1.04),
+        wheel_radius: 0.21,
+        column_angle_deg: 38,
+        mirror_pos: (1.26, 1.80),
+        seat: (1.96, 0.86),
+        driver_offset: 0.44,
+        rear_seat: false,
+        dials: 1,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, gray vinyl with a
+        // darker insert, a black rubber floor, a plain gray cargo bay, amber dial.
+        colors: ["#222326", "#5c5e62", "#232426", "#9a9a96", "#46484c", "#b0b0b0"],
+        display: "#ffae3b",
+        insert: "#4a4c50",
+        piping: "#2c2d30",
+        dash_top: "#2c2d30",
+    ),
+)

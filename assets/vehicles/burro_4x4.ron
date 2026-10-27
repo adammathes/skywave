@@ -1,0 +1,48 @@
+// Burro 4x4: a mid-80s small two-door four-wheel-drive utility.
+//
+// Intent: short, tall and willing. A modest four through a five-speed with low gearing
+// and four driven wheels: it scrabbles off the line without wheelspin, then runs out of
+// puff early; only the panel van tops out lower. Tall springs with long travel, soft
+// damping and big tires with soft sidewalls make it pitch and roll and grip only so-so on
+// the road. Short wheelbase, quick steering: it turns on a dime and feels tippy doing it.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "burro_4x4",
+    name: "Burro 4x4",
+    era: Eighties,
+    class: Utility,
+
+    mass_kg: 1350,
+    dims_m: (4.15, 1.72, 1.78),    // length, width, height
+    wheelbase_m: 2.40,
+    track_m: 1.46,
+    cg_height_m: 0.72,             // high: ground clearance and a tall body
+    cg_fore_aft: 0.46,
+
+    // A 2.4 L four: ~80 kW, a broad middle.
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 5000,
+        torque_nm: [(800, 150), (2000, 182), (2800, 192), (3800, 184), (5000, 150)],
+    ),
+    gears: [3.8, 2.2, 1.4, 1.0, 0.86],   // five-speed, short ratios
+    final_drive: 4.1,
+    reverse: 3.6,
+    shift_ms: 300,
+    auto: true,
+    drive: All,
+
+    tires: Tires(grip_lat: 0.93, grip_long: 0.95, load_sens: 0.12, slip_peak_deg: 10.0),
+    suspension: Susp(spring_n_m: 26000, damper: 1800, travel_m: 0.26, antiroll: 0.15),
+    steering: Steer(max_deg: 35, speed_sens: 0.55, return_rate: 8.0),
+    brakes: Brakes(max_nm: 3000, bias_front: 0.66, abs: false, handbrake_nm: 2200),
+    aero: Aero(cd: 0.5, frontal_m2: 2.55, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.1, body_roll: 0.9, engine_sound: "i4", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 100, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "burro_4x4.shape.ron",
+)

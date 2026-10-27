@@ -47,6 +47,9 @@ impl<'a, 'b> OpenTop<'a, 'b> {
 
     pub fn build(&mut self) {
         let Some(top) = self.b.spec.roof.top() else {
+            if self.b.has(Detail::TTop) {
+                self.t_top();
+            }
             return;
         };
         self.door_caps();
@@ -125,6 +128,61 @@ impl<'a, 'b> OpenTop<'a, 'b> {
                 let (b0, b1, b2) = (q(&rb, 0, sb), q(&rb, 1, sb), q(&rb, 2, sb));
                 self.body.quad_dir(a0, a1, b1, b0, top, UP);
                 self.body.quad_dir(a1, a2, b2, b1, inner, [-sx, 0.0, 0.0]);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- T-top
+
+    /// Two tinted glass panels in the roof behind the header, either side of a center bar
+    /// left in the paint, each in a black frame.
+    fn t_top(&mut self) {
+        let b = self.b;
+        let g = &b.spec.glass;
+        let s0 = g.windshield.1 + 0.05;
+        let s1 = (g.backlight.0 - 0.08).min(s0 + 0.8);
+        let f = b.frame((s0 + s1) * 0.5);
+        let (x0, x1) = (0.075, f.z_re - 0.09);
+        let lod0 = self.lod0();
+        let (ns, nx) = if lod0 { (4, 3) } else { (2, 1) };
+        let at = |s: f32, x: f32, lift: f32| b.p(s, x, b.frame(s).top_y(x.abs()) + lift);
+        let glass = self.m.glass;
+        for sx in [-1.0f32, 1.0] {
+            for i in 0..ns {
+                for k in 0..nx {
+                    let sa = lerp(s0, s1, i as f32 / ns as f32);
+                    let sb = lerp(s0, s1, (i + 1) as f32 / ns as f32);
+                    let xa = sx * lerp(x0, x1, k as f32 / nx as f32);
+                    let xb = sx * lerp(x0, x1, (k + 1) as f32 / nx as f32);
+                    let q = [
+                        at(sa, xa, 0.005),
+                        at(sb, xa, 0.005),
+                        at(sb, xb, 0.005),
+                        at(sa, xb, 0.005),
+                    ];
+                    self.glass.quad_dir(q[0], q[1], q[2], q[3], glass, UP);
+                }
+            }
+            if !lod0 {
+                continue;
+            }
+            // The frame: strips along the four edges, a little proud of the glass.
+            let w = 0.022;
+            let (xi, xo) = (sx * x0, sx * x1);
+            let strips = [
+                (s0 - w, s0, xi, xo),
+                (s1, s1 + w, xi, xo),
+                (s0 - w, s1 + w, xi - sx * w, xi),
+                (s0 - w, s1 + w, xo, xo + sx * w),
+            ];
+            for (sa, sb, xa, xb) in strips {
+                let q = [
+                    at(sa, xa, 0.008),
+                    at(sb, xa, 0.008),
+                    at(sb, xb, 0.008),
+                    at(sa, xb, 0.008),
+                ];
+                self.body.quad_dir(q[0], q[1], q[2], q[3], self.m.trim, UP);
             }
         }
     }

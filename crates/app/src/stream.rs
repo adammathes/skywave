@@ -330,7 +330,7 @@ pub struct PlaceSource {
 
 impl PlaceSource {
     pub fn new(place: Place, palette: Palette) -> PlaceSource {
-        let plan = ChunkPlan::new(&place, &palette);
+        let plan = ChunkPlan::new(&place, &palette, crate::places::grammar());
         let mut statics: Vec<StaticLight> = place
             .lights
             .items
@@ -1054,7 +1054,7 @@ mod tests {
         let mut place = Place::test_grid();
         place.header.seed = 1;
         let pal = Palette::socal_1985();
-        let plan = ChunkPlan::new(&place, &pal);
+        let plan = ChunkPlan::new(&place, &pal, crate::places::grammar());
         let src = PlaceSource::new(place.clone(), pal);
         let triangles = |m: &Mesh| {
             let mut t: Vec<[u32; 9]> = m

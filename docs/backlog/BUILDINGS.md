@@ -166,8 +166,8 @@ Visual tasks attach before/after screenshots of the four fixed coast cameras and
 
 | # | Task | Files | Depends |
 |---|---|---|---|
-| B1 | `CREDITS.md` at the root: the format from ADR 0005 and, at its top, how to record a fitted number and its source | `CREDITS.md` | — |
-| B2 | Grammar types in `world` (`no_std`, serde), RON loader in `app`, `california_coast_80s.ron` that reproduces today's look exactly: no hash moves. Tests: loader round-trip, current goldens unchanged | `world::grammar`, `app` loader, `assets/grammar/` | — |
+| B1 | **Done.** `CREDITS.md` at the root: the format from ADR 0005 and, at its top, how to record a fitted number and its source | `CREDITS.md` | — |
+| B2 | **Done** (as built: `docs/WORLD_GENERATION.md`, "Facade grammars"; fields move in as later tasks need them). Grammar types in `world` (`no_std`, serde), RON loader in `app`, `california_coast_80s.ron` that reproduces today's look exactly: no hash moves. Tests: loader round-trip, current goldens unchanged | `world::grammar`, `app` loader, `assets/grammar/` | — |
 | B3 | Fit pass, numbers only: measure 20+ public-domain references per scene (Margolies, DOCUMERICA, HABS, NHAP) into the SoCal grammar with source comments | `assets/grammar/` | B2 |
 | B4 | Three-band facade and the storefront bay (bulkhead, glass, transom, piers, recessed entry); upper windows aligned to the base bays | `world::buildings` | B2 |
 | B5 | Pictogram library: 32 shapes as 2D polygons, extrude and neon-outline builders, a preview sheet in `tools/shape-preview`; tests for triangle budget and closed outlines | `world::signs`, tools | — |

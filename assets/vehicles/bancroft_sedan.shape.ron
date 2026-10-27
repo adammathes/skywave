@@ -1,0 +1,58 @@
+// Bancroft Sedan body: an early-80s full-size four-door sedan.
+//
+// Intent: long, square and formal. An upright face with an egg-crate grille between
+// rectangular lamps, cornering lamps in the fenders, a long flat hood, an upright
+// windshield, a tall flat roof with thin pillars, a near-vertical rear window, a long flat
+// trunk and a squared tail with triple lamps. Chrome bumpers, belt and rocker moldings,
+// full wheel covers on whitewalls. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "bancroft_sedan",
+    side: [
+        (0.00, 0.80), (0.05, 0.86), (1.40, 0.91), (1.48, 0.93), (2.06, 1.39),
+        (2.14, 1.40), (3.40, 1.40), (3.48, 1.38), (3.96, 0.99), (4.04, 0.98),
+        (5.20, 0.97), (5.27, 0.95), (5.30, 0.91),
+        (5.30, 0.32), (5.15, 0.25), (4.50, 0.21), (1.00, 0.20), (0.12, 0.24), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.92), (0.08, 0.95), (0.40, 0.96), (5.05, 0.96), (5.25, 0.95), (5.30, 0.93),
+    ],
+    belt: [(1.48, 0.93), (5.30, 0.96)],
+    section: Section(shoulder: 0.96, tumblehome_deg: 10, greenhouse_frac: 0.86, crown: 0.03, tuck: 0.03),
+    glass: Glass(
+        windshield: (1.50, 2.04),
+        backlight: (3.48, 3.96),
+        side: [(1.56, 2.58), (2.68, 3.32)],
+    ),
+    wheels: Wheels(radius: 0.34, width: 0.21, arch_clearance: 0.05, front_x: 1.00, rear_x: 3.94, track: 1.58),
+    front: Front(lights: Rect, grille: Egg, bumper: Chrome, bumper_y: (0.30, 0.47)),
+    rear: Rear(lights: Triple, spoiler: None, bumper: Chrome, bumper_y: (0.31, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.80, creases: [(0.12, 0.71, 5.25, 0.72)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true, whitewalls: true),
+    details: [ChromeTrim, CorneringLamps, Badge(Circle)],
+    // Dark blue, silver, maroon, white, light blue, dark brown, silver over dark blue.
+    palette: ["#1f2b48", "#bfc1c3", "#5e1d26", "#ecebe5", "#8da6c0", "#4a3527", "#c4c6c8/#22304f"],
+    accent: "#b9bcc0",
+    interior: InteriorShape(
+        dash_height: 0.95,
+        dash_x: 1.84,
+        wheel_pos: (2.26, 0.76),
+        wheel_radius: 0.20,
+        column_angle_deg: 28,
+        mirror_pos: (2.02, 1.32),
+        seat: (2.76, 0.48),
+        driver_offset: 0.40,
+        rear_seat: true,
+        dials: 1,
+        // Dash, seats, carpet, headliner, trim, accent: navy velour with lighter blue
+        // inserts and silver piping, navy carpet, a wood band, a blue-green dial.
+        colors: ["#1e2a46", "#2c4070", "#1c2a4a", "#b9bec8", "#2a3a60", "#c0c4cc"],
+        display: "#4ce0c0",
+        insert: "#46609a",
+        piping: "#c4c8d0",
+        dash_top: "#2a3858",
+        applique: Wood,
+    ),
+)

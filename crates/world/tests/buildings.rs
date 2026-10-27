@@ -13,6 +13,12 @@ use world::procgen::{
 };
 use world::template::RegionTemplate;
 
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+
+fn grammar() -> world::Grammar {
+    ron::from_str(GRAMMAR).expect("parse grammar")
+}
+
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
 const SIZE: [u16; 2] = [16, 16];
 
@@ -72,7 +78,7 @@ struct ZoneStats {
 #[test]
 fn seed_one_zones_meet_their_targets() {
     let t = template();
-    let place = build_place(Seed(1), &t);
+    let place = build_place(Seed(1), &t, &grammar());
     let m = MacroMap::generate(Seed(1), &t, SIZE);
     let lots = per_lot(&t, &m, &place);
     let mut zones: BTreeMap<u8, ZoneStats> = BTreeMap::new();
@@ -223,7 +229,7 @@ fn places_with_buildings_validate_and_are_pinned() {
     let t = template();
     let mut got = Vec::new();
     for seed in 1..=4u64 {
-        let p = build_place(Seed(seed), &t);
+        let p = build_place(Seed(seed), &t, &grammar());
         assert_eq!(p.validate(), Ok(()), "seed {seed}");
         let lots = p
             .parcels
@@ -301,8 +307,8 @@ fn chunks_build_their_slice() {
 #[test]
 fn seed_one_meshes_within_budget() {
     let t = template();
-    let p = build_place(Seed(1), &t);
-    let (_, s) = world::build_with_stats(&p, &world::Palette::socal_1985());
+    let p = build_place(Seed(1), &t, &grammar());
+    let (_, s) = world::build_with_stats(&p, &world::Palette::socal_1985(), &grammar());
     println!(
         "seed 1: {} buildings, {} building triangles of {}, max {} per building, {} windows ({} lit)",
         s.buildings,
@@ -321,7 +327,7 @@ fn seed_one_meshes_within_budget() {
 #[test]
 fn signature_buildings_appear() {
     let t = template();
-    let p = build_place(Seed(1), &t);
+    let p = build_place(Seed(1), &t, &grammar());
     let count = |f: &dyn Fn(&Building) -> bool| p.buildings.iter().filter(|b| f(b)).count();
     let barns = count(&|b| b.style == StyleTag::Barn && b.footprint.len() == 4);
     let silos = count(&|b| b.style == StyleTag::Barn && b.footprint.len() == 8);

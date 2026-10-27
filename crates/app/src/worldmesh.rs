@@ -672,7 +672,11 @@ mod tests {
     #[test]
     fn town_stays_within_the_triangle_budget() {
         let place = place::Place::test_grid();
-        let chunks = world::build_chunk_meshes(&place, &world::Palette::socal_1985());
+        let chunks = world::build_chunk_meshes(
+            &place,
+            &world::Palette::socal_1985(),
+            crate::places::grammar(),
+        );
         let (mut before, mut after) = ([0usize; 16], [0usize; 16]);
         for c in &chunks {
             let m = atlas_mesh(&c.mesh, c.kind);

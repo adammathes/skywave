@@ -1,0 +1,48 @@
+// Drayman Van: an early-80s full-size rear-drive panel van, empty.
+//
+// Intent: tall, tippy and slow. A big six-cylinder hauling a steel box through a
+// three-speed automatic with short gearing: it gets going, then runs out of breath into
+// the wind. A high center of gravity on soft springs and a thin bar make it lean hard and
+// slide early; it understeers, steers slowly and wants to be driven gently. The lowest
+// top speed in the roster, and the tallest seat.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "drayman_van",
+    name: "Drayman Van",
+    era: Eighties,
+    class: Van,
+
+    mass_kg: 1900,
+    dims_m: (4.95, 1.98, 1.98),    // length, width, height
+    wheelbase_m: 3.00,
+    track_m: 1.66,
+    cg_height_m: 0.80,             // tall box, high seats
+    cg_fore_aft: 0.47,
+
+    // A 4.9 L straight six: ~100 kW, all torque down low.
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 4200,
+        torque_nm: [(800, 270), (1800, 315), (2600, 320), (3400, 290), (4200, 230)],
+    ),
+    gears: [2.48, 1.48, 1.0],      // three-speed automatic
+    final_drive: 3.73,
+    reverse: 2.1,
+    shift_ms: 480,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.84, grip_long: 0.85, load_sens: 0.13, slip_peak_deg: 9.5),
+    suspension: Susp(spring_n_m: 30000, damper: 2000, travel_m: 0.22, antiroll: 0.1),
+    steering: Steer(max_deg: 32, speed_sens: 0.45, return_rate: 4.5),
+    brakes: Brakes(max_nm: 4400, bias_front: 0.68, abs: false, handbrake_nm: 2400),
+    aero: Aero(cd: 0.5, frontal_m2: 3.4, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.3, body_roll: 1.0, engine_sound: "default", shift_jerk: 0.15),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 85, mph)],
+        radio: "amber_seek",
+    ),
+    shape: "drayman_van.shape.ron",
+)

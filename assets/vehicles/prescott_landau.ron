@@ -1,0 +1,47 @@
+// Prescott Landau: a mid-size rear-drive sedan with a vinyl roof and a V6.
+//
+// Intent: comfortable, a little dressed up, not quick. A smooth V6 with a flat torque
+// curve and a three-speed automatic, soft springs and a thin bar: it leans and bobs over
+// bumps, steers lightly and pushes wide when hurried. Lighter and nimbler than the
+// Bancroft, slower in a straight line.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "prescott_landau",
+    name: "Prescott Landau",
+    era: Eighties,
+    class: Sedan,
+
+    mass_kg: 1500,
+    dims_m: (5.00, 1.82, 1.38),    // length, width, height
+    wheelbase_m: 2.76,
+    track_m: 1.50,
+    cg_height_m: 0.54,
+    cg_fore_aft: 0.45,             // 55% front
+
+    // A 3.8 L V6: ~110 kW, flat in between.
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 4800,
+        torque_nm: [(800, 215), (2000, 268), (2800, 280), (3600, 268), (4400, 238), (4800, 214)],
+    ),
+    gears: [2.74, 1.57, 1.0],      // three-speed automatic
+    final_drive: 2.56,
+    reverse: 2.2,
+    shift_ms: 450,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.0, grip_long: 0.93, load_sens: 0.11, slip_peak_deg: 8.5),
+    suspension: Susp(spring_n_m: 23000, damper: 1900, travel_m: 0.20, antiroll: 0.14),
+    steering: Steer(max_deg: 31, speed_sens: 0.55, return_rate: 6.5),
+    brakes: Brakes(max_nm: 3500, bias_front: 0.66, abs: false, handbrake_nm: 2300),
+    aero: Aero(cd: 0.44, frontal_m2: 2.15, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.2, body_roll: 0.8, engine_sound: "v6", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "woodgrain_80s",
+        gauges: [Speedo(0, 85, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "prescott_landau.shape.ron",
+)

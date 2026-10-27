@@ -14,16 +14,22 @@
 //!
 //! The pedestrian figure ([`figure`]): seeded low-poly people, their walk cycle and the
 //! poses for stepping out of a car's way, posed as one rigid transform per part.
+//!
+//! NPC cars drive on the lane graph ([`Traffic`], [`cars`]): a fixed pool stepped at 120 Hz with car
+//! following, signals and stop signs, right of way, lane changes, and spawning by density
+//! out of the player's view.
 #![no_std]
 
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod cars;
 pub mod figure;
 pub mod lanes;
 pub mod math;
 pub mod signal;
 
+pub use cars::{Car, Clock, Density, Inputs, Player, Traffic, TrafficBudget, View};
 pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
 pub use signal::{Light, SignalClock};

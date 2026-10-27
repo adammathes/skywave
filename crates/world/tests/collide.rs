@@ -14,6 +14,12 @@ use world::collide::{Impact, Wall};
 use world::props::PropKind;
 use world::{resolve, WorldCollider};
 
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+
+fn grammar() -> world::Grammar {
+    ron::from_str(GRAMMAR).expect("parse grammar")
+}
+
 const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
 const PALISADE: &str = include_str!("../../../assets/vehicles/palisade_wagon.ron");
 const MPH: f32 = 0.447_04;
@@ -56,7 +62,7 @@ fn cars() -> [VehicleSpec; 2] {
 
 fn town() -> (Place, WorldCollider) {
     let place = Place::test_grid();
-    let collider = WorldCollider::build(&place);
+    let collider = WorldCollider::build(&place, &grammar());
     (place, collider)
 }
 
@@ -274,9 +280,9 @@ fn behind_and_gap(s: &VehicleState, spec: &VehicleSpec, w: &Wall) -> (f32, f32) 
 fn collider_builds_fast_and_matches_the_meshes() {
     let place = Place::test_grid();
     let t0 = std::time::Instant::now();
-    let c = WorldCollider::build(&place);
+    let c = WorldCollider::build(&place, &grammar());
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
-    let (_, stats) = world::build_with_stats(&place, &world::Palette::socal_1985());
+    let (_, stats) = world::build_with_stats(&place, &world::Palette::socal_1985(), &grammar());
     println!(
         "collider: {} patches, {} steps, {} walls, {} posts, {} boxes on a {:?} grid in {ms:.1} ms",
         c.patches.len(),
@@ -298,7 +304,7 @@ fn collider_builds_fast_and_matches_the_meshes() {
     );
     let walls: usize = place.buildings.iter().map(|b| b.footprint.len()).sum();
     assert_eq!(c.walls.len(), walls);
-    assert_eq!(c, WorldCollider::build(&place), "deterministic");
+    assert_eq!(c, WorldCollider::build(&place, &grammar()), "deterministic");
     // Heights where the meshes put them: arterial asphalt, its curb, sidewalk, the apron.
     assert_eq!(c.level_at([150.0, 3.0]).0, 0.0);
     assert_eq!(c.level_at([150.0, 8.0]).0, SIDEWALK_Y);
