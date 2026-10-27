@@ -55,11 +55,7 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   ads); the M8 spec for the second world, Basin City 2001 (`docs/backlog/LA2001.md`).
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
   natural map edges (#20, approved; refreshing on main after #24, then merges on green);
-  pedestrian hardening (#24, fourth review round: a car along or turning across a crossing must
-  never reach anyone; the adversarial probe sweep over every crossing, seeds 1-4, is becoming the
-  standing test; review round 4 passed; CI red on main's new gate test "nobody crossing in
-  three minutes": fixed at 5656b0a, walkers wait for stragglers only on crossings, step-aside
-  clearance 0.4 m, step gate p99 5 ms; merges on green CI). Sessions building: parking lots
+  Sessions building: parking lots
   (`bldg/parking-lots`, B10); era sports cars with open-top variants
   (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
   ad-free presets and the player's own MP3 folders as stations (`m3/music-2`, NOTES 9; no
