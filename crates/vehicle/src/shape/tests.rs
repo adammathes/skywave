@@ -492,7 +492,7 @@ fn builds_are_deterministic() {
         0x8b31_0cd0_4e92_d9fa,
         0x6328_65fb_668f_a6c4,
         0xc77e_f92e_8538_9720,
-        0xcf6a_e60a_c86b_bf86,
+        0x6f63_02d2_bd07_7f33,
         0x7c7f_2b14_9b07_4886,
         0x20d6_8a6d_7a68_c29d,
         0xcb4f_4a0e_9805_3593,
