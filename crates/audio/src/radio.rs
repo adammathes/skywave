@@ -12,12 +12,18 @@
 //!
 //! Switching stops the old station and plays [`TUNE_SECONDS`] of the dial sweep before the
 //! new one starts: the radio counts its tunes ([`Radio::tunes`]) and the mixer's
-//! [`crate::synth::TuneSynth`] plays a burst for each new one. Every `Play` carries a token; a [`PlayerEvent`] about an older token (a
+//! [`crate::synth::TuneSynth`] plays a burst for each new one. A station whose every URL
+//! failed shows [`ErrorReason::NoSignal`] for [`NO_SIGNAL_SECONDS`], then the radio moves up
+//! the dial; failed stations are remembered and skipped until one plays again. Every `Play`
+//! carries a token; a [`PlayerEvent`] about an older token (a
 //! station already switched away from) is ignored. The radio allocates only when it
 //! starts a station (the URL in the `Play` command).
 
 /// How long the dial sweep between stations lasts, s: the new station starts as it ends.
 pub const TUNE_SECONDS: f32 = 0.5;
+
+/// How long a station that did not play stays on "no signal" before the radio moves on, s.
+pub const NO_SIGNAL_SECONDS: f32 = 2.0;
 
 /// A station the radio can play: a stream station of a preset or one the user added.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +112,10 @@ pub struct Radio {
     live: bool,
     blocked: bool,
     volume: f32,
+    /// Ids of the stations that failed to play this session; the dial skips them.
+    failed: Vec<String>,
+    /// Time spent in `Error`, s.
+    error_t: f32,
     out: Vec<RadioCommand>,
 }
 
@@ -122,6 +132,8 @@ impl Radio {
             live: false,
             blocked: false,
             volume: 1.0,
+            failed: Vec::new(),
+            error_t: 0.0,
             out: Vec::with_capacity(8),
         }
     }
@@ -244,7 +256,21 @@ impl Radio {
                 _ => n - 1,
             },
         };
-        self.tune(to);
+        self.tune(self.skip_failed(to, dir).unwrap_or(to));
+    }
+
+    /// The first station from `to` along `dir` that has not failed, if any.
+    fn skip_failed(&self, to: usize, dir: i32) -> Option<usize> {
+        let n = self.channels.len();
+        (0..n)
+            .map(|k| {
+                if dir > 0 {
+                    (to + k) % n
+                } else {
+                    (to + n - k) % n
+                }
+            })
+            .find(|&i| !self.failed.contains(&self.channels[i].id))
     }
 
     /// Turns the radio on at the last station (or the first).
@@ -295,7 +321,18 @@ impl Radio {
     }
 
     /// Advances the tuning phase by `dt` seconds; the new station starts at its end.
+    /// After [`NO_SIGNAL_SECONDS`] of "no signal" the radio tunes the next working station.
     pub fn tick(&mut self, dt: f32) {
+        if let RadioState::Error { station, .. } = self.state {
+            self.error_t += dt.max(0.0);
+            if self.error_t >= NO_SIGNAL_SECONDS {
+                let next = (station + 1) % self.channels.len();
+                if let Some(to) = self.skip_failed(next, 1) {
+                    self.tune(to);
+                    return;
+                }
+            }
+        }
         if let RadioState::Tuning { from, to, t } = self.state {
             let t = t + dt.max(0.0);
             if t >= TUNE_SECONDS {
@@ -329,6 +366,8 @@ impl Radio {
             PlayerEvent::Started { token } if token == self.token => {
                 self.live = true;
                 self.blocked = false;
+                let id = &self.channels[station].id;
+                self.failed.retain(|f| f != id);
             }
             PlayerEvent::Blocked { token } if token == self.token => self.blocked = true,
             PlayerEvent::Failed { token } if token == self.token => {
@@ -342,6 +381,11 @@ impl Radio {
                         station,
                         reason: ErrorReason::NoSignal,
                     };
+                    self.error_t = 0.0;
+                    let id = &self.channels[station].id;
+                    if !self.failed.contains(id) {
+                        self.failed.push(id.clone());
+                    }
                     self.out.push(RadioCommand::Stop);
                 }
             }
@@ -478,6 +522,56 @@ mod tests {
             assert_eq!(got, cmds, "row {i}: {input:?}");
             assert_eq!(r.tunes() - tunes, u32::from(tuned), "row {i}: {input:?}");
         }
+    }
+
+    /// Fails every URL of the station being played.
+    fn fail_all(r: &mut Radio) {
+        while matches!(r.state(), RadioState::Playing { .. }) {
+            let token = r.token();
+            r.on_event(PlayerEvent::Failed { token });
+        }
+    }
+
+    #[test]
+    fn no_signal_moves_on_and_the_dial_skips_failed_stations() {
+        let mut r = radio();
+        r.next();
+        r.tick(TUNE_SECONDS);
+        fail_all(&mut r);
+        assert_eq!(kind(r.state()), "error 0");
+        r.tick(NO_SIGNAL_SECONDS * 0.9);
+        assert_eq!(kind(r.state()), "error 0", "no signal shows for a while");
+        r.tick(NO_SIGNAL_SECONDS * 0.2);
+        assert_eq!(kind(r.state()), "tuning Some(0)->1");
+        r.tick(TUNE_SECONDS);
+        r.drain_commands().for_each(drop);
+        // From b the dial skips a both ways.
+        r.next();
+        r.tick(TUNE_SECONDS);
+        assert_eq!(r.station(), Some(2));
+        r.next();
+        assert_eq!(r.station(), Some(1));
+        r.prev();
+        assert_eq!(r.station(), Some(2));
+        // b and c fail too: nothing left, so "no signal" stays.
+        r.tick(TUNE_SECONDS);
+        fail_all(&mut r);
+        r.tick(NO_SIGNAL_SECONDS);
+        r.tick(TUNE_SECONDS);
+        fail_all(&mut r);
+        assert_eq!(kind(r.state()), "error 1");
+        r.tick(NO_SIGNAL_SECONDS * 3.0);
+        assert_eq!(kind(r.state()), "error 1");
+        // The dial still turns (all failed: plain next), and a station that plays again is
+        // no longer skipped.
+        r.next();
+        r.tick(TUNE_SECONDS);
+        assert_eq!(r.station(), Some(2));
+        let token = r.token();
+        r.on_event(PlayerEvent::Started { token });
+        r.next();
+        r.next();
+        assert_eq!(r.station(), Some(2), "a and b skipped, c plays");
     }
 
     #[test]

@@ -1240,7 +1240,7 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
     assert_eq!(h.app.audio_params().tunes, 0);
     h.key(Key::BracketRight);
     assert!(h.app.ui().radio().toast().is_some());
-    assert!(h.hud_text().contains("SomaFM Left Coast 70s"));
+    assert!(h.hud_text().contains("181.FM Yacht Rock"));
     // The dial sweeps (in the mixer, at the radio's volume), then the station plays.
     assert_eq!(h.app.audio_params().tunes, 1);
     assert_eq!(h.app.audio_params().tune_volume, 0.8);
@@ -1350,7 +1350,7 @@ fn streams_can_be_added_by_url() {
 
 #[test]
 fn the_dash_shows_the_station_in_the_cockpit() {
-    let count = |h: &Harness| h.hud_text().matches("SomaFM").count();
+    let count = |h: &Harness| h.hud_text().matches("181.FM").count();
     let mut h = Harness::new();
     h.app.set_target_size(1280, 720);
     h.key(Key::BracketRight);

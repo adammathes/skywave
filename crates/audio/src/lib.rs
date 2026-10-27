@@ -23,6 +23,9 @@ pub mod settings;
 pub mod station;
 pub mod synth;
 
-pub use radio::{Channel, ErrorReason, PlayerEvent, Radio, RadioCommand, RadioState, TUNE_SECONDS};
+pub use radio::{
+    Channel, ErrorReason, PlayerEvent, Radio, RadioCommand, RadioState, NO_SIGNAL_SECONDS,
+    TUNE_SECONDS,
+};
 pub use settings::{CustomStream, RadioSettings};
 pub use station::{Codec, RadioPreset, Source, Station};

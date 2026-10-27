@@ -5,6 +5,7 @@ members = [
     "crates/place",
     "crates/vehicle",
     "crates/world",
+    "crates/traffic",
     "crates/render",
     "crates/audio",
     "crates/app",
@@ -28,6 +29,7 @@ skywave-core = { path = "crates/core" }
 place = { path = "crates/place" }
 vehicle = { path = "crates/vehicle" }
 world = { path = "crates/world" }
+traffic = { path = "crates/traffic" }
 render = { path = "crates/render" }
 app = { path = "crates/app" }
 audio = { path = "crates/audio" }
