@@ -196,6 +196,8 @@ pub struct WalkGraph {
     pub cell_links: Vec<u32>,
     pub cell_spot_start: Vec<u32>,
     pub cell_spots: Vec<u32>,
+    /// The lanes' painted bands, for [`WalkGraph::in_lane`].
+    lane_cover: Cover,
 }
 
 /// A road end at a node, as `world::roads` sees it.
@@ -900,6 +902,7 @@ impl WalkGraph {
             adj,
             links: b.links,
             crossings,
+            lane_cover,
             ..WalkGraph::default()
         };
         g.grid();
@@ -1021,10 +1024,23 @@ impl WalkGraph {
             + self.links.len() * size_of::<Link>()
             + self.crossings.len() * size_of::<Crossing>()
             + self.spots.len() * size_of::<Spot>()
+            + self.lane_cover.start.len() * 4
+            + self.lane_cover.segs.len() * size_of::<CoverSeg>()
+    }
+
+    /// Whether `p` is inside a lane's painted band, at its level (where the lane graph's
+    /// lanes and the world's road ends differ near a junction, a walk's edge can be).
+    pub fn in_lane(&self, p: [f32; 3]) -> bool {
+        self.lane_cover.near(p).iter().any(|&(s0, s1, half, _)| {
+            let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
+            let y = s0[1] + (s1[1] - s0[1]) * t;
+            d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
+        })
     }
 }
 
 /// The roads' pavement, as centerline segments with their half widths in a grid.
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Cover {
     origin: [f32; 2],
     size: [i32; 2],
