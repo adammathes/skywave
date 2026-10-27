@@ -427,6 +427,65 @@ fn cars_stop_at_red_and_go_on_green() {
     assert!(waited >= 4, "some cars met a red");
 }
 
+/// Brake lamps: a car queued at a red shows them for as long as it stands, the car behind
+/// it too, and both go dark pulling away on green; a car cruising a free road never shows
+/// them.
+#[test]
+fn queued_cars_show_brake_lamps_and_cruising_ones_do_not() {
+    let _quiet = shared();
+    let g = straight();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    t.spawn_at(&g, 0, 20.0, 10.0).expect("room");
+    for tick in 0..40 * HZ as u64 {
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        let c = t.cars()[0];
+        // Past the first 20 s it is at its cruising speed.
+        if tick > 20 * HZ as u64 {
+            assert!(
+                !c.braking,
+                "cruising at {:.1} m/s shows brake lamps",
+                c.speed
+            );
+        }
+    }
+
+    let g = crossing();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(3));
+    let (mut queued, mut lit_queued, mut went) = (0, 0, 0);
+    for tick in 0..120 * HZ as u64 {
+        if tick % (5 * HZ as u64) == 0 && t.cars().iter().all(|c| c.seg != 0 || c.s > 40.0) {
+            t.spawn_at(&g, 0, 20.0, 10.0).expect("pool");
+        }
+        let before: Vec<Car> = t.cars().to_vec();
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        for c in t.cars() {
+            let Some(b) = before.iter().find(|b| b.id == c.id) else {
+                continue;
+            };
+            // Standing: not moving, and not pulling away either.
+            if c.seg == 0 && c.speed < 0.05 && c.speed <= b.speed {
+                queued += 1;
+                lit_queued += usize::from(c.braking);
+            }
+            if c.speed > 1.0 && c.speed > b.speed {
+                went += 1;
+                assert!(
+                    !c.braking,
+                    "car {} pulls away with its brake lamps lit",
+                    c.id
+                );
+            }
+        }
+    }
+    println!("brake lamps: {lit_queued} of {queued} queued car-steps lit, {went} pull-aways");
+    assert!(queued > 10 * HZ, "cars queued at the red");
+    assert_eq!(
+        lit_queued, queued,
+        "every car standing in the queue shows its brake lamps"
+    );
+    assert!(went > 0);
+}
+
 /// Two lanes due east (lanes 0 and 1, slot 0 at z = 0, slot 1 at z = 3.5) for 3 km,
 /// going straight on into lanes 2 and 3.
 fn two_lanes() -> LaneGraph {

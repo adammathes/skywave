@@ -46,6 +46,12 @@ pub const CAR_LEN_M: f32 = 4.6;
 pub const CAR_HALF_W_M: f32 = 0.9;
 
 const DT: f32 = 1.0 / SIM_HZ as f32;
+/// Brake lamps: slowing faster than this lights them (m/s²)...
+pub const BRAKE_LAMP_DECEL: f32 = 0.6;
+/// ...and they stay lit while the car keeps slowing, or creeps under this speed (m/s)...
+const CREEP_MPS: f32 = 1.0;
+/// ...and does not speed up faster than this (m/s²): pulling away.
+const PULL_AWAY: f32 = 0.3;
 /// Intelligent-driver model: maximum acceleration, comfortable and emergency braking
 /// (m/s²), jam distance behind a car, a stop line and the player (m).
 const A_MAX: f32 = 1.4;
@@ -186,6 +192,10 @@ pub struct Car {
     pub paint: u32,
     /// Head lights on.
     pub lights: bool,
+    /// Brake lamps lit: slowing harder than [`BRAKE_LAMP_DECEL`] in the last step, and
+    /// after that while still slowing or standing in a queue or at a line, until it pulls
+    /// away.
+    pub braking: bool,
     /// Lane id, or the lane count plus a turn id while on a turn.
     pub seg: u32,
     /// The segment before `seg` (the rear may still be on it), or [`NONE`].
@@ -275,7 +285,9 @@ pub struct Clock {
 }
 
 impl Clock {
-    fn dark(&self, delay_s: f32) -> bool {
+    /// Whether a driver who switches `delay_s` after dusk (and as long after dawn) has
+    /// the head lights on.
+    pub fn dark(&self, delay_s: f32) -> bool {
         let day = 86_400.0;
         let mut t = self.seconds_of_day - delay_s;
         if t < 0.0 {
@@ -778,6 +790,7 @@ impl Traffic {
             shape,
             paint,
             lights: false,
+            braking: false,
             seg: lane,
             prev: NONE,
             s,
@@ -1347,7 +1360,11 @@ impl Traffic {
         if ds > 0.0 || c.offset != old.offset {
             self.place(g, &mut c);
             if self.bumps(i, &old, &c, ps) {
-                self.cars[i] = Car { speed: 0.0, ..old };
+                self.cars[i] = Car {
+                    speed: 0.0,
+                    braking: brake_lamps(&old, 0.0),
+                    ..old
+                };
                 return;
             }
         }
@@ -1360,6 +1377,7 @@ impl Traffic {
             c.ghost = NONE;
             self.ghosts -= 1;
         }
+        c.braking = brake_lamps(&old, c.speed);
         self.cars[i] = c;
     }
 
@@ -1740,6 +1758,13 @@ impl Traffic {
         }
         h
     }
+}
+
+/// Whether a car that was `old` and now goes `speed` shows its brake lamps.
+fn brake_lamps(old: &Car, speed: f32) -> bool {
+    let dv = speed - old.speed;
+    let held = speed < old.speed || (speed < CREEP_MPS && dv <= PULL_AWAY * DT);
+    dv < -BRAKE_LAMP_DECEL * DT || (old.braking && held)
 }
 
 #[cfg(test)]
