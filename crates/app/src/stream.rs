@@ -434,17 +434,18 @@ pub struct StreamBudget {
 
 impl StreamBudget {
     /// 9×9 chunks, 2 ms a step; a pool for 4.96M vertices, 208 MB of buffers. With its
-    /// buildings, baked props, stroke-lettered signs and the light tiles its street lamps
-    /// cut, the coast's densest 11×11 chunks (the ring and the chunks waiting to be
-    /// evicted) take 1101 pages of 4096 vertices on seed 1; this is about 10% more (trees, cars,
-    /// lamps and small furniture are instances, outside the pool).
+    /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
+    /// stroke-lettered signs and the light tiles its street lamps cut, the coast's densest
+    /// 11×11 chunks (the ring and the chunks waiting to be evicted) take 1100 pages of 4096
+    /// vertices on seed 1; this is 1211, a tenth more (trees, cars, lamps and small
+    /// furniture are instances, outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         step_budget_s: 0.002,
         pool_vertices: 4_960_000,
     };
     /// 13×13 chunks, 4 ms a step; 6.62M vertices, 278 MB: room for the whole coast (1470
-    /// pages on seed 1) and about 10% more.
+    /// pages on seed 1) and a tenth more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         step_budget_s: 0.004,
@@ -1136,8 +1137,9 @@ mod tests {
         let all: usize = c.pages.iter().map(|p| p.1).sum();
         let native = StreamBudget::NATIVE.pool_config().pages as usize;
         eprintln!(
-            "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; the whole \
-             place {all} of the native pool's {native}"
+            "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; densest 3x3 \
+             {}; the whole place {all} of the native pool's {native}",
+            c.densest_pages(3)
         );
         assert!(pages <= pool, "{pages} pages of {pool}");
         assert!(all <= native, "{all} pages of {native}");
