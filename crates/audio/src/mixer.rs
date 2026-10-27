@@ -279,6 +279,7 @@ pub(crate) mod script {
             surface,
         }; 4];
         p.curb_kicks = frame / 150;
+        p.curb_speed_mps = 30.0;
         p.hits = frame / 330;
         p.hit_speed_mps = 6.0;
         p.horn = (10.0..10.6).contains(&t);

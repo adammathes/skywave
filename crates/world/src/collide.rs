@@ -23,8 +23,10 @@
 //! step's edge, so a tire rolls up a 15 cm curb over ~27 cm instead of hitting a wall.
 //! Sloped ground reports its own normal, and a slope is no curb to the curb kick.
 //! [`resolve`], called after each `vehicle::step`, pushes the car's body box out of walls,
-//! posts and boxes with an impulse and a damping pulse (bump and stop, never bounce), and
-//! kicks the body when a wheel hits a curb fast.
+//! posts and boxes and answers each with a plain impulse (a nudge back, a speed loss in
+//! proportion to the closing speed, a little yaw off center, a dip the springs rock out),
+//! kicks the body when a wheel hits a curb fast, and reports the hits as [`Bump`]s for the
+//! sound. Parked cars stay put; [`Rocking`] sways the ones the car knocks, for drawing.
 //!
 //! Water: for now the car rolls on the sea floor under it. A water body would be a patch
 //! with its own [`Surface`] kind (a slow drag region with a reset); the probe and the patch
@@ -36,8 +38,8 @@
 use alloc::vec::Vec;
 
 use place::Place;
-use vehicle::sim::{DT, WHEEL_RADIUS_M};
-use vehicle::{Ground, Hit, VehicleSpec, VehicleState};
+use vehicle::sim::{self, DT, WHEEL_RADIUS_M};
+use vehicle::{Ground, Hit, Rock, VehicleSpec, VehicleState};
 
 use crate::buildings;
 use crate::ground::{self, Surface as LotSurface};
@@ -60,16 +62,21 @@ const STEP_SAMPLE_M: f32 = 0.05;
 /// Height of the car body's lowest face above the ground at rest, m. The sim's body-corner
 /// contacts use the same 0.25 m.
 const BODY_CLEARANCE_M: f32 = 0.25;
-/// Contact response (`docs/VEHICLES.md` item 6).
-const RESTITUTION: f32 = 0.2;
-const FRICTION: f32 = 0.6;
-/// After a hit the body may separate from what it hit at no more than this, m/s: the damping
-/// pulse that turns restitution's bounce into a bump.
-const REBOUND_MAX_MPS: f32 = 0.3;
-/// Share of the remaining horizontal velocity the damping pulse removes from a hit at
-/// [`HIT_DAMP_SPEED`] or harder (scaled down linearly for softer hits).
-const HIT_DAMP: f32 = 0.2;
-const HIT_DAMP_SPEED: f32 = 10.0;
+/// Contact response (`docs/VEHICLES.md` item 6): a plain impulse. The contact point leaves
+/// what it hit at this share of the closing speed, at most [`REBOUND_MAX_MPS`] (a nudge
+/// back, never a bounce)...
+const RESTITUTION: f32 = 0.1;
+const REBOUND_MAX_MPS: f32 = 0.4;
+/// ...with light friction along the contact...
+const FRICTION: f32 = 0.3;
+/// ...then the car loses this share of its horizontal speed in a hit closing at
+/// [`SCRUB_SPEED`] or harder (in proportion below it)...
+const SCRUB: f32 = 0.4;
+const SCRUB_SPEED: f32 = 12.0;
+/// ...and the body pitches or rolls toward what it hit at this rate per m/s of closing
+/// speed, rad/s, at most [`ROCK_MAX`]: the springs rock it back.
+const ROCK_PER_MPS: f32 = 0.03;
+const ROCK_MAX: f32 = 0.4;
 /// Gauss-Seidel passes over the contacts per call.
 const CONTACT_PASSES: usize = 4;
 /// Wheels climb curbs quietly up to this speed (30 mph), m/s; above it the body is kicked.
@@ -1387,42 +1394,11 @@ fn box_contact(fp: &Footprint, b: &BoxSolid) -> Option<Contact> {
     })
 }
 
-/// The car's rigid-body numbers for impulses.
-struct Body {
-    inv_mass: f32,
-    inertia: [f32; 3],
-}
-
-impl Body {
-    /// World-space inverse inertia applied to `v`.
-    fn inv_inertia(&self, q: [f32; 4], v: V3) -> V3 {
-        let b = rotate_inv(q, v);
-        rotate(
-            q,
-            [
-                b[0] / self.inertia[0],
-                b[1] / self.inertia[1],
-                b[2] / self.inertia[2],
-            ],
-        )
-    }
-
-    /// Inverse effective mass at offset `r` from the center of mass along unit `n`.
-    fn k(&self, q: [f32; 4], r: V3, n: V3) -> f32 {
-        self.inv_mass + dot3(n, cross3(self.inv_inertia(q, cross3(r, n)), r))
-    }
-
-    fn apply(&self, state: &mut VehicleState, r: V3, impulse: V3) {
-        state.vel = add3(state.vel, scale3(impulse, self.inv_mass));
-        let dw = self.inv_inertia(state.rot, cross3(r, impulse));
-        state.ang_vel = add3(state.ang_vel, dw);
-    }
-}
-
-/// Positional correction, then restitution and friction impulses at the contact, then the
-/// damping pulse that keeps the car from bouncing off. Returns the speed at which the
-/// contact point approached (0 if it was already separating).
-fn respond(state: &mut VehicleState, body: &Body, c: &Contact) -> f32 {
+/// One contact's answer: nudge the car out along `n`, then a plain impulse at the contact
+/// point (stop the approach, a small rebound, light friction; off center it yaws the car),
+/// a speed loss in proportion to the closing speed, and a pitch or roll kick toward what
+/// was hit that the springs rock out. The hit, if the point was approaching.
+fn respond(state: &mut VehicleState, spec: &VehicleSpec, c: &Contact) -> Option<Bump> {
     let n = [c.n[0], 0.0, c.n[1]];
     state.pos[0] += c.n[0] * c.depth;
     state.pos[2] += c.n[1] * c.depth;
@@ -1431,29 +1407,55 @@ fn respond(state: &mut VehicleState, body: &Body, c: &Contact) -> f32 {
     let v_p = add3(state.vel, cross3(state.ang_vel, r));
     let vn = dot3(v_p, n);
     if vn >= 0.0 {
-        return 0.0;
+        return None;
     }
-    let j = -(1.0 + RESTITUTION) * vn / body.k(state.rot, r, n);
+    let closing = -vn;
+    let rebound = (RESTITUTION * closing).min(REBOUND_MAX_MPS);
+    let j = (closing + rebound) / sim::inv_mass_at(spec, state, r, n);
     let mut impulse = scale3(n, j);
     // Friction along the horizontal sliding direction, within the friction cone.
     let vt = [v_p[0] - n[0] * vn, 0.0, v_p[2] - n[2] * vn];
     let vt_len = sqrt(dot3(vt, vt));
     if vt_len > 1e-6 {
         let t = scale3(vt, 1.0 / vt_len);
-        let jt = (vt_len / body.k(state.rot, r, t)).min(FRICTION * j);
+        let jt = (vt_len / sim::inv_mass_at(spec, state, r, t)).min(FRICTION * j);
         impulse = add3(impulse, scale3(t, -jt));
     }
-    body.apply(state, r, impulse);
+    sim::knock(spec, state, r, impulse);
 
-    // Damping pulse: cap the rebound, and bleed horizontal speed in proportion to the hit.
-    let sep = dot3(state.vel, n);
-    if sep > REBOUND_MAX_MPS {
-        state.vel = add3(state.vel, scale3(n, REBOUND_MAX_MPS - sep));
-    }
-    let keep = 1.0 - HIT_DAMP * (-vn / HIT_DAMP_SPEED).min(1.0);
-    state.vel[0] *= keep;
-    state.vel[2] *= keep;
-    -vn
+    // The speed loss, across the normal only, so the nudge back survives it.
+    let keep = 1.0 - SCRUB * (closing / SCRUB_SPEED).min(1.0);
+    let along = dot3(state.vel, n);
+    let lost = [
+        (state.vel[0] - n[0] * along) * (keep - 1.0),
+        0.0,
+        (state.vel[2] - n[2] * along) * (keep - 1.0),
+    ];
+    sim::knock(spec, state, [0.0; 3], scale3(lost, spec.mass_kg));
+
+    // The side that hit dips: a spin about the horizontal axis across the normal. It sits
+    // outside the impulse model and adds a little energy, capped at ROCK_MAX (0.4 rad/s, a
+    // dip of 1-2 degrees); the springs and dampers take it straight back out, and it is what
+    // makes a hit read as a bump rather than a stop.
+    let rock = (ROCK_PER_MPS * closing).min(ROCK_MAX);
+    state.ang_vel = add3(state.ang_vel, scale3([-n[2], 0.0, n[0]], rock));
+    Some(Bump {
+        speed: closing,
+        normal: n,
+        at: rotate_inv(state.rot, r),
+    })
+}
+
+/// A hit on the car, for sound and tests.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Bump {
+    /// Closing speed of the contact point, m/s.
+    pub speed: f32,
+    /// Unit world-space normal of what was hit, pointing at the car (up for a curb).
+    pub normal: [f32; 3],
+    /// Where on the car, body space (`+x` right, `-z` forward, origin at the center of
+    /// mass), m.
+    pub at: [f32; 3],
 }
 
 /// What [`resolve`] did this step, for sound, camera shake and tests.
@@ -1461,25 +1463,27 @@ fn respond(state: &mut VehicleState, body: &Body, c: &Contact) -> f32 {
 pub struct Impact {
     /// The body touched a wall, post or box.
     pub contact: bool,
-    /// Fastest approach of a contact point this step, m/s (0 for resting contact).
-    pub speed: f32,
-    /// A wheel hit a step above [`CURB_CLIMB_MPS`] and kicked the body.
+    /// The hardest of those contacts this step (speed 0 for resting contact).
+    pub hit: Bump,
+    /// A wheel hit a step above [`CURB_CLIMB_MPS`] and kicked the body...
     pub curb_kick: bool,
+    /// ...the fastest such wheel: its speed, up, and its contact patch.
+    pub curb: Bump,
+    /// The parked car hit hardest this step, an index into [`WorldCollider::boxes`], and
+    /// that hit.
+    pub parked: Option<u32>,
+    pub parked_hit: Bump,
 }
 
-/// Pushes the car out of walls, posts and boxes and answers each contact (restitution
-/// [`RESTITUTION`], friction [`FRICTION`], then a damping pulse), and kicks the body up when
-/// a wheel hits a curb above [`CURB_CLIMB_MPS`]. Call after every `vehicle::step` with the
-/// same collider that step probed.
+/// Pushes the car out of walls, posts and boxes and answers each contact with a plain
+/// impulse ([`RESTITUTION`], [`FRICTION`], [`SCRUB`], [`ROCK_PER_MPS`]), and kicks the body
+/// up when a wheel hits a curb above [`CURB_CLIMB_MPS`]. Call after every `vehicle::step`
+/// with the same collider that step probed.
 ///
 /// The car's center never crosses a wall between steps: the move since the last step is
 /// swept against walls first and clamped at the first one crossed.
 pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCollider) -> Impact {
     let mut impact = Impact::default();
-    let body = Body {
-        inv_mass: 1.0 / spec.mass_kg,
-        inertia: spec.inertia_box(),
-    };
     let moved = scale3(state.vel, DT);
     let prev = sub3(state.pos, moved);
     sweep_walls(state, prev, collider);
@@ -1495,10 +1499,20 @@ pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCol
             for z in z0..=z1 {
                 for x in x0..=x1 {
                     let cell = (z * collider.cells[0] + x) as usize;
-                    if let Some(v) = resolve_cell(state, spec, &body, collider, cell, moved) {
+                    let mut on = |hit: Option<Bump>, parked: Option<u32>| {
                         touched = true;
-                        impact.speed = impact.speed.max(v);
-                    }
+                        let Some(hit) = hit else {
+                            return;
+                        };
+                        if hit.speed > impact.hit.speed {
+                            impact.hit = hit;
+                        }
+                        if parked.is_some() && hit.speed > impact.parked_hit.speed {
+                            impact.parked = parked;
+                            impact.parked_hit = hit;
+                        }
+                    };
+                    resolve_cell(state, spec, collider, cell, moved, &mut on);
                 }
             }
             if !touched {
@@ -1507,30 +1521,105 @@ pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCol
             impact.contact = true;
         }
     }
-    impact.curb_kick = curb_kick(state, spec, &body, collider);
+    curb_kick(state, spec, collider, &mut impact);
     state.speed_mps = dot3(state.vel, rotate(state.rot, [0.0, 0.0, -1.0]));
     impact
+}
+
+/// Parked cars [`Rocking`] keeps swaying at once.
+pub const ROCK_SLOTS: usize = 4;
+
+/// A parked car swaying on its springs: the center of its box, [`BoxSolid::c`] (also
+/// where the Place's prop stands), and its sway.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RockingCar {
+    pub c: [f32; 2],
+    pub rock: Rock,
+    pub on: bool,
+}
+
+/// The parked cars the player has knocked, swaying until they settle. Nothing moves
+/// along the ground: this is only how they are drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Rocking {
+    pub cars: [RockingCar; ROCK_SLOTS],
+}
+
+impl Rocking {
+    /// After each [`resolve`]: the parked car `impact` hit, if any, is knocked away from
+    /// the player's car. It takes the slot it already has, else a free one, else the
+    /// stillest.
+    pub fn note(&mut self, impact: &Impact, collider: &WorldCollider) {
+        let Some(i) = impact.parked else {
+            return;
+        };
+        let c = collider.boxes[i as usize].c;
+        let mut slot = 0;
+        let mut best = f32::MAX;
+        for (k, car) in self.cars.iter().enumerate() {
+            let energy = if car.on && car.c == c {
+                -1.0
+            } else if !car.on {
+                0.0
+            } else {
+                let r = &car.rock;
+                abs(r.tilt[0]) + abs(r.tilt[1]) + abs(r.rate[0]) + abs(r.rate[1])
+            };
+            if energy < best {
+                best = energy;
+                slot = k;
+            }
+        }
+        let car = &mut self.cars[slot];
+        if !(car.on && car.c == c) {
+            *car = RockingCar {
+                c,
+                rock: Rock::default(),
+                on: true,
+            };
+        }
+        let hit = &impact.parked_hit;
+        car.rock.knock([-hit.normal[0], -hit.normal[2]], hit.speed);
+    }
+
+    /// One sim step of every swaying car; a settled one frees its slot.
+    pub fn step(&mut self) {
+        for car in &mut self.cars {
+            if car.on {
+                car.rock.step();
+                car.on = !car.rock.settled();
+            }
+        }
+    }
+
+    /// The tilt toward world `+x` and `+z`, rad, of the parked car standing at `c`, if it
+    /// is swaying.
+    pub fn tilt_at(&self, c: [f32; 2]) -> Option<[f32; 2]> {
+        self.cars
+            .iter()
+            .find(|car| car.on && car.c == c)
+            .map(|car| car.rock.tilt)
+    }
 }
 
 fn bin_slice(bins: &Bins, cell: usize) -> &[u32] {
     &bins.items[bins.start[cell] as usize..bins.start[cell + 1] as usize]
 }
 
-/// One pass over the solids binned in `cell`: the fastest approach speed if any touched.
+/// One pass over the solids binned in `cell`: `on` hears of every contact, with the hit if
+/// it was one and the box's index if it is a parked car.
 fn resolve_cell(
     state: &mut VehicleState,
     spec: &VehicleSpec,
-    body: &Body,
     collider: &WorldCollider,
     cell: usize,
     moved: V3,
-) -> Option<f32> {
-    let mut touched = None;
+    on: &mut impl FnMut(Option<Bump>, Option<u32>),
+) {
     for &i in bin_slice(&collider.wall_bins, cell) {
         let fp = Footprint::new(state, spec);
         if let Some(c) = wall_contact(&fp, &collider.walls[i as usize]) {
-            let v = respond(state, body, &c);
-            touched = Some(touched.unwrap_or(0.0f32).max(v));
+            on(respond(state, spec, &c), None);
         }
     }
     for &i in bin_slice(&collider.post_bins, cell) {
@@ -1542,18 +1631,17 @@ fn resolve_cell(
             l[1] + dot2([moved[0], moved[2]], fp.r),
         ];
         if let Some(c) = post_contact(&fp, post, prev) {
-            let v = respond(state, body, &c);
-            touched = Some(touched.unwrap_or(0.0f32).max(v));
+            on(respond(state, spec, &c), None);
         }
     }
     for &i in bin_slice(&collider.box_bins, cell) {
         let fp = Footprint::new(state, spec);
-        if let Some(c) = box_contact(&fp, &collider.boxes[i as usize]) {
-            let v = respond(state, body, &c);
-            touched = Some(touched.unwrap_or(0.0f32).max(v));
+        let b = &collider.boxes[i as usize];
+        if let Some(c) = box_contact(&fp, b) {
+            let parked = matches!(b.kind, PropKind::ParkedCar { .. }).then_some(i);
+            on(respond(state, spec, &c), parked);
         }
     }
-    touched
 }
 
 /// Continuous check: if the center went through a wall's outside face since `prev`, put it
@@ -1604,15 +1692,14 @@ fn sweep_walls(state: &mut VehicleState, prev: V3, collider: &WorldCollider) {
 }
 
 /// A wheel that went up a step faster than [`CURB_CLIMB_MPS`] kicks its corner of the body
-/// upward, harder the faster and higher.
+/// upward, harder the faster and higher; the fastest is `impact.curb`.
 fn curb_kick(
     state: &mut VehicleState,
     spec: &VehicleSpec,
-    body: &Body,
     collider: &WorldCollider,
-) -> bool {
+    impact: &mut Impact,
+) {
     let wheels = spec.wheel_positions();
-    let mut kicked = false;
     for (i, mount) in wheels.iter().enumerate() {
         if !state.wheels[i].grounded {
             continue;
@@ -1631,11 +1718,17 @@ fn curb_kick(
         }
         let up = [0.0, 1.0, 0.0];
         let kick = (CURB_KICK_PER_MPS_M * rise * (speed - CURB_CLIMB_MPS)).min(CURB_KICK_MAX);
-        let j = kick / body.k(state.rot, r, up);
-        body.apply(state, r, scale3(up, j));
-        kicked = true;
+        let j = kick / sim::inv_mass_at(spec, state, r, up);
+        sim::knock(spec, state, r, scale3(up, j));
+        impact.curb_kick = true;
+        if speed > impact.curb.speed {
+            impact.curb = Bump {
+                speed,
+                normal: up,
+                at: *mount,
+            };
+        }
     }
-    kicked
 }
 
 /// Compile-time proof that the collider's records are plain data.
@@ -1647,6 +1740,9 @@ const _: () = {
     copy::<Post>();
     copy::<BoxSolid>();
     copy::<GroundSample>();
+    copy::<Bump>();
+    copy::<Impact>();
+    copy::<Rocking>();
 };
 
 #[cfg(test)]

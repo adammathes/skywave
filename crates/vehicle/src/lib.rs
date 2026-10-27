@@ -18,7 +18,9 @@ pub mod shape;
 pub mod sim;
 mod spec;
 
-pub use sim::{step, Assists, FlatGround, Ground, Hit, VehicleInput, VehicleState, WheelState};
+pub use sim::{
+    step, Assists, FlatGround, Ground, Hit, Rock, VehicleInput, VehicleState, WheelState,
+};
 pub use spec::{
     Aero, Brakes, Drive, Engine, Era, Feel, Gauge, Interior, SpecError, SpeedUnit, Steer, Susp,
     Tires, VehicleClass, VehicleSpec,

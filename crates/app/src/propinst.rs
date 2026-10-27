@@ -135,6 +135,8 @@ struct Entry {
     chunk: [i32; 2],
     /// Squared draw distance.
     reach2: f32,
+    /// A parked car: it sways when knocked ([`world::collide::Rocking`]).
+    car: bool,
 }
 
 /// The instanced props of a place (see the module docs).
@@ -207,6 +209,7 @@ impl PropInstances {
                 &[u64::from(p.pos[0].to_bits()), u64::from(p.pos[2].to_bits())],
             );
             let chunk = chunk_of([p.pos[0], p.pos[2]]);
+            let car = matches!(p.kind, PropKind::ParkedCar { .. });
             let mut tint = [1.0; 4];
             let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
@@ -273,6 +276,7 @@ impl PropInstances {
                 bounds,
                 chunk,
                 reach2: reach * reach,
+                car,
             });
         }
         // Stable, so each mesh's instances keep the table's order.
@@ -302,13 +306,15 @@ impl PropInstances {
 
     /// Appends the instances near `eye` whose chunk `live` says is drawn, at most
     /// [`MAX_PROP_INSTANCES`], each with the nearest of `lights` that reach it when within
-    /// [`LIT_RADIUS_M`]; street lamp lenses glow by `lamp_glow`. Returns how many.
+    /// [`LIT_RADIUS_M`]; street lamp lenses glow by `lamp_glow`; parked cars `rocking`
+    /// knocked lean on their springs. Returns how many.
     pub fn push(
         &self,
         eye: Vec3,
         live: impl Fn([i32; 2]) -> bool,
         lights: &[PointLight],
         lamp_glow: f32,
+        rocking: &world::collide::Rocking,
         out: &mut Vec<MeshInstance>,
     ) -> usize {
         let mut n = 0;
@@ -340,15 +346,31 @@ impl PropInstances {
                 } else {
                     1.0
                 };
+                // A knocked parked car leans the same at either level of detail.
+                let mut transform = e.transform;
+                if e.car {
+                    let at = [transform[3][0], transform[3][2]];
+                    if let Some(tilt) = rocking.tilt_at(at) {
+                        transform = tilted(transform, tilt);
+                    }
+                }
                 out.push(MeshInstance {
                     lights,
                     glow,
                     color: e.tint,
-                    ..MeshInstance::new(self.ids[usize::from(mesh)], e.transform)
+                    ..MeshInstance::new(self.ids[usize::from(mesh)], transform)
                 });
                 n += 1;
             }
         }
         n
     }
+}
+
+/// `transform` leaned about its ground point by `tilt` (rad, toward world `+x` and `+z`).
+fn tilted(transform: [[f32; 4]; 4], tilt: [f32; 2]) -> [[f32; 4]; 4] {
+    let m = Mat4::from_cols_array_2d(&transform);
+    let at = m.w_axis.truncate();
+    let lean = Mat4::from_rotation_x(tilt[1]) * Mat4::from_rotation_z(-tilt[0]);
+    (Mat4::from_translation(at) * lean * Mat4::from_translation(-at) * m).to_cols_array_2d()
 }

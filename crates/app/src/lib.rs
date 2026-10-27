@@ -592,7 +592,8 @@ impl App {
             let stream = self.stream.as_deref();
             let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
             let lights = self.lights.lights();
-            props.push(eye, live, lights, lamp_glow, &mut self.instances);
+            let rocking = &self.drive.rocking;
+            props.push(eye, live, lights, lamp_glow, rocking, &mut self.instances);
         }
         SceneView {
             camera: Camera {
@@ -1101,7 +1102,7 @@ mod tests {
         // deliberately.
         assert_eq!(
             a.state_hash(),
-            0x3bd9_240f_f5b3_05d0,
+            0xadde_172d_3f95_7922,
             "{:#x}",
             a.state_hash()
         );

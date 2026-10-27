@@ -11,7 +11,8 @@
 //!   [`JOINT_SPACING_M`], grass a swishing hiss.
 //! - **Wind**: band-passed noise, independent per ear, rising with the square of speed,
 //!   with a slow gust.
-//! - **Curb kick** and **wall hit**: a low thump; the hit adds a short, soft crunch.
+//! - **Curb kick** and **wall hit**: a low thump, louder the faster the bump and leaning
+//!   toward the side of the car it was on; the hit adds a short, soft crunch.
 //! - **Horn**: two tones a minor third apart (410 and 500 Hz), brassy through a band-pass,
 //!   on its own output for the ui bus.
 //! - **Ambience**: an ocean wash (low-passed noise swelling every ~12 s) and, by day, the
@@ -64,10 +65,12 @@ pub struct WorldSynth {
     curb: Decay,
     curb_click: Decay,
     curb_osc: f32,
+    curb_gain: [f32; 2],
     click_lp: Svf,
     hit: Decay,
     thud: Decay,
     hit_osc: f32,
+    hit_gain: [f32; 2],
     hit_lp: Svf,
 
     horn: f32,
@@ -131,10 +134,12 @@ impl WorldSynth {
             curb: Decay::SILENT,
             curb_click: Decay::SILENT,
             curb_osc: 0.0,
+            curb_gain: [1.0, 1.0],
             click_lp: Svf::new(1500.0, 0.7),
             hit: Decay::SILENT,
             thud: Decay::SILENT,
             hit_osc: 0.0,
+            hit_gain: [1.0, 1.0],
             hit_lp: Svf::new(1800.0, 0.7),
             horn: 0.0,
             horn_phase: [0.0; 2],
@@ -162,9 +167,11 @@ impl WorldSynth {
     pub fn set_params(&mut self, p: &AudioParams) {
         if !self.fresh {
             if p.curb_kicks != self.target.curb_kicks {
-                self.curb = Decay::hit(0.7, 0.07);
-                self.curb_click = Decay::hit(0.35, 0.004);
+                let level = 0.7 * (0.2 + 0.8 * unit(p.curb_speed_mps / 24.0));
+                self.curb = Decay::hit(level, 0.07);
+                self.curb_click = Decay::hit(0.5 * level, 0.004);
                 self.curb_osc = 0.0;
+                self.curb_gain = side_gains(p.curb_side);
             }
             if p.hits != self.target.hits {
                 let level = 0.15 + 0.55 * unit(p.hit_speed_mps / 12.0);
@@ -172,6 +179,7 @@ impl WorldSynth {
                     self.hit = Decay::hit(level, 0.045);
                     self.thud = Decay::hit(level, 0.06);
                     self.hit_osc = 0.0;
+                    self.hit_gain = side_gains(p.hit_side);
                 }
             }
         }
@@ -335,8 +343,8 @@ impl WorldSynth {
             let thump = c * sin_turns(self.curb_osc);
             self.curb_osc = fract(self.curb_osc + (50.0 + 40.0 * c) * DT);
             let click = self.click_lp.low(w) * self.curb_click.step() * 2.0;
-            l += thump + click;
-            r += thump + click;
+            l += (thump + click) * self.curb_gain[0];
+            r += (thump + click) * self.curb_gain[1];
         }
 
         // Wall hit: a thud and a short, soft crunch.
@@ -347,8 +355,8 @@ impl WorldSynth {
             let t = self.thud.step();
             let thud = t * sin_turns(self.hit_osc);
             self.hit_osc = fract(self.hit_osc + (60.0 + 30.0 * t) * DT);
-            l += crunch + thud;
-            r += crunch + thud;
+            l += (crunch + thud) * self.hit_gain[0];
+            r += (crunch + thud) * self.hit_gain[1];
         }
 
         // Horn.
@@ -424,6 +432,12 @@ impl WorldSynth {
         }
         self.brown = 0.0;
     }
+}
+
+/// Left and right gains of a bump on `side` of the car (`[-1, 1]`, left to right): a
+/// lean, not a pan, so a bump square on the nose plays as it always did.
+fn side_gains(side: f32) -> [f32; 2] {
+    [1.0 - 0.35 * side, 1.0 + 0.35 * side]
 }
 
 #[cfg(test)]
@@ -535,6 +549,31 @@ mod tests {
         w.set_params(&p);
         render_into(&mut w, &mut buf);
         assert!(rms(&buf) < 1e-3, "{}", rms(&buf));
+    }
+
+    #[test]
+    fn bumps_scale_with_speed_and_lean_to_their_side() {
+        // One curb kick at `speed` on `side`: the RMS of each ear over its thump.
+        let bump = |speed: f32, side: f32| {
+            let mut w = WorldSynth::new();
+            let mut p = AudioParams::default();
+            w.set_params(&p);
+            p.curb_kicks = 1;
+            p.curb_speed_mps = speed;
+            p.curb_side = side;
+            w.set_params(&p);
+            let mut buf = vec![0.0; 9600];
+            render_into(&mut w, &mut buf);
+            let l: Vec<f32> = buf.iter().step_by(2).copied().collect();
+            let r: Vec<f32> = buf.iter().skip(1).step_by(2).copied().collect();
+            [rms(&l), rms(&r)]
+        };
+        let soft = bump(14.0, 0.0);
+        let hard = bump(25.0, 0.0);
+        assert!(hard[0] > 1.2 * soft[0], "{soft:?} {hard:?}");
+        assert_eq!(soft[0], soft[1]);
+        let left = bump(20.0, -1.0);
+        assert!(left[0] > 1.5 * left[1], "{left:?}");
     }
 
     #[test]

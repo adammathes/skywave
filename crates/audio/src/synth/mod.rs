@@ -86,11 +86,16 @@ pub struct AudioParams {
     pub speed_mps: f32,
     /// Front-left, front-right, rear-left, rear-right.
     pub wheels: [WheelParams; 4],
-    /// Counts every curb kick so far.
+    /// Counts every curb kick so far, and how fast the latest wheel hit its curb, m/s.
     pub curb_kicks: u32,
+    pub curb_speed_mps: f32,
     /// Counts every wall, post or box hit so far, and how hard the latest was, m/s.
     pub hits: u32,
     pub hit_speed_mps: f32,
+    /// Which side of the car the latest curb kick and hit were on, `[-1, 1]` (left to
+    /// right): the bump leans that way in the stereo image.
+    pub curb_side: f32,
+    pub hit_side: f32,
     pub horn: bool,
     /// Ambience amounts, `[0, 1]`: ocean wash near beach and water, birds by day in
     /// residential streets and parks.
@@ -118,8 +123,11 @@ impl Default for AudioParams {
             speed_mps: 0.0,
             wheels: [wheel; 4],
             curb_kicks: 0,
+            curb_speed_mps: 0.0,
             hits: 0,
             hit_speed_mps: 0.0,
+            curb_side: 0.0,
+            hit_side: 0.0,
             horn: false,
             ocean: 0.0,
             birds: 0.0,
@@ -158,7 +166,10 @@ impl AudioParams {
             },
             speed_mps: clamp(fin(self.speed_mps, 0.0), -150.0, 150.0),
             wheels,
+            curb_speed_mps: clamp(self.curb_speed_mps, 0.0, 100.0),
             hit_speed_mps: clamp(self.hit_speed_mps, 0.0, 100.0),
+            curb_side: clamp(fin(self.curb_side, 0.0), -1.0, 1.0),
+            hit_side: clamp(fin(self.hit_side, 0.0), -1.0, 1.0),
             ocean: unit(self.ocean),
             birds: unit(self.birds),
             ..*self
