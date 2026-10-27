@@ -9,7 +9,7 @@
 //!
 //! Usage: `skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] [--frames N]
 //! [--exit] [--no-vsync] [--quality NAME] [--no-cull] [--no-prepass] [--radio-off]
-//! [--version]`.
+//! [--music DIR] [--version]`.
 //! `--scene` sets one key of the starting scene (`app::scene`: `t=22:30`, `cam=cockpit`,
 //! `pos=-92,4.9`, `yaw=90`, `lights=1`, ...); `--seed N` and `--car ID` are
 //! `--scene seed=N` and `--scene car=ID`. `--stats` prints the adapter, the surface and a
@@ -42,8 +42,12 @@
 //!
 //! Sound plays through the default output device at 48 kHz (`sfx`); without one the game
 //! runs silent. The car radio's internet stations play through it too (`radio`); the
-//! window title shows the station and what it says is playing.
+//! window title shows the station and what it says is playing. The player's own MP3s are
+//! stations as well: each folder in the music folder (`--music DIR`, else `music` beside
+//! the executable, else `~/Music`) is one, scanned at start (`music`). `--radio-off` leaves
+//! out both.
 
+mod music;
 mod pad;
 mod radio;
 mod settings;
@@ -113,6 +117,8 @@ struct Options {
     no_prepass: bool,
     /// The radio stays silent and fetches nothing.
     radio_off: bool,
+    /// The music folder (`--music`).
+    music: Option<std::path::PathBuf>,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -126,6 +132,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
             "--no-cull" => opts.no_cull = true,
             "--no-prepass" => opts.no_prepass = true,
             "--radio-off" => opts.radio_off = true,
+            "--music" => {
+                let v = args.next().ok_or("--music needs a folder")?;
+                opts.music = Some(v.into());
+            }
             "--frames" => {
                 let v = args.next().ok_or("--frames needs a count")?;
                 let n = v
@@ -766,6 +776,8 @@ struct Shell {
     sfx: Option<sfx::Sfx>,
     /// The car radio's player, when there is a sink to play it and it is not turned off.
     radio: Option<radio::Player>,
+    /// The music folder's stations as the scan finds them.
+    music: Option<std::sync::mpsc::Receiver<music::Folder>>,
     /// What the window title last showed: the station playing and the player's title count.
     title: (Option<usize>, u32),
 }
@@ -781,6 +793,13 @@ impl Shell {
         };
         while let Some(event) = player.poll() {
             self.app.radio_event(event);
+        }
+        if let Some(found) = &self.music {
+            // Kept: the same folder is scanned again next session.
+            while let Ok(f) = found.try_recv() {
+                self.app
+                    .add_music_folder(&f.path, &f.name, f.tracks, false, true);
+            }
         }
         for cmd in self.app.radio_commands() {
             player.command(&cmd);
@@ -1021,7 +1040,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "usage: skywave [--seed N] [--car ID] [--scene KEY=VALUE]... [--stats] \
                  [--frames N [--exit]] [--no-vsync] [--quality low|battery|deck|medium|high|ultra] \
-                 [--no-cull] [--no-prepass] [--radio-off] [--version]"
+                 [--no-cull] [--no-prepass] [--radio-off] [--music DIR] [--version]"
             );
             return if e.is_empty() {
                 ExitCode::SUCCESS
@@ -1063,6 +1082,10 @@ fn main() -> ExitCode {
     let radio_out = (!opts.radio_off).then(|| Arc::new(radio::Output::new()));
     let sfx = sfx::Sfx::start(radio_out.clone());
     let radio = radio_out.filter(|_| sfx.is_some()).map(radio::Player::new);
+    let music = radio
+        .as_ref()
+        .and_then(|_| music::default_dir(opts.music.as_deref()))
+        .map(music::scan_in_background);
     let mut shell = Shell {
         app,
         opts,
@@ -1081,6 +1104,7 @@ fn main() -> ExitCode {
         error: None,
         sfx,
         radio,
+        music,
         title: (None, 0),
     };
     if let Err(e) = event_loop.run_app(&mut shell) {
@@ -1175,6 +1199,11 @@ mod tests {
         assert!(args(&["--quality", "potato"]).is_err());
         assert!(!args(&["--frames", "3"]).unwrap().exit);
         assert!(args(&["--radio-off"]).unwrap().radio_off);
+        assert_eq!(
+            args(&["--music", "/tunes"]).unwrap().music,
+            Some("/tunes".into())
+        );
+        assert!(args(&["--music"]).is_err());
     }
 
     #[test]

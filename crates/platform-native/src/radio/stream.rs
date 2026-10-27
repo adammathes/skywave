@@ -113,14 +113,8 @@ fn run_with(
     notes: &Sender<Note>,
 ) {
     let mut st = Stream {
-        token,
-        epoch,
-        ring,
-        notes,
-        started: false,
-        written: 0,
-        title: None,
         stall,
+        ..Stream::new(token, epoch, ring, notes)
     };
     loop {
         let (end, played) = st.connect_and_play(url);
@@ -147,7 +141,8 @@ fn run_with(
     }
 }
 
-struct Stream<'a> {
+/// A stream's writer into the ring (also what a file thread writes through).
+pub(super) struct Stream<'a> {
     token: u32,
     epoch: u32,
     ring: &'a Ring,
@@ -160,8 +155,27 @@ struct Stream<'a> {
     stall: Duration,
 }
 
-impl Stream<'_> {
-    fn wanted(&self) -> bool {
+impl<'a> Stream<'a> {
+    /// A writer for the `Play` (or `PlayFile`) with `token`, as the writer of `epoch`.
+    pub(super) fn new(
+        token: u32,
+        epoch: u32,
+        ring: &'a Ring,
+        notes: &'a Sender<Note>,
+    ) -> Stream<'a> {
+        Stream {
+            token,
+            epoch,
+            ring,
+            notes,
+            started: false,
+            written: 0,
+            title: None,
+            stall: STALL,
+        }
+    }
+
+    pub(super) fn wanted(&self) -> bool {
         self.ring.epoch() == self.epoch
     }
 
@@ -225,23 +239,30 @@ impl Stream<'_> {
 
     /// Writes all of `pcm`, waiting while the ring is full; reports `Started` once the
     /// prebuffer is in.
-    fn write(&mut self, mut pcm: &[f32]) -> Result<(), Gone> {
+    pub(super) fn write(&mut self, mut pcm: &[f32]) -> Result<(), Gone> {
         let prebuffer = (PREBUFFER_SECONDS * RATE as f32) as usize * 2;
         while !pcm.is_empty() {
             let n = self.ring.push(self.epoch, pcm)?;
             pcm = &pcm[n..];
             self.written += n;
-            if !self.started && self.written >= prebuffer {
-                self.started = true;
-                let _ = self
-                    .notes
-                    .send(Note::Event(PlayerEvent::Started { token: self.token }));
+            if self.written >= prebuffer {
+                self.mark_started();
             }
             if n == 0 {
                 thread::sleep(Duration::from_millis(10));
             }
         }
         Ok(())
+    }
+
+    /// Reports `Started`, once.
+    pub(super) fn mark_started(&mut self) {
+        if !self.started {
+            self.started = true;
+            let _ = self
+                .notes
+                .send(Note::Event(PlayerEvent::Started { token: self.token }));
+        }
     }
 
     fn set_title(&mut self, title: String) {

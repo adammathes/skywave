@@ -5,11 +5,14 @@
 //! Each `Play` cuts the [`Ring`] (the old station falls silent and its thread stops
 //! writing) and starts a stream thread (`stream`) that fetches the URL (`http`), splits
 //! off the ICY titles (`icy`), decodes MP3 and resamples to 48 kHz (`decode`) into the
-//! ring. The sound sink's callback reads the ring through a [`Tap`] and adds the radio to
+//! ring. Each `PlayFile` (a track of the player's music folder, see `crate::music`) starts a
+//! file thread (`file`) that reads, seeks, decodes and resamples the same way. The sound
+//! sink's callback reads the ring through a [`Tap`] and adds the radio to
 //! the mixer's output. The game's thread only sends commands and polls a channel: it never
 //! waits on the network.
 
 mod decode;
+pub(crate) mod file;
 mod http;
 mod icy;
 mod ring;
@@ -93,15 +96,23 @@ impl Player {
                     self.tx.clone(),
                 );
             }
-            RadioCommand::PlayFile { token, .. } => {
-                // Natively the dial holds no file stations yet (music folders come next);
-                // fail rather than leave the radio waiting.
-                self.out.ring.cut();
+            RadioCommand::PlayFile {
+                key,
+                start_s,
+                token,
+            } => {
+                let epoch = self.out.ring.cut();
                 self.token = *token;
                 self.set_title(None);
-                let _ = self
-                    .tx
-                    .send(Note::Event(PlayerEvent::Failed { token: *token }));
+                log::info!("radio: play {key} from {start_s:.0} s");
+                file::spawn(
+                    key.clone(),
+                    *start_s,
+                    *token,
+                    epoch,
+                    Arc::clone(&self.out.ring),
+                    self.tx.clone(),
+                );
             }
             RadioCommand::Stop => {
                 self.out.ring.cut();
