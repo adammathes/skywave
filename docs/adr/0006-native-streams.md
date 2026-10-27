@@ -1,6 +1,7 @@
 # ADR 0006: native radio streams (rustls, a hand-written HTTP/1.0 GET, nanomp3-core)
 
-Status: proposed, 2026-10-27
+Status: accepted, 2026-10-27 (the owner asked for the stations to work in the native build;
+`docs/backlog/NOTES.md` row 13)
 
 ## Context
 The web build plays the radio presets' internet stations through an `<audio>` element. The
