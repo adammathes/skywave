@@ -1030,8 +1030,8 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     let builtin = &crate::vehicles::BUILTIN;
     let store = SharedStore::default();
     let mut h = Harness::with_store(&store);
-    assert_eq!(h.app.drive.spec.id, "corsair_gtx");
-    let corsair_ids = h.app.car_meshes;
+    assert_eq!(h.app.drive.spec.id, "gannet_gt");
+    let gannet_ids = h.app.car_meshes;
     let before = h.app.mesh_count();
     assert_eq!(before, h.app.meshes().len());
     assert_eq!(
@@ -1062,13 +1062,8 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(0)]);
     assert_eq!((h.focus(), browsed(&h)), (0, (0, 0)));
     let text = h.hud_text();
-    let corsair = &roster::roster()[0];
-    for line in [
-        &corsair.name,
-        &corsair.stats,
-        &corsair.engine,
-        &corsair.drive,
-    ] {
+    let gannet = &roster::roster()[0];
+    for line in [&gannet.name, &gannet.stats, &gannet.engine, &gannet.drive] {
         assert!(text.contains(line.as_str()), "{text}");
     }
     assert!(
@@ -1082,7 +1077,7 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     let view = h.app.scene_view(1.0, 16.0 / 9.0);
     assert!(view.instances[world..]
         .iter()
-        .all(|i| i.mesh != corsair_ids.lods[0].interior));
+        .all(|i| i.mesh != gannet_ids.lods[0].interior));
     let (at, heading) = spot(&h.app);
 
     // Right: the wagon on the turntable, built and queued once; Select drives it, the menu
@@ -1090,9 +1085,9 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     let wagon_meshes = car_mesh_count(builtin[1].0);
     h.pad(PadButton::DpadRight);
     assert_eq!(browsed(&h), (1, 0));
-    assert!(h.hud_text().contains("Palisade Wagon"));
+    assert!(h.hud_text().contains("Homestead Wagon"));
     assert_eq!(h.app.mesh_count(), before + wagon_meshes);
-    assert_eq!(h.app.drive.spec.id, "corsair_gtx", "not yet");
+    assert_eq!(h.app.drive.spec.id, "gannet_gt", "not yet");
     h.pad(PadButton::South);
     assert!(!h.app.menu_open());
     assert_eq!(h.app.drive.spec.id, builtin[1].0);
@@ -1125,18 +1120,18 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert!(view
         .instances
         .iter()
-        .all(|i| i.mesh != corsair_ids.lods[0].body[0]));
+        .all(|i| i.mesh != gannet_ids.lods[0].body[0]));
 
     // Its name on the HUD for 2 s.
-    assert!(h.hud_text().contains("Palisade Wagon"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("Homestead Wagon"), "{}", h.hud_text());
     for _ in 0..((VEHICLE_TOAST_SECONDS as f64 / DT) as usize + 2) {
         h.frame();
     }
-    assert!(!h.hud_text().contains("Palisade Wagon"));
+    assert!(!h.hud_text().contains("Homestead Wagon"));
 
     // Saved at once.
     let (saved, _) = Settings::from_json(&store.load().expect("saved"));
-    assert_eq!((saved.vehicle, saved.paint), (Some("palisade_wagon"), 0));
+    assert_eq!((saved.vehicle, saved.paint), (Some("homestead_wagon"), 0));
 
     // Back to the first car: its meshes again, nothing new.
     h.open(&[ItemId::Open(Page::Vehicle)]);
@@ -1144,12 +1139,12 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     h.pad(PadButton::DpadLeft);
     h.pad(PadButton::South);
     assert_eq!(h.app.drive.spec.id, builtin[0].0);
-    assert_eq!(h.app.car_meshes, corsair_ids);
+    assert_eq!(h.app.car_meshes, gannet_ids);
     assert_eq!(h.app.mesh_count(), before + wagon_meshes);
     assert_eq!(h.app.take_new_meshes().count(), 0);
     // Picking the car already driven, from any row, changes nothing.
     h.open(&[ItemId::Open(Page::Vehicle), ItemId::Paint]);
-    assert_eq!(h.app.car_meshes, corsair_ids);
+    assert_eq!(h.app.car_meshes, gannet_ids);
     assert!(!h.app.menu_open());
 
     // The next session starts in the saved car, its meshes queued after the load's.
@@ -1170,10 +1165,10 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     scene.set_settings_store(Box::new(store.clone()));
     assert_eq!(scene.drive.spec.id, "seabreeze_convertible");
     assert_eq!(scene.take_new_meshes().count(), 0);
-    let setup = crate::SceneSetup::from_query("car=corsair_gtx&stream=0&traffic=off").unwrap();
+    let setup = crate::SceneSetup::from_query("car=gannet_gt&stream=0&traffic=off").unwrap();
     let mut scene = App::from_setup(&setup).unwrap();
     scene.set_settings_store(Box::new(store.clone()));
-    assert_eq!(scene.drive.spec.id, "corsair_gtx");
+    assert_eq!(scene.drive.spec.id, "gannet_gt");
 }
 
 #[test]
@@ -1331,14 +1326,14 @@ fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
     scene.set_settings_store(Box::new(SharedStore::default()));
     assert_eq!(
         (scene.drive.spec.id.as_str(), scene.ui().vehicle_paint()),
-        ("corsair_gtx", 7)
+        ("gannet_gt", 7)
     );
     // A saved paint the car does not have is its first.
     let store = SharedStore::default();
     *store.0.borrow_mut() =
-        Some(r#"{ "drive": { "vehicle": "palisade_wagon", "paint": 11 } }"#.to_owned());
+        Some(r#"{ "drive": { "vehicle": "homestead_wagon", "paint": 11 } }"#.to_owned());
     let h = Harness::with_store(&store);
-    assert_eq!(h.app.drive.spec.id, "palisade_wagon");
+    assert_eq!(h.app.drive.spec.id, "homestead_wagon");
     assert_eq!(h.app.ui().vehicle_paint(), 0);
 }
 
@@ -1505,11 +1500,11 @@ fn a_slow_roll_survives_the_switch() {
     let v = f * 3.0;
     h.app.drive.state.vel = v.to_array();
     h.app.drive.state.speed_mps = 3.0;
-    h.app.switch_vehicle("palisade_wagon").unwrap();
+    h.app.switch_vehicle("homestead_wagon").unwrap();
     assert_eq!(h.app.drive.state.speed_mps, 3.0);
     assert_eq!(h.app.drive.state.vel, v.to_array());
     assert!(h.app.switch_vehicle("hovercar").is_err());
-    assert_eq!(h.app.drive.spec.id, "palisade_wagon");
+    assert_eq!(h.app.drive.spec.id, "homestead_wagon");
 }
 
 /// Puts the car off the road in a block, tipped over, sliding, with miles on it.
@@ -1756,6 +1751,87 @@ fn still_scenes_keep_the_radio_off() {
     assert!(!app.ui().radio().started());
     assert_eq!(app.radio_commands().count(), 0);
     assert!(app.ui().radio().toast().is_none());
+}
+
+#[test]
+fn music_folders_are_picked_from_the_audio_page() {
+    let mut h = Harness::new();
+    let label = |h: &Harness| {
+        h.ui()
+            .items()
+            .iter()
+            .find(|i| i.id == ItemId::AddMusic)
+            .map(|i| i.label)
+    };
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    assert_eq!(label(&h), None, "no picker on this platform");
+    h.app.set_music_picker(true, true);
+    h.pad(PadButton::DpadDown);
+    assert_eq!(label(&h), Some("Pick music folder again"));
+    h.focus_on(ItemId::AddMusic);
+    h.pad(PadButton::South);
+    assert!(h.app.take_music_request());
+    assert!(!h.app.take_music_request());
+    let rows = h.app.ui().radio().rows().len();
+    let track = |i: usize| audio::Track {
+        key: format!("0/{i}"),
+        label: format!("Song {i}"),
+        secs: 200.0,
+    };
+    h.app
+        .add_music_folder("r1", "Yacht", vec![track(0), track(1)], true, true);
+    assert_eq!(
+        h.app.ui().toast(),
+        Some(Toast::MusicAdded {
+            tracks: 2,
+            kept: true
+        })
+    );
+    h.frame();
+    assert!(h.hud_text().contains("Yacht: 2 tracks on the dial"));
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    h.app
+        .add_music_folder("r1", "Yacht", vec![track(0)], false, true);
+    h.app
+        .add_music_folder("r2", "Empty", Vec::new(), true, false);
+    assert_eq!(h.app.ui().toast(), Some(Toast::MusicEmpty));
+    assert_eq!(
+        h.app.ui().radio().rows().len(),
+        rows + 1,
+        "replaced; empty left out"
+    );
+    let mine = h.app.radio().channels().last().unwrap().clone();
+    assert_eq!((mine.name.as_str(), mine.tracks.len()), ("Yacht", 1));
+    // Another folder of the same name is another station.
+    h.app
+        .add_music_folder("r3", "Yacht", vec![track(0)], true, false);
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 2);
+    h.frame();
+    assert!(h.hud_text().contains("(pick it again next time)"));
+    h.pad(PadButton::DpadUp);
+    assert_eq!(label(&h), Some("Add music folder"), "picked again");
+    // Removing one from the Stations page forgets it; "Remove music folders" the rest.
+    h.open(&[ItemId::Open(Page::Stations)]);
+    let remove = h
+        .ui()
+        .items()
+        .iter()
+        .find_map(|i| match i.id {
+            ItemId::RemoveFolder(r) if h.app.ui().radio().rows()[r].id == mine.id => Some(i.id),
+            _ => None,
+        })
+        .unwrap();
+    h.focus_on(remove);
+    h.pad(PadButton::South);
+    assert_eq!(h.app.take_forgotten_music(), ["r1"]);
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    h.pad(PadButton::East);
+    h.focus_on(ItemId::ClearMusic);
+    h.pad(PadButton::South);
+    assert_eq!(h.app.take_forgotten_music(), ["*"]);
+    assert_eq!(h.app.ui().radio().rows().len(), rows);
+    h.app.music_picker_refused();
+    assert_eq!(h.app.ui().toast(), Some(Toast::MusicNeedsKeyboard));
 }
 
 #[test]

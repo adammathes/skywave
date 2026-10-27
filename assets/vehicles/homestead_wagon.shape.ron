@@ -1,4 +1,4 @@
-// Palisade Wagon body: a full-size early-80s family wagon.
+// Homestead Wagon body: a full-size early-80s family wagon.
 //
 // Intent: long and square. A tall flat nose with a wide chrome grille between two pairs
 // of square sealed-beam lamps, a long flat hood, an upright windshield, a roof that runs
@@ -9,7 +9,7 @@
 // Units are meters; x runs rearward from the nose, y up from the ground. Layout:
 // docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
 ShapeSpec(
-    id: "palisade_wagon",
+    id: "homestead_wagon",
     side: [
         (0.00, 0.80), (0.05, 0.86), (1.30, 0.90), (1.40, 0.92), (2.00, 1.40),
         (2.12, 1.44), (4.95, 1.44), (5.14, 1.42), (5.22, 0.98), (5.25, 0.95),

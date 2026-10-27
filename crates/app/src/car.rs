@@ -952,12 +952,12 @@ mod tests {
 
     #[test]
     fn pop_ups_and_lamps_follow_the_switches() {
-        let (_, corsair) = model("corsair_gtx");
-        let (_, wagon) = model("palisade_wagon");
+        let (_, gannet) = model("gannet_gt");
+        let (_, wagon) = model("homestead_wagon");
         // Pop-ups: the raised variant is a different body; fixed lamps share one.
-        assert_ne!(corsair.lods[0].body[0], corsair.lods[0].body[1]);
+        assert_ne!(gannet.lods[0].body[0], gannet.lods[0].body[1]);
         assert_eq!(wagon.lods[0].body[0], wagon.lods[0].body[1]);
-        for m in [&corsair, &wagon] {
+        for m in [&gannet, &wagon] {
             let lights = &m.lods[0].lights;
             let peak = |mesh: &Mesh, g: LampGroup| {
                 mesh.vertices
@@ -1015,7 +1015,7 @@ mod tests {
             let (u, v) = (uv[0] as f32 / 65535.0, uv[1] as f32 / 65535.0);
             u >= u0 - 1e-4 && u <= u1 + 1e-4 && v >= v0 - 1e-4 && v <= v1 + 1e-4
         };
-        let (_, wagon) = model("palisade_wagon");
+        let (_, wagon) = model("homestead_wagon");
         let lod = &wagon.lods[0];
         assert!(lod
             .glass
@@ -1100,7 +1100,7 @@ mod tests {
 
     #[test]
     fn open_tops_see_much_more_sky_from_the_seat() {
-        let (_, wagon) = model("palisade_wagon");
+        let (_, wagon) = model("homestead_wagon");
         let hard = sky_share(&wagon);
         for id in ["seabreeze_convertible", "regent_coupe_cabrio"] {
             let (_, m) = model(id);
@@ -1117,7 +1117,7 @@ mod tests {
 
     #[test]
     fn left_steer_turns_the_wheel_counter_clockwise() {
-        let (spec, m) = model("corsair_gtx");
+        let (spec, m) = model("gannet_gt");
         let l = &m.layout;
         // The 12 o'clock point of the rim (up, square to the axis).
         let up = (Vec3::Y - l.wheel_axis * l.wheel_axis.y).normalize();
@@ -1136,7 +1136,7 @@ mod tests {
 
     #[test]
     fn needles_read_speed_and_rpm() {
-        let (_, m) = model("corsair_gtx");
+        let (_, m) = model("gannet_gt");
         let [speedo, tach, _] = m.layout.dials;
         assert_eq!(speedo.reading, DialReading::Speed(0.0, 160.0, MPH_PER_MPS));
         assert_eq!(tach.reading, DialReading::Rpm(0.0, 8000.0));
@@ -1167,7 +1167,7 @@ mod tests {
 
     #[test]
     fn registering_shares_identical_meshes() {
-        let (_, wagon) = model("palisade_wagon");
+        let (_, wagon) = model("homestead_wagon");
         let mut n = 0;
         let ids = wagon.register(|_| {
             n += 1;
@@ -1177,9 +1177,9 @@ mod tests {
         // wheel, 4 lamp states; then 3 needles, the ticks and 2 tell-tales.
         assert_eq!(n, 2 * 10 + 6);
         assert_eq!(ids.lods[0].body[0], ids.lods[0].body[1]);
-        let (_, corsair) = model("corsair_gtx");
+        let (_, gannet) = model("gannet_gt");
         let mut n = 0;
-        let ids = corsair.register(|_| {
+        let ids = gannet.register(|_| {
             n += 1;
             MeshId(n - 1)
         });

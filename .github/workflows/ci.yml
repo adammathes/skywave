@@ -29,8 +29,10 @@ jobs:
       # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/.
       - uses: Swatinem/rust-cache@v2
 
-      - name: Linux build deps (libudev for gilrs, ALSA for cpal)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config
+      # lavapipe (mesa-vulkan-drivers): a software Vulkan device for the renderer's
+      # fragment-count test (`fragments_on_the_coast_at_deck`).
+      - name: Linux build deps (libudev for gilrs, ALSA for cpal, lavapipe)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers
 
       - name: Format
         run: cargo fmt --all --check
@@ -67,7 +69,7 @@ jobs:
       - name: Screenshot smoke test and wasm self-test (WebGL2 on SwiftShader)
         run: |
           export NODE_PATH="$(npm root --global)"
-          node tools/screenshot/shoot.mjs --selftest --scene strip-golden-chase
+          node tools/screenshot/shoot.mjs --selftest --music --scene strip-golden-chase
           node tools/screenshot/diff.mjs --scene strip-golden-chase
 
       - uses: actions/upload-artifact@v4

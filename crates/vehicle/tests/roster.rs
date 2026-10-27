@@ -30,7 +30,7 @@ type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
 const ROSTER: [Entry; 20] = [
-    (car!("corsair_gtx"), (5.0, 8.0)),
+    (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
     (car!("buckboard_pickup"), (8.0, 10.0)),
@@ -39,7 +39,7 @@ const ROSTER: [Entry; 20] = [
     (car!("prescott_landau"), (10.5, 12.5)),
     (car!("burro_4x4"), (11.0, 13.5)),
     (car!("seabreeze_convertible"), (11.0, 14.0)),
-    (car!("palisade_wagon"), (10.0, 16.0)),
+    (car!("homestead_wagon"), (10.0, 16.0)),
     (car!("drayman_van"), (12.5, 15.0)),
     (car!("meadow_minivan"), (14.0, 16.5)),
     (car!("basilisk_v12"), (4.0, 5.0)),
@@ -68,11 +68,11 @@ const SPORTS: [&str; 7] = [
     "avocet_spider",
     "longbow_coupe",
     "longbow_convertible",
-    "corsair_gtx",
+    "gannet_gt",
 ];
 
 /// Smallest gaps between any two cars for them to count as distinct: six sim steps (the
-/// Palisade and the Seabreeze, tuned before the roster, are 0.09 s apart), ~1.5 mph and
+/// Homestead and the Seabreeze, tuned before the roster, are 0.09 s apart), ~1.5 mph and
 /// a hundredth of a g.
 const MIN_GAP_S: f32 = 0.05;
 const MIN_GAP_MPS: f32 = 0.7;

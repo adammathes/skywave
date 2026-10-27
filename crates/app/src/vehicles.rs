@@ -17,12 +17,12 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
 /// order the Vehicle page lists it (the everyday cars, then the sports cars).
 pub const BUILTIN: [(&str, &str); 20] = [
     (
-        "corsair_gtx",
-        include_str!("../../../assets/vehicles/corsair_gtx.ron"),
+        "gannet_gt",
+        include_str!("../../../assets/vehicles/gannet_gt.ron"),
     ),
     (
-        "palisade_wagon",
-        include_str!("../../../assets/vehicles/palisade_wagon.ron"),
+        "homestead_wagon",
+        include_str!("../../../assets/vehicles/homestead_wagon.ron"),
     ),
     (
         "seabreeze_convertible",
@@ -98,6 +98,21 @@ pub const BUILTIN: [(&str, &str); 20] = [
     ),
 ];
 
+/// Built-in vehicle ids that were renamed, `(old, new)`: a saved setting or a scene URL
+/// naming the old id gets the car under its new one.
+pub const RENAMED: [(&str, &str); 2] = [
+    ("corsair_gtx", "gannet_gt"),
+    ("palisade_wagon", "homestead_wagon"),
+];
+
+/// `id`, or the id it was renamed to.
+pub fn current_id(id: &str) -> &str {
+    RENAMED
+        .iter()
+        .find(|(old, _)| *old == id)
+        .map_or(id, |(_, new)| new)
+}
+
 /// Loads the built-in spec with this id.
 pub fn builtin_spec(id: &str) -> Result<VehicleSpec, String> {
     let (_, text) = BUILTIN
@@ -122,12 +137,12 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 /// index) keep theirs.
 pub const BUILTIN_SHAPES: [(&str, &str); 20] = [
     (
-        "corsair_gtx.shape.ron",
-        include_str!("../../../assets/vehicles/corsair_gtx.shape.ron"),
+        "gannet_gt.shape.ron",
+        include_str!("../../../assets/vehicles/gannet_gt.shape.ron"),
     ),
     (
-        "palisade_wagon.shape.ron",
-        include_str!("../../../assets/vehicles/palisade_wagon.shape.ron"),
+        "homestead_wagon.shape.ron",
+        include_str!("../../../assets/vehicles/homestead_wagon.shape.ron"),
     ),
     (
         "seabreeze_convertible.shape.ron",
@@ -222,8 +237,8 @@ mod tests {
     use super::*;
     use vehicle::{Drive, Era, VehicleClass};
 
-    const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
-    const PALISADE: &str = include_str!("../../../assets/vehicles/palisade_wagon.ron");
+    const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
+    const HOMESTEAD: &str = include_str!("../../../assets/vehicles/homestead_wagon.ron");
 
     /// Peak full-throttle power between idle and redline, W, sampled every 10 rpm.
     fn peak_power_w(spec: &VehicleSpec) -> f32 {
@@ -247,8 +262,8 @@ mod tests {
     #[test]
     fn both_specs_load_and_validate() {
         for (text, id, shape) in [
-            (CORSAIR, "corsair_gtx", "corsair_gtx.shape.ron"),
-            (PALISADE, "palisade_wagon", "palisade_wagon.shape.ron"),
+            (GANNET, "gannet_gt", "gannet_gt.shape.ron"),
+            (HOMESTEAD, "homestead_wagon", "homestead_wagon.shape.ron"),
         ] {
             let spec = load_spec(text).unwrap();
             assert_eq!(spec.validate(), Ok(()));
@@ -260,8 +275,8 @@ mod tests {
 
     #[test]
     fn specs_match_the_roster() {
-        let sports = load_spec(CORSAIR).unwrap();
-        let wagon = load_spec(PALISADE).unwrap();
+        let sports = load_spec(GANNET).unwrap();
+        let wagon = load_spec(HOMESTEAD).unwrap();
 
         assert_eq!(sports.class, VehicleClass::Sports);
         assert_eq!(sports.drive, Drive::Rear);
@@ -279,8 +294,8 @@ mod tests {
 
     #[test]
     fn sports_car_and_wagon_feel_different() {
-        let sports = load_spec(CORSAIR).unwrap();
-        let wagon = load_spec(PALISADE).unwrap();
+        let sports = load_spec(GANNET).unwrap();
+        let wagon = load_spec(HOMESTEAD).unwrap();
 
         let ptw = |s: &VehicleSpec| peak_power_w(s) / s.mass_kg;
         assert!(ptw(&sports) > 1.5 * ptw(&wagon));
@@ -391,7 +406,7 @@ mod tests {
             let spec = builtin_spec(id).unwrap();
             assert_eq!(builtin_shape(&spec).unwrap().id, id);
         }
-        let mut spec = builtin_spec("corsair_gtx").unwrap();
+        let mut spec = builtin_spec("gannet_gt").unwrap();
         spec.shape = "hovercar.shape.ron".into();
         assert!(builtin_shape(&spec).is_err());
         assert!(load_shape("ShapeSpec(id: ").is_err());
@@ -402,13 +417,13 @@ mod tests {
         let err = load_spec("VehicleSpec(id: ").unwrap_err();
         assert!(err.starts_with("vehicle spec: "), "{err}");
 
-        let typo = CORSAIR.replace("wheelbase_m:", "wheelbse_m:");
+        let typo = GANNET.replace("wheelbase_m:", "wheelbse_m:");
         assert!(load_spec(&typo).is_err());
 
-        let negative = CORSAIR.replace("mass_kg: 1250", "mass_kg: -1250");
+        let negative = GANNET.replace("mass_kg: 1250", "mass_kg: -1250");
         assert_eq!(
             load_spec(&negative).unwrap_err(),
-            "vehicle spec `corsair_gtx`: NonPositiveMass"
+            "vehicle spec `gannet_gt`: NonPositiveMass"
         );
     }
 }

@@ -3,7 +3,7 @@
 //!
 //! ```json
 //! { "version": 1,
-//!   "drive": { "handling": "arcade", "headlights": "auto", "vehicle": "corsair_gtx",
+//!   "drive": { "handling": "arcade", "headlights": "auto", "vehicle": "gannet_gt",
 //!              "paint": 0 },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
@@ -157,12 +157,15 @@ impl Quality {
     pub fn render(self, resolution_scale: f32) -> render::RenderQuality {
         let (shadow_size, cascades, bloom_levels, coronas, far_cascade_interval, min_caster) =
             match self {
-                Quality::Low => (1024, 2, 4, false, 2, 3.0),
-                Quality::Deck => (1536, 2, 4, true, 2, 2.0),
+                Quality::Low => (1024, 2, 4, false, 3, 3.0),
+                Quality::Deck => (1536, 2, 4, true, 3, 2.0),
                 Quality::Medium => (1536, 3, 5, true, 2, 2.0),
                 Quality::High => (2048, 3, 5, true, 1, 0.0),
                 Quality::Ultra => (3072, 3, 5, true, 1, 0.0),
             };
+        // The Deck only: short of fragment time, and native (the pre-pass's ~300 extra draws
+        // cost most on WebGL2, where Low also runs).
+        let depth_prepass = self == Quality::Deck;
         render::RenderQuality {
             shadow_size,
             cascades,
@@ -171,6 +174,7 @@ impl Quality {
             coronas,
             far_cascade_interval,
             min_caster_texels: min_caster,
+            depth_prepass,
         }
     }
 
@@ -341,8 +345,9 @@ pub fn headlights_name(auto: bool) -> &'static str {
     }
 }
 
-/// The [`BUILTIN`] id equal to `id`, if there is one.
+/// The [`BUILTIN`] id equal to `id` (or to the id it was renamed to), if there is one.
 pub fn builtin_vehicle(id: &str) -> Option<&'static str> {
+    let id = crate::vehicles::current_id(id);
     BUILTIN.iter().map(|(v, _)| *v).find(|v| *v == id)
 }
 
@@ -635,7 +640,7 @@ mod tests {
         let s = Settings {
             handling: Handling::Off,
             headlights_auto: false,
-            vehicle: Some("palisade_wagon"),
+            vehicle: Some("homestead_wagon"),
             paint: 3,
             camera: CameraMode::Cockpit,
             cockpit_fov_deg: 71.0,
@@ -734,8 +739,13 @@ mod tests {
         // An unknown car is forgotten; a missing one is none.
         let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "hovercar" } }"#);
         assert_eq!(s.vehicle, None);
-        let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "palisade_wagon" } }"#);
-        assert_eq!(s.vehicle, Some("palisade_wagon"));
+        let (s, _) = Settings::from_json(r#"{ "drive": { "vehicle": "homestead_wagon" } }"#);
+        assert_eq!(s.vehicle, Some("homestead_wagon"));
+        // A car saved under its old id comes back under its new one.
+        for (old, new) in crate::vehicles::RENAMED {
+            let json = format!(r#"{{ "drive": {{ "vehicle": "{old}" }} }}"#);
+            assert_eq!(Settings::from_json(&json).0.vehicle, Some(new));
+        }
         assert!(!Settings::default()
             .to_json(&Bindings::default())
             .contains("vehicle"));

@@ -147,7 +147,7 @@ impl SceneSetup {
             "seed" => self.seed = value.parse().map_err(|_| bad())?,
             "place" => self.place = PlaceKey::from_name(value).ok_or_else(bad)?,
             "car" => {
-                self.car = value.to_string();
+                self.car = crate::vehicles::current_id(value).to_string();
                 self.car_given = true;
             }
             "paint" => self.paint = Some(value.parse().map_err(|_| bad())?),
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&place=coast&car=palisade_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
+            "?seed=7&place=coast&car=homestead_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
         )
         .unwrap();
         assert!(s.map && !s.stream);
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(s.ui_scale, Some(1.5));
         assert_eq!(s.seed, 7);
         assert_eq!(s.place, PlaceKey::Coast);
-        assert_eq!(s.car, "palisade_wagon");
+        assert_eq!(s.car, "homestead_wagon");
         assert!(s.car_given && !SceneSetup::default().car_given);
         assert_eq!((s.paint, SceneSetup::default().paint), (Some(2), None));
         assert_eq!(s.camera, Some(CameraMode::Cockpit));
@@ -247,6 +247,9 @@ mod tests {
         let start = crate::drive::START_HEADING_RAD;
         assert!((east.heading_rad.unwrap() - start).abs() < 1e-6);
         assert_eq!(SceneSetup::default().place, PlaceKey::TestTown);
+        // An old URL's renamed car is the new one.
+        let s = SceneSetup::from_query("?car=palisade_wagon").unwrap();
+        assert_eq!(s.car, "homestead_wagon");
     }
 
     #[test]

@@ -100,9 +100,9 @@ pub struct CameraTuning {
 ///
 /// Feel pass 2 (after the first play, "hard to see out of the cockpits"): cockpit FOV
 /// 58° → 62° (and a setting, 50–80°), and the eye 5 cm higher and 3 cm further forward
-/// than the shape puts it. From the shape's eye the corsair's instrument hood and cowl hid
+/// than the shape puts it. From the shape's eye the gannet's instrument hood and cowl hid
 /// the road for more than 22 m ahead; 3 cm up and forward brought that to 9.5 m, 5 cm up to
-/// 6.5 m (the palisade's long flat hood: 21 m → 11 m).
+/// 6.5 m (the homestead's long flat hood: 21 m → 11 m).
 pub const TUNING: CameraTuning = CameraTuning {
     hood_above_belt_m: 0.30,
     hood_ahead_m: 1.0,
@@ -805,12 +805,12 @@ mod tests {
     }
 
     /// "Hard to see out of the cockpits" (the first play): from the default eye the road
-    /// shows from ~6 m ahead of the corsair's driver, and the eye offset is what gets it
-    /// there. The palisade's long flat hood keeps it ~11 m out (from 21 m). Hood only (no
+    /// shows from ~6 m ahead of the gannet's driver, and the eye offset is what gets it
+    /// there. The homestead's long flat hood keeps it ~11 m out (from 21 m). Hood only (no
     /// dashboard) never shows less.
     #[test]
     fn the_road_shows_from_six_metres_ahead_in_the_cockpit() {
-        for (id, limit) in [("corsair_gtx", 6.5), ("palisade_wagon", 11.5)] {
+        for (id, limit) in [("gannet_gt", 6.5), ("homestead_wagon", 11.5)] {
             let d = Drive::new(id).unwrap();
             let eye = cockpit_eye(&d, &TUNING, &CameraPrefs::default());
             let seen = road_visible_from(id, eye, true);
@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn cockpit_eye_is_inside_the_car() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let d = Drive::new(id).unwrap();
             let rig = CameraRig::new(CameraMode::Cockpit, &d);
             let pose = rig.pose(&d, 1.0);

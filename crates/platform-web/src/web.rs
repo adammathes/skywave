@@ -52,6 +52,74 @@ struct State {
     radio_cmds: Vec<RadioCommand>,
     /// What the glue was last told the radio's state is: kind, station, live, blocked.
     radio_reported: (u8, Option<usize>, bool, bool),
+    /// The page's music folder glue, when it has one.
+    music: Option<MusicGlue>,
+    /// Whether the glue last said the folders must be picked again.
+    music_again: bool,
+}
+
+/// `window.skywaveMusic` (web/index.html): the user's music folders, picked or dropped.
+/// The files stay in the page; the game only sees each file's key, name, size and first
+/// bytes (for its tags), and plays a file by its key through the radio player.
+struct MusicGlue {
+    this: JsValue,
+    pick: js_sys::Function,
+    take_folder: js_sys::Function,
+    forget: js_sys::Function,
+}
+
+impl MusicGlue {
+    fn find(window: &web_sys::Window) -> Option<MusicGlue> {
+        let this = js_sys::Reflect::get(window, &JsValue::from_str("skywaveMusic")).ok()?;
+        let func = |name: &str| {
+            js_sys::Reflect::get(&this, &JsValue::from_str(name))
+                .ok()?
+                .dyn_into::<js_sys::Function>()
+                .ok()
+        };
+        Some(MusicGlue {
+            pick: func("pick")?,
+            take_folder: func("takeFolder")?,
+            forget: func("forget")?,
+            this,
+        })
+    }
+
+    fn get(v: &JsValue, key: &str) -> JsValue {
+        js_sys::Reflect::get(v, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED)
+    }
+
+    /// Folders picked last session could not be kept (the browser cannot store their
+    /// handles, or has not let us read them again yet).
+    fn again(&self) -> bool {
+        Self::get(&self.this, "again").as_bool().unwrap_or(false)
+    }
+
+    /// The next folder read: its id, name, whether to announce it, whether the page will
+    /// remember it, and its tracks.
+    fn take_folder(&self) -> Option<(String, String, bool, bool, Vec<audio::Track>)> {
+        let f = self.take_folder.call0(&self.this).ok()?;
+        if f.is_null() || f.is_undefined() {
+            return None;
+        }
+        let path = Self::get(&f, "path").as_string().unwrap_or_default();
+        let name = Self::get(&f, "name").as_string().unwrap_or_default();
+        let announce = Self::get(&f, "announce").as_bool().unwrap_or(false);
+        let kept = Self::get(&f, "kept").as_bool().unwrap_or(false);
+        let files = js_sys::Array::from(&Self::get(&f, "files"));
+        let tracks = files
+            .iter()
+            .map(|file| {
+                let key = Self::get(&file, "key").as_string().unwrap_or_default();
+                let name = Self::get(&file, "name").as_string().unwrap_or_default();
+                let size = Self::get(&file, "size").as_f64().unwrap_or(0.0) as u64;
+                let bytes = |k| js_sys::Uint8Array::new(&Self::get(&file, k)).to_vec();
+                let probe = audio::music::probe(&bytes("head"), &bytes("audio"), size);
+                audio::Track::new(key, &name, &probe)
+            })
+            .collect();
+        Some((path, name, announce, kept, tracks))
+    }
 }
 
 /// `window.skywaveRadio` (web/index.html): plays what the radio asks for, reports back.
@@ -84,6 +152,11 @@ impl RadioGlue {
     fn send(&self, cmd: &RadioCommand, name: &str) {
         let (kind, url, token, value) = match cmd {
             RadioCommand::Play { url, token } => ("play", url.as_str(), *token, 0.0),
+            RadioCommand::PlayFile {
+                key,
+                start_s,
+                token,
+            } => ("file", key.as_str(), *token, *start_s),
             RadioCommand::Stop => ("stop", "", 0, 0.0),
             RadioCommand::Volume(v) => ("volume", "", 0, *v),
         };
@@ -594,7 +667,7 @@ pub async fn run(
             None => return Err(JsValue::from_str(&fallback.note)),
         }
     };
-    let app = app.expect("a started attempt built the app");
+    let mut app = app.expect("a started attempt built the app");
     log::info!(
         "skywave: {}, {:?}, {setup:?}",
         backend.label(),
@@ -607,6 +680,8 @@ pub async fn run(
     if radio.is_none() {
         log::info!("skywave: no radio player on this page; the radio stays silent");
     }
+    let music = MusicGlue::find(&window);
+    app.set_music_picker(music.is_some(), false);
 
     let state = Rc::new(RefCell::new(State {
         canvas,
@@ -631,6 +706,8 @@ pub async fn run(
         radio,
         radio_cmds: Vec::with_capacity(8),
         radio_reported: (0, None, false, false),
+        music,
+        music_again: false,
     }));
     listen_keys(&window, &state)?;
     listen_mouse(&window, &state)?;
@@ -976,6 +1053,28 @@ impl State {
             }
             // Key releases during the modal prompt never arrived.
             self.input.release_all();
+        }
+        if let Some(music) = &self.music {
+            if self.app.take_music_request() {
+                // The menu key's or click's activation lets the page open its folder
+                // picker; a gamepad press gives none, and the page says so.
+                let opened = music.pick.call0(&music.this).ok().and_then(|v| v.as_bool());
+                if opened == Some(false) {
+                    self.app.music_picker_refused();
+                }
+            }
+            for path in self.app.take_forgotten_music() {
+                let _ = music.forget.call1(&music.this, &JsValue::from_str(&path));
+            }
+            while let Some((path, name, announce, kept, tracks)) = music.take_folder() {
+                self.app
+                    .add_music_folder(&path, &name, tracks, announce, kept);
+            }
+            let again = music.again();
+            if again != self.music_again {
+                self.music_again = again;
+                self.app.set_music_picker(true, again);
+            }
         }
         let Some(glue) = &self.radio else {
             // Nobody plays: drop the commands.

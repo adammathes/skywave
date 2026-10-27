@@ -47,7 +47,7 @@ fn app(query: &str) -> App {
 fn app_at(pos: [f32; 3], heading: f32, extra: &str) -> App {
     let yaw = -heading.to_degrees();
     app(&format!(
-        "place=coast&car=corsair_gtx&cam=chase-mid&pos={},{}&yaw={yaw}&{extra}",
+        "place=coast&car=gannet_gt&cam=chase-mid&pos={},{}&yaw={yaw}&{extra}",
         pos[0], pos[2]
     ))
 }
@@ -699,7 +699,7 @@ fn densities_hold_their_bands(name: &str, query: &str, bands: [(usize, usize); 3
 fn densities_hold_their_bands_at_the_start() {
     densities_hold_their_bands(
         "the start",
-        "place=coast&car=corsair_gtx&cam=chase-mid",
+        "place=coast&car=gannet_gt&cam=chase-mid",
         BANDS,
     );
 }
@@ -713,7 +713,7 @@ fn densities_hold_their_bands_downtown() {
     densities_hold_their_bands(
         "downtown",
         &format!(
-            "place=coast&car=corsair_gtx&cam=chase-mid&pos={},{}&yaw={yaw}",
+            "place=coast&car=gannet_gt&cam=chase-mid&pos={},{}&yaw={yaw}",
             wait.pos[0], wait.pos[2]
         ),
         BANDS,
@@ -729,7 +729,7 @@ fn densities_hold_their_bands_on_the_arterial() {
     densities_hold_their_bands(
         "the arterial",
         &format!(
-            "place=coast&car=corsair_gtx&cam=chase-mid&pos={},{}&yaw={yaw}",
+            "place=coast&car=gannet_gt&cam=chase-mid&pos={},{}&yaw={yaw}",
             wait.pos[0], wait.pos[2]
         ),
         BANDS,
