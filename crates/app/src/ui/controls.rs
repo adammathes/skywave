@@ -1,11 +1,12 @@
 //! The controls card: what every action is on the keyboard and on the controller, read
 //! from the live bindings so a remap shows. It shows for [`START_SECONDS`] when a running
 //! game starts (never in a still scene) until any input, and comes and goes on the Controls
-//! action (H or F1; Start held on the pad) or the pause menu's Controls item. It pauses
-//! nothing: while it is up it takes the driving HUD's place and hides the performance
-//! overlay. Two columns, Keyboard and Controller, beside each row's name when the safe area
-//! is wide enough (UI scale up to 1.25); narrower, each row's inputs go on a line under its
-//! name. When it does not fit it scrolls with the menu's up and down.
+//! action (H or F1; Start held on the pad) or the pause menu's Show controls item. It pauses
+//! nothing, but while asked for it takes the keys and sticks as the full map does (the car
+//! coasts); it takes the driving HUD's place and hides the performance overlay. Two
+//! columns, Keyboard and Controller, beside each row's name when the safe area is wide
+//! enough (UI scale up to 1.25); narrower, each row's inputs go on a line under its name.
+//! When it does not fit (any scale over 1) it scrolls with the menu's up and down.
 
 use core::fmt::{self, Display};
 
@@ -120,6 +121,8 @@ pub struct ControlsCard {
     /// Lines that fit and lines in all, as last drawn.
     fit: usize,
     total: usize,
+    /// The card used this frame's input (to close or scroll it).
+    pub(super) took: bool,
     cell: String,
     part: String,
 }
@@ -233,6 +236,20 @@ impl Display for Toggle<'_> {
     }
 }
 
+/// The card's own inputs on a device, each followed by " / " (none when it is unbound), for
+/// the close hint.
+struct CloseKeys<'a>(&'a Ui, DeviceKind);
+
+impl Display for CloseKeys<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for b in self.0.bindings.get(self.1, Action::Controls) {
+            names::write_binding(f, b)?;
+            f.write_str(" / ")?;
+        }
+        Ok(())
+    }
+}
+
 impl ControlsCard {
     pub fn shown(&self) -> Option<Shown> {
         self.shown
@@ -261,6 +278,11 @@ impl Ui {
             Some(Shown::Start { .. }) => self.menu.is_none() && !self.map.full.open,
             None => false,
         }
+    }
+
+    /// The card asked for is up: it takes the keys and sticks (the car coasts under it).
+    pub fn controls_take_input(&self) -> bool {
+        self.controls.shown == Some(Shown::Asked)
     }
 
     /// Shows the card at the start of a game, unless the setting says not to.
@@ -314,6 +336,13 @@ impl Ui {
                     self.controls.shown = None;
                     return false;
                 }
+                if self.scroll_controls(s) {
+                    // Reading on: the time starts again.
+                    self.controls.shown = Some(Shown::Start {
+                        remaining: START_SECONDS,
+                    });
+                    return true;
+                }
                 if any_input(s) {
                     self.controls.shown = None;
                     self.controls_dismissed();
@@ -330,41 +359,43 @@ impl Ui {
                 false
             }
             Some(Shown::Asked) => {
-                let card = &mut self.controls;
-                if card.scrolls() {
-                    let last = card.total - card.fit;
-                    if s.just_pressed(Action::MenuDown) {
-                        card.scroll = (card.scroll + SCROLL_STEP).min(last);
-                        return true;
-                    }
-                    if s.just_pressed(Action::MenuUp) {
-                        card.scroll = card.scroll.saturating_sub(SCROLL_STEP);
-                        return true;
-                    }
+                if self.scroll_controls(s) {
+                    return true;
                 }
-                let closes = [
-                    Action::Controls,
-                    Action::Pause,
-                    Action::MenuBack,
-                    Action::MenuConfirm,
-                    Action::MenuUp,
-                    Action::MenuDown,
-                    Action::MenuLeft,
-                    Action::MenuRight,
-                ];
-                if closes.iter().any(|&a| s.just_pressed(a)) {
-                    card.shown = None;
+                if [Action::Controls, Action::Pause, Action::MenuBack]
+                    .iter()
+                    .any(|&a| s.just_pressed(a))
+                {
+                    self.controls.shown = None;
                     return true;
                 }
                 if self.menu.is_none() && s.just_pressed(Action::MapToggle) {
                     // The map takes the screen.
-                    card.shown = None;
+                    self.controls.shown = None;
                     return false;
                 }
-                // Over the pause menu the card has the input; over the road, the car does.
-                self.menu.is_some()
+                // The card has the input, over the menu and over the road.
+                true
             }
         }
+    }
+
+    /// Up and down scroll the card while it has more lines than fit. Returns whether they
+    /// did.
+    fn scroll_controls(&mut self, s: &InputState) -> bool {
+        let card = &mut self.controls;
+        if !card.scrolls() {
+            return false;
+        }
+        let last = card.total - card.fit;
+        if s.just_pressed(Action::MenuDown) {
+            card.scroll = (card.scroll + SCROLL_STEP).min(last);
+        } else if s.just_pressed(Action::MenuUp) {
+            card.scroll = card.scroll.saturating_sub(SCROLL_STEP);
+        } else {
+            return false;
+        }
+        true
     }
 
     /// Lays the card out at the middle of the safe area.
@@ -492,7 +523,7 @@ impl Ui {
                     foot_y,
                     S,
                     DIM,
-                    format_args!("[{} / {back}] Close{more}", Toggle(self, d)),
+                    format_args!("[{}{back}] Close{more}", CloseKeys(self, d)),
                 );
             }
         }

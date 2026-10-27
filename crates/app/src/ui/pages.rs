@@ -2,7 +2,7 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Controls (the
+//! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Show controls (the
 //!            controls card) · Quit (native only)
 //! Vehicle:   Car (left/right through every built-in car this world has) · Paint (its
 //!            palette) · Drive this car; a turntable preview and the car's specs beside
@@ -298,7 +298,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             add(id, "Settings", w);
             let (id, w) = open(Page::Worlds);
             add(id, "Worlds", w);
-            add(ItemId::Controls, "Controls", Widget::Action);
+            add(ItemId::Controls, "Show controls", Widget::Action);
             if ctx.can_quit {
                 add(ItemId::Quit, "Quit", Widget::Action);
             }

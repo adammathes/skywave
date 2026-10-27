@@ -293,7 +293,8 @@ fn the_card_fits_the_deck_at_scale_1_and_scrolls_on_a_tv_at_2() {
             assert!(h.hud_text().contains("Screenshot"));
             continue;
         }
-        // Two lines a row: it scrolls, down and up, then any other menu key closes it.
+        // Two lines a row: it scrolls down and up, and the radio and lights stay as they
+        // were; then B closes it.
         assert!(h.ui().controls().scrolls());
         assert!(!h.hud_text().contains("Screenshot"));
         for _ in 0..40 {
@@ -307,7 +308,18 @@ fn the_card_fits_the_deck_at_scale_1_and_scrolls_on_a_tv_at_2() {
             h.pad(PadButton::DpadUp);
         }
         assert!(h.hud_text().contains("Steer"));
+        assert!(!h.app.radio().is_on() && !h.app.drive.headlights);
+        // Keyboard Up and Down scroll it and do not drive.
+        h.input.press(RawInput::Key(Key::ArrowDown));
+        h.frame();
+        assert!(!h.hud_text().contains("Steer"));
+        h.input.release(RawInput::Key(Key::ArrowDown));
+        h.key(Key::ArrowUp);
+        assert!(h.hud_text().contains("Steer"));
+        assert!(h.app.hud_state().speed_mps.abs() < 0.05);
         h.pad(PadButton::DpadLeft);
+        assert_eq!(shown(&h), Some(Shown::Asked), "left and right do nothing");
+        h.pad(PadButton::East);
         assert_eq!(shown(&h), None);
     }
     // The start card's footer fits too.
@@ -315,4 +327,84 @@ fn the_card_fits_the_deck_at_scale_1_and_scrolls_on_a_tv_at_2() {
     h.app.set_target_size(1280, 800);
     h.frame();
     check_layout(&h, "start", 1.0);
+    // At scale 2 the start card scrolls on up and down (and its time starts again)
+    // rather than going.
+    let mut h = Harness::new();
+    h.app.set_target_size(1280, 800);
+    h.app.ui.force_ui_scale(2.0);
+    h.app.set_settings_store(Box::new(SharedStore::default()));
+    for _ in 0..60 {
+        h.frame();
+    }
+    assert!(h.hud_text().contains("[Up/Down] More"));
+    h.pad(PadButton::DpadDown);
+    assert_eq!(
+        shown(&h),
+        Some(Shown::Start {
+            remaining: START_SECONDS - (DT as f32).min(0.1)
+        })
+    );
+    assert!(!h.hud_text().contains("Steer"));
+    assert!(!h.app.radio().is_on());
+    h.key(Key::KeyW);
+    assert_eq!(shown(&h), None);
+}
+
+#[test]
+fn over_the_road_the_card_keeps_the_keys_from_the_car_and_the_radio() {
+    let mut h = Harness::new();
+    let lights = h.app.drive.headlights;
+    h.key(Key::KeyH);
+    // Menu keys that drive or tune do neither, and leave the card up.
+    h.pad(PadButton::DpadDown);
+    h.pad(PadButton::DpadUp);
+    h.pad(PadButton::DpadRight);
+    h.pad(PadButton::South);
+    h.key(Key::Space);
+    h.key(Key::Enter);
+    assert_eq!(shown(&h), Some(Shown::Asked));
+    assert!(!h.app.radio().is_on());
+    assert_eq!(h.app.drive.headlights, lights);
+    // Past half lock on the stick and the throttle: still up, and the car coasts.
+    h.input.axis(RawInput::PadAxis(PadAxis::LeftX), 0.6);
+    h.input.axis(RawInput::PadAxis(PadAxis::R2), 1.0);
+    for _ in 0..30 {
+        h.frame();
+    }
+    assert_eq!(shown(&h), Some(Shown::Asked));
+    assert!(h.app.hud_state().speed_mps.abs() < 0.05);
+    // B closes it and the next frame drives again.
+    h.pad(PadButton::East);
+    assert_eq!(shown(&h), None);
+    for _ in 0..30 {
+        h.frame();
+    }
+    assert!(h.app.hud_state().speed_mps.abs() > 0.5);
+    h.input.axis(RawInput::PadAxis(PadAxis::LeftX), 0.0);
+    h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
+    // Esc closes it without opening the pause menu.
+    h.key(Key::KeyH);
+    h.key(Key::Escape);
+    assert_eq!(shown(&h), None);
+    assert!(!h.app.menu_open());
+}
+
+#[test]
+fn the_close_hint_names_the_cards_keys_or_only_back() {
+    let mut h = Harness::new();
+    h.key(Key::KeyH);
+    assert!(
+        h.hud_text().contains("[H / F1 / Esc] Close"),
+        "{}",
+        h.hud_text()
+    );
+    h.key(Key::KeyH);
+    let kb = DeviceKind::KeyboardMouse;
+    h.app.ui.bindings.set(kb, Action::Controls, vec![]);
+    h.app.ui.bindings_changed = true;
+    h.frame();
+    h.open(&[]);
+    h.focus_on(ItemId::Controls);
+    h.key(Key::Enter);
+    assert!(h.hud_text().contains("[Esc] Close"), "{}", h.hud_text());
 }

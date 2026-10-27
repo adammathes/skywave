@@ -632,7 +632,9 @@ impl Ui {
             self.dirty = true;
             self.save_if_dirty();
         }
-        if self.capture.is_none() && self.controls_input(s, dt) {
+        let took = self.capture.is_none() && self.controls_input(s, dt);
+        self.controls.took = took;
+        if took {
             self.repeat.reset(&MenuInput::from_state(s));
             return;
         }
@@ -1212,15 +1214,21 @@ impl App {
         }
         let state = input.sample(dt as f32).clone();
         let was_open = self.ui.is_open();
+        let was_card = self.ui.controls_take_input();
         self.ui
             .handle(&state, input, &mut self.time.clock, dt as f32);
+        // The card asked for takes the keys and the sticks, as the full map does, and so
+        // does a press it used (to close or scroll it): none of it reaches the car or the
+        // radio.
+        let card = was_card || self.ui.controls_take_input() || self.ui.controls.took;
         if self.ui.take_bindings_changed() {
             input.set_bindings(self.ui.bindings.clone());
         }
         if self.ui.take_camera_changed() {
             self.camera.set_mode(self.ui.settings.camera);
         }
-        let driving = !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !self.still;
+        let driving =
+            !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !card && !self.still;
         self.world_pick = self.ui.take_world_pick().or(self.world_pick);
         if let Some((i, paint)) = self.ui.take_vehicle_pick() {
             self.switch_to(i, paint, true);
@@ -1232,7 +1240,7 @@ impl App {
         }
         self.apply_clock_speed();
         self.apply_settings();
-        let radio_keys = !was_open && !self.ui.is_open() && !self.ui.full_map_open();
+        let radio_keys = !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !card;
         if !self.still {
             self.ui.radio_frame(&state, dt as f32, radio_keys);
         }
@@ -1241,9 +1249,10 @@ impl App {
                 count: 0,
                 alpha: self.alpha,
             }
-        } else if was_open || self.ui.full_map_open() {
+        } else if was_open || self.ui.full_map_open() || card {
             // The press that closed the menu (Space on Resume) is not also a drive input,
-            // and the full map takes the sticks and keys: the car coasts under it.
+            // and the full map and the controls card take the sticks and keys: the car
+            // coasts under them.
             self.advance(&InputState::default(), dt, now_seconds)
         } else {
             self.advance(&state, dt, now_seconds)

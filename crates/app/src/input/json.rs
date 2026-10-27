@@ -152,11 +152,15 @@ fn read_device(out: &mut Bindings, device: DeviceKind, mut section: Map<String, 
 
 /// Fits a file written before some actions existed. A file without `Controls` (it came
 /// with H on the keyboard, until then the horn's) has its horn moved to the new default if
-/// it was still on the old one, H alone. Then every action the file does not list keeps only
+/// it was still on the old one, H alone, and nothing else in its context reads B. Then every action the file does not list keeps only
 /// the default inputs no listed action in its context reads.
 fn migrate(out: &mut Bindings, device: DeviceKind, listed: &[bool; Action::COUNT]) {
     let old_horn = [Binding::new(RawInput::Key(Key::KeyH), Sign::Positive)];
-    if !listed[Action::Controls as usize] && out.get(device, Action::Horn) == old_horn {
+    let new_horn = Binding::new(RawInput::Key(Key::KeyB), Sign::Positive);
+    if !listed[Action::Controls as usize]
+        && out.get(device, Action::Horn) == old_horn
+        && out.find_conflict(Action::Horn, &new_horn).is_none()
+    {
         out.reset_action(device, Action::Horn);
     }
     for action in Action::ALL {
@@ -272,6 +276,14 @@ mod tests {
             b.get(pad, Action::Controls),
             Bindings::default().get(pad, Action::Controls)
         );
+        // B taken by another action: the horn stays on H, the card keeps F1.
+        old.set(kb, Action::Horn, vec![key(Key::KeyH)]);
+        old.set(kb, Action::VehicleNext, vec![key(Key::KeyB)]);
+        let text = old.to_json().replace("\"Controls\": [],", "");
+        let b = Bindings::from_json(&text).unwrap();
+        assert_eq!(b.get(kb, Action::Horn), &[key(Key::KeyH)]);
+        assert_eq!(b.get(kb, Action::VehicleNext), &[key(Key::KeyB)]);
+        assert_eq!(b.get(kb, Action::Controls), &[key(Key::F1)]);
         // A file that lists the card is read as written.
         let mut new = Bindings::default();
         new.set(kb, Action::Horn, vec![key(Key::KeyH)]);
