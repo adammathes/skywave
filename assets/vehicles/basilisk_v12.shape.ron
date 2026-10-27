@@ -1,0 +1,61 @@
+// Basilisk V12 body: a mid-80s mid-engined V12 flagship.
+//
+// Intent: very low and very wide, one straight line from a blunt knife-edge nose up a long
+// raked windshield to a short roof, then a slatted cover over the rear glass sloping to a
+// broad engine deck and a tall rear wing on two struts. The doors are long trapezoids (the
+// seam only); tapered ducts are cut into the flanks ahead of rear haunches that flare out
+// past the doors. Pop-up lamps, body-colored bumpers, black trim and deep-dish rims with
+// five round holes. Engine behind the seats. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "basilisk_v12",
+    side: [
+        (0.00, 0.45), (0.05, 0.54), (1.42, 0.80), (1.50, 0.81),
+        (2.28, 1.05), (2.36, 1.07), (2.66, 1.06), (3.36, 0.94), (4.04, 0.93),
+        (4.14, 0.89),
+        (4.14, 0.30), (3.96, 0.20), (3.50, 0.15), (0.70, 0.14), (0.14, 0.18), (0.00, 0.27),
+    ],
+    plan: [
+        (0.00, 0.70), (0.12, 0.83), (0.50, 0.90), (1.10, 0.93), (2.30, 0.93), (2.80, 0.99),
+        (3.30, 1.00), (3.95, 1.00), (4.14, 0.97),
+    ],
+    belt: [(1.50, 0.77), (2.66, 0.81), (3.36, 0.93)],
+    section: Section(shoulder: 0.95, tumblehome_deg: 30, greenhouse_frac: 0.60, crown: 0.03, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.52, 2.26),
+        backlight: (2.70, 3.32),
+        side: [(1.62, 2.62)],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.26, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.43, track: 1.56),
+    front: Front(lights: PopUp, grille: None, bumper: Body, bumper_y: (0.25, 0.35)),
+    rear: Rear(lights: Dual, spoiler: Wing, bumper: Body, bumper_y: (0.30, 0.42)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.55, creases: [(0.20, 0.52, 4.10, 0.66)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 1, exhaust: Dual, antenna: None, rims: Dish, hubcaps: false),
+    details: [NacaDucts, Louvers, BlackTrim, Badge(Diamond)],
+    // White, red, black, yellow, silver, deep blue metallic.
+    palette: ["#f0efea", "#b4161d", "#121315", "#e3b512", "#b4b8bd", "#1b2a52"],
+    accent: "#151517",
+    interior: InteriorShape(
+        dash_height: 0.76,
+        dash_x: 1.80,
+        wheel_pos: (2.18, 0.56),
+        wheel_radius: 0.17,
+        column_angle_deg: 22,
+        mirror_pos: (2.08, 0.98),
+        seat: (2.40, 0.29),
+        driver_offset: 0.40,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, cream hide with black
+        // piping, black carpet, a plain band, green-lit dials.
+        colors: ["#1b1c1f", "#d8cdb4", "#1d1e21", "#2e2f32", "#2a2b2e", "#c8a050"],
+        display: "#3cff7a",
+        insert: "#e4dbc4",
+        piping: "#1e1f22",
+        dash_top: "#232427",
+        applique: None,
+        manual: true,
+    ),
+)

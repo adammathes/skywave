@@ -33,7 +33,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 8] = [
+const ROSTER: [(&str, &str); 16] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -42,6 +42,14 @@ const ROSTER: [(&str, &str); 8] = [
     car!("buckboard_pickup"),
     car!("drayman_van"),
     car!("burro_4x4"),
+    car!("basilisk_v12"),
+    car!("basilisk_roadster"),
+    car!("avocet_v8"),
+    car!("avocet_spider"),
+    car!("longbow_coupe"),
+    car!("longbow_convertible"),
+    car!("appaloosa_gt"),
+    car!("appaloosa_convertible"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -63,8 +71,16 @@ fn shapes() -> Vec<ShapeSpec> {
     pairs().iter().map(|p| load(p.0)).collect()
 }
 
-fn convertibles() -> [ShapeSpec; 2] {
-    [load(SEABREEZE), load(REGENT)]
+/// Every built-in convertible, top down.
+fn convertibles() -> Vec<ShapeSpec> {
+    shapes()
+        .into_iter()
+        .filter(|s| s.roof.convertible())
+        .map(|mut s| {
+            s.roof.kind = RoofKind::Convertible { top: Top::Down };
+            s
+        })
+        .collect()
 }
 
 /// `spec` with its convertible top raised.
@@ -484,7 +500,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 12] = [
+    let expected: [u64; 20] = [
         0xd8c8_d201_ca40_efe2,
         0xedbe_0c75_ff0b_96c9,
         0x0cc6_c3d4_6210_49af,
@@ -497,8 +513,16 @@ fn builds_are_deterministic() {
         0x20d6_8a6d_7a68_c29d,
         0xcb4f_4a0e_9805_3593,
         0x5b64_028a_975b_f878,
+        0x638f_c6a0_7ec1_6b83,
+        0xb0e0_99a8_0987_9555,
+        0xe26a_abb7_308a_fe22,
+        0x4a4b_59b9_e83c_44d3,
+        0x9b3c_4ea0_58dc_12b5,
+        0xba3c_37a1_d8c9_574a,
+        0xb634_e87c_d647_169d,
+        0x68c4_40f9_4786_c5e6,
     ];
-    let mut got = [0u64; 12];
+    let mut got = [0u64; 20];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -890,7 +914,14 @@ fn every_option_builds() {
         TailLights::Round,
     ];
     let spoilers = [Spoiler::None, Spoiler::Lip, Spoiler::Wing];
-    let rims = [Rims::Steel, Rims::Alloy5, Rims::Mesh, Rims::Turbine];
+    let rims = [
+        Rims::Steel,
+        Rims::Alloy5,
+        Rims::Mesh,
+        Rims::Turbine,
+        Rims::Dish,
+        Rims::Slotted,
+    ];
     let details = [
         Detail::Louvers,
         Detail::HoodScoop,
@@ -911,8 +942,12 @@ fn every_option_builds() {
         Detail::TTop,
         Detail::SpareTire,
         Detail::CorneringLamps,
+        Detail::SideStrakes,
+        Detail::NacaDucts,
+        Detail::EngineLouvers,
     ];
-    for base in shapes() {
+    // Each shape starts the option lists somewhere else, so every rim and detail is built.
+    for (i, base) in shapes().into_iter().enumerate() {
         for k in 0..5 {
             let mut s = base.clone();
             s.front.lights = heads[k % heads.len()];
@@ -921,7 +956,7 @@ fn every_option_builds() {
             s.rear.lights = tails[k % tails.len()];
             s.rear.spoiler = spoilers[k % spoilers.len()];
             s.rear.bumper = bumpers[(k + 1) % bumpers.len()];
-            s.parts.rims = rims[k % rims.len()];
+            s.parts.rims = rims[(i + k) % rims.len()];
             s.parts.hubcaps = k == 4;
             s.parts.whitewalls = k % 2 == 1;
             s.interior.manual = k % 2 == 0;
@@ -949,7 +984,13 @@ fn every_option_builds() {
             s.parts.wipers = k as u8 % 4;
             s.seams.doors = if k % 2 == 0 { 4 } else { 2 };
             s.seams.creases.truncate(k % 2);
-            s.details = details.iter().copied().skip(k * 3).take(4).collect();
+            s.details = details
+                .iter()
+                .copied()
+                .cycle()
+                .skip((i + k * 3) % details.len())
+                .take(4)
+                .collect();
             for lod in 0..3 {
                 for popups_up in [false, true] {
                     let opts = BuildOptions {
