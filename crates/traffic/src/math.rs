@@ -51,6 +51,44 @@ pub fn atan2(y: f32, x: f32) -> f32 {
     a as f32
 }
 
+/// `(sin x, cos x)` from Taylor polynomials after reduction to `[-pi/4, pi/4]` (as
+/// `world::math`).
+pub fn sin_cos(x: f32) -> (f32, f32) {
+    use core::f64::consts::{FRAC_PI_2, TAU};
+    let floor = |v: f64| {
+        let t = v as i64 as f64;
+        if t > v {
+            t - 1.0
+        } else {
+            t
+        }
+    };
+    let x = f64::from(x);
+    let r = x - floor(x / TAU + 0.5) * TAU;
+    let q = floor(r / FRAC_PI_2 + 0.5);
+    let t = r - q * FRAC_PI_2;
+    let t2 = t * t;
+    let s = t
+        * (1.0
+            + t2 * (-1.0 / 6.0
+                + t2 * (1.0 / 120.0
+                    + t2 * (-1.0 / 5040.0
+                        + t2 * (1.0 / 362_880.0
+                            + t2 * (-1.0 / 39_916_800.0 + t2 / 6_227_020_800.0))))));
+    let c = 1.0
+        + t2 * (-0.5
+            + t2 * (1.0 / 24.0
+                + t2 * (-1.0 / 720.0
+                    + t2 * (1.0 / 40_320.0 + t2 * (-1.0 / 3_628_800.0 + t2 / 479_001_600.0)))));
+    let (s, c) = match (q as i64).rem_euclid(4) {
+        0 => (s, c),
+        1 => (c, -s),
+        2 => (-s, -c),
+        _ => (-c, s),
+    };
+    (s as f32, c as f32)
+}
+
 /// Ground-plane length of `(x, z)`.
 pub fn len2(v: [f32; 2]) -> f32 {
     sqrt(v[0] * v[0] + v[1] * v[1])
@@ -105,7 +143,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sqrt_and_atan2_match_std() {
+    fn sqrt_atan2_and_sin_cos_match_std() {
         for &x in &[1e-6f32, 0.25, 2.0, 9.0, 1234.5, 1e7] {
             assert!((sqrt(x) - x.sqrt()).abs() <= x.sqrt() * 2e-7);
         }
@@ -113,6 +151,8 @@ mod tests {
             let a = i as f32 * 0.1 - 3.2;
             let (y, x) = (a.sin(), a.cos());
             assert!((atan2(y, x) - y.atan2(x)).abs() < 1e-6, "{a}");
+            let (sn, cs) = sin_cos(a * 3.0);
+            assert!((sn - (a * 3.0).sin()).abs() < 1e-6 && (cs - (a * 3.0).cos()).abs() < 1e-6);
         }
     }
 

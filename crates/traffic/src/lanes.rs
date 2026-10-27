@@ -19,17 +19,21 @@
 //! its length as lane, and its turns come out tight; every turn carries its tightest
 //! radius for turn speed. Through movements keep their slot (clamped to the outgoing
 //! road's lanes), left turns leave from and arrive in slot 0 and right turns use the
-//! outermost slots; nobody turns back onto the road they came from, and at a node touching
-//! a highway nobody turns more than 60 degrees (no crossing the median). A lane that no
-//! rule serves takes the straightest move available, so only lanes into dead ends have no
-//! turn.
+//! outermost slots; nobody turns back onto the road they came from but out of a dead end
+//! (a U-turn onto the other side, when the road is two-way), and at a node touching a
+//! highway nobody turns more than 60 degrees (no crossing the median). A lane that no rule
+//! serves takes the straightest move available.
 //!
-//! **Control.** Signals where arterials cross (three or more arterial ends, or two on a
-//! four-way at an even node), stop signs on every other approach that is not an arterial,
-//! arterials through stop-controlled junctions have priority; the same rule `world::props`
-//! places signal and stop-sign props by. Nodes with fewer than three roads or touching a
-//! highway are uncontrolled. A controlled lane ends at its stop line. Signal approaches
-//! split into two phases by axis: roughly parallel to the node's first road or across it.
+//! **Control** is what the world draws: the place's `StopSign` and `Signal` props, which
+//! the detailing pass stands at junction approaches. A stop sign controls the approach
+//! whose drivers it faces; a signal pole anywhere at a node signals every approach there.
+//! Everything else is free (arterials with priority, highway nodes, approaches whose sign
+//! the detailing left out). A signed approach ends at the stop bar `world` paints with the
+//! sign, 3.85 m past a stop sign and 3.65 m past a signal pole along the road; a road too
+//! short for both its setbacks gives way at its unsigned end first. Signal approaches
+//! group into phases by their direction of travel at the stop line: the most nearly
+//! opposite pairs (at least 145 degrees apart) share a phase, every other approach gets
+//! its own, so no two crossing streams are green together.
 
 use alloc::vec::Vec;
 
@@ -58,12 +62,25 @@ const BEND_MARGIN_M: f32 = 1.0;
 /// `MAX_TRIM_SHARE` of its length.
 const MAX_TRIM_M: f32 = 20.0;
 const MAX_TRIM_SHARE: f32 = 0.8;
+/// Shortest lane left between two stop bars.
+const MIN_LANE_M: f32 = 1.0;
 /// Moves within this of straight ahead are [`TurnKind::Straight`].
 const STRAIGHT_RAD: f32 = 35.0 * core::f32::consts::PI / 180.0;
 /// Moves sharper than this are U-turns, never offered at a junction of three or more.
 const UTURN_RAD: f32 = 150.0 * core::f32::consts::PI / 180.0;
 /// Sharpest move at a node that touches a highway.
 const HIGHWAY_TURN_RAD: f32 = 60.0 * core::f32::consts::PI / 180.0;
+/// Where drivers stop, past a sign: `world` stands stop signs 1.0 m and signal poles
+/// 1.2 m past a road end's trim and paints the stop bar 4.4..4.85 m past it.
+const STOP_PAST_SIGN_M: f32 = 3.85;
+const STOP_PAST_SIGNAL_M: f32 = 3.65;
+/// How far from its road's centerline, and from its node along the road, a sign may
+/// stand to count for that approach.
+const SIGN_REACH_M: f32 = 4.0;
+const SIGN_ALONG_M: f32 = 45.0;
+/// Approaches at least this close to opposite (`cos`, about 145 degrees apart) may share
+/// a signal phase.
+const OPPOSITE_COS: f32 = -0.8;
 /// Samples used to measure a turn curve and map arc length onto it.
 pub const CURVE_STEPS: usize = 16;
 
@@ -77,7 +94,8 @@ pub enum Control {
     Stop = 1,
     /// A traffic signal at the lane's end.
     Signal = 2,
-    /// A dead end: no turns leave the lane.
+    /// A dead end: the only turn is a U-turn onto the road's other side (none on a
+    /// one-way road).
     DeadEnd = 3,
 }
 
@@ -102,7 +120,8 @@ pub struct Lane {
     pub forward: bool,
     /// 0 is the lane next to the centerline (or the left edge of a one-way road).
     pub slot: u8,
-    /// Signal phase (0 or 1) when `control` is [`Control::Signal`], else 0.
+    /// Signal phase (below the junction's `phases`) when `control` is [`Control::Signal`],
+    /// else 0.
     pub phase: u8,
     pub control: Control,
     /// The nodes the lane drives from and toward.
@@ -143,8 +162,8 @@ pub struct Turn {
 pub struct Junction {
     /// Road ends meeting at the node.
     pub degree: u16,
-    /// Whether the node has signals.
-    pub signal: bool,
+    /// Signal phases at the node; 0 without signals.
+    pub phases: u8,
     /// Where its signal cycle starts, ticks ([`signal::offset`]); 0 without signals.
     pub offset: u32,
 }
@@ -326,6 +345,119 @@ fn heading(d: [f32; 2]) -> f32 {
     atan2(-d[0], -d[1])
 }
 
+/// A stop sign or signal pole of the place, matched to the approach it controls.
+#[derive(Clone, Copy)]
+struct Sign {
+    signal: bool,
+    /// Distance from the node along the road.
+    along: f32,
+}
+
+/// The place's stop signs and signal poles by road end (`[edge][at_b]`): the approach whose
+/// drivers a sign faces, standing on their right past the node. These props are what the
+/// detailing pass draws, so cars stop exactly where the world shows a sign.
+fn signs(
+    place: &Place,
+    incident: &[Vec<End>],
+    raws: &[Vec<[f32; 3]>],
+    hw: &[f32],
+) -> Vec<[Option<Sign>; 2]> {
+    let nodes = &place.roads.nodes;
+    let lens: Vec<f32> = raws.iter().map(|r| arcs(r)[r.len() - 1]).collect();
+    let mut out = alloc::vec![[None; 2]; place.roads.edges.len()];
+    for p in &place.props.items {
+        let signal = match p.kind {
+            place::PropKind::StopSign => false,
+            place::PropKind::Signal { .. } => true,
+            _ => continue,
+        };
+        let (sn, cs) = crate::math::sin_cos(p.yaw);
+        let facing = [-sn, -cs];
+        // A stop sign faces the drivers it stops (along the road, away from the node); a
+        // signal's arm reaches over their road from their right.
+        let out_dir = if signal {
+            [facing[1], -facing[0]]
+        } else {
+            facing
+        };
+        let mut best: Option<(f32, u32, bool)> = None;
+        for (node, ends) in incident.iter().enumerate() {
+            let n = nodes[node].pos;
+            let rel = [p.pos[0] - n[0], p.pos[2] - n[1]];
+            if ends.len() < 3 || rel[0].abs() > SIGN_ALONG_M || rel[1].abs() > SIGN_ALONG_M {
+                continue;
+            }
+            for e in ends {
+                // Drivers coming in have the left of `dir` on their right.
+                if dot(out_dir, e.dir) <= 0.5 || dot(rel, right(e.dir)) > 0.0 {
+                    continue;
+                }
+                // Along the road end and off its centerline: `world` lays every road end out
+                // straight from its node to its trim, and stands signs just past the trim.
+                let len = lens[e.edge as usize];
+                let along = dot(rel, e.dir);
+                let off = -dot(rel, right(e.dir));
+                let h = hw[e.edge as usize];
+                if along > 0.0
+                    && along < SIGN_ALONG_M.min(0.5 * len)
+                    && off > h - 1.0
+                    && off < h + SIGN_REACH_M
+                    && best.is_none_or(|b| along < b.0)
+                {
+                    best = Some((along, e.edge, e.at_b));
+                }
+            }
+        }
+        if let Some((along, edge, at_b)) = best {
+            let slot = &mut out[edge as usize][usize::from(at_b)];
+            if slot.is_none_or(|s: Sign| along < s.along) {
+                *slot = Some(Sign { signal, along });
+            }
+        }
+    }
+    out
+}
+
+/// Signal phases of a junction's approaches, given each approach's direction of travel at
+/// its stop line (by end; ends with no lanes in get 0): the
+/// most nearly opposite pairs share a phase first, every other approach goes alone, so no
+/// two crossing streams get green together. Returns the phase count.
+fn phases(dirs: &[[f32; 2]], arriving: &[bool], out: &mut Vec<u8>) -> u8 {
+    out.clear();
+    out.resize(dirs.len(), u8::MAX);
+    // Candidate pairs, most opposite first (ties by index: deterministic).
+    let mut pairs: Vec<(f32, usize, usize)> = Vec::new();
+    for i in 0..dirs.len() {
+        for j in i + 1..dirs.len() {
+            let c = dot(dirs[i], dirs[j]);
+            if arriving[i] && arriving[j] && c <= OPPOSITE_COS {
+                pairs.push((c, i, j));
+            }
+        }
+    }
+    pairs.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
+    let mut n = 0u8;
+    for &(_, i, j) in &pairs {
+        if out[i] == u8::MAX && out[j] == u8::MAX {
+            out[i] = n;
+            out[j] = n;
+            n += 1;
+        }
+    }
+    for i in 0..dirs.len() {
+        if arriving[i] && out[i] == u8::MAX {
+            out[i] = n;
+            n += 1;
+        }
+    }
+    for p in out.iter_mut() {
+        if *p == u8::MAX {
+            *p = 0;
+        }
+    }
+    n
+}
+
 impl LaneGraph {
     /// Builds the lane graph of `place` (see the module docs).
     pub fn new(place: &Place) -> LaneGraph {
@@ -422,28 +554,21 @@ impl LaneGraph {
             }
         }
 
-        // Junction control and setbacks.
+        // Junction control and setbacks. A signal pole anywhere at a node signals all of
+        // it; a stop sign controls its own approach.
+        let signs = signs(place, &incident, &raws, &hw);
+        let sign = |x: &End| signs[x.edge as usize][usize::from(x.at_b)];
         let mut junctions = Vec::with_capacity(nodes.len());
         let mut trims = alloc::vec![[0.0f32; 2]; edges.len()];
+        let mut signed = alloc::vec![[false; 2]; edges.len()];
         for (node, ends) in incident.iter().enumerate() {
             let deg = ends.len();
-            let class = |x: &End| edges[x.edge as usize].class;
-            let highway = ends.iter().any(|x| class(x) == RoadClass::Highway);
-            let arterials = ends
-                .iter()
-                .filter(|x| class(x) == RoadClass::Arterial)
-                .count();
-            let signal = deg >= 3
-                && !highway
-                && (arterials >= 3 || (arterials == 2 && deg == 4 && node % 2 == 0));
+            // Phases come once the lanes are laid (by their directions at the stop line).
+            let signal = !joined[node] && ends.iter().any(|x| sign(x).is_some_and(|s| s.signal));
             junctions.push(Junction {
                 degree: deg as u16,
-                signal,
-                offset: if signal {
-                    signal::offset(place.header.seed, node as u32)
-                } else {
-                    0
-                },
+                phases: u8::from(signal),
+                offset: 0,
             });
             if deg < 2 || joined[node] {
                 continue;
@@ -454,8 +579,15 @@ impl LaneGraph {
                 BEND_MARGIN_M
             };
             for i in 0..deg {
-                let t = setback(ends, i, &hw) + margin;
-                trims[ends[i].edge as usize][usize::from(ends[i].at_b)] = t;
+                // A signed approach ends at the world's stop bar.
+                let t = match sign(&ends[i]) {
+                    Some(s) if s.signal => s.along + STOP_PAST_SIGNAL_M,
+                    Some(s) => s.along + STOP_PAST_SIGN_M,
+                    None => setback(ends, i, &hw) + margin,
+                };
+                let at = usize::from(ends[i].at_b);
+                trims[ends[i].edge as usize][at] = t;
+                signed[ends[i].edge as usize][at] = sign(&ends[i]).is_some();
             }
         }
 
@@ -485,8 +617,26 @@ impl LaneGraph {
             let len = s[s.len() - 1];
             let mut ta = trims[e0 as usize][usize::from(r0)];
             let mut tb = trims[e1 as usize][usize::from(!r1)];
-            if ta + tb > MAX_TRIM_SHARE * len {
-                let k = MAX_TRIM_SHARE * len / (ta + tb);
+            // An end at a drawn stop bar keeps it, down to a short lane between two bars;
+            // an end without one gives way first.
+            let (sa, sb) = (
+                signed[e0 as usize][usize::from(r0)],
+                signed[e1 as usize][usize::from(!r1)],
+            );
+            let limit = if sa && sb {
+                (len - MIN_LANE_M).max(MAX_TRIM_SHARE * len)
+            } else {
+                MAX_TRIM_SHARE * len
+            };
+            if ta + tb > limit {
+                match (sa, sb) {
+                    (true, false) => tb = (limit - ta).max(0.0),
+                    (false, true) => ta = (limit - tb).max(0.0),
+                    _ => {}
+                }
+            }
+            if ta + tb > limit {
+                let k = limit / (ta + tb);
                 ta *= k;
                 tb *= k;
             }
@@ -552,6 +702,25 @@ impl LaneGraph {
                 continue;
             }
             let deg = ends.len();
+            // Signal phases by each approach's direction of travel at its stop line.
+            let mut ph = Vec::new();
+            if g.junctions[node].phases > 0 {
+                let dirs: Vec<[f32; 2]> = ends
+                    .iter()
+                    .map(|x| {
+                        let (first, n) = arriving(x);
+                        if n > 0 {
+                            g.end_pose(first).dir
+                        } else {
+                            [0.0, 0.0]
+                        }
+                    })
+                    .collect();
+                let mask: Vec<bool> = ends.iter().map(|x| arriving(x).1 > 0).collect();
+                let n = phases(&dirs, &mask, &mut ph).max(1);
+                g.junctions[node].phases = n;
+                g.junctions[node].offset = signal::offset(place.header.seed, node as u32, n);
+            }
             let j = g.junctions[node];
             let highway = ends
                 .iter()
@@ -561,18 +730,16 @@ impl LaneGraph {
                 if n_in == 0 {
                     continue;
                 }
-                let class = edges[inc.edge as usize].class;
                 let control = if deg < 2 {
                     Control::DeadEnd
-                } else if j.signal {
+                } else if j.phases > 0 {
                     Control::Signal
-                } else if deg >= 3 && !highway && class != RoadClass::Arterial {
+                } else if sign(inc).is_some() {
                     Control::Stop
                 } else {
                     Control::Free
                 };
-                let phase =
-                    u8::from(dot(inc.dir, ends[0].dir).abs() < core::f32::consts::FRAC_1_SQRT_2);
+                let phase = ph.get(i).copied().unwrap_or(0);
                 if matches!(control, Control::Stop | Control::Signal) {
                     let (a, b) = (g.end_pose(first), g.end_pose(first + n_in - 1));
                     let r = right(a.dir);
@@ -593,7 +760,8 @@ impl LaneGraph {
                     let mut best: Option<(usize, u32, TurnKind, f32)> = None;
                     for (o, out) in ends.iter().enumerate() {
                         let (ofirst, n_out) = leaving(out);
-                        if o == i || n_out == 0 {
+                        // Back the way it came only out of a dead end.
+                        if (o == i && deg > 1) || n_out == 0 {
                             continue;
                         }
                         // By the lanes' own directions: a road may curve between its
@@ -616,7 +784,7 @@ impl LaneGraph {
                         if best.is_none_or(|b| a.abs() < b.3) {
                             best = Some((o, target, kind, a.abs()));
                         }
-                        let allowed = (deg == 2 || kind != TurnKind::UTurn)
+                        let allowed = (deg <= 2 || kind != TurnKind::UTurn)
                             && (!highway || a.abs() <= HIGHWAY_TURN_RAD)
                             && match kind {
                                 TurnKind::Straight | TurnKind::UTurn => true,
@@ -782,7 +950,7 @@ impl LaneGraph {
             return None;
         }
         let j = &self.junctions[l.end_node as usize];
-        Some(signal::light(j.offset, l.phase, tick))
+        Some(signal::light(j.offset, l.phase, j.phases, tick))
     }
 
     /// Bytes the graph's arrays hold.
@@ -826,7 +994,7 @@ impl LaneGraph {
             w.extend(s.a.iter().chain(&s.b).map(|&x| f(x)));
         }
         for j in &self.junctions {
-            w.push(u64::from(j.degree) | u64::from(j.signal) << 16 | u64::from(j.offset) << 32);
+            w.push(u64::from(j.degree) | u64::from(j.phases) << 16 | u64::from(j.offset) << 32);
         }
         hash64(0x1A4E_6AF4, &w)
     }
