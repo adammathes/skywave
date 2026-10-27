@@ -55,9 +55,7 @@ pub fn offset(seed: u64, node: u32, phases: u8) -> u32 {
 
 /// The light shown to `phase` (below `phases`) of a junction with cycle `offset` at `tick`.
 pub fn light(offset: u32, phase: u8, phases: u8, tick: u64) -> Light {
-    let cycle = u64::from(cycle_ticks(phases.max(1)));
-    let shift = u64::from(phase % phases.max(1)) * u64::from(PHASE_TICKS);
-    let t = ((tick % cycle) + u64::from(offset) + cycle - shift) % cycle;
+    let t = phase_time(offset, phase, phases, tick);
     if t < u64::from(GREEN_TICKS) {
         Light::Green
     } else if t < u64::from(GREEN_TICKS + YELLOW_TICKS) {
@@ -65,6 +63,19 @@ pub fn light(offset: u32, phase: u8, phases: u8, tick: u64) -> Light {
     } else {
         Light::Red
     }
+}
+
+/// Ticks until the light shown to `phase` turns red (0 while red).
+pub fn until_red(offset: u32, phase: u8, phases: u8, tick: u64) -> u32 {
+    let t = phase_time(offset, phase, phases, tick);
+    u64::from(GREEN_TICKS + YELLOW_TICKS).saturating_sub(t) as u32
+}
+
+/// Ticks since `phase`'s green began, within its cycle.
+fn phase_time(offset: u32, phase: u8, phases: u8, tick: u64) -> u64 {
+    let cycle = u64::from(cycle_ticks(phases.max(1)));
+    let shift = u64::from(phase % phases.max(1)) * u64::from(PHASE_TICKS);
+    ((tick % cycle) + u64::from(offset) + cycle - shift) % cycle
 }
 
 #[cfg(test)]
@@ -85,6 +96,12 @@ mod tests {
                     going += u32::from(l != Light::Red);
                     greens[p as usize] += u32::from(l == Light::Green);
                     assert_eq!(l, light(off, p, phases, clock.tick + u64::from(cycle)));
+                    let left = until_red(off, p, phases, clock.tick);
+                    assert_eq!(left == 0, l == Light::Red);
+                    assert_eq!(
+                        light(off, p, phases, clock.tick + u64::from(left)),
+                        Light::Red
+                    );
                 }
                 assert!(going <= 1, "{phases} phases, tick {}", clock.tick);
                 clock.step();

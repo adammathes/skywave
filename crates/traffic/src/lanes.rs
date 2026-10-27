@@ -307,7 +307,7 @@ fn lane_offset(e: &place::Edge, slot: u8, n: u8) -> f32 {
 }
 
 /// Point on cubic `c` at parameter `t`.
-fn bezier(c: &[[f32; 3]; 4], t: f32) -> [f32; 3] {
+pub(crate) fn bezier(c: &[[f32; 3]; 4], t: f32) -> [f32; 3] {
     let u = 1.0 - t;
     let (b0, b1, b2, b3) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
     let mut p = [0.0; 3];
@@ -341,7 +341,7 @@ fn measure(c: [[f32; 3]; 4], d0: [f32; 2]) -> ([[f32; 3]; 4], f32, f32) {
     (c, length_m, min_radius_m)
 }
 
-fn heading(d: [f32; 2]) -> f32 {
+pub(crate) fn heading(d: [f32; 2]) -> f32 {
     atan2(-d[0], -d[1])
 }
 
@@ -951,6 +951,17 @@ impl LaneGraph {
         }
         let j = &self.junctions[l.end_node as usize];
         Some(signal::light(j.offset, l.phase, j.phases, tick))
+    }
+
+    /// Ticks until the light `lane` faces turns red (0 while red), when it ends at a
+    /// signal.
+    pub fn until_red(&self, lane: u32, tick: u64) -> Option<u32> {
+        let l = &self.lanes[lane as usize];
+        if l.control != Control::Signal {
+            return None;
+        }
+        let j = &self.junctions[l.end_node as usize];
+        Some(signal::until_red(j.offset, l.phase, j.phases, tick))
     }
 
     /// Bytes the graph's arrays hold.
