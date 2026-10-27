@@ -209,9 +209,10 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     assert!(changed >= 2 * (3 + 8 * 4) + 4 + 2, "{changed}");
     // Everything was put back, and the simulation stood still throughout.
     assert_eq!(h.app.bindings(), &bindings);
-    // Choosing a preset (and back) makes the automatic one an explicit choice.
+    // Choosing a preset or a frame rate (and back) makes the automatic one explicit.
     let explicit = Settings {
         quality: Some(Quality::Medium),
+        frame_rate: Some(FrameRate::Panel),
         ..settings
     };
     assert_eq!(h.app.settings(), &explicit);
@@ -1646,6 +1647,32 @@ fn the_master_volume_and_mute_reach_the_radio() {
 }
 
 #[test]
+fn the_radio_keeps_playing_in_the_background_unless_set_to_mute() {
+    use audio::RadioCommand;
+    let mut h = Harness::new();
+    h.frame();
+    h.app.radio_commands().for_each(drop);
+    h.app.set_focused(false);
+    h.app.set_focused(true);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert!(
+        cmds.iter().all(|c| *c == RadioCommand::Volume(0.8 * 0.8)),
+        "it is a radio: {cmds:?}"
+    );
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.focus_on(ItemId::BackgroundRadio);
+    h.pad(PadButton::DpadRight);
+    assert!(h.app.settings().mute_radio_unfocused);
+    h.app.radio_commands().for_each(drop);
+    h.app.set_focused(false);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.0)], "muted in the background");
+    h.app.set_focused(true);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.8 * 0.8)], "back in front");
+}
+
+#[test]
 fn still_scenes_keep_the_radio_off() {
     let setup = crate::SceneSetup {
         still: true,
@@ -1722,11 +1749,25 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     });
     assert_eq!(h.app.ui().quality(), Quality::Deck);
     assert_eq!(h.app.scene_view(0.0, 1.6).quality.cascades, 2);
-    // Low on the Video page: cheaper shadows, 75% resolution, saved.
+    assert_eq!(h.app.frame_rate(), FrameRate::Fps60, "the Deck's own cap");
+    // Battery on the Video page: the Deck's knobs at 85%, capped at 60.
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Video)]);
+    h.focus_on(ItemId::FrameRate);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.settings().frame_rate, Some(FrameRate::Panel));
+    h.focus_on(ItemId::Quality);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.settings().quality, Some(Quality::Battery));
+    assert_eq!(h.app.settings().resolution_scale, 0.85);
+    assert_eq!(h.app.frame_rate(), FrameRate::Fps60);
+    h.focus_on(ItemId::FrameRate);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.frame_rate(), FrameRate::Fps45);
+    // Low: cheaper shadows, 75% resolution, saved; the cap stays.
     h.focus_on(ItemId::Quality);
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
+    assert_eq!(h.app.frame_rate(), FrameRate::Fps45);
     assert_eq!(h.app.settings().resolution_scale, 0.75);
     let low = h.app.renderer_options().quality;
     assert_eq!(low, Quality::Low.render(0.75));
@@ -1735,6 +1776,7 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     h.pad(PadButton::Start);
     let saved = store.0.borrow().clone().expect("saved");
     assert!(saved.contains("\"quality\": \"low\""), "{saved}");
+    assert!(saved.contains("\"frame_rate\": \"45\""), "{saved}");
     // A forced preset wins for the session with its own scale, unsaved.
     h.app.force_quality(Some(Quality::Ultra));
     assert_eq!(

@@ -7,10 +7,11 @@
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
-//!              "quality": "auto" },
+//!              "quality": "auto", "frame_rate": "auto" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal" },
-//!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false },
+//!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
+//!              "mute_radio_unfocused": false },
 //!   "radio": { "volume": 0.8, "on": false, "last_station": null, "disabled": [],
 //!              "custom": [], "presets": {} },
 //!   "input": { …the bindings document, see `Bindings::to_json`… } }
@@ -108,6 +109,9 @@ impl Handling {
 pub enum Quality {
     /// Integrated GPUs that struggle: two 1024² cascades, 75% resolution, no coronas.
     Low,
+    /// The Deck on battery: Deck's knobs at 85% resolution, and choosing it caps the frame
+    /// rate at 60.
+    Battery,
     /// The Steam Deck at 1280×800 and 90 Hz: two 1536² cascades, full resolution.
     Deck,
     /// The default: three 1536² cascades, the far one drawn every other frame, all five
@@ -121,8 +125,9 @@ pub enum Quality {
 
 impl Quality {
     /// In the order the Video page offers them.
-    pub const ALL: [Quality; 5] = [
+    pub const ALL: [Quality; 6] = [
         Quality::Low,
+        Quality::Battery,
         Quality::Deck,
         Quality::Medium,
         Quality::High,
@@ -133,6 +138,7 @@ impl Quality {
     pub fn name(self) -> &'static str {
         match self {
             Quality::Low => "low",
+            Quality::Battery => "battery",
             Quality::Deck => "deck",
             Quality::Medium => "medium",
             Quality::High => "high",
@@ -148,7 +154,16 @@ impl Quality {
     pub fn resolution_scale(self) -> f32 {
         match self {
             Quality::Low => 0.75,
+            Quality::Battery => 0.85,
             _ => 1.0,
+        }
+    }
+
+    /// The frame-rate cap choosing this preset sets, if it sets one.
+    pub fn frame_rate(self) -> Option<FrameRate> {
+        match self {
+            Quality::Battery => Some(FrameRate::Fps60),
+            _ => None,
         }
     }
 
@@ -157,7 +172,7 @@ impl Quality {
         let (shadow_size, cascades, bloom_levels, coronas, far_cascade_interval, min_caster) =
             match self {
                 Quality::Low => (1024, 2, 4, false, 2, 3.0),
-                Quality::Deck => (1536, 2, 4, true, 2, 2.0),
+                Quality::Battery | Quality::Deck => (1536, 2, 4, true, 2, 2.0),
                 Quality::Medium => (1536, 3, 5, true, 2, 2.0),
                 Quality::High => (2048, 3, 5, true, 1, 0.0),
                 Quality::Ultra => (3072, 3, 5, true, 1, 0.0),
@@ -187,6 +202,67 @@ impl Quality {
             Quality::Deck
         } else {
             Quality::Medium
+        }
+    }
+}
+
+/// The frame-rate cap: Settings › Video › Frame rate. The simulation runs at 120 Hz
+/// whatever the cap; rendering interpolates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameRate {
+    /// The panel's refresh rate (vsync).
+    Panel,
+    Fps60,
+    /// Every other refresh of a 90 Hz panel.
+    Fps45,
+    Fps40,
+    /// Every other refresh of a 60 Hz panel, every third of a 90 Hz one.
+    Fps30,
+}
+
+impl FrameRate {
+    /// In the order the Video page offers them.
+    pub const ALL: [FrameRate; 5] = [
+        FrameRate::Panel,
+        FrameRate::Fps60,
+        FrameRate::Fps45,
+        FrameRate::Fps40,
+        FrameRate::Fps30,
+    ];
+
+    /// Stable name (settings JSON).
+    pub fn name(self) -> &'static str {
+        match self {
+            FrameRate::Panel => "panel",
+            FrameRate::Fps60 => "60",
+            FrameRate::Fps45 => "45",
+            FrameRate::Fps40 => "40",
+            FrameRate::Fps30 => "30",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<FrameRate> {
+        FrameRate::ALL.into_iter().find(|f| f.name() == name)
+    }
+
+    /// Frames a second, or `None` for the panel's rate.
+    pub fn fps(self) -> Option<u32> {
+        match self {
+            FrameRate::Panel => None,
+            FrameRate::Fps60 => Some(60),
+            FrameRate::Fps45 => Some(45),
+            FrameRate::Fps40 => Some(40),
+            FrameRate::Fps30 => Some(30),
+        }
+    }
+
+    /// The cap for a device nobody chose one for: 60 on a Steam Deck (where
+    /// [`Quality::auto`] picks [`Quality::Deck`]), the panel's rate everywhere else.
+    pub fn auto(gpu: &GpuInfo) -> FrameRate {
+        if Quality::auto(gpu) == Quality::Deck {
+            FrameRate::Fps60
+        } else {
+            FrameRate::Panel
         }
     }
 }
@@ -248,6 +324,8 @@ pub struct Settings {
     pub bloom: bool,
     /// The graphics preset; `None` picks one for the device ([`Quality::auto`]).
     pub quality: Option<Quality>,
+    /// The frame-rate cap; `None` picks one for the device ([`FrameRate::auto`]).
+    pub frame_rate: Option<FrameRate>,
     /// The frame-stats overlay (F3).
     pub debug_overlay: bool,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
@@ -265,6 +343,9 @@ pub struct Settings {
     pub engine_volume: f32,
     pub world_volume: f32,
     pub mute: bool,
+    /// The radio goes quiet while the window is in the background (off: it keeps playing,
+    /// it is a radio).
+    pub mute_radio_unfocused: bool,
     /// Radio volume, power, last station, stations and presets.
     pub radio: RadioSettings,
 }
@@ -285,6 +366,7 @@ impl Default for Settings {
             resolution_scale: 1.0,
             bloom: true,
             quality: None,
+            frame_rate: None,
             debug_overlay: false,
             clock_speed: 10.0,
             traffic: traffic::Density::Normal,
@@ -295,6 +377,7 @@ impl Default for Settings {
             engine_volume: 0.8,
             world_volume: 0.8,
             mute: false,
+            mute_radio_unfocused: false,
             radio: RadioSettings::default(),
         }
     }
@@ -369,6 +452,8 @@ struct Video {
     debug_overlay: bool,
     /// A [`Quality`] name, or "auto".
     quality: String,
+    /// A [`FrameRate`] name, or "auto".
+    frame_rate: String,
 }
 
 impl Default for Video {
@@ -380,6 +465,7 @@ impl Default for Video {
             bloom: s.bloom,
             debug_overlay: s.debug_overlay,
             quality: quality_name(s.quality).to_owned(),
+            frame_rate: frame_rate_name(s.frame_rate).to_owned(),
         }
     }
 }
@@ -387,6 +473,11 @@ impl Default for Video {
 /// The settings name of a preset choice.
 fn quality_name(q: Option<Quality>) -> &'static str {
     q.map_or("auto", Quality::name)
+}
+
+/// The settings name of a frame-rate choice.
+fn frame_rate_name(f: Option<FrameRate>) -> &'static str {
+    f.map_or("auto", FrameRate::name)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -433,6 +524,7 @@ struct Audio {
     engine: f32,
     world: f32,
     mute: bool,
+    mute_radio_unfocused: bool,
 }
 
 impl Default for Audio {
@@ -443,6 +535,7 @@ impl Default for Audio {
             engine: s.engine_volume,
             world: s.world_volume,
             mute: s.mute,
+            mute_radio_unfocused: s.mute_radio_unfocused,
         }
     }
 }
@@ -530,6 +623,7 @@ impl Settings {
                 bloom: self.bloom,
                 debug_overlay: self.debug_overlay,
                 quality: quality_name(self.quality).to_owned(),
+                frame_rate: frame_rate_name(self.frame_rate).to_owned(),
             },
             "hud": HudSection {
                 minimap: self.minimap,
@@ -545,6 +639,7 @@ impl Settings {
                 engine: self.engine_volume,
                 world: self.world_volume,
                 mute: self.mute,
+                mute_radio_unfocused: self.mute_radio_unfocused,
             },
             "radio": &self.radio,
             "input": input,
@@ -590,6 +685,7 @@ impl Settings {
             resolution_scale: video.resolution_scale,
             bloom: video.bloom,
             quality: Quality::from_name(&video.quality),
+            frame_rate: FrameRate::from_name(&video.frame_rate),
             debug_overlay: video.debug_overlay,
             clock_speed: world.clock_speed,
             traffic: density_from_name(&world.traffic).unwrap_or(d.traffic),
@@ -600,6 +696,7 @@ impl Settings {
             engine_volume: audio.engine,
             world_volume: audio.world,
             mute: audio.mute,
+            mute_radio_unfocused: audio.mute_radio_unfocused,
             radio,
         }
         .sanitized();
@@ -628,6 +725,7 @@ mod tests {
             resolution_scale: 0.75,
             bloom: false,
             quality: Some(Quality::Low),
+            frame_rate: Some(FrameRate::Fps45),
             debug_overlay: true,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
@@ -638,6 +736,7 @@ mod tests {
             engine_volume: 0.25,
             world_volume: 1.0,
             mute: true,
+            mute_radio_unfocused: true,
             radio: RadioSettings {
                 volume: 0.45,
                 on: true,
@@ -779,6 +878,37 @@ mod tests {
     }
 
     #[test]
+    fn frame_rates_and_the_battery_preset_round_trip() {
+        let b = Bindings::default();
+        for f in FrameRate::ALL.map(Some).into_iter().chain([None]) {
+            let s = Settings {
+                frame_rate: f,
+                quality: Some(Quality::Battery),
+                resolution_scale: Quality::Battery.resolution_scale(),
+                ..Settings::default()
+            };
+            assert_eq!(Settings::from_json(&s.to_json(&b)).0, s);
+        }
+        let (s, _) = Settings::from_json(r#"{ "video": { "frame_rate": "144" } }"#);
+        assert_eq!(s.frame_rate, None, "unknown rates are auto");
+        assert_eq!(
+            FrameRate::ALL.map(FrameRate::fps),
+            [None, Some(60), Some(45), Some(40), Some(30)]
+        );
+        // Battery: the Deck's knobs, smaller, capped at 60.
+        let battery = Quality::Battery.render(Quality::Battery.resolution_scale());
+        assert_eq!(
+            battery,
+            render::RenderQuality {
+                resolution_scale: 0.85,
+                ..Quality::Deck.render(1.0)
+            }
+        );
+        assert_eq!(Quality::Battery.frame_rate(), Some(FrameRate::Fps60));
+        assert_eq!(Quality::Deck.frame_rate(), None);
+    }
+
+    #[test]
     fn auto_quality_picks_deck_on_the_deck() {
         let gpu = |name: &str, integrated, linux, surface| GpuInfo {
             name: name.to_owned(),
@@ -810,6 +940,7 @@ mod tests {
         ];
         for g in &deck {
             assert_eq!(Quality::auto(g), Quality::Deck, "{g:?}");
+            assert_eq!(FrameRate::auto(g), FrameRate::Fps60, "{g:?}");
         }
         let other = [
             gpu(
@@ -824,6 +955,7 @@ mod tests {
         ];
         for g in &other {
             assert_eq!(Quality::auto(g), Quality::Medium, "{g:?}");
+            assert_eq!(FrameRate::auto(g), FrameRate::Panel, "{g:?}");
         }
     }
 

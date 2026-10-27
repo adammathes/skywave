@@ -33,7 +33,7 @@ use crate::map::view::{
 };
 use crate::map::MapPoi;
 use crate::radio::{self, CarRadio};
-use crate::settings::{GpuInfo, Handling, Quality, Settings, SettingsStore};
+use crate::settings::{FrameRate, GpuInfo, Handling, Quality, Settings, SettingsStore};
 use crate::App;
 use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
 use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
@@ -149,6 +149,11 @@ pub struct Ui {
     /// A preset the command line forced this session (not saved; a choice on the Video
     /// page replaces it).
     forced_quality: Option<Quality>,
+    /// The frame-rate cap [`FrameRate::auto`] picked for this device (the panel's until the
+    /// platform says what the GPU is).
+    auto_frame_rate: FrameRate,
+    /// The window has the focus (the platform says; true until it does).
+    focused: bool,
     /// CPU time the platform spent recording and submitting the last frame, ms (0:
     /// not measured).
     cpu_submit_ms: f32,
@@ -200,6 +205,8 @@ impl Ui {
             text_entry: false,
             auto_quality: Quality::Medium,
             forced_quality: None,
+            auto_frame_rate: FrameRate::Panel,
+            focused: true,
             cpu_submit_ms: 0.0,
             traffic: (0, 0.0),
             gpu_label: String::new(),
@@ -211,6 +218,11 @@ impl Ui {
         self.forced_quality
             .or(self.settings.quality)
             .unwrap_or(self.auto_quality)
+    }
+
+    /// The frame-rate cap in effect: saved, else picked for the device.
+    pub fn frame_rate(&self) -> FrameRate {
+        self.settings.frame_rate.unwrap_or(self.auto_frame_rate)
     }
 
     /// What the renderer may spend this frame: the preset at the resolution scale setting
@@ -475,6 +487,7 @@ impl Ui {
             radio: &self.radio,
             text_entry: self.text_entry,
             quality: self.quality(),
+            frame_rate: self.frame_rate(),
             browse: self.browse,
         }
     }
@@ -610,8 +623,19 @@ impl Ui {
                 let q = Quality::ALL[i.min(Quality::ALL.len() - 1)];
                 self.settings.quality = Some(q);
                 self.settings.resolution_scale = q.resolution_scale();
+                if let Some(f) = q.frame_rate() {
+                    self.settings.frame_rate = Some(f);
+                }
                 self.forced_quality = None;
                 self.dirty = true;
+            }
+            Effect::Choose(ItemId::FrameRate, i) => {
+                self.settings.frame_rate = Some(FrameRate::ALL[i.min(FrameRate::ALL.len() - 1)]);
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::BackgroundRadio, i) => {
+                self.settings.mute_radio_unfocused = i == 1;
+                self.radio_settings_changed();
             }
             Effect::Choose(..) => {}
             Effect::Activate(id) => self.activate(id),
@@ -829,9 +853,10 @@ impl Ui {
         &self.radio
     }
 
-    /// The master volume scales the radio too, and mute silences it.
+    /// The master volume scales the radio too, and mute silences it (and so does the
+    /// window going to the background, when the setting says so).
     fn radio_gain(&self) -> f32 {
-        if self.settings.mute {
+        if self.settings.mute || (self.settings.mute_radio_unfocused && !self.focused) {
             0.0
         } else {
             self.settings.master_volume
@@ -1280,11 +1305,27 @@ impl App {
     /// ([`Quality::auto`]) and labels the overlay. Call once, before the first frame.
     pub fn set_gpu_info(&mut self, gpu: &GpuInfo) {
         self.ui.auto_quality = Quality::auto(gpu);
+        self.ui.auto_frame_rate = FrameRate::auto(gpu);
         self.ui.gpu_label = if gpu.backend.is_empty() {
             gpu.name.clone()
         } else {
             format!("{} ({})", gpu.name, gpu.backend)
         };
+    }
+
+    /// The window gained or lost the focus (or was hidden): the radio goes quiet in the
+    /// background when the setting says so.
+    pub fn set_focused(&mut self, focused: bool) {
+        if self.ui.focused != focused {
+            self.ui.focused = focused;
+            self.ui.radio.set_gain(self.ui.radio_gain());
+            self.ui.radio.apply(&self.ui.settings.radio);
+        }
+    }
+
+    /// How often to draw: the frame-rate cap in effect (Settings › Video › Frame rate).
+    pub fn frame_rate(&self) -> FrameRate {
+        self.ui.frame_rate()
     }
 
     /// Uses preset `q` this session whatever is saved (`None` goes back to the setting).

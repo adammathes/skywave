@@ -95,12 +95,14 @@ Linux; **Medium** everywhere else. `--quality NAME` forces one for a session (no
 | Preset | Cascades | Cascade size | Far cascade | Small casters | Resolution | Bloom levels | Coronas | For |
 |---|---|---|---|---|---|---|---|---|
 | Low | 2 (50 / 400 m) | 1024² | every other frame | < 3 texels skipped | 75% | 4 | off | weak integrated GPUs |
+| Battery | 2 (50 / 400 m) | 1536² | every other frame | < 2 texels | 85% | 4 | on | the Deck on battery: Deck's knobs, and choosing it sets the frame rate to 60 |
 | Deck | 2 (50 / 400 m) | 1536² | every other frame | < 2 texels | 100% | 4 | on | Steam Deck, 1280×800 @ 90 Hz |
 | Medium (default) | 3 (40 / 160 / 600 m) | 1536² | every other frame | < 2 texels | 100% | 5 | on | everything else until chosen |
 | High | 3 | 2048² | every frame | all | 100% | 5 | on | desktop GPUs (the renderer's own default, `RenderQuality::default()`) |
 | Ultra | 3 | 3072² (where the device allows 9216-wide textures) | every frame | all | 100% | 5 | on | big desktop GPUs |
 
-Choosing a preset sets the resolution scale slider to the preset's value; the slider can
+Choosing a preset sets the resolution scale slider to the preset's value (Battery also sets
+Frame rate to 60); the slider can
 then move it (50–100%). Far terrain detail is the same at every preset: it is one mesh of
 ~8k triangles drawn last (a coarser level is a follow-up). Bloom on/off stays its own
 toggle.
@@ -111,6 +113,69 @@ halos round the coast's neon at night change about 2% of the night golden's pixe
 saving too small to measure (with five the night golden matches exactly). Its smaller
 cascades and every-other-frame far cascade stay well inside the goldens' tolerance (at most
 0.4% of pixels past the threshold, in the day scenes).
+
+## Idle frames and the frame-rate cap
+
+The owner's Deck ran at 90 fps with the GPU at 90% even paused or standing still. Two things
+now keep it from drawing what it already drew:
+
+**Draw only what changed** (`Renderer::plan` / `Renderer::draw`, both shells). Each frame
+the app builds its scene as before; the renderer compares it with what the last world frame
+was drawn from (camera, sun, sky, quality, every instance and light; positions and
+orientations within 2 ppm, because a car at rest jitters by a billionth of a radian on its
+springs forever) and the HUD's quads with the last ones drawn:
+
+| What changed | Frame | GPU work |
+|---|---|---|
+| anything the world passes draw, the targets (resize, resolution scale), a mesh or a streamed chunk | World | every pass, as before |
+| only the HUD (a toast fading, the clock text, a menu cursor, the F3 overlay) | Ui | the tonemap of the kept HDR target plus the HUD: one fullscreen pass |
+| nothing | Skip | none: no swapchain image is taken and nothing is presented; the window (or canvas) keeps showing the last frame |
+
+A window the system exposes or uncovers gets a Ui frame (`Renderer::screen_lost`). In LDR
+mode (no HDR target to keep) a Ui frame is a World frame. The first change after idle is
+drawn on the frame it happens: the comparison runs every frame, so a stale frame is never
+shown. `--no-vsync` (benchmarks) still draws the whole world every frame, uncapped.
+
+**Frame rate** (Settings › Video › Frame rate: Panel, 60, 45, 40, 30). The simulation stays
+at 120 Hz; rendering interpolates as before. Natively the loop sleeps to deadlines on a grid
+(`app::pacing::Pacer`: a late frame does not push the next ones back) and presents with
+vsync, so a cap that divides the panel's rate lands on every Nth refresh: 45 and 30 on the
+OLED Deck's 90 Hz panel, 30 on the LCD's 60. 60 on a 90 Hz panel alternates one and two
+refreshes (60 a second, not perfectly even; set the panel to 60 Hz in the Quick Access
+menu for that). The web skips `requestAnimationFrame` ticks the same way. Default: Panel,
+and 60 on a Steam Deck (`FrameRate::auto`, the same detection as `Quality::auto`). The
+**Battery** preset is Deck at 85% resolution and sets the cap to 60.
+
+**Background.** Unfocused, the game draws at most 4 frames a second
+(`app::pacing::BACKGROUND_FPS`); hidden or minimized, natively, it draws nothing (the game
+runs on; at 4 Hz the sim catches up at most 8 steps a frame, so it runs slow). The radio
+keeps playing unless Settings › Audio › Radio in background is Mute.
+
+Measured on the no-op device at 1280×800 (`idle_frames_draw_the_world_once`, in CI; and
+`cargo test --release -p platform-native -- --ignored --nocapture idle_cost`), 2026-10-27:
+
+| Scene, 120 frames at 90 Hz (coast: 600) | World | Ui | Skip | Pixels written |
+|---|---|---|---|---|
+| test town, paused in the menu | 1 | 0 | 119 | 9.8 M (one world frame) |
+| test town, still (car at rest, clock stopped, no traffic) | 1 | 0 | 119 | 9.8 M |
+| test town, driving | 120 | 0 | 0 | 1035 M (8.6 M a frame) |
+| coast, busy traffic, paused (600 frames) | 1 | 0 | 599 | 9.8 M |
+
+"Pixels written" is from the renderer's own size counters: each cascade drawn, the scene's
+target once (overdraw not counted), the bloom chain, the tonemap (Medium here, three 1536²
+cascades). At Deck it is about 7.4 M for a world frame (5 M on frames that keep the far
+cascade) and 1.0 M for a Ui frame. Deciding to draw nothing costs the CPU 9 µs a frame in
+the test town and 52 µs on the streamed coast (2347 instances), release build. The coast's
+start is on a slope: with no input the car rolls at a walking pace, so "standing" there
+still draws every frame, correctly.
+
+**What the Deck should show:** paused, or parked on the flat with the clock frozen and no
+traffic, GPU use near zero (no frames drawn; the CPU still runs the game and builds the
+scene at the panel's rate, not yet timed on the Deck); a menu with a moving element costs one fullscreen pass
+a frame. Driving, the 60 cap (the Deck's new default) draws two frames in three at 90 Hz,
+cutting GPU work by a third; Battery takes another ~28% off the scene's pixels (0.85²).
+With the clock running (10× by default) or traffic on, the world changes every frame, so
+the cap is what saves power there.
 
 ## Measured on the CPU
 

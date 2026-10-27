@@ -612,13 +612,101 @@ impl Default for RendererOptions {
     }
 }
 
+/// What a frame has to draw ([`Renderer::plan`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameWork {
+    /// Something the world passes draw changed: every pass.
+    World,
+    /// Only the HUD changed: the kept HDR frame is tonemapped again with the HUD over it.
+    Ui,
+    /// Nothing changed: the frame on screen is still right; nothing to draw or present.
+    Skip,
+}
+
+/// The world inputs the last world frame was drawn from, to tell whether the next would
+/// draw the same ([`Renderer::plan`]).
+struct KeptWorld {
+    /// Camera, sun, sky, quality and whether coronas were drawn; `None` before the first
+    /// world frame and after anything that changes what the same scene draws (targets
+    /// rebuilt, a mesh added, a chunk written or freed).
+    head: Option<(Camera, Sun, Sky, RenderQuality, bool)>,
+    instances: Vec<MeshInstance>,
+    /// The first [`MAX_LIGHTS`] (the rest are never drawn).
+    lights: Vec<PointLight>,
+}
+
+impl KeptWorld {
+    /// The same world as `scene` would draw: everything equal, but positions and
+    /// orientations (instances, lights, camera) only [`near`] (a car at rest jitters by a
+    /// billionth of a radian on its springs forever).
+    fn same(&self, scene: &SceneView, coronas: bool) -> bool {
+        let lights = &scene.lights[..scene.lights.len().min(MAX_LIGHTS)];
+        let Some((camera, sun, sky, quality, kept_coronas)) = &self.head else {
+            return false;
+        };
+        let instance = |a: &MeshInstance, b: &MeshInstance| {
+            near(a.transform.as_flattened(), b.transform.as_flattened())
+                && MeshInstance {
+                    transform: b.transform,
+                    ..*a
+                } == *b
+        };
+        let light = |a: &PointLight, b: &PointLight| {
+            near(&a.position, &b.position)
+                && near(&a.direction, &b.direction)
+                && PointLight {
+                    position: b.position,
+                    direction: b.direction,
+                    ..*a
+                } == *b
+        };
+        near(camera.view.as_flattened(), scene.camera.view.as_flattened())
+            && camera.proj == scene.camera.proj
+            && (*sun, *sky, *quality, *kept_coronas)
+                == (scene.sun, scene.sky, scene.quality, coronas)
+            && self.instances.len() == scene.instances.len()
+            && self
+                .instances
+                .iter()
+                .zip(scene.instances)
+                .all(|(a, b)| instance(a, b))
+            && self.lights.len() == lights.len()
+            && self.lights.iter().zip(lights).all(|(a, b)| light(a, b))
+    }
+
+    fn keep(&mut self, scene: &SceneView, coronas: bool) {
+        let lights = &scene.lights[..scene.lights.len().min(MAX_LIGHTS)];
+        self.head = Some((scene.camera, scene.sun, scene.sky, scene.quality, coronas));
+        self.instances.clear();
+        self.instances.extend_from_slice(scene.instances);
+        self.lights.clear();
+        self.lights.extend_from_slice(lights);
+    }
+}
+
+/// How far apart two positions or orientations may be and still draw the same frame: two
+/// parts in a million of the value (2 mm at a kilometre from the origin, where an `f32`
+/// step is 0.06 mm), or of 1 for values under it (a few millionths of a radian, a few
+/// millimetres at a kilometre's distance).
+const STILL_EPSILON: f32 = 2e-6;
+
+/// Every element of `a` within [`STILL_EPSILON`] of `b`'s (and neither NaN).
+fn near(a: &[f32], b: &[f32]) -> bool {
+    a.iter()
+        .zip(b)
+        .all(|(x, y)| (x - y).abs() <= STILL_EPSILON * (1.0 + x.abs()))
+}
+
 /// Counters for the last rendered frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RenderStats {
     /// The graphics backend ([`backend_label`]).
     pub backend: &'static str,
-    /// Frames rendered so far.
+    /// Frames rendered so far (the world drawn).
     pub frames: u64,
+    /// Frames that kept the last world frame and drew only the tonemap and the HUD over it
+    /// ([`FrameWork::Ui`]).
+    pub ui_frames: u64,
     /// Draw calls in the last frame, all passes.
     pub draw_calls: u32,
     /// Of which in the shadow pass.
@@ -1045,6 +1133,11 @@ pub struct Renderer {
     /// Room for [`MAX_HUD_QUADS`] quads, allocated once.
     hud_buffer: wgpu::Buffer,
     hud_staging: Vec<HudQuad>,
+    /// The HUD quads on screen, and whether they still are (false after a new map).
+    hud_drawn: Vec<HudQuad>,
+    hud_valid: bool,
+    /// What the last world frame drew from.
+    kept: KeptWorld,
     corona_pipeline: wgpu::RenderPipeline,
     /// The corona pipeline's start-up check: coronas are drawn once it has passed.
     corona_probe: ProbeState,
@@ -1700,6 +1793,13 @@ impl Renderer {
             map_size: [1, 1],
             hud_buffer,
             hud_staging: Vec::with_capacity(MAX_HUD_QUADS),
+            hud_drawn: Vec::with_capacity(MAX_HUD_QUADS),
+            hud_valid: false,
+            kept: KeptWorld {
+                head: None,
+                instances: Vec::with_capacity(instance_capacity),
+                lights: Vec::with_capacity(MAX_LIGHTS),
+            },
             corona_pipeline,
             corona_probe,
             corona_depth: if corona_load {
@@ -1792,6 +1892,7 @@ impl Renderer {
     /// Turns instance culling on or off (off draws every instance in every pass).
     pub fn set_culling(&mut self, on: bool) {
         self.culling = on;
+        self.kept.head = None;
     }
 
     /// Size of the scene's color and depth targets, pixels.
@@ -1800,6 +1901,7 @@ impl Renderer {
     }
 
     fn rebuild_targets(&mut self) {
+        self.kept.head = None;
         let size = if self.hdr {
             self.quality.render_size(self.size)
         } else {
@@ -1835,6 +1937,7 @@ impl Renderer {
     /// plane every frame).
     pub fn set_cascade_splits(&mut self, splits: [f32; CASCADES]) {
         self.cascade_splits = splits;
+        self.kept.head = None;
     }
 
     /// Counters for the last frame.
@@ -1857,6 +1960,8 @@ impl Renderer {
             self.order.reserve(packed - self.order.len());
             self.vis.reserve(self.instance_capacity - self.vis.len());
             self.raws.reserve(self.instance_capacity - self.raws.len());
+            let kept = &mut self.kept.instances;
+            kept.reserve(self.instance_capacity - kept.len());
         }
     }
 
@@ -1890,6 +1995,7 @@ impl Renderer {
             [&self.font_sampler, &self.map_sampler],
         );
         self.map_size = [w, h];
+        self.hud_valid = false;
     }
 
     /// Size in texels of the map [`Renderer::upload_map`] last uploaded (1×1 before).
@@ -1913,6 +2019,7 @@ impl Renderer {
                 contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
+        self.kept.head = None;
         self.meshes.push(GpuMesh {
             vertices,
             indices,
@@ -2184,25 +2291,15 @@ impl Renderer {
         if hud_quads > 0 {
             self.queue
                 .write_buffer(&self.hud_buffer, 0, bytemuck::cast_slice(&self.hud_staging));
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("hud"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                timestamp_writes: ts(timing::PASS_HUD, true, true),
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.hud_pipeline);
-            pass.set_bind_group(0, &self.frame_group, &[]);
-            pass.set_bind_group(1, &self.hud_group, &[]);
-            pass.set_vertex_buffer(0, self.hud_buffer.slice(..));
-            pass.draw(0..4, 0..hud_quads);
+            hud_pass(
+                &mut encoder,
+                view,
+                &self.hud_pipeline,
+                [&self.frame_group, &self.hud_group],
+                &self.hud_buffer,
+                hud_quads,
+                ts(timing::PASS_HUD, true, true),
+            );
             forward_draws += 1;
             timed |= 1 << timing::PASS_HUD;
         }
@@ -2219,6 +2316,9 @@ impl Renderer {
             t.after_submit();
         }
         self.shadow_valid = true;
+        let coronas_on = self.coronas_on(scene.quality);
+        self.kept.keep(scene, coronas_on);
+        self.note_hud_drawn();
         self.stats.frames += 1;
         self.stats.shadow_draw_calls = shadow_draws;
         self.stats.bloom_draw_calls = bloom_draws;
@@ -2241,6 +2341,112 @@ impl Renderer {
         self.stats.gpu_us = self.timer.as_ref().map_or([0; GPU_PASSES], |t| t.last_us);
         self.stats.hud_quads = hud_quads;
         self.stats.hud_quads_dropped = hud_dropped;
+    }
+
+    /// What drawing `scene` takes: [`FrameWork::Skip`] when the last frame drew the same
+    /// world (camera, sun, sky, quality, every instance and light compared exactly) and the
+    /// same HUD, [`FrameWork::Ui`] when only the HUD differs and the world is kept in an
+    /// HDR target, else [`FrameWork::World`]. Costs a compare of the instances (tens of
+    /// microseconds for a few thousand) and building the HUD's quads.
+    pub fn plan(&mut self, scene: &SceneView) -> FrameWork {
+        let coronas = self.coronas_on(scene.quality);
+        if !self.kept.same(scene, coronas) {
+            return FrameWork::World;
+        }
+        self.hud_staging.clear();
+        hud::build_quads(
+            &scene.hud,
+            self.size,
+            self.map_size,
+            &mut self.hud_staging,
+            MAX_HUD_QUADS,
+        );
+        if self.hud_valid && self.hud_staging == self.hud_drawn {
+            FrameWork::Skip
+        } else if self.post.is_some() && self.targets.post.is_some() {
+            FrameWork::Ui
+        } else {
+            FrameWork::World
+        }
+    }
+
+    /// Draws `scene` with no more work than [`Renderer::plan`] says it takes, into the
+    /// target `acquire` hands out (the swapchain texture and its view; called only when
+    /// there is something to draw). Returns the work done and the frame to present, if
+    /// one was acquired.
+    pub fn draw<F>(
+        &mut self,
+        scene: &SceneView,
+        acquire: impl FnOnce() -> Option<(F, wgpu::TextureView)>,
+    ) -> (FrameWork, Option<F>) {
+        let work = self.plan(scene);
+        if work == FrameWork::Skip {
+            return (work, None);
+        }
+        let Some((frame, view)) = acquire() else {
+            return (work, None);
+        };
+        match work {
+            FrameWork::Ui => self.render_ui(&view, scene),
+            _ => self.render(&view, scene),
+        }
+        (work, Some(frame))
+    }
+
+    /// Tonemaps the world kept from the last world frame into `view` again and draws
+    /// `scene`'s HUD over it ([`FrameWork::Ui`]). Draws the whole frame instead when no
+    /// world is kept (none drawn yet, or no HDR target to keep it in).
+    pub fn render_ui(&mut self, view: &wgpu::TextureView, scene: &SceneView) {
+        let (Some(post), Some(targets), Some(_)) =
+            (&self.post, &self.targets.post, &self.kept.head)
+        else {
+            return self.render(view, scene);
+        };
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ui") });
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        let groups = [&self.frame_group, &targets.tonemap_group];
+        fullscreen_pass(&mut encoder, view, clear, &post.tonemap, groups, None);
+        self.hud_staging.clear();
+        let dropped = hud::build_quads(
+            &scene.hud,
+            self.size,
+            self.map_size,
+            &mut self.hud_staging,
+            MAX_HUD_QUADS,
+        );
+        let quads = self.hud_staging.len() as u32;
+        if quads > 0 {
+            self.queue
+                .write_buffer(&self.hud_buffer, 0, bytemuck::cast_slice(&self.hud_staging));
+            let groups = [&self.frame_group, &self.hud_group];
+            let (pipeline, buffer) = (&self.hud_pipeline, &self.hud_buffer);
+            hud_pass(&mut encoder, view, pipeline, groups, buffer, quads, None);
+        }
+        self.queue.submit([encoder.finish()]);
+        self.note_hud_drawn();
+        self.stats.ui_frames += 1;
+        self.stats.hud_quads = quads;
+        self.stats.hud_quads_dropped = dropped;
+    }
+
+    /// The screen no longer shows the last frame (the window was exposed, or nothing was
+    /// drawn into it for a while): the next frame draws at least the tonemap and the HUD.
+    pub fn screen_lost(&mut self) {
+        self.hud_valid = false;
+    }
+
+    /// The corona pass runs at `quality` (and its start-up check has passed).
+    fn coronas_on(&mut self, quality: RenderQuality) -> bool {
+        quality.coronas && self.corona_probe.poll() == Probe::Passed
+    }
+
+    /// The quads just drawn (in `hud_staging`) are the HUD on screen.
+    fn note_hud_drawn(&mut self) {
+        self.hud_drawn.clear();
+        self.hud_drawn.extend_from_slice(&self.hud_staging);
+        self.hud_valid = true;
     }
 
     /// The cascades fitted to the camera: three over the cascade splits, or two over
@@ -2865,6 +3071,7 @@ impl ChunkStore for Renderer {
         parts: &[[u32; 2]],
     ) -> Result<(), PoolError> {
         let w = self.chunk_pool.stage_write(slot, mesh, parts)?;
+        self.kept.head = None;
         if !mesh.vertices.is_empty() {
             self.queue.write_buffer(
                 &self.chunk_vertices,
@@ -2883,6 +3090,7 @@ impl ChunkStore for Renderer {
     }
 
     fn free_chunk_slot(&mut self, slot: SlotId) -> Result<(), PoolError> {
+        self.kept.head = None;
         self.chunk_pool.free(slot)
     }
 }
@@ -2974,6 +3182,37 @@ fn fullscreen_pass(
     pass.set_bind_group(0, groups[0], &[]);
     pass.set_bind_group(1, groups[1], &[]);
     pass.draw(0..3, 0..1);
+}
+
+/// The HUD's `quads` (already in `buffer`) drawn over `target`.
+fn hud_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    pipeline: &wgpu::RenderPipeline,
+    groups: [&wgpu::BindGroup; 2],
+    buffer: &wgpu::Buffer,
+    quads: u32,
+    timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("hud"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        timestamp_writes,
+        ..Default::default()
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, groups[0], &[]);
+    pass.set_bind_group(1, groups[1], &[]);
+    pass.set_vertex_buffer(0, buffer.slice(..));
+    pass.draw(0..4, 0..quads);
 }
 
 /// Hermite step from 0 at `e0` to 1 at `e1`, as in WGSL.
@@ -3683,6 +3922,117 @@ mod tests {
                 view_formats: &[],
             });
             r.render(&target.create_view(&Default::default()), scene);
+        }
+    }
+
+    /// An unchanged scene is drawn once; a HUD change redraws only the tonemap and the HUD
+    /// (in HDR mode; without an HDR target to keep, the whole frame); any change to what
+    /// the world passes draw, or to the targets and chunks under them, draws the world.
+    #[test]
+    fn plans_redraw_only_what_changed() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        for mode in [HdrMode::Float16, HdrMode::Ldr] {
+            let options = RendererOptions {
+                hdr: mode,
+                chunk_pool: ChunkPoolConfig {
+                    slots: 1,
+                    pages: 1,
+                    page_vertices: 64,
+                    page_indices: 64,
+                },
+                ..Default::default()
+            };
+            let mut r = Renderer::with_options(&device, &queue, format, (64, 48), options);
+            let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+            let mut instances = [MeshInstance::new(block, Mat4::IDENTITY.to_cols_array_2d())];
+            let lights = lamps(3);
+            let mut hud = HudBuilder::new();
+            hud.begin(1.0);
+            hud.text(10.0, 10.0, 1.0, [255; 4], "12:00");
+            let target = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: 64,
+                    height: 48,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let mut draw = |r: &mut Renderer, scene: &SceneView| {
+                let acquire = || Some(((), target.create_view(&Default::default())));
+                r.draw(scene, acquire).0
+            };
+            let ui = if mode == HdrMode::Float16 {
+                FrameWork::Ui
+            } else {
+                FrameWork::World
+            };
+            let scene = SceneView {
+                hud: hud.view(),
+                ..test_scene_lit(&instances, &lights)
+            };
+            assert_eq!(draw(&mut r, &scene), FrameWork::World, "the first frame");
+            for _ in 0..3 {
+                assert_eq!(draw(&mut r, &scene), FrameWork::Skip);
+            }
+            assert_eq!((r.stats().frames, r.stats().ui_frames), (1, 0));
+            hud.begin(1.0);
+            hud.text(10.0, 10.0, 1.0, [255; 4], "12:01");
+            let scene = SceneView {
+                hud: hud.view(),
+                ..test_scene_lit(&instances, &lights)
+            };
+            assert_eq!(draw(&mut r, &scene), ui, "{mode:?}: the clock ticked");
+            assert_eq!(draw(&mut r, &scene), FrameWork::Skip);
+            let mut moved = scene;
+            moved.sun.direction[0] += 1e-4;
+            assert_eq!(draw(&mut r, &moved), FrameWork::World, "the sun moved");
+            assert_eq!(draw(&mut r, &moved), FrameWork::Skip);
+            let mut dimmer = lights.clone();
+            dimmer[2].color[0] *= 0.5;
+            let lit = SceneView {
+                lights: &dimmer,
+                ..moved
+            };
+            assert_eq!(draw(&mut r, &lit), FrameWork::World, "a light changed");
+            instances[0].transform[3][0] += 0.01;
+            let scene = SceneView {
+                hud: hud.view(),
+                ..test_scene_lit(&instances, &dimmer)
+            };
+            assert_eq!(draw(&mut r, &scene), FrameWork::World, "the block moved");
+            assert_eq!(draw(&mut r, &scene), FrameWork::Skip);
+            r.resize((32, 24));
+            assert_eq!(r.plan(&scene), FrameWork::World, "resized");
+            r.resize((64, 48));
+            assert_eq!(draw(&mut r, &scene), FrameWork::World);
+            let slot = r.alloc_chunk_slot().unwrap();
+            r.write_chunk(slot, &Mesh::unit_block([9; 4]), &[[0, 36]])
+                .unwrap();
+            assert_eq!(
+                draw(&mut r, &scene),
+                FrameWork::World,
+                "a chunk streamed in"
+            );
+            r.upload_map(1, 1, &[1, 2, 3, 4]);
+            assert_eq!(draw(&mut r, &scene), ui, "a new map");
+            let quality = RenderQuality {
+                resolution_scale: 0.5,
+                ..scene.quality
+            };
+            let scaled = SceneView { quality, ..scene };
+            assert_eq!(draw(&mut r, &scaled), FrameWork::World, "a quality change");
+            assert_eq!(draw(&mut r, &scaled), FrameWork::Skip);
+            let skipped = r.draw(&scaled, || -> Option<((), wgpu::TextureView)> {
+                panic!("nothing to draw: no target asked for")
+            });
+            assert_eq!(skipped, (FrameWork::Skip, None));
         }
     }
 

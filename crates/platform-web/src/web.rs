@@ -3,6 +3,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use app::pacing::{frame_interval, Pacer};
 use app::{
     pad_table, App, InputMapper, Key, RawInput, SceneSetup, SettingsStore, MOUSE_BUTTONS,
     MOUSE_RIGHT,
@@ -33,6 +34,10 @@ struct State {
     /// permissions policy): polling stops.
     pads_ok: bool,
     last_ms: Option<f64>,
+    /// The last animation frame's time, processed or skipped, ms.
+    last_tick_ms: Option<f64>,
+    /// Which animation frames the frame-rate cap (or the background rate) skips.
+    pacer: Pacer,
     /// The streaming clock (`performance.now()`), when the page has one.
     performance: Option<web_sys::Performance>,
     /// What `window.skywaveStreamIdle` was last set to.
@@ -620,6 +625,8 @@ pub async fn run(
         pad: None,
         pads_ok: true,
         last_ms: None,
+        last_tick_ms: None,
+        pacer: Pacer::default(),
         performance: window.performance(),
         stream_idle: None,
         backend,
@@ -1006,7 +1013,23 @@ impl State {
         }
     }
 
+    /// One animation frame: skipped when the frame-rate cap (or the background rate,
+    /// while the page has no focus) says it is early; else the game's frame, drawing only
+    /// what changed (nothing at all when nothing did: the canvas keeps the last frame).
     fn frame(&mut self, now_ms: f64) {
+        let tick_ms = self.last_tick_ms.map_or(0.0, |last| now_ms - last);
+        self.last_tick_ms = Some(now_ms);
+        let focused = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.has_focus().ok())
+            .unwrap_or(true);
+        self.app.set_focused(focused);
+        let interval = frame_interval(self.app.frame_rate(), focused).unwrap_or(0.0);
+        // Frames start only on the display's refreshes: one half a refresh early is on time.
+        let early = (0.5 * tick_ms / 1000.0).min(0.01);
+        if !self.pacer.due(now_ms / 1000.0, interval, early) {
+            return;
+        }
         let dt = self.last_ms.map_or(0.0, |last| (now_ms - last) / 1000.0);
         self.last_ms = Some(now_ms);
 
@@ -1057,23 +1080,29 @@ impl State {
             }
             self.stream_idle = Some(idle);
         }
-        let frame = match self.surface.get_current_texture() {
+        let (surface, device, config) = (&self.surface, &self.device, &self.config);
+        let acquire = || match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                let view = t.texture.create_view(&Default::default());
+                Some((t, view))
+            }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return;
+                surface.configure(device, config);
+                None
             }
             other => {
                 log::warn!("skipping frame: {other:?}");
-                return;
+                None
             }
         };
-        let view = frame.texture.create_view(&Default::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
         let started = self.performance.as_ref().map(|p| p.now());
-        self.renderer
-            .render(&view, &self.app.scene_view(steps.alpha, aspect));
+        let scene = self.app.scene_view(steps.alpha, aspect);
+        let (_, frame) = self.renderer.draw(&scene, acquire);
+        let Some(frame) = frame else {
+            return;
+        };
         if let (Some(p), Some(t)) = (&self.performance, started) {
             self.app.set_cpu_submit_ms((p.now() - t) as f32);
         }
