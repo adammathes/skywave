@@ -220,6 +220,10 @@ struct Entry {
     reach2: f32,
     /// A parked car: it sways when knocked ([`world::collide::Rocking`]).
     car: bool,
+    /// A parked car's hours ([`place::PropKind::ParkedCar`]; [`place::ALL_HOURS`] for
+    /// every other prop) and where it stands.
+    hours: u32,
+    at: [f32; 3],
 }
 
 /// The instanced props of a place (see the module docs).
@@ -305,7 +309,7 @@ impl PropInstances {
             let mut tint = [1.0; 4];
             let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
-                PropKind::ParkedCar { vehicle_class } => {
+                PropKind::ParkedCar { vehicle_class, .. } => {
                     let s = parked_shape(vehicle_class, (h >> 44) as u32) % shapes.len();
                     // A third in the car's own palette, the rest in the era's street colors.
                     let n_own = shapes[s].palette.len();
@@ -369,6 +373,11 @@ impl PropInstances {
                 chunk,
                 reach2: reach * reach,
                 car,
+                hours: match p.kind {
+                    PropKind::ParkedCar { hours, .. } => hours,
+                    _ => place::ALL_HOURS,
+                },
+                at: p.pos,
             });
         }
         // Stable, so each mesh's instances keep the table's order.
@@ -409,7 +418,9 @@ impl PropInstances {
     /// Appends the instances near `eye` whose chunk `live` says is drawn, at most
     /// [`MAX_PROP_INSTANCES`], each with the nearest of `lights` that reach it when within
     /// [`LIT_RADIUS_M`]; street lamp lenses glow by `lamp_glow`; parked cars `rocking`
-    /// knocked lean on their springs. Returns how many.
+    /// knocked lean on their springs, and a lot's are there only through their hours at
+    /// `seconds_of_day` ([`world::props::parked_now`]). Returns how many.
+    #[allow(clippy::too_many_arguments)]
     pub fn push(
         &self,
         eye: Vec3,
@@ -417,6 +428,7 @@ impl PropInstances {
         lights: &FrameLights,
         lamp_glow: f32,
         rocking: &world::collide::Rocking,
+        seconds_of_day: f32,
         out: &mut Vec<MeshInstance>,
     ) -> usize {
         let mut n = 0;
@@ -431,6 +443,11 @@ impl PropInstances {
                 }
                 let d2 = e.bounds.distance_squared(eye);
                 if d2 > e.reach2 || !live(e.chunk) {
+                    continue;
+                }
+                if e.hours != place::ALL_HOURS
+                    && !world::props::parked_now(e.hours, e.at, seconds_of_day)
+                {
                     continue;
                 }
                 let lod_far = e.far != e.mesh && d2 > near2;

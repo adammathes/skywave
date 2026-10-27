@@ -984,10 +984,36 @@ Grammar(
         name_radius: 400,
     ),
 
+    // Parking lots (B10), starting values from docs/backlog/BUILDINGS.md ("Parking lots"):
+    // 90° stalls × 5.5 m with 7.3 m two-way aisles, or 60° stalls with 5.5 m one-way aisles;
+    // light poles every 30–40 m; islands at the row ends with a palm; one or two curb cuts per
+    // frontage. The stall width stays the planner's former 2.8 m. The occupancy curves are
+    // starting values shaped by hand: the strip's shops busy from late morning into the
+    // evening, the downtown offices full in working hours and empty at night, the beach
+    // fullest at noon.
     lots: LotRules(
-        front_min_yard: 9.5,
         stall_w: 2.8,
-        front_fill: (0.25, 0.75),
-        aisle_fill: 0.4,
+        stall_d: 5.5,
+        aisle_w: 7.3,
+        aisle_w_60: 5.5,
+        angled_256: 80,
+        walkway: 3.6,
+        buffer: 1.5,
+        frontage: [(Hedge, 3), (Wall, 2), (Open, 2)],
+        second_cut_m: 36,
+        wheel_stop_256: 200,
+        pole_m: (30, 40),
+        run_max: 10,
+        islands: [(Palm, 3), (Shrub, 2), (Bare, 1)],
+        yellow_256: 70,
+        backed_in_256: 26,
+        rear_lot_256: 192,
+        occupancy: [
+            //           0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20  21  22  23
+            (Strip,     (10,  8,  6,  5,  5,  6, 10, 18, 30, 45, 60, 70, 78, 80, 78, 75, 72, 70, 65, 55, 45, 32, 22, 14)),
+            (Commercial, (6,  4,  3,  3,  3,  4,  8, 15, 28, 45, 60, 70, 75, 76, 75, 72, 70, 66, 58, 45, 30, 18, 10,  8)),
+            (Downtown,  ( 0,  0,  0,  0,  0,  2,  8, 40, 80, 90, 92, 90, 85, 88, 90, 88, 75, 40, 15,  6,  3,  2,  1,  0)),
+            (Beach,     ( 2,  2,  2,  2,  2,  5, 15, 25, 40, 55, 70, 85, 95, 95, 90, 85, 75, 62, 50, 35, 20, 10,  5,  3)),
+        ],
     ),
 )

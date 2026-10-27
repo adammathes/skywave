@@ -32,7 +32,9 @@ use alloc::vec::Vec;
 pub use codec::{decode, decode_chunk, encode, load, read_index, ChunkData};
 
 /// Format version of the [`Place`] layout and of [`codec`].
-pub const PLACE_VERSION: u32 = 3;
+pub const PLACE_VERSION: u32 = 4;
+/// A [`PropKind::ParkedCar`] parked at every hour of the day.
+pub const ALL_HOURS: u32 = (1 << 24) - 1;
 
 /// The first four bytes of every encoded place.
 pub const PLACE_MAGIC: [u8; 4] = *b"SKYW";
@@ -603,9 +605,12 @@ pub enum PropKind {
     },
     /// Facing: the nose. `vehicle_class`: the vehicle crate's `VehicleClass` in the low 4
     /// bits, the paint (an index into the shape's palette, wrapping) in the high 4; the app
-    /// maps the class onto a car shape.
+    /// maps the class onto a car shape. `hours`: bit `h` (0..24) set when the car is parked
+    /// there through hour `h` of the day ([`ALL_HOURS`] for always), so a lot fills and
+    /// empties with the clock.
     ParkedCar {
         vehicle_class: u8,
+        hours: u32,
     },
     /// A tall gum tree: a long bare trunk and a sparse, lobed crown.
     Eucalyptus,

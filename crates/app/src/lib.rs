@@ -637,6 +637,8 @@ impl App {
             } else {
                 drive::vehicle_input(input)
             };
+            // Lot cars come and go with the clock.
+            self.ground.seconds_of_day = self.time.clock.seconds_of_day as f32;
             self.drive.step(car_input, &self.ground);
             self.sound.note_step(&self.drive.impact);
             if self.npcs.active() {
@@ -848,7 +850,16 @@ impl App {
             let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
             let lights = &self.lights;
             let rocking = &self.drive.rocking;
-            props.push(eye, live, lights, lamp_glow, rocking, &mut self.instances);
+            let t = self.time.clock.seconds_of_day as f32;
+            props.push(
+                eye,
+                live,
+                lights,
+                lamp_glow,
+                rocking,
+                t,
+                &mut self.instances,
+            );
         }
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs
