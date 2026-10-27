@@ -1,0 +1,48 @@
+// Pipit Hatch: an early-80s three-door compact hatchback with a lively little four.
+//
+// Intent: small, light and nimble. A free-revving 1.6 L four with not much torque, a
+// five-speed with short ratios, a nose-heavy front drive that pulls out of corners and
+// tucks its nose in when you lift (a touch of oversteer_bias on a light rear). Firm-ish
+// springs, quick steering, little body roll. Not fast in a straight line, quicker than it
+// looks on a twisty road.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "pipit_hatch",
+    name: "Pipit Hatch",
+    era: Eighties,
+    class: Hatch,
+
+    mass_kg: 900,
+    dims_m: (3.85, 1.64, 1.36),    // length, width, height
+    wheelbase_m: 2.40,
+    track_m: 1.40,
+    cg_height_m: 0.50,
+    cg_fore_aft: 0.38,             // 62% front: engine and transaxle over the front wheels
+
+    // ~85 kW near the top: it wants revs.
+    engine: Engine(
+        idle_rpm: 850,
+        redline_rpm: 6600,
+        torque_nm: [(1000, 106), (3000, 136), (4600, 148), (6000, 136), (6600, 122)],
+    ),
+    gears: [3.45, 2.05, 1.38, 1.03, 0.85],   // close-ratio five-speed
+    final_drive: 3.9,
+    reverse: 3.2,
+    shift_ms: 230,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 1.08, grip_long: 1.0, load_sens: 0.09, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 24000, damper: 2300, travel_m: 0.17, antiroll: 0.35),
+    steering: Steer(max_deg: 34, speed_sens: 0.6, return_rate: 11.0),
+    brakes: Brakes(max_nm: 2400, bias_front: 0.66, abs: false, handbrake_nm: 2200),
+    aero: Aero(cd: 0.44, frontal_m2: 2.15, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.1, body_roll: 0.45, engine_sound: "i4", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 120, mph), Tach(0, 7000)],
+        radio: "digital_green",
+    ),
+    shape: "pipit_hatch.shape.ron",
+)

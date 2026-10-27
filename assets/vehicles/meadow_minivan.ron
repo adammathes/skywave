@@ -1,0 +1,47 @@
+// Meadow Minivan: a mid-80s front-drive minivan with a modest four.
+//
+// Intent: tall, roomy and in no hurry. A 2.6 L four through a three-speed automatic that
+// shifts early, a tall body on soft springs that leans and wallows, light slow steering
+// and plain understeer. Easy to drive, never exciting; it sits high and you see
+// everything.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "meadow_minivan",
+    name: "Meadow Minivan",
+    era: Eighties,
+    class: Van,
+
+    mass_kg: 1450,
+    dims_m: (4.75, 1.80, 1.65),    // length, width, height
+    wheelbase_m: 2.85,
+    track_m: 1.52,
+    cg_height_m: 0.64,
+    cg_fore_aft: 0.42,             // 58% front
+
+    // A 2.6 L four: ~86 kW near the top.
+    engine: Engine(
+        idle_rpm: 750,
+        redline_rpm: 5200,
+        torque_nm: [(800, 145), (2000, 178), (3000, 190), (4200, 182), (5200, 158)],
+    ),
+    gears: [2.69, 1.55, 1.0],      // three-speed automatic
+    final_drive: 3.02,
+    reverse: 2.1,
+    shift_ms: 450,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 0.85, grip_long: 0.88, load_sens: 0.12, slip_peak_deg: 9.0),
+    suspension: Susp(spring_n_m: 24000, damper: 1900, travel_m: 0.20, antiroll: 0.12),
+    steering: Steer(max_deg: 33, speed_sens: 0.5, return_rate: 5.5),
+    brakes: Brakes(max_nm: 3000, bias_front: 0.68, abs: false, handbrake_nm: 2200),
+    aero: Aero(cd: 0.41, frontal_m2: 2.6, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.25, body_roll: 0.85, engine_sound: "i4", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 85, mph), Tach(0, 6000)],
+        radio: "digital_green",
+    ),
+    shape: "meadow_minivan.shape.ron",
+)

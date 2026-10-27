@@ -31,6 +31,8 @@ pub enum VehicleClass {
     Convertible,
     Luxury,
     Muscle,
+    /// A small off-roader: short, tall, four-wheel drive.
+    Utility,
 }
 
 /// Which axle the engine drives.
