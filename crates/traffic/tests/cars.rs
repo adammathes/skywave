@@ -599,7 +599,8 @@ impl Coast {
 impl Coast {
     fn new(region: &str, seed: u64) -> Coast {
         let t: RegionTemplate = ron::from_str(region).expect("parse");
-        let place = build_place(Seed(seed), &t);
+        let g: world::Grammar = ron::from_str(GRAMMAR).expect("grammar");
+        let place = build_place(Seed(seed), &t, &g);
         let graph = LaneGraph::new(&place);
         let start = place.player_start().expect("start").pos;
         // The nearest point of a lane long enough to queue on.
@@ -636,6 +637,7 @@ impl Coast {
 }
 
 const COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 
 fn coast() -> &'static Coast {
     static COAST_SEED1: OnceLock<Coast> = OnceLock::new();
