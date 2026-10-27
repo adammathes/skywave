@@ -65,6 +65,7 @@ struct MusicGlue {
     this: JsValue,
     pick: js_sys::Function,
     take_folder: js_sys::Function,
+    forget: js_sys::Function,
 }
 
 impl MusicGlue {
@@ -79,6 +80,7 @@ impl MusicGlue {
         Some(MusicGlue {
             pick: func("pick")?,
             take_folder: func("takeFolder")?,
+            forget: func("forget")?,
             this,
         })
     }
@@ -93,8 +95,9 @@ impl MusicGlue {
         Self::get(&self.this, "again").as_bool().unwrap_or(false)
     }
 
-    /// The next folder read: its path, name, whether to announce it, and its tracks.
-    fn take_folder(&self) -> Option<(String, String, bool, Vec<audio::Track>)> {
+    /// The next folder read: its id, name, whether to announce it, whether the page will
+    /// remember it, and its tracks.
+    fn take_folder(&self) -> Option<(String, String, bool, bool, Vec<audio::Track>)> {
         let f = self.take_folder.call0(&self.this).ok()?;
         if f.is_null() || f.is_undefined() {
             return None;
@@ -102,6 +105,7 @@ impl MusicGlue {
         let path = Self::get(&f, "path").as_string().unwrap_or_default();
         let name = Self::get(&f, "name").as_string().unwrap_or_default();
         let announce = Self::get(&f, "announce").as_bool().unwrap_or(false);
+        let kept = Self::get(&f, "kept").as_bool().unwrap_or(false);
         let files = js_sys::Array::from(&Self::get(&f, "files"));
         let tracks = files
             .iter()
@@ -109,11 +113,12 @@ impl MusicGlue {
                 let key = Self::get(&file, "key").as_string().unwrap_or_default();
                 let name = Self::get(&file, "name").as_string().unwrap_or_default();
                 let size = Self::get(&file, "size").as_f64().unwrap_or(0.0) as u64;
-                let head = js_sys::Uint8Array::new(&Self::get(&file, "head")).to_vec();
-                audio::Track::new(key, &name, &audio::music::probe(&head, size))
+                let bytes = |k| js_sys::Uint8Array::new(&Self::get(&file, k)).to_vec();
+                let probe = audio::music::probe(&bytes("head"), &bytes("audio"), size);
+                audio::Track::new(key, &name, &probe)
             })
             .collect();
-        Some((path, name, announce, tracks))
+        Some((path, name, announce, kept, tracks))
     }
 }
 
@@ -1051,11 +1056,19 @@ impl State {
         }
         if let Some(music) = &self.music {
             if self.app.take_music_request() {
-                // The menu key's activation lets the page open its folder picker.
-                let _ = music.pick.call0(&music.this);
+                // The menu key's or click's activation lets the page open its folder
+                // picker; a gamepad press gives none, and the page says so.
+                let opened = music.pick.call0(&music.this).ok().and_then(|v| v.as_bool());
+                if opened == Some(false) {
+                    self.app.music_picker_refused();
+                }
             }
-            while let Some((path, name, announce, tracks)) = music.take_folder() {
-                self.app.add_music_folder(&path, &name, tracks, announce);
+            for path in self.app.take_forgotten_music() {
+                let _ = music.forget.call1(&music.this, &JsValue::from_str(&path));
+            }
+            while let Some((path, name, announce, kept, tracks)) = music.take_folder() {
+                self.app
+                    .add_music_folder(&path, &name, tracks, announce, kept);
             }
             let again = music.again();
             if again != self.music_again {

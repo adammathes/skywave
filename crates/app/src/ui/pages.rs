@@ -22,9 +22,10 @@
 //! HUD:       Minimap · Rotate with car · Minimap zoom
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
 //!            Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
-//!            · [web: Add music folder, or Pick music folder again]
+//!            · [web: Add music folder, or Pick music folder again] · [Remove music
+//!            folders, when there are some]
 //! Stations:  one on/off row per station of the preset, per added stream and per music
-//!            folder
+//!            folder, then "Remove <folder>" per music folder
 //! World:     Time of day · Clock speed · Traffic
 //! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
@@ -125,6 +126,9 @@ pub enum ItemId {
     AddStream,
     ClearStreams,
     AddMusic,
+    ClearMusic,
+    /// Row `i` of `CarRadio::rows`, a music folder: take it off the dial for good.
+    RemoveFolder(usize),
     KeepExisting,
     UseNew,
 }
@@ -510,6 +514,12 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     Widget::Toggle(ctx.settings.radio.is_enabled(&row.id)),
                 );
             }
+            for (i, row) in ctx.radio.rows().iter().enumerate() {
+                if ctx.radio.files().iter().any(|c| c.id == row.id) {
+                    // Drawn as "Remove <name>" from the row.
+                    add(ItemId::RemoveFolder(i), "", Widget::Action);
+                }
+            }
         }
         Page::Hud => {
             let s = ctx.settings;
@@ -568,6 +578,9 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 add(ItemId::AddMusic, "Pick music folder again", Widget::Action);
             } else if ctx.music_picker {
                 add(ItemId::AddMusic, "Add music folder", Widget::Action);
+            }
+            if !ctx.radio.files().is_empty() || ctx.music_again {
+                add(ItemId::ClearMusic, "Remove music folders", Widget::Action);
             }
         }
         Page::World => {

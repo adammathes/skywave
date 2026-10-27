@@ -436,7 +436,7 @@ impl Ui {
             );
         }
         if let Some(t) = self.toast() {
-            let args = ToastText(t);
+            let args = ToastText(t, &self.music_name);
             text_right(
                 hud,
                 px + pw - PAD,
@@ -520,6 +520,10 @@ impl Ui {
                 (ItemId::Station(i), _) => {
                     let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
                     hud.text(px + PAD, ty, S, fg, name);
+                }
+                (ItemId::RemoveFolder(i), _) => {
+                    let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
+                    hud.text_fmt(px + PAD, ty, S, fg, format_args!("Remove {name}"));
                 }
                 _ => hud.text(px + PAD, ty, S, fg, item.label),
             }
@@ -688,7 +692,7 @@ impl Ui {
             None => text_right(hud, x, y, 5.0, TEXT, true, format_args!("--")),
         };
         if let Some(t) = self.toast() {
-            let args = ToastText(t);
+            let args = ToastText(t, &self.music_name);
             hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
         }
         if let Some(d) = &ctx.radio_display {
@@ -1027,9 +1031,10 @@ impl Ui {
     }
 }
 
-struct ToastText(Toast);
+/// A toast and the music folder name it may name.
+struct ToastText<'a>(Toast, &'a str);
 
-impl Display for ToastText {
+impl Display for ToastText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             Toast::Bound(b, action, sign) => {
@@ -1052,7 +1057,19 @@ impl Display for ToastText {
             },
             Toast::CarReset => f.write_str("Car reset"),
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
-            Toast::MusicAdded(n) => write!(f, "Your music is on the dial: {n} tracks"),
+            Toast::MusicAdded { tracks, kept } => {
+                let s = if tracks == 1 { "" } else { "s" };
+                write!(f, "{}: {tracks} track{s} on the dial", self.1)?;
+                if !kept {
+                    f.write_str(" (pick it again next time)")?;
+                }
+                Ok(())
+            }
+            Toast::MusicEmpty => f.write_str("No music found in that folder"),
+            Toast::MusicNeedsKeyboard => {
+                f.write_str("Use the keyboard or mouse, or drop a folder on the page")
+            }
+            Toast::MusicRemoved => f.write_str("Music folder removed"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }
     }

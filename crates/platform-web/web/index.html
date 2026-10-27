@@ -332,14 +332,17 @@
 <script id="music">
   // The player's own music as radio stations. Folders come from "Add music folder" in the
   // game's Audio settings (showDirectoryPicker where the browser has it, else a folder
-  // input) or from dropping files or folders on the page. Each folder with audio files in
-  // it becomes a station (loose dropped files: one station). The files stay here: the game
-  // takes each folder's path, name, file names, sizes and first HEAD bytes (for tags) with
-  // takeFolder(), and plays a file through the radio player by its key ("<folder>/<file>"), so nothing is
-  // uploaded or sent anywhere. Picked folders are remembered as handles in IndexedDB where
-  // the browser can store them; when it cannot, or has not granted reading them again,
-  // `again` is true and the game's menu says "Pick music folder again" (pick() then asks for
-  // the remembered folders' permission, or opens the picker).
+  // input) or from dropping files or folders on the page. Each picked or dropped folder is
+  // ONE station of every playable file under it (loose dropped files: one station). The
+  // files stay here: the game takes each folder's id, name, file names, sizes and first
+  // bytes (for tags) with takeFolder(), and plays a file through the radio player by its
+  // key ("<folder id>/<path in it>"), so nothing is uploaded or sent anywhere. Picked
+  // folders are remembered as handles in IndexedDB (with a stable id) where the browser can
+  // store them; when it cannot, or has not granted reading them again, `again` is true and
+  // the game's menu says "Pick music folder again" (pick() then asks one remembered folder's
+  // permission per press, or opens the picker). forget(id) drops a folder for good ("*":
+  // all). The picker needs a user activation (a key or a click; a gamepad press is none):
+  // pick() returns false when there is none, and the game says how else to add music.
   (() => {
     const HEAD = 64 * 1024; // audio::music::HEAD_BYTES
     const MAX_FILES = 4096; // audio::music::MAX_TRACKS
@@ -347,94 +350,102 @@
     const PICKED_KEY = "skywave.musicPicked";
     const tester = document.createElement("audio");
     const playable = (f) => AUDIO.test(f.name) && (!f.type || tester.canPlayType(f.type) !== "");
-    const folders = []; // [File] per folder, by index
+    const files = new Map(); // key -> File
     const ready = []; // folders read, for takeFolder()
-    let handles = []; // remembered directory handles
-    let needPermission = false;
+    let roots = []; // remembered folders: { id, handle, granted, asked }
     const storage = (fn) => { try { return fn(localStorage); } catch { return null; } };
+    const newId = (p) => p + Math.random().toString(16).slice(2, 10);
 
-    // [{path, file}] grouped by folder into stations.
-    async function add(list, announce) {
-      const groups = new Map();
-      for (const { path, file } of list) {
-        if (!playable(file)) continue;
-        const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-        if (!groups.has(dir)) groups.set(dir, []);
-        groups.get(dir).push({ path, file });
+    // Where the audio starts after an ID3v2 tag (audio::music::audio_start).
+    const audioStart = (h) => (h.length >= 10 && h[0] === 0x49 && h[1] === 0x44 && h[2] === 0x33
+      ? 10 + ((h[6] & 0x7f) << 21 | (h[7] & 0x7f) << 14 | (h[8] & 0x7f) << 7 | (h[9] & 0x7f)) + (h[5] & 0x10 ? 10 : 0)
+      : 0);
+
+    // One station: folder `id` called `name`, from [{rel, file}].
+    async function add(id, name, list, announce, kept) {
+      const entries = list.filter((e) => playable(e.file)).sort((a, b) => a.rel.localeCompare(b.rel)).slice(0, MAX_FILES);
+      for (const k of [...files.keys()]) if (k.startsWith(`${id}/`)) files.delete(k);
+      const out = [];
+      for (const { rel, file } of entries) {
+        let head = new Uint8Array(0);
+        let audio = new Uint8Array(0);
+        try {
+          head = new Uint8Array(await file.slice(0, HEAD).arrayBuffer());
+          const start = audioStart(head);
+          if (start + 4 > head.length && start < file.size) {
+            audio = new Uint8Array(await file.slice(start, start + 4096).arrayBuffer());
+          }
+        } catch { /* unreadable: the file name will do */ }
+        const key = `${id}/${rel}`;
+        files.set(key, file);
+        out.push({ key, name: file.name, size: file.size, head, audio });
       }
-      for (const [dir, entries] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
-        entries.sort((a, b) => a.path.localeCompare(b.path));
-        const files = entries.slice(0, MAX_FILES).map((e) => e.file);
-        const index = folders.push(files) - 1;
-        const out = [];
-        for (const [i, f] of files.entries()) {
-          let head = new Uint8Array(0);
-          try { head = new Uint8Array(await f.slice(0, HEAD).arrayBuffer()); } catch { /* unreadable */ }
-          out.push({ key: `${index}/${i}`, name: f.name, size: f.size, head });
-        }
-        // The path keeps "Disc 1" of two albums apart; the dial shows the folder's name.
-        const name = dir ? dir.slice(dir.lastIndexOf("/") + 1) : "Dropped music";
-        ready.push({ path: dir || "Dropped music", name, announce, files: out });
-      }
-      if (groups.size > 0) {
-        music.again = false;
-        storage((s) => s.setItem(PICKED_KEY, "1"));
+      if (out.length > 0 || announce) ready.push({ path: id, name, announce, kept, files: out });
+      if (out.length > 0) {
+        if (kept) music.again = roots.some((r) => !r.granted);
+        else storage((s) => s.setItem(PICKED_KEY, "1"));
       }
     }
 
     async function walkHandle(dir, path, out, depth) {
       for await (const [name, h] of dir.entries()) {
         if (out.length >= MAX_FILES * 4) return;
-        if (h.kind === "file") { if (AUDIO.test(name)) out.push({ path: `${path}/${name}`, file: await h.getFile() }); }
-        else if (depth < 6) await walkHandle(h, `${path}/${name}`, out, depth + 1);
+        const rel = path ? `${path}/${name}` : name;
+        if (h.kind === "file") { if (AUDIO.test(name)) out.push({ rel, file: await h.getFile() }); }
+        else if (depth < 8) await walkHandle(h, rel, out, depth + 1);
       }
     }
     async function walkEntry(entry, path, out, depth) {
+      const rel = path ? `${path}/${entry.name}` : entry.name;
       if (entry.isFile) {
-        if (AUDIO.test(entry.name)) out.push({ path: `${path}${entry.name}`, file: await new Promise((ok, no) => entry.file(ok, no)) });
+        if (AUDIO.test(entry.name)) out.push({ rel, file: await new Promise((ok, no) => entry.file(ok, no)) });
         return;
       }
-      if (depth > 6) return;
+      if (depth > 8 || out.length >= MAX_FILES * 4) return;
       const reader = entry.createReader();
       for (;;) {
         const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
         if (batch.length === 0) break;
-        for (const e of batch) await walkEntry(e, `${path}${entry.name}/`, out, depth + 1);
+        for (const e of batch) await walkEntry(e, depth === 0 ? "" : rel, out, depth + 1);
       }
     }
-    async function scan(handle, announce) {
+    async function scan(root, announce) {
       const out = [];
-      try { await walkHandle(handle, handle.name, out, 0); } catch (e) { console.warn("skywave: music folder", e); }
-      await add(out, announce);
+      try { await walkHandle(root.handle, "", out, 0); } catch (e) { console.warn("skywave: music folder", e); }
+      await add(root.id, root.handle.name, out, announce, true);
     }
 
-    // Remembered handles (IndexedDB; handles are structured-clonable where supported).
+    // Remembered folders (IndexedDB; handles are structured-clonable where supported).
     const db = () => new Promise((ok, no) => {
       const r = indexedDB.open("skywave", 1);
       r.onupgradeneeded = () => r.result.createObjectStore("music");
       r.onsuccess = () => ok(r.result);
       r.onerror = () => no(r.error);
     });
-    async function store(list) {
+    async function store() {
       try {
         const d = await db();
-        d.transaction("music", "readwrite").objectStore("music").put(list, "folders");
+        d.transaction("music", "readwrite").objectStore("music")
+          .put(roots.map(({ id, handle }) => ({ id, handle })), "roots");
       } catch { /* private mode: not remembered */ }
     }
     async function load() {
       try {
         const d = await db();
         return await new Promise((ok) => {
-          const r = d.transaction("music").objectStore("music").get("folders");
+          const r = d.transaction("music").objectStore("music").get("roots");
           r.onsuccess = () => ok(Array.isArray(r.result) ? r.result : []);
           r.onerror = () => ok([]);
         });
       } catch { return []; }
     }
-    async function remember(h) {
-      for (const o of handles) if (await o.isSameEntry(h)) return;
-      handles.push(h);
-      await store(handles);
+    // The remembered root for `handle` (the same folder keeps its id), added if new.
+    async function remember(handle) {
+      for (const r of roots) if (await r.handle.isSameEntry(handle)) { r.granted = true; return r; }
+      const r = { id: newId("h"), handle, granted: true, asked: false };
+      roots.push(r);
+      await store();
+      return r;
     }
 
     const input = document.createElement("input");
@@ -444,9 +455,12 @@
     input.hidden = true;
     document.body.appendChild(input);
     input.addEventListener("change", () => {
-      const list = [...input.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f }));
+      const list = [...input.files].map((f) => {
+        const p = f.webkitRelativePath || f.name;
+        return { rel: p.includes("/") ? p.slice(p.indexOf("/") + 1) : p, file: f, top: p.split("/")[0] };
+      });
       input.value = "";
-      add(list, true);
+      add(newId("p"), (list[0] && list[0].top) || "My music", list, true, false);
     });
 
     window.addEventListener("dragover", (e) => {
@@ -466,61 +480,76 @@
         file: i.getAsFile(),
       }));
       (async () => {
-        const out = [];
+        const loose = [];
         for (const t of taken) {
           const h = t.handle && (await t.handle);
-          if (h && h.kind === "directory") await remember(h);
-          if (t.entry && t.entry.isDirectory) await walkEntry(t.entry, "", out, 0);
-          else if (t.file) out.push({ path: t.file.name, file: t.file });
+          if (h && h.kind === "directory") await scan(await remember(h), true);
+          else if (t.entry && t.entry.isDirectory) {
+            const out = [];
+            await walkEntry(t.entry, "", out, 0);
+            await add(newId("d"), t.entry.name, out, true, false);
+          } else if (t.file) loose.push({ rel: t.file.name, file: t.file });
         }
-        await add(out, true);
+        if (loose.length > 0) await add(newId("d"), "Dropped music", loose, true, false);
       })();
     });
 
+    async function pickNow() {
+      // One permission prompt per press: a prompt uses up the key's user activation.
+      for (const r of roots) {
+        if (r.granted || r.asked) continue;
+        r.asked = true;
+        try {
+          if ((await r.handle.requestPermission({ mode: "read" })) === "granted") {
+            r.granted = true;
+            await scan(r, true);
+          }
+        } catch { /* refused */ }
+        return;
+      }
+      if (window.showDirectoryPicker) {
+        try {
+          const h = await window.showDirectoryPicker({ id: "skywave-music", mode: "read", startIn: "music" });
+          await scan(await remember(h), true);
+        } catch { /* cancelled */ }
+      } else input.click();
+    }
+
     const music = {
       again: false,
-      folders,
-      // "Add music folder": the remembered folders' permission first, else a new folder.
-      // One permission prompt per press (a prompt uses up the key's user activation), so
-      // the next press can open the picker.
-      async pick() {
-        if (needPermission) {
-          for (const h of handles) {
-            let state = "denied";
-            try { state = await h.queryPermission({ mode: "read" }); } catch { /* gone */ }
-            if (state === "granted") continue;
-            if (h.asked) continue;
-            h.asked = true;
-            try { if ((await h.requestPermission({ mode: "read" })) === "granted") await scan(h, true); } catch { /* refused */ }
-            return;
-          }
-          needPermission = false;
-        }
-        if (window.showDirectoryPicker) {
-          try {
-            const h = await window.showDirectoryPicker({ id: "skywave-music", mode: "read", startIn: "music" });
-            await remember(h);
-            await scan(h, true);
-          } catch { /* cancelled */ }
-        } else input.click();
+      // "Add music folder". False when there is no user activation to open a picker from.
+      pick() {
+        if (navigator.userActivation && !navigator.userActivation.isActive) return false;
+        pickNow();
+        return true;
       },
       takeFolder() { return ready.length ? ready.shift() : null; },
-      file(key) {
-        const [f, i] = String(key).split("/").map(Number);
-        return (folders[f] || [])[i] || null;
+      get tracks() { return files.size; }, // for tests
+      file(key) { return files.get(String(key)) || null; },
+      forget(id) {
+        if (id === "*") {
+          roots = [];
+          files.clear();
+          storage((s) => s.removeItem(PICKED_KEY));
+        } else {
+          roots = roots.filter((r) => r.id !== id);
+          for (const k of [...files.keys()]) if (k.startsWith(`${id}/`)) files.delete(k);
+        }
+        music.again = roots.some((r) => !r.granted);
+        store();
       },
     };
     window.skywaveMusic = music;
 
     (async () => {
-      handles = window.showDirectoryPicker ? await load() : [];
-      for (const h of handles) {
-        let state = "denied";
-        try { state = await h.queryPermission({ mode: "read" }); } catch { /* gone */ }
-        if (state === "granted") await scan(h, false);
-        else needPermission = true;
+      roots = window.showDirectoryPicker
+        ? (await load()).map(({ id, handle }) => ({ id, handle, granted: false, asked: false }))
+        : [];
+      for (const r of roots) {
+        try { r.granted = (await r.handle.queryPermission({ mode: "read" })) === "granted"; } catch { /* gone */ }
+        if (r.granted) await scan(r, false);
       }
-      if (needPermission || (handles.length === 0 && storage((s) => s.getItem(PICKED_KEY)))) music.again = true;
+      music.again = roots.some((r) => !r.granted) || (roots.length === 0 && !!storage((s) => s.getItem(PICKED_KEY)));
     })();
   })();
 </script>

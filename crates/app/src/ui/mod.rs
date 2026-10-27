@@ -83,8 +83,17 @@ pub enum Toast {
     CarReset,
     /// A stream was added to the stations.
     StreamAdded,
-    /// A music folder with this many tracks was added to the stations.
-    MusicAdded(usize),
+    /// A music folder (`Ui::music_name`) with this many tracks was added to the stations;
+    /// `kept`: the browser will remember it next session.
+    MusicAdded {
+        tracks: usize,
+        kept: bool,
+    },
+    /// The folder picked had no music the platform plays.
+    MusicEmpty,
+    /// The folder picker needs a key or a click (a pad press cannot open it).
+    MusicNeedsKeyboard,
+    MusicRemoved,
     /// The text given for a stream was not an `https://` URL (or there are too many).
     StreamRejected,
 }
@@ -149,6 +158,8 @@ pub struct Ui {
     music_picker: bool,
     /// Folders picked last session could not be kept: the item says to pick them again.
     music_again: bool,
+    /// The name of the music folder last added, for its toast.
+    music_name: String,
     /// The preset [`Quality::auto`] picked for this device (Medium until the platform
     /// says what the GPU is).
     auto_quality: Quality,
@@ -208,6 +219,7 @@ impl Ui {
             text_entry: false,
             music_picker: false,
             music_again: false,
+            music_name: String::new(),
             auto_quality: Quality::Medium,
             forced_quality: None,
             cpu_submit_ms: 0.0,
@@ -807,11 +819,38 @@ impl Ui {
             ItemId::KeepExisting | ItemId::UseNew => self.settle_conflict(id == ItemId::UseNew),
             ItemId::AddStream => self.radio.request_url(),
             ItemId::AddMusic => self.radio.request_music(),
+            ItemId::ClearMusic => {
+                let ids: Vec<String> = self.radio.files().iter().map(|c| c.id.clone()).collect();
+                for id in &ids {
+                    self.forget_station(id);
+                }
+                self.radio.clear_files(&self.settings.radio);
+                self.music_again = false;
+                self.radio_settings_changed();
+                self.show(Toast::MusicRemoved);
+            }
+            ItemId::RemoveFolder(i) => {
+                if let Some(row) = self.radio.rows().get(i) {
+                    let id = row.id.clone();
+                    self.forget_station(&id);
+                    self.radio.remove_files(&id, &self.settings.radio);
+                    self.radio_settings_changed();
+                    self.show(Toast::MusicRemoved);
+                }
+            }
             ItemId::ClearStreams => {
                 self.settings.radio.clear_custom();
                 self.radio_settings_changed();
             }
             _ => {}
+        }
+    }
+
+    /// Drops what the settings keep about station `id` (switched off, last tuned).
+    fn forget_station(&mut self, id: &str) {
+        self.settings.radio.set_enabled(id, true);
+        if self.settings.radio.last_station.as_deref() == Some(id) {
+            self.settings.radio.last_station = None;
         }
     }
 
@@ -1245,27 +1284,47 @@ impl App {
         self.ui.radio.take_music_request()
     }
 
-    /// Puts the user's music folder at `path` (relative to what they picked or dropped) on
-    /// the dial as a station called `name` of these tracks (`audio::music` reads them),
-    /// replacing the one from the same path; `announce` says so in a toast (a folder the
-    /// user just picked, not one remembered from last session). Nothing without tracks.
+    /// Puts the music folder the user picked or dropped on the dial as one station called
+    /// `name` of these tracks (every playable file under it; `audio::music` reads them).
+    /// `path` is the platform's stable name for the folder: the station's id comes from it,
+    /// and a folder with the same path replaces the old one. `announce` says so in a toast
+    /// (a folder the user just picked, not one remembered from last session), `kept`
+    /// whether the platform will remember it next session. A folder without music says so
+    /// when announced.
     pub fn add_music_folder(
         &mut self,
         path: &str,
         name: &str,
         tracks: Vec<audio::Track>,
         announce: bool,
+        kept: bool,
     ) {
+        let ui = &mut self.ui;
         let Some(station) = audio::Channel::files(path, name, tracks) else {
+            if announce {
+                ui.show(Toast::MusicEmpty);
+            }
             return;
         };
         let n = station.tracks.len();
-        let ui = &mut self.ui;
-        ui.radio.add_files(station, &ui.settings.radio);
+        ui.music_name = station.name.clone();
+        ui.radio.add_files(path, station, &ui.settings.radio);
         ui.music_again = false;
         if announce {
-            ui.show(Toast::MusicAdded(n));
+            ui.show(Toast::MusicAdded { tracks: n, kept });
         }
+    }
+
+    /// The platform could not open its folder picker (no key or click to open it from: a
+    /// gamepad press): say how else to add music.
+    pub fn music_picker_refused(&mut self) {
+        self.ui.show(Toast::MusicNeedsKeyboard);
+    }
+
+    /// The paths of the music folders the user removed since the last call, for the
+    /// platform to forget ("*": forget them all, remembered ones too).
+    pub fn take_forgotten_music(&mut self) -> Vec<String> {
+        self.ui.radio.take_forgotten()
     }
 
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next

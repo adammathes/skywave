@@ -190,10 +190,24 @@ fn ascii(s: &str) -> String {
     out
 }
 
+/// Where an audio file's audio starts, from its first bytes: after its ID3v2 tag, if any.
+/// When that is beyond [`HEAD_BYTES`] (cover art), the platform reads a few KiB from here
+/// for [`probe`]'s `audio`.
+pub fn audio_start(head: &[u8]) -> u64 {
+    if head.len() >= 10 && &head[..3] == b"ID3" && (2..=4).contains(&head[3]) {
+        let footer = if head[5] & 0x10 != 0 { 10 } else { 0 };
+        10 + u64::from(syncsafe(&head[6..10])) + footer
+    } else {
+        0
+    }
+}
+
 /// Title, artist and length from the first bytes of an audio file (`head`, at most
-/// [`HEAD_BYTES`] of it) whose whole size is `file_len` bytes. Anything it cannot read is
-/// `None`; it never panics on odd input.
-pub fn probe(head: &[u8], file_len: u64) -> Probe {
+/// [`HEAD_BYTES`] of it) whose whole size is `file_len` bytes; `audio` is the start of its
+/// audio ([`audio_start`]) when that lies beyond `head`, else empty. Anything it cannot read
+/// is `None`; it never panics on odd input. Text frames under ID3 unsynchronisation (rare)
+/// are skipped rather than misread.
+pub fn probe(head: &[u8], audio: &[u8], file_len: u64) -> Probe {
     let mut p = Probe::default();
     let mut audio_at = 0usize;
     if head.len() >= 10 && &head[..3] == b"ID3" && (2..=4).contains(&head[3]) {
@@ -202,7 +216,8 @@ pub fn probe(head: &[u8], file_len: u64) -> Probe {
         let size = syncsafe(&head[6..10]) as usize;
         audio_at = 10 + size + if flags & 0x10 != 0 { 10 } else { 0 };
         let end = (10 + size).min(head.len());
-        let mut at = 10;
+        let unsynced = flags & 0x80 != 0;
+        let mut at = 10usize;
         if flags & 0x40 != 0 && major >= 3 && end >= 14 {
             // Extended header: its size counts itself in v2.4, not in v2.3.
             let n = if major == 4 {
@@ -210,7 +225,7 @@ pub fn probe(head: &[u8], file_len: u64) -> Probe {
             } else {
                 (be32(&head[10..14]) as usize).saturating_add(4)
             };
-            at += n;
+            at = at.saturating_add(n);
         }
         let (id_len, header_len) = if major == 2 { (3, 6) } else { (4, 10) };
         while at + header_len <= end {
@@ -233,7 +248,10 @@ pub fn probe(head: &[u8], file_len: u64) -> Probe {
                 break;
             }
             let data = &head[body..body + len];
+            // v2.4 marks unsynchronisation per frame (format flags, bit 1).
+            let frame_unsynced = major == 4 && head[at + 9] & 0x02 != 0;
             match id {
+                _ if unsynced || frame_unsynced => {}
                 b"TIT2" | b"TT2" => p.title = text_frame(data),
                 b"TPE1" | b"TP1" => p.artist = text_frame(data),
                 _ => {}
@@ -241,7 +259,11 @@ pub fn probe(head: &[u8], file_len: u64) -> Probe {
             at = body + len;
         }
     }
-    p.secs = mpeg_secs(head, audio_at, file_len);
+    p.secs = if audio_at + 4 <= head.len() || audio.is_empty() {
+        mpeg_secs(head, audio_at, file_len)
+    } else {
+        mpeg_secs(audio, 0, file_len.saturating_sub(audio_at as u64))
+    };
     p
 }
 
@@ -444,47 +466,47 @@ mod tests {
             .chain([0, 0])
             .collect();
         let tag = id3(3, &[(b"TPE1", b"\0The Example Band\0"), (b"TIT2", &utf16)]);
-        let p = probe(&tag, tag.len() as u64);
+        let p = probe(&tag, &[], tag.len() as u64);
         assert_eq!(p.artist.as_deref(), Some("The Example Band"));
         assert_eq!(p.title.as_deref(), Some("Caf\u{e9} Noir"));
         let tag = id3(
             4,
             &[(b"TIT2", "\u{3}Ni\u{f1}a".as_bytes()), (b"APIC", &[0; 300])],
         );
-        assert_eq!(probe(&tag, 0).title.as_deref(), Some("Ni\u{f1}a"));
+        assert_eq!(probe(&tag, &[], 0).title.as_deref(), Some("Ni\u{f1}a"));
         let be: Vec<u8> = [2u8]
             .into_iter()
             .chain("Big".encode_utf16().flat_map(u16::to_be_bytes))
             .collect();
         assert_eq!(
-            probe(&id3(4, &[(b"TIT2", &be)]), 0).title.as_deref(),
+            probe(&id3(4, &[(b"TIT2", &be)]), &[], 0).title.as_deref(),
             Some("Big")
         );
         // v2.2: three-letter ids and sizes.
         let mut v22 = vec![b'I', b'D', b'3', 2, 0, 0, 0, 0, 0, 16];
         v22.extend_from_slice(b"TT2\0\0\x06\0Short");
         v22.extend_from_slice(&[0; 3]);
-        assert_eq!(probe(&v22, 0).title.as_deref(), Some("Short"));
+        assert_eq!(probe(&v22, &[], 0).title.as_deref(), Some("Short"));
     }
 
     #[test]
     fn odd_input_gives_nothing_and_never_panics() {
-        assert_eq!(probe(&[], 0), Probe::default());
-        assert_eq!(probe(b"ID3", 3), Probe::default());
+        assert_eq!(probe(&[], &[], 0), Probe::default());
+        assert_eq!(probe(b"ID3", &[], 3), Probe::default());
         // A frame claiming more than the tag holds, an empty title, a bad encoding.
         let mut tag = id3(3, &[(b"TIT2", b"\0")]);
-        assert_eq!(probe(&tag, 0).title, None);
+        assert_eq!(probe(&tag, &[], 0).title, None);
         tag[17] = 0xff;
-        let _ = probe(&tag, 0);
+        let _ = probe(&tag, &[], 0);
         // A v2.3 size near u32::MAX (would wrap a 32-bit `body + len`).
         tag[14..18].copy_from_slice(&[0xff, 0xff, 0xff, 0x00]);
-        assert_eq!(probe(&tag, 0).title, None);
-        assert_eq!(probe(&id3(3, &[(b"TIT2", b"\x07abc")]), 0).title, None);
+        assert_eq!(probe(&tag, &[], 0).title, None);
+        assert_eq!(probe(&id3(3, &[(b"TIT2", b"\x07abc")]), &[], 0).title, None);
         // Every truncation of a tagged file.
         let mut file = id3(4, &[(b"TIT2", b"\0abc")]);
         file.extend(frames(3));
         for n in 0..file.len() {
-            let _ = probe(&file[..n], file.len() as u64);
+            let _ = probe(&file[..n], &file[n.min(file.len())..], file.len() as u64);
         }
     }
 
@@ -495,14 +517,14 @@ mod tests {
         let tag = file.len();
         let n = (2.0 * 44100.0 / 1152.0) as usize + 1;
         file.extend(frames(n));
-        let secs = probe(&file, file.len() as u64).secs.unwrap();
+        let secs = probe(&file, &[], file.len() as u64).secs.unwrap();
         let want = (file.len() - tag) as f32 * 8.0 / 128_000.0;
         assert!((secs - want).abs() < 1e-3, "{secs} vs {want}");
         // An Info frame says 1000 frames: 1000 × 1152 / 44100 s whatever the size.
         let mut info = frames(2);
         info[4 + 17..4 + 17 + 12]
             .copy_from_slice(&[b'I', b'n', b'f', b'o', 0, 0, 0, 1, 0, 0, 0x03, 0xe8]);
-        let secs = probe(&info, 10_000_000).secs.unwrap();
+        let secs = probe(&info, &[], 10_000_000).secs.unwrap();
         assert!((secs - 1000.0 * 1152.0 / 44100.0).abs() < 1e-3, "{secs}");
         // A VBRI frame (32 bytes after the header) says 500 frames over 5 MB.
         let mut vbri = frames(2);
@@ -510,10 +532,36 @@ mod tests {
         tag.extend_from_slice(&5_000_000u32.to_be_bytes());
         tag.extend_from_slice(&500u32.to_be_bytes());
         vbri[36..36 + tag.len()].copy_from_slice(&tag);
-        let secs = probe(&vbri, 5_000_000).secs.unwrap();
+        let secs = probe(&vbri, &[], 5_000_000).secs.unwrap();
         assert!((secs - 500.0 * 1152.0 / 44100.0).abs() < 1e-3, "{secs}");
         // Not MPEG audio (an Ogg page): no length.
-        assert_eq!(probe(b"OggS\0\x02\0\0\0\0\0\0\0\0", 1000).secs, None);
+        assert_eq!(probe(b"OggS\0\x02\0\0\0\0\0\0\0\0", &[], 1000).secs, None);
+    }
+
+    #[test]
+    fn unsynchronised_titles_are_skipped_and_art_does_not_hide_the_length() {
+        let mut tag = id3(3, &[(b"TIT2", b"\0Clear")]);
+        tag[5] |= 0x80;
+        assert_eq!(probe(&tag, &[], 0).title, None, "tag-wide flag (v2.3)");
+        let mut tag = id3(4, &[(b"TIT2", b"\0Clear")]);
+        tag[10 + 9] |= 0x02;
+        assert_eq!(probe(&tag, &[], 0).title, None, "per-frame flag (v2.4)");
+        // 100 KiB of art before the audio: the platform reads the audio's start apart.
+        let mut file = id3(3, &[(b"TIT2", b"\0Art"), (b"APIC", &vec![0; 100 * 1024])]);
+        let start = audio_start(&file) as usize;
+        assert_eq!(start, file.len());
+        file.extend(frames(200));
+        let head = &file[..HEAD_BYTES];
+        assert_eq!(probe(head, &[], file.len() as u64).secs, None);
+        let p = probe(head, &file[start..start + 4096], file.len() as u64);
+        let want = (file.len() - start) as f32 * 8.0 / 128_000.0;
+        assert!((p.secs.unwrap() - want).abs() < 1e-3, "{p:?}");
+        assert_eq!(
+            p.title.as_deref(),
+            Some("Art"),
+            "frames before the art still read"
+        );
+        assert_eq!(audio_start(b"not a tag at all"), 0);
     }
 
     #[test]

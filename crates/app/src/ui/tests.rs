@@ -1710,22 +1710,59 @@ fn music_folders_are_picked_from_the_audio_page() {
         secs: 200.0,
     };
     h.app
-        .add_music_folder("Music/Yacht", "Yacht", vec![track(0), track(1)], true);
-    assert_eq!(h.app.ui().toast(), Some(Toast::MusicAdded(2)));
+        .add_music_folder("r1", "Yacht", vec![track(0), track(1)], true, true);
+    assert_eq!(
+        h.app.ui().toast(),
+        Some(Toast::MusicAdded {
+            tracks: 2,
+            kept: true
+        })
+    );
+    h.frame();
+    assert!(h.hud_text().contains("Yacht: 2 tracks on the dial"));
     assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
     h.app
-        .add_music_folder("Music/Yacht", "Yacht", vec![track(0)], false);
+        .add_music_folder("r1", "Yacht", vec![track(0)], false, true);
     h.app
-        .add_music_folder("Music/Empty", "Empty", Vec::new(), true);
+        .add_music_folder("r2", "Empty", Vec::new(), true, false);
+    assert_eq!(h.app.ui().toast(), Some(Toast::MusicEmpty));
     assert_eq!(
         h.app.ui().radio().rows().len(),
         rows + 1,
         "replaced; empty left out"
     );
-    let mine = h.app.radio().channels().last().unwrap();
+    let mine = h.app.radio().channels().last().unwrap().clone();
     assert_eq!((mine.name.as_str(), mine.tracks.len()), ("Yacht", 1));
+    // Another folder of the same name is another station.
+    h.app
+        .add_music_folder("r3", "Yacht", vec![track(0)], true, false);
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 2);
+    h.frame();
+    assert!(h.hud_text().contains("(pick it again next time)"));
     h.pad(PadButton::DpadUp);
     assert_eq!(label(&h), Some("Add music folder"), "picked again");
+    // Removing one from the Stations page forgets it; "Remove music folders" the rest.
+    h.open(&[ItemId::Open(Page::Stations)]);
+    let remove = h
+        .ui()
+        .items()
+        .iter()
+        .find_map(|i| match i.id {
+            ItemId::RemoveFolder(r) if h.app.ui().radio().rows()[r].id == mine.id => Some(i.id),
+            _ => None,
+        })
+        .unwrap();
+    h.focus_on(remove);
+    h.pad(PadButton::South);
+    assert_eq!(h.app.take_forgotten_music(), ["r1"]);
+    assert_eq!(h.app.ui().radio().rows().len(), rows + 1);
+    h.pad(PadButton::East);
+    h.focus_on(ItemId::ClearMusic);
+    h.pad(PadButton::South);
+    assert_eq!(h.app.take_forgotten_music(), ["*"]);
+    assert_eq!(h.app.ui().radio().rows().len(), rows);
+    h.app.music_picker_refused();
+    assert_eq!(h.app.ui().toast(), Some(Toast::MusicNeedsKeyboard));
 }
 
 #[test]

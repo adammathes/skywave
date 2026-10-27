@@ -67,7 +67,10 @@ impl Channel {
         (!tracks.is_empty()).then(|| Channel {
             id: music::station_id(path),
             name: music::station_name(name, crate::station::MAX_NAME),
-            format: format!("your music, {} tracks", tracks.len()),
+            format: match tracks.len() {
+                1 => "your music, 1 track".to_string(),
+                n => format!("your music, {n} tracks"),
+            },
             urls: Vec::new(),
             tracks,
         })

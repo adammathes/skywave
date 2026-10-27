@@ -72,6 +72,10 @@ pub struct CarRadio {
     wants_music: bool,
     /// The user's music folders, by name, as stations.
     files: Vec<Channel>,
+    /// Each folder station's id and the platform's path for it (what it forgets it by).
+    paths: Vec<(String, String)>,
+    /// Paths of folders the user removed, for the platform to forget ("*": all of them).
+    forgotten: Vec<String>,
     /// The last station is a music folder the platform has not handed over yet: it
     /// becomes the station the power key resumes when it arrives, unless a key came first.
     pending: Option<String>,
@@ -104,6 +108,8 @@ impl CarRadio {
             wants_url: false,
             wants_music: false,
             files: Vec::new(),
+            paths: Vec::new(),
+            forgotten: Vec::new(),
             pending: None,
             gain: 1.0,
         };
@@ -190,9 +196,11 @@ impl CarRadio {
     /// the same path, folders in name order after the streams. The last station of the
     /// previous session, if it is this folder, is what the power key resumes (the radio
     /// stays off: a session starts silent).
-    pub fn add_files(&mut self, station: Channel, s: &RadioSettings) {
+    pub fn add_files(&mut self, path: &str, station: Channel, s: &RadioSettings) {
         let id = station.id.clone();
         self.files.retain(|c| c.id != id);
+        self.paths.retain(|(i, _)| *i != id);
+        self.paths.push((id.clone(), path.to_string()));
         self.files.push(station);
         self.files
             .sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
@@ -208,6 +216,30 @@ impl CarRadio {
     /// The music folders on the dial (on or off).
     pub fn files(&self) -> &[Channel] {
         &self.files
+    }
+
+    /// Takes music folder `id` off the dial for good: the platform forgets it.
+    pub fn remove_files(&mut self, id: &str, s: &RadioSettings) {
+        self.files.retain(|c| c.id != id);
+        if let Some(i) = self.paths.iter().position(|(i, _)| i == id) {
+            self.forgotten.push(self.paths.remove(i).1);
+        }
+        self.apply(s);
+    }
+
+    /// Takes every music folder off the dial, and has the platform forget them all
+    /// (remembered ones that never came back too).
+    pub fn clear_files(&mut self, s: &RadioSettings) {
+        self.files.clear();
+        self.paths.clear();
+        self.pending = None;
+        self.forgotten.push("*".to_string());
+        self.apply(s);
+    }
+
+    /// The paths of the folders removed since the last call ("*": forget them all).
+    pub fn take_forgotten(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.forgotten)
     }
 
     /// The station keys of one frame. Returns whether the power or the station changed.
@@ -628,8 +660,8 @@ mod tests {
         let mut kept = s.clone();
         r.store(&mut kept);
         assert_eq!(kept.last_station, s.last_station);
-        r.add_files(folder("Wave"), &s);
-        r.add_files(mine.clone(), &s);
+        r.add_files("Wave", folder("Wave"), &s);
+        r.add_files("Yacht", mine.clone(), &s);
         // Still off and silent; the power key resumes the folder.
         assert!(!r.radio().is_on());
         assert!(r
@@ -671,6 +703,14 @@ mod tests {
         r.apply(&off);
         assert!(r.radio().channels().iter().all(|c| c.id != mine.id));
         assert!(r.rows().iter().any(|row| row.id == mine.id));
+        // Removed: off the stations page too, and the platform forgets its path.
+        r.remove_files(&mine.id, &s);
+        assert!(r.rows().iter().all(|row| row.id != mine.id));
+        assert_eq!(r.take_forgotten(), ["Yacht"]);
+        r.clear_files(&s);
+        assert!(r.files().is_empty());
+        assert_eq!(r.take_forgotten(), ["*"]);
+        assert!(r.take_forgotten().is_empty());
     }
 
     #[test]
@@ -685,7 +725,7 @@ mod tests {
         r.start(&s);
         press(&mut r, Action::RadioNext);
         let first = r.radio().station();
-        r.add_files(mine, &s);
+        r.add_files("Yacht", mine, &s);
         assert_eq!(
             r.radio().station(),
             first,

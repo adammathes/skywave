@@ -276,7 +276,7 @@ async function runMusic() {
       data.items.add(file);
       window.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
     }, [...mp3]);
-    await page.waitForFunction(() => window.skywaveMusic.folders.length === 1, null, { timeout: 30_000 });
+    await page.waitForFunction(() => window.skywaveMusic.tracks === 1, null, { timeout: 30_000 });
     // The game takes the folder on its next frame; the station is last on the dial, so
     // "previous" from off tunes it.
     await frames(3);
@@ -293,7 +293,7 @@ async function runMusic() {
       paused: window.skywaveRadio.audio.paused,
     }));
     console.log(`shoot: music: ${state}; player log: ${log}`);
-    if (!/file 0\/0 \d+/.test(log)) throw new Error("the player never got the dropped file");
+    if (!/file d[0-9a-f]+\/01 test tone\.mp3 \d+/.test(log)) throw new Error("the player never got the dropped file");
     if (paused) throw new Error("the player is paused");
     // Warnings are expected (no WebGPU adapter on SwiftShader); errors are not.
     if (problems.some((p) => !p.startsWith("console.warning"))) throw new Error("the page logged errors");
