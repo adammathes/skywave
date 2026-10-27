@@ -14,9 +14,9 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Look back | button | Q | Right stick click |
 | Radio next / prev; deck next / previous track (`RadioNext`, `RadioPrev`) | buttons | ] / [ | D-pad right / left |
 | Radio off; deck play/pause (`RadioOff`) | button | \ | D-pad down (tap) |
-| Radio / deck (`DeckSource`) | button | ' | D-pad down held 1 s (also Audio › Source) |
-| Deck next / previous album (`AlbumNext`, `AlbumPrev`) | buttons | P / O | D-pad down held + right / left |
-| Deck mode (`DeckMode`) | button | ; | — (pause menu › Settings › Audio › Deck mode) |
+| Radio / deck (`DeckSource`) | button | ' | Back / Share held + D-pad down (also Audio › Source) |
+| Deck next / previous album (`AlbumNext`, `AlbumPrev`) | buttons | P / O | Back / Share held + D-pad right / left |
+| Deck mode (`DeckMode`) | button | ; | Back / Share held + D-pad up (also Audio › Deck mode) |
 | Headlights | button | L | D-pad up (tap) |
 | High beams (`HighBeams`) | button | K | D-pad up held 1 s |
 | Horn | button | B (H until the controls card took it) | Left stick click |
@@ -80,14 +80,12 @@ brake-to-reverse has picked.
 The deck (the player's own music, `docs/AUDIO_RADIO.md`) shares the radio's keys: while it is the source,
 next/previous are tracks (previous within 3 s of a track's start goes back a track, later it restarts it)
 and the power key plays and pauses. The source key (`'`, a free key beside the radio's `[` `]` `\`)
-switches between them: the one playing stops and the other starts. On the pad a tap of D-pad down is the
-power (play/pause), a hold of 1 s or more the source switch, and D-pad down held with right or left (a
-chord, so neither the tap nor the hold fires) the next or previous album; the mode has no pad binding, and
-the pause menu's Audio page has Source, Deck mode and Library (every album as "Artist - Album", select to
-play it), so the deck is fully playable with the gamepad alone. O and P on the radio put the tape in: the
-deck becomes the source on that album. A long or chorded binding defers only its own context's actions to
-release (`InputMapper`'s per-context modifiers): the menu's directions on D-pad up and down still act, and
-repeat, on press.
+switches between them: the one playing stops and the other starts. On the pad D-pad down stays the power
+(play/pause) and right/left the tracks; with Back / Share held (already the map's and the time scrub's
+modifier, so it opens no map) the D-pad is the deck's: down the source, right and left the albums, up the
+mode. The d-pad itself stays a plain button, so the menus and the controls card read it on press as
+before. The pause menu's Audio page has Source, Deck mode and Library (every album as "Artist - Album",
+select to play it) too. O and P on the radio put the tape in: the deck becomes the source on that album.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
 

@@ -66,7 +66,7 @@ const fn merged(group: &'static str, label: &'static str, actions: &'static [Act
 }
 
 /// Every action but the free-fly camera's, once each.
-pub const ROWS: [Row; 29] = [
+pub const ROWS: [Row; 25] = [
     merged("Drive", "Steer", &[Action::Steer]),
     row("Drive", "Throttle", &[Action::Throttle]),
     row("Drive", "Brake / reverse", &[Action::Brake]),
@@ -79,13 +79,22 @@ pub const ROWS: [Row; 29] = [
     row("Camera", "Look back", &[Action::LookBack]),
     row("Lights", "Headlights", &[Action::Headlights]),
     row("Lights", "High beams", &[Action::HighBeams]),
-    row("Radio", "On/off; deck play/pause", &[Action::RadioOff]),
-    row("Radio", "Next station / track", &[Action::RadioNext]),
-    row("Radio", "Prev. station / track", &[Action::RadioPrev]),
-    row("Radio", "Radio / deck", &[Action::DeckSource]),
-    row("Radio", "Next album", &[Action::AlbumNext]),
-    row("Radio", "Previous album", &[Action::AlbumPrev]),
-    row("Radio", "Deck mode", &[Action::DeckMode]),
+    // The deck shares the radio's keys: on/off plays and pauses it, the dial its tracks.
+    row(
+        "Radio",
+        "Power, source",
+        &[Action::RadioOff, Action::DeckSource],
+    ),
+    row(
+        "Radio",
+        "Station, track",
+        &[Action::RadioNext, Action::RadioPrev],
+    ),
+    row(
+        "Radio",
+        "Album, mode",
+        &[Action::AlbumNext, Action::AlbumPrev, Action::DeckMode],
+    ),
     row("Menus", "Pause menu", &[Action::Pause]),
     row("Menus", "Map", &[Action::MapToggle]),
     row("Menus", "Map zoom", &[Action::MapZoom]),

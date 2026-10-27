@@ -1916,17 +1916,6 @@ fn music_folders_are_picked_from_the_audio_page() {
 }
 
 impl Harness {
-    /// `b` held for longer than a long press, then let go.
-    fn hold(&mut self, b: PadButton) {
-        let raw = RawInput::PadButton(b);
-        self.input.press(raw);
-        for _ in 0..70 {
-            self.frame();
-        }
-        self.input.release(raw);
-        self.frame();
-    }
-
     /// `b` tapped while `hold` is held (a chord).
     fn chord(&mut self, hold: PadButton, b: PadButton) {
         self.input.press(RawInput::PadButton(hold));
@@ -1961,8 +1950,10 @@ fn the_deck_plays_from_the_pad_alone() {
     h.app.radio_commands().for_each(drop);
     assert_eq!(h.app.source(), Source::Radio);
     assert!(h.played().is_empty(), "silent until a key");
-    // D-pad down held: the deck (a tape deck in 1984) becomes the source and plays.
-    h.hold(PadButton::DpadDown);
+    // Select held with d-pad down: the deck (a tape deck in 1984) becomes the source and
+    // plays; the map stays closed.
+    h.chord(PadButton::Select, PadButton::DpadDown);
+    assert!(!h.ui().full_map_open());
     assert_eq!(h.app.source(), Source::Deck);
     assert!(!h.app.radio().is_on());
     assert_eq!(h.played(), ["h1/Night Shift/Coastline/01 Sunset Drive.mp3"]);
@@ -1989,16 +1980,21 @@ fn the_deck_plays_from_the_pad_alone() {
     h.pad(PadButton::DpadDown);
     assert!(h.app.deck().is_playing());
     assert_eq!(h.played().len(), 1);
-    // D-pad down held with right: the next album.
-    h.chord(PadButton::DpadDown, PadButton::DpadRight);
+    // Select held with right: the next album.
+    h.chord(PadButton::Select, PadButton::DpadRight);
     assert_eq!(h.played(), ["h1/Tidewater/Harbor Lights/01 Pier.mp3"]);
     assert!(h.app.deck().is_playing(), "the chord is not also a pause");
     assert_eq!(h.app.source(), Source::Deck, "nor a source switch");
-    // The Audio page: the mode, and the library as Artist - Album.
+    // Select held with up: the mode; on the Audio page, it goes round again.
+    h.chord(PadButton::Select, PadButton::DpadUp);
+    assert_eq!(h.app.deck().mode(), audio::deck::Mode::Shuffle);
+    assert!(!h.app.drive.headlights, "not also the headlights");
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
     h.focus_on(ItemId::DeckMode);
     h.pad(PadButton::DpadRight);
-    assert_eq!(h.app.deck().mode(), audio::deck::Mode::Shuffle);
+    assert_eq!(h.app.deck().mode(), audio::deck::Mode::Continuous);
+    // Continuous lands where its broadcast is.
+    assert_eq!(h.played().len(), 1);
     h.open(&[ItemId::Open(Page::Library)]);
     assert!(
         h.hud_text().contains("Night Shift - Coastline"),
