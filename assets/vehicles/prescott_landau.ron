@@ -10,6 +10,7 @@ VehicleSpec(
     id: "prescott_landau",
     name: "Prescott Landau",
     era: Eighties,
+    year: 1979,
     class: Sedan,
 
     mass_kg: 1500,

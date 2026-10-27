@@ -10,6 +10,7 @@ VehicleSpec(
     id: "longbow_coupe",
     name: "Longbow Coupe",
     era: Eighties,
+    year: 1984,
     class: Sports,
 
     mass_kg: 1450,

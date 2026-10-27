@@ -1,0 +1,17 @@
+// Pacific Shore, 1984: the launch world (docs/SCENARIOS.md). The procedural coast, the
+// 1980s roster, the 1984 SoCal radio preset, golden hour. Format:
+// crates/app/src/scenario.rs.
+Scenario(
+    id: "socal_beach_1984",
+    title: "Pacific Shore",
+    year: 1984,
+    kind: "Beach town",
+    region: "california_coast",
+    grammar: "california_coast_80s.ron",
+    radio: "1984_socal",
+    palette: "socal_1985",
+    default_time: (17, 40),
+    default_vehicle: "gannet_gt",
+    years: (1979, 1987),
+    heroes: [],
+)

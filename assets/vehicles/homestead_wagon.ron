@@ -14,6 +14,7 @@ VehicleSpec(
     id: "homestead_wagon",
     name: "Homestead Wagon",
     era: Eighties,
+    year: 1983,
     class: Wagon,
 
     mass_kg: 1750,

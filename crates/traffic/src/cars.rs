@@ -421,6 +421,9 @@ pub struct Traffic {
     /// Pool slots sorted by `x_key`, each car's x at the start of the step.
     by_x: Vec<u32>,
     x_key: Vec<f32>,
+    /// Per shape, how often a new car takes it ([`Traffic::set_shape_weights`]); empty
+    /// for every shape alike.
+    shape_weights: Vec<u32>,
 }
 
 impl Clone for Traffic {
@@ -453,6 +456,7 @@ impl Clone for Traffic {
             ghosts: self.ghosts,
             by_x,
             x_key: self.x_key.clone(),
+            shape_weights: self.shape_weights.clone(),
         }
     }
 }
@@ -770,6 +774,7 @@ impl Traffic {
             ghosts: 0,
             by_x: Vec::with_capacity(cap),
             x_key: alloc::vec![0.0; cap],
+            shape_weights: Vec::new(),
         }
     }
 
@@ -807,6 +812,32 @@ impl Traffic {
         }
     }
 
+    /// New cars take shape `k` (below [`TrafficBudget::shapes`]) in proportion to
+    /// `weights[k]`; a shape of weight 0 never appears. Weights are taken as they are, so
+    /// all ones (or none at all, or all zeros) draw the same shapes as an unweighted pool.
+    pub fn set_shape_weights(&mut self, weights: &[u32]) {
+        let n = usize::from(self.budget.shapes);
+        self.shape_weights.clear();
+        self.shape_weights
+            .extend((0..n).map(|k| weights.get(k).copied().unwrap_or(0)));
+    }
+
+    /// A seeded shape for a new car, by the shape weights.
+    fn pick_shape(&mut self) -> u8 {
+        let total: u32 = self.shape_weights.iter().sum();
+        if total == 0 {
+            return self.rng.range(0, u32::from(self.budget.shapes.max(1))) as u8;
+        }
+        let mut r = self.rng.range(0, total);
+        for (k, &w) in self.shape_weights.iter().enumerate() {
+            if r < w {
+                return k as u8;
+            }
+            r -= w;
+        }
+        0
+    }
+
     /// A car of fresh seeded looks and temperament with its front `s` meters along `lane`
     /// at `speed`, choosing its turn. Its id, or `None` when the pool is full. Does not
     /// check for room: [`Traffic::populate`] does, scripted scenarios place cars apart.
@@ -816,7 +847,7 @@ impl Traffic {
         }
         let id = self.next_id;
         self.next_id += 1;
-        let shape = self.rng.range(0, u32::from(self.budget.shapes.max(1))) as u8;
+        let shape = self.pick_shape();
         let paint = self.rng.next_u32();
         let v0 = self.rng.range_f32(0.9, 1.1);
         let headway = self.rng.range_f32(1.1, 1.6);

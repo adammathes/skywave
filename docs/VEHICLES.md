@@ -10,7 +10,8 @@ Cars are data. A vehicle is a `VehicleSpec` (RON file in `assets/vehicles/`), a 
 ## `VehicleSpec` (RON)
 ```
 VehicleSpec(
-  id: "gannet_gt", name: "Gannet GT", era: 1980s, class: Sports,       // Sports|Sedan|Wagon|Coupe|Pickup|Van|Hatch|Convertible|Luxury|Muscle|Utility
+  id: "gannet_gt", name: "Gannet GT", era: 1980s, year: 1981,          // the model year its archetype is dated to, 1900–2100
+  class: Sports,                                                            // Sports|Sedan|Wagon|Coupe|Pickup|Van|Hatch|Convertible|Luxury|Muscle|Utility
   mass_kg: 1250, dims_m: (4.3, 1.75, 1.15), wheelbase_m: 2.45, track_m: 1.5,
   cg_height_m: 0.45, cg_fore_aft: 0.48,                                     // fraction of wheelbase from front axle
   engine: Engine(idle_rpm: 900, redline_rpm: 7200, torque_nm: [(1000, 180), (3000, 260), (5500, 290), (7000, 230)]),
@@ -26,6 +27,28 @@ VehicleSpec(
   shape: "gannet_gt.shape.ron",
 )
 ```
+
+**`year`** (required) dates the car by its archetype; `era` stays the decade. A world shows only the cars of
+its era (`app::scenario`, format in `docs/SCENARIOS.md`): a car newer than the scenario's last year
+(`years.1`) never appears in it, on the road, parked or on the Vehicle page. The rest are weighted, in
+integer thousandths so every platform picks the same: 1 for a car within the scenario's `years`, else
+`0.5^((years.0 - year) / 8)` (half every eight years older than the world's first year, so no step at its edge), at least 0.05 for a car the
+scenario lists in `heroes` (and never quite 0). The weights are kept per car and per body shape (`Lineup::shapes`, keyed by the spec's `shape`, since the
+shape list and the roster are not in the same order). Traffic draws a new car's shape by these weights from its
+seeded generator; a parked car multiplies its class list's weights (`propinst::PARKED`) by them. Equal
+weights are reduced by their common divisor before a pick, so a world whose cars all fall in its years
+picks exactly as before weights existed: the twenty-car 1979–1987 roster in the 1984 coast changes no hash
+or golden.
+
+| Car | Year | Car | Year | Car | Year |
+|---|---|---|---|---|---|
+| Prescott Landau | 1979 | Pipit Hatch | 1981 | Seabreeze Convertible | 1985 |
+| Bancroft Sedan | 1980 | Buckboard Pickup | 1982 | Burro 4x4 | 1985 |
+| Drayman Van | 1980 | Homestead Wagon | 1983 | Halcyon Turbo | 1986 |
+| Gannet GT | 1981 | Meadow Minivan | 1984 | Regent Coupe Cabrio | 1987 |
+| Avocet V8 | 1984 | Basilisk V12 | 1985 | Avocet Spider | 1986 |
+| Longbow Coupe | 1984 | Appaloosa GT | 1985 | Basilisk Roadster | 1986 |
+| Longbow Convertible | 1986 | Appaloosa Convertible | 1987 | | |
 
 ## Physics model (`vehicle::sim`), fixed 120 Hz
 One rigid body per car (position, orientation quaternion, linear/angular velocity, inertia tensor from a box of `dims_m` and `mass_kg`). Per step:

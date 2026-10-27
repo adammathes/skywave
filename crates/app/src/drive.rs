@@ -25,7 +25,12 @@ pub type DriveGround = world::WorldCollider;
 
 /// The collider for `place`, built once.
 pub fn ground_for(place: &Place) -> DriveGround {
-    world::WorldCollider::build(place, crate::places::grammar())
+    ground_in(place, crate::places::grammar())
+}
+
+/// The collider for `place` dressed by `grammar`.
+pub fn ground_in(place: &Place, grammar: &world::Grammar) -> DriveGround {
+    world::WorldCollider::build(place, grammar)
 }
 
 /// The test town's `PlayerStart` spawn, for what starts without a Place at hand
