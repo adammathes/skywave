@@ -880,14 +880,14 @@ fn obstacle(
     t0: u64,
     secs: f32,
     path: impl Fn(f32) -> Player,
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     let first = path(0.0);
     let landed: HashSet<u32> = peds
         .iter()
         .filter(|p| inside(&first, p.pos))
         .map(|p| p.id)
         .collect();
-    let (mut steps_inside, mut near) = (0usize, HashSet::new());
+    let (mut steps_inside, mut near, mut close) = (0usize, HashSet::new(), HashSet::new());
     for k in 0..(secs * 120.0) as u64 {
         let car = path(k as f32 / 120.0);
         let view = View {
@@ -914,9 +914,12 @@ fn obstacle(
             if along.max(across) < 8.0 {
                 near.insert(p.id);
             }
+            if along.max(across) < 5.0 {
+                close.insert(p.id);
+            }
         }
     }
-    (steps_inside, near.len())
+    (steps_inside, near.len(), close.len())
 }
 
 /// The busy coast after 40 s, and a crossing near the eye: its middle and the road's
@@ -953,7 +956,7 @@ fn warm_and_crossing(b: &Built) -> (Pedestrians, [f32; 3], [f32; 3], [f32; 2]) {
 fn nobody_enters_a_car_stopped_on_a_crosswalk() {
     let b = coast();
     let (mut peds, eye, mid, along) = warm_and_crossing(b);
-    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |_| {
+    let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |_| {
         slow_car(mid, along, 0.0, 0.0)
     });
     println!("stopped on a crosswalk: {n} person-steps inside, {near} people came near");
@@ -965,7 +968,7 @@ fn nobody_enters_a_car_stopped_on_a_crosswalk() {
 fn nobody_enters_a_car_creeping_over_a_crosswalk() {
     let b = coast();
     let (mut peds, eye, mid, along) = warm_and_crossing(b);
-    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
+    let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
         slow_car(mid, along, -8.0 + 0.25 * t, 0.25)
     });
     println!("creeping at 0.25 m/s: {n} person-steps inside, {near} people came near");
@@ -981,7 +984,7 @@ fn nobody_enters_a_car_parked_on_the_sidewalk() {
     run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
     let (at, dir) = walk_near(b, crowd(&peds));
     // 2.5 m/s along the walk for 8 s, then parked there.
-    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 50.0, |t| {
+    let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 50.0, |t| {
         let t = t.min(8.0);
         slow_car(at, dir, -20.0 + 2.5 * t, if t < 8.0 { 2.5 } else { 0.0 })
     });
@@ -998,13 +1001,13 @@ fn nobody_enters_a_car_driving_slowly_through_a_crowd() {
     run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
     let (at, dir) = walk_near(b, crowd(&peds));
     // Between 1 and 3 m/s for 60 s along the walk through the busiest stretch.
-    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
+    let (n, _, close) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
         let s = -60.0 + 2.0 * t - 3.0 * (t / 3.0).cos() + 3.0;
         slow_car(at, dir, s, 2.0 + (t / 3.0).sin())
     });
-    println!("1-3 m/s through a crowd: {n} person-steps inside, {near} people came near");
+    println!("1-3 m/s through a crowd: {n} person-steps inside, {close} people within 5 m");
     assert_eq!(n, 0);
-    assert!(near > 3, "{near}");
+    assert!(close > 5, "{close}");
 }
 
 #[test]
@@ -1067,8 +1070,8 @@ fn people_stepping_aside_stay_on_the_walk() {
 }
 
 /// Coast seeds 1–4, each built fresh: 60 s busy with the player's car (and the camera)
-/// driving 4–8 m/s through the busiest stretch. Nobody off a crossing (and not stepping
-/// aside) stands in a lane on the road, nobody ever stands inside the car (but anyone it
+/// driving 4–8 m/s through the busiest stretch. Nobody off a crossing (stepping aside or
+/// not) stands in a lane on the road (within [`LANE_CLEAR_M`] of its band, on asphalt), nobody ever stands inside the car (but anyone it
 /// appears on at its first step, for 1.5 s), and everyone stays finite. "In a lane": inside
 /// a lane's band by the lane graph and on asphalt by the world's collider (near junctions
 /// where a road bends into its node the lane graph's lanes and the world's straightened
@@ -1078,7 +1081,8 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
     let ron = REGIONS[0].1;
     let t: RegionTemplate = ron::from_str(ron).expect("parse");
     let grammar = grammar();
-    let results: Vec<(u64, usize, f32, usize, usize)> = std::thread::scope(|scope| {
+    type Sweep = (u64, usize, f32, usize, usize, usize, f32);
+    let results: Vec<Sweep> = std::thread::scope(|scope| {
         let jobs: Vec<_> = (1..=4u64)
             .map(|seed| {
                 let (t, grammar) = (&t, &grammar);
@@ -1128,6 +1132,7 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
                     let collider = WorldCollider::build(&place, grammar);
                     let (mut inside_steps, mut nearest, mut checked, mut in_lane) =
                         (0, f32::MAX, 0, 0usize);
+                    let (mut dodges, mut off_walk) = (0usize, 0.0f32);
                     for k in 0..120 * 60u64 {
                         let car = path(k);
                         let inp = PedInput {
@@ -1149,31 +1154,171 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
                             if inside(&car, p.pos) && !(landed.contains(&p.id) && k < 180) {
                                 inside_steps += 1;
                             }
-                            if k % 6 == 0 && !peds.on_crossing(&walks, i) && !peds.dodging(i) {
+                            if k % 6 == 0 && !peds.on_crossing(&walks, i) {
                                 checked += 1;
+                                if peds.dodging(i) {
+                                    dodges += 1;
+                                    off_walk = off_walk.max(near_link(&walks, p.pos, false));
+                                }
                                 let o = index.outside(p.pos);
                                 let (_, surf) =
                                     collider.level_from([p.pos[0], p.pos[2]], p.pos[1] + 1.0);
-                                if o < 0.0 && surf == Surface::Asphalt {
+                                if o < LANE_CLEAR_M && surf == Surface::Asphalt {
                                     in_lane += 1;
                                 }
                                 nearest = nearest.min(o);
                             }
                         }
                     }
-                    (seed, inside_steps, nearest, checked, in_lane)
+                    (
+                        seed,
+                        inside_steps,
+                        nearest,
+                        checked,
+                        in_lane,
+                        dodges,
+                        off_walk,
+                    )
                 })
             })
             .collect();
         jobs.into_iter().map(|j| j.join().expect("seed")).collect()
     });
-    for (seed, inside_steps, nearest, checked, in_lane) in results {
+    for (seed, inside_steps, nearest, checked, in_lane, dodges, off_walk) in results {
         println!(
             "coast seed {seed}: {inside_steps} person-steps inside the car, at least \
-             {nearest:.2} m outside every lane over {checked} samples"
+             {nearest:.2} m outside every lane over {checked} samples; {dodges} dodging \
+             samples, at most {off_walk:.2} m off a walk line"
+        );
+        assert!(
+            off_walk < 1.5,
+            "seed {seed}: a dodge {off_walk} m off the walk"
         );
         assert_eq!(inside_steps, 0, "seed {seed}");
         assert_eq!(in_lane, 0, "seed {seed}: in a lane on the road");
         assert!(checked > 1000, "seed {seed}: {checked}");
+    }
+}
+
+/// The car driven along crossings, as a car mounting the sidewalk and coming over the
+/// crosswalk would: coast seeds 1–4, the four crossings with the most people near them,
+/// each at 1 and 3 m/s, forward and reversing, from 12 m before one curb to 12 m past the
+/// other, the camera on the car. Nobody is ever inside its footprint (but anyone it
+/// appears on at its first step, for 1.5 s).
+#[test]
+fn nobody_is_run_over_by_a_car_coming_along_a_crosswalk() {
+    let ron = REGIONS[0].1;
+    let t: RegionTemplate = ron::from_str(ron).expect("parse");
+    let grammar = grammar();
+    let results: Vec<(u64, usize, usize, usize)> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = (1..=4u64)
+            .map(|seed| {
+                let (t, grammar) = (&t, &grammar);
+                scope.spawn(move || {
+                    let place = build_place(Seed(seed), t, grammar);
+                    let lanes = LaneGraph::new(&place);
+                    let walks = WalkGraph::new(&place, &lanes);
+                    let eye = busy_eye(&walks);
+                    let mut warm = Pedestrians::new(
+                        &walks,
+                        Seed(seed),
+                        place.header.era,
+                        PedestrianBudget::LARGE,
+                    );
+                    for k in 0..120 * 30 {
+                        let inp = PedInput {
+                            tick: k,
+                            density: Density::Busy,
+                            view: view_at(eye, k),
+                            player: Player::ABSENT,
+                        };
+                        warm.step(&walks, &lanes, &inp);
+                    }
+                    let mut busy: Vec<(usize, usize)> = walks
+                        .crossings
+                        .iter()
+                        .enumerate()
+                        .map(|(c, x)| {
+                            let at = walks.nodes[x.curbs[0] as usize].pos;
+                            (warm.iter().filter(|p| dist(p.pos, at) < 25.0).count(), c)
+                        })
+                        .collect();
+                    busy.sort_by_key(|b| std::cmp::Reverse(b.0));
+                    let (mut inside_steps, mut passes, mut near) = (0, 0, 0);
+                    for &(_, c) in busy.iter().take(4) {
+                        let x = &walks.crossings[c];
+                        let (a, z) = (
+                            walks.nodes[x.curbs[0] as usize].pos,
+                            walks.nodes[x.curbs[1] as usize].pos,
+                        );
+                        let l = dist(a, z);
+                        let dir = [(z[0] - a[0]) / l, (z[2] - a[2]) / l];
+                        for (speed, reverse) in
+                            [(1.0, false), (3.0, false), (1.0, true), (3.0, true)]
+                        {
+                            let mut peds = warm.clone();
+                            let span = l + 24.0;
+                            let car_at = |k: u64| {
+                                let s = -12.0 + speed * k as f32 / 120.0;
+                                let pos = [a[0] + dir[0] * s, a[1], a[2] + dir[1] * s];
+                                // Reversing: the car faces back the way it came.
+                                let (h, v) = if reverse {
+                                    ((dir[0]).atan2(dir[1]), -speed)
+                                } else {
+                                    ((-dir[0]).atan2(-dir[1]), speed)
+                                };
+                                Player {
+                                    pos,
+                                    heading: h,
+                                    speed: v,
+                                    half_len: 2.3,
+                                    half_w: 0.9,
+                                }
+                            };
+                            let landed: HashSet<u32> = peds
+                                .iter()
+                                .filter(|p| inside(&car_at(0), p.pos))
+                                .map(|p| p.id)
+                                .collect();
+                            let mut close = HashSet::new();
+                            for k in 0..(span / speed * 120.0) as u64 {
+                                let car = car_at(k);
+                                let inp = PedInput {
+                                    tick: 120 * 30 + k,
+                                    density: Density::Busy,
+                                    view: View {
+                                        pos: car.pos,
+                                        dir,
+                                        ..view_at(eye, 0)
+                                    },
+                                    player: car,
+                                };
+                                peds.step(&walks, &lanes, &inp);
+                                for p in peds.iter() {
+                                    if inside(&car, p.pos) && !(landed.contains(&p.id) && k < 180) {
+                                        inside_steps += 1;
+                                    }
+                                    if dist(p.pos, car.pos) < 6.0 {
+                                        close.insert(p.id);
+                                    }
+                                }
+                            }
+                            passes += 1;
+                            near += close.len();
+                        }
+                    }
+                    (seed, inside_steps, passes, near)
+                })
+            })
+            .collect();
+        jobs.into_iter().map(|j| j.join().expect("seed")).collect()
+    });
+    for (seed, inside_steps, passes, near) in results {
+        println!(
+            "coast seed {seed}: {passes} passes along crosswalks, {near} people within 6 m, \
+             {inside_steps} person-steps inside the car"
+        );
+        assert_eq!(inside_steps, 0, "seed {seed}");
+        assert!(near > 10, "seed {seed}: {near}");
     }
 }
