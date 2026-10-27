@@ -22,6 +22,8 @@ RegionTemplate(
         canals: None,
     ),
 
+    edges: Edges(north: RailYards, east: Lake, south: HighwayLoop, west: RailYards),
+
     elevation: Elevation(
         water_level_m: 176,
         shelf_depth_m: 8,
@@ -43,7 +45,7 @@ RegionTemplate(
     layout: Layout(
         strip: StripRule(length_m: (1200, 1700), inland_m: (60, 120), width_m: (60, 90)),
         downtown_inland_m: (120, 260),
-        highway: HighwayRule(corridor_m: 64, pass_depth: 0, pass_width_m: 200),
+        highway: HighwayRule(corridor_m: 64),
         parks: ParkRule(count: (3, 5), radius_m: (60, 120)),
         pier: true,
         overlooks: (0, 0),

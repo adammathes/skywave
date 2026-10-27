@@ -134,6 +134,7 @@ fn assemble(
             heights,
             water_level: m.water_level,
             water,
+            edges: m.edges,
         },
         zones: Zones { cells },
         roads,

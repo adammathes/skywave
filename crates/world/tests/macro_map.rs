@@ -92,9 +92,14 @@ fn seed_one_has_every_zone() {
     for z in required {
         assert!(count[z as usize] > 0, "{z:?} missing: {count:?}");
     }
-    // Ocean on the west: the whole west column is water, the whole east column is not.
+    // Ocean on the west: the west column is water between the headlands the walls of the
+    // north and south edges raise out of it, the whole east column is not.
     let (zw, zh) = (m.zone_width as usize, m.zone_height as usize);
-    assert!((0..zh).all(|cz| m.zones[cz * zw] == ZoneId::Water));
+    let play = m.playable();
+    let between = |cz: usize| (play[1]..=play[3]).contains(&(cz as f32 * ZONE_CELL_M + 8.0));
+    assert!((0..zh)
+        .filter(|&cz| between(cz))
+        .all(|cz| m.zones[cz * zw] == ZoneId::Water));
     assert!((0..zh).all(|cz| m.zones[cz * zw + zw - 1] != ZoneId::Water));
     assert!(m.pass.is_some());
     assert!(m.pois.iter().any(|p| p.kind == MacroPoiKind::Pier));
@@ -119,11 +124,13 @@ fn water_lies_below_the_water_level() {
             }
             assert!(sum / 16.0 < m.water_level, "seed {seed} water cell {i}");
         }
-        // Every sample clearly out at sea is under water.
+        // Every sample clearly out at sea is under water, the headlands at the ends of the
+        // coast aside.
+        let play = m.playable();
         for iz in 0..m.height as usize {
             for ix in 0..w {
                 let (x, z) = (ix as f32 * 4.0, iz as f32 * 4.0);
-                if m.coast_distance(x, z) < -4.0 {
+                if m.coast_distance(x, z) < -4.0 && (play[1]..=play[3]).contains(&z) {
                     assert!(
                         m.heights[iz * w + ix] < m.water_level,
                         "seed {seed} ({x}, {z})"
@@ -207,13 +214,15 @@ fn heights_are_finite_and_within_the_template() {
                 assert!(m.pass.is_some());
             } else {
                 assert!(m.pass.is_none());
-                assert!(m
-                    .zones
-                    .iter()
-                    .all(|&z| z != ZoneId::Hills && z != ZoneId::Farmland));
-                // The lake is on the east edge.
+                // No hills or farms, but in the bands of the edge walls.
                 let zw = m.zone_width as usize;
-                assert_eq!(m.zones[zw - 1], ZoneId::Water, "{}", t.name);
+                assert!(m.zones.iter().enumerate().all(|(i, &z)| {
+                    let (x, z_m) = ((i % zw) as f32 * 16.0 + 8.0, (i / zw) as f32 * 16.0 + 8.0);
+                    !m.in_playable(x, z_m, 0.0) || (z != ZoneId::Hills && z != ZoneId::Farmland)
+                }));
+                // The lake is on the east edge.
+                let mid = m.zone_height as usize / 2 * zw;
+                assert_eq!(m.zones[mid + zw - 1], ZoneId::Water, "{}", t.name);
             }
         }
     }

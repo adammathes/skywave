@@ -222,7 +222,7 @@ fn every_border_matches() {
 /// streets -- --nocapture` prints the new tables), look at the `tools/mapdump --streets`
 /// PNGs for seeds 1–2 before and after, and commit the new values in their own commit whose
 /// message says why they moved.
-const CHUNKS: [[i32; 2]; 5] = [[3, 7], [7, 7], [10, 6], [7, 13], [4, 14]];
+const CHUNKS: [[i32; 2]; 5] = [[3, 7], [7, 7], [10, 6], [7, 13], [4, 13]];
 const GOLDEN_CHUNKS: [u64; 5] = [
     0x6168_2D51_7717_A59C,
     0xEE47_ECE0_9460_0CFD,
@@ -353,6 +353,7 @@ fn skeleton(m: &MacroMap, graded: &[f32], g: &RoadGraph) -> Place {
             heights,
             water_level: m.water_level,
             water: Vec::new(),
+            edges: m.edges,
         },
         zones: Zones { cells },
         roads: g.clone(),

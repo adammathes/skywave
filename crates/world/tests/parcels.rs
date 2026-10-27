@@ -121,6 +121,7 @@ fn skeleton(m: &MacroMap, graded: &[f32], g: &RoadGraph, parcels: Vec<Parcel>) -
             heights,
             water_level: m.water_level,
             water: Vec::new(),
+            edges: m.edges,
         },
         zones: Zones { cells },
         roads: g.clone(),

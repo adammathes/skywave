@@ -204,7 +204,8 @@ fn seed_one_has_highway_ramps_overpasses_and_beachfront() {
     }
     println!("seed 1 edges by class (Local, Collector, Arterial, Highway, Alley, Beachfront, Rural): {count:?}");
 
-    // One highway chain: its edges form a single path.
+    // One highway chain from the coast round the town and back: its edges form a single
+    // path whose two ends are on the beachfront road, joined to the town between them.
     let hw: Vec<&place::Edge> = g
         .edges
         .iter()
@@ -217,63 +218,83 @@ fn seed_one_has_highway_ramps_overpasses_and_beachfront() {
         deg[e.b as usize] += 1;
     }
     assert!(deg.iter().all(|&d| d <= 2), "highway branches");
-    assert_eq!(
-        deg.iter().filter(|&&d| d == 1).count(),
-        2,
-        "highway is not one chain"
-    );
+    let ends: Vec<usize> = (0..deg.len()).filter(|&i| deg[i] == 1).collect();
+    assert_eq!(ends.len(), 2, "highway is not one chain");
+    for &n in &ends {
+        let beachfront = g
+            .edges
+            .iter()
+            .any(|e| e.class == RoadClass::Beachfront && (e.a as usize == n || e.b as usize == n));
+        assert!(beachfront, "highway end {n} is not on the beachfront road");
+    }
+    let joins = (0..deg.len())
+        .filter(|&n| deg[n] == 2)
+        .filter(|&n| {
+            g.edges
+                .iter()
+                .any(|e| e.class != RoadClass::Highway && (e.a as usize == n || e.b as usize == n))
+        })
+        .count();
+    println!("seed 1: {joins} junctions and ramp ends on the highway");
+    assert!(joins >= 2, "the highway joins the town at {joins} points");
     for e in &hw {
         assert_eq!((e.lanes_fwd, e.lanes_back, e.sidewalk), (2, 2, false));
         assert_eq!((e.speed_kph, e.width_m), (100, 22.0));
     }
 
-    // Ramps: one-way collectors off the highway rising about 6 m above the ground over
-    // about 150 m.
-    let graded = &m.heights;
-    let ground = |x: f32, z: f32| {
-        let w = m.width as usize;
-        let (fx, fz) = (x / 4.0, z / 4.0);
-        let (ix, iz) = (fx as usize, fz as usize);
-        let (tx, tz) = (fx - ix as f32, fz - iz as f32);
-        let at = |i: usize, j: usize| graded[j * w + i];
-        let a = at(ix, iz) + (at(ix + 1, iz) - at(ix, iz)) * tx;
-        let b = at(ix, iz + 1) + (at(ix + 1, iz + 1) - at(ix, iz + 1)) * tx;
-        a + (b - a) * tz
-    };
-    let ramp = ramps(&g);
-    println!("seed 1: {} ramps", ramp.len());
-    assert!(ramp.len() >= 2, "only {} ramps", ramp.len());
-    for &i in &ramp {
-        let e = &g.edges[i];
-        let above = |p: [f32; 3]| p[1] - ground(p[0], p[2]);
-        let (p0, p1) = (e.profile[0], e.profile[e.profile.len() - 1]);
-        let rise = (above(p1) - above(p0)).abs();
-        let len: f32 = e
-            .profile
-            .windows(2)
-            .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt())
-            .sum();
-        println!("  ramp {i}: {len:.0} m, rises {rise:.1} m above the ground");
-        assert!((120.0..=220.0).contains(&len), "ramp {i} is {len} m");
-        assert!((4.5..=7.5).contains(&rise), "ramp {i} rises {rise} m");
+    // Ramps, over seeds 1-8 (the bypass meets most roads at grade; an interchange goes
+    // where a road crosses it on a straight, level stretch): one-way collectors off the
+    // highway rising about 6 m above the ground over about 150 m. Every other highway
+    // crossing is an overpass, unconnected, and one clears by 5 m.
+    let (mut ramp_count, mut best) = (0, f32::NEG_INFINITY);
+    for seed in 1..=8 {
+        let (m, g) = generate(&t, seed);
+        let graded = &m.heights;
+        let ground = |x: f32, z: f32| {
+            let w = m.width as usize;
+            let (fx, fz) = (x / 4.0, z / 4.0);
+            let (ix, iz) = (fx as usize, fz as usize);
+            let (tx, tz) = (fx - ix as f32, fz - iz as f32);
+            let at = |i: usize, j: usize| graded[j * w + i];
+            let a = at(ix, iz) + (at(ix + 1, iz) - at(ix, iz)) * tx;
+            let b = at(ix, iz + 1) + (at(ix + 1, iz + 1) - at(ix, iz + 1)) * tx;
+            a + (b - a) * tz
+        };
+        let ramp = ramps(&g);
+        ramp_count += ramp.len();
+        for &i in &ramp {
+            let e = &g.edges[i];
+            let above = |p: [f32; 3]| p[1] - ground(p[0], p[2]);
+            let (p0, p1) = (e.profile[0], e.profile[e.profile.len() - 1]);
+            let rise = (above(p1) - above(p0)).abs();
+            let len: f32 = e
+                .profile
+                .windows(2)
+                .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][2] - w[0][2]).powi(2)).sqrt())
+                .sum();
+            println!("  seed {seed} ramp {i}: {len:.0} m, rises {rise:.1} m above the ground");
+            assert!(
+                (120.0..=220.0).contains(&len),
+                "seed {seed} ramp {i} is {len} m"
+            );
+            assert!(
+                (4.5..=7.5).contains(&rise),
+                "seed {seed} ramp {i} rises {rise} m"
+            );
+        }
+        let over = overpasses(&g);
+        for &(i, clear) in &over {
+            best = best.max(clear);
+            let e = &g.edges[i];
+            assert!(
+                !is_highway_node(&g, e.a) && !is_highway_node(&g, e.b),
+                "seed {seed}: crossing edge {i} connects to the highway"
+            );
+        }
     }
-
-    // Every other highway crossing is an overpass, unconnected, and one clears by 5 m.
-    let over = overpasses(&g);
-    let best = over.iter().map(|o| o.1).fold(f32::NEG_INFINITY, f32::max);
-    println!(
-        "seed 1: {} overpass crossings, best clearance {best:.1} m",
-        over.len()
-    );
-    assert!(!over.is_empty(), "no overpass");
+    println!("seeds 1-8: {ramp_count} ramps, best overpass clearance {best:.1} m");
+    assert!(ramp_count >= 4, "only {ramp_count} ramps");
     assert!(best >= 5.0, "best overpass clearance {best}");
-    for &(i, _) in &over {
-        let e = &g.edges[i];
-        assert!(
-            !is_highway_node(&g, e.a) && !is_highway_node(&g, e.b),
-            "crossing edge {i} connects to the highway"
-        );
-    }
 
     // The beachfront road hugs the beach band.
     let zw = m.zone_width as usize;
@@ -496,6 +517,7 @@ fn skeleton(m: &MacroMap, g: &RoadGraph) -> Place {
             heights,
             water_level: m.water_level,
             water: Vec::new(),
+            edges: m.edges,
         },
         zones: Zones { cells },
         roads: g.clone(),

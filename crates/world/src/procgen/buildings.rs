@@ -91,7 +91,7 @@ pub fn buildings_all(
     parcels: &[Parcel],
     roads: &RoadGraph,
 ) -> Vec<Building> {
-    let all = buildings(seed, template, macro_map, parcels, roads);
+    let all = without_overlaps(buildings(seed, template, macro_map, parcels, roads));
     let sx = i64::from(macro_map.size_chunks[0]);
     let key = |b: &Building| {
         let n = b.footprint.len() as f32;
@@ -106,6 +106,47 @@ pub fn buildings_all(
     let mut keyed: Vec<(i64, Building)> = all.into_iter().map(|b| (key(&b), b)).collect();
     keyed.sort_by_key(|k| k.0);
     keyed.into_iter().map(|k| k.1).collect()
+}
+
+/// `all` less every building whose footprint overlaps one kept before it by more than half
+/// of what `place::validate` tolerates: two lots a degenerate block cut from the same
+/// frontage never both build.
+fn without_overlaps(all: Vec<Building>) -> Vec<Building> {
+    let bbox = |b: &Building| {
+        let mut r = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for p in &b.footprint {
+            r = [
+                r[0].min(p[0]),
+                r[1].min(p[1]),
+                r[2].max(p[0]),
+                r[3].max(p[1]),
+            ];
+        }
+        r
+    };
+    let area = |b: &Building| {
+        let f = &b.footprint;
+        let mut a = 0.0f64;
+        for i in 0..f.len() {
+            let (p, q) = (f[i], f[(i + 1) % f.len()]);
+            a += f64::from(p[0]) * f64::from(q[1]) - f64::from(q[0]) * f64::from(p[1]);
+        }
+        0.5 * a.abs()
+    };
+    let mut kept: Vec<(Building, [f32; 4], f64)> = Vec::with_capacity(all.len());
+    for b in all {
+        let (r, a) = (bbox(&b), area(&b));
+        let clash = kept.iter().any(|(k, kr, ka)| {
+            let apart = r[0] >= kr[2] || kr[0] >= r[2] || r[1] >= kr[3] || kr[1] >= r[3];
+            !apart
+                && place::validate::overlap_area(&b.footprint, &k.footprint)
+                    > 0.5 * place::validate::MAX_BUILDING_OVERLAP * a.min(*ka)
+        });
+        if !clash {
+            kept.push((b, r, a));
+        }
+    }
+    kept.into_iter().map(|k| k.0).collect()
 }
 
 /// Content hash of buildings (every field, in order), for determinism tests.

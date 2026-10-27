@@ -135,6 +135,134 @@ impl Roads<'_> {
 
 /// Meshes of a procedural place: well formed, within the chunk budget, roads on their
 /// profiles, the ground graded under them, water planes only where there is water.
+/// The coast's edges bound it (`docs/WORLD_GENERATION.md`, "Map edges"), seeds 1-8: every
+/// road stays in the playable rectangle (none runs into an edge band or off the place), so
+/// every dead end is interior (a cul-de-sac at the foot of the hills at most) or on the
+/// beach; the highway is one chain whose two ends are on the beachfront road (it loops
+/// back to the coast, it does not end); and along every land side the wall rises at least
+/// `RISE_M` (`MOUNTAINS_RISE_M` for mountains) from the foot of its band to the side.
+#[test]
+fn edges_bound_the_coast() {
+    use place::{EdgeKind, RoadClass, ZoneId, EAST, NORTH, SOUTH, WEST};
+    use world::edges::{band_m, inside};
+    const RISE_M: f32 = 50.0;
+    const MOUNTAINS_RISE_M: f32 = 85.0;
+    let t = template();
+    for seed in 1..=8u64 {
+        let p = build_place(Seed(seed), &t);
+        let edges = p.terrain.edges;
+        assert_eq!(edges, t.edges.sides());
+        let ext = p.header.extent_m();
+        let bands = edges.map(band_m);
+        let in_play = |q: [f32; 2], margin: f32| {
+            let d = inside(q, ext);
+            (0..4).all(|k| d[k] >= bands[k] + margin)
+        };
+        let mut deg = vec![0u32; p.roads.nodes.len()];
+        for e in &p.roads.edges {
+            deg[e.a as usize] += 1;
+            deg[e.b as usize] += 1;
+            for q in &e.profile {
+                assert!(
+                    in_play([q[0], q[2]], 0.0),
+                    "seed {seed}: {:?} road at ({:.0}, {:.0}) is in an edge band",
+                    e.class,
+                    q[0],
+                    q[2]
+                );
+            }
+        }
+        let (mut dead, mut beach) = (0, 0);
+        for (i, n) in p.roads.nodes.iter().enumerate() {
+            if deg[i] != 1 {
+                continue;
+            }
+            dead += 1;
+            let zone = p.zones.cells[{
+                let res = usize::from(p.terrain.res_per_chunk);
+                let cw = usize::from(p.header.size_chunks[0]) * res;
+                let cell = p.header.chunk_size_m / res as f32;
+                (n.pos[1] / cell) as usize * cw + (n.pos[0] / cell) as usize
+            }];
+            beach += usize::from(zone == ZoneId::Beach);
+            assert!(
+                in_play(n.pos, 4.0),
+                "seed {seed}: dead end at {:?} by the place edge",
+                n.pos
+            );
+        }
+        // The highway: one chain, its ends on the beachfront road.
+        let mut hdeg = vec![0u32; p.roads.nodes.len()];
+        for e in p
+            .roads
+            .edges
+            .iter()
+            .filter(|e| e.class == RoadClass::Highway)
+        {
+            hdeg[e.a as usize] += 1;
+            hdeg[e.b as usize] += 1;
+        }
+        let ends: Vec<usize> = (0..hdeg.len()).filter(|&i| hdeg[i] == 1).collect();
+        assert_eq!(ends.len(), 2, "seed {seed}: the highway is not one chain");
+        for &n in &ends {
+            assert!(
+                p.roads
+                    .edges
+                    .iter()
+                    .any(|e| e.class == RoadClass::Beachfront
+                        && (e.a as usize == n || e.b as usize == n)),
+                "seed {seed}: highway end {:?} is not on the beachfront road",
+                p.roads.nodes[n].pos
+            );
+        }
+        // The walls, sampled every 32 m along each land side clear of the corners.
+        let mut least = [f32::INFINITY; 4];
+        for k in [NORTH, EAST, SOUTH, WEST] {
+            if edges[k].is_water() {
+                continue;
+            }
+            let along_len = if k == NORTH || k == SOUTH {
+                ext[0]
+            } else {
+                ext[1]
+            };
+            let (lo, hi) = if k == NORTH || k == SOUTH {
+                (bands[WEST], ext[0] - bands[EAST])
+            } else {
+                (bands[NORTH], ext[1] - bands[SOUTH])
+            };
+            let at = |a: f32, d: f32| match k {
+                NORTH => [a, d],
+                SOUTH => [a, ext[1] - d],
+                WEST => [d, a],
+                _ => [ext[0] - d, a],
+            };
+            let mut a = lo.max(32.0);
+            while a <= hi.min(along_len - 32.0) {
+                let h = |d: f32| p.terrain.height_at(&p.header, at(a, d)).unwrap();
+                let rise = h(1.0) - h(bands[k]);
+                least[k] = least[k].min(rise);
+                a += 32.0;
+            }
+            let need = if edges[k] == EdgeKind::Mountains {
+                MOUNTAINS_RISE_M
+            } else {
+                RISE_M
+            };
+            assert!(
+                least[k] >= need,
+                "seed {seed}: the {:?} wall rises only {:.1} m",
+                edges[k],
+                least[k]
+            );
+        }
+        println!(
+            "seed {seed}: {dead} dead ends ({beach} on the beach), least rise N {:.0} E {:.0} S {:.0} m",
+            least[NORTH], least[EAST], least[SOUTH]
+        );
+    }
+}
+
 #[test]
 fn coast_meshes_sit_roads_on_the_terrain() {
     use world::math::V2;

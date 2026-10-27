@@ -25,7 +25,7 @@
 //!   52  u32      file_len: total length in bytes
 //!
 //! Grids, at 56
-//!   u16 res_per_chunk, u16 reserved 0, f32 water_level
+//!   u16 res_per_chunk, u8 x4 edges [north, east, south, west] (EdgeKind), f32 water_level
 //!   list of f32  terrain heights ((sx*res+1) * (sz*res+1), row-major, z major)
 //!   list of u8   zone cells (sx*res * sz*res, row-major, z major; ZoneId)
 //!   list of water bodies: u8 kind (WaterKind), pts2 polygon
@@ -75,7 +75,7 @@ use alloc::vec::Vec;
 use skywave_core::hash_bytes;
 
 use crate::{
-    Building, BuildingUse, ChunkEntry, ChunkIndex, Crossing, Edge, Era, Facade, Facades,
+    Building, BuildingUse, ChunkEntry, ChunkIndex, Crossing, Edge, EdgeKind, Era, Facade, Facades,
     GroundFloor, Lane, Lanes, Light, LightKind, Lights, LotKind, Node, Parcel, Place, PlaceError,
     PlaceHeader, Poi, PoiKind, Prop, PropKind, Props, RegionId, RoadClass, RoadGraph, Roof,
     Sidewalk, Sidewalks, Spawn, SpawnKind, StopLine, StyleTag, Table, TableRange, Terrain, Turn,
@@ -123,7 +123,7 @@ pub fn encode(place: &Place) -> Vec<u8> {
 
     let t = &place.terrain;
     w.extend_from_slice(&t.res_per_chunk.to_le_bytes());
-    w.extend_from_slice(&[0, 0]);
+    w.extend(t.edges.iter().map(|&e| e as u8));
     put_f32(&mut w, t.water_level);
     put_u32(&mut w, t.heights.len() as u32);
     let heights_at = w.len();
@@ -603,6 +603,21 @@ fn era(v: u8) -> Option<Era> {
     })
 }
 
+fn edge_kind(v: u8) -> Option<EdgeKind> {
+    Some(match v {
+        0 => EdgeKind::Open,
+        1 => EdgeKind::Ocean,
+        2 => EdgeKind::Lake,
+        3 => EdgeKind::Bay,
+        4 => EdgeKind::Mountains,
+        5 => EdgeKind::Hills,
+        6 => EdgeKind::Forest,
+        7 => EdgeKind::HighwayLoop,
+        8 => EdgeKind::RailYards,
+        _ => return None,
+    })
+}
+
 fn water_kind(v: u8) -> Option<WaterKind> {
     Some(match v {
         0 => WaterKind::Ocean,
@@ -1004,10 +1019,9 @@ pub fn decode(bytes: &[u8]) -> Result<Place, PlaceError> {
         pos: HEADER_LEN,
     };
     let res_per_chunk = r.u16()?;
-    if r.u16()? != 0 {
-        return Err(PlaceError::BadValue {
-            offset: (r.pos - 2) as u32,
-        });
+    let mut edges = [EdgeKind::Open; 4];
+    for e in &mut edges {
+        *e = r.tag(edge_kind)?;
     }
     let water_level = r.f32()?;
     let [sw, sd] = Terrain::samples(&h, res_per_chunk);
@@ -1041,6 +1055,7 @@ pub fn decode(bytes: &[u8]) -> Result<Place, PlaceError> {
             heights,
             water_level,
             water,
+            edges,
         },
         zones: Zones { cells },
         roads: RoadGraph::default(),
@@ -1150,7 +1165,8 @@ pub fn decode_chunk(bytes: &[u8], chunk: [u16; 2]) -> Result<ChunkData, PlaceErr
     let res = usize::from(res_per_chunk);
     let [sw, sd] = Terrain::samples(&h, res_per_chunk);
     let [zw, zd] = Zones::cells_per_side(&h, res_per_chunk);
-    let heights_at = HEADER_LEN + 12;
+    // res_per_chunk, the edges, water_level, the height count.
+    let heights_at = HEADER_LEN + 14;
     let zones_at = heights_at + 4 * sw * sd + 4;
     if res == 0 || zones_at + zw * zd > bytes.len() {
         return Err(PlaceError::TerrainSize);
@@ -1186,6 +1202,7 @@ pub fn decode_chunk(bytes: &[u8], chunk: [u16; 2]) -> Result<ChunkData, PlaceErr
             heights: Vec::new(),
             water_level: 0.0,
             water: Vec::new(),
+            edges: [EdgeKind::Open; 4],
         },
         zones: Zones::default(),
         roads: RoadGraph::default(),
@@ -1647,7 +1664,7 @@ mod tests {
         assert_eq!(damaged(&|b| b[48] ^= 4), Err(E::Layout));
         // A zone cell out of range.
         let res = 8usize;
-        let zones_at = HEADER_LEN + 12 + 4 * (3 * res + 1) * (3 * res + 1) + 4;
+        let zones_at = HEADER_LEN + 14 + 4 * (3 * res + 1) * (3 * res + 1) + 4;
         assert_eq!(
             damaged(&|b| b[zones_at + 5] = 77),
             Err(E::BadValue {

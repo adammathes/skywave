@@ -18,6 +18,7 @@ extern crate std;
 
 pub mod buildings;
 pub mod collide;
+pub mod edges;
 pub mod ground;
 pub mod math;
 pub mod mesh;
