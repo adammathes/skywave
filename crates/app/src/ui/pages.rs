@@ -194,7 +194,10 @@ pub fn note(page: Page) -> Option<&'static str> {
              Skywave is free software under the BSD-3-Clause license.\n\
              Code, font and art: ours. Music: whatever you tune in.",
         ),
-        Page::Bindings(_) => Some("Select a row, then press the new input."),
+        Page::Bindings(_) => Some(
+            "Select a row, then press the new input.\n\
+             (hold): let go after a second. Other actions on that button act on release.",
+        ),
         Page::Vehicle => Some(
             "The marked car is the one you are driving.\n\
              Select another to swap it in right where you are.",

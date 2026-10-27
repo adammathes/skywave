@@ -288,7 +288,9 @@ impl Drive {
     pub fn reset(&mut self, lanes: &world::lanes::LaneLines, ground: &DriveGround) {
         let odometer = self.state.odometer_m;
         let p = self.state.pos;
-        match lanes.nearest([p[0], p[2]], RESET_RANGE_M) {
+        // The ground point under the body, for which level of a bridge it is on.
+        let foot = [p[0], p[1] - self.spec.cg_height_m, p[2]];
+        match lanes.nearest(foot, RESET_RANGE_M) {
             Some(h) => {
                 let [x, y, z] = h.pos;
                 let (y, _) = ground.level_from([x, z], y + 0.5);

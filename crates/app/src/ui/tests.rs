@@ -1096,7 +1096,10 @@ fn strand(app: &mut App) {
 /// The car is at rest, upright, on a lane's centerline heading along it, with its miles.
 fn assert_on_a_lane(app: &App) {
     let (at, heading) = spot(app);
-    let hit = app.lanes.nearest(at, 1.0).expect("on a lane");
+    let hit = app
+        .lanes
+        .nearest([at[0], 0.0, at[1]], 1.0)
+        .expect("on a lane");
     assert!(hit.dist < 0.05, "{hit:?}");
     let lane_heading = (-hit.dir[0]).atan2(-hit.dir[1]);
     let turn = (heading - lane_heading + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
@@ -1116,7 +1119,8 @@ fn r_puts_a_stuck_car_back_on_the_nearest_lane() {
     let mut h = Harness::new();
     strand(&mut h.app);
     let p = h.app.drive.state.pos;
-    let want = h.app.lanes.nearest([p[0], p[2]], 200.0).unwrap();
+    let foot = [p[0], p[1] - h.app.drive.spec.cg_height_m, p[2]];
+    let want = h.app.lanes.nearest(foot, 200.0).unwrap();
     h.key(Key::KeyR);
     assert_on_a_lane(&h.app);
     let (at, _) = spot(&h.app);

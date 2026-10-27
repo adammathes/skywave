@@ -27,9 +27,11 @@ pub enum Sign {
 /// bindings of the same `raw` on that device are ignored, so Select + right stick scrubs
 /// time instead of also looking around.
 ///
-/// A `long` binding (a button only) fires once its input has been held for
-/// [`LONG_PRESS_S`] without a chord on it; the input's other actions then act on release, as
-/// a chord's hold's do, so a tap of pad Select opens the map and holding it resets the car.
+/// A `long` binding (a button only) fires when its input is let go after [`LONG_PRESS_S`] or
+/// more held with no chord used; a shorter press fires the input's other actions instead,
+/// also on release (as a chord's hold's do). So a tap of pad Select opens the map, holding it
+/// resets the car, and holding it to scrub time does neither. Any action bound to that
+/// button acts on release, not press (shown as "(hold)" on the Bindings page).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {
     pub raw: RawInput,
@@ -58,7 +60,7 @@ impl Binding {
         }
     }
 
-    /// This binding, firing only after [`LONG_PRESS_S`] held.
+    /// This binding, firing only on release after [`LONG_PRESS_S`] held.
     pub fn held_long(self) -> Binding {
         Binding { long: true, ..self }
     }

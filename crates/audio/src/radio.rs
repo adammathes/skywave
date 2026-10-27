@@ -541,8 +541,10 @@ mod tests {
         assert_eq!(kind(r.state()), "error 0");
         r.tick(NO_SIGNAL_SECONDS * 0.9);
         assert_eq!(kind(r.state()), "error 0", "no signal shows for a while");
+        let tunes = r.tunes();
         r.tick(NO_SIGNAL_SECONDS * 0.2);
         assert_eq!(kind(r.state()), "tuning Some(0)->1");
+        assert_eq!(r.tunes(), tunes + 1, "moving on sweeps the dial");
         r.tick(TUNE_SECONDS);
         r.drain_commands().for_each(drop);
         // From b the dial skips a both ways.

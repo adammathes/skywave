@@ -42,8 +42,10 @@ closes the menu.
 place's lane table, or each road's lanes laid out from its cross section, driving on the right), heading
 the way that lane drives, on the deck it is on; with no lane within 200 m it goes back to the place's start.
 The odometer, headlights and camera are kept, and "Car reset" shows for 2 s. On the pad it is a long press
-(`Binding::long`): Back fires it once after 1 s held with no chord used, so a tap still opens the map and
-holding Back while scrubbing time never resets; a remap of Reset to another pad button is a long press too.
+(`Binding::long`): letting go of Back after 1 s or more held fires it, so a tap still opens the map, and a
+hold that scrubbed time (the right stick moved, however late) fires neither. A remap of Reset to another pad
+button is a long press too. Every other action on a long-press button acts on release rather than press (the
+Bindings page says so under its rows); that is what keeps a tap and a hold apart.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
 
