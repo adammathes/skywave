@@ -10,8 +10,8 @@ use std::cell::Cell;
 use vehicle::sim::{steer_target, DT, REVERSE_MAX_MPS};
 use vehicle::{step, Assists, FlatGround, VehicleInput, VehicleSpec, VehicleState};
 
-const CORSAIR: &str = include_str!("../../../assets/vehicles/corsair_gtx.ron");
-const PALISADE: &str = include_str!("../../../assets/vehicles/palisade_wagon.ron");
+const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
+const HOMESTEAD: &str = include_str!("../../../assets/vehicles/homestead_wagon.ron");
 const MPH: f32 = 0.447_04;
 const STEPS_PER_S: usize = 120;
 const GROUND: FlatGround = FlatGround {
@@ -51,7 +51,7 @@ fn load(text: &str) -> VehicleSpec {
 }
 
 fn cars() -> [VehicleSpec; 2] {
-    [load(CORSAIR), load(PALISADE)]
+    [load(GANNET), load(HOMESTEAD)]
 }
 
 fn spawn(spec: &VehicleSpec) -> VehicleState {
@@ -142,9 +142,9 @@ fn full_throttle(spec: &VehicleSpec, assists: &Assists, secs: usize) -> (f32, Ve
 
 #[test]
 fn straight_line_acceleration_and_top_speed() {
-    let [corsair, palisade] = cars();
+    let [gannet, homestead] = cars();
     let mut tops = [0.0; 2];
-    for (k, (spec, band)) in [(&corsair, (5.0, 8.0)), (&palisade, (10.0, 16.0))]
+    for (k, (spec, band)) in [(&gannet, (5.0, 8.0)), (&homestead, (10.0, 16.0))]
         .into_iter()
         .enumerate()
     {
@@ -194,7 +194,7 @@ fn stopping_distance(spec: &VehicleSpec, assists: &Assists) -> f32 {
 }
 
 /// 60–0 mph. Before the feel pass after the first play (light assists the default, the
-/// specs' old brakes): corsair 47.6 m, palisade 56.4 m with ABS. Now the arcade assists
+/// specs' old brakes): gannet 47.6 m, homestead 56.4 m with ABS. Now the arcade assists
 /// (the default) stop within ~38 m and ~45 m, and the light ones no longer than before.
 const ARCADE_STOP_M: [f32; 2] = [38.5, 45.5];
 const LIGHT_STOP_M: [f32; 2] = [47.6, 56.4];
@@ -312,12 +312,12 @@ fn skidpad(spec: &VehicleSpec) -> f32 {
 
 #[test]
 fn skidpad_lateral_grip_is_ordered() {
-    let [corsair, palisade] = cars();
-    let gc = skidpad(&corsair);
-    let gp = skidpad(&palisade);
-    println!("{:15} skidpad {gc:.3} g", corsair.id);
-    println!("{:15} skidpad {gp:.3} g", palisade.id);
-    assert!(gc > gp, "skidpad order: corsair {gc} g, palisade {gp} g");
+    let [gannet, homestead] = cars();
+    let gc = skidpad(&gannet);
+    let gp = skidpad(&homestead);
+    println!("{:15} skidpad {gc:.3} g", gannet.id);
+    println!("{:15} skidpad {gp:.3} g", homestead.id);
+    assert!(gc > gp, "skidpad order: gannet {gc} g, homestead {gp} g");
     assert!(
         gp > 0.5 && gc < 1.6,
         "implausible skidpad numbers {gc} {gp}"
@@ -400,9 +400,9 @@ fn steering_right_turns_right() {
 
 #[test]
 fn soft_car_leans_more() {
-    let [corsair, palisade] = cars();
+    let [gannet, homestead] = cars();
     let mut lean = [0.0; 2];
-    for (k, spec) in [&corsair, &palisade].into_iter().enumerate() {
+    for (k, spec) in [&gannet, &homestead].into_iter().enumerate() {
         let mut s = spawn(spec);
         up_to_speed(spec, &mut s, 12.0);
         hold(
@@ -415,7 +415,7 @@ fn soft_car_leans_more() {
         lean[k] = s.right()[1].asin().to_degrees() / s.lat_g.max(0.05);
     }
     println!(
-        "roll gradient: corsair {:.2} deg/g, palisade {:.2} deg/g",
+        "roll gradient: gannet {:.2} deg/g, homestead {:.2} deg/g",
         lean[0], lean[1]
     );
     assert!(lean[1] > 1.5 * lean[0], "roll gradients {lean:?}");
@@ -683,7 +683,7 @@ fn full_stick_at(spec: &VehicleSpec, assists: &Assists, mps: f32) -> (f32, f32, 
 }
 
 /// Grip-limited steering (on in the default assists). Before it, full stick asked for the
-/// spec's speed-sensitive lock: corsair 22.4° and palisade 22.5° at 30 m/s, far past what
+/// spec's speed-sensitive lock: gannet 22.4° and homestead 22.5° at 30 m/s, far past what
 /// the tires use, so the fronts scrubbed at 2–4× their peak slip. Now full stick aims the
 /// fronts their peak slip angle off the front axle's travel (7° and 9.5° on a straight at
 /// speed, plus the turn's kinematic angle once turning), so they sit near their peak with
@@ -825,7 +825,7 @@ fn replay_is_deterministic_and_pinned() {
             spec.id
         );
     }
-    assert_eq!(hashes, PINNED, "replay hashes moved (corsair, palisade)");
+    assert_eq!(hashes, PINNED, "replay hashes moved (gannet, homestead)");
 }
 
 #[test]

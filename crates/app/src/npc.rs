@@ -4,8 +4,9 @@
 //!
 //! - **Setup.** [`Npcs::new`] builds the lane graph and the pool (sized for
 //!   [`Density::Busy`]) at scene setup. The first time traffic is on, [`Npcs::build_meshes`]
-//!   finds the meshes: every built-in shape in the place's four era street colors for it
-//!   (`propinst::place_paints`, the parked cars' own) at levels of detail 1 and 2, the
+//!   finds the meshes: every traffic shape (`vehicles::TRAFFIC_SHAPES`) in the place's four
+//!   era street colors for it (`propinst::place_paints`, the parked cars' own) at levels
+//!   of detail 1 and 2, the
 //!   parked cars' meshes where the place parks that shape and paint, built
 //!   ([`car::parked_mesh`]) only where it does not; a session with traffic off never
 //!   builds any. Lamps are built lit so the instance's glow switches them.
@@ -153,7 +154,7 @@ impl Npcs {
     pub fn new(place: &Place, seed: Seed) -> Npcs {
         let graph = LaneGraph::new(place);
         let budget = TrafficBudget {
-            shapes: vehicles::BUILTIN_SHAPES.len() as u8,
+            shapes: vehicles::TRAFFIC_SHAPES as u8,
             ..TrafficBudget::default()
         };
         let traffic = Traffic::new(&graph, budget, seed);
@@ -191,7 +192,7 @@ impl Npcs {
         parked: Option<&crate::propinst::PropInstances>,
         mut register: impl FnMut(Mesh) -> MeshId,
     ) -> Result<(), String> {
-        let shapes: Vec<shape::ShapeSpec> = vehicles::BUILTIN_SHAPES
+        let shapes: Vec<shape::ShapeSpec> = vehicles::BUILTIN_SHAPES[..vehicles::TRAFFIC_SHAPES]
             .iter()
             .map(|(_, text)| vehicles::load_shape(text))
             .collect::<Result<_, _>>()?;
@@ -616,7 +617,7 @@ mod tests {
 
     /// The coast junction of the `coast-traffic-noon` golden, waiting at the stop line.
     pub(crate) const JUNCTION: &str =
-        "place=coast&car=corsair_gtx&cam=chase-mid&pos=477.5,1001.2&yaw=347";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=477.5,1001.2&yaw=347";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()

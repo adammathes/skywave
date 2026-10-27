@@ -19,7 +19,7 @@ use super::names::{self, action_label, device_label, device_noun};
 use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
-use crate::settings::Quality;
+use crate::settings::{FrameRate, Quality};
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -436,7 +436,7 @@ impl Ui {
             );
         }
         if let Some(t) = self.toast() {
-            let args = ToastText(t);
+            let args = ToastText(t, &self.music_name);
             text_right(
                 hud,
                 px + pw - PAD,
@@ -521,6 +521,10 @@ impl Ui {
                     let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
                     hud.text(px + PAD, ty, S, fg, name);
                 }
+                (ItemId::RemoveFolder(i), _) => {
+                    let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
+                    hud.text_fmt(px + PAD, ty, S, fg, format_args!("Remove {name}"));
+                }
                 _ => hud.text(px + PAD, ty, S, fg, item.label),
             }
             match item.widget {
@@ -558,6 +562,20 @@ impl Ui {
                 }
                 Widget::Choice { index, .. } if item.id == ItemId::Paint => {
                     self.draw_swatches(hud, right, y, index, focused);
+                }
+                Widget::Choice { index, .. } if item.id == ItemId::FrameRate => {
+                    let hz = self.panel_hz();
+                    match FrameRate::ALL.get(index) {
+                        Some(&f) if index > 0 => {
+                            let fps = f.fps(hz);
+                            let args = format_args!("< {fps:.0} fps >");
+                            text_right(hud, right, ty, S, fg, false, args);
+                        }
+                        _ => {
+                            let args = format_args!("< Panel ({hz:.0}) >");
+                            text_right(hud, right, ty, S, fg, false, args);
+                        }
+                    }
                 }
                 Widget::Choice { options, index } => {
                     let name = options.get(index).copied().unwrap_or("?");
@@ -688,7 +706,7 @@ impl Ui {
             None => text_right(hud, x, y, 5.0, TEXT, true, format_args!("--")),
         };
         if let Some(t) = self.toast() {
-            let args = ToastText(t);
+            let args = ToastText(t, &self.music_name);
             hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
         }
         if let Some(d) = &ctx.radio_display {
@@ -955,7 +973,8 @@ impl Ui {
                  peds {} people  step {:.3} ms\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
-                 hud {} quads  ({} dropped)",
+                 hud {} quads  ({} dropped)\n\
+                 frame {:?}  world {}  ui {}  skip {}",
                 if r.backend.is_empty() { "?" } else { r.backend },
                 r.draw_calls,
                 r.shadow_draw_calls,
@@ -997,19 +1016,26 @@ impl Ui {
                 cz,
                 r.hud_quads,
                 r.hud_quads_dropped,
+                r.last_work,
+                r.frames,
+                r.ui_frames,
+                r.skipped_frames,
             ),
         );
         let mut y = y + 11.0 * line;
         if r.gpu_timing {
-            let ms = |p: usize| r.gpu_us[p] as f32 / 1000.0;
-            let total: u32 = r.gpu_us.iter().sum();
+            // Medians over the last 64 frames read back; the parts (each cascade; the
+            // depth pre-pass, meshes and sky) where timestamps work inside passes.
+            let ms = |p: usize| r.gpu_median_us[p] as f32 / 1000.0;
+            let part = |k: usize| r.gpu_median_part_us[k] as f32 / 1000.0;
+            let total: u32 = r.gpu_median_us.iter().sum();
             hud.text_fmt(
                 sx,
                 y,
                 s,
                 TEXT,
                 format_args!(
-                    "gpu {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}",
+                    "gpu med {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}{}",
                     total as f32 / 1000.0,
                     ms(0),
                     ms(1),
@@ -1017,6 +1043,10 @@ impl Ui {
                     ms(3),
                     ms(4),
                     ms(5),
+                    GpuParts(
+                        r.gpu_parts
+                            .then(|| { [part(0), part(1), part(2), part(3), part(4), part(6)] })
+                    ),
                 ),
             );
             y += line;
@@ -1027,9 +1057,26 @@ impl Ui {
     }
 }
 
-struct ToastText(Toast);
+/// The F3 overlay's GPU parts: the cascades, then the forward pass's depth pre-pass,
+/// meshes and sky, ms.
+struct GpuParts(Option<[f32; 6]>);
 
-impl Display for ToastText {
+impl Display for GpuParts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some([c0, c1, c2, z, m, sky]) => write!(
+                f,
+                " | c {c0:.2}/{c1:.2}/{c2:.2} z {z:.2} m {m:.2} sky {sky:.2}"
+            ),
+            None => Ok(()),
+        }
+    }
+}
+
+/// A toast and the music folder name it may name.
+struct ToastText<'a>(Toast, &'a str);
+
+impl Display for ToastText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             Toast::Bound(b, action, sign) => {
@@ -1052,6 +1099,19 @@ impl Display for ToastText {
             },
             Toast::CarReset => f.write_str("Car reset"),
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
+            Toast::MusicAdded { tracks, kept } => {
+                let s = if tracks == 1 { "" } else { "s" };
+                write!(f, "{}: {tracks} track{s} on the dial", self.1)?;
+                if !kept {
+                    f.write_str(" (pick it again next time)")?;
+                }
+                Ok(())
+            }
+            Toast::MusicEmpty => f.write_str("No music found in that folder"),
+            Toast::MusicNeedsKeyboard => {
+                f.write_str("Use the keyboard or mouse, or drop a folder on the page")
+            }
+            Toast::MusicRemoved => f.write_str("Music folder removed"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }
     }

@@ -33,7 +33,7 @@ use crate::map::view::{
 };
 use crate::map::MapPoi;
 use crate::radio::{self, CarRadio};
-use crate::settings::{GpuInfo, Handling, Quality, Settings, SettingsStore};
+use crate::settings::{FrameRate, GpuInfo, Handling, Quality, Settings, SettingsStore};
 use crate::App;
 use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
 use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
@@ -83,6 +83,17 @@ pub enum Toast {
     CarReset,
     /// A stream was added to the stations.
     StreamAdded,
+    /// A music folder (`Ui::music_name`) with this many tracks was added to the stations;
+    /// `kept`: the browser will remember it next session.
+    MusicAdded {
+        tracks: usize,
+        kept: bool,
+    },
+    /// The folder picked had no music the platform plays.
+    MusicEmpty,
+    /// The folder picker needs a key or a click (a pad press cannot open it).
+    MusicNeedsKeyboard,
+    MusicRemoved,
     /// The text given for a stream was not an `https://` URL (or there are too many).
     StreamRejected,
 }
@@ -143,12 +154,24 @@ pub struct Ui {
     radio: CarRadio,
     /// The platform can ask the user for a line of text (the "Add stream URL" item).
     text_entry: bool,
+    /// The platform can ask the user for a music folder (the "Add music folder" item).
+    music_picker: bool,
+    /// Folders picked last session could not be kept: the item says to pick them again.
+    music_again: bool,
+    /// The name of the music folder last added, for its toast.
+    music_name: String,
     /// The preset [`Quality::auto`] picked for this device (Medium until the platform
     /// says what the GPU is).
     auto_quality: Quality,
     /// A preset the command line forced this session (not saved; a choice on the Video
     /// page replaces it).
     forced_quality: Option<Quality>,
+    /// The display's refresh rate, Hz (the platform says; 60 until it does): what the
+    /// frame-rate caps are fractions of.
+    panel_hz: f64,
+    /// The window has the focus (the platform says; true until it does). Without it the
+    /// game is paused.
+    focused: bool,
     /// CPU time the platform spent recording and submitting the last frame, ms (0:
     /// not measured).
     cpu_submit_ms: f32,
@@ -159,6 +182,9 @@ pub struct Ui {
     /// Adapter and backend, for the overlay.
     gpu_label: String,
 }
+
+/// The display's refresh rate until the platform reports it, Hz.
+const DEFAULT_PANEL_HZ: f64 = 60.0;
 
 impl Default for Ui {
     fn default() -> Self {
@@ -200,8 +226,13 @@ impl Ui {
             forced_ui_scale: None,
             radio: CarRadio::new(),
             text_entry: false,
+            music_picker: false,
+            music_again: false,
+            music_name: String::new(),
             auto_quality: Quality::Medium,
             forced_quality: None,
+            panel_hz: DEFAULT_PANEL_HZ,
+            focused: true,
             cpu_submit_ms: 0.0,
             traffic: (0, 0.0),
             peds: (0, 0.0),
@@ -214,6 +245,18 @@ impl Ui {
         self.forced_quality
             .or(self.settings.quality)
             .unwrap_or(self.auto_quality)
+    }
+
+    /// The frame-rate cap in effect: a forced preset's own (Battery's), else the setting.
+    pub fn frame_rate(&self) -> FrameRate {
+        self.forced_quality
+            .and_then(Quality::frame_rate)
+            .unwrap_or(self.settings.frame_rate)
+    }
+
+    /// The display's refresh rate the platform reported, Hz.
+    pub fn panel_hz(&self) -> f64 {
+        self.panel_hz
     }
 
     /// What the renderer may spend this frame: the preset at the resolution scale setting
@@ -477,7 +520,11 @@ impl Ui {
             can_quit: self.can_quit,
             radio: &self.radio,
             text_entry: self.text_entry,
+            music_picker: self.music_picker,
+            music_again: self.music_again,
             quality: self.quality(),
+            frame_rate: self.frame_rate(),
+            panel_hz: self.panel_hz,
             browse: self.browse,
         }
     }
@@ -613,8 +660,20 @@ impl Ui {
                 let q = Quality::ALL[i.min(Quality::ALL.len() - 1)];
                 self.settings.quality = Some(q);
                 self.settings.resolution_scale = q.resolution_scale();
+                if let Some(f) = q.frame_rate() {
+                    self.settings.frame_rate = f;
+                }
                 self.forced_quality = None;
                 self.dirty = true;
+            }
+            Effect::Choose(ItemId::FrameRate, i) => {
+                let offered = FrameRate::offered(self.panel_hz);
+                self.settings.frame_rate = offered[i.min(offered.len() - 1)];
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::BackgroundRadio, i) => {
+                self.settings.mute_radio_unfocused = i == 1;
+                self.radio_settings_changed();
             }
             Effect::Choose(..) => {}
             Effect::Activate(id) => self.activate(id),
@@ -796,11 +855,39 @@ impl Ui {
             }
             ItemId::KeepExisting | ItemId::UseNew => self.settle_conflict(id == ItemId::UseNew),
             ItemId::AddStream => self.radio.request_url(),
+            ItemId::AddMusic => self.radio.request_music(),
+            ItemId::ClearMusic => {
+                let ids: Vec<String> = self.radio.files().iter().map(|c| c.id.clone()).collect();
+                for id in &ids {
+                    self.forget_station(id);
+                }
+                self.radio.clear_files(&self.settings.radio);
+                self.music_again = false;
+                self.radio_settings_changed();
+                self.show(Toast::MusicRemoved);
+            }
+            ItemId::RemoveFolder(i) => {
+                if let Some(row) = self.radio.rows().get(i) {
+                    let id = row.id.clone();
+                    self.forget_station(&id);
+                    self.radio.remove_files(&id, &self.settings.radio);
+                    self.radio_settings_changed();
+                    self.show(Toast::MusicRemoved);
+                }
+            }
             ItemId::ClearStreams => {
                 self.settings.radio.clear_custom();
                 self.radio_settings_changed();
             }
             _ => {}
+        }
+    }
+
+    /// Drops what the settings keep about station `id` (switched off, last tuned).
+    fn forget_station(&mut self, id: &str) {
+        self.settings.radio.set_enabled(id, true);
+        if self.settings.radio.last_station.as_deref() == Some(id) {
+            self.settings.radio.last_station = None;
         }
     }
 
@@ -832,9 +919,10 @@ impl Ui {
         &self.radio
     }
 
-    /// The master volume scales the radio too, and mute silences it.
+    /// The master volume scales the radio too, and mute silences it (and so does the
+    /// window going to the background, when the setting says so).
     fn radio_gain(&self) -> f32 {
-        if self.settings.mute {
+        if self.settings.mute || (self.settings.mute_radio_unfocused && !self.focused) {
             0.0
         } else {
             self.settings.master_volume
@@ -1036,7 +1124,7 @@ impl App {
         if !self.still {
             self.ui.radio_frame(&state, dt as f32, radio_keys);
         }
-        let steps = if self.ui.is_open() {
+        let steps = if self.ui.is_open() || !self.ui.focused {
             Steps {
                 count: 0,
                 alpha: self.alpha,
@@ -1090,7 +1178,7 @@ impl App {
             &self.ground,
             &daylight,
             &self.ui.settings,
-            self.ui.is_open(),
+            self.ui.is_open() || !self.ui.focused,
         );
         // The engine and the world duck under a station that is playing; the dial sweeps
         // between stations at the radio's volume.
@@ -1220,6 +1308,63 @@ impl App {
         }
     }
 
+    /// The platform can ask the user for music folders: the Audio page offers "Add music
+    /// folder" ("Pick music folder again" with `again`, when the folders picked last
+    /// session could not be kept), and [`App::take_music_request`] says when it was chosen.
+    pub fn set_music_picker(&mut self, on: bool, again: bool) {
+        self.ui.music_picker = on;
+        self.ui.music_again = on && again;
+    }
+
+    /// True once after the user chose "Add music folder": ask for one and pass each
+    /// folder of it to [`App::add_music_folder`].
+    pub fn take_music_request(&mut self) -> bool {
+        self.ui.radio.take_music_request()
+    }
+
+    /// Puts the music folder the user picked or dropped on the dial as one station called
+    /// `name` of these tracks (every playable file under it; `audio::music` reads them).
+    /// `path` is the platform's stable name for the folder: the station's id comes from it,
+    /// and a folder with the same path replaces the old one. `announce` says so in a toast
+    /// (a folder the user just picked, not one remembered from last session), `kept`
+    /// whether the platform will remember it next session. A folder without music says so
+    /// when announced.
+    pub fn add_music_folder(
+        &mut self,
+        path: &str,
+        name: &str,
+        tracks: Vec<audio::Track>,
+        announce: bool,
+        kept: bool,
+    ) {
+        let ui = &mut self.ui;
+        let Some(station) = audio::Channel::files(path, name, tracks) else {
+            if announce {
+                ui.show(Toast::MusicEmpty);
+            }
+            return;
+        };
+        let n = station.tracks.len();
+        ui.music_name = station.name.clone();
+        ui.radio.add_files(path, station, &ui.settings.radio);
+        ui.music_again = false;
+        if announce {
+            ui.show(Toast::MusicAdded { tracks: n, kept });
+        }
+    }
+
+    /// The platform could not open its folder picker (no key or click to open it from: a
+    /// gamepad press): say how else to add music.
+    pub fn music_picker_refused(&mut self) {
+        self.ui.show(Toast::MusicNeedsKeyboard);
+    }
+
+    /// The paths of the music folders the user removed since the last call, for the
+    /// platform to forget ("*": forget them all, remembered ones too).
+    pub fn take_forgotten_music(&mut self) -> Vec<String> {
+        self.ui.radio.take_forgotten()
+    }
+
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next
     /// [`App::frame`]) and saves there from now on. The saved vehicle and paint replace the
     /// car the app was built with unless a scene named that one (`car=`); its meshes then
@@ -1289,6 +1434,29 @@ impl App {
         } else {
             format!("{} ({})", gpu.name, gpu.backend)
         };
+    }
+
+    /// The display's refresh rate, Hz: the frame-rate caps offered are its whole divisors.
+    pub fn set_panel_hz(&mut self, hz: f64) {
+        if hz.is_finite() && hz >= 1.0 {
+            self.ui.panel_hz = hz;
+        }
+    }
+
+    /// The window gained or lost the focus (or the page was hidden): the game pauses in the
+    /// background and resumes in front (a menu the player opened stays open), and the radio
+    /// goes quiet in the background when the setting says so.
+    pub fn set_focused(&mut self, focused: bool) {
+        if self.ui.focused != focused {
+            self.ui.focused = focused;
+            self.ui.radio.set_gain(self.ui.radio_gain());
+            self.ui.radio.apply(&self.ui.settings.radio);
+        }
+    }
+
+    /// How often to draw: the frame-rate cap in effect (Settings › Video › Frame rate).
+    pub fn frame_rate(&self) -> FrameRate {
+        self.ui.frame_rate()
     }
 
     /// Uses preset `q` this session whatever is saved (`None` goes back to the setting).

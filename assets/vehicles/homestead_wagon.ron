@@ -1,4 +1,4 @@
-// Palisade Wagon: 1980s full-size family wagon with wood-grain side panels.
+// Homestead Wagon: 1980s full-size family wagon with wood-grain side panels.
 //
 // Intent: slow, heavy, soft and happy about it. A lazy big-displacement engine with lots
 // of low-end torque but little power, a three-speed automatic with tall, widely spaced
@@ -11,8 +11,8 @@
 //
 // Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
 VehicleSpec(
-    id: "palisade_wagon",
-    name: "Palisade Wagon",
+    id: "homestead_wagon",
+    name: "Homestead Wagon",
     era: Eighties,
     class: Wagon,
 
@@ -53,5 +53,5 @@ VehicleSpec(
         gauges: [Speedo(0, 85, mph)],   // era-correct 85 mph speedometer, no tach
         radio: "amber_seek",
     ),
-    shape: "palisade_wagon.shape.ron",
+    shape: "homestead_wagon.shape.ron",
 )

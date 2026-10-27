@@ -3,7 +3,7 @@
 // Intent: balanced, with a surge. Below 3000 rpm the turbo four is soft; then the boost
 // arrives and it pulls hard to the redline. Near 50/50 weight, firm springs and a stiff
 // bar keep it flat; it is neutral until you lift, when the tail comes round a little.
-// Quicker than everything but the Corsair, and slower than the Corsair everywhere.
+// Quicker than every everyday car, and slower than the Gannet everywhere.
 //
 // Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
 VehicleSpec(

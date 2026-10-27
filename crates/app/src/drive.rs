@@ -18,7 +18,7 @@ use crate::input::{Action, InputState};
 use crate::vehicles;
 
 /// The car you get without asking for one.
-pub const DEFAULT_VEHICLE: &str = "corsair_gtx";
+pub const DEFAULT_VEHICLE: &str = "gannet_gt";
 
 /// What the car drives on: the town's collider (ground heights, curbs, walls, props).
 pub type DriveGround = world::WorldCollider;
@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     fn both_cars_spawn_on_the_strip_facing_east() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let d = Drive::new(id).unwrap();
             assert_eq!(d.spec.id, id);
             let pose = d.pose(1.0);
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn wheels_sit_at_the_shape_hubs_steer_and_roll() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let mut d = Drive::new(id).unwrap();
             let g = flat();
             let r = d.layout.wheel_radius;
@@ -862,7 +862,7 @@ mod tests {
 
     #[test]
     fn the_cabin_draws_interior_wheel_and_needles() {
-        for id in ["corsair_gtx", "palisade_wagon"] {
+        for id in ["gannet_gt", "homestead_wagon"] {
             let d = Drive::new(id).unwrap();
             let ids = ids();
             let lod = ids.lods[0];
@@ -930,7 +930,7 @@ mod tests {
             assert_eq!(out.len(), 8, "{id}");
             assert_eq!(out[7].mesh, lod.shell_inside);
         }
-        let hardtop = Drive::new("palisade_wagon").unwrap();
+        let hardtop = Drive::new("homestead_wagon").unwrap();
         assert!(!hardtop.layout.open_top);
         let mut out = Vec::new();
         hardtop.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);

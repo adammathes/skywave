@@ -1,0 +1,46 @@
+// Longbow Coupe: a mid-80s front-engined American V8 sports car.
+//
+// Intent: a big lazy V8 in a stiff, wide, low car. Fat torque from idle, a four-speed
+// automatic and huge tires: it grips like a race car on a smooth road and rides like one
+// too. Stable, a touch of understeer, and the tail steps out only on a big throttle.
+// Quicker than the coupes, slower than the mid-engined cars.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "longbow_coupe",
+    name: "Longbow Coupe",
+    era: Eighties,
+    class: Sports,
+
+    mass_kg: 1450,
+    dims_m: (4.48, 1.80, 1.19),    // length, width, height
+    wheelbase_m: 2.44,
+    track_m: 1.52,
+    cg_height_m: 0.46,
+    cg_fore_aft: 0.49,             // 51% front
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 5200,
+        torque_nm: [(1000, 330), (2500, 420), (3200, 447), (4400, 400), (5200, 330)],
+    ),
+    gears: [3.06, 1.63, 1.0, 0.7],
+    final_drive: 3.07,
+    reverse: 2.3,
+    shift_ms: 300,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.28, grip_long: 1.06, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 40000, damper: 3600, travel_m: 0.13, antiroll: 0.5),
+    steering: Steer(max_deg: 31, speed_sens: 0.6, return_rate: 11.0),
+    brakes: Brakes(max_nm: 3600, bias_front: 0.62, abs: true, handbrake_nm: 3000),
+    aero: Aero(cd: 0.38, frontal_m2: 1.95, downforce_coef: 0.01),
+    feel: Feel(oversteer_bias: 0.02, body_roll: 0.25, engine_sound: "v8_lazy", shift_jerk: 0.2),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "longbow_coupe.shape.ron",
+)

@@ -1,6 +1,7 @@
 //! Performance bands for the whole 1980s roster (`docs/VEHICLES.md`, "Launch roster"),
 //! driven with the real specs from `assets/vehicles/`: every car's 0–60 mph time in its
-//! band, all twelve distinct in 0–60, top speed and skidpad grip, the class orderings, and
+//! band, all twenty distinct in 0–60, top speed and skidpad grip, the class orderings, the
+//! mid-engined exotics ahead of everything and the pony car behind the other sports cars, and
 //! nothing rolls at full lock or needs more than 60 m to stop. Run with `--nocapture` for
 //! the table: `cargo test -p vehicle --test roster -- --nocapture`.
 #![cfg(feature = "serde")]
@@ -28,8 +29,8 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 12] = [
-    (car!("corsair_gtx"), (5.0, 8.0)),
+const ROSTER: [Entry; 20] = [
+    (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
     (car!("buckboard_pickup"), (8.0, 10.0)),
@@ -38,13 +39,40 @@ const ROSTER: [Entry; 12] = [
     (car!("prescott_landau"), (10.5, 12.5)),
     (car!("burro_4x4"), (11.0, 13.5)),
     (car!("seabreeze_convertible"), (11.0, 14.0)),
-    (car!("palisade_wagon"), (10.0, 16.0)),
+    (car!("homestead_wagon"), (10.0, 16.0)),
     (car!("drayman_van"), (12.5, 15.0)),
     (car!("meadow_minivan"), (14.0, 16.5)),
+    (car!("basilisk_v12"), (4.0, 5.0)),
+    (car!("basilisk_roadster"), (4.2, 5.2)),
+    (car!("avocet_v8"), (4.6, 5.6)),
+    (car!("avocet_spider"), (4.8, 5.8)),
+    (car!("longbow_coupe"), (5.4, 6.6)),
+    (car!("longbow_convertible"), (5.6, 6.8)),
+    (car!("appaloosa_gt"), (5.8, 7.2)),
+    (car!("appaloosa_convertible"), (6.0, 7.4)),
+];
+
+/// The mid-engined exotics, which out-accelerate and outrun every other car, and the pony
+/// cars, which every other sports car of the 1980s roster out-accelerates and outruns.
+const EXOTICS: [&str; 4] = [
+    "basilisk_v12",
+    "basilisk_roadster",
+    "avocet_v8",
+    "avocet_spider",
+];
+const PONY: [&str; 2] = ["appaloosa_gt", "appaloosa_convertible"];
+const SPORTS: [&str; 7] = [
+    "basilisk_v12",
+    "basilisk_roadster",
+    "avocet_v8",
+    "avocet_spider",
+    "longbow_coupe",
+    "longbow_convertible",
+    "gannet_gt",
 ];
 
 /// Smallest gaps between any two cars for them to count as distinct: six sim steps (the
-/// Palisade and the Seabreeze, tuned before the roster, are 0.09 s apart), ~1.5 mph and
+/// Homestead and the Seabreeze, tuned before the roster, are 0.09 s apart), ~1.5 mph and
 /// a hundredth of a g.
 const MIN_GAP_S: f32 = 0.05;
 const MIN_GAP_MPS: f32 = 0.7;
@@ -245,6 +273,17 @@ fn every_car_is_distinct_and_the_classes_are_ordered() {
     assert_ordered(&m, "skidpad", &[Sports, Hatch, Sedan, Wagon, Van], |c| {
         c.grip
     });
+    // (fast, slow) pairs: every exotic beats every other car, every other sports car beats
+    // the pony cars.
+    let pairs = m.iter().flat_map(|a| m.iter().map(move |b| (a, b)));
+    for (a, b) in pairs {
+        let ahead = (EXOTICS.contains(&a.id) && !EXOTICS.contains(&b.id))
+            || (SPORTS.contains(&a.id) && PONY.contains(&b.id));
+        if ahead {
+            assert!(a.t60 < b.t60, "0-60 mph: {} should beat {}", a.id, b.id);
+            assert!(a.top > b.top, "top speed: {} should beat {}", a.id, b.id);
+        }
+    }
 }
 
 #[test]

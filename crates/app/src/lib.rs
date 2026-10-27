@@ -24,6 +24,7 @@ pub mod lighting;
 mod lighttiles;
 pub mod map;
 pub mod npc;
+pub mod pacing;
 mod peds;
 mod places;
 pub mod preview;
@@ -39,7 +40,7 @@ pub mod vehicles;
 mod worldmesh;
 
 pub use settings::{
-    GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
+    FrameRate, GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
 };
 
 pub use camera::CameraMode;
@@ -1424,8 +1425,8 @@ mod tests {
 
     #[test]
     fn the_wagon_drives_too() {
-        let mut app = App::new_with(Seed(1), "palisade_wagon").unwrap();
-        assert_eq!(app.drive.spec.id, "palisade_wagon");
+        let mut app = App::new_with(Seed(1), "homestead_wagon").unwrap();
+        assert_eq!(app.drive.spec.id, "homestead_wagon");
         let start = Vec3::from(app.drive.state.pos);
         run_script(&mut app);
         assert!((Vec3::from(app.drive.state.pos) - start).length() > 30.0);
@@ -1641,11 +1642,11 @@ mod tests {
         );
 
         let setup = SceneSetup::from_query(
-            "?seed=3&car=palisade_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0&traffic=off",
+            "?seed=3&car=homestead_wagon&cam=cockpit&t=22:30&pos=-200,-197.5&yaw=0&lights=1&stream=0&traffic=off",
         )
         .unwrap();
         let mut app = App::from_setup(&setup).unwrap();
-        assert_eq!(app.drive.spec.id, "palisade_wagon");
+        assert_eq!(app.drive.spec.id, "homestead_wagon");
         assert_eq!(app.hud_state().camera_mode, CameraMode::Cockpit);
         assert!(app.hud_state().headlights);
         let pose = app.drive.pose(1.0);
