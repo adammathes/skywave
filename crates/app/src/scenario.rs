@@ -19,7 +19,7 @@
 //! ```
 //!
 //! The era filter: a car newer than `years.1` never appears in the world, on the road,
-//! parked or on the Vehicle page. A car of `years` weighs 1; an older one
+//! parked or on the Vehicle page (nor one built up later than that, `VehicleSpec::built`). A car of `years` weighs 1; an older one
 //! `0.5^((years.0 - year) / 8)`, at least 0.05 for a hero. Weights are kept per roster car
 //! and per body shape ([`Lineup::shapes`], what traffic and parked cars pick from). Weights are integers in
 //! thousandths ([`era_weight`]), computed without floating point, so every platform picks
@@ -99,7 +99,7 @@ impl Scenario {
         {
             return err("unknown radio preset");
         }
-        let year_of = |id: &str| vehicles::builtin_spec(id).ok().map(|s| s.year);
+        let year_of = |id: &str| vehicles::builtin_spec(id).ok().map(|s| s.first_shown());
         match year_of(&self.default_vehicle) {
             Some(y) if y <= last => {}
             _ => return err("default_vehicle is not a built-in car of its years"),
@@ -196,6 +196,8 @@ pub struct RosterCar<'a> {
     pub id: &'a str,
     pub name: &'static str,
     pub year: u16,
+    /// The first year a world may show it ([`vehicle::VehicleSpec::first_shown`]).
+    pub shown: u16,
     /// Its body: a `VehicleSpec::shape` file name.
     pub shape: &'a str,
 }
@@ -218,7 +220,14 @@ impl Lineup {
     pub fn new(s: &Scenario, roster: &[RosterCar]) -> Lineup {
         let weights: Vec<u32> = roster
             .iter()
-            .map(|c| era_weight(c.year, s.years, s.heroes.iter().any(|h| h == c.id)))
+            .map(|c| {
+                let hero = s.heroes.iter().any(|h| h == c.id);
+                if c.shown > s.years.1 {
+                    0
+                } else {
+                    era_weight(c.year, s.years, hero)
+                }
+            })
             .collect();
         let cars: Vec<usize> = (0..roster.len()).filter(|&i| weights[i] > 0).collect();
         let shapes = vehicles::BUILTIN_SHAPES
@@ -279,6 +288,7 @@ pub(crate) struct OwnedCar {
     id: &'static str,
     name: &'static str,
     year: u16,
+    shown: u16,
     shape: String,
 }
 
@@ -288,6 +298,7 @@ impl OwnedCar {
             id: self.id,
             name: self.name,
             year: self.year,
+            shown: self.shown,
             shape: &self.shape,
         }
     }
@@ -302,11 +313,14 @@ fn builtin_roster(year_of: impl Fn(&str) -> Option<u16>) -> Vec<OwnedCar> {
         .enumerate()
         .map(|(i, &(id, _))| {
             let spec = vehicles::builtin_spec(id).ok();
-            let year = spec.as_ref().map_or(u16::MAX, |s| s.year);
+            let year = year_of(id).or(spec.as_ref().map(|s| s.year));
+            let year = year.unwrap_or(u16::MAX);
+            let built = spec.as_ref().map_or(0, |s| s.built);
             OwnedCar {
                 id,
                 name: names[i],
-                year: year_of(id).unwrap_or(year),
+                year,
+                shown: year.max(built),
                 shape: spec.map(|s| s.shape).unwrap_or_default(),
             }
         })
@@ -451,7 +465,7 @@ mod tests {
         let basin = &all[1];
         assert_eq!(
             (basin.id.as_str(), basin.years, basin.stub),
-            ("inland_basin_2001", (1965, 2001), true)
+            ("inland_basin_2001", (1995, 2001), true)
         );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(get(99).id, basin.id);
@@ -524,19 +538,69 @@ mod tests {
         assert_eq!(w, [0, 0]);
     }
 
+    /// The 1980s roster: the first twenty built-in cars.
+    const EIGHTIES: usize = 20;
+
     #[test]
     fn the_1984_lineup_is_the_whole_80s_roster_at_weight_one() {
         let l = lineup(0);
-        assert_eq!(l.cars, (0..vehicles::BUILTIN.len()).collect::<Vec<_>>());
-        assert_eq!(l.names, crate::ui::roster::names());
-        assert!(l.weights.iter().all(|&w| w == WEIGHT_ONE));
-        // Every built-in car is a 1979-1987 car.
-        for (id, _) in vehicles::BUILTIN {
+        assert_eq!(l.cars, (0..EIGHTIES).collect::<Vec<_>>());
+        assert_eq!(l.names, crate::ui::roster::names()[..EIGHTIES]);
+        assert!(l.weights[..EIGHTIES].iter().all(|&w| w == WEIGHT_ONE));
+        assert!(l.weights[EIGHTIES..].iter().all(|&w| w == 0));
+        // The 1980s roster is all 1979-1987 cars.
+        for (id, _) in &vehicles::BUILTIN[..EIGHTIES] {
             let y = vehicles::builtin_spec(id).unwrap().year;
             assert!((1979..=1987).contains(&y), "{id}: {y}");
         }
-        // The 2001 world has all of them too, by its stub's years.
-        assert_eq!(lineup(1).cars, l.cars);
+        // The 2001 world has every car: its heroes at weight one (the old muscle coupe by
+        // its age), the 1980s cars old and rarer.
+        let l01 = lineup(1);
+        assert_eq!(l01.cars, (0..vehicles::BUILTIN.len()).collect::<Vec<_>>());
+        for (k, (id, _)) in vehicles::BUILTIN.iter().enumerate() {
+            let w = l01.weights[k];
+            match *id {
+                "destrier_coupe" => assert_eq!(w, era_weight(1969, (1995, 2001), true)),
+                _ if k >= EIGHTIES => assert_eq!(w, WEIGHT_ONE, "{id}"),
+                _ => assert!(w > 0 && w < WEIGHT_ONE, "{id}: {w}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_basin_starts_in_a_hero_car_listed_in_its_heroes() {
+        let basin = get(1);
+        assert_eq!(basin.default_vehicle, "halberd_coupe");
+        assert!(basin.heroes.contains(&basin.default_vehicle));
+        let ids: Vec<&str> = vehicles::BUILTIN[EIGHTIES..].iter().map(|c| c.0).collect();
+        assert_eq!(basin.heroes, ids);
+        assert!(get(0).heroes.is_empty());
+    }
+
+    #[test]
+    fn no_2001_hero_ever_lists_in_1984() {
+        let (l84, coast) = (lineup(0), get(0));
+        for hero in &get(1).heroes {
+            let k = vehicles::BUILTIN.iter().position(|b| b.0 == hero).unwrap();
+            assert!(!l84.allows(k), "{hero}");
+            assert_eq!(l84.position(k), None);
+            assert_eq!(l84.weights[k], 0);
+            assert!(!l84.names.contains(&crate::ui::roster::names()[k]));
+            let shape = &vehicles::builtin_spec(hero).unwrap().shape;
+            let s = vehicles::BUILTIN_SHAPES.iter().position(|b| b.0 == shape);
+            assert_eq!(l84.shapes[s.unwrap()], 0, "{hero}'s body");
+        }
+        let mut next = 0;
+        for _ in 0..2 * vehicles::BUILTIN.len() {
+            next = l84.next_after(next);
+            assert!(next < EIGHTIES, "{next}");
+        }
+        // The muscle coupe is a 1969 car, kept out of the 1984 coast by its 2001 build
+        // alone: dated without it, the coast would show it.
+        let spec = vehicles::builtin_spec("destrier_coupe").unwrap();
+        assert_eq!((spec.year, spec.built), (1969, 2001));
+        assert!(spec.year <= coast.years.1 && spec.first_shown() > coast.years.1);
+        assert!(era_weight(spec.year, coast.years, false) > 0);
     }
 
     #[test]
@@ -571,7 +635,9 @@ mod tests {
                 .iter()
                 .position(|(id, _)| vehicles::builtin_spec(id).unwrap().shape == *file)
                 .unwrap();
-            let year = vehicles::builtin_spec(vehicles::BUILTIN[i].0).unwrap().year;
+            let year = vehicles::builtin_spec(vehicles::BUILTIN[i].0)
+                .unwrap()
+                .first_shown();
             assert_eq!(l.shapes[k], l.weights[i], "{file}");
             assert_eq!(l.shapes[k] > 0, year <= 1983, "{file}: {year}");
         }

@@ -103,7 +103,13 @@ pub fn render_zoomed(
     let mut g = Item::new(&ground);
     g.two_sided = true;
     items.push(g);
-    for m in [&car.body, &car.lights, &car.interior, &car.steering_wheel] {
+    for m in [
+        &car.body,
+        &car.lights,
+        &car.underglow,
+        &car.interior,
+        &car.steering_wheel,
+    ] {
         items.push(Item::new(m));
     }
     let mut glass = Item::new(&car.glass);

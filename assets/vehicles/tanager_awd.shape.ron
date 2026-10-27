@@ -1,0 +1,59 @@
+// Tanager AWD body: a late-90s all-wheel-drive twin-turbo V6 coupe.
+//
+// Intent: wide and muscular, a short hood with a sharp nose and slim lamps, a tall cabin
+// pushed forward, a fastback hatch over a squared, high tail with a low wing across it and
+// four round tail lamps in a dark panel. A scoop on the hood, pronounced arches, a rising
+// waist line, black trim, five-spoke alloys. Front engine, all four wheels driven. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "tanager_awd",
+    side: [
+        (0.00, 0.54), (0.05, 0.63), (0.30, 0.72), (1.45, 0.88), (1.55, 0.90),
+        (2.13, 1.25), (2.24, 1.29), (2.75, 1.28), (3.55, 1.03), (4.40, 1.00),
+        (4.55, 0.93),
+        (4.55, 0.30), (4.38, 0.22), (3.90, 0.17), (0.70, 0.16), (0.14, 0.19), (0.00, 0.28),
+    ],
+    plan: [
+        (0.00, 0.72), (0.15, 0.85), (0.60, 0.90), (1.00, 0.91), (3.60, 0.92), (4.30, 0.905),
+        (4.55, 0.86),
+    ],
+    belt: [(1.52, 0.89), (2.75, 0.94), (3.55, 1.00)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 24, greenhouse_frac: 0.74, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.57, 2.13),
+        backlight: (2.80, 3.50),
+        side: [(1.65, 2.62), (2.70, 3.05)],
+    ),
+    wheels: Wheels(radius: 0.33, width: 0.24, arch_clearance: 0.05, front_x: 0.96, rear_x: 3.43, track: 1.55),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.22, 0.40)),
+    rear: Rear(lights: Round, spoiler: Wing, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.75, creases: [(0.20, 0.58, 4.50, 0.66)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, HoodScoop, Badge(Diamond)],
+    // Pearl white, black, silver, deep red, dark green, midnight purple.
+    palette: ["#ecebe6", "#121316", "#b4b8bd", "#8e1520", "#1f3a2c", "#3a2350"],
+    accent: "#151517",
+    interior: InteriorShape(
+        dash_height: 0.84,
+        dash_x: 1.78,
+        wheel_pos: (2.14, 0.66),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (2.06, 1.17),
+        seat: (2.50, 0.40),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: charcoal dash, gray cloth with
+        // dark patterned inserts, charcoal carpet, a plain band, white-lit dials.
+        colors: ["#25272b", "#4a4d53", "#2a2c30", "#8c8e92", "#333539", "#3a7ad0"],
+        display: "#e8f0ff",
+        insert: "#30333a",
+        piping: "#24262b",
+        dash_top: "#2b2d32",
+        applique: None,
+        manual: true,
+    ),
+)

@@ -1,0 +1,47 @@
+// Siskin Coupe: a 2000 front-drive compact coupe built up as a street tuner.
+//
+// Intent: light, sharp and loud. A small turbo four that wakes up hard past 4000 rpm and
+// screams to a high redline, short gears, stiff lowered springs and sticky tires; it
+// turns in eagerly, tucks its nose when you lift and scrabbles a little at the front off
+// the line. The slowest of the hero cars in a straight line and the most fun in town.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "siskin_coupe",
+    name: "Siskin Coupe",
+    era: Aughts,
+    year: 2000,
+    class: Coupe,
+
+    mass_kg: 1180,
+    dims_m: (4.42, 1.74, 1.30),    // length, width, height
+    wheelbase_m: 2.62,
+    track_m: 1.49,
+    cg_height_m: 0.46,
+    cg_fore_aft: 0.38,             // 62% front
+
+    engine: Engine(
+        idle_rpm: 900,
+        redline_rpm: 8200,
+        torque_nm: [(1000, 109), (2500, 143), (4000, 195), (5500, 204), (7000, 186), (8200, 153)],
+    ),
+    gears: [3.23, 2.11, 1.46, 1.11, 0.88],
+    final_drive: 4.4,
+    reverse: 3.0,
+    shift_ms: 180,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 1.19, grip_long: 1.2, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 38000, damper: 3600, travel_m: 0.12, antiroll: 0.5),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 12.0),
+    brakes: Brakes(max_nm: 3000, bias_front: 0.66, abs: true, handbrake_nm: 2600),
+    aero: Aero(cd: 0.40, frontal_m2: 1.9, downforce_coef: 0.05),
+    feel: Feel(oversteer_bias: 0.1, body_roll: 0.25, engine_sound: "i4", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_00s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 10000)],
+        radio: "digital_blue",
+    ),
+    shape: "siskin_coupe.shape.ron",
+)
