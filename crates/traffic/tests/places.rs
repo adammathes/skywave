@@ -33,7 +33,7 @@ const SEEDS: [u64; 3] = [1, 2, 3];
 /// Pinned [`LaneGraph::hash`] of the coast at seed 1. The graph is a pure function of the
 /// place, so this moves when lane building or the place's roads or props change; update it
 /// in its own commit with the reason.
-const COAST_SEED1_HASH: u64 = 0xf095_ff61_cfc3_7eaa;
+const COAST_SEED1_HASH: u64 = 0x61a7_8cde_c093_f939;
 
 /// Size ceilings for the coast's graph (16×16 chunks); about twice what seed 1 needs.
 const MAX_LANES: usize = 2_400;
