@@ -758,7 +758,7 @@ impl Ui {
         let r = &self.render_stats;
         let gpu_line = r.gpu_timing as u32 as f32;
         let label_line = !self.gpu_label.is_empty() as u32 as f32;
-        let lines = 10.0 + gpu_line + label_line;
+        let lines = 11.0 + gpu_line + label_line;
         hud.rect(
             sx - 10.0,
             sy - 10.0,
@@ -821,6 +821,7 @@ impl Ui {
                  view {}x{} of {}x{}  bloom {}\n\
                  lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
+                 traffic {} cars  step {:.3} ms\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
                  hud {} quads  ({} dropped)",
@@ -854,6 +855,8 @@ impl Ui {
                 r.coronas,
                 self.last_steps,
                 ctx.ticks,
+                self.traffic.0,
+                self.traffic.1,
                 d.sun_elevation_deg,
                 d.sun_azimuth_deg,
                 cx,
@@ -863,7 +866,7 @@ impl Ui {
                 r.hud_quads_dropped,
             ),
         );
-        let mut y = y + 10.0 * line;
+        let mut y = y + 11.0 * line;
         if r.gpu_timing {
             let ms = |p: usize| r.gpu_us[p] as f32 / 1000.0;
             let total: u32 = r.gpu_us.iter().sum();

@@ -181,6 +181,8 @@ impl Sound {
             horn: drive.horn,
             ocean,
             birds: birds * day,
+            // Set by the app from the traffic (`App::frame`).
+            traffic: Default::default(),
             // Set by the app from the car radio (`App::frame`).
             tunes: 0,
             tune_volume: 0.0,

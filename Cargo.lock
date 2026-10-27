@@ -98,6 +98,7 @@ dependencies = [
  "serde",
  "serde_json",
  "skywave-core",
+ "traffic",
  "vehicle",
  "world",
 ]
