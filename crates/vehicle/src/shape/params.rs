@@ -266,27 +266,27 @@ pub enum Detail {
     /// open from the windshield header to the end of the first side window, a painted
     /// hoop behind it; the side glass stays up.
     Targa,
-    /// Neon tubes under the sills and the bumpers, lit by their own switch
+    /// Glowing tubes under the sills and the bumpers, lit by their own switch
     /// (`CarMesh::underglow`).
-    Underglow(Neon),
+    Underglow(TubeColor),
 }
 
 /// An underglow tube's color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Neon {
+pub enum TubeColor {
     Blue,
     Violet,
     Green,
 }
 
-impl Neon {
+impl TubeColor {
     /// The tube's glow, sRGB.
     pub fn rgb(self) -> [u8; 3] {
         match self {
-            Neon::Blue => [40, 110, 255],
-            Neon::Violet => [170, 60, 255],
-            Neon::Green => [60, 255, 140],
+            TubeColor::Blue => [40, 110, 255],
+            TubeColor::Violet => [170, 60, 255],
+            TubeColor::Green => [60, 255, 140],
         }
     }
 }

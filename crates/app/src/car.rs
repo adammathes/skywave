@@ -34,11 +34,12 @@
 //! **Convertibles** ([`CarLayout::open_top`]) have no roof or side glass, so their cabin
 //! shows from outside: every camera draws the interior and steering wheel. The body has
 //! nothing above the belt over the cabin, so neither has its inside-out copy, and the
-//! cockpit sees the sky.
+//! cockpit sees the sky. A targa is open over the front seats the same way, so it counts as
+//! open too.
 
 use glam::{Mat4, Quat, Vec3};
 use render::{Mesh, MeshId, Tile, Vertex};
-use vehicle::shape::{self, BuildOptions, CarMesh, HeadLights, MeshData, ShapeSpec};
+use vehicle::shape::{self, BuildOptions, CarMesh, Detail, HeadLights, MeshData, ShapeSpec};
 use vehicle::{Gauge, SpeedUnit, VehicleSpec};
 
 /// Steering wheel angle at full road-wheel lock: 2.5 turns lock to lock, degrees.
@@ -207,8 +208,8 @@ pub struct CarLayout {
     pub taillamps: [Vec3; 2],
     /// Overall body extent: length, width, height, m (the spec's `dims_m`).
     pub dims: [f32; 3],
-    /// A convertible: the cabin is open above the belt, so the interior and steering wheel
-    /// are drawn from every camera, not only the first-person ones.
+    /// A convertible or a targa: the cabin shows from outside, so the interior and steering
+    /// wheel are drawn from every camera, not only the first-person ones.
     pub open_top: bool,
     /// The underglow's lights, if the car has one.
     pub underglow: Option<Underglow>,
@@ -295,7 +296,7 @@ impl CarLayout {
             headlamps: lamp_centers(&lit.lights, LampGroup::Head).map(|p| p + offset),
             taillamps: lamp_centers(&lit.lights, LampGroup::Tail).map(|p| p + offset),
             dims: spec.dims_m,
-            open_top: shape.roof.convertible(),
+            open_top: shape.roof.convertible() || shape.details.contains(&Detail::Targa),
             underglow: Underglow::of(&car.underglow, offset),
         }
     }

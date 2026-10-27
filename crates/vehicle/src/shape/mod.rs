@@ -29,8 +29,8 @@ mod tests;
 pub use mesh::MeshData;
 pub use params::{
     Antenna, Applique, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles,
-    HeadLights, InteriorShape, Mirrors, Neon, Parts, Rear, Rims, Roof, RoofKind, Seams, Section,
-    ShapeError, ShapeSpec, Spoiler, TailLights, Top, Wheels,
+    HeadLights, InteriorShape, Mirrors, Parts, Rear, Rims, Roof, RoofKind, Seams, Section,
+    ShapeError, ShapeSpec, Spoiler, TailLights, Top, TubeColor, Wheels,
 };
 
 use crate::VehicleSpec;

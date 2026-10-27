@@ -768,7 +768,7 @@ fn the_tuner_wears_a_kit_a_tall_wing_rims_and_underglow() {
             continue;
         }
         assert!(tubes.triangle_count() > 20, "lod{lod}");
-        let blue = emissive(Neon::Blue.rgb(), 3.0);
+        let blue = emissive(TubeColor::Blue.rgb(), 3.0);
         assert!(tubes.emissive.iter().all(|e| *e == blue));
         assert!(tubes.positions.iter().all(|p| p[1] > 0.05 && p[1] < 0.2));
     }
@@ -1119,9 +1119,9 @@ fn every_option_builds() {
         Detail::EngineLouvers,
         Detail::BodyKit,
         Detail::Blower,
-        Detail::Underglow(Neon::Blue),
-        Detail::Underglow(Neon::Violet),
-        Detail::Underglow(Neon::Green),
+        Detail::Underglow(TubeColor::Blue),
+        Detail::Underglow(TubeColor::Violet),
+        Detail::Underglow(TubeColor::Green),
     ];
     // Each shape starts the option lists somewhere else, so every rim and detail is built.
     for (i, base) in shapes().into_iter().enumerate() {

@@ -5,8 +5,8 @@ use super::body::Body;
 use super::math::*;
 use super::mesh::{emissive, Mat, Soup, Uv};
 use super::params::{
-    BadgeShape, Bumper, Detail, Exhaust, Grille, Handles, HeadLights, Mirrors, Neon, Spoiler,
-    TailLights,
+    BadgeShape, Bumper, Detail, Exhaust, Grille, Handles, HeadLights, Mirrors, Spoiler, TailLights,
+    TubeColor,
 };
 use super::Materials;
 use alloc::vec::Vec;
@@ -137,7 +137,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                 Detail::BodyKit => self.body_kit(),
                 Detail::Blower => self.blower(),
                 // The far level is for parked cars, which never light it.
-                Detail::Underglow(neon) if self.b.lod < 2 => self.underglow(neon),
+                Detail::Underglow(color) if self.b.lod < 2 => self.underglow(color),
                 Detail::Badge(shape) if self.lod0() => {
                     self.badge(shape, true);
                     self.badge(shape, false);
@@ -1853,10 +1853,10 @@ impl<'a, 'b> Parts<'a, 'b> {
         }
     }
 
-    /// Neon tubes under each sill between the arches and across under the nose and the
+    /// Glowing tubes under each sill between the arches and across under the nose and the
     /// tail, inboard of the body's edge so only their glow shows, into `underglow`.
-    fn underglow(&mut self, neon: Neon) {
-        let mat = Mat::new([20, 20, 22, 255]).glow(emissive(neon.rgb(), UNDERGLOW_GLOW));
+    fn underglow(&mut self, color: TubeColor) {
+        let mat = Mat::new([20, 20, 22, 255]).glow(emissive(color.rgb(), UNDERGLOW_GLOW));
         let b = self.b;
         let r = 0.012;
         let segs = if self.lod0() { 6 } else { 4 };

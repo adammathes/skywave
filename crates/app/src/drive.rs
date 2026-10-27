@@ -1175,7 +1175,11 @@ mod tests {
     fn an_open_top_shows_its_cabin_from_every_camera() {
         let ids = ids();
         let lod = ids.lods[0];
-        for id in ["seabreeze_convertible", "regent_coupe_cabrio"] {
+        for id in [
+            "seabreeze_convertible",
+            "regent_coupe_cabrio",
+            "halberd_targa",
+        ] {
             let d = Drive::new(id).unwrap();
             assert!(d.layout.open_top, "{id}");
             let mut out = Vec::new();
