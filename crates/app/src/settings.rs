@@ -7,7 +7,7 @@
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
-//!              "quality": "auto", "frame_rate": "auto" },
+//!              "quality": "auto", "frame_rate": "panel" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal" },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
@@ -109,8 +109,8 @@ impl Handling {
 pub enum Quality {
     /// Integrated GPUs that struggle: two 1024² cascades, 75% resolution, no coronas.
     Low,
-    /// The Deck on battery: Deck's knobs at 85% resolution, and choosing it caps the frame
-    /// rate at 60.
+    /// The Deck on battery: Deck's knobs at 85% resolution, and choosing it draws every
+    /// other refresh (45 fps on the 90 Hz panel, 30 on the 60 Hz one).
     Battery,
     /// The Steam Deck at 1280×800 and 90 Hz: two 1536² cascades, full resolution.
     Deck,
@@ -162,7 +162,7 @@ impl Quality {
     /// The frame-rate cap choosing this preset sets, if it sets one.
     pub fn frame_rate(self) -> Option<FrameRate> {
         match self {
-            Quality::Battery => Some(FrameRate::Fps60),
+            Quality::Battery => Some(FrameRate::Half),
             _ => None,
         }
     }
@@ -206,38 +206,41 @@ impl Quality {
     }
 }
 
-/// The frame-rate cap: Settings › Video › Frame rate. The simulation runs at 120 Hz
-/// whatever the cap; rendering interpolates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The frame-rate cap: Settings › Video › Frame rate, as which of the panel's refreshes
+/// get a frame, so frames are always evenly paced. The simulation runs at 120 Hz whatever
+/// the cap; rendering interpolates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FrameRate {
-    /// The panel's refresh rate (vsync).
+    /// Every refresh (vsync).
+    #[default]
     Panel,
-    Fps60,
-    /// Every other refresh of a 90 Hz panel.
-    Fps45,
-    Fps40,
-    /// Every other refresh of a 60 Hz panel, every third of a 90 Hz one.
-    Fps30,
+    /// Every other refresh: 45 fps on a 90 Hz panel, 30 on a 60 Hz one.
+    Half,
+    /// Every third refresh: 30 fps at 90 Hz, 20 at 60 Hz.
+    Third,
+    /// Every fourth refresh: 36 fps at 144 Hz.
+    Quarter,
 }
+
+/// The slowest cap offered, frames a second.
+pub const MIN_CAPPED_FPS: u32 = 20;
 
 impl FrameRate {
     /// In the order the Video page offers them.
-    pub const ALL: [FrameRate; 5] = [
+    pub const ALL: [FrameRate; 4] = [
         FrameRate::Panel,
-        FrameRate::Fps60,
-        FrameRate::Fps45,
-        FrameRate::Fps40,
-        FrameRate::Fps30,
+        FrameRate::Half,
+        FrameRate::Third,
+        FrameRate::Quarter,
     ];
 
     /// Stable name (settings JSON).
     pub fn name(self) -> &'static str {
         match self {
             FrameRate::Panel => "panel",
-            FrameRate::Fps60 => "60",
-            FrameRate::Fps45 => "45",
-            FrameRate::Fps40 => "40",
-            FrameRate::Fps30 => "30",
+            FrameRate::Half => "half",
+            FrameRate::Third => "third",
+            FrameRate::Quarter => "quarter",
         }
     }
 
@@ -245,25 +248,34 @@ impl FrameRate {
         FrameRate::ALL.into_iter().find(|f| f.name() == name)
     }
 
-    /// Frames a second, or `None` for the panel's rate.
-    pub fn fps(self) -> Option<u32> {
+    /// Refreshes per frame.
+    pub fn divisor(self) -> u32 {
         match self {
-            FrameRate::Panel => None,
-            FrameRate::Fps60 => Some(60),
-            FrameRate::Fps45 => Some(45),
-            FrameRate::Fps40 => Some(40),
-            FrameRate::Fps30 => Some(30),
+            FrameRate::Panel => 1,
+            FrameRate::Half => 2,
+            FrameRate::Third => 3,
+            FrameRate::Quarter => 4,
         }
     }
 
-    /// The cap for a device nobody chose one for: 60 on a Steam Deck (where
-    /// [`Quality::auto`] picks [`Quality::Deck`]), the panel's rate everywhere else.
-    pub fn auto(gpu: &GpuInfo) -> FrameRate {
-        if Quality::auto(gpu) == Quality::Deck {
-            FrameRate::Fps60
-        } else {
-            FrameRate::Panel
-        }
+    /// Frames a second on a panel refreshing `panel_hz` times a second.
+    pub fn fps(self, panel_hz: f64) -> f64 {
+        panel_hz / f64::from(self.divisor())
+    }
+
+    /// The caps offered on a panel of `panel_hz`: the panel's own rate, then each that is a
+    /// whole number of frames a second and at least [`MIN_CAPPED_FPS`] (90 Hz: 45, 30;
+    /// 60 Hz: 30, 20; 144 Hz: 72, 48, 36).
+    pub fn offered(panel_hz: f64) -> &'static [FrameRate] {
+        let hz = panel_hz.round().max(1.0) as u32;
+        let n = FrameRate::ALL
+            .iter()
+            .take_while(|f| {
+                let d = f.divisor();
+                hz.is_multiple_of(d) && (d == 1 || hz / d >= MIN_CAPPED_FPS)
+            })
+            .count();
+        &FrameRate::ALL[..n.max(1)]
     }
 }
 
@@ -324,8 +336,8 @@ pub struct Settings {
     pub bloom: bool,
     /// The graphics preset; `None` picks one for the device ([`Quality::auto`]).
     pub quality: Option<Quality>,
-    /// The frame-rate cap; `None` picks one for the device ([`FrameRate::auto`]).
-    pub frame_rate: Option<FrameRate>,
+    /// The frame-rate cap (the panel's rate unless chosen).
+    pub frame_rate: FrameRate,
     /// The frame-stats overlay (F3).
     pub debug_overlay: bool,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
@@ -344,7 +356,7 @@ pub struct Settings {
     pub world_volume: f32,
     pub mute: bool,
     /// The radio goes quiet while the window is in the background (off: it keeps playing,
-    /// it is a radio).
+    /// it is a radio). Only the web has a radio player so far.
     pub mute_radio_unfocused: bool,
     /// Radio volume, power, last station, stations and presets.
     pub radio: RadioSettings,
@@ -366,7 +378,7 @@ impl Default for Settings {
             resolution_scale: 1.0,
             bloom: true,
             quality: None,
-            frame_rate: None,
+            frame_rate: FrameRate::Panel,
             debug_overlay: false,
             clock_speed: 10.0,
             traffic: traffic::Density::Normal,
@@ -452,7 +464,7 @@ struct Video {
     debug_overlay: bool,
     /// A [`Quality`] name, or "auto".
     quality: String,
-    /// A [`FrameRate`] name, or "auto".
+    /// A [`FrameRate`] name.
     frame_rate: String,
 }
 
@@ -465,7 +477,7 @@ impl Default for Video {
             bloom: s.bloom,
             debug_overlay: s.debug_overlay,
             quality: quality_name(s.quality).to_owned(),
-            frame_rate: frame_rate_name(s.frame_rate).to_owned(),
+            frame_rate: s.frame_rate.name().to_owned(),
         }
     }
 }
@@ -473,11 +485,6 @@ impl Default for Video {
 /// The settings name of a preset choice.
 fn quality_name(q: Option<Quality>) -> &'static str {
     q.map_or("auto", Quality::name)
-}
-
-/// The settings name of a frame-rate choice.
-fn frame_rate_name(f: Option<FrameRate>) -> &'static str {
-    f.map_or("auto", FrameRate::name)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -623,7 +630,7 @@ impl Settings {
                 bloom: self.bloom,
                 debug_overlay: self.debug_overlay,
                 quality: quality_name(self.quality).to_owned(),
-                frame_rate: frame_rate_name(self.frame_rate).to_owned(),
+                frame_rate: self.frame_rate.name().to_owned(),
             },
             "hud": HudSection {
                 minimap: self.minimap,
@@ -685,7 +692,7 @@ impl Settings {
             resolution_scale: video.resolution_scale,
             bloom: video.bloom,
             quality: Quality::from_name(&video.quality),
-            frame_rate: FrameRate::from_name(&video.frame_rate),
+            frame_rate: FrameRate::from_name(&video.frame_rate).unwrap_or_default(),
             debug_overlay: video.debug_overlay,
             clock_speed: world.clock_speed,
             traffic: density_from_name(&world.traffic).unwrap_or(d.traffic),
@@ -725,7 +732,7 @@ mod tests {
             resolution_scale: 0.75,
             bloom: false,
             quality: Some(Quality::Low),
-            frame_rate: Some(FrameRate::Fps45),
+            frame_rate: FrameRate::Third,
             debug_overlay: true,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
@@ -880,7 +887,7 @@ mod tests {
     #[test]
     fn frame_rates_and_the_battery_preset_round_trip() {
         let b = Bindings::default();
-        for f in FrameRate::ALL.map(Some).into_iter().chain([None]) {
+        for f in FrameRate::ALL {
             let s = Settings {
                 frame_rate: f,
                 quality: Some(Quality::Battery),
@@ -889,13 +896,26 @@ mod tests {
             };
             assert_eq!(Settings::from_json(&s.to_json(&b)).0, s);
         }
-        let (s, _) = Settings::from_json(r#"{ "video": { "frame_rate": "144" } }"#);
-        assert_eq!(s.frame_rate, None, "unknown rates are auto");
+        let (s, _) = Settings::from_json(r#"{ "video": { "frame_rate": "60" } }"#);
         assert_eq!(
-            FrameRate::ALL.map(FrameRate::fps),
-            [None, Some(60), Some(45), Some(40), Some(30)]
+            s.frame_rate,
+            FrameRate::Panel,
+            "unknown caps are the panel's rate"
         );
-        // Battery: the Deck's knobs, smaller, capped at 60.
+        // Whole divisors of the panel's rate, 20 fps or more.
+        let offered = |hz| {
+            FrameRate::offered(hz)
+                .iter()
+                .map(|f| f.fps(hz))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(offered(90.0), [90.0, 45.0, 30.0]);
+        assert_eq!(offered(60.0), [60.0, 30.0, 20.0]);
+        assert_eq!(offered(144.0), [144.0, 72.0, 48.0, 36.0]);
+        assert_eq!(offered(120.0), [120.0, 60.0, 40.0, 30.0]);
+        assert_eq!(offered(59.94).len(), 3, "rounded to 60");
+        assert_eq!(offered(75.0), [75.0], "no whole divisor");
+        // Battery: the Deck's knobs, smaller, every other refresh.
         let battery = Quality::Battery.render(Quality::Battery.resolution_scale());
         assert_eq!(
             battery,
@@ -904,7 +924,7 @@ mod tests {
                 ..Quality::Deck.render(1.0)
             }
         );
-        assert_eq!(Quality::Battery.frame_rate(), Some(FrameRate::Fps60));
+        assert_eq!(Quality::Battery.frame_rate(), Some(FrameRate::Half));
         assert_eq!(Quality::Deck.frame_rate(), None);
     }
 
@@ -940,7 +960,6 @@ mod tests {
         ];
         for g in &deck {
             assert_eq!(Quality::auto(g), Quality::Deck, "{g:?}");
-            assert_eq!(FrameRate::auto(g), FrameRate::Fps60, "{g:?}");
         }
         let other = [
             gpu(
@@ -955,7 +974,6 @@ mod tests {
         ];
         for g in &other {
             assert_eq!(Quality::auto(g), Quality::Medium, "{g:?}");
-            assert_eq!(FrameRate::auto(g), FrameRate::Panel, "{g:?}");
         }
     }
 

@@ -149,10 +149,11 @@ pub struct Ui {
     /// A preset the command line forced this session (not saved; a choice on the Video
     /// page replaces it).
     forced_quality: Option<Quality>,
-    /// The frame-rate cap [`FrameRate::auto`] picked for this device (the panel's until the
-    /// platform says what the GPU is).
-    auto_frame_rate: FrameRate,
-    /// The window has the focus (the platform says; true until it does).
+    /// The display's refresh rate, Hz (the platform says; 60 until it does): what the
+    /// frame-rate caps are fractions of.
+    panel_hz: f64,
+    /// The window has the focus (the platform says; true until it does). Without it the
+    /// game is paused.
     focused: bool,
     /// CPU time the platform spent recording and submitting the last frame, ms (0:
     /// not measured).
@@ -164,6 +165,9 @@ pub struct Ui {
     /// Adapter and backend, for the overlay.
     gpu_label: String,
 }
+
+/// The display's refresh rate until the platform reports it, Hz.
+const DEFAULT_PANEL_HZ: f64 = 60.0;
 
 impl Default for Ui {
     fn default() -> Self {
@@ -207,7 +211,7 @@ impl Ui {
             text_entry: false,
             auto_quality: Quality::Medium,
             forced_quality: None,
-            auto_frame_rate: FrameRate::Panel,
+            panel_hz: DEFAULT_PANEL_HZ,
             focused: true,
             cpu_submit_ms: 0.0,
             traffic: (0, 0.0),
@@ -223,9 +227,16 @@ impl Ui {
             .unwrap_or(self.auto_quality)
     }
 
-    /// The frame-rate cap in effect: saved, else picked for the device.
+    /// The frame-rate cap in effect: a forced preset's own (Battery's), else the setting.
     pub fn frame_rate(&self) -> FrameRate {
-        self.settings.frame_rate.unwrap_or(self.auto_frame_rate)
+        self.forced_quality
+            .and_then(Quality::frame_rate)
+            .unwrap_or(self.settings.frame_rate)
+    }
+
+    /// The display's refresh rate the platform reported, Hz.
+    pub fn panel_hz(&self) -> f64 {
+        self.panel_hz
     }
 
     /// What the renderer may spend this frame: the preset at the resolution scale setting
@@ -491,6 +502,7 @@ impl Ui {
             text_entry: self.text_entry,
             quality: self.quality(),
             frame_rate: self.frame_rate(),
+            panel_hz: self.panel_hz,
             browse: self.browse,
         }
     }
@@ -627,13 +639,14 @@ impl Ui {
                 self.settings.quality = Some(q);
                 self.settings.resolution_scale = q.resolution_scale();
                 if let Some(f) = q.frame_rate() {
-                    self.settings.frame_rate = Some(f);
+                    self.settings.frame_rate = f;
                 }
                 self.forced_quality = None;
                 self.dirty = true;
             }
             Effect::Choose(ItemId::FrameRate, i) => {
-                self.settings.frame_rate = Some(FrameRate::ALL[i.min(FrameRate::ALL.len() - 1)]);
+                let offered = FrameRate::offered(self.panel_hz);
+                self.settings.frame_rate = offered[i.min(offered.len() - 1)];
                 self.dirty = true;
             }
             Effect::Choose(ItemId::BackgroundRadio, i) => {
@@ -1061,7 +1074,7 @@ impl App {
         if !self.still {
             self.ui.radio_frame(&state, dt as f32, radio_keys);
         }
-        let steps = if self.ui.is_open() {
+        let steps = if self.ui.is_open() || !self.ui.focused {
             Steps {
                 count: 0,
                 alpha: self.alpha,
@@ -1115,7 +1128,7 @@ impl App {
             &self.ground,
             &daylight,
             &self.ui.settings,
-            self.ui.is_open(),
+            self.ui.is_open() || !self.ui.focused,
         );
         // The engine and the world duck under a station that is playing; the dial sweeps
         // between stations at the radio's volume.
@@ -1309,7 +1322,6 @@ impl App {
     /// ([`Quality::auto`]) and labels the overlay. Call once, before the first frame.
     pub fn set_gpu_info(&mut self, gpu: &GpuInfo) {
         self.ui.auto_quality = Quality::auto(gpu);
-        self.ui.auto_frame_rate = FrameRate::auto(gpu);
         self.ui.gpu_label = if gpu.backend.is_empty() {
             gpu.name.clone()
         } else {
@@ -1317,8 +1329,16 @@ impl App {
         };
     }
 
-    /// The window gained or lost the focus (or was hidden): the radio goes quiet in the
-    /// background when the setting says so.
+    /// The display's refresh rate, Hz: the frame-rate caps offered are its whole divisors.
+    pub fn set_panel_hz(&mut self, hz: f64) {
+        if hz.is_finite() && hz >= 1.0 {
+            self.ui.panel_hz = hz;
+        }
+    }
+
+    /// The window gained or lost the focus (or the page was hidden): the game pauses in the
+    /// background and resumes in front (a menu the player opened stays open), and the radio
+    /// goes quiet in the background when the setting says so.
     pub fn set_focused(&mut self, focused: bool) {
         if self.ui.focused != focused {
             self.ui.focused = focused;

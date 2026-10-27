@@ -3,7 +3,6 @@ use std::future::Future;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use app::pacing::{frame_interval, Pacer};
 use app::{
     pad_table, App, InputMapper, Key, RawInput, SceneSetup, SettingsStore, MOUSE_BUTTONS,
     MOUSE_RIGHT,
@@ -36,8 +35,10 @@ struct State {
     last_ms: Option<f64>,
     /// The last animation frame's time, processed or skipped, ms.
     last_tick_ms: Option<f64>,
-    /// Which animation frames the frame-rate cap (or the background rate) skips.
-    pacer: Pacer,
+    /// The time between animation frames, smoothed, ms: the display's refresh.
+    refresh_ms: f64,
+    /// Animation frames skipped since the last one processed (the frame-rate cap).
+    skipped: u32,
     /// The streaming clock (`performance.now()`), when the page has one.
     performance: Option<web_sys::Performance>,
     /// What `window.skywaveStreamIdle` was last set to.
@@ -626,7 +627,8 @@ pub async fn run(
         pads_ok: true,
         last_ms: None,
         last_tick_ms: None,
-        pacer: Pacer::default(),
+        refresh_ms: 1000.0 / 60.0,
+        skipped: 0,
         performance: window.performance(),
         stream_idle: None,
         backend,
@@ -1013,23 +1015,30 @@ impl State {
         }
     }
 
-    /// One animation frame: skipped when the frame-rate cap (or the background rate,
-    /// while the page has no focus) says it is early; else the game's frame, drawing only
-    /// what changed (nothing at all when nothing did: the canvas keeps the last frame).
+    /// One animation frame: skipped unless it is the Nth since the last one processed
+    /// (the frame-rate cap: every Nth refresh); else the game's frame, drawing only what
+    /// changed (nothing at all when nothing did: the canvas keeps the last frame). The
+    /// game pauses while the page is hidden (a tab switch; the browser stops animation
+    /// frames then too).
     fn frame(&mut self, now_ms: f64) {
-        let tick_ms = self.last_tick_ms.map_or(0.0, |last| now_ms - last);
+        if let Some(last) = self.last_tick_ms {
+            // Refreshes run 4 to 50 ms apart; longer gaps are the page stalling.
+            let tick = now_ms - last;
+            if (4.0..50.0).contains(&tick) {
+                self.refresh_ms += 0.05 * (tick - self.refresh_ms);
+                self.app.set_panel_hz((1000.0 / self.refresh_ms).round());
+            }
+        }
         self.last_tick_ms = Some(now_ms);
-        let focused = web_sys::window()
+        let hidden = web_sys::window()
             .and_then(|w| w.document())
-            .and_then(|d| d.has_focus().ok())
-            .unwrap_or(true);
-        self.app.set_focused(focused);
-        let interval = frame_interval(self.app.frame_rate(), focused).unwrap_or(0.0);
-        // Frames start only on the display's refreshes: one half a refresh early is on time.
-        let early = (0.5 * tick_ms / 1000.0).min(0.01);
-        if !self.pacer.due(now_ms / 1000.0, interval, early) {
+            .is_some_and(|d| d.hidden());
+        self.app.set_focused(!hidden);
+        if self.skipped + 1 < self.app.frame_rate().divisor() {
+            self.skipped += 1;
             return;
         }
+        self.skipped = 0;
         let dt = self.last_ms.map_or(0.0, |last| (now_ms - last) / 1000.0);
         self.last_ms = Some(now_ms);
 
@@ -1080,6 +1089,7 @@ impl State {
             }
             self.stream_idle = Some(idle);
         }
+        let mut reconfigured = false;
         let (surface, device, config) = (&self.surface, &self.device, &self.config);
         let acquire = || match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
@@ -1089,6 +1099,7 @@ impl State {
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 surface.configure(device, config);
+                reconfigured = true;
                 None
             }
             other => {
@@ -1100,6 +1111,10 @@ impl State {
         let started = self.performance.as_ref().map(|p| p.now());
         let scene = self.app.scene_view(steps.alpha, aspect);
         let (_, frame) = self.renderer.draw(&scene, acquire);
+        if reconfigured {
+            // The new surface shows nothing yet.
+            self.renderer.screen_lost();
+        }
         let Some(frame) = frame else {
             return;
         };

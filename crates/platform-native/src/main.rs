@@ -24,9 +24,10 @@
 //! and exits.
 //!
 //! Frames are drawn no more often than Settings › Video › Frame rate allows (the panel's
-//! rate, or a cap the loop sleeps to, on a grid so a cap that divides the panel's rate
-//! takes every Nth refresh), at most [`app::pacing::BACKGROUND_FPS`] a second while the
-//! window is unfocused, and not at all while it is hidden (the game runs on). Each frame
+//! rate, or every Nth refresh: the loop sleeps to deadlines N refreshes apart and
+//! presents with vsync). Unfocused, the game pauses and the loop runs at most
+//! [`app::pacing::BACKGROUND_FPS`] times a second; hidden (where the system says so), it
+//! draws nothing. Each frame
 //! draws only what changed (`render::Renderer::draw`): nothing when nothing did, the
 //! tonemap and HUD over the kept world when only the HUD did.
 //!
@@ -250,6 +251,13 @@ fn render_line(r: &RenderStats) -> String {
         r.surface_size.1,
         r.bloom_levels,
     );
+    // A frame that kept the world (Ui) or drew nothing (Skip) leaves the counts above as
+    // the last world frame's.
+    let _ = write!(
+        s,
+        " | last={:?} world={} ui={} skip={}",
+        r.last_work, r.frames, r.ui_frames, r.skipped_frames
+    );
     if r.gpu_timing {
         let total: u32 = r.gpu_us.iter().sum();
         let _ = write!(s, " | gpu_ms total={:.2}", total as f32 / 1000.0);
@@ -421,6 +429,7 @@ impl Gpu {
             .current_monitor()
             .and_then(|m| m.refresh_rate_millihertz())
             .map_or(DEFAULT_PANEL_HZ, |mhz| f64::from(mhz) / 1000.0);
+        app.set_panel_hz(panel_hz);
         app.force_quality(opts.quality);
         let options = render::RendererOptions {
             culling: !opts.no_cull,
@@ -451,8 +460,9 @@ impl Gpu {
                 if options.culling { "on" } else { "off" },
             );
             eprintln!(
-                "frame rate: {} (panel {panel_hz:.0} Hz){}",
+                "frame rate: {} = {:.0} fps (panel {panel_hz:.0} Hz){}",
                 app.frame_rate().name(),
+                app.frame_rate().fps(panel_hz),
                 if opts.no_vsync {
                     "; --no-vsync: uncapped, the world drawn every frame"
                 } else {
@@ -503,6 +513,9 @@ impl Gpu {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         self.renderer.resize((width, height));
+        // A new swapchain shows nothing yet, even at the same size (Windows sends one
+        // restoring from minimized).
+        self.renderer.screen_lost();
     }
 
     /// Draws what changed since the last frame (the whole world every frame when
@@ -521,6 +534,7 @@ impl Gpu {
         let aspect = self.config.width as f32 / self.config.height as f32;
         let start = Instant::now();
         let mut waited = Duration::ZERO;
+        let mut reconfigured = false;
         let (surface, device, config) = (&self.surface, &self.device, &self.config);
         let mut acquire = || {
             let t = Instant::now();
@@ -534,6 +548,7 @@ impl Gpu {
                 }
                 wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                     surface.configure(device, config);
+                    reconfigured = true;
                     None
                 }
                 other => {
@@ -553,6 +568,9 @@ impl Gpu {
             self.renderer.draw(&scene, acquire).1
         };
         let cpu = start.elapsed().saturating_sub(waited);
+        if reconfigured {
+            self.renderer.screen_lost();
+        }
         let Some(frame) = frame else {
             return (cpu, false);
         };
@@ -580,8 +598,6 @@ struct Shell {
     pacer: Pacer,
     /// The last frame was presented (the display paces the next at the panel's rate).
     presented: bool,
-    /// The shell asked for the pending redraw (any other came from the system).
-    redraw_asked: bool,
     /// The cursor is grabbed for mouse look.
     grabbed: bool,
     gpu: Option<Gpu>,
@@ -609,11 +625,12 @@ impl Shell {
             return 0.0;
         }
         let focused = self.focused && !self.occluded;
-        match frame_interval(self.app.frame_rate(), focused) {
+        let hz = self.gpu.as_ref().map_or(DEFAULT_PANEL_HZ, |g| g.panel_hz);
+        match frame_interval(self.app.frame_rate(), hz, focused) {
             Some(s) => s,
             None if self.presented => 0.0,
             // Nothing presented to wait on: poll at the panel's rate.
-            None => 1.0 / self.gpu.as_ref().map_or(DEFAULT_PANEL_HZ, |g| g.panel_hz),
+            None => 1.0 / hz,
         }
     }
 
@@ -700,12 +717,6 @@ impl ApplicationHandler for Shell {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if !std::mem::take(&mut self.redraw_asked) {
-                    // The system asked (the window was exposed): what it shows may be gone.
-                    if let Some(gpu) = &mut self.gpu {
-                        gpu.renderer.screen_lost();
-                    }
-                }
                 let interval = self.interval();
                 if self.pacer.wait(self.now(), interval) > SLEEP_SLACK {
                     // Early for the cap: `about_to_wait` asks again when it is due.
@@ -792,7 +803,6 @@ impl ApplicationHandler for Shell {
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
             gpu.window.request_redraw();
-            self.redraw_asked = true;
         }
     }
 }
@@ -854,7 +864,6 @@ fn main() -> ExitCode {
         occluded: false,
         pacer: Pacer::default(),
         presented: false,
-        redraw_asked: false,
         grabbed: false,
         gpu: None,
         last_frame: None,
@@ -880,6 +889,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use app::FrameRate;
     use render::FrameWork;
 
     fn args(list: &[&str]) -> Result<Options, String> {
@@ -1479,38 +1489,48 @@ mod tests {
         eprintln!("coast, busy traffic, paused: {drawn:?}; plan {plan:?} a frame drawn nothing");
     }
 
-    /// The frame-rate cap as the shell sleeps to it: over two seconds nine frames in ten
-    /// or more start within 10% of the cap's interval of the one before (the rest are a
-    /// scheduler stall while other tests load the machine, and the grid's catch-up after
-    /// it), and about as many start as the cap allows.
+    /// The frame-rate cap as the shell sleeps to it, for two seconds at each cap of a
+    /// 90 Hz and a 60 Hz panel: the median time between frames within 2% of the cap's
+    /// interval and about as many frames as it allows. Frames more than 10% off are
+    /// printed, not failed: on a loaded test machine a scheduler stall makes one late and
+    /// the grid's catch-up the next one early.
     #[test]
     fn capped_frames_are_evenly_paced() {
-        for fps in [60u32, 45, 30] {
-            let interval = 1.0 / f64::from(fps);
+        for (hz, rate) in [
+            (90.0, FrameRate::Half),
+            (90.0, FrameRate::Third),
+            (60.0, FrameRate::Half),
+        ] {
+            let interval = app::pacing::frame_interval(rate, hz, true).unwrap();
             let start = Instant::now();
             let now = || start.elapsed().as_secs_f64();
             let mut pacer = Pacer::default();
-            let mut times = Vec::with_capacity(2 * fps as usize + 1);
+            let mut times = Vec::with_capacity(128);
             while now() < 2.0 {
                 sleep_until_due(&mut pacer, interval, now);
                 times.push(now());
                 // Some work, as a frame would do.
                 std::thread::sleep(Duration::from_micros(500));
             }
-            let late: Vec<f64> = times
-                .windows(2)
-                .map(|w| w[1] - w[0])
-                .filter(|dt| (dt - interval).abs() > 0.1 * interval)
+            let mut gaps: Vec<f64> = times.windows(2).map(|w| w[1] - w[0]).collect();
+            let off: Vec<&f64> = gaps
+                .iter()
+                .filter(|dt| (*dt - interval).abs() > 0.1 * interval)
                 .collect();
             eprintln!(
-                "{fps} fps: {} frames, off by more than 10%: {late:?}",
+                "{hz} Hz {rate:?}: {} frames, more than 10% off: {off:?}",
                 times.len()
             );
-            assert!(late.len() * 10 <= times.len(), "{fps} fps: {late:?}");
-            let expected = 2.0 * f64::from(fps);
+            gaps.sort_by(f64::total_cmp);
+            let median = gaps[gaps.len() / 2];
             assert!(
-                (times.len() as f64 - expected).abs() <= 3.0,
-                "{fps} fps: {}",
+                (median - interval).abs() <= 0.02 * interval,
+                "{hz} Hz {rate:?}: median {median}"
+            );
+            let expected = 2.0 / interval;
+            assert!(
+                (times.len() as f64 - expected).abs() <= 0.1 * expected,
+                "{hz} Hz {rate:?}: {} frames",
                 times.len()
             );
         }

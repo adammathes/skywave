@@ -1,19 +1,25 @@
-//! When the platform starts its next frame: the frame-rate cap (Settings › Video › Frame
-//! rate) and the background rate. The simulation is unaffected: it runs at 120 Hz on
-//! whatever time passed between frames.
+//! When the native shell starts its next frame: the frame-rate cap (Settings › Video ›
+//! Frame rate, every Nth refresh of the panel) and the background rate. The web counts
+//! animation frames instead. The simulation is unaffected: it runs at 120 Hz on whatever
+//! time passed between frames.
 
 use crate::settings::FrameRate;
 
-/// Frames a second while the window is in the background (unfocused or hidden).
+/// Frames a second while the window is in the background (unfocused or hidden; the game
+/// is paused there, so these frames draw nothing unless the window needs repainting).
 pub const BACKGROUND_FPS: u32 = 4;
 
-/// Seconds between frames for the cap `rate` (`None` for [`FrameRate::Panel`]: the
-/// display paces them), or at [`BACKGROUND_FPS`] when the window is in the background.
-pub fn frame_interval(rate: FrameRate, focused: bool) -> Option<f64> {
+/// Seconds between frames for the cap `rate` on a panel refreshing `panel_hz` times a
+/// second (`None` for [`FrameRate::Panel`]: vsync paces them), or at [`BACKGROUND_FPS`]
+/// when the window is in the background.
+pub fn frame_interval(rate: FrameRate, panel_hz: f64, focused: bool) -> Option<f64> {
     if !focused {
         return Some(1.0 / f64::from(BACKGROUND_FPS));
     }
-    rate.fps().map(|fps| 1.0 / f64::from(fps))
+    match rate.divisor() {
+        1 => None,
+        n => Some(f64::from(n) / panel_hz),
+    }
 }
 
 /// Frame deadlines on a grid `interval` apart, so a cap that divides the panel's rate
@@ -62,35 +68,30 @@ impl Pacer {
 mod tests {
     use super::*;
 
-    /// Frames asked for at every refresh of a panel at `hz` for `seconds`, with a cap of
-    /// `fps`: the refreshes (indices) that start one.
-    fn run(hz: f64, fps: f64, seconds: f64) -> Vec<u32> {
+    /// Frames asked for at every refresh of a panel at `hz` for `seconds`, capped at
+    /// `rate`: the refreshes (indices) that start one.
+    fn run(hz: f64, rate: FrameRate, seconds: f64) -> Vec<u32> {
         let mut p = Pacer::default();
         let refresh = 1.0 / hz;
+        let interval = frame_interval(rate, hz, true).unwrap_or(0.0);
         (0..(seconds * hz) as u32)
-            .filter(|&i| p.due(f64::from(i) * refresh, 1.0 / fps, 0.5 * refresh))
+            .filter(|&i| p.due(f64::from(i) * refresh, interval, 0.5 * refresh))
             .collect()
     }
 
     #[test]
-    fn caps_that_divide_the_panel_take_every_nth_refresh() {
-        for (hz, fps, n) in [
-            (90.0, 45.0, 2),
-            (90.0, 30.0, 3),
-            (60.0, 30.0, 2),
-            (120.0, 60.0, 2),
-        ] {
-            let frames = run(hz, fps, 2.0);
-            assert!(
-                frames.windows(2).all(|w| w[1] - w[0] == n),
-                "{hz} Hz at {fps}: {frames:?}"
-            );
-            assert_eq!(frames.len() as f64, 2.0 * fps, "{hz} Hz at {fps}");
+    fn a_cap_takes_every_nth_refresh() {
+        for hz in [60.0, 90.0, 144.0] {
+            for &rate in FrameRate::offered(hz) {
+                let frames = run(hz, rate, 2.0);
+                let n = rate.divisor();
+                assert!(
+                    frames.windows(2).all(|w| w[1] - w[0] == n),
+                    "{hz} Hz, {rate:?}: {frames:?}"
+                );
+                assert_eq!(frames.len() as f64, 2.0 * rate.fps(hz), "{hz} Hz, {rate:?}");
+            }
         }
-        // 60 on a 90 Hz panel cannot be even: one and two refreshes alternate, 60 a second.
-        let frames = run(90.0, 60.0, 2.0);
-        assert!(frames.windows(2).all(|w| (1..=2).contains(&(w[1] - w[0]))));
-        assert_eq!(frames.len(), 120);
     }
 
     #[test]
@@ -112,9 +113,12 @@ mod tests {
 
     #[test]
     fn the_background_rate_wins_over_the_cap() {
-        assert_eq!(frame_interval(FrameRate::Panel, true), None);
-        assert_eq!(frame_interval(FrameRate::Fps60, true), Some(1.0 / 60.0));
-        assert_eq!(frame_interval(FrameRate::Panel, false), Some(0.25));
-        assert_eq!(frame_interval(FrameRate::Fps30, false), Some(0.25));
+        assert_eq!(frame_interval(FrameRate::Panel, 90.0, true), None);
+        assert_eq!(
+            frame_interval(FrameRate::Half, 90.0, true),
+            Some(2.0 / 90.0)
+        );
+        assert_eq!(frame_interval(FrameRate::Panel, 90.0, false), Some(0.25));
+        assert_eq!(frame_interval(FrameRate::Third, 60.0, false), Some(0.25));
     }
 }

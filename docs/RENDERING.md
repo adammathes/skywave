@@ -97,16 +97,31 @@ A resolution-scale setting (50–100%) and a quality preset keep the Deck at its
 Settings → Video → Quality; `app::Quality` maps each to a `render::RenderQuality` carried in every `SceneView` (the
 renderer rebuilds the shadow atlas or the scaled targets when their size changes). Unchosen, the game picks **Deck**
 on the Deck's APU / an AMD integrated GPU / a 1280×800 Linux surface and **Medium** elsewhere; the choice is saved.
+**Battery** is Deck at 85% resolution that also sets Frame rate to every other refresh.
 
 | Preset | Cascades | Size | Far cascade | Skip casters under | Resolution | Bloom levels | Coronas |
 |---|---|---|---|---|---|---|---|
 | Low | 2 (50/400 m) | 1024² | every other frame | 3 texels | 75% | 4 | off |
+| Battery | 2 (50/400 m) | 1536² | every other frame | 2 texels | 85% | 4 | on |
 | Deck | 2 (50/400 m) | 1536² | every other frame | 2 texels | 100% | 4 | on |
 | Medium (default) | 3 | 1536² | every other frame | 2 texels | 100% | 5 | on |
 | High | 3 | 2048² | every frame | — | 100% | 5 | on |
 | Ultra | 3 | 3072² (device permitting) | every frame | — | 100% | 5 | on |
 
 The cost model, the reasoning behind each knob and how to measure on hardware are in `docs/PERFORMANCE.md`.
+
+**Drawing only what changed.** Platforms call `Renderer::draw(scene, acquire)` once a frame.
+It runs `Renderer::plan`: **World** when anything the world passes draw differs from the
+last world frame (camera, sun, sky, quality, instances, lights; positions and orientations
+within a stillness tolerance judged from the camera) or the renderer's own state changed
+under it (targets rebuilt, a mesh added, a chunk written or freed); **Ui** when only the HUD
+quads differ: the HDR target and bloom chain still hold the last world frame, so the frame
+is the tonemap pass and the HUD pass; **Skip** when nothing differs: `acquire` is never
+called, nothing is submitted or presented. `render` draws the world unconditionally and
+`render_ui` the Ui frame; both record what they drew for the next plan. A platform that
+reconfigures its surface, or whose window was hidden, calls `screen_lost` (the next frame
+is at least Ui). Without an HDR target (LDR mode) there is nothing to keep, so Ui becomes
+World. Battery and the frame-rate cap are in `docs/PERFORMANCE.md`.
 
 **Web start-up and fallback** (`crates/platform-web`). WebGPU is tried first where `navigator.gpu` exists. The device is requested with no optional features and with `Limits::downlevel_defaults()` (WebGL2's own limits on GL), the texture size raised to the adapter's and every value clamped to what the adapter reports, so no browser can reject the request for asking too much. The canvas is configured with its preferred 8-bit format (the shaders encode sRGB), FIFO, opaque; the float path is used only where the adapter reports `Rgba16Float` as renderable, blendable and filterable. Surface configuration, renderer construction and a probe frame (`SceneView::probe`: sky, low sun, one mesh, presented to the canvas) run inside validation, out-of-memory and internal error scopes; an uncaptured-error handler and a device-lost callback catch the rest. Any failure before the first frame (no adapter, `requestDevice` rejected, no surface configuration or no texture from the canvas, a scope reporting an error, the device lost) destroys the device and starts again on WebGL2 on a fresh canvas (a canvas never changes context kind), with the reason in the console and the page footer. A crash (wasm trap) during the WebGPU start is caught by the page, which starts a fresh wasm instance on WebGL2. `?gl=1` goes straight to WebGL2, `?gpu=1` uses WebGPU with no fallback, and the F3 overlay and the footer name the backend.
 

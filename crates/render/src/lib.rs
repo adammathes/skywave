@@ -613,9 +613,10 @@ impl Default for RendererOptions {
 }
 
 /// What a frame has to draw ([`Renderer::plan`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FrameWork {
     /// Something the world passes draw changed: every pass.
+    #[default]
     World,
     /// Only the HUD changed: the kept HDR frame is tonemapped again with the HUD over it.
     Ui,
@@ -636,31 +637,41 @@ struct KeptWorld {
 }
 
 impl KeptWorld {
-    /// The same world as `scene` would draw: everything equal, but positions and
-    /// orientations (instances, lights, camera) only [`near`] (a car at rest jitters by a
-    /// billionth of a radian on its springs forever).
+    /// The same world as `scene` would draw: everything equal, but orientations only
+    /// [`turned_little`] and positions only [`moved_little`] as seen from the camera (a car
+    /// at rest jitters by a billionth of a radian on its springs forever).
     fn same(&self, scene: &SceneView, coronas: bool) -> bool {
         let lights = &scene.lights[..scene.lights.len().min(MAX_LIGHTS)];
         let Some((camera, sun, sky, quality, kept_coronas)) = &self.head else {
             return false;
         };
+        let (view, new_view) = (&camera.view, &scene.camera.view);
+        let eye = Mat4::from_cols_array_2d(view).inverse().w_axis.truncate();
+        let new_eye = Mat4::from_cols_array_2d(new_view)
+            .inverse()
+            .w_axis
+            .truncate();
         let instance = |a: &MeshInstance, b: &MeshInstance| {
-            near(a.transform.as_flattened(), b.transform.as_flattened())
+            let (ta, tb) = (&a.transform, &b.transform);
+            turned_little(ta[..3].as_flattened(), tb[..3].as_flattened())
+                && moved_little(Vec3::from_slice(&ta[3]), Vec3::from_slice(&tb[3]), eye)
                 && MeshInstance {
                     transform: b.transform,
                     ..*a
                 } == *b
         };
         let light = |a: &PointLight, b: &PointLight| {
-            near(&a.position, &b.position)
-                && near(&a.direction, &b.direction)
+            let (pa, pb) = (Vec3::from(a.position), Vec3::from(b.position));
+            moved_little(pa, pb, eye)
+                && turned_little(&a.direction, &b.direction)
                 && PointLight {
                     position: b.position,
                     direction: b.direction,
                     ..*a
                 } == *b
         };
-        near(camera.view.as_flattened(), scene.camera.view.as_flattened())
+        turned_little(view[..3].as_flattened(), new_view[..3].as_flattened())
+            && moved_little(eye, new_eye, eye)
             && camera.proj == scene.camera.proj
             && (*sun, *sky, *quality, *kept_coronas)
                 == (scene.sun, scene.sky, scene.quality, coronas)
@@ -684,17 +695,30 @@ impl KeptWorld {
     }
 }
 
-/// How far apart two positions or orientations may be and still draw the same frame: two
-/// parts in a million of the value (2 mm at a kilometre from the origin, where an `f32`
-/// step is 0.06 mm), or of 1 for values under it (a few millionths of a radian, a few
-/// millimetres at a kilometre's distance).
-const STILL_EPSILON: f32 = 2e-6;
+/// How far an orientation may turn and still draw the same frame: two millionths of each
+/// element of a rotation (and scale) matrix or a direction (of 1 + the element, for
+/// scaled ones), a few millionths of a radian.
+const STILL_TURN: f32 = 2e-6;
 
-/// Every element of `a` within [`STILL_EPSILON`] of `b`'s (and neither NaN).
-fn near(a: &[f32], b: &[f32]) -> bool {
+/// How far a point may move and still draw the same frame: a tenth of a millimetre, plus
+/// a millionth of its distance from the eye (a millionth of a radian as seen, wherever in
+/// the place it is).
+const STILL_MOVE_M: f32 = 1e-4;
+const STILL_MOVE_PER_M: f32 = 1e-6;
+
+/// Every element of `a` within [`STILL_TURN`] of `b`'s (and neither NaN).
+fn turned_little(a: &[f32], b: &[f32]) -> bool {
     a.iter()
         .zip(b)
-        .all(|(x, y)| (x - y).abs() <= STILL_EPSILON * (1.0 + x.abs()))
+        .all(|(x, y)| (x - y).abs() <= STILL_TURN * (1.0 + x.abs()))
+}
+
+/// `b` within [`STILL_MOVE_M`] and [`STILL_MOVE_PER_M`] of `a` seen from `eye`, on every
+/// axis (and neither NaN).
+fn moved_little(a: Vec3, b: Vec3, eye: Vec3) -> bool {
+    let limit = STILL_MOVE_M + STILL_MOVE_PER_M * a.distance(eye);
+    let d = (a - b).abs();
+    d.x <= limit && d.y <= limit && d.z <= limit
 }
 
 /// Counters for the last rendered frame.
@@ -707,6 +731,11 @@ pub struct RenderStats {
     /// Frames that kept the last world frame and drew only the tonemap and the HUD over it
     /// ([`FrameWork::Ui`]).
     pub ui_frames: u64,
+    /// Frames [`Renderer::draw`] drew nothing for ([`FrameWork::Skip`]).
+    pub skipped_frames: u64,
+    /// What the last frame drew; after a Ui or Skip frame the pass counters below are the
+    /// last world frame's.
+    pub last_work: FrameWork,
     /// Draw calls in the last frame, all passes.
     pub draw_calls: u32,
     /// Of which in the shadow pass.
@@ -2320,6 +2349,7 @@ impl Renderer {
         self.kept.keep(scene, coronas_on);
         self.note_hud_drawn();
         self.stats.frames += 1;
+        self.stats.last_work = FrameWork::World;
         self.stats.shadow_draw_calls = shadow_draws;
         self.stats.bloom_draw_calls = bloom_draws;
         self.stats.draw_calls = shadow_draws + forward_draws + bloom_draws;
@@ -2381,6 +2411,8 @@ impl Renderer {
     ) -> (FrameWork, Option<F>) {
         let work = self.plan(scene);
         if work == FrameWork::Skip {
+            self.stats.skipped_frames += 1;
+            self.stats.last_work = work;
             return (work, None);
         }
         let Some((frame, view)) = acquire() else {
@@ -2427,6 +2459,7 @@ impl Renderer {
         self.queue.submit([encoder.finish()]);
         self.note_hud_drawn();
         self.stats.ui_frames += 1;
+        self.stats.last_work = FrameWork::Ui;
         self.stats.hud_quads = quads;
         self.stats.hud_quads_dropped = dropped;
     }
@@ -4034,6 +4067,57 @@ mod tests {
             });
             assert_eq!(skipped, (FrameWork::Skip, None));
         }
+    }
+
+    /// How still is still is measured from the camera, not the place's origin: at the far
+    /// corner of a 3 km place a block 3 m ahead creeping 4 mm a frame is drawn every frame,
+    /// while a car's billionth-of-a-radian spring jitter is not.
+    #[test]
+    fn stillness_is_judged_from_the_camera() {
+        let corner = Vec3::new(3000.0, 1.0, -3000.0);
+        let camera = Camera {
+            view: glam::camera::rh::view::look_at_mat4(corner, corner + Vec3::X, Vec3::Y)
+                .to_cols_array_2d(),
+            proj: glam::camera::rh::proj::directx::perspective(1.0, 1.6, 0.1, 1000.0)
+                .to_cols_array_2d(),
+        };
+        let at = |x: f32, tilt: f32| {
+            let m = Mat4::from_translation(corner + Vec3::new(3.0 + x, 0.0, 0.0))
+                * Mat4::from_rotation_z(tilt);
+            [MeshInstance::new(MeshId(0), m.to_cols_array_2d())]
+        };
+        let mut kept = KeptWorld {
+            head: None,
+            instances: Vec::new(),
+            lights: Vec::new(),
+        };
+        let first = at(0.0, 0.0);
+        let scene = SceneView {
+            camera,
+            ..test_scene(&first)
+        };
+        kept.keep(&scene, false);
+        for step in 1..5 {
+            let crept = at(0.004 * step as f32, 0.0);
+            let moved = SceneView {
+                instances: &crept,
+                ..scene
+            };
+            assert!(!kept.same(&moved, false), "4 mm × {step} at 3 m");
+            kept.keep(&moved, false);
+        }
+        let jitter = at(0.016, 1e-9);
+        let still = SceneView {
+            instances: &jitter,
+            ..scene
+        };
+        assert!(kept.same(&still, false), "spring jitter");
+        let nan = at(f32::NAN, 0.0);
+        let broken = SceneView {
+            instances: &nan,
+            ..scene
+        };
+        assert!(!kept.same(&broken, false), "NaN is never still");
     }
 
     /// Builds the whole renderer on wgpu's no-op backend with WebGL2 limits, in both HDR

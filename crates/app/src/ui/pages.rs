@@ -17,8 +17,9 @@
 //!            this device; select to remap
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
-//! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (Panel /
-//!            60 / 45 / 40 / 30) · UI scale · Resolution scale · Bloom · Performance overlay
+//! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (the
+//!            panel's, then its whole divisors: 45 / 30 at 90 Hz) · UI scale · Resolution
+//!            scale · Bloom · Performance overlay
 //! HUD:       Minimap · Rotate with car · Minimap zoom
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
 //!            Radio in background · Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
@@ -141,8 +142,9 @@ pub struct PageCtx<'a> {
     pub text_entry: bool,
     /// The preset in effect (the saved one, else the one picked for the device).
     pub quality: Quality,
-    /// The frame-rate cap in effect (the saved one, else the one picked for the device).
+    /// The frame-rate cap in effect, and the display's refresh rate it divides.
     pub frame_rate: FrameRate,
+    pub panel_hz: f64,
     /// The Vehicle page's car (a [`crate::vehicles::BUILTIN`] index) and paint.
     pub browse: [usize; 2],
 }
@@ -163,8 +165,8 @@ pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
 /// Names of [`Quality::ALL`].
 pub const QUALITY_NAMES: [&str; Quality::ALL.len()] =
     ["Low", "Battery", "Deck", "Medium", "High", "Ultra"];
-/// Names of [`FrameRate::ALL`].
-pub const FRAME_RATE_NAMES: [&str; FrameRate::ALL.len()] = ["Panel", "60", "45", "40", "30"];
+/// Names of [`FrameRate::ALL`] (the page draws the frames a second they come to).
+pub const FRAME_RATE_NAMES: [&str; FrameRate::ALL.len()] = ["Panel", "1/2", "1/3", "1/4"];
 /// The Radio in background choice: index 0 keeps playing, 1 mutes.
 pub const BACKGROUND_RADIO_NAMES: [&str; 2] = ["Keep playing", "Mute"];
 /// The Dashboard choice: index 0 draws it, 1 is hood only.
@@ -223,8 +225,9 @@ pub fn note(page: Page) -> Option<&'static str> {
              (hold): let go after a second. Other actions on that button act on release.",
         ),
         Page::Video => Some(
-            "Quality sets shadows, bloom and glow; Deck targets 90 fps there, Battery 60.\n\
-             Frame rate caps how often the world is drawn; the game runs the same.\n\
+            "Quality sets shadows, bloom and glow; Deck holds the panel's 90 fps there,\n\
+             Battery every other refresh at 85% resolution. Frame rate draws every Nth refresh;\n\
+             the game runs the same.\n\
              Resolution scale draws the world smaller and upscales it.",
         ),
         Page::Drive => Some(
@@ -476,7 +479,8 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     index,
                 },
             );
-            let index = FrameRate::ALL
+            let offered = FrameRate::offered(ctx.panel_hz);
+            let index = offered
                 .iter()
                 .position(|&f| f == ctx.frame_rate)
                 .unwrap_or(0);
@@ -484,7 +488,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 ItemId::FrameRate,
                 "Frame rate",
                 Widget::Choice {
-                    options: &FRAME_RATE_NAMES,
+                    options: &FRAME_RATE_NAMES[..offered.len()],
                     index,
                 },
             );
@@ -686,7 +690,8 @@ mod tests {
             radio: &radio,
             text_entry: false,
             quality: Quality::Deck,
-            frame_rate: FrameRate::Fps60,
+            frame_rate: FrameRate::Half,
+            panel_hz: 90.0,
             browse: [3, 1],
         };
         let mut items = Vec::new();
@@ -778,8 +783,8 @@ mod tests {
         );
         assert_eq!(items[1].id, ItemId::FrameRate);
         assert!(
-            matches!(items[1].widget, Widget::Choice { index: 1, .. }),
-            "60"
+            matches!(items[1].widget, Widget::Choice { index: 1, options } if options.len() == 3),
+            "45 of 90, 45 and 30"
         );
     }
 }
