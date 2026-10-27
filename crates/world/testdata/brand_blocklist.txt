@@ -2,7 +2,9 @@
 # tests only (never shipped, never read by the game). Each line is the FNV-1a 64 hash of a
 # name's letters and digits, uppercased (`key` in crates/world/src/signs/lexicon.rs); the
 # names themselves stay out of the repo (CLAUDE.md: no real brand names anywhere). To add
-# one, hash it the same way and append the key.
+# one, hash it the same way and append the key; `blocklist_check` in that file prints
+# whether words are listed and their keys:
+#   BLOCKLIST_CHECK="Golden Books,Kessick's Tacos" cargo test -p world --lib -- --ignored blocklist_check --nocapture
 0x0062ef79aad775cf
 0x01732163134ea0eb
 0x018055e178a6cf25
@@ -14,10 +16,12 @@
 0x0684592d9250b1e5
 0x06c4b6afdce3da42
 0x071c27612eba76ea
+0x07454b793a2b3ecd
 0x0790677ea4b32791
 0x07a6957da3113c1b
 0x07f0ee2c1986576d
 0x084e7acd39a06910
+0x0b35273d12f43686
 0x0b4c0c19aa15562d
 0x0e171d21dae521fb
 0x0e89c567ab3724eb
@@ -45,6 +49,7 @@
 0x22d19e8b659a01fc
 0x232caad47140fd8d
 0x251aa1ac7eed7991
+0x2614925f3a83968b
 0x263a2844a3d029de
 0x27bb2e8b3c5ab6cb
 0x28e0d4f0a3561a55
@@ -78,6 +83,7 @@
 0x49b7b4d8724e6382
 0x4bef53a44873edd3
 0x4cb07600045511b3
+0x4e39d93607cfdfd8
 0x50ce3419d18362e5
 0x515e628a174bfac4
 0x51a31ac5facc6ab1
@@ -90,16 +96,20 @@
 0x5aa7556fba97232c
 0x5b72bfbbdff78877
 0x5bcec82379c5e017
+0x5c554484e1e9f7b2
+0x5ccc3fcdb7972d6f
 0x5db1a1b74c7fd0aa
 0x5ebdab0ee692fddc
 0x60ccbec03926086d
 0x62cab5476aa09d4d
 0x633e3f81d728bbd6
+0x64b27916b7369658
 0x657c80d389d0c23b
 0x65c935695c4466e5
 0x684d513f23f41922
 0x6850e16f3162a211
 0x6980d2bb3141d0f2
+0x6fe83cda1a69760a
 0x702912ff20cc7273
 0x7053daad5ab5e2f6
 0x705b35c71153e9aa
@@ -128,6 +138,8 @@
 0x8ec1a6d31824566f
 0x8f9aeb318f920c12
 0x8ff5b5773c2940a1
+0x90fa079ae11c18db
+0x91631ac3e9ec8e80
 0x94bf712836a24aed
 0x95e039afb91ff4fd
 0x967edc130e94e15d
@@ -157,6 +169,7 @@
 0xad4700ae2d35b195
 0xad9bf2fef143f5c8
 0xaefa998a9aca977f
+0xaf20097863db511a
 0xb3c2c895b48c1b51
 0xb3f3f55551101b80
 0xb4815641ed3dbc51
@@ -167,6 +180,7 @@
 0xb71b79e933796681
 0xb8eb49e7d3abc83e
 0xb95e4fd7f9debe51
+0xb9f81902495177ec
 0xbc0d217473a1dd46
 0xbdee0c6a42e2b1d6
 0xbe054e7f2d25beb0
@@ -174,6 +188,7 @@
 0xbeba7c9e83aab4c1
 0xc22fc92eaf17472f
 0xc33b825988114fe5
+0xc4b1ce66af35de4e
 0xc53910138de1f697
 0xc6713da5f3c5892b
 0xc70a4a3cbc7bc5b2
@@ -226,3 +241,5 @@
 0xfa052326824757a1
 0xfa1ed21417423e9f
 0xfa7e9d436c8eacbb
+0xfe7d4055fb3bd96a
+0xff8881c734f92bef

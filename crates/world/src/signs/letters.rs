@@ -1156,9 +1156,9 @@ mod tests {
 
     #[test]
     fn script_runs_one_tube_per_word() {
-        let s = layout(b"DALVEY'S", LetterStyle::Script);
-        // The capital, the tube of "alvey", the apostrophe, the tube of "s".
-        assert_eq!(s.lines().count(), 4, "{:?}", s.starts);
+        let s = layout(b"HOLDREK'S", LetterStyle::Script);
+        // The H's three strokes, the tube of "oldrek", the apostrophe, the tube of "s".
+        assert_eq!(s.lines().count(), 6, "{:?}", s.starts);
         let s = layout(b"KESSICK", LetterStyle::Script);
         // The K's three strokes, the tube, and the dot of the i.
         assert_eq!(s.lines().count(), 5, "{:?}", s.starts);

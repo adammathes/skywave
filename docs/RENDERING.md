@@ -68,7 +68,7 @@ First person cockpit (eye position from the spec; head sways with suspension and
 | Player car exterior (LOD0) | 8–14k |
 | Player car interior | 4–8k |
 | Parked / NPC cars | 3–5k within 80 m (LOD1), ~2k beyond (LOD2) |
-| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300 |
+| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300; a shop's blade sign (frame, word, pictogram, both faces) ≤ 360 (`props::BLADE_TRIANGLES`) |
 | Buildings | ≤ 3.5k (ceiling; `world::buildings` still plans each to 2,000 until the building pass) |
 | Chunk vertex cap | 256k vertices (384k comes with the building pass, when a chunk needs it) |
 

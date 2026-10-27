@@ -219,6 +219,9 @@ pub struct TradeRule {
     pub pictograms: Vec<(Pictogram, u32)>,
     /// Its secondary lines with integer weights.
     pub lines: Vec<(Line, u32)>,
+    /// Descriptors it never takes: pairs that would name a well-known business.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub descriptors_out: Vec<String>,
 }
 
 /// A secondary line.
@@ -356,6 +359,16 @@ impl Grammar {
                 return Err(word("signs.trades", &t.trade));
             }
             if t.pictograms.iter().any(|p| p.1 == 0) || t.lines.iter().any(|l| l.1 == 0) {
+                return Err(bad("signs.trades"));
+            }
+            if let Some(d) = t
+                .descriptors_out
+                .iter()
+                .find(|d| !self.lexicon.descriptors.contains(d))
+            {
+                return Err(word("signs.trades.descriptors_out", d));
+            }
+            if t.descriptors_out.len() >= self.lexicon.descriptors.len() {
                 return Err(bad("signs.trades"));
             }
             for (l, _) in &t.lines {

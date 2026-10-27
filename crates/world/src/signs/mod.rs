@@ -13,15 +13,14 @@ use alloc::vec::Vec;
 
 use skywave_core::mix64;
 
-/// First syllables of invented names.
-const HEADS: [&str; 25] = [
-    "BAR", "BEL", "CAR", "DAL", "DOM", "FEN", "GAR", "HAL", "JOR", "KIP", "LAN", "LOR", "MEL",
-    "ZAN", "NOR", "PAR", "QUIN", "RAL", "REN", "SOM", "TAM", "TIV", "VAR", "VEL", "WEN",
+/// First syllables of invented names (pruned of those that make real names; the tests
+/// check every pairing against the brand blocklist).
+const HEADS: [&str; 20] = [
+    "BAR", "DAL", "DOM", "FEN", "HAL", "JOR", "KIP", "LAN", "MEL", "ZAN", "NOR", "PAR", "QUIN",
+    "RAL", "REN", "SOM", "TIV", "VAR", "VEL", "WEN",
 ];
 /// Second syllables.
-const TAILS: [&str; 12] = [
-    "BA", "DEN", "LA", "LEY", "LO", "NA", "NEY", "RA", "RO", "SA", "VA", "WIN",
-];
+const TAILS: [&str; 9] = ["DEN", "LA", "LO", "NA", "RA", "RO", "SA", "VA", "WIN"];
 /// What a shop sells, in its sign's words.
 const TRADES: [&str; 31] = [
     "DINER",
@@ -124,9 +123,84 @@ pub fn text_width(text: &[u8]) -> u32 {
     }
 }
 
+/// The test-only brand blocklist (`crates/world/testdata/brand_blocklist.txt`).
+#[cfg(test)]
+pub(crate) mod testing {
+    use alloc::vec::Vec;
+
+    /// FNV-1a over the letters and digits of `s`, uppercased: how the blocklist stores the
+    /// names it keeps out.
+    pub fn key(s: &[u8]) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for &c in s {
+            let c = c.to_ascii_uppercase();
+            if c.is_ascii_alphanumeric() {
+                h = (h ^ u64::from(c)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        h
+    }
+
+    pub fn blocklist() -> Vec<u64> {
+        include_str!("../../testdata/brand_blocklist.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| u64::from_str_radix(l.trim_start_matches("0x"), 16).expect("hex"))
+            .collect()
+    }
+
+    /// Prints whether each comma-separated entry of `BLOCKLIST_CHECK` is listed, and its
+    /// key, so a reviewer can audit a word or a pair without reading the list:
+    /// `BLOCKLIST_CHECK="Golden Books" cargo test -p world --lib -- --ignored
+    /// blocklist_check --nocapture`.
+    #[test]
+    #[ignore]
+    fn blocklist_check() {
+        let list = blocklist();
+        let words = std::env::var("BLOCKLIST_CHECK").unwrap_or_default();
+        for w in words.split(',').map(str::trim).filter(|w| !w.is_empty()) {
+            let k = key(w.as_bytes());
+            let on = if list.contains(&k) {
+                "LISTED"
+            } else {
+                "not listed"
+            };
+            std::println!("{w}: {on} ({k:#018x})");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::testing::{blocklist, key};
     use super::*;
+
+    /// The sign bands' and billboards' syllable names, alone, possessive and with every
+    /// trade, and the street names: none spells a listed brand.
+    #[test]
+    fn syllable_names_are_not_brands() {
+        let block = blocklist();
+        for h in HEADS {
+            for t in TAILS {
+                let name = [h, t].concat();
+                let mut forms = alloc::vec![name.clone(), [name.as_str(), "S"].concat()];
+                for trade in TRADES {
+                    forms.push([name.as_str(), "S ", trade].concat());
+                    forms.push([name.as_str(), " ", trade].concat());
+                }
+                for st in STREET_TYPES {
+                    forms.push([name.as_str(), " ", st].concat());
+                }
+                for f in forms {
+                    assert!(!block.contains(&key(f.as_bytes())), "{f}");
+                }
+            }
+        }
+        for trade in TRADES {
+            assert!(!block.contains(&key(trade.as_bytes())), "{trade}");
+        }
+    }
 
     #[test]
     fn names_fit_and_vary() {

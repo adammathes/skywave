@@ -1,15 +1,24 @@
 //! `--signs`: a sheet of every sign pictogram (extruded, outlined in neon, on a dark
-//! panel) above the four letterforms, each lettered in one of the sign finishes.
+//! panel) above the four letterforms, each lettered in one of the sign finishes, and a row
+//! of blade signs as the coast grammar draws them.
 
 use crate::raster::{Camera, Item, Target};
 use vehicle::shape::MeshData;
-use world::math::V3;
+use world::math::{V2, V3};
 use world::mesh::{rect, Frame, Glow, Paint, Pattern, WorldMesh};
+use world::props::{shop_sign, Prop, PropKind};
 use world::signs::letters::{self, Finish, LetterStyle};
+use world::signs::lexicon::ShopSign;
 use world::signs::pictogram::{self, Pictogram, Tints};
+use world::Palette;
 
 /// Pictogram tiles per row.
 pub const COLS: usize = 8;
+/// Blade signs in the bottom row.
+pub const BLADES: usize = 8;
+
+const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 
 fn to_mesh(m: &WorldMesh) -> MeshData {
     let mut d = MeshData::default();
@@ -83,7 +92,8 @@ fn blit(out: &mut [u8], w: usize, x0: usize, y0: usize, tile: (usize, usize, Vec
 pub fn sheet(tile: usize, ss: usize) -> (usize, usize, Vec<u8>) {
     let rows = Pictogram::ALL.len().div_ceil(COLS);
     let line_h = tile * 3 / 4;
-    let (w, h) = (tile * COLS, tile * rows + line_h * 4);
+    let blade_h = tile * 3;
+    let (w, h) = (tile * COLS, tile * rows + line_h * 4 + blade_h);
     let mut out = vec![0u8; w * h * 3];
     let f = frame();
     let tints = Tints {
@@ -131,7 +141,7 @@ pub fn sheet(tile: usize, ss: usize) -> (usize, usize, Vec<u8>) {
         (
             LetterStyle::Script,
             Finish::Neon,
-            b"Script Abcdefghijklm Nopqrstuvwxyz Dalvey's",
+            b"Script Abcdefghijklm Nopqrstuvwxyz Holdrek's",
         ),
         (
             LetterStyle::Slab,
@@ -162,6 +172,38 @@ pub fn sheet(tile: usize, ss: usize) -> (usize, usize, Vec<u8>) {
         );
         let y0 = tile * rows + row * line_h;
         blit(&mut out, w, 0, y0, shoot(&m, w, line_h, ss, view_h));
+    }
+    // Blade signs as the coast places them, square on.
+    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("grammar");
+    g.lexicon = ron::from_str(LEXICON).expect("lexicon");
+    let pal = Palette::socal_1985();
+    let bw = w / BLADES;
+    for k in 0..BLADES {
+        // A splitmix step, so neighbouring signs draw unlike trades.
+        let mut h = (k as u64 + 3).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        let s = ShopSign::draw(&g.signs, &g.lexicon, g.era, h ^ (h >> 31));
+        let p = Prop {
+            pos: V2::new(0.9, 0.0),
+            y: -5.6,
+            dir: V2::new(-1.0, 0.0),
+            kind: PropKind::NeonSign {
+                palette: (k % 5) as u8,
+            },
+            seed: k as u32,
+        };
+        let mut m = WorldMesh::default();
+        shop_sign(&mut m, &p, &pal, &s, &g.lexicon);
+        println!(
+            "blade {k}: {:?} ({:?}, {:?}), {} triangles",
+            String::from_utf8_lossy(&s.text(&g.lexicon)),
+            s.style,
+            s.pictogram,
+            m.triangle_count()
+        );
+        let y0 = tile * rows + line_h * 4;
+        blit(&mut out, w, k * bw, y0, shoot(&m, bw, blade_h, ss, 4.6));
     }
     (w, h, out)
 }

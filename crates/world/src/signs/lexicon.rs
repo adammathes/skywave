@@ -261,7 +261,13 @@ impl ShopSign {
             .unwrap_or(0) as u16;
         let mut form = *pick(&rules.forms, |f| f.1, h >> 8).map_or(&Form::Trade, |f| &f.0);
         let name = ((h >> 16) % lex.names().max(1) as u64) as u16;
-        let descriptor = ((h >> 28) % lex.descriptors.len().max(1) as u64) as u16;
+        let n = lex.descriptors.len().max(1);
+        let mut descriptor = ((h >> 28) % n as u64) as usize;
+        // Not one the trade leaves out (validation keeps at least one).
+        while rule.descriptors_out.contains(&lex.descriptors[descriptor]) {
+            descriptor = (descriptor + 1) % n;
+        }
+        let descriptor = descriptor as u16;
         // "SURF SURFBOARDS" says it twice: the descriptor gives way to a name.
         let d = &lex.descriptors[usize::from(descriptor)];
         if form == Form::DescriptorTrade && lex.trades[usize::from(trade)].starts_with(d.as_str()) {
@@ -411,28 +417,7 @@ pub fn assign(rules: &SignRules, lex: &Lexicon, era: Era, seed: u64, at: &[V2]) 
 mod tests {
     use super::*;
     use crate::grammar::coast_80s;
-
-    /// FNV-1a over the letters and digits of `s`, uppercased: how the test-only blocklist
-    /// stores the names it keeps out (`crates/world/testdata/brand_blocklist.txt`).
-    fn key(s: &[u8]) -> u64 {
-        let mut h = 0xcbf2_9ce4_8422_2325u64;
-        for &c in s {
-            let c = c.to_ascii_uppercase();
-            if c.is_ascii_alphanumeric() {
-                h = (h ^ u64::from(c)).wrapping_mul(0x0100_0000_01b3);
-            }
-        }
-        h
-    }
-
-    fn blocklist() -> Vec<u64> {
-        include_str!("../../testdata/brand_blocklist.txt")
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| u64::from_str_radix(l.trim_start_matches("0x"), 16).expect("hex"))
-            .collect()
-    }
+    use crate::signs::testing::{blocklist, key};
 
     /// Every sign the coast grammar can draw, over enough hashes to meet every word.
     fn signs() -> (crate::grammar::Grammar, Vec<ShopSign>) {
@@ -447,7 +432,7 @@ mod tests {
     fn shipped_lexicon_validates() {
         let g = coast_80s();
         g.lexicon.validate().expect("lexicon");
-        assert!(g.lexicon.phonotactic("DALVEY"));
+        assert!(g.lexicon.phonotactic("HOLDREK"));
         assert!(!g.lexicon.phonotactic("XQZZT"));
         let mut bad = g.lexicon.clone();
         bad.surnames.push("KES7".into());

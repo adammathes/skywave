@@ -406,11 +406,12 @@ Grammar(
         shop_lit_256: 115,
 
         // Shop signs (the blade signs on storefronts): a pictogram and a wordmark from the
-        // lexicon. Starting values for a 1985 beach strip, not yet fitted (B3): food,
+        // lexicon. `descriptors_out` skips a descriptor whose pair with the trade would name
+        // a well-known business. Starting values for a 1985 beach strip, not yet fitted (B3): food,
         // drink, the motel and the surf trade lead.
         lexicon: "us_roadside",
         trades: [
-            TradeRule(trade: "DONUTS", weight: 3, pictograms: [(Donut, 3), (CoffeeCup, 1)], lines: [(Word("OPEN"), 2), (Since, 1)]),
+            TradeRule(trade: "DONUTS", weight: 3, pictograms: [(Donut, 3), (CoffeeCup, 1)], lines: [(Word("OPEN"), 2), (Since, 1)], descriptors_out: ["ROYAL"]),
             TradeRule(trade: "CAFE", weight: 2, pictograms: [(CoffeeCup, 3), (Sun, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "DINER", weight: 2, pictograms: [(CoffeeCup, 2), (Burger, 1), (Star, 1)], lines: [(Word("OPEN"), 2), (Since, 1)]),
             TradeRule(trade: "BURGERS", weight: 3, pictograms: [(Burger, 1)], lines: [(Word("OPEN"), 1)]),
@@ -425,7 +426,7 @@ Grammar(
             TradeRule(trade: "LIQUOR", weight: 3, pictograms: [(BeerMug, 1), (MartiniGlass, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "SURFBOARDS", weight: 2, pictograms: [(Surfboard, 3), (Wave, 2), (Palm, 1)], lines: []),
             TradeRule(trade: "MOTEL", weight: 3, pictograms: [(Arrow, 3), (Palm, 1), (Star, 1), (Sun, 1), (Wave, 1)], lines: [(Word("VACANCY"), 1)]),
-            TradeRule(trade: "RECORDS", weight: 2, pictograms: [(Record, 1)], lines: []),
+            TradeRule(trade: "RECORDS", weight: 2, pictograms: [(Record, 1)], lines: [], descriptors_out: ["LAKESHORE"]),
             TradeRule(trade: "TV REPAIR", weight: 1, pictograms: [(TvSet, 1)], lines: [(Since, 1)]),
             TradeRule(trade: "PHOTO", weight: 1, pictograms: [(Camera, 1)], lines: []),
             TradeRule(trade: "VIDEO", weight: 2, pictograms: [(FilmReel, 2), (TvSet, 1), (Star, 1)], lines: []),
@@ -437,7 +438,7 @@ Grammar(
             TradeRule(trade: "DENTAL", weight: 1, pictograms: [(Tooth, 1)], lines: []),
             TradeRule(trade: "DRUGS", weight: 2, pictograms: [(MortarPestle, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "CLEANERS", weight: 2, pictograms: [(ShirtHanger, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "BOOKS", weight: 1, pictograms: [(Book, 1)], lines: []),
+            TradeRule(trade: "BOOKS", weight: 1, pictograms: [(Book, 1)], lines: [], descriptors_out: ["GOLDEN"]),
             TradeRule(trade: "BIKES", weight: 1, pictograms: [(Bicycle, 1)], lines: []),
             TradeRule(trade: "BOWL", weight: 1, pictograms: [(BowlingPin, 1), (Star, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "FLOWERS", weight: 1, pictograms: [(Flower, 1)], lines: []),

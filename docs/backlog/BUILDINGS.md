@@ -78,8 +78,8 @@ a hanger, book, bicycle, bowling pin, flower. Never a red cross on white (a prot
 
 **Wordmarks**: one or two words from a closed lexicon, lettered in a stroke style.
 - Lexicon (data, reviewed by a person, never generated free-form): invented surnames and given
-  names built from phonotactic tables so they read as names, not syllable soup ("Dalvey's",
-  "Orlan", "Kessick"); generic descriptors (Sunset, Harbor, Surf, Lakeshore, Corner, Golden,
+  names built from phonotactic tables so they read as names, not syllable soup ("Holdrek's",
+  "Vornie", "Kessick"); generic descriptors (Sunset, Harbor, Surf, Lakeshore, Corner, Golden,
   Coast, Northside, Avenue, Royal, Star); trade words (Donuts, Liquor, Records, Cleaners,
   Cocktails, Tacos, Motel, Bowl, Tires). Forms: `Name's`, `Name's Trade`, `Descriptor Trade`,
   `Trade` alone, plus a secondary line (`Cocktails`, `Open`, `Vacancy`, `Since 19xx` with a year

@@ -85,7 +85,7 @@ SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256,
               lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
               wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
 TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
-              lines: [(Word(String) | Since, weight)] }
+              lines: [(Word(String) | Since, weight)], descriptors_out: [String] }
 Lexicon     { id, syllables: { onsets, nuclei, codas }, given, surnames, descriptors, trades,
               lines }
 LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
@@ -109,7 +109,8 @@ every `ByUse` taken at `u`):
 - **Shop signs** (the blade signs the detailing hangs on storefronts; `world::signs`). Each
   draws a trade from `trades` by weight, a form from `forms` (`Name's`, `Name's Trade`,
   `Descriptor Trade`, `Trade`), a name from the lexicon's given names and surnames, a
-  descriptor, a pictogram from its trade's `pictograms`, a lettering style from `wordmarks`
+  descriptor (never one in its trade's `descriptors_out`: pairs that would name a well-known
+  business), a pictogram from its trade's `pictograms`, a lettering style from `wordmarks`
   and, `line_256` times in 256, a secondary line from its trade's `lines` (`SINCE` and a year
   2-35 years before the era). `Descriptor Trade` that would say a word twice becomes
   `Name's Trade`; a line that repeats the trade is dropped. `ChunkPlan` assigns them in prop
@@ -118,12 +119,14 @@ every `ByUse` taken at `u`):
   closed and reviewed; names are two or three syllables from its `syllables` tables), which
   `app::places::load_grammar` attaches to the grammar after checking its `id` against
   `signs.lexicon`. A grammar parsed without it gets plain blade signs (a pictogram, no words).
-  The blade: the pictogram (`signs::pictogram`, 32 generic shapes as 2D polygons, extruded
-  4 cm proud of both faces and outlined in neon) above the word, stacked, or reading upward
-  in script; a backlit box (`lit_box_256`) letters dark on a lit panel and drops the neon
-  outline. A sign spends at most 300 triangles (`props::BLADE_TRIANGLES`): a word that does
-  not fit gives way to the trade, then the pictogram's neon gives way to the word; the
-  second line goes on only if it still fits.
+  The blade puts the word first: bold stacked capitals up to 0.6 m tall (the stroke a fifth
+  of the cap), or the main line reading upward in script, inside a neon frame; a backlit
+  box (`lit_box_256`) letters dark on a lit panel. The pictogram (`signs::pictogram`, 32
+  generic shapes as 2D polygons, extruded 4 cm proud of both faces and outlined in neon)
+  goes above the word when the word leaves at least 0.4 m and the triangles for it, so short
+  words get one. A sign spends at most 360 triangles (`props::BLADE_TRIANGLES`): a word that
+  does not fit gives way to the trade, then to block capitals; the pictogram's neon goes
+  before the pictogram. Blades carry no second line (the carriers of B7 will).
 - **Letterforms** (`signs::letters`): stroke polylines on a 20-unit cap grid, ours, in four
   styles (block capitals, condensed sans, connected script, slab serif), built as neon tubes,
   dark strokes on a backlit box, extruded channel letters or flat paint. The sign bands and

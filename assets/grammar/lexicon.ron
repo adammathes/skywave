@@ -21,13 +21,13 @@ Lexicon(
     ),
 
     given: [
-        "ORLAN", "DELVA", "RENNA", "KESTA", "LORNIE", "BRELLA", "SOVIE", "DORVAN", "GILVA",
-        "HOLVIS", "IVELLA", "JORVEN", "KALDER", "LISSET", "MARVO", "NELVA", "OTTAL",
+        "VORNIE", "DELVA", "RENNA", "KESTA", "LORNIE", "BRELLA", "SOVIE", "DORVAN", "GILVA",
+        "HOLVIS", "IVELLA", "JORVEN", "KALDER", "LISSET", "DRELVA", "NELVA", "OTTAL",
         "PERVIS", "RAVELLE", "SELVIN", "TERVA", "VELDO", "WILVER", "ARDELL", "BEVRO",
         "CORLIE", "DESVIE", "FENLO", "HARVIE", "MIRELL",
     ],
     surnames: [
-        "DALVEY", "KESSICK", "TORVELL", "HADLEN", "BRANNOK", "CORVEY", "PELLARD", "WESKIN",
+        "HOLDREK", "KESSICK", "TORVELL", "HADLEN", "TESKOW", "CORVEY", "PELLARD", "WESKIN",
         "MORVANE", "LINVER", "GASKEN", "RUDLOW", "SORVIK", "TAVERLY", "BELVANE", "HOLLEN",
         "DRESKY", "FALVEN", "KILDER", "MARSKY", "NOLVIN", "PADVEN", "QUILLAN", "RASKELL",
         "STARVEY", "TOLVERY", "VARLOCK", "WENDRIK", "ABERNY", "OSMERE", "ELVANT", "GORVETT",
@@ -35,7 +35,7 @@ Lexicon(
     ],
     descriptors: [
         "SUNSET", "HARBOR", "LAKESHORE", "CORNER", "GOLDEN", "COAST", "NORTHSIDE",
-        "AVENUE", "ROYAL", "STAR", "OCEAN", "PALM", "BAYSIDE", "HILLTOP", "SEASIDE", "SILVER",
+        "AVENUE", "ROYAL", "STAR", "OCEAN", "PALM", "BAYSIDE", "HILLTOP", "SEASIDE",
         "PIER",
     ],
     trades: [
