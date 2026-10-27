@@ -1,0 +1,62 @@
+// Longbow Convertible body: the Longbow Coupe as a convertible.
+//
+// Intent: the coupe's long nose, clamshell hood and pop-up lamps, open from the windshield
+// header back: bare door tops, the top folded under a black boot behind the seats and a
+// short trunk lid where the coupe has its glass hatch. Wide and flat, with a body-side rub line, a short squared tail
+// with four round lamps in a black panel, body-colored bumpers and slotted alloys. Front
+// engine, rear drive: the hood is very long. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "longbow_convertible",
+    side: [
+        (0.00, 0.46), (0.06, 0.55), (0.40, 0.64), (1.70, 0.84), (1.82, 0.86),
+        (2.42, 1.16), (2.48, 0.885), (3.40, 0.935), (4.02, 0.955), (4.36, 0.96),
+        (4.48, 0.90),
+        (4.48, 0.32), (4.28, 0.22), (3.80, 0.18), (0.70, 0.16), (0.14, 0.19), (0.00, 0.28),
+    ],
+    plan: [
+        (0.00, 0.66), (0.15, 0.80), (0.60, 0.88), (1.00, 0.90), (3.90, 0.90), (4.30, 0.885),
+        (4.48, 0.86),
+    ],
+    belt: [(1.80, 0.85), (2.86, 0.90), (4.02, 0.95), (4.48, 0.955)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 24, greenhouse_frac: 0.72, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.84, 2.40),
+        // No side glass; the backlight range is the boot behind the seats.
+        backlight: (3.40, 3.80),
+        side: [],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.24, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.42, track: 1.52),
+    front: Front(lights: PopUp, grille: Slot, bumper: Body, bumper_y: (0.26, 0.38)),
+    rear: Rear(lights: Round, spoiler: None, bumper: Body, bumper_y: (0.30, 0.44)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.95, creases: [(0.20, 0.50, 4.42, 0.54), (0.06, 0.62, 1.80, 0.80)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Slotted, hubcaps: false),
+    details: [BlackTrim, Badge(Circle)],
+    roof: Roof(kind: Convertible(top: Down)),
+    // Bright red, white, black, yellow, silver over charcoal, medium blue metallic, bronze.
+    palette: ["#b81a22", "#eeede8", "#16171a", "#e2b51a", "#c3c6ca/#45494f", "#2e4f86", "#8a5a32"],
+    accent: "#1a1a1c",
+    interior: InteriorShape(
+        dash_height: 0.84,
+        dash_x: 2.00,
+        wheel_pos: (2.38, 0.64),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (2.24, 1.10),
+        seat: (2.70, 0.36),
+        driver_offset: 0.38,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: graphite dash and charcoal hide
+        // with light gray inserts, red piping, gray carpet, an orange-lit digital cluster.
+        colors: ["#26282d", "#3b3e45", "#34363c", "#6c6e72", "#33353a", "#d04a2a"],
+        display: "#ffb030",
+        insert: "#8a8d93",
+        piping: "#a8262c",
+        dash_top: "#2d2f34",
+        applique: None,
+        manual: true,
+    ),
+)
