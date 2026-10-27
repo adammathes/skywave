@@ -31,7 +31,7 @@ use alloc::vec::Vec;
 use place::{Building, BuildingUse, Roof, StyleTag, ZoneId};
 use skywave_core::{Rng, Seed};
 
-use crate::grammar::{pick, Base, Grammar, GroundBays, SignRules, StyleRules};
+use crate::grammar::{pick, Awning, Base, Grammar, GroundBays, SignRules, StyleRules};
 use crate::math::{abs, clamp, floor, offset_polygon, V2, V3};
 use crate::mesh::{
     boxf, face, frustum, lathe, polygon_cap, quad, rect, ring_band, tri, Frame, Glow, Paint,
@@ -58,8 +58,9 @@ const KEY_FACADE: u64 = 0x4641_4344;
 const LIT_WINDOWS_256: u32 = 102;
 /// Estimated triangles per window (glass, reveals, sill, surrounding wall pieces).
 const TRIS_PER_WINDOW: usize = 20;
-/// Estimated triangles of everything but windows; generous so the budget holds.
-const TRIS_FIXED: usize = 560;
+/// Estimated triangles of everything but windows, the top and the rooftop units (counted
+/// apart: [`RoofPlan`]); generous so the budget holds.
+const TRIS_FIXED: usize = 420;
 /// Rng key for per-building detail.
 const KEY_BUILDING: u64 = 0x4255_494C;
 /// Towers of at least [`STEP_BACK_MIN_FLOORS`] step back above this many floors.
@@ -196,10 +197,50 @@ pub enum TopKind {
     Parapet = 0,
     Cornice = 1,
     Stepped = 2,
+    Shaped = 3,
+    /// One storey only (the planner gives taller buildings the plain parapet).
+    FalseFront = 4,
+    Bracketed = 5,
+    Mansard = 6,
 }
 
 impl TopKind {
-    const ALL: [TopKind; 3] = [TopKind::Parapet, TopKind::Cornice, TopKind::Stepped];
+    const ALL: [TopKind; 7] = [
+        TopKind::Parapet,
+        TopKind::Cornice,
+        TopKind::Stepped,
+        TopKind::Shaped,
+        TopKind::FalseFront,
+        TopKind::Bracketed,
+        TopKind::Mansard,
+    ];
+}
+
+/// What stands on a flat roof, counted at planning (from the grammar's rates and the roof's
+/// area) so the triangle estimate covers it; where each goes is drawn when it is built.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoofPlan {
+    /// Vent hoods and plumbing vents.
+    pub vents: u8,
+    /// Packaged rooftop units.
+    pub units: u8,
+    pub fans: u8,
+    pub skylights: u8,
+}
+
+/// Most of each kind of rooftop unit on one roof (the triangle ceiling holds with all).
+const MAX_ROOF_UNITS: u8 = 6;
+const MAX_FANS: u8 = 3;
+const MAX_SKYLIGHTS: u8 = 8;
+
+impl RoofPlan {
+    /// Estimated triangles.
+    fn tris(&self) -> usize {
+        12 * usize::from(self.vents)
+            + 40 * usize::from(self.units)
+            + 34 * usize::from(self.fans)
+            + 10 * usize::from(self.skylights)
+    }
 }
 
 /// Everything needed to build a building, decided up front.
@@ -222,6 +263,8 @@ pub struct BuildingPlan {
     pub door_h: f32,
     pub window_kind: WindowKind,
     pub top_kind: TopKind,
+    /// Rooftop units (none on pitched roofs and stepped-back bases).
+    pub roof: RoofPlan,
     /// The part of a tall building stepped back above [`STEP_BACK_FLOORS`]; this plan is
     /// then the base.
     pub tower: Option<Box<TowerPlan>>,
@@ -236,9 +279,11 @@ pub struct BuildingPlan {
 pub struct Signage {
     /// Seeds the invented names on its signs.
     pub name_seed: u64,
-    /// The storefront awning: 0 striped (the plain look's), 1 one solid color, 2 a flat
-    /// canopy, 3 none.
+    /// The awning over each run of storefronts ([`Awning`] as `u8`; the plain look's is
+    /// striped).
     pub awning: u8,
+    /// A strip mall's canopy ([`Awning::Mansard`] or else a flat canopy, as `u8`).
+    pub canopy: u8,
     /// Its signs are backlit boxes with dark letters rather than neon letters.
     pub lit_box: bool,
     /// The shop is open late: the detailing lights the walk in front of it at night (its
@@ -256,6 +301,7 @@ pub fn signage(seed: u64, index: u32, rules: &SignRules) -> Signage {
     Signage {
         name_seed: h,
         awning: rules.awning(h >> 8) as u8,
+        canopy: rules.mall_canopy(h >> 40) as u8,
         lit_box: (h >> 16) & 255 < u64::from(rules.lit_box_256),
         shop_lit: (h >> 24) & 255 < u64::from(rules.shop_lit_256),
     }
@@ -364,6 +410,8 @@ fn step_back(
         ..b.clone()
     };
     let mut base = plan_one(&base_b, env, door_pick, BASE_BUDGET, rules, true);
+    // The tower stands where the base's rooftop units would.
+    base.roof = RoofPlan::default();
     let tower_fp = offset_polygon(&fp, |_| -inset);
     let tower_b = Building {
         footprint: tower_fp.iter().map(|p| [p.x, p.y]).collect(),
@@ -446,13 +494,14 @@ fn base_tris(f: &FacadePlan) -> usize {
 
 /// The triangle estimate of a plan.
 fn estimate(b: &Building, plan: &BuildingPlan, fs: &[FacadePlan], floors: usize) -> usize {
-    estimate_parts(b, plan.window_kind, plan.top_kind, fs, floors)
+    estimate_parts(b, plan.window_kind, plan.top_kind, plan.roof, fs, floors)
 }
 
 fn estimate_parts(
     b: &Building,
     window_kind: WindowKind,
     top_kind: TopKind,
+    roof: RoofPlan,
     fs: &[FacadePlan],
     floors: usize,
 ) -> usize {
@@ -461,14 +510,61 @@ fn estimate_parts(
         TopKind::Parapet => 0,
         TopKind::Cornice => 12 * b.footprint.len(),
         TopKind::Stepped => 36,
+        TopKind::Shaped => 12 * SHAPED_SEGMENTS + 16,
+        TopKind::FalseFront => 30,
+        TopKind::Bracketed => 24 + 10 * MAX_BRACKETS,
+        TopKind::Mansard => 10 * b.footprint.len(),
     };
     let per_window = tris_per_window(b, window_kind);
     TRIS_FIXED
         + top
+        + roof.tris()
         + floors * per_floor
         + fs.iter()
             .map(|f| f.windows() as usize * per_window + 24 + base_tris(f))
             .sum::<usize>()
+}
+
+/// Rng key for the rooftop counts.
+const KEY_ROOF: u64 = 0x524F_4F46;
+
+/// How many of each rooftop unit a flat roof gets: the grammar's rate per 1000 m² times the
+/// footprint's area, rounded at random (so the counts average the rate), at least one of
+/// a kind whose rate is above zero, at most the per-kind cap.
+fn plan_roof(b: &Building, rules: &StyleRules, door_pick: u32) -> RoofPlan {
+    let fp = &b.footprint;
+    let n = fp.len();
+    let mut twice = 0.0;
+    for i in 0..n {
+        let (p, q) = (fp[i], fp[(i + 1) % n]);
+        twice += p[0] * q[1] - q[0] * p[1];
+    }
+    let area = abs(twice) * 0.5;
+    let mut rng = Rng::new(Seed(u64::from(door_pick)), &[KEY_ROOF]);
+    let a = &rules.addenda;
+    let mut count = |(lo, hi): (f32, f32), max: u8| -> u8 {
+        if hi <= 0.0 {
+            return 0;
+        }
+        let rate = rng.range_f32(lo, hi);
+        let n = floor(rate * area / 1000.0 + rng.range_f32(0.0, 1.0));
+        (n as u8).clamp(1, max)
+    };
+    let units = count(a.roof_units.of(b.usage), MAX_ROOF_UNITS);
+    let fans = count(a.exhaust_fans.of(b.usage), MAX_FANS);
+    let skylights = count(a.skylights.of(b.usage), MAX_SKYLIGHTS);
+    let (lo, hi) = a.roof_vents.of(b.usage);
+    let vents = if hi == 0 {
+        0
+    } else {
+        rng.range(u32::from(lo), u32::from(hi) + 1) as u8
+    };
+    RoofPlan {
+        vents,
+        units,
+        fans,
+        skylights,
+    }
 }
 
 /// The base band of a street front `len` long, from the grammar's `base` with `ground`
@@ -610,7 +706,21 @@ fn plan_one(
     let mut rng = Rng::new(Seed(u64::from(door_pick)), &[KEY_FACADE]);
     let window_kind =
         WindowKind::ALL[pick(&rules.body.kinds.of(b.usage).weights(), rng.next_u32()).unwrap_or(0)];
-    let top_kind = TopKind::ALL[pick(&rules.top.kinds.weights(), rng.next_u32()).unwrap_or(0)];
+    let top_kind = match TopKind::ALL[pick(&rules.top.kinds.weights(), rng.next_u32()).unwrap_or(0)]
+    {
+        // A false front is a one-storey thing; on one storey the shop signs reach the top
+        // of the wall, where brackets and a mansard's eave would be.
+        TopKind::FalseFront if floors > 1 => TopKind::Parapet,
+        TopKind::Bracketed if floors == 1 => TopKind::Cornice,
+        // A motel's walkway roof runs where a mansard's eave would.
+        TopKind::Mansard if floors == 1 || b.style == StyleTag::Motel => TopKind::Parapet,
+        k => k,
+    };
+    let roof = if is_pitched(b) {
+        RoofPlan::default()
+    } else {
+        plan_roof(b, rules, door_pick)
+    };
 
     let len = |i: usize| (V2::from_array(fp[(i + 1) % n]) - V2::from_array(fp[i])).length();
     // The frontage: the open facade facing the parcel's frontage road, else the one closest
@@ -718,7 +828,7 @@ fn plan_one(
             }
         })
         .collect();
-    let est = |fs: &[FacadePlan]| estimate_parts(b, window_kind, top_kind, fs, floors);
+    let est = |fs: &[FacadePlan]| estimate_parts(b, window_kind, top_kind, roof, fs, floors);
     let mut facades = make(&bays);
     // A base band raises the budget by what it costs, up to the ceiling: the windows get
     // no more than they would without it.
@@ -770,6 +880,7 @@ fn plan_one(
         door_h,
         window_kind,
         top_kind,
+        roof,
         tower: None,
         signage: None,
         rules: *rules,
@@ -1183,7 +1294,7 @@ pub fn build_on(
         stats.windows += s.windows;
         stats.lit_windows += s.lit_windows;
     } else {
-        roof_clutter(m, b, plan, &inner, &look, pal, &mut rng);
+        roof_clutter(m, plan, &fp, &inner, &look, pal, &mut rng);
     }
     if b.style == StyleTag::Motel {
         // The motel's name on the street side, over the parapet.
@@ -2258,7 +2369,7 @@ fn base_band(
                 let (sy0, sy1) = (tt + 0.12, (tt + 0.92).min(y1 - 0.12));
                 let sx0 = pier(first as u32).1;
                 if last {
-                    storefront_awning(m, f, sx0, x1, tt, look);
+                    storefront_awning(m, f, sx0, x1, y0, tt, look);
                 }
                 if signs && last && sy1 - sy0 > 0.35 {
                     sign_band(m, f, sx0 + 0.1, x1 - 0.1, sy0, sy1, look, rng);
@@ -2445,23 +2556,150 @@ fn storefront_bay(
     }
 }
 
-/// The awning over a run of storefronts from `x0` to `x1`, hung from the transoms' top
-/// `tt`, clear of heads at its valance.
-fn storefront_awning(m: &mut WorldMesh, f: &Frame, x0: f32, x1: f32, tt: f32, look: &Look) {
+/// Clear height under a storefront awning's lowest edge, m (`docs/backlog/BUILDINGS.md`).
+const AWNING_CLEARANCE: f32 = 2.4;
+
+/// The underside of an awning or canopy: shaded, and where the shop is open late, lit by
+/// its spill (a glow at window strength, so it shows at night like the light the
+/// detailing puts in front of the shop).
+fn underside(look: &Look, paint: Paint) -> Paint {
+    let under = paint.with_rgb(shade(paint.rgb(), 150));
+    if look.signage.is_some_and(|s| s.shop_lit) {
+        under.glowing(shade(look.lit.rgb_emissive(), 110), Glow::Window)
+    } else {
+        under
+    }
+}
+
+/// The awning over a run of storefronts from `x0` to `x1` on a floor at `y0`, hung from
+/// the transoms' top `tt`, its lowest edge clear of heads.
+#[allow(clippy::too_many_arguments)]
+fn storefront_awning(
+    m: &mut WorldMesh,
+    f: &Frame,
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    tt: f32,
+    look: &Look,
+) {
+    // Too low a transom for any awning to clear heads.
+    if tt - y0 < AWNING_CLEARANCE + 0.4 {
+        return;
+    }
     let (ax0, ax1) = (x0 - 0.05, x1 + 0.05);
-    match look.signage.map_or(0, |s| s.awning) {
-        0 => awning(m, f, ax0, ax1, tt, 1.4, 0.6, look),
-        1 => {
+    // How far an edge `val` below the awning's front may drop (at most 0.3 m).
+    let drop = |want: f32, val: f32| want.min(tt - y0 - AWNING_CLEARANCE - val).max(0.1);
+    let kind = look.signage.map_or(Awning::Striped as u8, |s| s.awning);
+    match kind {
+        k if k == Awning::Striped as u8 => awning(m, f, ax0, ax1, tt, 1.4, drop(0.6, 0.28), look),
+        k if k == Awning::Solid as u8 => {
             let solid = Look {
                 awning: [look.awning[0], look.awning[0]],
                 ..*look
             };
-            awning(m, f, ax0, ax1, tt, 1.1, 0.45, &solid);
+            awning(m, f, ax0, ax1, tt, 1.1, drop(0.45, 0.28), &solid);
         }
-        2 => {
-            // A flat canopy with a fascia in the trim color.
-            let (lo, hi) = ([ax0, tt - 0.05, 0.0], [ax1, tt + 0.23, 1.7]);
-            boxf(m, f, lo, hi, face::ALL & !face::NEG_Z, look.trim);
+        k if k == Awning::Canopy as u8 => {
+            // A flat stucco canopy with a fascia in the trim color.
+            let d = 1.7;
+            let (lo, hi) = ([ax0, tt - 0.28, 0.0], [ax1, tt, d]);
+            boxf(
+                m,
+                f,
+                lo,
+                hi,
+                face::POS_Y | face::NEG_X | face::POS_X,
+                look.wall,
+            );
+            boxf(m, f, lo, hi, face::NEG_Y, underside(look, look.wall));
+            rect(m, f, ax0, tt - 0.28, ax1, tt, d, false, look.trim);
+        }
+        k if k == Awning::Bullnose as u8 => {
+            // A quarter round of vinyl from the transoms' top at the wall over and down to
+            // its front edge.
+            let r = drop(0.9, 0.0).max(0.3);
+            let yb = tt - r;
+            let arc = |k: u32| {
+                let (s, c) = crate::math::sin_cos(core::f32::consts::FRAC_PI_2 * k as f32 / 4.0);
+                (r * s, yb + r * c)
+            };
+            let cloth = look.awning[0];
+            for k in 0..4 {
+                let ((za, ya), (zb, yb2)) = (arc(k), arc(k + 1));
+                let q = [
+                    f.p(ax0, ya, za),
+                    f.p(ax1, ya, za),
+                    f.p(ax1, yb2, zb),
+                    f.p(ax0, yb2, zb),
+                ];
+                let out = f.v(0.0, (ya + yb2) * 0.5 - yb, (za + zb) * 0.5);
+                quad(m, q, out, cloth);
+                for (x, side) in [(ax0, -f.x), (ax1, f.x)] {
+                    tri(
+                        m,
+                        f.p(x, yb, 0.0),
+                        f.p(x, ya, za),
+                        f.p(x, yb2, zb),
+                        side,
+                        cloth,
+                    );
+                }
+            }
+            let soffit = [
+                f.p(ax0, yb, 0.0),
+                f.p(ax1, yb, 0.0),
+                f.p(ax1, yb, r),
+                f.p(ax0, yb, r),
+            ];
+            quad(m, soffit, -f.y, underside(look, cloth));
+        }
+        k if k == Awning::Aluminum as u8 => {
+            // A shallow ribbed metal shed with a deep fascia.
+            let metal = Paint::new(mix(look.trim.rgb(), [236, 236, 230], 150), Pattern::Metal);
+            let d = 1.3;
+            let yf = tt - drop(0.25, 0.3);
+            let slope = [
+                f.p(ax0, tt, 0.0),
+                f.p(ax1, tt, 0.0),
+                f.p(ax1, yf, d),
+                f.p(ax0, yf, d),
+            ];
+            let up = f.y * d + f.z * (tt - yf);
+            quad(m, slope, up, metal);
+            quad(m, slope, -up, underside(look, metal));
+            boxf(
+                m,
+                f,
+                [ax0, yf - 0.3, d],
+                [ax1, yf + 0.06, d + 0.06],
+                face::ALL,
+                metal,
+            );
+        }
+        k if k == Awning::Mansard as u8 => {
+            // A shingled pent from the transoms' top down and out under the sign band, a
+            // soffit under it.
+            let d = 1.0;
+            let yb = tt - drop(0.6, 0.0);
+            let slope = [
+                f.p(ax0, tt, 0.0),
+                f.p(ax1, tt, 0.0),
+                f.p(ax1, yb, d),
+                f.p(ax0, yb, d),
+            ];
+            quad(m, slope, f.y * d + f.z * (tt - yb), look.roof_tile);
+            let soffit = [
+                f.p(ax0, yb, 0.0),
+                f.p(ax1, yb, 0.0),
+                f.p(ax1, yb, d),
+                f.p(ax0, yb, d),
+            ];
+            quad(m, soffit, -f.y, underside(look, look.reveal));
+            for (x, side) in [(ax0, -f.x), (ax1, f.x)] {
+                let cheek = [f.p(x, tt, 0.0), f.p(x, yb, 0.0), f.p(x, yb, d)];
+                tri(m, cheek[0], cheek[1], cheek[2], side, look.roof_tile);
+            }
         }
         _ => {}
     }
@@ -2682,7 +2920,7 @@ fn awning(
     for k in 0..stripes {
         let (a, b) = (x0 + w * k as f32, x0 + w * (k + 1) as f32);
         let paint = look.awning[(k % 2) as usize];
-        let under = paint.with_rgb(shade(paint.rgb(), 150));
+        let under = underside(look, paint);
         let slope = [
             f.p(a, y, 0.0),
             f.p(b, y, 0.0),
@@ -2824,8 +3062,13 @@ fn named_sign(
     true
 }
 
-/// The strip mall's front: a row of shop units under one deep canopy on posts, signs on
-/// the fascia above.
+/// A strip mall's mansard canopy: tall `(min, max)` and projecting `(min, max)`, m
+/// (`docs/backlog/BUILDINGS.md`, the SoCal table).
+const MALL_MANSARD_H: (f32, f32) = (0.9, 1.5);
+const MALL_MANSARD_D: (f32, f32) = (2.0, 3.0);
+
+/// The strip mall's front: a row of shop units under one canopy on posts (a flat one, or
+/// a shingled mansard), signs on the fascia above or on the mansard's face.
 #[allow(clippy::too_many_arguments)]
 fn strip_mall_front(
     m: &mut WorldMesh,
@@ -2840,6 +3083,18 @@ fn strip_mall_front(
     let unit = len / units as f32;
     let y0 = plan.plinth_top;
     let canopy_y = y0 + 3.3;
+    let mansard = look
+        .signage
+        .is_some_and(|s| s.canopy == Awning::Mansard as u8);
+    let (h, depth) = if mansard {
+        (
+            rng.range_f32(MALL_MANSARD_H.0, MALL_MANSARD_H.1)
+                .min(plan.top - canopy_y - 0.2),
+            rng.range_f32(MALL_MANSARD_D.0, MALL_MANSARD_D.1),
+        )
+    } else {
+        (0.4, 3.2)
+    };
     for u in 0..units {
         let ux = unit * u as f32;
         let sub = Frame {
@@ -2849,29 +3104,88 @@ fn strip_mall_front(
         let neon = choose(rng, &pal.neon());
         let unit_look = Look { neon, ..*look };
         storefront_unit(m, &sub, unit, y0, canopy_y, &unit_look, rng);
-        // Sign on the fascia above the canopy.
-        sign_band(
-            m,
-            f,
-            ux + 1.2,
-            ux + unit - 1.2,
-            canopy_y + 0.55,
-            (canopy_y + 1.35).min(plan.top - 0.3),
-            &unit_look,
-            rng,
-        );
+        if mansard && h > 0.8 {
+            // Letters on the mansard's shingled face: a frame whose y runs up the slope.
+            let (rise, run) = (h - 0.25, 0.6 * h);
+            let along = f.y * rise - f.z * run;
+            let up = along.normalize();
+            let g = Frame {
+                o: f.p(0.0, canopy_y + 0.25, depth),
+                y: up,
+                z: f.x.cross(up),
+                ..*f
+            };
+            let slope = along.length();
+            sign_band(
+                m,
+                &g,
+                ux + 1.2,
+                ux + unit - 1.2,
+                0.08,
+                slope - 0.08,
+                &unit_look,
+                rng,
+            );
+        } else if !mansard {
+            // Sign on the fascia above the canopy.
+            sign_band(
+                m,
+                f,
+                ux + 1.2,
+                ux + unit - 1.2,
+                canopy_y + 0.55,
+                (canopy_y + 1.35).min(plan.top - 0.3),
+                &unit_look,
+                rng,
+            );
+        }
     }
     rect(m, f, 0.0, canopy_y, len, plan.top, 0.0, false, look.wall);
-    // Canopy slab with a fascia, on square posts.
-    let depth = 3.2;
-    boxf(
-        m,
-        f,
-        [-0.3, canopy_y, 0.0],
-        [len + 0.3, canopy_y + 0.4, depth],
-        face::ALL & !face::NEG_Z,
-        look.trim,
-    );
+    let (x0, x1) = (-0.3, len + 0.3);
+    if mansard {
+        // Profile, wall to eave: soffit, a short fascia, the shingled slope, a flat top
+        // back to the wall.
+        let (yf, run) = (canopy_y + 0.25, 0.6 * h);
+        let p = [
+            (0.0, canopy_y),
+            (depth, canopy_y),
+            (depth, yf),
+            (depth - run, canopy_y + h),
+            (0.0, canopy_y + h),
+        ];
+        let under = underside(look, look.reveal);
+        let paints = [under, look.trim, look.roof_tile, look.parapet_in];
+        for k in 0..4 {
+            let ((za, ya), (zb, yb)) = (p[k], p[k + 1]);
+            let q = [
+                f.p(x0, ya, za),
+                f.p(x1, ya, za),
+                f.p(x1, yb, zb),
+                f.p(x0, yb, zb),
+            ];
+            let out = f.v(0.0, za - zb, yb - ya);
+            quad(m, q, out, paints[k]);
+        }
+        for (x, side) in [(x0, -f.x), (x1, f.x)] {
+            for k in 1..4 {
+                let v = |i: usize| f.p(x, p[i].1, p[i].0);
+                tri(m, v(0), v(k), v(k + 1), side, look.trim);
+            }
+        }
+    } else {
+        // Canopy slab with a fascia.
+        let (lo, hi) = ([x0, canopy_y, 0.0], [x1, canopy_y + h, depth]);
+        boxf(
+            m,
+            f,
+            lo,
+            hi,
+            face::ALL & !face::NEG_Z & !face::NEG_Y,
+            look.trim,
+        );
+        boxf(m, f, lo, hi, face::NEG_Y, underside(look, look.trim));
+    }
+    // Square posts.
     for u in 0..=units {
         let x = (unit * u as f32).clamp(0.3, len - 0.3);
         boxf(
@@ -2982,10 +3296,30 @@ fn storefront_unit(
 
 /// Height of a stepped parapet's three steps.
 const STEPS_H: f32 = 2.4;
+/// Segments of a shaped parapet's outline.
+const SHAPED_SEGMENTS: usize = 8;
+/// Brackets under a bracketed cornice at most.
+const MAX_BRACKETS: usize = 16;
+/// How far a mansard reaches out at its foot, and how far down the wall it comes.
+const MANSARD_D: f32 = 0.7;
+const MANSARD_H: f32 = 1.1;
 
-/// The top of a flat roof: nothing more than the coping, a cornice all round, or a
-/// parapet stepped up over the middle of the street front.
+/// The street front's frame and length.
+fn front_frame(plan: &BuildingPlan, fp: &[V2]) -> (Frame, f32) {
+    let i = plan.frontage;
+    let (a, c) = (fp[i], fp[(i + 1) % fp.len()]);
+    (
+        Frame::upright(a.at(0.0), (c - a).normalize()),
+        (c - a).length(),
+    )
+}
+
+/// The top of a flat roof: nothing more than the coping, a cornice all round, a parapet
+/// stepped up or shaped over the middle of the street front, a false front, a cornice on
+/// brackets along the street front, or a shingled mansard all round.
 fn top_details(m: &mut WorldMesh, plan: &BuildingPlan, fp: &[V2], look: &Look) {
+    let (f, len) = front_frame(plan, fp);
+    let mid = len * 0.5;
     match plan.top_kind {
         TopKind::Parapet => {}
         TopKind::Cornice => {
@@ -3002,12 +3336,6 @@ fn top_details(m: &mut WorldMesh, plan: &BuildingPlan, fp: &[V2], look: &Look) {
             );
         }
         TopKind::Stepped => {
-            let n = fp.len();
-            let i = plan.frontage;
-            let (a, c) = (fp[i], fp[(i + 1) % n]);
-            let len = (c - a).length();
-            let f = Frame::upright(a.at(0.0), (c - a).normalize());
-            let mid = len * 0.5;
             let mut y = plan.top;
             for (k, frac) in [0.55f32, 0.32, 0.14].iter().enumerate() {
                 let half = len * frac * 0.5;
@@ -3022,6 +3350,111 @@ fn top_details(m: &mut WorldMesh, plan: &BuildingPlan, fp: &[V2], look: &Look) {
                     paint,
                 );
                 y += rise;
+            }
+        }
+        TopKind::Shaped => {
+            // Flat shoulders, then a curved crown; coped in the trim color.
+            let half = (len * 0.3).clamp(2.0, 7.0).min(len * 0.5);
+            let rise = |t: f32| {
+                let c = (abs(t) / 0.75).min(1.0);
+                0.5 + 0.9 * (1.0 - c * c)
+            };
+            let (z0, z1) = (-0.3, 0.0);
+            let n = SHAPED_SEGMENTS;
+            for k in 0..n {
+                let (ta, tb) = (
+                    -1.0 + 2.0 * k as f32 / n as f32,
+                    -1.0 + 2.0 * (k + 1) as f32 / n as f32,
+                );
+                let (xa, xb) = (mid + ta * half, mid + tb * half);
+                let (ya, yb) = (plan.top + rise(ta), plan.top + rise(tb));
+                for (z, out) in [(z1, f.z), (z0, -f.z)] {
+                    let q = [
+                        f.p(xa, plan.top, z),
+                        f.p(xb, plan.top, z),
+                        f.p(xb, yb, z),
+                        f.p(xa, ya, z),
+                    ];
+                    quad(m, q, out, look.wall);
+                }
+                let up = f.y * (xb - xa) - f.x * (yb - ya);
+                let cap = [
+                    f.p(xa, ya, z1 + 0.05),
+                    f.p(xb, yb, z1 + 0.05),
+                    f.p(xb, yb, z0 - 0.05),
+                    f.p(xa, ya, z0 - 0.05),
+                ];
+                quad(m, cap, up, look.trim);
+            }
+            for (x, side) in [(mid - half, -f.x), (mid + half, f.x)] {
+                let y = plan.top + rise(1.0);
+                let q = [
+                    f.p(x, plan.top, z0),
+                    f.p(x, plan.top, z1),
+                    f.p(x, y, z1),
+                    f.p(x, y, z0),
+                ];
+                quad(m, q, side, look.wall);
+            }
+        }
+        TopKind::FalseFront => {
+            // The street wall carried up across the whole front, with a coping.
+            let h = (len * 0.12).clamp(1.2, 2.4);
+            let y = plan.top + h;
+            boxf(
+                m,
+                &f,
+                [0.0, plan.top, -0.25],
+                [len, y, 0.0],
+                face::NO_BOTTOM & !face::POS_Y,
+                look.wall,
+            );
+            boxf(
+                m,
+                &f,
+                [-0.06, y, -0.31],
+                [len + 0.06, y + 0.14, 0.08],
+                face::ALL,
+                look.trim,
+            );
+        }
+        TopKind::Bracketed => {
+            // A deep cornice crowning the street front on a row of brackets.
+            let d = (plan.rules.top.cornice_d * 2.0).max(0.45);
+            let (y0, y1) = (plan.top - 0.25, plan.top + 0.05);
+            boxf(
+                m,
+                &f,
+                [-d, y0, 0.0],
+                [len + d, y1, d],
+                face::ALL & !face::NEG_Z,
+                look.sill,
+            );
+            let count = ((len / 1.2) as usize).clamp(2, MAX_BRACKETS);
+            for k in 0..count {
+                let x = 0.3 + (len - 0.6) * k as f32 / (count - 1) as f32;
+                boxf(
+                    m,
+                    &f,
+                    [x - 0.08, y0 - 0.45, 0.0],
+                    [x + 0.08, y0, d * 0.8],
+                    face::NEG_X | face::POS_X | face::POS_Z | face::NEG_Y,
+                    look.sill,
+                );
+            }
+        }
+        TopKind::Mansard => {
+            // Shingles from the coping down and out to an eave all round, a soffit under it.
+            let n = fp.len();
+            let eave = offset_polygon(fp, |_| MANSARD_D);
+            let (y0, y1) = (plan.top - MANSARD_H, plan.top + 0.15);
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let out = (fp[j] - fp[i]).right();
+                let slope = [eave[i].at(y0), eave[j].at(y0), fp[j].at(y1), fp[i].at(y1)];
+                quad(m, slope, out.at(MANSARD_D / (y1 - y0)), look.roof_tile);
+                let soffit = [fp[i].at(y0), fp[j].at(y0), eave[j].at(y0), eave[i].at(y0)];
+                quad(m, soffit, -V3::Y, look.reveal);
             }
         }
     }
@@ -3113,97 +3546,173 @@ fn style_details(m: &mut WorldMesh, b: &Building, plan: &BuildingPlan, fp: &[V2]
     }
 }
 
-/// Vents, air conditioners, a stair bulkhead and a water tank on taller roofs.
+/// What stands on a flat roof: plumbing vents and hoods, packaged rooftop units on curbs
+/// with a duct elbow into the roof, exhaust fans, skylights ([`RoofPlan`]), set toward the
+/// back so the parapet hides most of them from the street; a stair bulkhead and a water
+/// tank on taller roofs.
 fn roof_clutter(
     m: &mut WorldMesh,
-    b: &Building,
     plan: &BuildingPlan,
+    fp: &[V2],
     inner: &[V2],
     look: &Look,
     pal: &Palette,
     rng: &mut Rng,
 ) {
+    // Placed in the street front's frame: x along it, z out of it (the roof is at z < 0).
+    let (f, _) = front_frame(plan, fp);
+    let (dir, out) = (V2::new(f.x.x, f.x.z), V2::new(f.z.x, f.z.z));
+    let o = V2::new(f.o.x, f.o.z);
     let (mut lo, mut hi) = (V2::new(f32::MAX, f32::MAX), V2::new(f32::MIN, f32::MIN));
-    for p in inner {
-        lo = V2::new(lo.x.min(p.x), lo.y.min(p.y));
-        hi = V2::new(hi.x.max(p.x), hi.y.max(p.y));
+    for &p in inner {
+        let l = V2::new((p - o).dot(dir), (p - o).dot(out));
+        lo = V2::new(lo.x.min(l.x), lo.y.min(l.y));
+        hi = V2::new(hi.x.max(l.x), hi.y.max(l.y));
     }
     let size = hi - lo;
     if size.x < 3.0 || size.y < 3.0 {
         return;
     }
     let y = plan.roof_y;
-    let metal = Paint::new(pal.metal_light, Pattern::Metal);
-    let dark = Paint::new(pal.metal_dark, Pattern::Metal);
-    let spot = |rng: &mut Rng, margin: f32| {
+    // A frame on the roof at a spot `margin` in from the edges, in the back `share` of
+    // the roof's depth, for an item reaching `[x0, x1, z0, z1]` around it; `None` when any
+    // corner of the item falls off the roof (odd footprints).
+    let spot = |rng: &mut Rng, margin: f32, share: f32, [x0, x1, z0, z1]: [f32; 4]| {
         let mx = margin.min(size.x * 0.4);
         let mz = margin.min(size.y * 0.4);
-        V2::new(
-            rng.range_f32(lo.x + mx, hi.x - mx),
-            rng.range_f32(lo.y + mz, hi.y - mz),
-        )
+        let x = rng.range_f32(lo.x + mx, hi.x - mx);
+        let z = rng.range_f32(lo.y + mz, (lo.y + size.y * share - mz).max(lo.y + mz));
+        let at = |dx: f32, dz: f32| o + dir * (x + dx) + out * (z + dz);
+        let on = [(x0, z0), (x1, z0), (x1, z1), (x0, z1)]
+            .iter()
+            .all(|&(dx, dz)| crate::math::point_in_polygon(at(dx, dz), inner));
+        on.then(|| Frame {
+            o: at(0.0, 0.0).at(y),
+            ..f
+        })
     };
-    let add = &plan.rules.addenda;
-    let draw = |rng: &mut Rng, (lo, hi): (u8, u8)| {
-        if hi == 0 {
-            0
-        } else {
-            rng.range(u32::from(lo), u32::from(hi) + 1)
-        }
-    };
-    let vents = draw(rng, add.roof_vents.of(b.usage));
-    for _ in 0..vents {
-        let p = spot(rng, 1.0);
-        let f = Frame::at(p.at(y));
+    let metal = Paint::new(pal.metal_light, Pattern::Metal);
+    let dark = Paint::new(pal.metal_dark, Pattern::Metal);
+    let cabinet = Paint::new(mix(pal.metal_light, pal.sand, 90), Pattern::Metal);
+    let r = plan.roof;
+    for _ in 0..r.vents {
+        let Some(g) = spot(rng, 1.0, 1.0, [-0.3, 0.3, -0.25, 0.25]) else {
+            continue;
+        };
         if rng.range(0, 2) == 0 {
             boxf(
                 m,
-                &f,
+                &g,
                 [-0.3, 0.0, -0.25],
                 [0.3, 0.45, 0.25],
                 face::NO_BOTTOM,
                 metal,
             );
         } else {
-            frustum(m, &f, 0.12, 0.12, 0.6, 6, true, false, dark);
+            frustum(m, &g, 0.06, 0.06, 0.6, 5, false, false, dark);
         }
     }
-    let units = draw(rng, add.roof_units.of(b.usage));
-    for _ in 0..units {
-        let p = spot(rng, 2.0);
-        let f = Frame::at(p.at(y));
+    for _ in 0..r.units {
+        let Some(g) = spot(rng, 2.0, 0.65, [-1.15, 0.75, -0.6, 0.6]) else {
+            continue;
+        };
+        let sides = face::NO_BOTTOM & !face::POS_Y;
+        boxf(m, &g, [-0.75, 0.0, -0.6], [0.75, 0.3, 0.6], sides, dark);
         boxf(
             m,
-            &f,
-            [-0.65, 0.0, -0.5],
-            [0.65, 1.0, 0.5],
+            &g,
+            [-0.65, 0.3, -0.5],
+            [0.65, 1.25, 0.5],
             face::NO_BOTTOM,
+            cabinet,
+        );
+        // The condenser fan's grille on top.
+        let grille = [
+            g.p(-0.1, 1.26, -0.35),
+            g.p(0.5, 1.26, -0.35),
+            g.p(0.5, 1.26, 0.35),
+            g.p(-0.1, 1.26, 0.35),
+        ];
+        quad(m, grille, V3::Y, dark);
+        // The supply duct: out of the cabinet's side, then down through the roof.
+        let elbow = face::POS_Y | face::NEG_Z | face::POS_Z | face::NEG_X;
+        boxf(
+            m,
+            &g,
+            [-1.15, 0.45, -0.25],
+            [-0.65, 0.85, 0.25],
+            elbow,
+            metal,
+        );
+        let drop = face::NEG_X | face::POS_X | face::NEG_Z | face::POS_Z;
+        boxf(m, &g, [-1.15, 0.0, -0.25], [-0.75, 0.45, 0.25], drop, metal);
+    }
+    for _ in 0..r.fans {
+        let Some(g) = spot(rng, 1.5, 0.8, [-0.45, 0.45, -0.45, 0.45]) else {
+            continue;
+        };
+        let sides = face::NO_BOTTOM & !face::POS_Y;
+        boxf(m, &g, [-0.35, 0.0, -0.35], [0.35, 0.3, 0.35], sides, dark);
+        frustum(
+            m,
+            &g.offset(0.0, 0.3, 0.0),
+            0.18,
+            0.18,
+            0.3,
+            6,
+            false,
+            false,
             metal,
         );
         frustum(
             m,
-            &f.offset(0.0, 1.0, 0.0),
-            0.4,
-            0.4,
-            0.02,
-            8,
-            true,
+            &g.offset(0.0, 0.5, 0.0),
+            0.45,
+            0.06,
+            0.28,
+            6,
             false,
-            dark,
+            false,
+            metal,
         );
     }
-    if plan.floors() >= usize::from(add.bulkhead_floors) {
-        let p = spot(rng, 3.0);
+    for _ in 0..r.skylights {
+        let Some(g) = spot(rng, 1.5, 1.0, [-0.6, 0.6, -0.9, 0.9]) else {
+            continue;
+        };
+        let sides = face::NO_BOTTOM & !face::POS_Y;
         boxf(
             m,
-            &Frame::at(p.at(y)),
-            [-1.4, 0.0, -1.2],
-            [1.4, 2.6, 1.2],
-            face::NO_BOTTOM,
+            &g,
+            [-0.6, 0.0, -0.9],
+            [0.6, 0.25, 0.9],
+            sides,
             look.parapet_in,
         );
+        let pane = [
+            g.p(-0.6, 0.25, -0.9),
+            g.p(0.6, 0.25, -0.9),
+            g.p(0.6, 0.25, 0.9),
+            g.p(-0.6, 0.25, 0.9),
+        ];
+        quad(m, pane, V3::Y, look.shop_glass);
+    }
+    let add = &plan.rules.addenda;
+    if plan.floors() >= usize::from(add.bulkhead_floors) {
+        if let Some(g) = spot(rng, 3.0, 1.0, [-1.4, 1.4, -1.2, 1.2]) {
+            boxf(
+                m,
+                &g,
+                [-1.4, 0.0, -1.2],
+                [1.4, 2.6, 1.2],
+                face::NO_BOTTOM,
+                look.parapet_in,
+            );
+        }
         if rng.range(0, add.water_tank_1_in) == 0 && size.x > 9.0 && size.y > 9.0 {
-            water_tank(m, spot(rng, 3.5).at(y), pal);
+            if let Some(g) = spot(rng, 3.5, 1.0, [-1.7, 1.7, -1.7, 1.7]) {
+                water_tank(m, g.o, pal);
+            }
         }
     }
 }
@@ -3793,5 +4302,264 @@ mod tests {
         let plan = plan_building(&b, ZoneId::Strip, &e, 0, &crate::grammar::coast_80s());
         assert_eq!(plan.facades[0].columns, 0);
         assert_eq!(plan.facades[0].windows(), 0);
+    }
+
+    /// Signage with awning `awning`, strip-mall canopy `canopy`, open late.
+    fn lit_shop(awning: Awning, canopy: Awning) -> Signage {
+        Signage {
+            name_seed: 7,
+            awning: awning as u8,
+            canopy: canopy as u8,
+            lit_box: false,
+            shop_lit: true,
+        }
+    }
+
+    /// Underside faces glowing with the shop's spill.
+    fn lit_undersides(m: &WorldMesh) -> usize {
+        m.vertices
+            .iter()
+            .filter(|v| v.emissive[3] == Glow::Window as u8 && v.normal[1] < -0.9)
+            .count()
+    }
+
+    #[test]
+    fn every_awning_fits_and_lit_shops_light_its_underside() {
+        let g = crate::grammar::coast_80s();
+        let pal = Palette::socal_1985();
+        let b = shop(StyleTag::StuccoBox, BuildingUse::Commercial, 2, 30.0, 18.0);
+        for awning in [
+            Awning::Striped,
+            Awning::Solid,
+            Awning::Canopy,
+            Awning::None,
+            Awning::Bullnose,
+            Awning::Aluminum,
+            Awning::Mansard,
+        ] {
+            for pick in 0..12u32 {
+                let mut plan = plan_building(&b, ZoneId::Strip, &env(4), pick, &g);
+                if !plan.facades[plan.frontage].storefront {
+                    continue;
+                }
+                let mut s = lit_shop(awning, Awning::Canopy);
+                for lit in [true, false] {
+                    s.shop_lit = lit;
+                    plan.signage = Some(s);
+                    let mut m = WorldMesh::default();
+                    let stats = build(&mut m, &b, &plan, &pal, 5, pick);
+                    assert!(stats.triangles <= BUILDING_TRIANGLE_BUDGET, "{awning:?}");
+                    // Nothing hangs over the sign band: every awning stays below the
+                    // transoms' top, the highest a storefront's glass and transom reach.
+                    let bp = plan.facades[plan.frontage].base.unwrap();
+                    let y1 = plan.floor_y[1];
+                    let (_, tt) = storefront_heights(&bp, plan.plinth_top, y1, true);
+                    let mut bare = WorldMesh::default();
+                    let mut none = plan.clone();
+                    none.signage = Some(Signage {
+                        awning: Awning::None as u8,
+                        ..s
+                    });
+                    build(&mut bare, &b, &none, &pal, 5, pick);
+                    let reach = |m: &WorldMesh| {
+                        m.vertices
+                            .iter()
+                            .filter(|v| v.pos[2] > 18.2 && v.pos[1] > tt + 0.01)
+                            .count()
+                    };
+                    assert_eq!(reach(&m), reach(&bare), "{awning:?}");
+                    let glow = lit_undersides(&m);
+                    assert_eq!(glow > 0, lit && awning != Awning::None, "{awning:?} {lit}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn strip_mall_canopies_and_their_rooftops() {
+        let g = crate::grammar::coast_80s();
+        let pal = Palette::socal_1985();
+        let b = Building {
+            height_m: 5.4,
+            ..shop(StyleTag::StripMall, BuildingUse::Commercial, 1, 66.0, 22.0)
+        };
+        for canopy in [Awning::Mansard, Awning::Canopy] {
+            for pick in 0..8u32 {
+                let mut plan = plan_building(&b, ZoneId::Strip, &env(4), pick, &g);
+                plan.signage = Some(lit_shop(Awning::None, canopy));
+                // 1452 m² at 2-4 units and 3-6 skylights per 1000 m².
+                assert!((2..=6).contains(&plan.roof.units), "{:?}", plan.roof);
+                assert!((4..=MAX_SKYLIGHTS).contains(&plan.roof.skylights));
+                let mut m = WorldMesh::default();
+                let stats = build(&mut m, &b, &plan, &pal, 5, pick);
+                assert!(
+                    stats.triangles <= BUILDING_TRIANGLE_BUDGET,
+                    "{}",
+                    stats.triangles
+                );
+                assert!(lit_undersides(&m) > 0);
+                // The parapet hides everything on the roof: nothing stands above its
+                // coping.
+                let top = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+                assert!(top <= plan.top + 1e-3, "{top} over {}", plan.top);
+                // The mansard reaches 2-3 m out in front of the shops.
+                let front = m.vertices.iter().map(|v| v.pos[2]).fold(f32::MIN, f32::max);
+                let reach = front - 22.0;
+                if canopy == Awning::Mansard {
+                    assert!((2.0..=3.1).contains(&reach), "{reach}");
+                } else {
+                    assert!((3.1..=3.3).contains(&reach), "{reach}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn roof_units_follow_the_roof_area() {
+        let g = crate::grammar::coast_80s();
+        let rules = g.style(StyleTag::StuccoBox, ZoneId::Strip);
+        let small = shop(StyleTag::StuccoBox, BuildingUse::Commercial, 2, 12.0, 15.0);
+        let big = shop(StyleTag::StuccoBox, BuildingUse::Commercial, 2, 40.0, 40.0);
+        let flats = shop(StyleTag::StuccoBox, BuildingUse::Residential, 2, 40.0, 40.0);
+        let (mut a, mut c) = (0u32, 0u32);
+        for pick in 0..64 {
+            let (s, l) = (plan_roof(&small, rules, pick), plan_roof(&big, rules, pick));
+            // One unit at least on any commercial roof, 2-4 per 1000 m² on a big one.
+            assert!(
+                s.units >= 1 && (3..=MAX_ROOF_UNITS).contains(&l.units),
+                "{l:?}"
+            );
+            assert_eq!((s.skylights, l.skylights), (0, 0));
+            a += u32::from(s.units);
+            c += u32::from(l.units);
+            let r = plan_roof(&flats, rules, pick);
+            assert_eq!((r.units, r.fans), (0, 0));
+        }
+        assert!(c > 3 * a, "{a} {c}");
+    }
+
+    #[test]
+    fn top_kinds_build_where_they_belong() {
+        let pal = Palette::socal_1985();
+        for kind in TopKind::ALL {
+            let mut g = crate::grammar::coast_80s();
+            let mut w = [0u16; 7];
+            w[kind as usize] = 1;
+            for r in &mut g.styles {
+                let t = &mut r.top.kinds;
+                [
+                    t.parapet,
+                    t.cornice,
+                    t.stepped,
+                    t.shaped,
+                    t.false_front,
+                    t.bracketed,
+                    t.mansard,
+                ] = w;
+            }
+            for floors in [1u8, 3] {
+                let b = shop(StyleTag::Brick, BuildingUse::Commercial, floors, 24.0, 20.0);
+                let mut plan = plan_building(&b, ZoneId::Strip, &env(4), 3, &g);
+                let want = match (kind, floors) {
+                    (TopKind::FalseFront, 3) | (TopKind::Mansard, 1) => TopKind::Parapet,
+                    (TopKind::Bracketed, 1) => TopKind::Cornice,
+                    _ => kind,
+                };
+                assert_eq!(plan.top_kind, want);
+                plan.signage = Some(lit_shop(Awning::Striped, Awning::Canopy));
+                let mut m = WorldMesh::default();
+                let stats = build(&mut m, &b, &plan, &pal, 5, 3);
+                assert!(stats.triangles <= BUILDING_TRIANGLE_BUDGET, "{kind:?}");
+                let top = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+                // Stepped, shaped and false fronts rise over the coping.
+                let rises = matches!(
+                    want,
+                    TopKind::Stepped | TopKind::Shaped | TopKind::FalseFront
+                );
+                assert_eq!(top > plan.top + 1.0, rises, "{kind:?} {floors}: {top}");
+            }
+        }
+    }
+
+    #[test]
+    fn awnings_clear_heads_or_are_left_off() {
+        let pal = Palette::socal_1985();
+        let b = shop(StyleTag::StuccoBox, BuildingUse::Commercial, 2, 30.0, 18.0);
+        let mut rng = Rng::new(Seed(1), &[KEY_BUILDING]);
+        let mut look = look(&b, &pal, &mut rng);
+        let f = Frame::at(V3::new(0.0, 0.0, 0.0));
+        for awning in 0..7u8 {
+            look.signage = Some(Signage {
+                awning,
+                ..lit_shop(Awning::None, Awning::Canopy)
+            });
+            for tt in [2.6f32, 2.79, 2.85, 3.3, 4.0] {
+                let mut m = WorldMesh::default();
+                storefront_awning(&mut m, &f, 0.0, 6.0, 0.0, tt, &look);
+                let low = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MAX, f32::min);
+                assert!(
+                    m.vertices.is_empty() || low >= AWNING_CLEARANCE - 1e-4,
+                    "{awning}: {low}"
+                );
+                assert_eq!(
+                    m.vertices.is_empty(),
+                    awning == 3 || tt < 2.8,
+                    "{awning} {tt}"
+                );
+                let high = m.vertices.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+                assert!(
+                    m.vertices.is_empty() || high <= tt + 1e-4,
+                    "{awning}: {high}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rooftop_items_stay_on_l_shaped_roofs() {
+        let g = crate::grammar::coast_80s();
+        let pal = Palette::socal_1985();
+        // 40 x 30 with a 24 x 12 notch out of one corner.
+        let l = [
+            [0.0, 0.0],
+            [0.0, 30.0],
+            [40.0, 30.0],
+            [40.0, 18.0],
+            [16.0, 18.0],
+            [16.0, 0.0],
+        ];
+        for turn in 0..6 {
+            let (sn, cs) = crate::math::sin_cos(turn as f32 * 0.55);
+            let fp: Vec<[f32; 2]> = l
+                .iter()
+                .map(|p| [p[0] * cs - p[1] * sn, p[0] * sn + p[1] * cs])
+                .collect();
+            let b = Building {
+                footprint: fp.clone(),
+                height_m: 9.0,
+                floors: 2,
+                roof: Roof::Flat,
+                style: StyleTag::StuccoBox,
+                built_year: None,
+                usage: BuildingUse::Commercial,
+            };
+            let walls: Vec<V2> = fp.iter().map(|&p| V2::from_array(p)).collect();
+            let outer = offset_polygon(&walls, |_| 0.1);
+            for pick in 0..32u32 {
+                let plan = plan_building(&b, ZoneId::Strip, &env(6), pick, &g);
+                let mut m = WorldMesh::default();
+                build(&mut m, &b, &plan, &pal, 5, pick);
+                // Everything on the roof stands within the walls.
+                for v in m.vertices.iter().filter(|v| v.pos[1] > plan.roof_y + 0.01) {
+                    let p = V2::new(v.pos[0], v.pos[2]);
+                    let top = plan.top_kind;
+                    let edge = matches!(top, TopKind::Cornice | TopKind::Bracketed);
+                    assert!(
+                        edge || crate::math::point_in_polygon(p, &outer),
+                        "turn {turn} pick {pick} {top:?}: {p:?}"
+                    );
+                }
+            }
+        }
     }
 }
