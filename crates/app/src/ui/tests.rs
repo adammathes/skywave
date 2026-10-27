@@ -1656,6 +1656,55 @@ fn the_master_volume_and_mute_reach_the_radio() {
 }
 
 #[test]
+fn the_game_pauses_in_the_background_and_resumes_in_front() {
+    let mut h = Harness::new();
+    h.frame();
+    let ticks = h.app.ticks();
+    h.app.set_focused(false);
+    for _ in 0..30 {
+        h.frame();
+    }
+    assert_eq!(h.app.ticks(), ticks, "paused in the background");
+    assert!(!h.app.menu_open(), "no menu put up");
+    h.app.set_focused(true);
+    h.frame();
+    assert!(h.app.ticks() > ticks, "running again");
+    // A menu the player opened stays open through it.
+    h.open(&[ItemId::Open(Page::Settings)]);
+    h.app.set_focused(false);
+    h.frame();
+    h.app.set_focused(true);
+    h.frame();
+    assert!(h.app.menu_open());
+}
+
+#[test]
+fn the_radio_keeps_playing_in_the_background_unless_set_to_mute() {
+    use audio::RadioCommand;
+    let mut h = Harness::new();
+    h.frame();
+    h.app.radio_commands().for_each(drop);
+    h.app.set_focused(false);
+    h.app.set_focused(true);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert!(
+        cmds.iter().all(|c| *c == RadioCommand::Volume(0.8 * 0.8)),
+        "it is a radio: {cmds:?}"
+    );
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.focus_on(ItemId::BackgroundRadio);
+    h.pad(PadButton::DpadRight);
+    assert!(h.app.settings().mute_radio_unfocused);
+    h.app.radio_commands().for_each(drop);
+    h.app.set_focused(false);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.0)], "muted in the background");
+    h.app.set_focused(true);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.8 * 0.8)], "back in front");
+}
+
+#[test]
 fn still_scenes_keep_the_radio_off() {
     let setup = crate::SceneSetup {
         still: true,
@@ -1813,11 +1862,33 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     });
     assert_eq!(h.app.ui().quality(), Quality::Deck);
     assert_eq!(h.app.scene_view(0.0, 1.6).quality.cascades, 2);
-    // Low on the Video page: cheaper shadows, 75% resolution, saved.
+    assert_eq!(
+        h.app.frame_rate(),
+        FrameRate::Panel,
+        "the panel's rate everywhere"
+    );
+    h.app.set_panel_hz(90.0);
+    // Battery on the Video page: the Deck's knobs at 85%, every other refresh.
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Video)]);
     h.focus_on(ItemId::Quality);
     h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.settings().quality, Some(Quality::Battery));
+    assert_eq!(h.app.settings().resolution_scale, 0.85);
+    assert_eq!(h.app.frame_rate(), FrameRate::Half);
+    assert!(h.hud_text().contains("45 fps"), "{}", h.hud_text());
+    // 90 Hz offers 45 and 30 and no slower: one more step comes round to the panel's.
+    h.focus_on(ItemId::FrameRate);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.frame_rate(), FrameRate::Third);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.frame_rate(), FrameRate::Panel);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.frame_rate(), FrameRate::Third);
+    // Low: cheaper shadows, 75% resolution, saved; the cap stays.
+    h.focus_on(ItemId::Quality);
+    h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
+    assert_eq!(h.app.frame_rate(), FrameRate::Third);
     assert_eq!(h.app.settings().resolution_scale, 0.75);
     let low = h.app.renderer_options().quality;
     assert_eq!(low, Quality::Low.render(0.75));
@@ -1826,6 +1897,7 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     h.pad(PadButton::Start);
     let saved = store.0.borrow().clone().expect("saved");
     assert!(saved.contains("\"quality\": \"low\""), "{saved}");
+    assert!(saved.contains("\"frame_rate\": \"third\""), "{saved}");
     // A forced preset wins for the session with its own scale, unsaved.
     h.app.force_quality(Some(Quality::Ultra));
     assert_eq!(
@@ -1833,4 +1905,8 @@ fn quality_presets_apply_to_the_renderer_and_save() {
         Quality::Ultra.render(1.0)
     );
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
+    // `--quality battery` brings its cap too, for the session.
+    h.app.force_quality(Some(Quality::Battery));
+    assert_eq!(h.app.frame_rate(), FrameRate::Half);
+    assert_eq!(h.app.settings().frame_rate, FrameRate::Third);
 }
