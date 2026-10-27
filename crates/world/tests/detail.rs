@@ -378,8 +378,10 @@ fn lights_are_the_lamps_signs_and_shops() {
             LightKind::Neon => {
                 neon += 1;
                 let by_sign = signs.iter().any(|s| (*s - q).length() < 2.0);
+                // 1.2 m out from its sign, which on a strip mall's mansard canopy stands up
+                // to 3 m out from the wall.
                 assert!(
-                    wall < 2.0 || by_sign,
+                    wall < 4.5 || by_sign,
                     "neon light at {:?} by no sign",
                     l.pos
                 );
@@ -402,10 +404,10 @@ fn lights_are_the_lamps_signs_and_shops() {
 /// with `cargo test -p world --test detail -- --nocapture` (it prints the table), check the
 /// coast screenshots, and commit the new values in their own commit saying why they moved.
 const GOLDEN: [u64; 4] = [
-    0xA280_24EC_D701_0B02,
-    0x25F8_23FF_C8DE_E1A2,
-    0x549C_F3F9_5EC2_3DFF,
-    0xCB26_52CA_2B33_B9D8,
+    0x1E45_9EDE_5C3C_5916,
+    0xCAF2_F5D1_3B8F_E50E,
+    0x8FF9_995E_CE2A_C45B,
+    0x4AB5_3D7D_3AD8_0FBD,
 ];
 
 /// The detail is deterministic, valid and pinned.
