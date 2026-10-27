@@ -220,6 +220,8 @@ pub enum Detail {
     ChromeTrim,
     /// Textured roof cover in the accent color.
     VinylRoof,
+    /// A landau top: the textured cover over the rear half of the roof only.
+    LandauRoof,
     /// Twin stripes over hood, roof and deck in the accent color.
     RallyStripes,
     MudFlaps,

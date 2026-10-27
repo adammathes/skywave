@@ -1,8 +1,8 @@
 // Prescott Landau body: a late-70s-into-80s mid-size sedan with a landau vinyl roof.
 //
 // Intent: a crisp three-box sedan dressed up. Two pairs of square lamps either side of an
-// egg-crate grille, a long hood, a tall roof under a textured vinyl cover with small opera
-// windows in wide rear pillars, a short trunk and a squared tail. Chrome bumpers, belt
+// egg-crate grille, a long hood, a tall roof whose rear half wears a textured landau cover,
+// small opera windows in wide blind rear pillars, a short trunk and a squared tail. Chrome bumpers, belt
 // molding and rockers, turbine wheels. Generic period cues only.
 //
 // Units are meters; x runs rearward from the nose, y up from the ground. Layout:
@@ -23,14 +23,14 @@ ShapeSpec(
     glass: Glass(
         windshield: (1.40, 1.92),
         backlight: (3.30, 3.76),
-        side: [(1.48, 2.46), (2.56, 2.96), (3.06, 3.18)],
+        side: [(1.48, 2.46), (2.56, 2.88), (3.04, 3.15)],
     ),
     wheels: Wheels(radius: 0.33, width: 0.20, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.74, track: 1.50),
     front: Front(lights: Quad, grille: Egg, bumper: Chrome, bumper_y: (0.30, 0.46)),
     rear: Rear(lights: Dual, spoiler: None, bumper: Chrome, bumper_y: (0.31, 0.46)),
     seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.82, creases: [(0.10, 0.70, 4.95, 0.72)]),
     parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Turbine, hubcaps: false, whitewalls: true),
-    details: [ChromeTrim, VinylRoof, Badge(Circle)],
+    details: [ChromeTrim, LandauRoof, Badge(Circle)],
     // Champagne, light blue, jade, white, maroon, silver, cream over brown.
     palette: ["#cdbb96", "#9db3c8", "#4b7a66", "#ecebe4", "#6c2230", "#bcbec0", "#e6dcc0/#5c4230"],
     // The vinyl roof: dark brown.

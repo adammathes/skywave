@@ -117,7 +117,8 @@ impl<'a, 'b> Parts<'a, 'b> {
                         self.side_molding();
                     }
                 }
-                Detail::VinylRoof if hardtop => self.vinyl_roof(),
+                Detail::VinylRoof if hardtop => self.vinyl_roof(false),
+                Detail::LandauRoof if hardtop => self.vinyl_roof(true),
                 Detail::RallyStripes if self.lod0() => self.rally_stripes(),
                 Detail::MudFlaps => self.mud_flaps(),
                 Detail::RoofRack if hardtop => self.roof_rack(),
@@ -1718,11 +1719,27 @@ impl<'a, 'b> Parts<'a, 'b> {
         (g.windshield.1 + 0.02, g.backlight.0 - 0.02)
     }
 
-    fn vinyl_roof(&mut self) {
+    /// The roof cover, or with `landau` its rear half only, wrapping down the blind rear
+    /// pillars behind the last side window.
+    fn vinyl_roof(&mut self, landau: bool) {
         let (s0, s1) = self.roof_spans();
+        let s0 = if landau { (s0 + s1) * 0.5 } else { s0 };
         let f = self.b.frame((s0 + s1) * 0.5);
         let x = f.z_re - 0.01;
-        self.surface_patch(s0, s1, -x, x, 0.004, self.m.accent.uv(Uv::Top), 4);
+        let vinyl = self.m.accent.uv(Uv::Top);
+        self.surface_patch(s0, s1, -x, x, 0.004, vinyl, 4);
+        if !landau {
+            return;
+        }
+        let g = &self.b.spec.glass;
+        let a = g.side.last().map_or(s0, |w| w.1 + 0.015);
+        let c = s1 + 0.02;
+        let (fa, fc) = (self.b.frame(a), self.b.frame(c));
+        let low = [fa.y_ledge + 0.012, fc.y_ledge + 0.012];
+        let high = [fa.y_edge - 0.03, (fc.y_edge - 0.03).max(low[1] + 0.02)];
+        for sx in [-1.0f32, 1.0] {
+            self.side_patch(sx, a, c, low, high, 0.004, vinyl);
+        }
     }
 
     fn rally_stripes(&mut self) {

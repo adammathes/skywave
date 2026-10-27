@@ -898,6 +898,7 @@ fn every_option_builds() {
         Detail::WoodPanel,
         Detail::ChromeTrim,
         Detail::VinylRoof,
+        Detail::LandauRoof,
         Detail::RallyStripes,
         Detail::MudFlaps,
         Detail::RoofRack,
