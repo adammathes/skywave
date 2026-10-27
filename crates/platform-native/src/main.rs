@@ -79,6 +79,9 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 /// same figure the web build uses.
 const PIXELS_PER_NOTCH: f64 = 100.0;
 
+/// Music folders put on the dial per frame at most (each rebuilds the dial's channels).
+const MUSIC_FOLDERS_PER_FRAME: usize = 4;
+
 /// Frames left out of the `--frames` summary while the town streams in and caches warm.
 const SUMMARY_WARMUP_FRAMES: usize = 60;
 
@@ -804,8 +807,10 @@ struct Shell {
     sfx: Option<sfx::Sfx>,
     /// The car radio's player, when there is a sink to play it and it is not turned off.
     radio: Option<radio::Player>,
-    /// The music folder's stations as the scan finds them.
+    /// The music folder's stations, once the scan is done.
     music: Option<std::sync::mpsc::Receiver<music::Folder>>,
+    /// The folders put on the dial this session.
+    music_paths: Vec<String>,
     /// What the window title last showed: the station playing and the player's title count.
     title: (Option<usize>, u32),
 }
@@ -823,10 +828,24 @@ impl Shell {
             self.app.radio_event(event);
         }
         if let Some(found) = &self.music {
-            // Kept: the same folder is scanned again next session.
-            while let Ok(f) = found.try_recv() {
+            // A few a frame, so a big library never stalls one. Kept: the same folder is
+            // scanned again next session.
+            for f in found.try_iter().take(MUSIC_FOLDERS_PER_FRAME) {
+                self.music_paths.push(f.path.clone());
                 self.app
                     .add_music_folder(&f.path, &f.name, f.tracks, false, true);
+            }
+        }
+        let forgotten = self.app.take_forgotten_music();
+        if !forgotten.is_empty() {
+            // Removed on the Audio page: the scan leaves them out from now on.
+            let paths = if forgotten.iter().any(|p| p == "*") {
+                self.music_paths.clone()
+            } else {
+                forgotten
+            };
+            if let Some(file) = music::ignore_file() {
+                music::ignore(&file, &paths);
             }
         }
         for cmd in self.app.radio_commands() {
@@ -1129,7 +1148,10 @@ fn main() -> ExitCode {
     let music = radio
         .as_ref()
         .and_then(|_| music::default_dir(opts.music.as_deref()))
-        .map(music::scan_in_background);
+        .map(|dir| {
+            let ignored = music::ignore_file().map_or(Vec::new(), |f| music::load_ignored(&f));
+            music::scan_in_background(dir, ignored)
+        });
     let mut shell = Shell {
         app,
         opts,
@@ -1149,6 +1171,7 @@ fn main() -> ExitCode {
         sfx,
         radio,
         music,
+        music_paths: Vec::new(),
         title: (None, 0),
     };
     if let Err(e) = event_loop.run_app(&mut shell) {

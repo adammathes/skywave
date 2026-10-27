@@ -5,7 +5,9 @@
 //!
 //! It reports `Started` once the prebuffer is in, like a stream, and `Ended` once the
 //! whole file has been played, the ring drained (so the next track does not cut its
-//! tail). A file that does not open or holds no audio it decodes reports `Failed`, and the
+//! tail). A file ends with one prebuffer of silence: the audio callback waits for that much
+//! in the ring before it plays (at a track's start, and after the ring ran dry), so without
+//! it a track's last fraction of a second could sit unplayed and `Ended` never come. A file that does not open or holds no audio it decodes reports `Failed`, and the
 //! radio skips to the next track.
 
 use std::fs::File;
@@ -13,14 +15,14 @@ use std::io::{Read, Seek, SeekFrom};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use audio::music::{self, HEAD_BYTES};
 use audio::PlayerEvent;
 
-use super::decode::Mp3;
+use super::decode::{Mp3, RATE};
 use super::ring::Ring;
-use super::stream::{Note, Stream};
+use super::stream::{Note, Stream, PREBUFFER_SECONDS};
 
 /// How it went.
 #[derive(Debug, PartialEq, Eq)]
@@ -38,8 +40,11 @@ pub fn play(path: &str, start_s: f32, token: u32, epoch: u32, ring: &Ring, notes
     let event = match decode_file(path, start_s, &mut w) {
         Ok(Outcome::Gone) => return,
         Ok(Outcome::Ended) => {
-            // Let the callback play what is still in the ring.
-            while w.wanted() && ring.available() > 0 {
+            // Let the callback play what is still in the ring; give up a second after it
+            // should have (no device draining it, say).
+            let left_s = ring.available() as f32 / (RATE as f32 * 2.0);
+            let deadline = Instant::now() + Duration::from_secs_f32(left_s + 1.0);
+            while w.wanted() && ring.available() > 0 && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(20));
             }
             if !w.wanted() {
@@ -81,7 +86,10 @@ fn decode_file(path: &str, start_s: f32, w: &mut Stream) -> Result<Outcome, Stri
     if mp3.frames == 0 {
         return Err("no MP3 audio in it".into());
     }
-    // Shorter than the prebuffer, it still played.
+    let tail = vec![0.0; (PREBUFFER_SECONDS * RATE as f32) as usize * 2];
+    if w.write(&tail).is_err() {
+        return Ok(Outcome::Gone);
+    }
     w.mark_started();
     Ok(Outcome::Ended)
 }
@@ -136,7 +144,6 @@ pub mod tests {
     use super::*;
     use crate::radio::decode::tests::silent_frame;
     use std::sync::mpsc;
-    use std::time::Instant;
 
     /// An ID3v2.3 tag with these text frames (`TIT2`, `TPE1`, ...).
     pub fn id3(frames: &[(&str, &str)]) -> Vec<u8> {
@@ -169,7 +176,7 @@ pub mod tests {
         f
     }
 
-    fn scratch(name: &str, bytes: &[u8]) -> String {
+    pub fn scratch(name: &str, bytes: &[u8]) -> String {
         let dir = std::env::temp_dir().join(format!("skywave-file-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join(name);
@@ -218,8 +225,8 @@ pub mod tests {
                 ev(PlayerEvent::Ended { token: 9 })
             ]
         );
-        // 200 frames of 1152 samples at 44.1 kHz, as 48 kHz stereo.
-        let want = 200.0 * 1152.0 * 48_000.0 / 44_100.0 * 2.0;
+        // 200 frames of 1152 samples at 44.1 kHz, as 48 kHz stereo, then the silent tail.
+        let want = 200.0 * 1152.0 * 48_000.0 / 44_100.0 * 2.0 + 24_000.0;
         assert!((read as f64 - want).abs() < 2400.0, "{read} vs {want}");
     }
 
@@ -233,10 +240,8 @@ pub mod tests {
             Some(&Note::Event(PlayerEvent::Ended { token: 9 }))
         );
         let whole = 200.0 * 1152.0 * 48_000.0 / 44_100.0 * 2.0;
-        assert!(
-            (read as f64 / whole - 0.5).abs() < 0.05,
-            "{read} of {whole}"
-        );
+        let played = read as f64 - 24_000.0;
+        assert!((played / whole - 0.5).abs() < 0.05, "{played} of {whole}");
     }
 
     #[test]

@@ -6,6 +6,12 @@
 //! folder is one station". Titles and lengths come from `audio::music::probe` on the first
 //! 64 KiB of each file, as on the web; the radio's seeded shuffle and resume do the rest.
 //! Only MP3 plays natively (ADR 0006). Nothing plays until the power key, as on the web.
+//!
+//! At most [`MAX_STATIONS`] folders become stations (by name), and the shell adds them a
+//! few per frame, so a large library never stalls a frame. "Remove music folders" on the
+//! Audio page writes the folders to an ignore list beside the settings
+//! (`music-ignored.txt`, one path a line; delete a line to bring a folder back), which
+//! later scans skip.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -17,6 +23,10 @@ use audio::music::{self, Track, HEAD_BYTES, MAX_TRACKS};
 
 /// Folders deeper than this below a station's folder are not searched.
 const MAX_DEPTH: usize = 8;
+/// Stations a music folder makes at most: plenty for a dial.
+pub const MAX_STATIONS: usize = 64;
+/// The ignore list's file name, beside `settings.json`.
+const IGNORE_FILE: &str = "music-ignored.txt";
 
 /// A folder of music, ready for `App::add_music_folder`.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,13 +41,16 @@ pub struct Folder {
 /// there is one, else the Music folder in `home`.
 pub fn music_dir(arg: Option<&Path>, exe: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
     if let Some(dir) = arg {
-        return Some(dir.to_path_buf());
+        // Absolute, so station ids do not depend on the working directory.
+        return Some(fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf()));
     }
     let beside = exe.and_then(Path::parent).map(|d| d.join("music"));
     if let Some(dir) = beside.filter(|d| d.is_dir()) {
         return Some(dir);
     }
-    home.map(|h| h.join("Music")).filter(|d| d.is_dir())
+    home.filter(|h| h.is_absolute())
+        .map(|h| h.join("Music"))
+        .filter(|d| d.is_dir())
 }
 
 /// [`music_dir`] for this process: the executable's path and `HOME` (`USERPROFILE` on
@@ -50,13 +63,18 @@ pub fn default_dir(arg: Option<&Path>) -> Option<PathBuf> {
     music_dir(arg, exe.as_deref(), home.as_deref())
 }
 
-/// Scans `root` on a background thread; its folders arrive one by one.
-pub fn scan_in_background(root: PathBuf) -> Receiver<Folder> {
+/// Scans `root` on a background thread, leaving out the folders in `ignored`; the stations
+/// arrive when the scan is done.
+pub fn scan_in_background(root: PathBuf, ignored: Vec<String>) -> Receiver<Folder> {
     let (tx, rx) = mpsc::channel();
     let spawned = thread::Builder::new()
         .name("music-scan".into())
         .spawn(move || {
-            let folders = scan(&root);
+            if !root.is_dir() {
+                log::warn!("music: {} is not a folder", root.display());
+                return;
+            }
+            let folders = scan(&root, &ignored);
             log::info!(
                 "music: {} station(s) from {}",
                 folders.len(),
@@ -74,20 +92,65 @@ pub fn scan_in_background(root: PathBuf) -> Receiver<Folder> {
     rx
 }
 
-/// The stations of `root`: one per folder in it, then its loose files; folders without
-/// MP3s are left out.
-pub fn scan(root: &Path) -> Vec<Folder> {
+/// The stations of `root`: one per folder in it, then its loose files, at most
+/// [`MAX_STATIONS`]; folders without MP3s and those in `ignored` are left out.
+pub fn scan(root: &Path, ignored: &[String]) -> Vec<Folder> {
+    let wanted = |p: &Path| !ignored.iter().any(|i| Path::new(i) == p);
     let mut out = Vec::new();
     let (dirs, files) = list(root);
-    for dir in dirs {
+    for dir in dirs.into_iter().filter(|d| wanted(d)) {
+        if out.len() == MAX_STATIONS {
+            log::warn!("music: more than {MAX_STATIONS} folders; the rest are left out");
+            return out;
+        }
         let mut paths = Vec::new();
         collect(&dir, 0, &mut paths);
         let name = dir.file_name().map(|n| n.to_string_lossy().into_owned());
         out.extend(folder(&dir, name.unwrap_or_default(), &paths));
     }
-    let name = root.file_name().map(|n| n.to_string_lossy().into_owned());
-    out.extend(folder(root, name.unwrap_or_default(), &files));
+    if out.len() < MAX_STATIONS && wanted(root) {
+        let name = root.file_name().map(|n| n.to_string_lossy().into_owned());
+        out.extend(folder(root, name.unwrap_or_default(), &files));
+    }
     out
+}
+
+/// Where the ignore list lives: beside the settings file.
+pub fn ignore_file() -> Option<PathBuf> {
+    crate::settings::settings_path(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    )
+    .map(|p| p.with_file_name(IGNORE_FILE))
+}
+
+/// The folders in the ignore list at `file` (none when it is missing).
+pub fn load_ignored(file: &Path) -> Vec<String> {
+    fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Adds `paths` to the ignore list at `file`.
+pub fn ignore(file: &Path, paths: &[String]) {
+    let mut list = load_ignored(file);
+    for p in paths {
+        if !list.contains(p) {
+            list.push(p.clone());
+        }
+    }
+    let text: String = list.iter().map(|p| format!("{p}\n")).collect();
+    let written = file
+        .parent()
+        .map_or(Ok(()), fs::create_dir_all)
+        .and_then(|()| fs::write(file, text));
+    if let Err(e) = written {
+        log::warn!("music: cannot write {}: {e}", file.display());
+    }
 }
 
 fn folder(dir: &Path, name: String, paths: &[PathBuf]) -> Option<Folder> {
@@ -114,10 +177,15 @@ fn list(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
         let Ok(kind) = entry.file_type() else {
             continue;
         };
+        // Hidden entries: dot folders, and the `._*.mp3` resource forks a Mac leaves on
+        // cards it fills.
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let path = entry.path();
         if kind.is_dir() {
             dirs.push(path);
-        } else if is_mp3(&path) && !kind.is_dir() {
+        } else if is_mp3(&path) {
             files.push(path);
         }
     }
@@ -144,7 +212,8 @@ fn is_mp3(path: &Path) -> bool {
 }
 
 /// The track of the file at `path`: its title, artist and length from its head, keyed by
-/// its full path (what `PlayFile` gets back).
+/// its full path (what `PlayFile` gets back). A file without a readable MPEG audio frame
+/// (empty, or not MP3 after all) is left out.
 fn track(path: &Path) -> Option<Track> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -160,6 +229,7 @@ fn track(path: &Path) -> Option<Track> {
         file.take(4096).read_to_end(&mut audio).ok()?;
     }
     let probe = music::probe(&head, &audio, len);
+    probe.secs?;
     let key = path.to_string_lossy().into_owned();
     let name = path.file_name()?.to_string_lossy().into_owned();
     Some(Track::new(key, &name, &probe))
@@ -195,7 +265,11 @@ mod tests {
         put(&root.join("Beach Mix/cover.jpg"), b"not music");
         put(&root.join("Empty/notes.txt"), b"nothing");
         put(&root.join("loose.mp3"), &song("Alone", "Solo"));
-        let stations = scan(&root);
+        put(&root.join("Beach Mix/._b.mp3"), b"Mac resource fork");
+        put(&root.join("Beach Mix/empty.mp3"), b"");
+        put(&root.join("Beach Mix/renamed.mp3"), &[0x55; 20_000]);
+        put(&root.join(".hidden/x.mp3"), &mp3_file(40, &[]));
+        let stations = scan(&root, &[]);
         let names: Vec<&str> = stations.iter().map(|f| f.name.as_str()).collect();
         let root_name = root.file_name().unwrap().to_string_lossy().into_owned();
         assert_eq!(names, ["Beach Mix", root_name.as_str()]);
@@ -221,7 +295,11 @@ mod tests {
         )
         .unwrap();
         assert!(ch.id.starts_with("files_") && ch.is_files());
-        assert_eq!(scan(&root), stations, "the same folder scans the same");
+        assert_eq!(scan(&root, &[]), stations, "the same folder scans the same");
+        // An ignored folder is left out.
+        let ignored = [stations[0].path.clone()];
+        let names: Vec<String> = scan(&root, &ignored).into_iter().map(|f| f.name).collect();
+        assert_eq!(names, [root_name]);
     }
 
     #[test]
@@ -236,6 +314,10 @@ mod tests {
             music_dir(Some(flag), Some(&exe), Some(&home)),
             Some(flag.to_path_buf())
         );
+        // A relative flag becomes absolute; a relative home is ignored.
+        let rel = music_dir(Some(Path::new(".")), None, None).unwrap();
+        assert!(rel.is_absolute(), "{}", rel.display());
+        assert_eq!(music_dir(None, None, Some(Path::new("relative"))), None);
         assert_eq!(
             music_dir(None, Some(&exe), Some(&home)),
             Some(home.join("Music"))
@@ -250,6 +332,27 @@ mod tests {
 
     #[test]
     fn a_missing_folder_has_no_stations() {
-        assert!(scan(Path::new("/nonexistent/skywave/music")).is_empty());
+        assert!(scan(Path::new("/nonexistent/skywave/music"), &[]).is_empty());
+    }
+
+    #[test]
+    fn stations_stop_at_the_cap() {
+        let root = dir("many");
+        for i in 0..MAX_STATIONS + 3 {
+            put(&root.join(format!("f{i:03}/a.mp3")), &mp3_file(4, &[]));
+        }
+        put(&root.join("loose.mp3"), &mp3_file(4, &[]));
+        let stations = scan(&root, &[]);
+        assert_eq!(stations.len(), MAX_STATIONS);
+        assert_eq!(stations[0].name, "f000");
+    }
+
+    #[test]
+    fn the_ignore_list_round_trips() {
+        let file = dir("ignore").join("cfg/music-ignored.txt");
+        assert!(load_ignored(&file).is_empty());
+        ignore(&file, &["/m/a".into(), "/m/b".into()]);
+        ignore(&file, &["/m/b".into(), "/m/c".into()]);
+        assert_eq!(load_ignored(&file), ["/m/a", "/m/b", "/m/c"]);
     }
 }
