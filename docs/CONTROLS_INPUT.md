@@ -25,8 +25,19 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
 | Pause/menu | button | Esc | Start / Options (tap) |
 | Screenshot | button | F12 | — |
-| Debug overlay | button | F3 | — |
+| Performance overlay (`DebugOverlay`) | button | F3 | — |
 | Controls card (`Controls`) | button | H, F1 | Start / Options held 1 s (also pause menu › Show controls) |
+
+F3 cycles the performance overlay Off → FPS → Full → Off. FPS is the frame rate alone (one decimal, the
+same average the full overlay shows) in the top left corner, which the driving HUD leaves empty; Full is
+every counter and the frame graph. The mode is saved (`hud.overlay`: `"off"`, `"fps"` or `"full"`; default
+off) and is also on Settings › HUD › Performance overlay. Any menu (pause, settings, vehicle select,
+worlds), the full map and the controls card hide the overlay while open and bring it back when they close,
+without changing the mode. F3 still cycles the saved mode under a menu, so it can be set from there; it
+shows once the menu closes. The window in the background hides it too. While a station toast is up the FPS
+number sits below its two lines (a long station name reaches the corner at large UI scales). Holding F3
+and pressing C (Camera cycle) toggles the free-fly camera; the F3 press that starts the chord also moves
+the overlay one mode.
 
 While the full map is open the sim keeps running, but the car gets no driving input (it coasts): the menu
 directions (arrows, d-pad, left stick) pan the map, Map zoom and the wheel zoom it, and Map toggle, Back or
