@@ -96,16 +96,15 @@ fn fs_bloom_down(in: BloomOut) -> @location(0) vec4<f32> {
 // 3×3 tent over the smaller level, one of its texels wide (shared with the tonemap pass).
 fn tent9(src: texture_2d<f32>, uv: vec2<f32>) -> vec3<f32> {
     let t = 1.0 / vec2<f32>(textureDimensions(src));
-    let s = bloom_sampler;
-    var c = textureSampleLevel(src, s, uv, 0.0).rgb * 4.0;
-    c += (textureSampleLevel(src, s, uv + vec2<f32>(-t.x, 0.0), 0.0).rgb
-        + textureSampleLevel(src, s, uv + vec2<f32>(t.x, 0.0), 0.0).rgb
-        + textureSampleLevel(src, s, uv + vec2<f32>(0.0, -t.y), 0.0).rgb
-        + textureSampleLevel(src, s, uv + vec2<f32>(0.0, t.y), 0.0).rgb) * 2.0;
-    c += textureSampleLevel(src, s, uv - t, 0.0).rgb
-        + textureSampleLevel(src, s, uv + t, 0.0).rgb
-        + textureSampleLevel(src, s, uv + vec2<f32>(-t.x, t.y), 0.0).rgb
-        + textureSampleLevel(src, s, uv + vec2<f32>(t.x, -t.y), 0.0).rgb;
+    var c = textureSampleLevel(src, bloom_sampler, uv, 0.0).rgb * 4.0;
+    c += (textureSampleLevel(src, bloom_sampler, uv + vec2<f32>(-t.x, 0.0), 0.0).rgb
+        + textureSampleLevel(src, bloom_sampler, uv + vec2<f32>(t.x, 0.0), 0.0).rgb
+        + textureSampleLevel(src, bloom_sampler, uv + vec2<f32>(0.0, -t.y), 0.0).rgb
+        + textureSampleLevel(src, bloom_sampler, uv + vec2<f32>(0.0, t.y), 0.0).rgb) * 2.0;
+    c += textureSampleLevel(src, bloom_sampler, uv - t, 0.0).rgb
+        + textureSampleLevel(src, bloom_sampler, uv + t, 0.0).rgb
+        + textureSampleLevel(src, bloom_sampler, uv + vec2<f32>(-t.x, t.y), 0.0).rgb
+        + textureSampleLevel(src, bloom_sampler, uv + vec2<f32>(t.x, -t.y), 0.0).rgb;
     return c * (1.0 / 16.0);
 }
 
