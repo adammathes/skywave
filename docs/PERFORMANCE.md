@@ -168,9 +168,9 @@ not quoted. Deck preset, 2026-10-27:
 | coast-night-golden | 885k | 1024k → 139k | 2089k (2.36×) | 885k (1.00×) |
 
 Drawing the meshes front to back instead (runs of one mesh sorted by distance, no extra
-pass) only got to 2.04–2.22× (most overdraw is inside a chunk's own mesh) and changed
-which of two coplanar meshes wins (a car's trim over its body) as the distances changed,
-a flicker while driving; it was taken out.
+pass) only got to 2.04–2.22× (most overdraw is inside a chunk's own mesh), and it would
+let the camera's distances decide which of two coplanar meshes wins the depth test, which
+can flicker while driving; it was taken out.
 
 At night the light loop runs 15.0 M times a frame before, 6.2 M with the
 pre-pass (7.0 per fragment: the 36 instances with a full set of 8 lights are chunk tiles
