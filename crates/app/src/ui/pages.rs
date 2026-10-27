@@ -2,7 +2,8 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Reset car · Vehicle › · Settings › · Quit (native only)
+//! Pause:     Resume · Reset car · Vehicle › · Settings › · Controls (the controls card) ·
+//!            Quit (native only)
 //! Vehicle:   Car (left/right through every built-in car) · Paint (its palette) · Drive
 //!            this car; a turntable preview and the car's specs beside them, and Select on
 //!            any row swaps the car in where you are
@@ -20,7 +21,7 @@
 //! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (the
 //!            panel's, then its whole divisors: 45 / 30 at 90 Hz) · UI scale · Resolution
 //!            scale · Bloom · Performance overlay
-//! HUD:       Minimap · Rotate with car · Minimap zoom
+//! HUD:       Minimap · Rotate with car · Minimap zoom · Show controls at start
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
 //!            Radio in background · Stations › · [web: Add stream URL] · [Remove added
 //!            streams, when there are some] · [web: Add music folder, or Pick music folder
@@ -75,6 +76,8 @@ pub enum ItemId {
     Resume,
     /// Put the car back on the nearest lane (and close the menu).
     ResetCar,
+    /// Show the controls card over the menu.
+    Controls,
     Quit,
     Open(Page),
     /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`] (in the
@@ -115,6 +118,7 @@ pub enum ItemId {
     Minimap,
     MinimapRotate,
     MinimapZoom,
+    ControlsAtStart,
     MasterVolume,
     /// The radio in the background: keep playing (0) or mute (1).
     BackgroundRadio,
@@ -282,6 +286,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             add(id, "Vehicle", w);
             let (id, w) = open(Page::Settings);
             add(id, "Settings", w);
+            add(ItemId::Controls, "Controls", Widget::Action);
             if ctx.can_quit {
                 add(ItemId::Quit, "Quit", Widget::Action);
             }
@@ -578,6 +583,11 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     options: &MINIMAP_RANGE_NAMES,
                     index,
                 },
+            );
+            add(
+                ItemId::ControlsAtStart,
+                "Show controls at start",
+                Widget::Toggle(s.controls_at_start),
             );
         }
         Page::Audio => {

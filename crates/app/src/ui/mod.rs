@@ -12,7 +12,11 @@
 //!
 //! The UI also owns the car radio ([`CarRadio`]): its settings live with the others, the
 //! station keys act while driving, and its toast and dash text are part of the HUD.
+//!
+//! The controls card ([`controls`]) is an overlay over all of it: it shows at the start of
+//! a running game and on the Controls action, and pauses nothing.
 
+pub mod controls;
 mod draw;
 mod menu;
 mod names;
@@ -181,6 +185,7 @@ pub struct Ui {
     pub(crate) peds: (usize, f32),
     /// Adapter and backend, for the overlay.
     gpu_label: String,
+    controls: controls::ControlsCard,
 }
 
 /// The display's refresh rate until the platform reports it, Hz.
@@ -237,6 +242,7 @@ impl Ui {
             traffic: (0, 0.0),
             peds: (0, 0.0),
             gpu_label: String::new(),
+            controls: controls::ControlsCard::default(),
         }
     }
 
@@ -560,6 +566,10 @@ impl Ui {
             self.dirty = true;
             self.save_if_dirty();
         }
+        if self.capture.is_none() && self.controls_input(s, dt) {
+            self.repeat.reset(&MenuInput::from_state(s));
+            return;
+        }
         if self.capture.is_some() {
             self.update_capture(mapper, dt);
             // The capturing press may also be a menu action: swallow this frame's menu input.
@@ -741,6 +751,14 @@ impl Ui {
                 self.settings.minimap_rotate = on;
                 self.dirty = true;
             }
+            ItemId::ControlsAtStart => {
+                self.settings.controls_at_start = on;
+                // Switched back on, it gets its sessions again.
+                if on {
+                    self.settings.controls_dismissed = 0;
+                }
+                self.dirty = true;
+            }
             ItemId::CameraShake => {
                 self.settings.camera_shake = on;
                 self.dirty = true;
@@ -819,6 +837,7 @@ impl Ui {
     fn activate(&mut self, id: ItemId) {
         match id {
             ItemId::Resume => self.close(),
+            ItemId::Controls => self.open_controls(),
             ItemId::ResetCar => {
                 // Back to the road, where the car now is.
                 self.reset_pick = true;
@@ -1048,7 +1067,7 @@ fn covers(b: &Binding, slot: Sign) -> bool {
 /// The binding a captured raw input makes for one row of an action: two-way actions take a
 /// whole stick axis (or a key for one direction), one-way actions the half of the stick
 /// that was pushed; the analog triggers bind as axes for analog actions. Reset on a pad
-/// button is a long press, as by default.
+/// button is a long press, as by default, and so is the controls card.
 pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) -> Binding {
     let half = if value < 0.0 {
         Sign::Negative
@@ -1067,7 +1086,7 @@ pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) ->
         RawInput::PadAxis(PadAxis::L2 | PadAxis::R2) => Binding::new(raw, Sign::Full),
         RawInput::PadAxis(_) if action.is_bipolar() => Binding::new(raw, Sign::Full),
         RawInput::PadAxis(_) => Binding::new(raw, half),
-        RawInput::PadButton(_) if action == Action::Reset => {
+        RawInput::PadButton(_) if matches!(action, Action::Reset | Action::Controls) => {
             Binding::new(raw, Sign::Positive).held_long()
         }
         _ => Binding::new(
@@ -1375,6 +1394,10 @@ impl App {
     /// wait in [`App::take_new_meshes`].
     pub fn set_settings_store(&mut self, store: Box<dyn SettingsStore>) {
         self.ui.set_store(store);
+        // The controls card greets a running game (a still scene is a picture).
+        if !self.still {
+            self.ui.show_controls_at_start();
+        }
         if !self.camera_from_scene {
             self.camera.set_mode(self.ui.settings.camera);
         }

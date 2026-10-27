@@ -200,6 +200,9 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     let mut expected = Vec::new();
     reachable(Page::Pause, &h.app, &mut expected);
     assert_eq!(visited, expected);
+    // The pause menu's Controls item among them.
+    let controls = h.ui().items().iter().position(|i| i.id == ItemId::Controls);
+    assert!(visited.contains(&(Page::Pause, controls.expect("Controls item"))));
     // Pause, Settings, Controls, 2 × (device, bindings, axes, 8 axes), Video, World, About.
     let mut pages: Vec<Page> = visited.iter().map(|v| v.0).collect();
     pages.dedup();
@@ -1984,3 +1987,5 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     assert_eq!(h.app.frame_rate(), FrameRate::Half);
     assert_eq!(h.app.settings().frame_rate, FrameRate::Third);
 }
+
+mod controls;

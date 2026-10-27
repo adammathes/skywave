@@ -20,8 +20,8 @@ use std::fmt;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use super::bindings::{AxisOptions, Binding, Bindings};
-use super::raw::DeviceKind;
+use super::bindings::{AxisOptions, Binding, Bindings, Sign};
+use super::raw::{DeviceKind, Key, RawInput};
 use super::Action;
 
 /// The settings format version written by [`Bindings::to_json`].
@@ -108,20 +108,23 @@ impl Bindings {
 
 fn read_device(out: &mut Bindings, device: DeviceKind, mut section: Map<String, Value>) {
     if let Some(Value::Object(lists)) = section.remove("bindings") {
+        let mut listed = [false; Action::COUNT];
         for (name, list) in lists {
             let (Some(action), Value::Array(items)) = (Action::from_name(&name), list) else {
                 continue;
             };
-            let listed = items.len();
+            listed[action as usize] = true;
+            let count = items.len();
             let parsed: Vec<Binding> = items
                 .into_iter()
                 .filter_map(|v| serde_json::from_value::<Binding>(v).ok())
                 .filter(|b| b.raw.device() == device)
                 .collect();
-            if listed == 0 || !parsed.is_empty() {
+            if count == 0 || !parsed.is_empty() {
                 out.set(device, action, parsed);
             }
         }
+        migrate(out, device, &listed);
     }
     if let Some(Value::Object(axes)) = section.remove("axes") {
         for (name, fields) in axes {
@@ -147,11 +150,32 @@ fn read_device(out: &mut Bindings, device: DeviceKind, mut section: Map<String, 
     }
 }
 
+/// Fits a file written before some actions existed. A file without `Controls` (it came
+/// with H on the keyboard, until then the horn's) has its horn moved to the new default if
+/// it was still on the old one, H alone. Then every action the file does not list keeps only
+/// the default inputs no listed action in its context reads.
+fn migrate(out: &mut Bindings, device: DeviceKind, listed: &[bool; Action::COUNT]) {
+    let old_horn = [Binding::new(RawInput::Key(Key::KeyH), Sign::Positive)];
+    if !listed[Action::Controls as usize] && out.get(device, Action::Horn) == old_horn {
+        out.reset_action(device, Action::Horn);
+    }
+    for action in Action::ALL {
+        if listed[action as usize] {
+            continue;
+        }
+        let keep: Vec<Binding> = out
+            .get(device, action)
+            .iter()
+            .filter(|b| out.find_conflict(action, b).is_none())
+            .copied()
+            .collect();
+        out.set(device, action, keep);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::bindings::Sign;
-    use crate::input::raw::{Key, RawInput};
 
     #[test]
     fn defaults_round_trip() {
@@ -223,6 +247,36 @@ mod tests {
         // A pad binding in the keyboard section is dropped.
         let wrong = r#"{"keyboard_mouse":{"bindings":{"Horn":[{"raw":{"PadAxis":"L2"}}]}}}"#;
         assert_eq!(Bindings::from_json(wrong), Ok(d));
+    }
+
+    #[test]
+    fn a_file_from_before_the_controls_card_keeps_working() {
+        let kb = DeviceKind::KeyboardMouse;
+        let pad = DeviceKind::Gamepad;
+        let key = |k| Binding::new(RawInput::Key(k), Sign::Positive);
+        // Written before Controls existed, the horn on its old default H: H moves to the card.
+        let mut old = Bindings::default();
+        old.set(kb, Action::Horn, vec![key(Key::KeyH)]);
+        old.set(kb, Action::Controls, vec![]);
+        old.set(pad, Action::Controls, vec![]);
+        let text = old.to_json().replace("\"Controls\": [],", "");
+        assert!(!text.contains("Controls"));
+        assert_eq!(Bindings::from_json(&text), Ok(Bindings::default()));
+        // A horn the player put on H themselves (beside another key) stays; the card keeps F1.
+        old.set(kb, Action::Horn, vec![key(Key::KeyH), key(Key::KeyJ)]);
+        let text = old.to_json().replace("\"Controls\": [],", "");
+        let b = Bindings::from_json(&text).unwrap();
+        assert_eq!(b.get(kb, Action::Horn), &[key(Key::KeyH), key(Key::KeyJ)]);
+        assert_eq!(b.get(kb, Action::Controls), &[key(Key::F1)]);
+        assert_eq!(
+            b.get(pad, Action::Controls),
+            Bindings::default().get(pad, Action::Controls)
+        );
+        // A file that lists the card is read as written.
+        let mut new = Bindings::default();
+        new.set(kb, Action::Horn, vec![key(Key::KeyH)]);
+        new.set(kb, Action::Controls, vec![key(Key::F1)]);
+        assert_eq!(Bindings::from_json(&new.to_json()), Ok(new));
     }
 
     #[test]
