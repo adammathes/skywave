@@ -75,17 +75,16 @@ dispatching the next session, and updates statuses as PRs open and merge.
   beams, auto headlights and tell-tales (#29); native radio playback of the station streams (#15:
   rustls+ring and nanomp3-core, ADR 0006 accepted on the owner's word; 13 of 16 stations play
   natively, two are AAC-only and one server lacks the cipher suites rustls ships).
-- Open PRs:   natural map edges (#20, approved; refreshing on main after #24, then merges on green);
-  Sessions building: parking lots
-  (`bldg/parking-lots`, B10); era sports cars with open-top variants
-  (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
-  ; idle frames, frame cap, Battery preset
- pedestrian follow-ups (`m4/peds-followups`: body-width gap in
-  the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
-  road); scenario switching and the era filter (`m8/scenarios`, M8 #1); the rename of
-  two roster cars that shared real model names (#33, now the Gannet GT and the Homestead Wagon). PRs in review:
-  idle frames and the frame cap
-  
+- Open PRs: natural map edges (#20, approved; re-siting the strip goldens to the neon storefront
+  run and the junction goldens to a red-light queue, then merges on green); scenario switching and
+  the era filter (#35, M8 #1; review done, fixing the era-weight index bug, music carry-over, raw
+  stills; merges on green); pedestrian follow-ups (#36; review done, shrinking the turn cover and
+  tightening the creep thresholds; merges on green); car collisions without damage (#38, under
+  review). Sessions building: parking lots (`bldg/parking-lots`, B10); native music folders
+  (`m3/native-radio` restarted on main, NOTES 9c/13); overlay modes (`ui/overlay-modes`, NOTES
+  12); the Deck: tapes, CDs or an MP3 player for the player's own music (`m3/deck`, NOTES 15);
+  the controls card (`ui/controls-help`, NOTES 16). The owner's board (above) is the queue of
+  record for what comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
