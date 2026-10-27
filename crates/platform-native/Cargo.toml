@@ -22,6 +22,9 @@ env_logger.workspace = true
 gilrs.workspace = true
 cpal.workspace = true
 audio.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+nanomp3-core.workspace = true
 
 [dev-dependencies]
 # The no-op device for the culling benchmark (`culling_on_the_coast`).
