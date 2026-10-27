@@ -68,10 +68,10 @@ impl Track {
     }
 }
 
-/// The id of the station made from the folder at `path` (relative to what the user picked
-/// or dropped, the picked folder's name first): `files_` and a hash of the path, so the
-/// dial, the on/off switches and the last station survive a new session, and two folders
-/// with the same name ("Disc 1") stay two stations.
+/// The id of the station made from the folder the platform names `path` (its stable name
+/// for it: on the web the id kept with the folder's handle, natively the folder's full
+/// path): `files_` and a hash of it, so the dial, the on/off switches and the last station
+/// survive a new session, and two folders with the same name ("Disc 1") stay two stations.
 pub fn station_id(path: &str) -> String {
     format!("files_{:08x}", fnv1a(path.as_bytes()) as u32)
 }
