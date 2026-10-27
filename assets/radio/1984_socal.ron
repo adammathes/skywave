@@ -1,71 +1,18 @@
-// Radio preset: 1984 SoCal. Real stations whose stream URLs the broadcasters publish for
-// listening in other players (181.FM's stream links page, Radio Paradise's stream links for
-// WiFi radios and other players, WFMU's playlists, the college stations' own listen links);
-// names are the stations' own. Nothing is rehosted. tools/check-streams.mjs played 5 s of
-// audio from every URL, as the published page asks for it, on the date in `terms_checked`;
-// `verified` turns true after the owner's first listen. Format: crates/audio/src/station.rs,
-// docs/AUDIO_RADIO.md.
+// Radio preset: 1984 SoCal. Ad-free stations only (docs/AUDIO_RADIO.md, "the ad-free rule"):
+// listener-supported, public and college broadcasters that publish their stream URLs for
+// listening in other players, each checked for pre-roll and mid-roll ads as its
+// `ad-free:` note says. Names are the stations' own. Nothing is rehosted.
+// tools/check-streams.mjs plays every URL as the published page asks for it (its Referer
+// and Origin) and warns about a station without an `ad-free:` note; `verified` turns true
+// after the owner's first listen. Format: crates/audio/src/station.rs.
 RadioPreset(
     id: "1984_socal",
     title: "1984 SoCal",
     scenario: "socal_beach_1984",
     stations: [
-        Station(
-            id: "181fm_yachtrock",
-            name: "181.FM Yacht Rock",
-            era: "1970s",
-            format: "yacht rock and smooth soft rock",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-yachtrock_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_mellowgold",
-            name: "181.FM Mellow Gold",
-            era: "1970s",
-            format: "70s and 80s soft rock",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-mellow_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_lite80s",
-            name: "181.FM Lite 80's",
-            era: "1980s",
-            format: "80s soft hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-lite80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_awesome80s",
-            name: "181.FM Awesome 80's",
-            era: "1980s",
-            format: "80s pop and rock hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-awesome80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, its stream says "Always 100% commercial-free"; music from the
+        // first second both times. Terms: URLs published for WiFi radios and other players.
         Station(
             id: "radioparadise_mellow",
             name: "Radio Paradise Mellow Mix",
@@ -80,6 +27,9 @@ RadioPreset(
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, "Always 100% commercial-free" (its icy-description); music
+        // from the first second both times. Terms: URLs published for other players.
         Station(
             id: "radioparadise_main",
             name: "Radio Paradise Main Mix",
@@ -94,6 +44,81 @@ RadioPreset(
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // non-commercial college station (Loyola Marymount), donor-supported; live DJ
+        // talk and music both times, no spots. Terms: the site lists this stream and
+        // external players ("External Streams"), nothing forbids other players.
+        Station(
+            id: "kxlu",
+            name: "KXLU 88.9 FM",
+            era: "mixed",
+            format: "Los Angeles college radio: indie, punk, new wave",
+            source: Stream(
+                urls: ["https://kxlu.streamguys1.com/kxlu-hi"],
+                homepage: "https://www.kxlu.com/",
+                codec: Mp3,
+                bitrate_kbps: 320,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // volunteer-run and donation-supported (no ads on the site or the stream);
+        // music from the first second both times, ICY titles are track credits. Terms: the
+        // channel page publishes this URL and lists outside player apps; no terms forbid it.
+        Station(
+            id: "intergalactic_cbs",
+            name: "Intergalactic FM CBS",
+            era: "1980s",
+            format: "italo, new wave and electro",
+            source: Stream(
+                urls: ["https://radio.intergalactic.fm/1A"],
+                homepage: "https://www.intergalactic.fm/channels/cybernetic-broadcasting-system",
+                codec: Aac,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // non-commercial college station (UC Irvine); both starts landed in a live
+        // talk show, no spots. Terms: the listen page publishes this URL, nothing forbids
+        // other players.
+        Station(
+            id: "kuci",
+            name: "KUCI 88.9 FM",
+            era: "mixed",
+            format: "Irvine college radio: freeform and talk",
+            source: Stream(
+                urls: ["https://streamer.kuci.org/high"],
+                homepage: "https://kuci.org/listen/",
+                codec: Mp3,
+                bitrate_kbps: 320,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // non-commercial college station (UC Santa Barbara); both starts landed in
+        // its news hour, no spots. Terms: the home page lists this secured stream with
+        // its alternate URLs; nothing forbids other players.
+        Station(
+            id: "kcsb",
+            name: "KCSB 91.9 FM",
+            era: "mixed",
+            format: "Santa Barbara college radio: freeform and news",
+            source: Stream(
+                urls: ["https://kcsb.streamguys1.com/live"],
+                homepage: "https://www.kcsb.org/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, commercial-free; music from the first second both times.
+        // Terms: URLs published for WiFi radios and other players.
         Station(
             id: "radioparadise_global",
             name: "Radio Paradise Global Mix",

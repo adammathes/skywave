@@ -5,10 +5,10 @@ The radio is half the experience. It plays **real music the user owns or real st
 ## Stations
 ```
 Station(
-  id: "181fm_yachtrock", name: "181.FM Yacht Rock", era: "1970s",
-  format: "yacht rock and smooth soft rock",
-  source: Stream(urls: ["https://listen.181fm.com/181-yachtrock_128k.mp3", ...],
-                 homepage: "https://www.181.fm/links", codec: Mp3, bitrate_kbps: 128,
+  id: "radioparadise_main", name: "Radio Paradise Main Mix", era: "mixed",
+  format: "eclectic album rock",
+  source: Stream(urls: ["https://stream.radioparadise.com/mp3-128", ...],
+                 homepage: "https://radioparadise.com/listen/stream-links", codec: Mp3, bitrate_kbps: 128,
                  terms_checked: "2026-10-27", verified: false)
         | Files(folder_hint: "yacht-rock"),
 )
@@ -26,47 +26,56 @@ Next/previous station, radio off, volume. Switching plays a 0.5 s dial sweep (st
 
 ### As built (M3, web first)
 - **`crates/audio`** (std, platform-neutral). `Radio` is the switching state machine: `Off`, `Tuning { from, to, t }` (`TUNE_SECONDS`, 0.5 s, of the dial sweep), `Playing { station }`, `Error { station, reason }`. Next/previous from off resume the last station; `\` is the power button. It emits `RadioCommand`s (`Play { url, token }`, `Stop`, `Volume(f32)`), counts its tunes (`Radio::tunes`, which the app copies into `AudioParams::tunes` so the mixer plays the sweep; the automatic move after "no signal" is a tune too) and takes `PlayerEvent`s (`Started`, `Failed`, `Blocked`, each with the token of its `Play`; stale ones are ignored). A failed URL moves to the station's next URL; when none is left the station is in `Error` ("NO SIGNAL" on the dash and in the toast) for `NO_SIGNAL_SECONDS` (2 s), then the radio tunes the next station up the dial by itself. A station that failed is remembered for the session (by id) and skipped by next, previous, power-on and the automatic move, until it plays again; when every station has failed, "NO SIGNAL" stays and the dial turns plainly, so the user can retry. `RadioSettings` (volume, power, last station, disabled stations, added streams, preset per scenario) is the `radio` section of the settings JSON. Native will consume the same commands.
-- **`app::radio`**. The built-in presets, the keys (`]` `[` `\`, d-pad right/left/down), the toast ("1/7  181.FM Yacht Rock" over its format, 3 s; "Press any key for radio" while the browser holds playback), and the dash: in the cockpit view the radio display quad's corners are projected to the screen and the station name is drawn there as HUD text in the display's glow color, scrolling a character at a time when it does not fit. The radio starts with the first frame of a running game, never in a still scene (screenshot goldens stay silent). Settings → Audio (one page with the sound effects' volumes): master, engine, world and radio volume, mute, preset (per scenario), Stations (on/off per station and added stream), "Add stream URL" (web: a text prompt; `https://` only), "Remove added streams". The master volume scales the radio too and mute silences it; while a station plays, its volume setting is `AudioParams::radio`, which ducks the engine and world buses.
+- **`app::radio`**. The built-in presets, the keys (`]` `[` `\`, d-pad right/left/down), the toast ("1/7  Radio Paradise Mellow Mix" over its format, 3 s; "Press any key for radio" while the browser holds playback), and the dash: in the cockpit view the radio display quad's corners are projected to the screen and the station name is drawn there as HUD text in the display's glow color, scrolling a character at a time when it does not fit. The radio starts with the first frame of a running game, never in a still scene (screenshot goldens stay silent). Settings → Audio (one page with the sound effects' volumes): master, engine, world and radio volume, mute, preset (per scenario), Stations (on/off per station and added stream), "Add stream URL" (web: a text prompt; `https://` only), "Remove added streams". The master volume scales the radio too and mute silences it; while a station plays, its volume setting is `AudioParams::radio`, which ducks the engine and world buses.
 - **Web** (`platform-web` + the radio block of `web/index.html`). One hidden `<audio preload="none">` element: `Play` sets its `src` and calls `play()`; `error` events, rejected plays and a stream that neither plays nor errors within 10 s come back as `failed`, a `NotAllowedError` (no user gesture yet) as `blocked`, retried on the next key, click or touch (the key that dismisses the help card counts). The dial sweep is not played here: it comes from the mixer through the sfx worklet, like the engine. Media Session metadata carries the station name. `window.skywaveRadio` is the debug handle (`.log`, `.state`, `.audio`). Nothing is fetched until the user tunes a station.
 
 ## Presets
 Real stations whose broadcasters publish their stream URLs for listening in other players; nothing is rehosted. `verified` stays `false` until the owner has listened from the game.
 
-**The referer rule.** The game is a web page (`https://adammathes.github.io/skywave/`), so every stream request carries that page as its `Referer` and `Origin`, and must be HTTPS (an `http://` stream is blocked as mixed content). A station whose servers refuse requests from other sites, or whose terms do not allow its streams inside third-party players or sites, does not go in a preset, and we never work around a refusal (no `referrerpolicy`, no proxy). SomaFM is out for this reason: its servers answer 403 to a request with a foreign `Referer`, and it does not allow its streams inside third-party sites.
+**The ad-free rule.** Every preset station is ad-free and its terms allow third-party players: listener-supported, public or college broadcasters (and other non-commercial ones) whose published stream URL plays music or their own programming from the first second, with no pre-roll and no inserted mid-roll. Commercial aggregators are out however their streams are labelled: their stitching servers put a pre-roll in front of every connection (181.FM, the first presets, answered as `Server: DAS` with `X-DAS-SessionId`, sent a minute of credit-card spots at a burst before the music, and titled it "THIS STATION WILL CONTINUE AFTER THIS BREAK"; it is the owner's "forced ad at the start"). Underwriting that a public station reads on air within its own programming is not an inserted ad; a spot the stream's server inserts is. Each station carries a `// ad-free: <date>, ...` comment just above it in its preset saying how that was checked and where its terms are; the checker warns about a station without one.
 
-**The checker.** `node tools/check-streams.mjs` (Node 22; behind a proxy add `NODE_USE_ENV_PROXY=1`) asks for every preset URL the way a browser on the page does: HTTPS only, a browser User-Agent, the page's `Referer` and `Origin`, redirects followed. A URL passes when it answers 200 with an `audio/*` content type and sends at least 5 seconds of audio (`bitrate_kbps` × 5 s of bytes) within 15 s. It prints one line per URL (status, content type, bytes, time to the first byte) and exits 1 if any URL fails. All 22 URLs passed on 2026-10-27.
+How a station is checked for ads, before it goes in and when its note is renewed:
+1. Two cold starts of at least 60 s each with `node tools/check-streams.mjs --url <url> --kbps <n> --listen 60 --save <dir>` (it reads a minute of wall time and of audio, prints the ICY titles as they change and keeps the audio with the ICY blocks taken out).
+2. No warning from it: it flags the response headers, redirect hosts and ICY titles of ad insertion (`Server: DAS`, `X-DAS-*`, `X-Ad*`, AdsWizz, Triton/StreamTheWorld and similar hosts, `adw_ad`/`insertionType`/"after this break" titles). A burst of many seconds at the start is not proof of a pre-roll by itself (most Icecast servers burst their buffer), but with a station ID or sponsor line it is.
+3. Listen to the saved audio, or let a speech recognizer transcribe it and read the loudness per 5 s (`ffmpeg -af ebur128`): an ad is a sudden change of content with a different loudness and a spoken pitch ("... is made possible by ...", a product, a phone number). A DJ talking over the station's own show is not an ad.
+4. The terms or stream-links page: the URL is published for listening (a `.pls`, a "listen in your player" link, the station's own listen page), and nothing forbids other players or sites.
+
+**The referer rule.** The game is a web page (`https://adammathes.github.io/skywave/`), so every stream request carries that page as its `Referer` and `Origin`, and must be HTTPS (an `http://` stream is blocked as mixed content). A station whose servers refuse requests from other sites, or whose terms do not allow its streams inside third-party players or sites, does not go in a preset, and we never work around a refusal (no `referrerpolicy`, no proxy). SomaFM is out for this reason: its servers answer 403 to a request with a foreign `Referer`, and it does not allow its streams inside third-party sites. A station that publishes only an `http://` URL goes in when the same host serves the same path over HTTPS.
+
+**The checker.** `node tools/check-streams.mjs` (Node 22; behind a proxy add `NODE_USE_ENV_PROXY=1`) asks for every preset URL the way a browser on the page does: HTTPS only, a browser User-Agent, the page's `Referer` and `Origin`, redirects followed. A URL passes when it answers 200 with an `audio/*` content type and sends at least 5 seconds of audio (`bitrate_kbps` × 5 s of bytes) within 15 s. It prints one line per URL (status, content type, bytes, time to the first byte), a `warn` line for each station without an `ad-free:` note and for each sign of ad insertion, and exits 1 if any URL fails. `--listen <s>`, `--save <dir>` and `--url <url> --kbps <n>` are for checking ads and candidates (above); listening sends `Icy-MetaData: 1` to read the titles, which the page's player does not. All 20 URLs passed with no warning on 2026-10-27.
 
 **Adding a station.**
 1. Find the station's own listen or stream-links page (or its `.pls`/`.m3u` playlist) and read its terms: the stream URL must be published for listening, and nothing may forbid other players. That page goes in `homepage`, today's date in `terms_checked`.
-2. Take the `https://` URL (mirrors in order in `urls`), and its real codec and bitrate (the `icy-br` header, or measured).
-3. The id is lowercase letters, digits and `_`; the name is the station's own name (at most 48 printable ASCII characters).
-4. Run the checker; every URL must pass. Keep a preset at 5 to 7 stations (a test checks).
+2. Check it for ads as above, and write its `// ad-free:` note.
+3. Take the `https://` URL (mirrors in order in `urls`), and its real codec and bitrate (the `icy-br` header, or measured).
+4. The id is lowercase letters, digits and `_`; the name is the station's own name (at most 48 printable ASCII characters).
+5. Run the checker; every URL must pass with no warning. Keep a preset at 5 to 7 stations (a test checks).
+
+Checked on 2026-10-27, each twice from a cold start for a minute: every station below played music or its own live programming from the first second; none had a pre-roll, a break or an ad mark. College stations are live: a cold start can land in a talk show or a news hour (KUCI, KCSB and KXLU did), which is their programming, not an ad.
 
 | Preset | Station | Format | Stream | Published at |
 |---|---|---|---|---|
-| `1984_socal` | 181.FM Yacht Rock | yacht rock and smooth soft rock | `https://listen.181fm.com/181-yachtrock_128k.mp3` (MP3 128) | 181.FM stream links |
-| | 181.FM Mellow Gold | 70s and 80s soft rock | `.../181-mellow_128k.mp3` | |
-| | 181.FM Lite 80's | 80s soft hits | `.../181-lite80s_128k.mp3` | |
-| | 181.FM Awesome 80's | 80s pop and rock hits | `.../181-awesome80s_128k.mp3` | |
-| | Radio Paradise Mellow Mix | mellow rock and soft pop | `https://stream.radioparadise.com/mellow-128` (AAC 128) | Radio Paradise stream links |
+| `1984_socal` | Radio Paradise Mellow Mix | mellow rock and soft pop | `https://stream.radioparadise.com/mellow-128` (AAC 128) | Radio Paradise stream links |
 | | Radio Paradise Main Mix | eclectic album rock | `.../mp3-128` (MP3 128) | |
-| | Radio Paradise Global Mix | world music and eclectic grooves | `.../global-128` (AAC 128) | |
-| `1977_chicago` | 181.FM Soul | classic soul and R&B | `.../181-soul_128k.mp3` | 181.FM stream links |
-| | 181.FM Super 70s | 70s pop and rock hits | `.../181-70s_128k.mp3` | |
+| | KXLU 88.9 FM | LA college radio: indie, punk, new wave | `https://kxlu.streamguys1.com/kxlu-hi` (MP3 320) | kxlu.com's stream links |
+| | Intergalactic FM CBS | italo, new wave and electro | `https://radio.intergalactic.fm/1A` (AAC 128) | its channel page |
+| | KUCI 88.9 FM | Irvine college radio: freeform and talk | `https://streamer.kuci.org/high` (MP3 320) | kuci.org/listen |
+| | KCSB 91.9 FM | Santa Barbara college radio: freeform and news | `https://kcsb.streamguys1.com/live` (MP3 128) | kcsb.org's stream list |
+| | Radio Paradise Global Mix | world music and eclectic grooves | `.../global-128` (AAC 128) | Radio Paradise stream links |
+| `1977_chicago` | WFMU Rock'n'Soul Radio | soul, R&B and rock 'n' roll 45s | `https://stream{2,0}.wfmu.org/rocknsoul` (MP3 128) | WFMU's `wfmu_rock.pls` |
+| | Intergalactic FM Disco Fetish | disco, boogie and soul | `https://radio.intergalactic.fm/2A` (AAC 128) | its channel page |
 | | WDCB 90.9 FM | Chicago jazz and blues | `https://wdcb-ice.streamguys1.com/wdcb128` (MP3 128) | WDCB streaming support page |
-| | 181.FM True Blues | electric and classic blues | `.../181-blues_128k.mp3` | |
 | | WHPK 88.5 FM | Hyde Park college radio | `https://whpk-stream.uchicago.edu/stream` (MP3 256) | whpk.org listen link |
-| | WFMU Rock'n'Soul Radio | soul, R&B and rock 'n' roll 45s | `https://stream{2,0}.wfmu.org/rocknsoul` (MP3 128) | WFMU's `wfmu_rock.pls` |
-| | Radio Paradise Rock Mix | classic and album rock | `.../rock-128` (AAC 128) | |
-| `1986_north_shore` | 181.FM Awesome 80's | 80s pop and rock hits | as above | |
-| | 181.FM Classic Buzz | classic alternative and new wave | `.../181-classicbuzz_128k.mp3` | |
-| | WNUR 89.3 FM | Evanston student freeform, jazz and rock | `https://stream.rcs.revma.com/w4pmmfkdx4zuv` (MP3 ~192) | wnur.org's own player |
-| | 181.FM Lite 80's | 80s soft hits | as above | |
-| | 181.FM The Eagle | classic rock | `.../181-eagle_128k.mp3` | |
-| | Radio Paradise Rock Mix | classic and album rock | as above | |
+| | Radio Paradise Rock Mix | classic and album rock | `.../rock-128` (AAC 128) | Radio Paradise stream links |
+| | WFMU Give the Drummer Radio | soul, funk, jazz and world grooves | `https://stream0.wfmu.org/drummer` (MP3 128) | WFMU's `wfmu_drummer.pls` |
+| `1986_north_shore` | WNUR 89.3 FM | Evanston student freeform, jazz and rock | `https://stream.rcs.revma.com/w4pmmfkdx4zuv` (MP3 ~192) | wnur.org's own player |
+| | WMXM 88.9 FM | Lake Forest college radio: indie and freeform | `https://wmxm.streamguys1.com/live` (MP3 128) | wmxm.org's Listen Live |
+| | Intergalactic FM CBS | italo, new wave and electro | as above | |
 | | Radio Paradise Main Mix | eclectic album rock | as above | |
+| | Radio Paradise Rock Mix | classic and album rock | as above | |
+| | WFMU 91.1 FM | freeform | `https://stream0.wfmu.org/freeform-128k` (MP3 128) | WFMU's `wfmu.pls` |
 
-Left out: SomaFM (the referer rule); KCRW Eclectic24, WLUW and Vocalo (no stream URL published on their own pages that we could find; their players only); KEXP, WWOZ, WXPN and The Current answer the checker but fit neither era nor place. Gaps: no openly streamed disco station with a stable published URL; users add their own by URL (and, next, from their own files).
+Left out: every 181.FM channel (pre-roll on every connection, above); KEXP (a cold start opened with a sponsor message, "... is made possible by ...", and its site loads an ad-insertion server; it also fits neither era nor place); WWOZ (no pre-roll in two starts, but no stream URL published on its own pages that we could reach); SomaFM (the referer rule); KCRW (its stream host's certificate does not match its name over HTTPS); WLUW and Vocalo (no stream URL published on their own pages that we could find; their players only). Gaps: no ad-free yacht-rock or soft-rock channel exists that we could find (the genre channels are all commercial aggregators), so 1984 SoCal leans on Radio Paradise and the college stations; 1977 and 1986 have six stations each, not seven.
 
 ## Engine and world sound
 No recorded audio in v1; everything is synthesized at 48 kHz by the `audio` crate (std; the synth and mixer use no dependencies, only the radio's presets need `ron` and `serde`). The app fills one plain `audio::synth::AudioParams` per frame (`app::sound`, read with `App::audio_params`): engine (profile, rpm, idle and redline, throttle pedal, gear, shift time), forward speed, per wheel (combined slip relative to the tire's peak, load relative to rest, tire speed, grounded, surface under the contact from the collider), curb-kick and wall-hit counters with the last kick's and hit's speed and side of the car (from `world::Bump`) (counted per sim step from `world::Impact`, rising edges only, so no event is lost or doubled between frames), the horn, ocean and bird amounts, the nearest passing NPC cars (`TrafficVoice`: level, pan, heard frequency), the volumes, mute and paused. All synth math is `+ - * /`, `floor` and `sqrt` with a polynomial sine and `exp2` (`audio::synth::dsp`), so a scripted drive renders bit-identically everywhere; its WAV is pinned by hash in `mixer::tests`.
