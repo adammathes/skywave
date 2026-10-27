@@ -34,6 +34,13 @@ rendering, minutes per scene; run it once, not per subagent). Determinism hashes
 purpose, in their own commit, with the reason; `cargo test -p app -- --ignored write_selftest`
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
+## The owner's board
+A live board of every task (needs the owner / in review / building / queued / merged) lives at
+https://claude.ai/artifact/17baWQ1hwt3R194YbzjpWS (private to the owner). Its `items` collection
+is the queue of record: the owner reorders the Queued column and leaves notes on cards; the
+coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered by `order`) before
+dispatching the next session, and updates statuses as PRs open and merge.
+
 ## Where things stand (keep current)
 - Done on `main` (2026-10-27 19:20 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
