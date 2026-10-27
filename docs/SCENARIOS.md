@@ -21,7 +21,9 @@ Scenario(
 )
 ```
 Validation: years in order and the year within them, a known region, grammar, palette and preset, a
-default car no newer than the years, heroes that are built-in cars. The era filter and its weights are in
+default car no newer than the years (nor built up later, `VehicleSpec::built`), heroes that are built-in
+cars. Inland Basin (`inland_basin_2001`) is `years: (1995, 2001)` and starts in the Halberd Coupe; its
+`heroes` are the five 2001 hero cars (`docs/VEHICLES.md`), which no earlier world shows. The era filter and its weights are in
 `docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
 64,768 bytes, committed; rendered with `tools/screenshot`, cropped clear of the HUD and quantized, see
 `assets/stills/README.md`), laid out in an atlas four to a row for the World page.
@@ -67,6 +69,9 @@ wing and a body kit; a rotary sports coupe; a Japanese all-wheel-drive rally sed
 scoop; a German compact sedan with a body kit; a mid-90s American V8 sports car. Traffic cars of
 2001: a jellybean sedan, a mid-size SUV, a minivan, a full-size pickup, a compact hatch, a box
 truck and semis on the freeway.
+As built (M8 #4): the grand tourer is the Halberd Coupe and its Halberd Targa, the AWD coupe the
+Tanager AWD, the muscle coupe the Destrier Coupe (a 1969 car `built` up in 2001, so the 1984 world never
+shows it) and the tuner the Siskin Coupe (body kit, tall wing, aftermarket rims, underglow).
 
 Set pieces (places, not missions; nothing can be hurt): the night street race (a four-wide start
 line painted on an industrial boulevard, spectator cars and a crowd that clears, three opponent

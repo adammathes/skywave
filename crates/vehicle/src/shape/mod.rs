@@ -30,7 +30,7 @@ pub use mesh::MeshData;
 pub use params::{
     Antenna, Applique, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles,
     HeadLights, InteriorShape, Mirrors, Parts, Rear, Rims, Roof, RoofKind, Seams, Section,
-    ShapeError, ShapeSpec, Spoiler, TailLights, Top, Wheels,
+    ShapeError, ShapeSpec, Spoiler, TailLights, Top, TubeColor, Wheels,
 };
 
 use crate::VehicleSpec;
@@ -79,6 +79,9 @@ pub struct CarMesh {
     pub glass: MeshData,
     /// Lamp lenses with the emissive channel set (head, tail, turn, badges).
     pub lights: MeshData,
+    /// Underglow tubes, lit; empty without `Detail::Underglow`. Their own lamp group: the
+    /// app draws them only while the underglow is switched on.
+    pub underglow: MeshData,
     /// The cabin except the steering wheel.
     pub interior: MeshData,
     /// Rim, spokes and hub; rotates about `cockpit.wheel_pivot` / `wheel_axis`.
@@ -90,11 +93,12 @@ pub struct CarMesh {
 }
 
 impl CarMesh {
-    /// Body, parts, glass, lights and all four wheels.
+    /// Body, parts, glass, lights, underglow and all four wheels.
     pub fn exterior_triangles(&self) -> usize {
         self.body.triangle_count()
             + self.glass.triangle_count()
             + self.lights.triangle_count()
+            + self.underglow.triangle_count()
             + self
                 .wheels
                 .iter()
@@ -235,6 +239,7 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
         wheels: [wheel.clone(), wheel.clone(), wheel.clone(), wheel],
         glass: glass.finish(),
         lights: p.lights.finish(),
+        underglow: p.underglow.finish(),
         interior: int.soup.finish(),
         steering_wheel: int.wheel.finish(),
         wheel_centers: [[-x, y, 0.0], [x, y, 0.0], [-x, y, wb], [x, y, wb]],

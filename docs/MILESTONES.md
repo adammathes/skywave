@@ -223,7 +223,7 @@ camera (people are not in the app yet). Coast, seed 1, noon, busy:
 | 60 mph through a signalized four-way against the light (a straight two-lane arterial on the north side; the line reached 4–9 s into the red, the cross traffic on its green) | at 26.0 m/s on the line; 3 NPC cars (already turning) within 15 m in the junction, none overlapping the player's footprint at any step (least centre gap less both half lengths 2.9 m); the cross queue's head car held 3.5 s on its green at the line until the player had cleared, then went (asserted) |
 | Stopped on a downtown crosswalk for a minute (the crossing people use most), people crossing round it | 0 person-steps inside the car, 6 people within 5 m, 0 NPC car overlaps over 85 s |
 | Nosed at 1.5 m/s into the people on a downtown corner during the walk phase, until the curb and the signal pole stop it | 0 person-steps inside; 3 people within 5 m, 1 stepped aside, 1 hopped |
-| Reversing into a queue at a red (the car behind 7.3 m back) | **fails, test ignored**: 915 car-steps overlapping from 1.6 s in. The player's car does not collide with NPC cars and a stopped queue has nowhere to go, so the player backs into it |
+| Reversing into a queue at a red (the car behind 7.3 m back) | since NOTES 14 (`m4/car-collision`): the player bumps the first car of the queue after backing 2.95 m and stops 0.05 m short of its body; that car is shoved 0.22 m and brakes, its lamps lit; 0 car-steps overlapping. At the gate it failed (915 car-steps overlapping, the test ignored): NPC cars did not collide |
 | Density bands, 120 s each at the start, downtown and on the arterial, player still | Low 10–24 (band 9–24), Normal 33–48 (30–48), Busy 78–96 (72–96) cars of 96; Off drops every car and never steps the sim (not one timed step in 120 s, state unchanged) |
 
 What it found beyond the table: the walks are too narrow for the car (walls, posts, parked
@@ -249,15 +249,15 @@ New golden scenes: `coast-traffic-night` (busy, 22:30, the strip junction, headl
 
 **Deferred** (known, not in this milestone's build): pedestrians are not drawn in the game
 (figure instancing is next); NPC cars do not see pedestrians (turning traffic at signals,
-unsignalized crossings); no player–NPC collision (the player drives through NPC cars; they never
-drive into it); NPC wheels do not turn; no brake lights; traffic sparse near the player.
+unsignalized crossings); NPC wheels do not turn; no brake lights; traffic sparse near the player.
+Player–NPC collision came after the gate (NOTES 14, `m4/car-collision`): a push both ways, the
+NPC car brakes, waits and drives on; reversing into a queue stops against it.
 
 **For the human at the gate**
 - Does the coast feel alive but calm with traffic on? Is Normal the right default, and is Busy
   busy enough (it rarely fills the junction in front of you)?
-- Does it matter that you can drive through an NPC car? The fix is a soft push both ways
-  (`docs/NPCS.md`: a bumper-car push, no damage); until then reversing into a queue goes
-  through it. Should it be in M5?
+- NPC cars are now solid (after the gate, NOTES 14): a bump both ways, no damage. Does a hit
+  feel right: the thud, how far the car is shoved, how long it waits before driving on?
 - NPC cars at night: are the low beams and lamps right, and how much do brake lights and turning
   wheels matter?
 - Pedestrians: draw them next (before M5), and should cars yield to them at crossings first?

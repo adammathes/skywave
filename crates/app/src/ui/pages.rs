@@ -22,8 +22,9 @@
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
 //! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (the
 //!            panel's, then its whole divisors: 45 / 30 at 90 Hz) · UI scale · Resolution
-//!            scale · Bloom · Performance overlay
-//! HUD:       Minimap · Rotate with car · Minimap zoom · Show controls at start
+//!            scale · Bloom
+//! HUD:       Minimap · Rotate with car · Minimap zoom · Performance overlay (Off / FPS /
+//!            Full) · Show controls at start
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
 //!            Radio in background · Stations › · [web: Add stream URL] · [Remove added
 //!            streams, when there are some] · [web: Add music folder, or Pick music folder
@@ -41,9 +42,9 @@ use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
 use crate::radio::{CarRadio, PRESET_TITLES};
 use crate::settings::{
-    FrameRate, Handling, Quality, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP,
-    RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM,
-    UI_SCALE_STEP, VOLUME_STEP,
+    FrameRate, Handling, Overlay, Quality, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN,
+    COCKPIT_FOV_STEP, RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM,
+    SEAT_STEP_CM, UI_SCALE_STEP, VOLUME_STEP,
 };
 
 use super::menu::{Item, Unit, Widget};
@@ -192,6 +193,8 @@ pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
 /// Names of [`Quality::ALL`].
 pub const QUALITY_NAMES: [&str; Quality::ALL.len()] =
     ["Low", "Battery", "Deck", "Medium", "High", "Ultra"];
+/// Names of [`Overlay::ALL`].
+pub const OVERLAY_NAMES: [&str; Overlay::ALL.len()] = ["Off", "FPS", "Full"];
 /// Names of [`FrameRate::ALL`] (the page draws the frames a second they come to).
 pub const FRAME_RATE_NAMES: [&str; FrameRate::ALL.len()] = ["Panel", "1/2", "1/3", "1/4"];
 /// The Radio in background choice: index 0 keeps playing, 1 mutes.
@@ -554,11 +557,6 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 ),
             );
             add(ItemId::Bloom, "Bloom", Widget::Toggle(s.bloom));
-            add(
-                ItemId::DebugOverlay,
-                "Performance overlay",
-                Widget::Toggle(s.debug_overlay),
-            );
         }
         Page::Stations => {
             for (i, row) in ctx.radio.rows().iter().enumerate() {
@@ -594,6 +592,17 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 Widget::Choice {
                     options: &MINIMAP_RANGE_NAMES,
                     index,
+                },
+            );
+            add(
+                ItemId::DebugOverlay,
+                "Performance overlay",
+                Widget::Choice {
+                    options: &OVERLAY_NAMES,
+                    index: Overlay::ALL
+                        .iter()
+                        .position(|&o| o == s.overlay)
+                        .unwrap_or(0),
                 },
             );
             add(
@@ -789,7 +798,11 @@ mod tests {
         let Widget::Choice { options, index } = items[0].widget else {
             panic!("{:?}", items[0])
         };
-        assert_eq!((options.len(), index), (crate::vehicles::BUILTIN.len(), 3));
+        // The coast's cars only: no 2001 car lists in 1984.
+        assert_eq!(
+            (options.len(), index),
+            (crate::scenario::lineup(0).cars.len(), 3)
+        );
         assert_eq!(options[3], "Regent Coupe Cabrio");
         let Widget::Choice { options, index } = items[1].widget else {
             panic!("{:?}", items[1])

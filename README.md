@@ -28,7 +28,9 @@ curl -fsSL https://raw.githubusercontent.com/adammathes/skywave/main/tools/insta
 ```
 (The URL names the working branch for now; it moves to `main` later.) The script puts the nightly
 AppImage in `~/Applications/Skywave/`, adds a menu entry, and prints the steps to add it to Steam
-as a non-steam game. Run it again to update; `--tag vX.Y.Z` installs a tagged release instead
+as a non-steam game. It also writes a "Skywave Update" entry: add that as a second non-Steam game
+and launch it from Gaming Mode whenever you want the latest build, so the command above is typed
+once. Running the installer again updates too; `--tag vX.Y.Z` installs a tagged release instead
 (`... | bash -s -- --tag vX.Y.Z`). No sudo, nothing outside your home folder.
 
 To do it by hand, download

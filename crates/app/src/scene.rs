@@ -27,6 +27,7 @@
 //! - `yaw=<deg>`: the car's compass heading, degrees clockwise from north (-z): 0 north,
 //!   90 east, 180 south, 270 west (default the `PlayerStart`'s: east in the test town).
 //! - `lights=1`: headlights on.
+//! - `glow=1`: the underglow switched on (lit on a car that has one).
 //! - `fly=1`: the free-fly debug camera.
 //! - `still=1`: the simulation does not run, so every frame is the same picture of the
 //!   scene at rest (for screenshot goldens; input is ignored).
@@ -92,6 +93,7 @@ pub struct SceneSetup {
     /// for the `PlayerStart`'s.
     pub heading_rad: Option<f32>,
     pub headlights: bool,
+    pub underglow: bool,
     pub fly: bool,
     /// Draw the scene without running the simulation.
     pub still: bool,
@@ -123,6 +125,7 @@ impl Default for SceneSetup {
             pos: None,
             heading_rad: None,
             headlights: false,
+            underglow: false,
             fly: false,
             still: false,
             map: false,
@@ -155,9 +158,9 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 17] = [
-        "seed", "place", "scenario", "car", "paint", "cam", "t", "pos", "yaw", "lights", "fly",
-        "still", "map", "ui", "stream", "traffic", "phase",
+    pub const KEYS: [&'static str; 18] = [
+        "seed", "place", "scenario", "car", "paint", "cam", "t", "pos", "yaw", "lights", "glow",
+        "fly", "still", "map", "ui", "stream", "traffic", "phase",
     ];
 
     /// World `scenario` and its procedural place; its own car unless the scene named one.
@@ -182,6 +185,7 @@ impl SceneSetup {
             pos: None,
             heading_rad: None,
             headlights: false,
+            underglow: false,
             fly: false,
             map: false,
             ..self.clone()
@@ -242,6 +246,7 @@ impl SceneSetup {
                 self.heading_rad = Some(-deg.to_radians());
             }
             "lights" => self.headlights = parse_switch(value).ok_or_else(bad)?,
+            "glow" => self.underglow = parse_switch(value).ok_or_else(bad)?,
             "fly" => self.fly = parse_switch(value).ok_or_else(bad)?,
             "still" => self.still = parse_switch(value).ok_or_else(bad)?,
             "map" => self.map = parse_switch(value).ok_or_else(bad)?,
@@ -293,7 +298,7 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&place=coast&car=homestead_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
+            "?seed=7&place=coast&car=homestead_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&glow=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
         )
         .unwrap();
         assert!(s.map && !s.stream);
@@ -313,7 +318,8 @@ mod tests {
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
         assert_eq!(s.pos, Some([-200.5, 97.0]));
         assert!((s.heading_rad.unwrap() + core::f32::consts::PI).abs() < 1e-6);
-        assert!(s.headlights && !s.fly && s.still);
+        assert!(s.headlights && s.underglow && !s.fly && s.still);
+        assert!(!SceneSetup::default().underglow);
         // 90 is east, the test town's start heading.
         let mut east = SceneSetup::default();
         east.set("yaw", "90").unwrap();

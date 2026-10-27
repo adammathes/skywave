@@ -79,9 +79,14 @@ pub const ROWS: [Row; 25] = [
     row("Camera", "Look back", &[Action::LookBack]),
     row("Lights", "Headlights", &[Action::Headlights]),
     row("Lights", "High beams", &[Action::HighBeams]),
+    row("Lights", "Underglow", &[Action::Underglow]),
     row("Radio", "Radio on/off", &[Action::RadioOff]),
-    row("Radio", "Next station", &[Action::RadioNext]),
-    row("Radio", "Previous station", &[Action::RadioPrev]),
+    // One row for both ways, so the underglow's row keeps the card one Deck screen.
+    merged(
+        "Radio",
+        "Next / prev station",
+        &[Action::RadioNext, Action::RadioPrev],
+    ),
     row("Menus", "Pause menu", &[Action::Pause]),
     row("Menus", "Map", &[Action::MapToggle]),
     row("Menus", "Map zoom", &[Action::MapZoom]),

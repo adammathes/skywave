@@ -1,0 +1,48 @@
+// Destrier Coupe: a late-60s big-block muscle coupe with a supercharger through the hood.
+//
+// Intent: all engine. A huge blown V8 makes more torque than the skinny-for-today rear
+// tires can hold, so it lights them up off the line and wags its tail out of every slow
+// corner; four long gears, light steering, soft springs and a lot of lean. Brakes of its
+// day, no ABS. Old in 2001 and still one of the quickest things on the boulevard.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "destrier_coupe",
+    name: "Destrier Coupe",
+    era: Sixties,
+    year: 1969,
+    built: 2001,                   // the blower and wheels: never in a world before 2001
+    class: Muscle,
+
+    mass_kg: 1660,
+    dims_m: (4.75, 1.83, 1.34),    // length, width, height
+    wheelbase_m: 2.75,
+    track_m: 1.52,
+    cg_height_m: 0.52,
+    cg_fore_aft: 0.46,             // 54% front
+
+    engine: Engine(
+        idle_rpm: 850,
+        redline_rpm: 6000,
+        torque_nm: [(1000, 480), (2000, 610), (3200, 680), (4400, 650), (5400, 560), (6000, 480)],
+    ),
+    gears: [2.20, 1.64, 1.27, 1.0],
+    final_drive: 3.31,
+    reverse: 2.3,
+    shift_ms: 260,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.08, grip_long: 0.89, load_sens: 0.09, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 26000, damper: 2400, travel_m: 0.18, antiroll: 0.28),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 9.0),
+    brakes: Brakes(max_nm: 3800, bias_front: 0.62, abs: false, handbrake_nm: 3000),
+    aero: Aero(cd: 0.47, frontal_m2: 2.1, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.2, body_roll: 0.6, engine_sound: "v8_lazy", shift_jerk: 0.4),
+    interior: Interior(
+        dash: "sport_60s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "destrier_coupe.shape.ron",
+)

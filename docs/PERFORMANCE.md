@@ -185,8 +185,8 @@ runs every frame, so a stale frame is never shown. A World frame copies the scen
 instances and lights for the next comparison (about 250 KB on the coast: 2347 instances of
 ~104 bytes, into a buffer reserved at load). `--no-vsync` (benchmarks) still draws the whole
 world every frame, uncapped. `--stats` ends its line with `last=World|Ui|Skip` and running
-counts of each; the F3 overlay shows the same (with F3 on, the overlay itself changes every
-frame, so frames are at least Ui).
+counts of each; the full F3 overlay shows the same (with an overlay up, it changes every
+frame, so frames are at least Ui; menus and the map hide it, so they idle).
 
 **Frame rate** (Settings › Video › Frame rate): the panel's rate, or every Nth refresh, so
 frames are always evenly paced. Offered: the panel's rate, then each whole divisor of at
@@ -527,7 +527,9 @@ runs 9 comparisons, 18 in a cascade blend band), and the depth texels written pe
 
 `--frames N` ends with a `[summary]` line over the run after 60 warmup frames.
 
-The F3 overlay shows the same numbers in game (web and native): draws, CPU time, instances
+F3 cycles the overlay Off → FPS (the frame rate alone, top left) → Full; the mode is saved
+(`hud.overlay`) and menus hide it while open. The full overlay shows the same numbers in
+game (web and native): draws, CPU time, instances
 per pass, triangles, cascades, view and surface size, the adapter, and where timestamps
 work one line of GPU medians over the last 64 frames read: `gpu med 7.20 ms: sh 0.90 fw
 5.40 co 0.05 bl 0.42 tm 0.31 hud 0.06 | c 0.40/0.00/0.00 z 0.55 m 4.60 sky 0.16`
@@ -539,7 +541,7 @@ work one line of GPU medians over the last 64 frames read: `gpu med 7.20 ms: sh 
    is time `stats.txt`, `stats-vsync.txt`, the per-preset files and `stats-nocull.txt`.
 2. Which Deck (LCD 60 Hz or OLED 90 Hz), SteamOS version, Game Mode or Desktop Mode, and
    the frame limiter / refresh settings in the Quick Access menu.
-3. A screenshot with F3 on at the slowest spot you find.
+3. A screenshot with the full F3 overlay (F3 twice from off) at the slowest spot you find.
 4. If one pass stands out, a RenderDoc capture (below).
 
 ### A frame capture with RenderDoc
