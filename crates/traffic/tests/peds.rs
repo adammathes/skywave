@@ -1347,3 +1347,256 @@ fn nobody_is_run_over_by_a_car_coming_along_a_crosswalk() {
         assert!(near > 10, "seed {seed}: {near}");
     }
 }
+
+/// One scripted car: where it is at time `t` (s).
+type Script<'a> = Box<dyn Fn(f32) -> Player + 'a>;
+
+/// Runs `script` for `secs` from the warmed people `warm` with the camera on the car:
+/// the person-steps inside its footprint (anyone it appears on at the first step gets
+/// 1.5 s to get out) and the people who came within 6 m of it.
+fn drive_script(
+    walks: &WalkGraph,
+    lanes: &LaneGraph,
+    warm: &Pedestrians,
+    t0: u64,
+    secs: f32,
+    script: &Script,
+) -> (usize, usize) {
+    let mut peds = warm.clone();
+    let first = script(0.0);
+    let landed: HashSet<u32> = peds
+        .iter()
+        .filter(|p| inside(&first, p.pos))
+        .map(|p| p.id)
+        .collect();
+    let (mut steps_inside, mut near) = (0usize, HashSet::new());
+    for k in 0..(secs * 120.0) as u64 {
+        let car = script(k as f32 / 120.0);
+        let inp = PedInput {
+            tick: t0 + k,
+            density: Density::Busy,
+            view: View {
+                pos: car.pos,
+                dir: [-car.heading.sin(), -car.heading.cos()],
+                ..view_at(car.pos, 0)
+            },
+            player: car,
+        };
+        peds.step(walks, lanes, &inp);
+        for p in peds.iter() {
+            if inside(&car, p.pos) && !(landed.contains(&p.id) && k < 180) {
+                steps_inside += 1;
+            }
+            if dist(p.pos, car.pos) < 6.0 {
+                near.insert(p.id);
+            }
+        }
+    }
+    (steps_inside, near.len())
+}
+
+/// The player's car at `pos` facing ground direction `dir`, at `speed` along it.
+fn car_at(pos: [f32; 3], dir: [f32; 2], speed: f32) -> Player {
+    Player {
+        pos,
+        heading: (-dir[0]).atan2(-dir[1]),
+        speed,
+        half_len: 2.3,
+        half_w: 0.9,
+    }
+}
+
+/// Distance covered by time `t` going at `v` after standing still until `t0` (from rest,
+/// at 2 m/s² up to `v`), and the speed then.
+fn pull_away(t: f32, t0: f32, v: f32) -> (f32, f32) {
+    let t = (t - t0).max(0.0);
+    let ramp = v / 2.0;
+    if t < ramp {
+        (t * t, 2.0 * t)
+    } else {
+        (ramp * ramp + v * (t - ramp), v)
+    }
+}
+
+/// The ways a player's car reaches people that a plain drive does not, on coast seeds
+/// 1–4 around the busiest crossings and walks, each with zero person-steps inside it:
+/// stopping on a crosswalk along it and driving on; turning across a crossing at 3 and
+/// 6 m/s; standing on a sidewalk 2.4 m short of someone and pulling away toward them;
+/// parking on a sidewalk after a 2.5 m/s approach; and appearing on a curb queue.
+#[test]
+fn nobody_is_reached_by_a_car_stopping_turning_or_pulling_away() {
+    let _quiet = shared();
+    let ron = REGIONS[0].1;
+    let t: RegionTemplate = ron::from_str(ron).expect("parse");
+    let grammar = grammar();
+    let results: Vec<Vec<(String, usize, usize)>> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = (1..=4u64)
+            .map(|seed| {
+                let (t, grammar) = (&t, &grammar);
+                scope.spawn(move || {
+                    let place = build_place(Seed(seed), t, grammar);
+                    let lanes = LaneGraph::new(&place);
+                    let walks = WalkGraph::new(&place, &lanes);
+                    let eye = busy_eye(&walks);
+                    let mut warm = Pedestrians::new(
+                        &walks,
+                        Seed(seed),
+                        place.header.era,
+                        PedestrianBudget::LARGE,
+                    );
+                    for k in 0..120 * 30 {
+                        let inp = PedInput {
+                            tick: k,
+                            density: Density::Busy,
+                            view: view_at(eye, k),
+                            player: Player::ABSENT,
+                        };
+                        warm.step(&walks, &lanes, &inp);
+                    }
+                    let t0 = 120 * 30;
+                    let mut out = Vec::new();
+                    // The two crossings with the most people near them.
+                    let mut busy: Vec<(usize, usize)> = walks
+                        .crossings
+                        .iter()
+                        .enumerate()
+                        .map(|(c, x)| {
+                            let at = walks.nodes[x.curbs[0] as usize].pos;
+                            (warm.iter().filter(|p| dist(p.pos, at) < 25.0).count(), c)
+                        })
+                        .collect();
+                    busy.sort_by_key(|b| std::cmp::Reverse(b.0));
+                    for &(_, c) in busy.iter().take(2) {
+                        let x = &walks.crossings[c];
+                        let (a, z) = (
+                            walks.nodes[x.curbs[0] as usize].pos,
+                            walks.nodes[x.curbs[1] as usize].pos,
+                        );
+                        let l = dist(a, z);
+                        let d = [(z[0] - a[0]) / l, (z[2] - a[2]) / l];
+                        let mid = [(a[0] + z[0]) * 0.5, a[1], (a[2] + z[2]) * 0.5];
+                        let at = |o: [f32; 3], s: f32| [o[0] + d[0] * s, o[1], o[2] + d[1] * s];
+                        let mut scripts: Vec<(String, f32, Script)> = Vec::new();
+                        // Along the crosswalk, stopping on it for 6 s, then on.
+                        scripts.push((
+                            format!("crossing {c} along, stop and go"),
+                            24.0,
+                            Box::new(move |t| {
+                                let (s, v) = if t < 6.0 {
+                                    (2.0 * t, 2.0)
+                                } else {
+                                    let (s, v) = pull_away(t, 12.0, 2.0);
+                                    (12.0 + s, if t < 12.0 { 0.0 } else { v })
+                                };
+                                car_at(at(a, -12.0 + s), d, v)
+                            }),
+                        ));
+                        // Turning across the crossing: 12 m straight in, then half a
+                        // circle of 9 m through its middle.
+                        for speed in [3.0f32, 6.0] {
+                            for side in [1.0f32, -1.0] {
+                                let r = 9.0;
+                                let n = [d[1] * side, -d[0] * side];
+                                let center = [mid[0] + n[0] * r, mid[2] + n[1] * r];
+                                let lead = 12.0 / speed;
+                                scripts.push((
+                                    format!("crossing {c} turn {speed} m/s side {side}"),
+                                    lead + (std::f32::consts::PI * r) / speed,
+                                    Box::new(move |t| {
+                                        if t < lead {
+                                            // On the circle's start tangent, toward it.
+                                            let back = speed * (lead - t);
+                                            let p0 = [center[0] - d[0] * r, center[1] - d[1] * r];
+                                            let pos =
+                                                [p0[0] + n[0] * back, mid[1], p0[1] + n[1] * back];
+                                            return car_at(pos, [-n[0], -n[1]], speed);
+                                        }
+                                        let t = t - lead;
+                                        let ang = -std::f32::consts::FRAC_PI_2 + speed * t / r;
+                                        let (sn, cs) = ang.sin_cos();
+                                        // Position on the circle from the center, and
+                                        // the tangent the car drives along.
+                                        let rad = [-n[0] * cs + d[0] * sn, -n[1] * cs + d[1] * sn];
+                                        let pos = [
+                                            center[0] + rad[0] * r,
+                                            mid[1],
+                                            center[1] + rad[1] * r,
+                                        ];
+                                        let tan = [d[0] * cs + n[0] * sn, d[1] * cs + n[1] * sn];
+                                        car_at(pos, tan, speed)
+                                    }),
+                                ));
+                            }
+                        }
+                        // Appearing on the curb queue and standing there.
+                        let curb = a;
+                        scripts.push((
+                            format!("crossing {c} on the curb queue"),
+                            8.0,
+                            Box::new(move |_| car_at(curb, d, 0.0)),
+                        ));
+                        for (name, secs, script) in &scripts {
+                            let (n, near) = drive_script(&walks, &lanes, &warm, t0, *secs, script);
+                            out.push((format!("seed {seed} {name}"), n, near));
+                        }
+                    }
+                    // On the busiest walk: stopped 2.4 m short of the person there, then
+                    // pulling away at them; and parking there after 2.5 m/s.
+                    let p = warm
+                        .iter()
+                        .filter(|p| p.pose.action == Action::None)
+                        .max_by_key(|p| warm.iter().filter(|q| dist(q.pos, p.pos) < 15.0).count())
+                        .expect("people")
+                        .pos;
+                    let dir = walks
+                        .links
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| l.kind == LinkKind::Walk && l.road_side != 0)
+                        .min_by(|(i, _), (j, _)| {
+                            let ai = walks.point(*i as u32, 0.0, 0.0);
+                            let aj = walks.point(*j as u32, 0.0, 0.0);
+                            dist(ai, p).total_cmp(&dist(aj, p))
+                        })
+                        .map(|(_, l)| l.dir)
+                        .expect("walks");
+                    let at = move |s: f32| [p[0] - dir[0] * s, p[1], p[2] - dir[1] * s];
+                    let stop_go: Script = Box::new(move |t| {
+                        let (s, v) = pull_away(t, 3.0, 3.0);
+                        car_at(at(2.4 + 2.3 - s), dir, if t < 3.0 { 0.0 } else { v })
+                    });
+                    let park: Script = Box::new(move |t| {
+                        let tt = t.min(8.0);
+                        car_at(at(20.0 - 2.5 * tt), dir, if t < 8.0 { 2.5 } else { 0.0 })
+                    });
+                    for (name, secs, script) in [
+                        ("walk stop then pull away", 12.0, &stop_go),
+                        ("walk parked after 2.5 m/s", 30.0, &park),
+                    ] {
+                        let (n, near) = drive_script(&walks, &lanes, &warm, t0, secs, script);
+                        out.push((format!("seed {seed} {name}"), n, near));
+                    }
+                    out
+                })
+            })
+            .collect();
+        jobs.into_iter().map(|j| j.join().expect("seed")).collect()
+    });
+    let (mut total, mut near_all, mut runs) = (0, 0, 0);
+    for r in results.iter().flatten() {
+        if r.1 > 0 {
+            println!(
+                "{}: {} person-steps inside, {} people within 6 m",
+                r.0, r.1, r.2
+            );
+        }
+        total += r.1;
+        near_all += r.2;
+        runs += 1;
+    }
+    println!(
+        "{runs} scripted runs, {near_all} people within 6 m, {total} person-steps inside the car"
+    );
+    assert_eq!(total, 0);
+    assert!(near_all > 100, "{near_all}");
+}
