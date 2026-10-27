@@ -606,6 +606,8 @@ mod tests {
         })
         .unwrap();
         let npc = npcs.built_bytes();
+        // The pedestrian figures' meshes have their own budget (`peds`).
+        let built = built - crate::peds::VARIANTS * traffic::figure::PARTS;
         eprintln!("traffic: {built} more meshes, {npc} bytes");
         assert!(cars.len() + built <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
         assert!(

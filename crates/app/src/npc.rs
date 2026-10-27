@@ -27,8 +27,13 @@
 //!   the world synth's traffic voices, panned by where they are, attenuated by distance,
 //!   pitched by speed and the Doppler shift of the relative speed.
 //!
+//! - **Pedestrians.** [`Npcs`] also owns the place's people ([`crate::peds`]): built at
+//!   setup, at the same density, warmed up with the cars (and while a scene loads,
+//!   [`PEDS_PREROLL_S`] before them), stepped after the cars at the signal tick they
+//!   reached.
+//!
 //! Every per-frame path writes into buffers sized at setup: nothing allocates after it
-//! but switching traffic off, which drops the cars.
+//! but switching traffic off, which drops the cars and the people.
 
 use audio::synth::{TrafficVoice, TRAFFIC_VOICES};
 use core::f32::consts::{PI, TAU};
@@ -42,7 +47,7 @@ use traffic::{
 use vehicle::shape;
 
 use crate::lighting::{Bounds, FrameLights};
-use crate::{car, drive, vehicles};
+use crate::{car, drive, peds, vehicles};
 
 /// Every density, in the order the World page offers them.
 pub const DENSITIES: [Density; 4] = [Density::Off, Density::Low, Density::Normal, Density::Busy];
@@ -69,6 +74,10 @@ pub const PAINTS: usize = crate::propinst::ERA_PAINTS;
 /// Seconds of traffic run when it is switched on...
 pub const WARMUP_S: f32 = 20.0;
 const WARMUP_STEPS: u32 = (WARMUP_S as u32) * skywave_core::SIM_HZ;
+/// Seconds the pedestrians alone walk before that while a scene loads, so people have
+/// spread from where they appear (40–120 m out) toward the camera before the first frame.
+pub const PEDS_PREROLL_S: f32 = 40.0;
+const PEDS_PREROLL_STEPS: u32 = (PEDS_PREROLL_S as u32) * skywave_core::SIM_HZ;
 /// ...at most this many steps a frame once the game is running: a second of sim, about
 /// 10 ms of CPU, for 20 frames.
 pub const WARMUP_BATCH: u32 = 120;
@@ -103,7 +112,7 @@ struct Snap {
 
 /// The traffic of one place (see the module docs).
 pub struct Npcs {
-    graph: LaneGraph,
+    pub(crate) graph: LaneGraph,
     /// The place's seed, which picks its parked-car paints.
     place_seed: u64,
     traffic: Traffic,
@@ -122,10 +131,14 @@ pub struct Npcs {
     order: Vec<(u32, u16)>,
     /// Per-step sim time, ms, smoothed, for the overlay.
     step_ms: f32,
-    /// Warm-up steps still to run.
+    /// Warm-up steps still to run, and pedestrian steps to run before them when the scene
+    /// loads.
     warm: u32,
+    preroll: u32,
     /// The car id each traffic voice follows ([`traffic::cars::Car::id`]), or `u32::MAX`.
     voice_ids: [u32; TRAFFIC_VOICES],
+    /// The place's pedestrians, at the same density.
+    pub(crate) crowd: peds::Crowd,
 }
 
 /// What a step needs from the game.
@@ -146,6 +159,7 @@ impl Npcs {
         };
         let traffic = Traffic::new(&graph, budget, seed);
         let cap = budget.cars;
+        let crowd = peds::Crowd::new(place, &graph, seed);
         Npcs {
             graph,
             place_seed: place.header.seed,
@@ -160,17 +174,19 @@ impl Npcs {
             order: Vec::with_capacity(cap),
             step_ms: 0.0,
             warm: 0,
+            preroll: 0,
             voice_ids: [u32::MAX; TRAFFIC_VOICES],
+            crowd,
         }
     }
 
-    /// Whether the cars' meshes are built and registered.
+    /// Whether the cars' and the figures' meshes are built and registered.
     pub fn has_meshes(&self) -> bool {
         !self.ids.is_empty()
     }
 
-    /// Finds the cars' meshes among `parked`'s and builds the rest, registering each
-    /// with `register`, which returns its id.
+    /// Finds the cars' meshes among `parked`'s and builds the rest, then builds the
+    /// pedestrian figures', registering each with `register`, which returns its id.
     pub fn build_meshes(
         &mut self,
         parked: Option<&crate::propinst::PropInstances>,
@@ -202,6 +218,7 @@ impl Npcs {
         self.ids = ids;
         self.heads = heads;
         self.built_bytes = bytes;
+        self.crowd.build_meshes(register);
         Ok(())
     }
 
@@ -210,9 +227,9 @@ impl Npcs {
         self.built_bytes
     }
 
-    /// Most cars ever live, so most instances a frame draws.
+    /// Most instances a frame draws: every car the pool holds and every person's parts.
     pub fn capacity(&self) -> usize {
-        self.traffic.budget.cars
+        self.traffic.budget.cars + self.crowd.capacity()
     }
 
     pub fn density(&self) -> Density {
@@ -234,15 +251,18 @@ impl Npcs {
         self.step_ms
     }
 
-    /// Keeps `density` of cars from the next step; off drops every car at once, and
-    /// switching on again starts a warm-up.
+    /// Keeps `density` of cars and people from the next step; off drops every car and
+    /// person at once, and switching on again starts a warm-up.
     pub fn set_density(&mut self, density: Density) {
+        self.crowd.set_density(density);
         if density == Density::Off && self.density != Density::Off {
             self.traffic = self.empty.clone();
             self.prev.clear();
             self.warm = 0;
+            self.preroll = 0;
         } else if density != Density::Off && self.density == Density::Off {
             self.warm = WARMUP_STEPS;
+            self.preroll = PEDS_PREROLL_STEPS;
         }
         self.density = density;
     }
@@ -275,12 +295,56 @@ impl Npcs {
         self.traffic.populate(&self.graph, &inputs);
     }
 
-    /// Runs up to `max` of the warm-up's steps still due, the player and the view held
-    /// still. Returns how many ran.
+    /// One pedestrian step after [`Npcs::step`], at the signal tick it reached.
+    pub fn step_peds(&mut self, inp: &StepInputs) {
+        let tick = self.signals.tick;
+        self.crowd.step(&self.graph, tick, inp.player, inp.view);
+    }
+
+    /// Runs up to `max` of the warm-up's steps (cars and people) still due, the player
+    /// and the view held still. Returns how many ran.
     pub fn warm_up(&mut self, inp: &StepInputs, max: u32) -> u32 {
+        self.preroll = 0;
+        self.run_warm_up(inp, max, inp.view)
+    }
+
+    /// Runs the whole warm-up still due before anything is drawn (the scene loading):
+    /// [`PEDS_PREROLL_S`] of pedestrians, then as [`Npcs::warm_up`]. Nobody is watching,
+    /// so the people's view cone is narrowed to a line ahead of the camera (`View::sees`
+    /// still covers a beam a person wide along it and a couple of meters round the eye)
+    /// and they may appear and walk where the camera will look; the cars still keep out
+    /// of its view. The pedestrians' first seconds run before the signal clock's tick 0:
+    /// at ticks a whole number of every junction's cycle later, which show the same lights,
+    /// so the signals and the cars are just as without them.
+    pub fn warm_up_unseen(&mut self, inp: &StepInputs) -> u32 {
+        let blind = StepInputs {
+            view: View {
+                tan_half: 0.0,
+                ..inp.view
+            },
+            ..*inp
+        };
+        if self.preroll > 0 {
+            let period = signal_period(&self.graph);
+            let n = u64::from(self.preroll);
+            let start = n.div_ceil(period) * period + self.signals.tick - n;
+            for t in start..start + n {
+                self.crowd.step(&self.graph, t, blind.player, blind.view);
+            }
+        }
+        self.preroll = 0;
+        self.run_warm_up(inp, u32::MAX, blind.view)
+    }
+
+    fn run_warm_up(&mut self, inp: &StepInputs, max: u32, peds_view: View) -> u32 {
         let n = self.warm.min(max);
+        let peds = StepInputs {
+            view: peds_view,
+            ..*inp
+        };
         for _ in 0..n {
             self.step(inp);
+            self.step_peds(&peds);
         }
         self.warm -= n;
         n
@@ -294,9 +358,9 @@ impl Npcs {
         }
     }
 
-    /// Fingerprint of the traffic, for determinism checks.
+    /// Fingerprint of the traffic and the pedestrians, for determinism checks.
     pub fn hash(&self) -> u64 {
-        hash64(self.traffic.hash(), &[self.signals.tick])
+        hash64(self.traffic.hash(), &[self.signals.tick, self.crowd.hash()])
     }
 
     /// Car `i`'s ground point and heading `alpha` of the way through the last step.
@@ -480,6 +544,28 @@ impl Npcs {
         }
         out
     }
+}
+
+/// Ticks after which every signal of `graph` shows what it showed: the least common
+/// multiple of its junctions' cycles.
+fn signal_period(graph: &LaneGraph) -> u64 {
+    fn gcd(a: u64, b: u64) -> u64 {
+        if b == 0 {
+            a
+        } else {
+            gcd(b, a % b)
+        }
+    }
+    graph
+        .junctions
+        .iter()
+        .filter(|j| j.phases > 0)
+        .map(|j| u64::from(traffic::signal::cycle_ticks(j.phases)))
+        .fold(1, |l, c| {
+            (l / gcd(l, c))
+                .checked_mul(c)
+                .expect("signal cycles have a common period")
+        })
 }
 
 /// Head lights come on [`TWILIGHT_S`] after sunset at `latitude_deg` on `day_of_year`, and
