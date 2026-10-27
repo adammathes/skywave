@@ -12,7 +12,10 @@
 //! by the lane they leave. Building allocates; queries never do. Everything is a pure
 //! function of the place, so the same place gives a bit-identical graph everywhere.
 //!
-//! NPC cars drive on it ([`Traffic`], [`cars`]): a fixed pool stepped at 120 Hz with car
+//! The pedestrian figure ([`figure`]): seeded low-poly people, their walk cycle and the
+//! poses for stepping out of a car's way, posed as one rigid transform per part.
+//!
+//! NPC cars drive on the lane graph ([`Traffic`], [`cars`]): a fixed pool stepped at 120 Hz with car
 //! following, signals and stop signs, right of way, lane changes, and spawning by density
 //! out of the player's view.
 #![no_std]
@@ -22,6 +25,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod cars;
+pub mod figure;
 pub mod lanes;
 pub mod math;
 pub mod signal;
