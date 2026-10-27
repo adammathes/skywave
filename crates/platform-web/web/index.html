@@ -234,6 +234,8 @@
   // use is the stream URL the player chose. Tune noise is synthesized here, not a sample.
   // Browsers play sound only after a user gesture: a refused play() is reported as blocked
   // (the game shows "Press any key for radio") and retried on the next key, click or touch.
+  // A stream that neither plays nor errors within STALL_MS is reported as failed, so the
+  // game moves on instead of sitting in silence.
   // Registered once per page: after a WebGL2 restart the new app instance finds this same
   // player. Debugging: skywaveRadio.log (recent commands, events, states), .state, .audio.
   (() => {
@@ -247,14 +249,20 @@
     let blocked = 0; // the Play waiting for a user gesture
     let volume = 1;
     let ctx = null;
+    let stall = 0; // the timer that fails a Play that never started
+    const STALL_MS = 10000;
     const note = (line) => { log.push(line); if (log.length > 200) log.shift(); };
     const emit = (type, t) => {
       if (!t || t !== token) return;
       events.push(`${type} ${t}`);
       note(`event ${type} ${t}`);
     };
-    audio.addEventListener("playing", () => emit("started", token));
+    audio.addEventListener("playing", () => { clearTimeout(stall); emit("started", token); });
     audio.addEventListener("error", () => { if (audio.getAttribute("src")) emit("failed", token); });
+    const arm = (t) => {
+      clearTimeout(stall);
+      stall = setTimeout(() => { if (blocked !== t) emit("failed", t); }, STALL_MS);
+    };
     const tryPlay = (t) => {
       const p = audio.play();
       if (p && p.catch) p.catch((e) => {
@@ -264,6 +272,7 @@
       });
     };
     const stop = () => {
+      clearTimeout(stall);
       token = 0;
       blocked = 0;
       audio.pause();
@@ -299,7 +308,7 @@
       } catch { /* optional */ }
     };
     const gesture = () => {
-      if (blocked && blocked === token) { blocked = 0; note("retry after a gesture"); tryPlay(token); }
+      if (blocked && blocked === token) { blocked = 0; note("retry after a gesture"); arm(token); tryPlay(token); }
       if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
     };
     for (const t of ["keydown", "mousedown", "touchstart"]) window.addEventListener(t, gesture, true);
@@ -313,6 +322,7 @@
           audio.src = url;
           audio.volume = volume;
           metadata(name);
+          arm(t);
           tryPlay(t);
         } else if (kind === "stop") stop();
         else if (kind === "volume") { volume = Math.min(1, Math.max(0, value)); audio.volume = volume; }

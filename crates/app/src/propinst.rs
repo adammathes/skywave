@@ -1,7 +1,7 @@
 //! The props a terrain place draws as instances of shared meshes rather than inside its
 //! chunks' meshes ([`world::props::instanced`]): its trees, parked cars, street lights,
-//! power poles and small street furniture. A tree costs a chunk ~1100 vertices and a car
-//! ~2000 triangles, and the coast has thousands of lamps, hydrants, benches and poles:
+//! power poles and small street furniture. A tree costs ~700–900 triangles and a car
+//! 3–4k, and the coast has thousands of lamps, hydrants, benches and poles:
 //! baked into the chunks (and cut into their light tiles) they would not fit the chunk
 //! pool. As instances there are a few dozen meshes, and each frame draws the ones near the
 //! camera in live chunks. Street lights draw out past the resident ring, so a boulevard's
@@ -10,7 +10,8 @@
 //!
 //! Trees come in [`VARIANTS`] shapes per kind, each turned and scaled per tree; mailboxes
 //! and poles in a few shapes too; parked cars are the built-in body shapes at level of
-//! detail 1 in their palette colors. Every instance is placed by a fixed transform from
+//! detail 1, a third in their own palette colors and the rest in the era's street colors
+//! (`vehicle::shape::ERA_1980S_PAINT`), each with a little dust and wear. Every instance is placed by a fixed transform from
 //! the Place's `Props` table. Each frame [`PropInstances::push`] appends the ones within
 //! their kind's draw distance of the eye whose chunk is drawn, grouped by mesh so the
 //! renderer draws each mesh's run as one instanced draw, each with the lights that reach
@@ -19,6 +20,7 @@
 use glam::{Mat4, Quat, Vec3};
 use place::{Place, PropKind};
 use render::{LightSet, Mesh, MeshId, MeshInstance, PointLight};
+use vehicle::shape;
 use world::{MeshKind, Palette, WorldMesh};
 
 use crate::lighting::{light_set, Bounds};
@@ -29,6 +31,23 @@ use crate::{car, convert, lighttiles, vehicles, Part};
 pub const VARIANTS: u32 = 4;
 /// How far from the eye parked cars are drawn, m.
 pub const CAR_DRAW_RADIUS_M: f32 = 280.0;
+/// Parked cars nearer than this draw at level of detail 1 (3-5k triangles), farther at
+/// level 2 (~2k), m.
+pub const CAR_DETAIL_RADIUS_M: f32 = 80.0;
+/// Parked cars whose paint nibble (0..16) is under this wear their own palette's colors.
+const OWN_PAINT_NIBBLES: usize = 5;
+/// Most a parked car's dust and wear darkens it.
+const MAX_WEAR: f32 = 0.14;
+
+/// The entry of [`shape::ERA_1980S_PAINT`] that `roll` picks.
+fn era_index(roll: u32) -> usize {
+    let paint = shape::era_1980s_paint(roll);
+    shape::ERA_1980S_PAINT
+        .iter()
+        .position(|e| e.0 == paint)
+        .unwrap_or(0)
+}
+
 /// Instances farther than this from the eye are lit by the sun and sky only, m.
 pub const LIT_RADIUS_M: f32 = 160.0;
 /// Most prop instances a frame draws.
@@ -64,7 +83,9 @@ const fn look(
     }
 }
 
-/// The instanced kinds but cars, in mesh order.
+/// The instanced kinds but cars, in mesh order. A bench or a trash can is one of a few
+/// street-clutter designs (`world::props::PropKit::instanced`): eight shapes each, so the
+/// designs come out in about their shares.
 const LOOKS: [Look; 10] = {
     use world::props::PropKind as K;
     [
@@ -72,9 +93,9 @@ const LOOKS: [Look; 10] = {
         look(K::Oak, VARIANTS, true, 420.0, 4.0, 3.5),
         look(K::Eucalyptus, VARIANTS, true, 420.0, 5.0, 9.0),
         look(K::Hydrant, 1, false, 200.0, 0.5, 0.4),
-        look(K::Bench, 1, false, 200.0, 1.0, 0.5),
-        look(K::TrashCan, 1, false, 200.0, 0.5, 0.5),
-        look(K::Mailbox, VARIANTS, false, 200.0, 0.5, 0.7),
+        look(K::Bench, 8, false, 200.0, 1.6, 1.3),
+        look(K::TrashCan, 8, false, 200.0, 0.7, 0.6),
+        look(K::Mailbox, 8, false, 200.0, 0.5, 0.7),
         look(K::PowerPole, VARIANTS, false, 380.0, 1.5, 5.5),
         look(K::StopSign, 1, false, 250.0, 0.6, 1.5),
         look(K::StreetLight, 1, false, 900.0, 1.5, 4.0),
@@ -105,6 +126,10 @@ fn look_of(k: PropKind) -> Option<usize> {
 #[derive(Clone, Copy, Debug)]
 struct Entry {
     mesh: u16,
+    /// The mesh beyond [`CAR_DETAIL_RADIUS_M`] (a parked car's level 2; `mesh` otherwise).
+    far: u16,
+    /// Vertex color multiplier (a parked car's wear).
+    tint: [f32; 4],
     transform: [[f32; 4]; 4],
     bounds: Bounds,
     chunk: [i32; 2],
@@ -142,7 +167,7 @@ impl PropInstances {
             return Ok(None);
         }
         let seed = place.header.seed;
-        let kit = world::props::PropKit::new();
+        let kit = world::props::PropKit::instanced();
         // Each kind's shapes, built at the origin facing yaw 0 (`-z`).
         let mut meshes = Vec::new();
         let mut first = [0u16; LOOKS.len()];
@@ -172,8 +197,10 @@ impl PropInstances {
             .map(|(_, text)| vehicles::load_shape(text))
             .collect::<Result<_, _>>()?;
         // Car meshes are made for the (shape, paint) pairs the place uses.
-        let mut car_mesh: Vec<Vec<Option<u16>>> =
-            shapes.iter().map(|s| vec![None; s.palette.len()]).collect();
+        let mut car_mesh: Vec<Vec<Option<u16>>> = shapes
+            .iter()
+            .map(|s| vec![None; s.palette.len() + shape::ERA_1980S_PAINT.len()])
+            .collect();
         let mut entries = Vec::with_capacity(items.len());
         for p in items {
             let pos = Vec3::from(p.pos);
@@ -183,21 +210,40 @@ impl PropInstances {
             );
             let chunk = chunk_of([p.pos[0], p.pos[2]]);
             let car = matches!(p.kind, PropKind::ParkedCar { .. });
+            let mut tint = [1.0; 4];
+            let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
                 PropKind::ParkedCar { vehicle_class } => {
                     let s = world::props::parked_car_shape(vehicle_class) % shapes.len();
-                    let paint = usize::from(vehicle_class >> 4) % shapes[s].palette.len();
+                    // A third in the car's own palette, the rest in the era's street colors.
+                    let n_own = shapes[s].palette.len();
+                    let nibble = usize::from(vehicle_class >> 4);
+                    let (paint, era) = if nibble < OWN_PAINT_NIBBLES {
+                        (nibble % n_own, None)
+                    } else {
+                        let roll = (h >> 32) as u32;
+                        let k = era_index(roll);
+                        (n_own + k, Some(shape::ERA_1980S_PAINT[k].0))
+                    };
                     let id = match car_mesh[s][paint] {
                         Some(id) => id,
                         None => {
-                            meshes.push(car::parked_mesh(&shapes[s], paint)?);
-                            let id = (meshes.len() - 1) as u16;
+                            let own = if era.is_some() { 0 } else { paint };
+                            // Level 1, then level 2 right after it (`far` is `mesh + 1`).
+                            for lod in [1, 2] {
+                                meshes.push(car::parked_mesh(&shapes[s], own, era, lod)?);
+                            }
+                            let id = (meshes.len() - 2) as u16;
                             car_mesh[s][paint] = Some(id);
                             id
                         }
                     };
+                    far = id + 1;
                     let m = Mat4::from_rotation_translation(Quat::from_rotation_y(p.yaw), pos);
                     let b = Bounds::cube(pos + Vec3::Y, 2.8);
+                    // Road dust and sun wear: a little darker and warmer, up to 14%.
+                    let d = ((h >> 12) & 255) as f32 / 255.0 * MAX_WEAR;
+                    tint = [1.0 - d, 1.0 - d * 1.06, 1.0 - d * 1.2, 1.0];
                     (id, m, b, CAR_DRAW_RADIUS_M)
                 }
                 kind => {
@@ -224,6 +270,8 @@ impl PropInstances {
             };
             entries.push(Entry {
                 mesh,
+                far: if far == u16::MAX { mesh } else { far },
+                tint,
                 transform: transform.to_cols_array_2d(),
                 bounds,
                 chunk,
@@ -271,37 +319,49 @@ impl PropInstances {
     ) -> usize {
         let mut n = 0;
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
-        for e in &self.entries {
-            if n == MAX_PROP_INSTANCES {
-                break;
-            }
-            let d2 = e.bounds.distance_squared(eye);
-            if d2 > e.reach2 || !live(e.chunk) {
-                continue;
-            }
-            let lights = if d2 < lit2 {
-                light_set(lights, &e.bounds)
-            } else {
-                LightSet::EMPTY
-            };
-            let glow = if e.mesh == self.lamp_mesh {
-                lamp_glow
-            } else {
-                1.0
-            };
-            let mut transform = e.transform;
-            if e.car {
-                let at = [transform[3][0], transform[3][2]];
-                if let Some(tilt) = rocking.tilt_at(at) {
-                    transform = tilted(transform, tilt);
+        let near2 = CAR_DETAIL_RADIUS_M * CAR_DETAIL_RADIUS_M;
+        // Two passes so each mesh's instances stay one run: everything near (and every
+        // prop with one level), then the far parked cars at their lower level.
+        for far in [false, true] {
+            for e in &self.entries {
+                if n == MAX_PROP_INSTANCES {
+                    return n;
                 }
+                let d2 = e.bounds.distance_squared(eye);
+                if d2 > e.reach2 || !live(e.chunk) {
+                    continue;
+                }
+                let lod_far = e.far != e.mesh && d2 > near2;
+                if lod_far != far {
+                    continue;
+                }
+                let mesh = if far { e.far } else { e.mesh };
+                let lights = if d2 < lit2 {
+                    light_set(lights, &e.bounds)
+                } else {
+                    LightSet::EMPTY
+                };
+                let glow = if e.mesh == self.lamp_mesh {
+                    lamp_glow
+                } else {
+                    1.0
+                };
+                // A knocked parked car leans the same at either level of detail.
+                let mut transform = e.transform;
+                if e.car {
+                    let at = [transform[3][0], transform[3][2]];
+                    if let Some(tilt) = rocking.tilt_at(at) {
+                        transform = tilted(transform, tilt);
+                    }
+                }
+                out.push(MeshInstance {
+                    lights,
+                    glow,
+                    color: e.tint,
+                    ..MeshInstance::new(self.ids[usize::from(mesh)], transform)
+                });
+                n += 1;
             }
-            out.push(MeshInstance {
-                lights,
-                glow,
-                ..MeshInstance::new(self.ids[usize::from(e.mesh)], transform)
-            });
-            n += 1;
         }
         n
     }

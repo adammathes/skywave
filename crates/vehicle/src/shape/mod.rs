@@ -2,9 +2,9 @@
 //!
 //! A [`ShapeSpec`] (RON file `assets/vehicles/*.shape.ron`, layout in `docs/VEHICLES.md`)
 //! is a side silhouette, a plan outline, a beltline and a few cross-section numbers, plus
-//! choices for lamps, grille, bumpers, rims and trim. [`build`] lofts it into an
-//! early-2000s-console-density body (3–6k triangles with wheels and parts, 1.5–3k for the
-//! cabin) as plain arrays the renderer can upload.
+//! choices for lamps, grille, bumpers, rims and trim. [`build`] lofts it into a body of a
+//! little more than early-2000s-console density (8–14k triangles with wheels and parts,
+//! 4–8k for the cabin; 3–5k at LOD1) as plain arrays the renderer can upload.
 //!
 //! Model space is the body-space axes (`+x` right, `+y` up, `-z` forward) with the origin
 //! on the ground, on the centerline, under the front axle. [`body_offset`] moves it to
@@ -27,14 +27,14 @@ mod tests;
 
 pub use mesh::MeshData;
 pub use params::{
-    Antenna, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles, HeadLights,
-    InteriorShape, Mirrors, Parts, Rear, Rims, Roof, RoofKind, Seams, Section, ShapeError,
-    ShapeSpec, Spoiler, TailLights, Top, Wheels,
+    Antenna, Applique, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles,
+    HeadLights, InteriorShape, Mirrors, Parts, Rear, Rims, Roof, RoofKind, Seams, Section,
+    ShapeError, ShapeSpec, Spoiler, TailLights, Top, Wheels,
 };
 
 use crate::VehicleSpec;
 use mesh::{emissive, Mat, Uv};
-use params::parse_hex;
+use params::{parse_hex, parse_paint};
 
 /// One instrument dial: the app draws its face markings and needle at runtime.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -134,10 +134,46 @@ pub struct BuildOptions {
     /// Palette entry for the paint (wraps).
     pub color_index: usize,
     /// 0 is full detail; 1 drops seams, interior detail, small parts and turns rims into
-    /// discs (≤ 40% of the triangles).
+    /// discs (≤ 40% of the triangles); 2 is a coarser loft with plainer wheels and no arch
+    /// lips (~2k exterior triangles) for parked cars far away.
     pub lod: u8,
     /// Pop-up headlamps raised.
     pub popups_up: bool,
+    /// A paint (`#rrggbb` or `#upper/#lower`) in place of the palette entry's, which still
+    /// picks the `color_details`: parked cars in an era's colors ([`ERA_1980S_PAINT`]).
+    pub paint: Option<&'static str>,
+}
+
+/// Body colors seen on the street in the 1980s and how common each is (weights): lots of
+/// tan, white, silver and burgundy, some browns, blues and two-tones.
+pub const ERA_1980S_PAINT: [(&str, u32); 14] = [
+    ("#c9b48e", 14),        // tan
+    ("#ebe8df", 14),        // white
+    ("#b9bbbd", 11),        // silver
+    ("#6e1f2a", 10),        // burgundy
+    ("#6a4a32", 8),         // brown
+    ("#41597e", 7),         // medium blue
+    ("#bfc2c4/#3b4d72", 6), // silver over blue
+    ("#1e1f22", 6),         // black
+    ("#a8262a", 6),         // red
+    ("#344a3a", 4),         // dark green
+    ("#e3d9bd", 4),         // cream
+    ("#8fa7bd", 4),         // light blue
+    ("#b89a52", 3),         // gold
+    ("#d4c3a0/#5e4430", 3), // champagne over brown
+];
+
+/// The era paint `roll` (any number; taken modulo the weights' sum) lands on.
+pub fn era_1980s_paint(roll: u32) -> &'static str {
+    let total: u32 = ERA_1980S_PAINT.iter().map(|p| p.1).sum();
+    let mut r = roll % total;
+    for &(paint, w) in &ERA_1980S_PAINT {
+        if r < w {
+            return paint;
+        }
+        r -= w;
+    }
+    ERA_1980S_PAINT[0].0
 }
 
 /// Builds the full-detail car in palette color `color_index`.
@@ -151,7 +187,7 @@ pub fn build(spec: &ShapeSpec, color_index: usize) -> Result<CarMesh, ShapeError
     )
 }
 
-/// Builds level of detail `level` (0 or 1).
+/// Builds level of detail `level` (0, 1 or 2).
 pub fn build_lod(spec: &ShapeSpec, color_index: usize, level: u8) -> Result<CarMesh, ShapeError> {
     build_with(
         spec,
@@ -166,8 +202,11 @@ pub fn build_lod(spec: &ShapeSpec, color_index: usize, level: u8) -> Result<CarM
 /// Validates `spec` and builds it.
 pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, ShapeError> {
     spec.validate()?;
-    let lod = opts.lod.min(1);
-    let mats = Materials::new(spec, opts.color_index);
+    let lod = opts.lod.min(2);
+    if opts.paint.is_some_and(|p| params::parse_paint(p).is_none()) {
+        return Err(ShapeError::BadColor { index: u32::MAX });
+    }
+    let mats = Materials::new(spec, opts.color_index, opts.paint);
     let b = body::Body::new(spec, lod, opts.color_index);
 
     let mut shell = mesh::Soup::new(38.0);
@@ -187,7 +226,7 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
     int.build();
 
     let w = &spec.wheels;
-    let wheel = wheel::build(w, spec.parts.rims, spec.parts.hubcaps, lod, &mats).finish();
+    let wheel = wheel::build(w, &spec.parts, lod, &mats).finish();
     let (x, y, wb) = (w.track * 0.5, w.radius, w.rear_x - w.front_x);
     Ok(CarMesh {
         body: shell.finish(),
@@ -219,7 +258,13 @@ fn hex(s: &str) -> [u8; 4] {
 
 /// Every material a car uses, resolved to linear colors.
 pub(crate) struct Materials {
+    /// The paint, or the upper color of a two-tone.
     pub paint: Mat,
+    /// The lower color of a two-tone paint (`paint` otherwise).
+    pub paint_low: Mat,
+    pub two_tone: bool,
+    /// The two-tone split's pinstripe.
+    pub pinstripe: Mat,
     pub seam: Mat,
     pub chassis: Mat,
     pub liner: Mat,
@@ -228,6 +273,7 @@ pub(crate) struct Materials {
     pub rubber: Mat,
     pub glass: Mat,
     pub tire: Mat,
+    pub whitewall: Mat,
     pub rim: Mat,
     pub steel: Mat,
     pub headlamp: Mat,
@@ -241,6 +287,9 @@ pub(crate) struct Materials {
     pub wood: Mat,
     pub wood_trim: Mat,
     pub dash: Mat,
+    pub dash_top: Mat,
+    pub applique: Mat,
+    pub bezel: Mat,
     pub cluster: Mat,
     pub dial: Mat,
     pub display: Mat,
@@ -248,6 +297,11 @@ pub(crate) struct Materials {
     pub radio: Mat,
     pub seat: Mat,
     pub seat_bolster: Mat,
+    pub seat_insert: Mat,
+    pub piping: Mat,
+    pub belt: Mat,
+    pub switch: Mat,
+    pub warn: [Mat; 4],
     pub carpet: Mat,
     pub headliner: Mat,
     pub int_trim: Mat,
@@ -258,9 +312,11 @@ pub(crate) struct Materials {
 }
 
 impl Materials {
-    fn new(spec: &ShapeSpec, color_index: usize) -> Materials {
-        let paint_hex = &spec.palette[color_index % spec.palette.len()];
-        let paint = Mat::new(hex(paint_hex));
+    fn new(spec: &ShapeSpec, color_index: usize, paint: Option<&str>) -> Materials {
+        let paint_hex = paint.unwrap_or(&spec.palette[color_index % spec.palette.len()]);
+        let (upper, lower) = parse_paint(paint_hex).unwrap_or(([128, 128, 128], None));
+        let paint = Mat::new(rgb(upper));
+        let paint_low = lower.map_or(paint, |c| Mat::new(rgb(c)));
         let s = |h: [u8; 3]| Mat::new(rgb(h));
         let ic = &spec.interior.colors;
         let ic = |k: usize| Mat::new(hex(&ic[k]));
@@ -268,8 +324,20 @@ impl Materials {
         let disp_lin = rgb(disp);
         let disp_e = [disp_lin[0], disp_lin[1], disp_lin[2]];
         let trim = s([40, 40, 43]);
+        let opt = |h: &str, or: Mat| parse_hex(h).map_or(or, |c| Mat::new(rgb(c)));
+        let i = &spec.interior;
+        let seat = ic(1);
+        let dash = ic(0);
+        let applique = match i.applique {
+            params::Applique::None => dash.shade(0.8),
+            params::Applique::Wood => s([112, 66, 34]),
+            params::Applique::Brushed => s([150, 152, 156]).group(3),
+        };
         Materials {
             paint,
+            paint_low,
+            two_tone: lower.is_some(),
+            pinstripe: Mat::new(hex(&spec.accent)),
             seam: paint.shade(0.25).group(1),
             chassis: s([30, 30, 32]),
             liner: s([18, 18, 19]),
@@ -283,6 +351,7 @@ impl Materials {
             })
             .uv(Uv::Side),
             tire: s([30, 30, 31]),
+            whitewall: s([226, 224, 216]),
             rim: s([196, 198, 202]),
             steel: s([70, 72, 76]),
             headlamp: s([236, 238, 230]).glow(emissive([255, 238, 205], 2.0)),
@@ -295,14 +364,28 @@ impl Materials {
             accent: Mat::new(hex(&spec.accent)),
             wood: s([120, 74, 40]).uv(Uv::Side),
             wood_trim: s([206, 186, 140]),
-            dash: ic(0),
+            dash,
+            dash_top: opt(&i.dash_top, dash),
+            applique,
+            bezel: s([170, 174, 180]).group(2),
             cluster: s([14, 14, 16]),
-            dial: s([22, 24, 26]).glow(emissive(disp_e, 0.15)),
+            // Backlit faces: the display color, dim by day, glowing with the instruments.
+            dial: s([20, 22, 24]).glow(emissive(disp_e, 0.7)),
             display: Mat::new(disp_lin).glow(emissive(disp_e, 1.5)),
             vent: s([14, 14, 15]),
             radio: s([30, 30, 33]),
-            seat: ic(1),
-            seat_bolster: ic(1).shade(0.82),
+            seat,
+            seat_bolster: seat.shade(0.82),
+            seat_insert: opt(&i.insert, seat.shade(1.18)),
+            piping: opt(&i.piping, seat.shade(0.55)),
+            belt: s([38, 38, 40]),
+            switch: s([24, 24, 26]),
+            warn: [
+                s([90, 20, 16]).glow(emissive([255, 30, 20], 0.25)),
+                s([90, 60, 10]).glow(emissive([255, 150, 20], 0.25)),
+                s([20, 70, 30]).glow(emissive([40, 255, 80], 0.25)),
+                s([20, 40, 90]).glow(emissive([40, 120, 255], 0.25)),
+            ],
             carpet: ic(2),
             headliner: ic(3),
             int_trim: ic(4),

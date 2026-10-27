@@ -5,13 +5,13 @@
 //!     id: "1984_socal", title: "1984 SoCal", scenario: "socal_beach_1984",
 //!     stations: [
 //!         Station(
-//!             id: "somafm_seventies", name: "SomaFM Left Coast 70s", era: "1970s",
-//!             format: "mellow 70s album rock",
+//!             id: "181fm_yachtrock", name: "181.FM Yacht Rock", era: "1970s",
+//!             format: "yacht rock and smooth soft rock",
 //!             source: Stream(
-//!                 urls: ["https://ice1.somafm.com/seventies-128-mp3"],
-//!                 homepage: "https://somafm.com/seventies/",
+//!                 urls: ["https://listen.181fm.com/181-yachtrock_128k.mp3"],
+//!                 homepage: "https://www.181.fm/links",
 //!                 codec: Mp3, bitrate_kbps: 128,
-//!                 terms_checked: "2026-10-26", verified: false,
+//!                 terms_checked: "2026-10-27", verified: false,
 //!             ),
 //!         ),
 //!     ],

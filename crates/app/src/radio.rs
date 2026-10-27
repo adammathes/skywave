@@ -194,11 +194,16 @@ impl CarRadio {
         self.shown_s = 0.0;
     }
 
-    /// Advances the tune noise, the toast and the dash scroll by `dt` seconds.
+    /// Advances the tune noise, the toast and the dash scroll by `dt` seconds. A station
+    /// the radio moved to on its own (after "no signal") gets its toast.
     pub fn tick(&mut self, dt: f32) {
+        let before = self.radio.station();
         self.radio.tick(dt);
         self.toast = (self.toast - dt).max(0.0);
         self.shown_s += dt;
+        if self.radio.station() != before {
+            self.on_tuned();
+        }
     }
 
     /// A report from the platform's player. A station that just failed for good shows its
@@ -396,9 +401,9 @@ mod tests {
         }
         assert_eq!(radio.preset().id, "1984_socal");
         assert_eq!(radio.preset().scenario, SCENARIO);
-        assert!((6..=8).contains(&radio.presets[0].stations.len()));
-        assert!((4..=6).contains(&radio.presets[1].stations.len()));
-        assert!((4..=6).contains(&radio.presets[2].stations.len()));
+        for p in &radio.presets {
+            assert!((5..=7).contains(&p.stations.len()), "{}", p.id);
+        }
         // Off until started, and silent.
         assert!(!radio.radio().is_on());
         assert_eq!(radio.rows().len(), radio.radio().channels().len());
@@ -422,8 +427,8 @@ mod tests {
         let first = r.radio().channels()[0].clone();
         let t = r.toast().unwrap();
         assert_eq!(t, ToastLines::Station(1, 7, &first));
-        assert_eq!(t.title().to_string(), "1/7  SomaFM Left Coast 70s");
-        assert_eq!(t.detail().to_string(), "mellow 70s album rock");
+        assert_eq!(t.title().to_string(), "1/7  181.FM Yacht Rock");
+        assert_eq!(t.detail().to_string(), "yacht rock and smooth soft rock");
         r.tick(0.2);
         let cmds: Vec<_> = r.commands().collect();
         assert!(
@@ -439,6 +444,9 @@ mod tests {
         }
         assert!(matches!(r.toast(), Some(ToastLines::NoSignal(1, 7, _))));
         assert_eq!(r.dash(12).unwrap().to_string(), "NO SIGNAL");
+        // Then the radio moves on by itself, and the dial skips the failed station.
+        r.tick(audio::NO_SIGNAL_SECONDS);
+        assert!(matches!(r.toast(), Some(ToastLines::Station(2, 7, _))));
         assert!(press(&mut r, Action::RadioPrev));
         assert_eq!(r.radio().station(), Some(6));
         assert!(press(&mut r, Action::RadioOff));
@@ -448,7 +456,7 @@ mod tests {
         assert!(r.store(&mut s));
         assert_eq!(
             (s.on, s.last_station.as_deref()),
-            (false, Some("somafm_bossa"))
+            (false, Some("radioparadise_global"))
         );
         assert!(!r.store(&mut s));
     }
@@ -479,13 +487,13 @@ mod tests {
         let mut r = CarRadio::new();
         let mut s = RadioSettings::default();
         s.presets.insert(SCENARIO.into(), "1986_north_shore".into());
-        s.set_enabled("somafm_u80s", false);
+        s.set_enabled("181fm_awesome80s", false);
         s.add_custom("https://example.org/live").unwrap();
         r.apply(&s);
         assert_eq!(r.preset_index(), 2);
-        assert_eq!(r.rows().len(), 6, "every station and the added stream");
+        assert_eq!(r.rows().len(), 8, "every station and the added stream");
         let ids: Vec<&str> = r.radio().channels().iter().map(|c| c.id.as_str()).collect();
-        assert!(!ids.contains(&"somafm_u80s") && ids.contains(&"custom_1"));
+        assert!(!ids.contains(&"181fm_awesome80s") && ids.contains(&"custom_1"));
         s.presets.insert(SCENARIO.into(), "no_such_preset".into());
         r.apply(&s);
         assert_eq!(r.preset_index(), 0);
@@ -503,11 +511,11 @@ mod tests {
         let mut r = CarRadio::new();
         r.start(&RadioSettings::default());
         press(&mut r, Action::RadioNext);
-        // "SomaFM Left Coast 70s" is 21 characters.
-        assert_eq!(r.dash(40).unwrap().to_string(), "SomaFM Left Coast 70s");
-        assert_eq!(r.dash(8).unwrap().to_string(), "SomaFM L");
+        // "181.FM Yacht Rock" is 17 characters.
+        assert_eq!(r.dash(40).unwrap().to_string(), "181.FM Yacht Rock");
+        assert_eq!(r.dash(8).unwrap().to_string(), "181.FM Y");
         r.tick(1.0 + 2.0 / SCROLL_CHARS_PER_S);
-        assert_eq!(r.dash(8).unwrap().to_string(), "maFM Lef");
+        assert_eq!(r.dash(8).unwrap().to_string(), "1.FM Yac");
         let wrap = DashText {
             text: "ABCDE",
             start: 3,

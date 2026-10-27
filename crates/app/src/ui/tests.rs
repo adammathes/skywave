@@ -1120,7 +1120,7 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
     assert!(h.app.ui().radio().toast().is_none());
     h.key(Key::BracketRight);
     assert!(h.app.ui().radio().toast().is_some());
-    assert!(h.hud_text().contains("SomaFM Left Coast 70s"));
+    assert!(h.hud_text().contains("181.FM Yacht Rock"));
     for _ in 0..12 {
         h.frame();
     }
@@ -1224,7 +1224,7 @@ fn streams_can_be_added_by_url() {
 
 #[test]
 fn the_dash_shows_the_station_in_the_cockpit() {
-    let count = |h: &Harness| h.hud_text().matches("SomaFM").count();
+    let count = |h: &Harness| h.hud_text().matches("181.FM").count();
     let mut h = Harness::new();
     h.app.set_target_size(1280, 720);
     h.key(Key::BracketRight);

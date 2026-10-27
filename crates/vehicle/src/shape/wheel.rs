@@ -5,7 +5,7 @@
 
 use super::math::*;
 use super::mesh::{Mat, Soup};
-use super::params::{Rims, Wheels};
+use super::params::{Parts, Rims, Wheels};
 use super::Materials;
 
 const AXIS: V3 = [1.0, 0.0, 0.0];
@@ -15,13 +15,15 @@ pub fn rim_radius(r: f32) -> f32 {
     r * 0.62
 }
 
-pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> Soup {
+pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
+    let (rims, hubcaps) = (parts.rims, parts.hubcaps);
     let mut s = Soup::new(40.0);
     let r = w.radius;
     let hw = w.width * 0.5;
     let rr = rim_radius(r);
     let o = [0.0; 3];
     let mid = (r + rr) * 0.5;
+    let white = m.whitewall;
     if lod > 0 {
         let prof = [
             (hw - 0.01, rr),
@@ -31,21 +33,70 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
             (-hw, r - 0.03),
             (-hw + 0.01, rr),
         ];
-        s.lathe(o, AXIS, &prof, 10, 0.0, (0.0, mid), m.tire);
+        let segs = if lod > 1 { 10 } else { 20 };
+        s.lathe(o, AXIS, &prof, segs, 0.0, (0.0, mid), m.tire);
+        if parts.whitewalls {
+            let k = (r - rr) * 0.5;
+            s.annulus(
+                [hw + 0.002, 0.0, 0.0],
+                AXIS,
+                rr + k * 0.4,
+                rr + k * 1.2,
+                segs,
+                white,
+            );
+        }
         // Rims become a flat disc with a hub.
-        s.disc([hw - 0.015, 0.0, 0.0], AXIS, rr, 10, m.rim);
+        let face = if hubcaps { m.chrome } else { m.rim };
+        s.disc([hw - 0.015, 0.0, 0.0], AXIS, rr, segs, face);
+        if lod == 1 {
+            s.disc([hw - 0.01, 0.0, 0.0], AXIS, rr * 0.3, 8, m.trim);
+        }
         s.disc([-hw + 0.015, 0.0, 0.0], scale(AXIS, -1.0), rr, 8, m.chassis);
         return s;
     }
-    let prof = [
-        (hw - 0.012, rr + 0.004),
-        (hw + 0.006, rr + 0.45 * (r - rr)),
+    // Tire: bead, sidewall bulge, shoulder, a tread with three grooves, and back.
+    let segs = 24;
+    let side = |t: f32| rr + t * (r - rr);
+    let sw = |x: f32, t: f32| (x, side(t));
+    let out = [
+        sw(hw - 0.012, 0.03),
+        sw(hw + 0.002, 0.25),
+        sw(hw + 0.007, 0.5),
+        sw(hw + 0.004, 0.72),
+        sw(hw - 0.008, 0.9),
         (hw - 0.03, r - 0.004),
-        (-hw + 0.03, r - 0.004),
-        (-hw - 0.006, rr + 0.45 * (r - rr)),
-        (-hw + 0.012, rr + 0.004),
     ];
-    s.lathe(o, AXIS, &prof, 16, 0.0, (0.0, mid), m.tire);
+    // Outer sidewall, a whitewall band on it when the car has them.
+    for k in 0..out.len() - 1 {
+        let mat = if parts.whitewalls && (k == 1 || k == 2) {
+            white
+        } else {
+            m.tire
+        };
+        s.lathe(o, AXIS, &out[k..k + 2], segs, 0.0, (0.0, mid), mat);
+    }
+    // Tread: ribs at the full radius, two grooves sunk 8 mm.
+    let tw = hw - 0.03;
+    let mut tread: alloc::vec::Vec<(f32, f32)> = alloc::vec![(tw, r - 0.004)];
+    for g in [0.4f32, -0.4] {
+        let x = g * tw;
+        tread.extend([
+            (x + 0.008, r - 0.004),
+            (x + 0.006, r - 0.012),
+            (x - 0.006, r - 0.012),
+            (x - 0.008, r - 0.004),
+        ]);
+    }
+    tread.push((-tw, r - 0.004));
+    s.lathe(o, AXIS, &tread, segs, 0.0, (0.0, mid), m.tire);
+    let back = [
+        (-hw + 0.03, r - 0.004),
+        sw(-hw + 0.008, 0.9),
+        sw(-hw - 0.006, 0.5),
+        sw(-hw + 0.012, 0.03),
+    ];
+    s.lathe(o, AXIS, &back, segs / 2, 0.0, (0.0, mid), m.tire);
     let face = hw - 0.012;
     if hubcaps {
         // Full wheel cover: a shallow chrome dome with ribs and a dark center.
@@ -56,19 +107,19 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
             (face + 0.024, rr * 0.3),
             (face + 0.027, 0.0),
         ];
-        s.lathe(o, AXIS, &cap, 14, 0.0, (-0.3, rr * 0.5), m.chrome);
+        s.lathe(o, AXIS, &cap, 24, 0.0, (-0.3, rr * 0.5), m.chrome);
         // A darker ring and flat radial ribs give the cover its pressed look.
         s.lathe(
             o,
             AXIS,
             &[(face + 0.0175, rr * 0.6), (face + 0.0205, rr * 0.48)],
-            14,
+            24,
             0.0,
             (-0.3, rr * 0.5),
             m.chrome.shade(0.7),
         );
-        for k in 0..10 {
-            let a = 2.0 * PI * (k as f32 + 0.5) / 10.0;
+        for k in 0..16 {
+            let a = 2.0 * PI * (k as f32 + 0.5) / 16.0;
             let (sn, cs) = sin_cos(a);
             let (sn1, cs1) = sin_cos(a + 0.07);
             let pt = |r: f32, x: f32, sn: f32, cs: f32| [x, cs * r, sn * r];
@@ -78,7 +129,8 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
             let q3 = pt(rr * 0.64, face + 0.0185, sn1, cs1);
             s.quad_dir(q0, q1, q2, q3, m.chrome.shade(0.62), AXIS);
         }
-        s.disc([face + 0.028, 0.0, 0.0], AXIS, rr * 0.18, 10, m.trim);
+        s.disc([face + 0.028, 0.0, 0.0], AXIS, rr * 0.18, 16, m.trim);
+        lugs(&mut s, face + 0.024, rr * 0.3, 5, m.chrome);
         return s;
     }
     // Barrel, flange and back plate (what you see between spokes).
@@ -86,7 +138,7 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
         o,
         AXIS,
         &[(face, rr), (-hw + 0.015, rr)],
-        12,
+        24,
         0.0,
         (0.0, rr + 1.0),
         m.chassis,
@@ -94,13 +146,28 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
     s.lathe(
         o,
         AXIS,
-        &[(face - 0.004, rr - 0.016), (face + 0.002, rr + 0.004)],
-        12,
+        &[
+            (face - 0.004, rr - 0.016),
+            (face + 0.001, rr - 0.006),
+            (face + 0.002, rr + 0.004),
+        ],
+        24,
         0.0,
         (-1.0, rr),
         m.rim,
     );
-    s.disc([-0.03, 0.0, 0.0], AXIS, rr, 8, m.chassis);
+    // A dark back plate so the spokes stand out.
+    s.disc([-0.03, 0.0, 0.0], AXIS, rr, 12, m.liner);
+    // Brake drum or disc behind the spokes.
+    s.cylinder(
+        [-0.03, 0.0, 0.0],
+        [-0.005, 0.0, 0.0],
+        rr * 0.72,
+        16,
+        true,
+        false,
+        m.steel,
+    );
     let hub_x = face - 0.03;
     match rims {
         Rims::Steel => {
@@ -111,9 +178,9 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
                 (hub_x + 0.012, rr * 0.3),
                 (hub_x + 0.02, 0.0),
             ];
-            s.lathe(o, AXIS, &dish, 12, 0.0, (-0.3, rr * 0.5), m.steel);
-            for k in 0..6 {
-                let a = 2.0 * PI * k as f32 / 6.0;
+            s.lathe(o, AXIS, &dish, 24, 0.0, (-0.3, rr * 0.5), m.steel);
+            for k in 0..8 {
+                let a = 2.0 * PI * k as f32 / 8.0;
                 let (sn, cs) = sin_cos(a);
                 let dir = [0.0, cs, sn];
                 let c = madd([hub_x + 0.006, 0.0, 0.0], dir, rr * 0.57);
@@ -140,12 +207,22 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
                 false,
                 m.rim,
             );
-            s.disc([hub_x + 0.022, 0.0, 0.0], AXIS, 0.065, 12, m.rim.shade(1.1));
+            s.disc([hub_x + 0.022, 0.0, 0.0], AXIS, 0.065, 16, m.rim.shade(1.1));
+            // Spoke windows show the dark barrel; a bright lip rings the face.
+            s.annulus(
+                [face - 0.003, 0.0, 0.0],
+                AXIS,
+                rr - 0.03,
+                rr - 0.012,
+                24,
+                m.rim,
+            );
             lugs(&mut s, hub_x + 0.024, 0.042, 5, m.chrome);
+            s.disc([hub_x + 0.03, 0.0, 0.0], AXIS, 0.022, 10, m.trim);
         }
         Rims::Mesh => {
-            for k in 0..10 {
-                let a = 2.0 * PI * k as f32 / 10.0;
+            for k in 0..16 {
+                let a = 2.0 * PI * k as f32 / 16.0;
                 for (lean, x) in [(0.22f32, 0.0f32), (-0.22, 0.008)] {
                     let (sn, cs) = sin_cos(a);
                     let (sn1, cs1) = sin_cos(a + lean);
@@ -169,10 +246,19 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
                 false,
                 m.rim,
             );
-            s.disc([hub_x + 0.024, 0.0, 0.0], AXIS, 0.072, 12, m.chrome);
+            s.disc([hub_x + 0.024, 0.0, 0.0], AXIS, 0.072, 16, m.chrome);
+            lugs(&mut s, hub_x + 0.026, 0.045, 5, m.chrome.shade(0.8));
+            s.annulus(
+                [face - 0.003, 0.0, 0.0],
+                AXIS,
+                rr - 0.03,
+                rr - 0.012,
+                24,
+                m.rim,
+            );
         }
         Rims::Turbine => {
-            let n = 8;
+            let n = 12;
             for k in 0..n {
                 let a = 2.0 * PI * k as f32 / n as f32;
                 let (sn, cs) = sin_cos(a);
@@ -204,7 +290,8 @@ pub fn build(w: &Wheels, rims: Rims, hubcaps: bool, lod: u8, m: &Materials) -> S
                 m.rim,
             );
             s.disc([hub_x + 0.026, 0.0, 0.0], AXIS, 0.075, 10, m.rim.shade(1.1));
-            s.disc([hub_x + 0.027, 0.0, 0.0], AXIS, 0.03, 8, m.trim);
+            s.disc([hub_x + 0.027, 0.0, 0.0], AXIS, 0.03, 12, m.trim);
+            lugs(&mut s, hub_x + 0.028, 0.05, 5, m.chrome);
         }
     }
     s
@@ -215,9 +302,13 @@ fn lugs(s: &mut Soup, x: f32, r: f32, n: usize, mat: Mat) {
         let a = 2.0 * PI * k as f32 / n as f32;
         let (sn, cs) = sin_cos(a);
         let c = [x, cs * r, sn * r];
-        s.aabb(
-            sub(c, [0.006, 0.009, 0.009]),
-            add(c, [0.006, 0.009, 0.009]),
+        s.cylinder(
+            sub(c, [0.006, 0.0, 0.0]),
+            add(c, [0.006, 0.0, 0.0]),
+            0.009,
+            6,
+            true,
+            false,
             mat,
         );
     }

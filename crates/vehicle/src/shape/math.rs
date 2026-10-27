@@ -104,6 +104,15 @@ pub fn madd(a: V3, b: V3, k: f32) -> V3 {
     [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k]
 }
 
+/// Point between `a` and `b` at `t`.
+pub fn lerp3(a: V3, b: V3, t: f32) -> V3 {
+    [
+        lerp(a[0], b[0], t),
+        lerp(a[1], b[1], t),
+        lerp(a[2], b[2], t),
+    ]
+}
+
 pub fn dot(a: V3, b: V3) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
