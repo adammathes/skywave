@@ -1,0 +1,47 @@
+// Basilisk V12: a mid-80s mid-engined V12 flagship.
+//
+// Intent: the fastest car in the game, and it feels heavy and serious about it. A big
+// V12 with torque everywhere, very wide tires and a rear wing that presses it down at
+// speed; heavy steering and a firm, flat ride. It squats and goes, and the rear only lets
+// go when you ask it to.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "basilisk_v12",
+    name: "Basilisk V12",
+    era: Eighties,
+    year: 1985,
+    class: Sports,
+
+    mass_kg: 1490,
+    dims_m: (4.14, 2.06, 1.07),    // length, width, height
+    wheelbase_m: 2.45,
+    track_m: 1.56,
+    cg_height_m: 0.42,
+    cg_fore_aft: 0.57,             // 43% front: the V12 is behind the seats
+
+    engine: Engine(
+        idle_rpm: 950,
+        redline_rpm: 7500,
+        torque_nm: [(1000, 300), (3000, 420), (5200, 500), (7000, 455), (7500, 410)],
+    ),
+    gears: [2.2, 1.6, 1.24, 1.0, 0.8],
+    final_drive: 3.9,
+    reverse: 2.9,
+    shift_ms: 260,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.33, grip_long: 1.12, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 38000, damper: 3800, travel_m: 0.14, antiroll: 0.5),
+    steering: Steer(max_deg: 30, speed_sens: 0.6, return_rate: 10.0),
+    brakes: Brakes(max_nm: 4200, bias_front: 0.57, abs: false, handbrake_nm: 3000),
+    aero: Aero(cd: 0.42, frontal_m2: 1.9, downforce_coef: 0.06),
+    feel: Feel(oversteer_bias: 0.12, body_roll: 0.2, engine_sound: "v8_flatplane", shift_jerk: 0.35),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 200, mph), Tach(0, 9000)],
+        radio: "digital_green",
+    ),
+    shape: "basilisk_v12.shape.ron",
+)

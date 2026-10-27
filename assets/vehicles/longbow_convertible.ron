@@ -1,0 +1,45 @@
+// Longbow Convertible: the Longbow Coupe as a convertible.
+//
+// Intent: the same lazy V8 and grip with the top down: heavier with the extra bracing,
+// draggier, slightly softer, and a little slower than the coupe everywhere.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "longbow_convertible",
+    name: "Longbow Convertible",
+    era: Eighties,
+    year: 1986,
+    class: Convertible,
+
+    mass_kg: 1510,
+    dims_m: (4.48, 1.80, 1.17),    // length, width, height
+    wheelbase_m: 2.44,
+    track_m: 1.52,
+    cg_height_m: 0.46,
+    cg_fore_aft: 0.49,             // 51% front
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 5200,
+        torque_nm: [(1000, 330), (2500, 420), (3200, 447), (4400, 400), (5200, 330)],
+    ),
+    gears: [3.06, 1.63, 1.0, 0.7],
+    final_drive: 3.07,
+    reverse: 2.3,
+    shift_ms: 300,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.24, grip_long: 1.06, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 38000, damper: 3600, travel_m: 0.13, antiroll: 0.5),
+    steering: Steer(max_deg: 31, speed_sens: 0.6, return_rate: 11.0),
+    brakes: Brakes(max_nm: 3600, bias_front: 0.62, abs: true, handbrake_nm: 3000),
+    aero: Aero(cd: 0.4, frontal_m2: 1.95, downforce_coef: 0.01),
+    feel: Feel(oversteer_bias: 0.02, body_roll: 0.3, engine_sound: "v8_lazy", shift_jerk: 0.2),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "longbow_convertible.shape.ron",
+)

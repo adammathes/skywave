@@ -1,5 +1,5 @@
 // Pacific Shore, 1984: the launch world (docs/SCENARIOS.md). The procedural coast, the
-// twelve-car 1980s roster, the 1984 SoCal radio preset, golden hour. Format:
+// 1980s roster, the 1984 SoCal radio preset, golden hour. Format:
 // crates/app/src/scenario.rs.
 Scenario(
     id: "socal_beach_1984",

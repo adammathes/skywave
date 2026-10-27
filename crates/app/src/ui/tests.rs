@@ -1121,7 +1121,10 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
                 text.contains(&car.name) && text.contains(&car.engine),
                 "{text}"
             );
-            assert!(text.contains(&format!("{} of 12", i + 1)), "{text}");
+            assert!(
+                text.contains(&format!("{} of {}", i + 1, builtin.len())),
+                "{text}"
+            );
             // Exactly one car on the disc: the browsed one's meshes, in its first paint.
             let meshes = turntable(&mut h);
             let spec = crate::vehicles::builtin_spec(builtin[i].0).unwrap();
@@ -1158,11 +1161,12 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
     assert_eq!(h.app.take_new_meshes().count(), new);
     // Left goes back round the other way.
     h.pad(PadButton::DpadLeft);
-    assert_eq!(browsed(&h), (11, 0));
+    let last = builtin.len() - 1;
+    assert_eq!(browsed(&h), (last, 0));
     // The paint row and Drive keep the car; Back leaves without driving it.
     h.pad(PadButton::DpadDown);
     h.pad(PadButton::DpadDown);
-    assert_eq!(h.item(2).id, ItemId::Vehicle(11));
+    assert_eq!(h.item(2).id, ItemId::Vehicle(last));
     h.pad(PadButton::East);
     assert_eq!(h.page(), Page::Pause);
     assert!(turntable(&mut h).is_empty(), "the page is closed");
@@ -1270,7 +1274,8 @@ fn the_vehicle_page_fits_the_deck_and_a_tv() {
     let r = roster::roster();
     let longest = (0..r.len()).max_by_key(|&i| r[i].name.len()).unwrap();
     let most = (0..r.len()).max_by_key(|&i| r[i].paints.len()).unwrap();
-    assert_eq!(r[longest].name, "Seabreeze Convertible");
+    // The Seabreeze and the Appaloosa Convertible tie.
+    assert_eq!(r[longest].name.len(), "Seabreeze Convertible".len());
     assert_eq!(r[most].paints.len(), roster::MAX_PAINTS.min(8));
     for target in [(1280, 800), (1920, 1080)] {
         for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
@@ -1784,7 +1789,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     for line in [
         "Pacific Shore",
         "Beach town, 1984",
-        "12 cars",
+        "20 cars",
         "Basin City",
         "coming",
         "here",

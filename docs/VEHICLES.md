@@ -36,7 +36,8 @@ integer thousandths so every platform picks the same: 1 for a car within the sce
 scenario lists in `heroes` (and never quite 0). Traffic draws a new car's shape by these weights from its
 seeded generator; a parked car multiplies its class list's weights (`propinst::PARKED`) by them. Equal
 weights are reduced by their common divisor before a pick, so a world whose cars all fall in its years
-picks exactly as before weights existed: the 1979–1987 roster in the 1984 coast changes no hash or golden.
+picks exactly as before weights existed: the twenty-car 1979–1987 roster in the 1984 coast changes no hash
+or golden.
 
 | Car | Year | Car | Year | Car | Year |
 |---|---|---|---|---|---|
@@ -44,6 +45,9 @@ picks exactly as before weights existed: the 1979–1987 roster in the 1984 coas
 | Bancroft Sedan | 1980 | Buckboard Pickup | 1982 | Burro 4x4 | 1985 |
 | Drayman Van | 1980 | Palisade Wagon | 1983 | Halcyon Turbo | 1986 |
 | Corsair GTX | 1981 | Meadow Minivan | 1984 | Regent Coupe Cabrio | 1987 |
+| Avocet V8 | 1984 | Basilisk V12 | 1985 | Avocet Spider | 1986 |
+| Longbow Coupe | 1984 | Appaloosa GT | 1985 | Basilisk Roadster | 1986 |
+| Longbow Convertible | 1986 | Appaloosa Convertible | 1987 | | |
 
 ## Physics model (`vehicle::sim`), fixed 120 Hz
 One rigid body per car (position, orientation quaternion, linear/angular velocity, inertia tensor from a box of `dims_m` and `mass_kg`). Per step:
@@ -84,9 +88,10 @@ ShapeSpec(
   rear: Rear(lights: FullWidth|Dual|Triple|Round, spoiler: None|Lip|Wing, bumper: Chrome|Body|Rubber, bumper_y: (lo, hi)),
   seams: Seams(hood: bool, trunk: bool, doors: 2|4, hood_width: 0.6, creases: [(x0, y0, x1, y1)...]),  // 6 mm insets; ≤ 2 creases
   parts: Parts(mirrors: Door|Fender, handles: Flush|Pull, wipers: 0–3, exhaust: Single|Dual, antenna: Mast|None,
-               rims: Steel|Alloy5|Mesh|Turbine, hubcaps: bool, whitewalls: bool),  // whitewalls optional (false)
+               rims: Steel|Alloy5|Mesh|Turbine|Dish|Slotted, hubcaps: bool, whitewalls: bool),  // whitewalls optional (false)
   details: [Louvers, HoodScoop, SideStripe, WoodPanel, WoodApplique, ChromeTrim, VinylRoof, LandauRoof, RallyStripes, MudFlaps, RoofRack,
-            BlackTrim, CorneringLamps, PickupBed, SpareTire, TTop, Badge(Diamond|Circle|Bar|Chevron)],
+            BlackTrim, CorneringLamps, PickupBed, SpareTire, TTop, SideStrakes, NacaDucts, EngineLouvers,
+            Badge(Diamond|Circle|Bar|Chevron)],
   color_details: [(1, WoodApplique)],  // optional: extra details for one palette entry
   roof: Roof(kind: Hardtop),           // optional (default Hardtop) | Convertible(top: Down|Up)
   palette: ["#b9bcc0", "#c4c7cc/#363b43", ...], // era body colors (sRGB), one chosen per instance;
@@ -103,6 +108,8 @@ ShapeSpec(
 **Convertibles** (`roof: Roof(kind: Convertible(top: Down|Up))`): the side silhouette rises over the windshield to the header and drops straight to the deck, `glass.side` is empty and `glass.backlight` is where the top folds (the well behind the rear seat). The loft has nothing above the belt from the header to the boot and no side faces beside the windshield; the windshield gets a swept frame (A-pillars and a header rail, chrome with `ChromeTrim`, else black), the door tops a painted cap with a trim inner face, and the backlight range a deck. `top: Down` puts a padded boot over the well (six segments, rounded ends, pleat seams; `VinylRoof` makes it a conversion shop's taller, squarer boot with a bright foot molding); `top: Up` raises a slightly crowned fabric top from the header to the deck, open over the doors (the door glass is down), solid over the rear quarters, with a plastic rear window and seams. The interior keeps its door cards but no pillars or headliner; LOD1 keeps the boot and the seats (with headrests) as blocks. Louvers, roof racks and vinyl roofs are not drawn on a convertible. `WoodApplique` is a narrow wood-grain band under the belt from the front wheel to the rear wheel; `CorneringLamps` are unlit clear lenses in the front fender sides. Validation (`ShapeError::OpenTop`): no side glass, the boot behind the rear seat and ahead of the deck's end, the header 0.25 m over the belt, the deck at the belt.
 
 **Body-style details** (added with the roster): `PickupBed` opens the top from `glass.backlight.1 + 0.08` (the bulkhead behind the cab's rear window) to 6 cm short of the tail (the tailgate): the loft leaves out everything above the belt ledge there (`Body::bed`, like a convertible's opening) and `bed.rs` lines it with painted rail caps, inner walls, a front bulkhead, the tailgate's inner face, a floor 0.46 m under the rail with raised ribs (LOD0) and box tubs over the rear tires; the trunk seams outline the tailgate on the tail. Validation (`ShapeError::Bed`): a hardtop, a bed of at least a meter, and the side silhouette within 5 cm of the belt along it (the bed rails). `SpareTire` hangs a spare wheel (92% of the road wheels, tread showing) on a bracket off the tail, centered over the rear bumper, in a cover in the accent color with a bright center ring. `TTop` sets two tinted glass panels into the roof behind the windshield header (up to 0.8 m long) either side of a body-colored center bar, in black frames at LOD0; hardtops only. `LandauRoof` puts the vinyl cover (`VinylRoof`'s texture in the accent color) over the rear half of the roof only and wraps it down the blind rear pillars behind the last side window. A van is the ordinary loft with a tall roof, a short nose and side glass only where it has windows; a hatchback is a short deck whose trunk seams become a tailgate outline; pop-up lamps are `front.lights: PopUp`.
+
+**Mid-engined cars** (added with the sports cars) need no new shape: the silhouette puts a short nose, the cabin well forward and a long deck behind it, the deck's `seams.trunk` lid is the engine cover, and a convertible's boot sits between the seats and that deck. Three details dress one: `SideStrakes` runs five body-colored fins (three at LOD2) along each flank from mid-door to a dark intake ahead of the rear wheel, standing out more toward the intake, the intake's top 7 cm under the belt ledge at each station; `NacaDucts` cuts a tapered dark duct into the upper flank ahead of the rear wheel, its top 4 cm under the belt ledge at each station, narrow at the front and opening rearward, with a black lower lip at LOD0; `EngineLouvers` lays nine black slats (five past LOD0) across the deck from 12 cm behind the backlight to 16 cm short of the tail over a dark well that follows the deck's crown. These two details are cut into pieces along and up the flank so they stay on a side that bulges and a belt that climbs (the older side decals, stripes and wood panels, are not). Two rims came with them: `Dish`, a deep polished lip falling to a face sunk inside it with five round holes, and `Slotted`, a nearly flat face with a ring of ten long slots.
 
 `build` / `build_lod` / `build_with(BuildOptions { color_index, lod, popups_up })` return a `CarMesh` of plain arrays (`MeshData`: positions, normals, uvs in meters for atlas-patterned panels, linear colors, emissive in the renderer's encoding, CCW triangles) in model space (`-z` forward, origin on the ground under the front axle; `body_offset(&VehicleSpec)` moves it to the sim's center-of-mass origin): `body` (shell and every opaque part), `wheels` (hub-local, right-side; left wheels turn 180° about `y`), `glass` (single-sided, facing out), `lights` (every lens with its emissive set as if lit), `interior`, `steering_wheel`, `wheel_centers`, `wheel_radius` and a `Cockpit` (eye, steering pivot and axis, radio display quad, up to 3 dials). Loft: 50–70 stations (30–40 at LOD1), a ring per station from `section`, smooth across rounded panels and hard at creases and seams (12 mm deep, 14 mm wide grooves so they catch light), raised 16 mm feature lines along the hood and trunk lid; arches cut with a lip; lights (headlamp and tail-lamp lenses with reflector facets in chrome surrounds with dividers, side markers, a plate lamp), bumper rub strips (chrome bumpers rubber, rubber bumpers gray), a chrome side molding along the crease with `ChromeTrim`, badges sized to read from the chase camera plus a trunk lock and a blank name plate on the tail, grille, bumpers, rounded mirrors, handles with key locks, wipers with arms, exhaust tips with a muffler, drip rails (`ChromeTrim`/`BlackTrim` hardtops), a fuel door and badges as small meshes; tires with a sidewall bulge and tread grooves, whitewalls when asked for, rims with real spokes, hex lug nuts and a brake drum behind. Two-tone paint is split by the crease's ring slots at LOD0 (its groove becomes the pinstripe) and by height at LOD1 and LOD2 (each ring point's height before the arches lift it, so the lower color runs over the arches); body-colored bumpers and arch lips take the lower color. LOD1 drops seams, small parts and interior detail and turns rims into discs.
 
@@ -124,10 +131,18 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Buckboard | 11,614 | 6,352 | 3,228 | 1,984 |
 | Drayman | 12,220 | 6,472 | 3,336 | 1,872 |
 | Burro | 11,674 | 7,068 | 3,422 | 2,210 |
+| Basilisk V12 | 12,042 | 6,460 | 3,322 | 2,142 |
+| Basilisk Roadster | 11,850 | 6,198 | 3,260 | 1,992 |
+| Avocet V8 | 12,332 | 6,476 | 3,474 | 2,118 |
+| Avocet Spider | 11,872 | 6,186 | 3,296 | 2,020 |
+| Longbow Coupe | 12,784 | 6,524 | 3,434 | 2,258 |
+| Longbow Convertible | 12,252 | 6,150 | 3,156 | 2,036 |
+| Appaloosa GT | 12,072 | 7,144 | 3,220 | 1,880 |
+| Appaloosa Convertible | 11,570 | 6,902 | 3,188 | 1,860 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
-Parked cars (`app::propinst`) are LOD1 of the built-in shapes within 80 m and LOD2 beyond, drawn out to 280 m. The Place gives each a `VehicleClass`; `propinst::PARKED` turns it into a weighted pick among shapes within half a meter of that class's collision box (`world::props::parked_car_size`): sporty cars the Corsair, Halcyon or Pipit; sedans the Bancroft, Prescott, Palisade or Buckboard; wagons the Palisade, Meadow, Drayman or Buckboard; coupes the Seabreeze, Halcyon or Burro; luxury cars the Regent or Bancroft (and a list for each other class but `Utility`, which parks as the wagon). Each place parks a shape in at most six paints, two from its palette and four era colors drawn by the era's weights from the place seed, which keeps the parked-car meshes at 21.5 MB on the coast (`docs/PERFORMANCE.md`). Their paint is the car's own palette for a third of them and otherwise the era's street colors, `shape::ERA_1980S_PAINT` (weighted: tan, white, silver and burgundy most, then browns, blues, black, red, the two-tones silver over blue and champagne over brown, greens, creams, gold), passed as `BuildOptions::paint`; each instance gets a slight dust and wear tint.
+Parked cars (`app::propinst`) are LOD1 of the built-in shapes within 80 m and LOD2 beyond, drawn out to 280 m. The Place gives each a `VehicleClass`; `propinst::PARKED` turns it into a weighted pick among shapes within half a meter of that class's collision box (`world::props::parked_car_size`): sporty cars the Corsair, Halcyon, Pipit, Longbow Coupe or Appaloosa GT; sedans the Bancroft, Prescott, Palisade or Buckboard; wagons the Palisade, Meadow, Drayman or Buckboard; coupes the Seabreeze, Halcyon or Burro; luxury cars the Regent or Bancroft (and a list for each other class but `Utility`, which parks as the wagon). The exotics (Basilisk, Avocet) and the sports cars' open versions never park, and NPC traffic draws from the same fourteen shapes (`vehicles::TRAFFIC_SHAPES`, the first fourteen of `BUILTIN_SHAPES`): they are the player's. Each place parks a shape in at most six paints, two from its palette and four era colors drawn by the era's weights from the place seed, which keeps the parked-car meshes at 24.8 MB on the coast (`docs/PERFORMANCE.md`). Their paint is the car's own palette for a third of them and otherwise the era's street colors, `shape::ERA_1980S_PAINT` (weighted: tan, white, silver and burgundy most, then browns, blues, black, red, the two-tones silver over blue and champagne over brown, greens, creams, gold), passed as `BuildOptions::paint`; each instance gets a slight dust and wear tint.
 
 In the game (`app::car`): LOD0 and LOD1 are built when a car is first driven (at startup, or on the first switch to it from the pause menu's Vehicle page or `VehicleNext`, see `docs/CONTROLS_INPUT.md`), with pop-ups down and up, and kept for the session: switching back reuses its mesh ids, so a session registers at most one set per built-in car. Another paint
 (the Vehicle page's paint chooser; the `paint` setting and scene key) registers only what the paint changes,
@@ -139,7 +154,15 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 ## Launch roster (1980s), archetypes not models
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
 |---|---|---|---|
+| `basilisk_v12` | very low, very wide mid-engined V12 wedge flagship: flank ducts, flared rear haunches, slatted rear window, wide tail-lamp band, tall wing, deep-dish rims | Sports | 1,490 kg, ~333 kW V12, 5-speed, RWD; heavy, serious, planted by its wing; the quickest and fastest car in the game; 4.5 s, 79 m/s, 1.19 g |
+| `basilisk_roadster` | the Basilisk with its roof cut away | Convertible | 1,540 kg, same V12, more drag; 4.7 s, 77 m/s, 1.18 g |
+| `avocet_v8` | mid-engined V8 two-seater: pop-ups, side strakes into rear intakes, louvred engine lid, four round tail lamps, five-spoke alloys | Sports | 1,300 kg, ~210 kW flat-plane V8, 5-speed, RWD; light, rev-hungry, sharp turn-in, tail-happy on a lift; 5.1 s, 75 m/s, 1.15 g |
+| `avocet_spider` | the Avocet with its roof off, top under a boot | Convertible | 1,340 kg, same V8, more drag; 5.3 s, 73 m/s, 1.14 g |
 | `corsair_gtx` | gull-wing stainless wedge | Sports | 1,250 kg, ~173 kW, 5-speed, RWD; quick, light rear, pop-up lights; 5.6 s, 70 m/s, 1.08 g |
+| `longbow_coupe` | front-engined American V8 sports car: long nose, pop-ups, clamshell hood, big glass hatch, slotted rims | Sports | 1,450 kg, ~185 kW V8, 4-speed, RWD; fat torque, huge grip, stiff, mild understeer; 5.9 s, 68 m/s, 1.10 g |
+| `longbow_convertible` | the Longbow as a convertible with a short trunk lid | Convertible | 1,510 kg, same V8, softer, more drag; 6.1 s, 67 m/s, 1.09 g |
+| `appaloosa_gt` | mid-80s pony-car notchback with a small V8: quad lamps, hood scoop, turbine-look alloys | Coupe (on purpose: as a Sports car its 63 m/s would break the Sports > Coupe top-speed ordering against the Halcyon) | 1,400 kg, ~157 kW V8, 5-speed, RWD; the softest sports car: launches hard, leans, lets the tail out; 6.3 s, 63 m/s, 0.95 g |
+| `appaloosa_convertible` | the Appaloosa with a black canvas top, raised | Convertible | 1,480 kg, same V8, floppier, more drag; 6.6 s, 60 m/s, 0.94 g |
 | `halcyon_turbo` | front-engined wedge sports coupe, pop-ups, T-top | Coupe | 1,300 kg, ~143 kW turbo four, 5-speed, RWD; balanced, turbo surge past 3,000 rpm; 6.8 s, 65 m/s, 1.01 g |
 | `pipit_hatch` | three-door compact hatchback | Hatch | 900 kg, ~85 kW four, 5-speed, FWD; nimble, lift-off tuck; 8.8 s, 49 m/s, 0.93 g |
 | `buckboard_pickup` | square-body full-size pickup, long bed | Pickup | 1,700 kg, ~139 kW V8, 3-speed, RWD; high, rear-light, bouncy unloaded; 9.1 s, 47 m/s, 0.67 g |
@@ -152,15 +175,16 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `drayman_van` | full-size panel van | Van | 1,900 kg, ~104 kW six, 3-speed, RWD; tall, tippy, the lowest top speed; 13.5 s, 37 m/s, 0.70 g |
 | `meadow_minivan` | front-drive minivan, wood-grain edition | Van | 1,450 kg, ~86 kW four, 3-speed, FWD; tall, roomy, wallowy; 15.0 s, 44 m/s, 0.73 g |
 
-Every automatic for now (manual mode comes later). Each car has its own cabin palette (`interior.colors`, insert, piping, applique and dial glow) and its own body palette, which a third of its parked instances wear.
+Every automatic for now (manual mode comes later). The four sports cars (the Basilisk, the Avocet, the Longbow and the Appaloosa) each have an open version on the same chassis and engine, a little heavier and draggier, so a little slower everywhere. Each car has its own cabin palette (`interior.colors`, insert, piping, applique and dial glow) and its own body palette, which a third of its parked instances wear.
 
 Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, tuners; 10s: hybrid wedges; 20s: EVs with instant torque).
 
 ## Acceptance tests (`crates/vehicle/tests`)
 - Each spec loads and validates (positive mass, monotone gears, torque curve sane).
-- Straight-line: 0–60 mph times within a band per car (`tests/roster.rs`: Sports 5–8 s, Wagon 10–16 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, and a band for each roster car); top speed ordering Sports > Coupe > Sedan > Wagon > Van (every car of a class beats every car of the next).
+- Straight-line: 0–60 mph times within a band per car (`tests/roster.rs`: Sports 4–8 s, Wagon 10–16 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, and a band for each roster car); top speed ordering Sports > Coupe > Sedan > Wagon > Van (every car of a class beats every car of the next).
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
-- Distinct: all twelve differ pairwise by at least 0.05 s in 0–60 (the Palisade and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.38 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
+- Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Corsair, Longbow) beats both Appaloosas.
+- Distinct: all twenty differ pairwise by at least 0.05 s in 0–60 (the Palisade and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Determinism: scripted 10 s input replay produces identical state hashes.
 - Mesh: every shape builds, is manifold enough (no NaN normals), exterior 8k–14k triangles, interior 4k–8k, LOD1 exterior 3k–5k, wheels fit arches, LOD1 ≤ 40% of LOD0; two-tone paint splits low/high with a pinstripe; whitewalls only on the outer sidewall; era paints parse, are weighted as listed and change only the paint; a pickup bed is open over its whole length at every LOD with its floor well under the rail; a spare tire hangs behind the tail; a T-top puts glass in the roof. Convertibles: no body or glass triangle over the cabin between the header and the boot, above the belt (top down), a framed windshield and a boot, a raised top that covers the cabin, and much more sky from the seat than a hardtop.

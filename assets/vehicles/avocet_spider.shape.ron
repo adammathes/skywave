@@ -1,0 +1,63 @@
+// Avocet Spider body: the Avocet V8 with its roof off.
+//
+// Intent: the coupe's nose, flanks and tail, but open from the windshield header back:
+// bare door tops, the soft top folded under a black boot behind the seats, then the long
+// flat engine lid with its black louvers. Deep fins run along the doors into dark intakes ahead of the
+// rear wheels; the tail is short and upright with four round lamps over a black bumper.
+// Black lower bumpers and trim, five-spoke alloys. Engine behind the seats: the nose is
+// short, the tail long. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "avocet_spider",
+    side: [
+        (0.00, 0.50), (0.05, 0.58), (0.40, 0.66), (1.40, 0.80), (1.52, 0.82),
+        (2.10, 1.11), (2.16, 0.87), (3.00, 0.925), (3.40, 0.94),
+        (4.16, 0.95), (4.23, 0.92),
+        (4.23, 0.32), (4.05, 0.22), (3.60, 0.17), (0.70, 0.16), (0.14, 0.20), (0.00, 0.30),
+    ],
+    plan: [
+        (0.00, 0.66), (0.12, 0.77), (0.45, 0.835), (1.00, 0.85), (2.40, 0.85), (3.20, 0.86),
+        (4.00, 0.86), (4.23, 0.84),
+    ],
+    belt: [(1.50, 0.80), (2.20, 0.84), (3.00, 0.915), (4.23, 0.94)],
+    section: Section(shoulder: 0.93, tumblehome_deg: 26, greenhouse_frac: 0.66, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.54, 2.10),
+        // No side glass; the backlight range is the boot behind the seats.
+        backlight: (3.04, 3.40),
+        side: [],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.22, arch_clearance: 0.05, front_x: 0.92, rear_x: 3.26, track: 1.46),
+    front: Front(lights: PopUp, grille: Slot, bumper: Rubber, bumper_y: (0.27, 0.37)),
+    rear: Rear(lights: Round, spoiler: None, bumper: Rubber, bumper_y: (0.30, 0.42)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.70, creases: [(0.20, 0.56, 4.18, 0.62)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [SideStrakes, EngineLouvers, BlackTrim, Badge(Bar)],
+    roof: Roof(kind: Convertible(top: Down)),
+    // Racing red, yellow, black, white, silver, dark blue metallic, red again.
+    palette: ["#b5131b", "#e8b40e", "#141518", "#efeee9", "#b8bcc1", "#1d2b4e", "#a8121a"],
+    accent: "#161618",
+    interior: InteriorShape(
+        dash_height: 0.80,
+        dash_x: 1.74,
+        wheel_pos: (2.10, 0.60),
+        wheel_radius: 0.17,
+        column_angle_deg: 24,
+        mirror_pos: (1.96, 1.03),
+        seat: (2.34, 0.33),
+        driver_offset: 0.36,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, tan hide with darker
+        // tan piping, black carpet, a brushed band, orange-lit dials.
+        colors: ["#1c1d20", "#b0855a", "#1e1f22", "#3a3a3c", "#2a2b2e", "#d0a050"],
+        display: "#ff9a30",
+        insert: "#c29a6a",
+        piping: "#7a5838",
+        dash_top: "#26272a",
+        applique: Brushed,
+        manual: true,
+    ),
+)
