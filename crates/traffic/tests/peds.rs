@@ -13,11 +13,10 @@ use std::sync::OnceLock;
 use place::Place;
 use skywave_core::Seed;
 use traffic::peds::{
-    Action, Car, Density, PedInput, PedestrianBudget, Pedestrians, View, DESPAWN_M, SPAWN_FAR_M,
-    SPAWN_NEAR_M,
+    Action, PedInput, PedestrianBudget, Pedestrians, DESPAWN_M, SPAWN_FAR_M, SPAWN_NEAR_M,
 };
 use traffic::walks::{LinkKind, WalkGraph, CELL_M};
-use traffic::{LaneGraph, Light, NONE};
+use traffic::{Density, LaneGraph, Light, Player, View, NONE};
 use world::collide::{Surface, WorldCollider};
 use world::procgen::build_place;
 use world::template::RegionTemplate;
@@ -170,18 +169,18 @@ fn busy_eye(walks: &WalkGraph) -> [f32; 3] {
 fn view_at(eye: [f32; 3], tick: u64) -> View {
     let a = tick as f32 * 0.001;
     View {
-        eye,
-        forward: [a.cos(), a.sin()],
-        cos_half_fov: (55.0f32).to_radians().cos(),
+        pos: eye,
+        dir: [a.cos(), a.sin()],
+        tan_half: (55.0f32).to_radians().tan(),
     }
 }
 
-fn input(eye: [f32; 3], tick: u64, density: Density, car: Option<Car>) -> PedInput {
+fn input(eye: [f32; 3], tick: u64, density: Density, car: Option<Player>) -> PedInput {
     PedInput {
         tick,
         density,
         view: view_at(eye, tick),
-        car,
+        player: car.unwrap_or(Player::ABSENT),
     }
 }
 
@@ -464,11 +463,12 @@ fn car_pass(
     let steps = (secs * 120.0) as u64;
     for k in 0..steps {
         let s = speed * k as f32 / 120.0;
-        let car = Car {
+        let car = Player {
             pos: [start[0] + dir[0] * s, start[1], start[2] + dir[1] * s],
             heading,
             speed,
-            half_extents: half,
+            half_w: half[0],
+            half_len: half[1],
         };
         peds.step(
             &b.walks,
@@ -622,20 +622,34 @@ fn density_bands_hold_and_nothing_spawns_in_view() {
     for d in [Density::Off, Density::Low, Density::Normal, Density::Busy] {
         let mut peds = new_peds(b, PedestrianBudget::LARGE);
         let mut seen = HashSet::new();
-        let (mut sum, mut samples) = (0usize, 0usize);
+        let mut last: HashMap<u32, [f32; 3]> = HashMap::new();
+        let (mut sum, mut samples, mut gone) = (0usize, 0usize, 0usize);
         for k in 0..120 * 60 {
             let inp = input(eye, k, d, None);
             peds.step(&b.walks, &b.lanes, &inp);
+            let now: HashMap<u32, [f32; 3]> = peds.iter().map(|p| (p.id, p.pos)).collect();
+            for (id, pos) in &last {
+                if !now.contains_key(id) {
+                    gone += 1;
+                    assert!(!inp.view.sees(*pos, 1.5), "person {id} vanished in view");
+                }
+            }
+            last = now;
             for p in peds.iter() {
                 if seen.insert(p.id) {
                     let r = dist(p.pos, eye);
-                    assert!(!inp.view.sees(p.pos), "person {} spawned in view", p.id);
+                    assert!(
+                        !inp.view.sees(p.pos, 1.5),
+                        "person {} spawned in view",
+                        p.id
+                    );
                     assert!(
                         (SPAWN_NEAR_M - 1.0..=SPAWN_FAR_M + 1.0).contains(&r),
                         "spawned {r:.1} m away"
                     );
                 }
-                assert!(dist(p.pos, eye) < DESPAWN_M + 2.0);
+                // Past the despawn range only while still in view.
+                assert!(dist(p.pos, eye) < DESPAWN_M + 2.0 || inp.view.sees(p.pos, 1.5));
             }
             if k >= 120 * 30 {
                 sum += peds.count();
@@ -645,7 +659,7 @@ fn density_bands_hold_and_nothing_spawns_in_view() {
         let mean = sum as f32 / samples as f32;
         let target = peds.target();
         println!(
-            "{d:?}: target {target}, mean {mean:.1} over the last 30 s, {} spawned",
+            "{d:?}: target {target}, mean {mean:.1} over the last 30 s, {} spawned, {gone} gone",
             seen.len()
         );
         if d == Density::Off {
@@ -668,11 +682,12 @@ fn thirty_seconds(b: &Built) -> u64 {
     let mut peds = new_peds(b, PedestrianBudget::SMALL);
     for k in 0..120 * 30u64 {
         let s = k as f32 / 120.0;
-        let car = (k > 120 * 15).then(|| Car {
+        let car = (k > 120 * 15).then(|| Player {
             pos: [eye[0] - 60.0 + 8.0 * (s - 15.0), eye[1], eye[2]],
             heading: -std::f32::consts::FRAC_PI_2,
             speed: 8.0,
-            half_extents: [0.9, 2.3],
+            half_w: 0.9,
+            half_len: 2.3,
         });
         peds.step(&b.walks, &b.lanes, &input(eye, k, Density::Normal, car));
     }
@@ -695,7 +710,7 @@ fn stepping_allocates_nothing_after_construction() {
     let mut peds = new_peds(b, PedestrianBudget::SMALL);
     let before = allocations();
     for k in 0..120 * 40u64 {
-        let car = (k > 120 * 20).then(|| Car {
+        let car = (k > 120 * 20).then(|| Player {
             pos: [
                 eye[0] + 50.0 - 10.0 * (k as f32 / 120.0 - 20.0),
                 eye[1],
@@ -703,7 +718,8 @@ fn stepping_allocates_nothing_after_construction() {
             ],
             heading: std::f32::consts::FRAC_PI_2,
             speed: 10.0,
-            half_extents: [0.9, 2.3],
+            half_w: 0.9,
+            half_len: 2.3,
         });
         peds.step(&b.walks, &b.lanes, &input(eye, k, Density::Busy, car));
     }
@@ -718,12 +734,15 @@ fn step_budget_for_128_people() {
     let mut peds = new_peds(b, PedestrianBudget::SMALL);
     run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
     let mut times = Vec::with_capacity(1200);
+    // The car drives slowly through the people the whole time, so reactions are timed.
+    let dir = walk_dir_near(b, eye);
     for k in 0..1200u64 {
+        let car = slow_car(eye, dir, -30.0 + 2.0 * k as f32 / 120.0, 2.0);
         let t = std::time::Instant::now();
         peds.step(
             &b.walks,
             &b.lanes,
-            &input(eye, 120 * 40 + k, Density::Busy, None),
+            &input(eye, 120 * 40 + k, Density::Busy, Some(car)),
         );
         times.push(t.elapsed().as_secs_f64() * 1000.0);
     }
@@ -739,4 +758,221 @@ fn step_budget_for_128_people() {
     if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
         assert!(p99 < 0.5, "{p99} ms");
     }
+}
+
+/// Where the people are thickest: the walking or standing person with the most others
+/// within 20 m.
+fn crowd(peds: &Pedestrians) -> [f32; 3] {
+    let all: Vec<[f32; 3]> = peds
+        .iter()
+        .filter(|p| p.pose.action != Action::Sit)
+        .map(|p| p.pos)
+        .collect();
+    *all.iter()
+        .max_by_key(|a| all.iter().filter(|b| dist(**a, **b) < 20.0).count())
+        .expect("people")
+}
+
+/// The direction of the walk link nearest `p`.
+fn walk_dir_near(b: &Built, p: [f32; 3]) -> [f32; 2] {
+    walk_near(b, p).1
+}
+
+/// The walk link (along a road) nearest `p`: a point on its walk line and its direction.
+fn walk_near(b: &Built, p: [f32; 3]) -> ([f32; 3], [f32; 2]) {
+    let g = &b.walks;
+    g.links
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.kind == LinkKind::Walk && l.road_side != 0 && l.length_m > 4.0)
+        .map(|(i, l)| (g.point(i as u32, 0.5 * l.length_m, 0.0), l.dir))
+        .min_by(|a, c| dist(a.0, p).total_cmp(&dist(c.0, p)))
+        .expect("walks")
+}
+
+/// The player's car `s` meters along `dir` from `at`, at `speed`.
+fn slow_car(at: [f32; 3], dir: [f32; 2], s: f32, speed: f32) -> Player {
+    Player {
+        pos: [at[0] + dir[0] * s, at[1], at[2] + dir[1] * s],
+        heading: (-dir[0]).atan2(-dir[1]),
+        speed,
+        half_len: 2.3,
+        half_w: 0.9,
+    }
+}
+
+fn inside(car: &Player, p: [f32; 3]) -> bool {
+    let f = [-car.heading.sin(), -car.heading.cos()];
+    let d = [p[0] - car.pos[0], p[2] - car.pos[2]];
+    let along = d[0] * f[0] + d[1] * f[1];
+    let across = d[0] * -f[1] + d[1] * f[0];
+    along.abs() <= car.half_len && across.abs() <= car.half_w
+}
+
+/// Steps `secs` from signal tick `t0` with the player's car at `path(seconds)` and the
+/// camera on it: returns the person-steps inside its footprint and how many people came
+/// within 5 m of it.
+/// Anyone the car appears on at the first step (it comes out of nowhere) gets 1.5 s to
+/// get out, then counts like everyone else.
+fn obstacle(
+    b: &Built,
+    peds: &mut Pedestrians,
+    eye: [f32; 3],
+    t0: u64,
+    secs: f32,
+    path: impl Fn(f32) -> Player,
+) -> (usize, usize) {
+    let first = path(0.0);
+    let landed: HashSet<u32> = peds
+        .iter()
+        .filter(|p| inside(&first, p.pos))
+        .map(|p| p.id)
+        .collect();
+    let (mut steps_inside, mut near) = (0usize, HashSet::new());
+    for k in 0..(secs * 120.0) as u64 {
+        let car = path(k as f32 / 120.0);
+        let view = View {
+            pos: car.pos,
+            dir: [-car.heading.sin(), -car.heading.cos()],
+            ..view_at(eye, 0)
+        };
+        let inp = PedInput {
+            tick: t0 + k,
+            density: Density::Busy,
+            view,
+            player: car,
+        };
+        peds.step(&b.walks, &b.lanes, &inp);
+        for p in peds.iter() {
+            let grace = landed.contains(&p.id) && k < 180;
+            if inside(&car, p.pos) && !grace {
+                steps_inside += 1;
+            }
+            let f = [-car.heading.sin(), -car.heading.cos()];
+            let d = [p.pos[0] - car.pos[0], p.pos[2] - car.pos[2]];
+            let along = (d[0] * f[0] + d[1] * f[1]).abs() - car.half_len;
+            let across = (d[0] * -f[1] + d[1] * f[0]).abs() - car.half_w;
+            if along.max(across) < 5.0 {
+                near.insert(p.id);
+            }
+        }
+    }
+    (steps_inside, near.len())
+}
+
+/// The busy coast after 40 s, and a crossing near the eye: its middle and the road's
+/// direction there.
+fn warm_and_crossing(b: &Built) -> (Pedestrians, [f32; 3], [f32; 3], [f32; 2]) {
+    let eye = busy_eye(&b.walks);
+    let mut peds = new_peds(b, PedestrianBudget::LARGE);
+    run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
+    let g = &b.walks;
+    // The crossing with the most people within 25 m of it.
+    let c = g
+        .crossings
+        .iter()
+        .max_by_key(|x| {
+            let at = g.nodes[x.curbs[0] as usize].pos;
+            peds.iter().filter(|p| dist(p.pos, at) < 25.0).count()
+        })
+        .expect("crossings");
+    let (a, z) = (
+        g.nodes[c.curbs[0] as usize].pos,
+        g.nodes[c.curbs[1] as usize].pos,
+    );
+    let mid = [
+        (a[0] + z[0]) * 0.5,
+        (a[1] + z[1]) * 0.5,
+        (a[2] + z[2]) * 0.5,
+    ];
+    let across = [z[0] - a[0], z[2] - a[2]];
+    let l = (across[0].powi(2) + across[1].powi(2)).sqrt();
+    (peds, eye, mid, [across[1] / l, -across[0] / l])
+}
+
+#[test]
+fn nobody_enters_a_car_stopped_on_a_crosswalk() {
+    let b = coast();
+    let (mut peds, eye, mid, along) = warm_and_crossing(b);
+    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |_| {
+        slow_car(mid, along, 0.0, 0.0)
+    });
+    println!("stopped on a crosswalk: {n} person-steps inside, {near} people came near");
+    assert_eq!(n, 0);
+    assert!(near > 0);
+}
+
+#[test]
+fn nobody_enters_a_car_creeping_over_a_crosswalk() {
+    let b = coast();
+    let (mut peds, eye, mid, along) = warm_and_crossing(b);
+    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
+        slow_car(mid, along, -8.0 + 0.25 * t, 0.25)
+    });
+    println!("creeping at 0.25 m/s: {n} person-steps inside, {near} people came near");
+    assert_eq!(n, 0);
+    assert!(near > 0);
+}
+
+#[test]
+fn nobody_enters_a_car_parked_on_the_sidewalk() {
+    let b = coast();
+    let eye = busy_eye(&b.walks);
+    let mut peds = new_peds(b, PedestrianBudget::LARGE);
+    run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
+    let (at, dir) = walk_near(b, crowd(&peds));
+    // 2.5 m/s along the walk for 8 s, then parked there.
+    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 50.0, |t| {
+        let t = t.min(8.0);
+        slow_car(at, dir, -20.0 + 2.5 * t, if t < 8.0 { 2.5 } else { 0.0 })
+    });
+    println!("parked on the sidewalk: {n} person-steps inside, {near} people came near");
+    assert_eq!(n, 0);
+    assert!(near > 0);
+}
+
+#[test]
+fn nobody_enters_a_car_driving_slowly_through_a_crowd() {
+    let b = coast();
+    let eye = busy_eye(&b.walks);
+    let mut peds = new_peds(b, PedestrianBudget::LARGE);
+    run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
+    let (at, dir) = walk_near(b, crowd(&peds));
+    // Between 1 and 3 m/s for 60 s along the walk through the busiest stretch.
+    let (n, near) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
+        let s = -60.0 + 2.0 * t - 3.0 * (t / 3.0).cos() + 3.0;
+        slow_car(at, dir, s, 2.0 + (t / 3.0).sin())
+    });
+    println!("1-3 m/s through a crowd: {n} person-steps inside, {near} people came near");
+    assert_eq!(n, 0);
+    assert!(near > 5, "{near}");
+}
+
+#[test]
+fn people_stepping_aside_stay_on_the_walk() {
+    let b = coast();
+    let eye = busy_eye(&b.walks);
+    let mut peds = new_peds(b, PedestrianBudget::LARGE);
+    run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
+    let (at, dir) = walk_near(b, crowd(&peds));
+    let (mut samples, mut worst) = (0usize, 0.0f32);
+    for k in 0..120 * 50u64 {
+        let car = slow_car(at, dir, -25.0 + k as f32 / 120.0, 1.0);
+        peds.step(
+            &b.walks,
+            &b.lanes,
+            &input(eye, 120 * 40 + k, Density::Busy, Some(car)),
+        );
+        for (i, p) in peds.pedestrians().iter().enumerate() {
+            if !p.alive || !peds.dodging(i) {
+                continue;
+            }
+            samples += 1;
+            let off = near_link(&b.walks, p.pos, false);
+            worst = worst.max(off);
+            assert!(off < 1.5, "person {} stepped {off:.2} m off the walk", p.id);
+        }
+    }
+    println!("{samples} dodging person-steps, at most {worst:.2} m off a walk line");
+    assert!(samples > 100, "{samples}");
 }
