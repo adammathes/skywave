@@ -58,12 +58,12 @@ One rigid body per car (position, orientation quaternion, linear/angular velocit
 4. **Aero** drag and small downforce. Rolling resistance.
 5. **Integration**: semi-implicit Euler; sub-steps not needed at 120 Hz.
 6. **Collision**: body OBB vs. static world: building footprints extruded (2D polygon vs. OBB on the ground plane with height check), curbs as a height step (wheel ray hits terrain+curb; body may clip over), props as cylinders/boxes with soft push, water as a slow drag region with a reset. Response (`world::collide::resolve`, through `vehicle::sim::knock`): the car is nudged out along the contact normal, then a plain impulse at the contact point stops the approach and leaves a small rebound (10% of the closing speed, at most 0.4 m/s) with light friction (0.3); off center it yaws the car. The car then loses speed across the normal in proportion to the closing speed (40% at 12 m/s or harder), and the side that hit dips (0.03 rad/s per m/s, at most 0.4) for the springs to rock out. The wheels roll on at the new speed, so they do not drive the car back into what it hit. A head-on hit at 10 m/s ends rolling back at 0.4 m/s with the nose dipping 1–2°; a 20° glancing hit at 18 m/s keeps about half its speed and leaves along the wall. Curbs: wheels climb them below 30 mph; faster, the wheel's corner is kicked up. Each step reports an `Impact`: the hardest hit and the fastest curb kick as a `Bump` (closing speed, normal, where on the car in body space) for the sound, and the parked car hit, if any. A parked car stays where it is; `world::collide::Rocking` sways it on its springs (`vehicle::Rock`, 1.4 Hz, settling in about a second) for drawing. No damage, no deformation. Flips are possible; an auto-right occurs after 3 s upside down.
-7. **Assists** (settings → Drive → Handling): stability (yaw damping toward the intended heading, plus damping of a sideways slide past the tires' peak slip angle; it lets go while the handbrake is held), traction (cap slip ratio), ABS, grip-limited steering (the road-wheel target follows the front axle's travel plus the stick's share of the peak slip angle above 8–11 m/s; it also pivots the car on the handbrake, helping yaw toward `steer × 1.6 rad/s`), and two multipliers, `grip_boost` (tire grip, lateral and longitudinal) and `brake_boost` (service-brake torque). Presets:
+7. **Assists** (settings → Drive → Handling): stability (yaw damping toward the intended heading, plus damping of a sideways slide past the tires' peak slip angle; it lets go while the handbrake is held), traction (cap slip ratio), ABS, grip-limited steering (the road-wheel target follows the front axle's travel plus the stick's share of the peak slip angle above 8–11 m/s; it also pivots the car on the handbrake, helping yaw toward `steer × 1.6 rad/s`), and two multipliers, `grip_boost` (tire grip, lateral and longitudinal; the handbrake scales with it so it still locks the boosted rears) and `brake_boost` (service-brake torque). Stability's yaw gain is 12/s at full strength, its slide damping 4/s. Presets:
 
 | Preset | stability | traction | ABS | steering | grip_boost | brake_boost |
 |---|---|---|---|---|---|---|
-| `ARCADE` (default) | 0.8 | 0.8 | on | 1 | 1.2 | 1.4 |
-| `LIGHT` | 0.3 | 0.5 | on | 1 | 1 | 1 |
+| `ARCADE` (default) | 1.0 | 0.8 | on | 1 | 1.2 | 1.4 |
+| `LIGHT` | 0.5 | 0.7 | on | 1 | 1 | 1 |
 | `OFF` ("driver") | 0 | 0 | spec | 0 | 1 | 1 |
 
 Engine braking is a drag at the driven wheels through whatever gear is in, 0.13 g of the car's weight at idle rpm to 0.22 g at the redline: with aero and rolling resistance every car coasts down at ~0.15 g in gear.
@@ -162,9 +162,9 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `gannet_gt` | gull-wing stainless wedge | Sports | 1,250 kg, ~173 kW, 5-speed, RWD; quick, light rear, pop-up lights; 5.6 s, 70 m/s, 1.08 g |
 | `longbow_coupe` | front-engined American V8 sports car: long nose, pop-ups, clamshell hood, big glass hatch, slotted rims | Sports | 1,450 kg, ~185 kW V8, 4-speed, RWD; fat torque, huge grip, stiff, mild understeer; 5.9 s, 68 m/s, 1.10 g |
 | `longbow_convertible` | the Longbow as a convertible with a short trunk lid | Convertible | 1,510 kg, same V8, softer, more drag; 6.1 s, 67 m/s, 1.09 g |
-| `appaloosa_gt` | mid-80s pony-car notchback with a small V8: quad lamps, hood scoop, turbine-look alloys | Coupe (on purpose: as a Sports car its 63 m/s would break the Sports > Coupe top-speed ordering against the Halcyon) | 1,400 kg, ~157 kW V8, 5-speed, RWD; the softest sports car: launches hard, leans, lets the tail out; 6.3 s, 63 m/s, 0.95 g |
-| `appaloosa_convertible` | the Appaloosa with a black canvas top, raised | Convertible | 1,480 kg, same V8, floppier, more drag; 6.6 s, 60 m/s, 0.94 g |
-| `halcyon_turbo` | front-engined wedge sports coupe, pop-ups, T-top | Coupe | 1,300 kg, ~143 kW turbo four, 5-speed, RWD; balanced, turbo surge past 3,000 rpm; 6.8 s, 65 m/s, 1.01 g |
+| `appaloosa_gt` | mid-80s pony-car notchback with a small V8: quad lamps, hood scoop, turbine-look alloys | Coupe (on purpose: as a Sports car its 63 m/s would break the Sports > Coupe top-speed ordering against the Halcyon) | 1,400 kg, ~157 kW V8, 5-speed, RWD; the softest sports car: launches hard, leans, lets the tail out; 6.3 s, 63 m/s, 0.96 g |
+| `appaloosa_convertible` | the Appaloosa with a black canvas top, raised | Convertible | 1,480 kg, same V8, floppier, more drag; 6.6 s, 60 m/s, 0.95 g |
+| `halcyon_turbo` | front-engined wedge sports coupe, pop-ups, T-top | Coupe | 1,300 kg, ~143 kW turbo four, 5-speed, RWD; balanced, turbo surge past 3,000 rpm; 6.8 s, 65 m/s, 1.02 g |
 | `pipit_hatch` | three-door compact hatchback | Hatch | 900 kg, ~85 kW four, 5-speed, FWD; nimble, lift-off tuck; 8.8 s, 49 m/s, 0.93 g |
 | `buckboard_pickup` | square-body full-size pickup, long bed | Pickup | 1,700 kg, ~139 kW V8, 3-speed, RWD; high, rear-light, bouncy unloaded; 9.1 s, 47 m/s, 0.67 g |
 | `regent_coupe_cabrio` | big luxury coupe cut open by a conversion shop, padded boot | Convertible | 1,650 kg, ~146 kW V8, 4-speed, FWD; floaty, slow steering, lots of roll; 9.9 s, 55 m/s, 0.80 g |
@@ -188,5 +188,23 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Distinct: all twenty differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Determinism: scripted 10 s input replay produces identical state hashes.
+- Feel bands (`tests/handling.rs`; `-- --nocapture` prints the table): every car in every preset through five
+  probes, measuring the rear axle's peak slip angle, the peak yaw rate past what the road wheels ask for, and
+  whether it spins (sideslip past 60°): a 60 mph lane change (one sine of full stick over 1.5 s, throttle
+  held); a 40 mph corner at half stick with the throttle floored through the apex; a 25 mph junction turn at
+  full stick, then full throttle (the keyboard case, where the owner's fishtail reproduced); a quarter-stick
+  launch from rest to 30 mph (at most 6 s); and a 30 mph quarter-stick handbrake turn. Bands: in Arcade the
+  rear stays within 1.1× its tires' peak slip angle in the lane change and the corner, the lane change
+  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.7× out of the junction; with
+  traction control the launch is a little wheelspin, never a spin; the handbrake slides the rear past 1.5×
+  its peak in every preset, 2× in Arcade. With no assists the sports and muscle cars may still spin a
+  quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
+  stay lively there on purpose. The tuning that set these (stability gain 12 from 8, Arcade stability 1.0
+  from 0.8, Light 0.5/0.7 from 0.3/0.5, the handbrake times `grip_boost`, `oversteer_bias` halved on the
+  Basilisks, Avocets, Appaloosas and the Halcyon) took the sports cars' Arcade lane-change overshoot from
+  32 to 22°/s, their Light junction rear slip from 36° to 18° (the inside rear had been spinning at twice its
+  peak under Light's traction control), and made the six cars that did not slide on Arcade's handbrake slide
+  31–50°. A softer tire tail (85% for 70%) was measured and left out: it gives overdriven front tires more bite
+  with no assists, so more cars spin there.
 - Mesh: every shape builds, is manifold enough (no NaN normals), exterior 8k–14k triangles, interior 4k–8k, LOD1 exterior 3k–5k, wheels fit arches, LOD1 ≤ 40% of LOD0; two-tone paint splits low/high with a pinstripe; whitewalls only on the outer sidewall; era paints parse, are weighted as listed and change only the paint; a pickup bed is open over its whole length at every LOD with its floor well under the rail; a spare tire hangs behind the tail; a T-top puts glass in the roof. Convertibles: no body or glass triangle over the cabin between the header and the boot, above the belt (top down), a framed windshield and a boot, a raised top that covers the cabin, and much more sky from the seat than a hardtop.
 - Visual: `tools/shape-preview` PNGs attached to the PR introducing or changing a car.

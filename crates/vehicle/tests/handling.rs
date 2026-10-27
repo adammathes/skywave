@@ -245,9 +245,56 @@ fn measure() -> Vec<(String, &'static str, Probe, Feel, f32)> {
     out
 }
 
+/// The sports and muscle cars, which may stay lively with no assists (a choice: the
+/// "driver" preset is for drivers).
+const LIVELY: [&str; 10] = [
+    "basilisk_v12",
+    "basilisk_roadster",
+    "avocet_v8",
+    "avocet_spider",
+    "gannet_gt",
+    "longbow_coupe",
+    "longbow_convertible",
+    "appaloosa_gt",
+    "appaloosa_convertible",
+    "halcyon_turbo",
+];
+
 #[test]
 fn the_rear_steps_out_only_when_provoked() {
-    for (id, preset, p, f, _) in measure() {
-        assert!(f.rear_slip_deg.is_finite(), "{id} {preset} {p:?}");
+    for (id, preset, p, f, peak) in measure() {
+        let what = format!("{id} {preset} {p:?}: {f:?} (tire peak {peak}°)");
+        let rear = f.rear_slip_deg / peak;
+        match (preset, p) {
+            // Arcade: the rear stays at its tires' peak through a lane change and a corner
+            // under power, little yaw past what the wheels ask for, and nothing spins.
+            ("arcade", Probe::LaneChange) => {
+                assert!(
+                    rear < 1.1 && f.overshoot_dps < 25.0 && f.sideslip_deg < 8.0,
+                    "{what}"
+                );
+            }
+            ("arcade", Probe::Corner) => assert!(rear < 1.1 && f.overshoot_dps < 5.0, "{what}"),
+            // A keyboard junction turn under full throttle steps the tail out a little.
+            ("arcade", Probe::Junction) => assert!(rear < 1.6 && !f.spun(), "{what}"),
+            // Light: a little more, still caught.
+            ("light", Probe::LaneChange) => {
+                assert!(
+                    rear < 1.25 && f.overshoot_dps < 32.0 && f.sideslip_deg < 8.0,
+                    "{what}"
+                );
+            }
+            ("light", Probe::Corner) => assert!(rear < 1.25 && f.overshoot_dps < 10.0, "{what}"),
+            ("light", Probe::Junction) => assert!(rear < 2.7 && !f.spun(), "{what}"),
+            // With traction control a launch at a quarter lock is a little wheelspin; without
+            // it only the sports and muscle cars may swing round.
+            ("arcade" | "light", Probe::Launch) => assert!(rear < 1.0 && !f.spun(), "{what}"),
+            ("off", Probe::Launch) => assert!(LIVELY.contains(&id.as_str()) || !f.spun(), "{what}"),
+            // The handbrake slides the rear past its peak in every preset, well past it with
+            // the pivot of Arcade.
+            ("arcade", Probe::Handbrake) => assert!(rear > 2.0, "{what}"),
+            (_, Probe::Handbrake) => assert!(rear > 1.5, "{what}"),
+            _ => assert!(f.rear_slip_deg.is_finite(), "{what}"),
+        }
     }
 }
