@@ -28,8 +28,8 @@
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "17:40", "pos": "608.6,1049.8", "yaw": "-72.3", "still": "1", "stream": "1" }
   },
   "coast-traffic-noon": {
-    "about": "Busy NPC traffic at a signalized downtown junction on the coast at noon, from the mid chase camera waiting at the stop line on a red, the cross traffic going by and the far side's queue at the lights (phase=4320), and the busy pedestrians that come with it: a few people on the walks toward the beach (traffic warmed up 20 s before the frame, people 60 s).",
-    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-mid", "t": "12:00", "pos": "1143.0,1072.5", "yaw": "-76.0", "traffic": "busy", "phase": "4320", "still": "1", "stream": "1" }
+    "about": "Busy NPC traffic at a signalized junction on the coast at noon, from the mid chase camera waiting at the stop line on a red with cars stopped at the lights (phase=1440), and the busy pedestrians that come with it: a few people on the walks toward the beach (traffic warmed up 20 s before the frame, people 60 s).",
+    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-mid", "t": "12:00", "pos": "737.1,464.8", "yaw": "-19.6", "traffic": "busy", "phase": "1440", "still": "1", "stream": "1" }
   },
   "coast-peds-noon": {
     "about": "Busy pedestrians on the coast's busiest block at noon, from the mid chase camera on the road: people walking, standing about and in groups on both walks (the crowd warmed up 60 s before the frame).",
@@ -48,8 +48,8 @@
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "17:40", "pos": "400.3,1510.7", "yaw": "103", "still": "1", "stream": "1" }
   },
   "coast-traffic-night": {
-    "about": "Busy NPC traffic at the signalized downtown junction of coast-traffic-noon at night, headlights on, from the mid chase camera waiting at the stop line: NPC low beams with coronas, glowing lamps (traffic warmed up 20 s before the frame).",
-    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-mid", "t": "22:30", "lights": "1", "pos": "1143.0,1072.5", "yaw": "-76.0", "traffic": "busy", "phase": "4320", "still": "1", "stream": "1" }
+    "about": "Busy NPC traffic at the signalized junction of coast-traffic-noon at night, headlights on, from the mid chase camera waiting at the stop line: NPC low beams with coronas, glowing lamps (traffic warmed up 20 s before the frame).",
+    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-mid", "t": "22:30", "lights": "1", "pos": "737.1,464.8", "yaw": "-19.6", "traffic": "busy", "phase": "1440", "still": "1", "stream": "1" }
   },
   "coast-traffic-dusk-chase": {
     "about": "Busy NPC traffic on the coast highway at dusk from the mid chase camera, in the outer eastbound lane heading inland (traffic warmed up 20 s before the frame).",

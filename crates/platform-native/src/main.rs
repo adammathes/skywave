@@ -1587,9 +1587,11 @@ mod tests {
 
     /// The coast junction of the `coast-traffic-noon` golden, busy traffic and pedestrians
     /// warmed up (queued, oncoming and crossing cars and people on the walks in view). Not
-    /// `still`: the world runs, so cars and people move between frames.
+    /// `still`: the world runs, so cars and people move between frames. On the map-edges
+    /// coast (release, 8 frames, busy): Medium 694 draws at most, 312 in the median frame,
+    /// 197k forward and 1078k shadow triangles; Deck 598, 294, 197k, 687k.
     const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
-                            &pos=477.5,1001.2&yaw=347";
+                            &pos=737.1,464.8&yaw=-19.6";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
     /// draws in the worst frame and in the median frame after the first, forward and shadow
@@ -1823,7 +1825,7 @@ mod tests {
             ("coast-strip-golden", "cam=chase-far&t=17:40"),
             (
                 "coast-traffic-noon",
-                "cam=chase-mid&t=12:00&pos=477.5,1001.2&yaw=347&traffic=busy",
+                "cam=chase-mid&t=12:00&pos=737.1,464.8&yaw=-19.6&traffic=busy&phase=1440",
             ),
             ("coast-night-golden", "cam=chase-near&t=22:30&lights=1"),
         ];
