@@ -13,7 +13,14 @@
 //! function of the place, so the same place gives a bit-identical graph everywhere.
 //!
 //! The pedestrian figure ([`figure`]): seeded low-poly people, their walk cycle and the
-//! poses for stepping out of a car's way, posed as one rigid transform per part.
+//! poses for stepping out of a car's way and sitting down, posed as one rigid transform
+//! per part.
+//!
+//! Pedestrians: the sidewalk graph ([`walks`], walks along both sides of every road with
+//! sidewalks, corners, crossings gated by the lane graph's signals, and the spots people
+//! go to) and the people on it ([`peds`]: walking in ones, twos and threes, waiting at the
+//! curb for the walk phase, staying at shop windows, benches and landmarks, stepping
+//! aside for the player's car, spawned and despawned out of view by density).
 //!
 //! NPC cars drive on the lane graph ([`Traffic`], [`cars`]): a fixed pool stepped at 120 Hz with car
 //! following, signals and stop signs, right of way, lane changes, and spawning by density
@@ -28,7 +35,9 @@ pub mod cars;
 pub mod figure;
 pub mod lanes;
 pub mod math;
+pub mod peds;
 pub mod signal;
+pub mod walks;
 
 pub use cars::{Car, Clock, Density, Inputs, Player, Traffic, TrafficBudget, View};
 pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
