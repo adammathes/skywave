@@ -23,7 +23,8 @@ use super::ring::{Gone, Ring};
 /// Audio in the ring before a stream counts as started, and before the callback plays
 /// from an empty ring again, s.
 pub const PREBUFFER_SECONDS: f32 = 0.25;
-/// A stream that has not started by then fails (the web player's limit too).
+/// A stream that sends no audio for this long is dropped: before it started it fails (the
+/// web player's limit too), after that it reconnects.
 pub const STALL: Duration = Duration::from_secs(10);
 
 /// What a stream thread tells the player.
@@ -99,11 +100,12 @@ impl From<Gone> for End {
 /// Plays `url` into `ring` as the writer of `epoch`, reporting with `token`, until the
 /// epoch ends or the stream fails.
 pub fn run(url: &str, token: u32, epoch: u32, ring: &Ring, notes: &Sender<Note>) {
-    run_with(Reconnect::default(), url, token, epoch, ring, notes);
+    run_with(Reconnect::default(), STALL, url, token, epoch, ring, notes);
 }
 
 fn run_with(
     mut reconnect: Reconnect,
+    stall: Duration,
     url: &str,
     token: u32,
     epoch: u32,
@@ -118,14 +120,14 @@ fn run_with(
         started: false,
         written: 0,
         title: None,
+        stall,
     };
     loop {
-        let t0 = Instant::now();
-        let why = match st.connect_and_play(url) {
-            End::Gone => return,
-            End::Dropped(why) => why,
+        let (end, played) = st.connect_and_play(url);
+        let End::Dropped(why) = end else {
+            return;
         };
-        match reconnect.on_drop(st.started, t0.elapsed()) {
+        match reconnect.on_drop(st.started, played) {
             Next::RetryAfter(delay) => {
                 log::info!("radio: {url}: {why}; reconnecting in {delay:?}");
                 let until = Instant::now() + delay;
@@ -154,6 +156,8 @@ struct Stream<'a> {
     /// Samples written since the stream started.
     written: usize,
     title: Option<String>,
+    /// How long without decoded audio drops the connection.
+    stall: Duration,
 }
 
 impl Stream<'_> {
@@ -161,9 +165,17 @@ impl Stream<'_> {
         self.ring.epoch() == self.epoch
     }
 
-    fn connect_and_play(&mut self, url: &str) -> End {
+    /// One connection: how it ended, and how long it played (from the connect to its last
+    /// audio).
+    fn connect_and_play(&mut self, url: &str) -> (End, Duration) {
         let t0 = Instant::now();
-        let deadline = t0 + STALL;
+        let mut last_audio = t0;
+        let end = self.play_once(url, t0, &mut last_audio);
+        (end, last_audio - t0)
+    }
+
+    fn play_once(&mut self, url: &str, t0: Instant, last_audio: &mut Instant) -> End {
+        let deadline = t0 + self.stall;
         let (mut conn, head, body) = match http::open(url, deadline, &|| self.wanted()) {
             Ok(c) => c,
             Err(_) if !self.wanted() => return End::Gone,
@@ -191,12 +203,16 @@ impl Stream<'_> {
             if let Err(g) = self.write(&pcm) {
                 return g.into();
             }
+            if !pcm.is_empty() {
+                *last_audio = Instant::now();
+            }
             pcm.clear();
             if !self.wanted() {
                 return End::Gone;
             }
-            if !self.started && t0.elapsed() >= STALL {
-                return End::Dropped(format!("no audio within {STALL:?}"));
+            // Open but silent (or sending what does not decode): a drop, like a hang-up.
+            if last_audio.elapsed() >= self.stall {
+                return End::Dropped(format!("no audio for {:?}", self.stall));
             }
             input = match conn.read(&mut chunk) {
                 Ok(0) => return End::Dropped("the server closed the stream".into()),
@@ -313,10 +329,22 @@ mod tests {
     /// An Icecast-like server on this machine: `answer` as the head, then `frames`
     /// generated silent MP3 frames with a title every `metaint` bytes, then it hangs up.
     fn serve(head: &'static str, metaint: usize, frames: usize) -> String {
+        serve_then_hold(head, metaint, frames, Duration::ZERO)
+    }
+
+    /// [`serve`], keeping the connection open and silent for `hold` before hanging up.
+    fn serve_then_hold(
+        head: &'static str,
+        metaint: usize,
+        frames: usize,
+        hold: Duration,
+    ) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
+            // One connection only: reconnecting is refused.
+            drop(listener);
             let mut req = [0u8; 1024];
             let _ = s.read(&mut req);
             let audio: Vec<u8> = (0..frames)
@@ -334,6 +362,7 @@ mod tests {
                 }
             }
             let _ = s.write_all(&body);
+            thread::sleep(hold);
         });
         format!("http://127.0.0.1:{port}/stream")
     }
@@ -351,7 +380,7 @@ mod tests {
             tries: 0,
             first: Duration::from_millis(1),
         };
-        run_with(quick, &url, 7, ring.epoch(), &ring, &tx);
+        run_with(quick, STALL, &url, 7, ring.epoch(), &ring, &tx);
         let notes: Vec<Note> = rx.try_iter().collect();
         // Titles arrive in order, once each (a read that spans several keeps the last).
         let titles: Vec<&str> = notes
@@ -374,6 +403,44 @@ mod tests {
             notes.last(),
             Some(&Note::Event(PlayerEvent::Failed { token: 7 }))
         );
+    }
+
+    /// A server that plays ~2.6 s, then keeps the connection open and sends nothing: the
+    /// watchdog drops it long before the server hangs up, reconnecting fails (the server
+    /// takes one connection), and the stream reports Failed.
+    #[test]
+    fn a_stream_that_goes_quiet_is_dropped() {
+        let url = serve_then_hold(
+            "HTTP/1.0 200 OK\r\nContent-Type: audio/mpeg\r\n\r\n",
+            1 << 30,
+            100,
+            Duration::from_secs(30),
+        );
+        let ring = Ring::new(1 << 20);
+        let (tx, rx) = mpsc::channel();
+        let quick = Reconnect {
+            tries: 0,
+            first: Duration::from_millis(1),
+        };
+        let t0 = Instant::now();
+        run_with(
+            quick,
+            Duration::from_millis(1500),
+            &url,
+            4,
+            ring.epoch(),
+            &ring,
+            &tx,
+        );
+        let notes: Vec<Note> = rx.try_iter().collect();
+        assert_eq!(
+            notes,
+            [
+                Note::Event(PlayerEvent::Started { token: 4 }),
+                Note::Event(PlayerEvent::Failed { token: 4 })
+            ]
+        );
+        assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
     }
 
     #[test]

@@ -6,8 +6,9 @@
 //! host.
 
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::{Arc, OnceLock};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::{mpsc, Arc, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use rustls::pki_types::ServerName;
@@ -76,6 +77,17 @@ impl Url {
             path: location.to_string(),
             ..self.clone()
         })
+    }
+}
+
+impl Url {
+    /// Where a redirect to `location` leads; never from https down to http.
+    pub fn redirect(&self, location: &str) -> Result<Url, String> {
+        let next = self.join(location)?;
+        if self.tls && !next.tls {
+            return Err(format!("refusing a redirect from https to {location}"));
+        }
+        Ok(next)
     }
 }
 
@@ -213,7 +225,7 @@ pub fn open(
 ) -> Result<(Conn, Head, Vec<u8>), String> {
     let mut url = Url::parse(url)?;
     for _ in 0..=MAX_REDIRECTS {
-        let mut conn = connect(&url)?;
+        let mut conn = connect(&url, deadline, wanted)?;
         conn.write_all(request(&url).as_bytes())
             .map_err(|e| format!("sending the request: {e}"))?;
         let (head, body) = read_head(&mut conn, deadline, wanted)?;
@@ -223,7 +235,7 @@ pub fn open(
                 let to = head
                     .header("location")
                     .ok_or("a redirect without Location")?;
-                url = url.join(to)?;
+                url = url.redirect(to)?;
             }
             s => return Err(format!("HTTP {s}")),
         }
@@ -262,12 +274,15 @@ fn read_head(
     }
 }
 
-fn connect(url: &Url) -> Result<Conn, String> {
+fn connect(url: &Url, deadline: Instant, wanted: &impl Fn() -> bool) -> Result<Conn, String> {
     let proxy = if url.tls { proxy_for(&url.host) } else { None };
     let (host, port) = proxy
         .as_ref()
         .map_or((url.host.as_str(), url.port), |(h, p)| (h.as_str(), *p));
     let tcp = tcp(host, port)?;
+    if !wanted() {
+        return Err("no longer wanted".into());
+    }
     if proxy.is_some() {
         tunnel(&tcp, url)?;
     }
@@ -276,13 +291,36 @@ fn connect(url: &Url) -> Result<Conn, String> {
     }
     let name = ServerName::try_from(url.host.clone()).map_err(|e| format!("{e}"))?;
     let tls = ClientConnection::new(tls_config()?, name).map_err(|e| format!("TLS: {e}"))?;
-    Ok(Conn::Tls(Box::new(StreamOwned::new(tls, tcp))))
+    let mut stream = StreamOwned::new(tls, tcp);
+    handshake(&mut stream, deadline, wanted)?;
+    Ok(Conn::Tls(Box::new(stream)))
+}
+
+/// Completes the TLS handshake. The socket's short read timeout only lets the thread check
+/// whether it is still wanted; a slow link keeps trying until `deadline`.
+fn handshake(
+    s: &mut StreamOwned<ClientConnection, TcpStream>,
+    deadline: Instant,
+    wanted: &impl Fn() -> bool,
+) -> Result<(), String> {
+    while s.conn.is_handshaking() {
+        if !wanted() {
+            return Err("no longer wanted".into());
+        }
+        if Instant::now() >= deadline {
+            return Err("timed out in the TLS handshake".into());
+        }
+        match s.conn.complete_io(&mut s.sock) {
+            Ok(_) => {}
+            Err(e) if is_timeout(&e) => {}
+            Err(e) => return Err(format!("TLS handshake: {e}")),
+        }
+    }
+    Ok(())
 }
 
 fn tcp(host: &str, port: u16) -> Result<TcpStream, String> {
-    let addrs = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("looking up {host}: {e}"))?;
+    let addrs = lookup(host, port)?;
     let mut last = format!("{host} has no address");
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
@@ -297,6 +335,25 @@ fn tcp(host: &str, port: u16) -> Result<TcpStream, String> {
         }
     }
     Err(last)
+}
+
+/// Resolves `host` on a helper thread, giving up after [`CONNECT_TIMEOUT`] (the system
+/// resolver has no timeout of its own; a hung lookup's thread ends when the resolver does).
+fn lookup(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    let (tx, rx) = mpsc::channel();
+    let name = host.to_string();
+    thread::Builder::new()
+        .name("radio-dns".into())
+        .spawn(move || {
+            let found = (name.as_str(), port).to_socket_addrs();
+            let _ = tx.send(found.map(Iterator::collect::<Vec<_>>));
+        })
+        .map_err(|e| e.to_string())?;
+    match rx.recv_timeout(CONNECT_TIMEOUT) {
+        Ok(Ok(addrs)) => Ok(addrs),
+        Ok(Err(e)) => Err(format!("looking up {host}: {e}")),
+        Err(_) => Err(format!("looking up {host} timed out")),
+    }
 }
 
 /// Asks the proxy on `tcp` for a tunnel to `url`'s server.
@@ -492,5 +549,53 @@ mod tests {
         assert_eq!(head.header("content-type"), Some("audio/mpeg"));
         assert_eq!(body, b"BODY");
         server.join().unwrap();
+    }
+
+    /// A server that answers too slowly for one read timeout is waited for: the handshake
+    /// fails only on what the server does (here it hangs up after 1.2 s), not on the
+    /// 500 ms socket timeout.
+    #[test]
+    fn a_slow_tls_handshake_is_waited_for() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_millis(1200));
+            drop(s);
+        });
+        let t0 = Instant::now();
+        let deadline = t0 + Duration::from_secs(10);
+        let url = Url::parse(&format!("https://127.0.0.1:{port}/s")).unwrap();
+        let Err(e) = connect(&url, deadline, &|| true) else {
+            panic!("a server that hangs up cannot complete a handshake");
+        };
+        assert!(
+            t0.elapsed() >= Duration::from_secs(1),
+            "gave up after {:?}: {e}",
+            t0.elapsed()
+        );
+        assert!(e.starts_with("TLS handshake:"), "{e}");
+        // And the deadline still bounds it.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = Url::parse(&format!("https://127.0.0.1:{port}/s")).unwrap();
+        let t0 = Instant::now();
+        let e = connect(&url, t0 + Duration::from_millis(800), &|| true).err();
+        assert_eq!(e.as_deref(), Some("timed out in the TLS handshake"));
+        drop(listener);
+    }
+
+    #[test]
+    fn https_never_redirects_to_http() {
+        let tls = Url::parse("https://e.com/a").unwrap();
+        assert!(tls.redirect("http://e.com/b").is_err());
+        assert!(tls.redirect("https://f.com/b").unwrap().tls);
+        assert!(tls.redirect("/b").unwrap().tls);
+        let plain = Url::parse("http://e.com/a").unwrap();
+        assert!(
+            plain.redirect("https://e.com/b").unwrap().tls,
+            "upgrading is fine"
+        );
     }
 }

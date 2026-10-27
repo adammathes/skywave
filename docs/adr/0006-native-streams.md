@@ -51,8 +51,9 @@ not ship and cannot check.
   Over the 5k threshold, hence this ADR: TLS is not something to write ourselves.
 - **HTTP:** a hand-written `GET` in `platform-native/src/radio/http.rs`: HTTP/1.0 so the
   body is never chunked, `Icy-MetaData: 1`, `HTTP/1.x` and `ICY` status lines, up to five
-  redirects, a 5 s connect timeout per address, a 500 ms read timeout so a thread notices
-  it is no longer wanted, and the proxy in `HTTPS_PROXY` (`http://host:port`, by
+  redirects (never from https down to http), a 5 s timeout on the DNS lookup and on each
+  connect, a TLS handshake that may take until the stream's 10 s deadline, a 500 ms read
+  timeout so a thread notices it is no longer wanted, and the proxy in `HTTPS_PROXY` (`http://host:port`, by
   `CONNECT`) unless `NO_PROXY` names the host. `http://` works too (tests use a server on
   the loopback); the radio only ever hands it `https://` URLs.
 - **MP3:** `nanomp3-core` with default features off (no `wide` SIMD, no Layer I/II):
@@ -81,8 +82,9 @@ not ship and cannot check.
   next station, exactly as on the web.
 - **Reconnect:** a stream that played and then dropped reconnects after 0.5, 1, 2, 4 and
   8 s; five seconds of steady play reset the count; when the tries run out it reports
-  `Failed`. (The web `<audio>` element simply errors; native is gentler with a flaky
-  network.)
+  `Failed`. A connection that stays open but sends no audio that decodes for 10 s counts
+  as a drop too, so the radio never shows a station as playing in silence. (The web
+  `<audio>` element simply errors; native is gentler with a flaky network.)
 - **ICY titles:** `StreamTitle` from each metadata block, kept per `Play` token. The window
   title shows "Skywave · station · title". Showing it on the dash needs an `App` method in
   `crates/app/src/ui`, a separate task; `radio::Player::title` is ready for it.
