@@ -673,11 +673,11 @@ mod tests {
     use super::*;
     use crate::{App, InputState, SceneSetup};
 
-    /// The coast junction of the `coast-traffic-noon` golden, waiting at the stop line: the
-    /// busiest signalized crossing at busy density (7.1 NPC cars within 40 m and 11.8
-    /// people within 30 m of it on average over 30 s at noon).
+    /// The coast junction of the `coast-traffic-noon` golden, waiting at the stop line: of
+    /// the signalized four-way approaches, the one whose frame shows the most NPC cars
+    /// (6 in view, 3 of them stopped at the lights, at `phase=4320`; busy, noon).
     pub(crate) const JUNCTION: &str =
-        "place=coast&car=gannet_gt&cam=chase-mid&pos=513.0,541.8&yaw=-26.4";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1143.0,1072.5&yaw=-76.0";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
