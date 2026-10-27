@@ -681,7 +681,7 @@ mod tests {
                     count[mesh.vertices[t[0] as usize].color[3] as usize & 15] += 1;
                 }
             }
-            assert!(m.vertices.len() <= render::MAX_CHUNK_VERTICES as usize);
+            assert!(m.vertices.len() <= 256 * 1024);
             assert!(m
                 .vertices
                 .iter()

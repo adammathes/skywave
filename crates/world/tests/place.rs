@@ -161,7 +161,7 @@ fn coast_meshes_sit_roads_on_the_terrain() {
             stats.vertices,
         );
         assert_eq!(count(MeshKind::Ground), p.header.chunk_count());
-        assert!(max_vertices <= 384 * 1024); // render::MAX_CHUNK_VERTICES
+        assert!(max_vertices <= 256 * 1024);
         let roads = Roads {
             place: &p,
             net: &net,
