@@ -2712,7 +2712,8 @@ mod tests {
                 let budget = match kind {
                     PropKind::Oak | PropKind::PalmTree | PropKind::Eucalyptus => 600..=1200,
                     PropKind::StreetLight => 100..=250,
-                    _ => 20..=2500,
+                    // Small street items (mailboxes, signs, hydrants) may be under 300.
+                    _ => 50..=2500,
                 };
                 assert!(budget.contains(&n), "{kind:?} seed {seed}: {n}");
             }

@@ -6,7 +6,7 @@ The look: **2002 geometry, 2026 light.** Early-2000s open-world and arcade-racer
 Not a DOS game, not flat boxes on a plane. A street must have: curbs with a gutter, sidewalks with seams, crosswalks and lane paint, lamp posts with arms and heads, signs on poles, trees with volume (3–5 lobed canopies, a trunk), hydrants, parked cars. A building must have: a plinth, window insets with sills, a storefront bay with a door and awning where it faces the street, a cornice or parapet, roof clutter (vents, a water tank downtown), a sign band, drainpipes on brick. A car must read as a specific shape from 30 m with seams, mirrors, rims and lights. Then lighting makes it sing.
 
 ## Style rules
-- Geometry: hard silhouettes, face normals (smoothing only on wheels, canopies, rounded car panels and curved sky objects). Buildings are extrusions **with facade geometry**, never bare boxes. Props 300–2500 triangles (trees 600–1200, lamps ~150). Cars 8–14k exterior + 4–8k interior, 3–5k at LOD1 (see "Mesh and instance budgets").
+- Geometry: hard silhouettes, face normals (smoothing only on wheels, canopies, rounded car panels and curved sky objects). Buildings are extrusions **with facade geometry**, never bare boxes. Props 300–2500 triangles (trees 600–1200, lamps ~150; small street items such as mailboxes, signs and hydrants 50–300). Cars 8–14k exterior + 4–8k interior, 3–5k at LOD1 (see "Mesh and instance budgets").
 - Color: vertex colors from a per-place palette (16–32 colors per era) plus one emissive channel. **Tiny pattern textures are allowed and expected** where geometry is wasteful: asphalt grain, concrete, brick and stucco courses, window glass with a mullion cross, roof gravel, sand, lawn, wood siding, awning stripes. 64–256 px, generated procedurally at startup from a few parameters (never photos, never shipped bitmaps), stored in one atlas, sampled with nearest/linear and no mips below 32 px so they stay crisp and period-looking. Lane markings via vertex strips or the atlas.
 - Lighting is where the fidelity goes: physically plausible sun and sky, cascaded shadows, atmosphere, bloom on emissives, reflections on wet roads and water, night lights with real falloff.
 - Readable at a glance from a moving car. Contrast and silhouettes over clutter, but clutter exists.
@@ -68,7 +68,7 @@ First person cockpit (eye position from the spec; head sways with suspension and
 | Player car exterior (LOD0) | 8–14k |
 | Player car interior | 4–8k |
 | Parked / NPC cars (LOD1) | 3–5k |
-| Props | 300–2500 (trees 600–1200, lamps ~150) |
+| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300 |
 | Buildings | ≤ 3.5k (ceiling; `world::buildings` still plans each to 2,000 until the building pass) |
 | Chunk vertex cap | 256k vertices (384k comes with the building pass, when a chunk needs it) |
 
