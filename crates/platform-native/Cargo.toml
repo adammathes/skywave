@@ -22,3 +22,7 @@ env_logger.workspace = true
 gilrs.workspace = true
 cpal.workspace = true
 audio.workspace = true
+
+[dev-dependencies]
+# The no-op device for the culling benchmark (`culling_on_the_coast`).
+wgpu = { workspace = true, features = ["noop"] }
