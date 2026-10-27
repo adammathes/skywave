@@ -5,12 +5,12 @@
 //!     id: "1984_socal", title: "1984 SoCal", scenario: "socal_beach_1984",
 //!     stations: [
 //!         Station(
-//!             id: "181fm_yachtrock", name: "181.FM Yacht Rock", era: "1970s",
+//!             id: "radioparadise_mellow", name: "Radio Paradise Mellow Mix", era: "1970s",
 //!             format: "yacht rock and smooth soft rock",
 //!             source: Stream(
-//!                 urls: ["https://listen.181fm.com/181-yachtrock_128k.mp3"],
-//!                 homepage: "https://www.181.fm/links",
-//!                 codec: Mp3, bitrate_kbps: 128,
+//!                 urls: ["https://stream.radioparadise.com/mellow-128"],
+//!                 homepage: "https://radioparadise.com/listen/stream-links",
+//!                 codec: Aac, bitrate_kbps: 128,
 //!                 terms_checked: "2026-10-27", verified: false,
 //!             ),
 //!         ),
