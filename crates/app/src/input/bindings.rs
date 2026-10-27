@@ -391,6 +391,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioPrev => vec![key(Key::BracketLeft, Pos)],
             Action::RadioOff => vec![key(Key::Backslash, Pos)],
             Action::Headlights => vec![key(Key::KeyL, Pos)],
+            Action::HighBeams => vec![key(Key::KeyK, Pos)],
             Action::Horn => vec![key(Key::KeyH, Pos)],
             Action::VehicleNext => vec![key(Key::KeyV, Pos)],
             Action::Reset => vec![key(Key::KeyR, Pos)],
@@ -428,6 +429,8 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioPrev => vec![btn(PadButton::DpadLeft)],
             Action::RadioOff => vec![btn(PadButton::DpadDown)],
             Action::Headlights => vec![btn(PadButton::DpadUp)],
+            // Held, so a tap stays the headlights.
+            Action::HighBeams => vec![btn(PadButton::DpadUp).held_long()],
             Action::Horn => vec![btn(PadButton::L3)],
             // The pad picks a car on the pause menu's Vehicle page.
             Action::VehicleNext => vec![],
@@ -497,7 +500,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 20] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 21] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -557,6 +560,11 @@ mod tests {
             (
                 Action::Headlights,
                 vec![K(Key::KeyL)],
+                vec![B(PadButton::DpadUp)],
+            ),
+            (
+                Action::HighBeams,
+                vec![K(Key::KeyK)],
                 vec![B(PadButton::DpadUp)],
             ),
             (Action::Horn, vec![K(Key::KeyH)], vec![B(PadButton::L3)]),
@@ -750,7 +758,7 @@ mod tests {
         );
 
         assert!(b.is_bound(RawInput::Key(Key::KeyW)));
-        assert!(!b.is_bound(RawInput::Key(Key::KeyK)));
+        assert!(!b.is_bound(RawInput::Key(Key::KeyJ)));
         assert!(Bindings::default().is_bound(RawInput::MouseButton(MOUSE_RIGHT)));
         b.reset_device(DeviceKind::Gamepad);
         b.reset_action(kb, Action::Horn);
