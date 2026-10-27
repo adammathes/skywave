@@ -67,7 +67,7 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   (`perf/gpu-time`, NOTES 10b); pedestrian follow-ups (`m4/peds-followups`: body-width gap in
   the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
   road); scenario switching and the era filter (`m8/scenarios`, M8 #1); the rename of
-  `corsair_gtx` and `palisade_wagon` (real model names, `m4/rename-real-names`). PRs in review:
+  two roster cars that shared real model names (#33, now the Gannet GT and the Homestead Wagon). PRs in review:
   lamps (#29, NPC brake lights, high beams, auto headlights); idle frames and the frame cap
   (#31); GPU timestamps and the Deck depth pre-pass (#32).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
