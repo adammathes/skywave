@@ -1,5 +1,5 @@
 // Radio preset: 1984 SoCal. Real stations whose stream URLs the broadcasters publish for
-// listening in other players (181.FM's stream links page, Radio Paradise's stream links for
+// listening in other players (Radio Paradise's stream links for
 // WiFi radios and other players, WFMU's playlists, the college stations' own listen links);
 // names are the stations' own. Nothing is rehosted. tools/check-streams.mjs played 5 s of
 // audio from every URL, as the published page asks for it, on the date in `terms_checked`;
@@ -10,62 +10,6 @@ RadioPreset(
     title: "1984 SoCal",
     scenario: "socal_beach_1984",
     stations: [
-        Station(
-            id: "181fm_yachtrock",
-            name: "181.FM Yacht Rock",
-            era: "1970s",
-            format: "yacht rock and smooth soft rock",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-yachtrock_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_mellowgold",
-            name: "181.FM Mellow Gold",
-            era: "1970s",
-            format: "70s and 80s soft rock",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-mellow_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_lite80s",
-            name: "181.FM Lite 80's",
-            era: "1980s",
-            format: "80s soft hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-lite80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_awesome80s",
-            name: "181.FM Awesome 80's",
-            era: "1980s",
-            format: "80s pop and rock hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-awesome80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
         Station(
             id: "radioparadise_mellow",
             name: "Radio Paradise Mellow Mix",

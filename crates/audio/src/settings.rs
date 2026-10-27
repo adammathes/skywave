@@ -31,7 +31,8 @@ pub struct CustomStream {
 pub struct RadioSettings {
     /// 0 to 1.
     pub volume: f32,
-    /// The radio was on when the last session ended: it comes back on.
+    /// The radio was on when the last session ended. Saved for the record; a session
+    /// always starts with the radio off.
     pub on: bool,
     /// Id of the station last tuned.
     pub last_station: Option<String>,

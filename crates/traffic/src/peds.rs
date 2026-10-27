@@ -17,15 +17,17 @@
 //!
 //! **The car** (no harm, by construction: nobody is ever collidable), moving or standing
 //! still. Its danger zone is its footprint plus a margin and, while it moves, its path
-//! ahead for a distance that grows with its speed. A person in it steps to the nearest
-//! point across their walk clear of it (within the walk's width, toward the curb or the
-//! building line; off the curb only when a car on the walk covers all of it), in one move:
-//! the figure's step aside, or a hop if the car is close or the spot farther. A walker on
-//! a crossing, or with no room across the walk because the car comes across it, hurries
-//! off along its path away from the car instead, so nobody freezes in the road. Walkers
-//! stop short of the car and do not walk toward its path; held by a stopped car, they turn
-//! back. Nobody walks back into the zone; when the car has gone, people return to their
-//! slots and carry on.
+//! ahead for a distance that grows with its speed, around the curve it is turning on. A
+//! person in it steps to the nearest spot on the walk geometry around them clear of the
+//! car's footprint and whole path ahead, without passing into the car or across its path
+//! just in front of it (off the curb only when the car is on the walk itself); with no
+//! clear spot, to the least bad one, never standing still in its path. The move is the
+//! figure's step aside or a hop, a startled jump when the car is close, and changes course
+//! if the car turns into its spot. A walker on a crossing, or with nowhere to step,
+//! hurries off along its path away from the car when that leads out of its way, so nobody
+//! freezes in the road. Walkers stop short of the car and do not walk toward its path;
+//! held by a stopped car, they turn back. Nobody walks into the zone; when the car has
+//! gone, people return to their slots and carry on.
 //!
 //! **Spawning** keeps the density target (per zone, scaled by [`Density`]) within 120 m of
 //! the eye: new walkers appear 40–120 m away and out of view, on a walk or already at a
@@ -85,6 +87,10 @@ const TURN_RATE: f32 = 3.5;
 const TURN_RATE_DODGE: f32 = 10.0;
 /// Spacing of people walking abreast and of a group standing about.
 const ABREAST_M: f32 = 0.65;
+/// Spacing of a group in single file on a spur and queued at the curb.
+const QUEUE_M: f32 = 0.6;
+/// Walking groups keep within this of the walk line.
+const WALK_SPREAD_M: f32 = 0.75;
 const RING_M: f32 = 0.55;
 /// A walker gives up on a spot after this many seconds.
 const GIVE_UP_S: f32 = 120.0;
@@ -98,13 +104,48 @@ const HOP_TTI_S: f32 = 0.8;
 const DANGER_BASE_M: f32 = 4.0;
 const DANGER_S: f32 = 2.0;
 const DANGER_SIDE_M: f32 = 0.7;
+/// The way of a car faster than walking widens ahead of its front by up to this much per
+/// meter (all of it from twice this speed, m/s), up to this much (a turn it may start
+/// before it gets there).
+const CONE: f32 = 0.2;
+const CONE_MAX_M: f32 = 1.0;
+const CONE_FROM_MPS: f32 = 3.0;
 /// Walkers stop short of this from the car's footprint, moving or not.
 const CLEAR_M: f32 = 0.5;
-/// How far onto the road a person may step when a car on the walk covers all of it.
-const ROAD_DODGE_M: f32 = 1.2;
+/// Below this curvature (1/m) the car's path is taken as straight.
+const MIN_CURVATURE: f32 = 0.01;
+/// A person steps aside to a clear spot no farther than this, sampled this finely, and
+/// covers ground at least this fast on the way (a longer move takes longer).
+const DODGE_REACH_M: f32 = 2.0;
+const DODGE_STEP_M: f32 = 0.25;
+const DODGE_MPS: f32 = 2.5;
+/// Nobody moves faster than this, m/s; the steepest slopes of the step-aside curve and of
+/// the hop curve (share of the move per share of its time).
+const MAX_MPS: f32 = 4.0;
+const ASIDE_SLOPE: f32 = 1.5;
+const HOP_SLOPE: f32 = 3.75;
+/// A move under way changes course, if its spot is no longer clear, after this long, s.
+const REPLAN_S: f32 = 0.25;
+/// With the car closer than this (s), the hop is a startled jump: under way at once and
+/// quicker.
+const URGENT_TTI_S: f32 = 0.8;
+const URGENT_HOP_S: f32 = 0.3;
+/// On the road a walker waits for anyone this far from their place in the group.
+const STRANDED_M: f32 = 1.0;
+/// Stepping across a moving car's path needs this long to spare before it arrives, s.
+const CROSS_SPARE_S: f32 = 0.8;
+/// How far off the curb into the gutter a person may step when a car on the walk itself
+/// covers all of it: within the 0.45 m the lane graph leaves outside the lanes.
+const ROAD_DODGE_M: f32 = 0.4;
+/// How far past its room either side of a corner a person may step when a car on the
+/// corner covers all of it (still on the sidewalk).
+const CORNER_DODGE_M: f32 = 0.3;
+/// Moving off along a path escapes a car only if the way away from it is at least this
+/// much along the path (cosine).
+const ALONG_MIN: f32 = 0.3;
 /// A person within this of the footprint (or in a moving car's way) gets out of it, to a
 /// spot at least this far off; nobody walks into it.
-const SPOT_CLEAR_M: f32 = 0.25;
+const SPOT_CLEAR_M: f32 = 0.4;
 /// Watched zone (walkers do not walk toward the car's path in it): farther ahead and wider.
 const WATCH_BASE_M: f32 = 10.0;
 const WATCH_S: f32 = 2.5;
@@ -251,10 +292,14 @@ pub struct Pedestrian {
 struct Dodge {
     action: Action,
     t: f32,
+    /// Seconds the move takes: longer moves take longer.
+    dur: f32,
     from: [f32; 2],
     to: [f32; 2],
     /// Seconds since anything last threatened.
     calm: f32,
+    /// A startled move: under way at once (no crouch first).
+    quick: bool,
     /// No safe spot across the walk: the walker should move off along it.
     stuck: bool,
 }
@@ -263,16 +308,19 @@ impl Dodge {
     const NONE: Dodge = Dodge {
         action: Action::None,
         t: 0.0,
+        dur: HOP_S,
         from: [0.0; 2],
         to: [0.0; 2],
         calm: 0.0,
         stuck: false,
+        quick: false,
     };
 
     /// The offset now: the figure's own sidestep or hop curve, scaled to the move.
     fn offset(&self) -> [f32; 2] {
         let k = match self.action {
             Action::Aside => aside_offset(self.t) / ASIDE_M,
+            Action::Hop if self.quick => aside_offset(self.t) / ASIDE_M,
             Action::Hop => hop_offset(self.t) / HOP_M,
             _ => return self.to,
         };
@@ -374,10 +422,13 @@ struct CarFrame {
     hw: f32,
     hl: f32,
     v: f32,
+    /// Path curvature, 1/m, positive turning left (0 going straight).
+    k: f32,
 }
 
 impl CarFrame {
-    fn new(car: &Player) -> CarFrame {
+    /// The car `car`, turning at `yaw_rate` rad/s (positive left).
+    fn new(car: &Player, yaw_rate: f32) -> CarFrame {
         let (sn, cs) = sin_cos(car.heading);
         let mut f = [-sn, -cs];
         if car.speed < 0.0 {
@@ -390,7 +441,65 @@ impl CarFrame {
             hw: car.half_w,
             hl: car.half_len,
             v: car.speed.abs(),
+            k: if car.speed.abs() > 0.3 {
+                (yaw_rate / car.speed.abs()).clamp(-0.5, 0.5)
+            } else {
+                0.0
+            },
         }
+    }
+
+    /// `(ahead, lat)` of ground point `p` along the path the car is driving: around the
+    /// circle it is turning on (arc length from the car's middle, offset outward or inward
+    /// signed to its right at the car), or straight on.
+    fn path(&self, p: [f32; 3]) -> (f32, f32) {
+        if self.k.abs() < MIN_CURVATURE {
+            return self.rel(p);
+        }
+        let r = 1.0 / self.k.abs();
+        let toward = if self.k > 0.0 {
+            [-self.r[0], -self.r[1]]
+        } else {
+            self.r
+        };
+        let o = [self.c[0] + toward[0] * r, self.c[1] + toward[1] * r];
+        let u0 = [-toward[0], -toward[1]];
+        let v = [p[0] - o[0], p[2] - o[1]];
+        let d = len2(v);
+        if d < 1e-3 {
+            return (0.0, -r * dot(self.r, u0));
+        }
+        let w = [v[0] / d, v[1] / d];
+        let turn = if u0[0] * self.f[1] - u0[1] * self.f[0] >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let ang = crate::math::atan2(u0[0] * w[1] - u0[1] * w[0], dot(u0, w)) * turn;
+        (ang * r, (d - r) * dot(self.r, u0))
+    }
+
+    /// Half the width the body sweeps along its path: on a curve its corners swing out
+    /// past its half width by about `hl² k / 2`.
+    fn sweep_hw(&self) -> f32 {
+        self.hw + 0.5 * self.hl * self.hl * self.k.abs()
+    }
+
+    /// Ground direction across the path at `p`, to its right.
+    fn path_right(&self, p: [f32; 3]) -> [f32; 2] {
+        if self.k.abs() < MIN_CURVATURE {
+            return self.r;
+        }
+        let r = 1.0 / self.k.abs();
+        let toward = if self.k > 0.0 {
+            [-self.r[0], -self.r[1]]
+        } else {
+            self.r
+        };
+        let o = [self.c[0] + toward[0] * r, self.c[1] + toward[1] * r];
+        let w = unit2([p[0] - o[0], p[2] - o[1]]);
+        let s = dot(self.r, [-toward[0], -toward[1]]);
+        [w[0] * s, w[1] * s]
     }
 
     /// `(ahead, lat)` of ground point `p`: along the motion from the center, and to the
@@ -405,17 +514,119 @@ impl CarFrame {
         a.abs() <= self.hl + margin && l.abs() <= self.hw + margin
     }
 
+    /// Whether a spot at `p` is in the car's way for good: within `margin` of its
+    /// footprint, or of its path ahead however far (a spot farther along the path is no
+    /// way out of it).
+    fn blocks(&self, p: [f32; 3], margin: f32) -> bool {
+        let (a, l) = self.rel(p);
+        let near = a.abs() <= self.hl + margin && l.abs() <= self.hw + margin;
+        let (pa, pl) = self.path(p);
+        near || (self.moving() && pa > -self.hl - 0.3 && pl.abs() < self.side(pa) + margin)
+    }
+
+    /// Half the width of the car's way `pa` along its path: what the body sweeps, and
+    /// ahead of a fast car's front a cone for a turn it may yet start into someone.
+    fn side(&self, pa: f32) -> f32 {
+        let fast = ((self.v - CONE_FROM_MPS) / CONE_FROM_MPS).clamp(0.0, 1.0);
+        self.sweep_hw() + (fast * CONE * (pa - self.hl)).clamp(0.0, CONE_MAX_M)
+    }
+
     /// How far `p` is out of the car's way (negative inside): out of its path beside it
     /// while it moves toward `p`, else out of its footprint, roughly.
     fn gap(&self, p: [f32; 3]) -> f32 {
-        let (a, l) = self.rel(p);
-        let side = l.abs() - self.hw;
+        let (pa, pl) = self.path(p);
         let reach = self.hl + DANGER_BASE_M + DANGER_S * self.v;
-        if self.moving() && a > -self.hl - 0.3 && a < reach {
-            side
+        if self.moving() && pa > -self.hl - 0.3 && pa < reach {
+            pl.abs() - self.sweep_hw()
         } else {
-            (a.abs() - self.hl).max(side)
+            self.out_of(p)
         }
+    }
+
+    /// Whether a person may move straight from `p` to `q` out of the car's way: deeper
+    /// into a moving car's way only where they are past with `spare` seconds left before
+    /// it gets there (never just in front of it; `None`: any way out will do), and never
+    /// into its footprint (from inside it, only ever farther out).
+    fn reachable(&self, p: [f32; 3], q: [f32; 3], spare: Option<f32>) -> bool {
+        // Wherever the way there goes deeper into the car's way than `p` (toward the
+        // middle of its path or past it; on a curve even a spot on one's own side can lie
+        // past the middle in a straight line), be past it before the car gets there.
+        let (ap, lp) = self.path(p);
+        let d = dist(p, q);
+        if let Some(spare) = spare.filter(|_| self.moving()) {
+            // From inside its way, out of it before the car gets here.
+            let way = |a: f32, l: f32| a > -self.hl && l.abs() < self.side(a) + SPOT_CLEAR_M;
+            if way(ap, lp) {
+                let out = (1..=8).find(|&k| {
+                    let (a, l) = self.path(crate::math::lerp3(p, q, k as f32 / 8.0));
+                    !way(a, l)
+                });
+                let gone = out.map_or(d, |k| k as f32 / 8.0 * d) / DODGE_MPS;
+                if (ap - self.hl) / self.v < gone {
+                    return false;
+                }
+            }
+            for k in 1..=8 {
+                let f = k as f32 / 8.0;
+                let (a, l) = self.path(crate::math::lerp3(p, q, f));
+                let deeper = l * lp < 0.0 || l.abs() < lp.abs() - 0.05;
+                let in_way = a > -self.hl && l.abs() < self.side(a) + SPOT_CLEAR_M;
+                let arrive = (a - self.hl) / self.v;
+                if deeper && in_way && arrive < f * d / DODGE_MPS + spare {
+                    return false;
+                }
+            }
+        }
+        let mut prev = self.out_of(p);
+        (1..=4).all(|k| {
+            let g = self.out_of(crate::math::lerp3(p, q, k as f32 / 4.0));
+            let ok = g > 0.1 || g >= prev - 1e-3;
+            prev = g;
+            ok
+        })
+    }
+
+    /// How far `p` is outside the footprint (negative inside), as the larger of the two
+    /// axes.
+    fn out_of(&self, p: [f32; 3]) -> f32 {
+        let (a, l) = self.rel(p);
+        (a.abs() - self.hl).max(l.abs() - self.hw)
+    }
+
+    /// How clear of the car's way `p` is: past its footprint and, while it moves, past
+    /// the side of its path ahead (negative in it).
+    fn clearance(&self, p: [f32; 3]) -> f32 {
+        let (pa, pl) = self.path(p);
+        if self.moving() && pa > -self.hl - 0.3 {
+            pl.abs() - self.side(pa)
+        } else {
+            self.out_of(p)
+        }
+    }
+
+    /// Whether the footprint overlaps walk link `l`'s band (the car is on that walk).
+    fn on_walk(&self, walks: &WalkGraph, l: u32) -> bool {
+        let link = &walks.links[l as usize];
+        let a = walks.nodes[link.a as usize].pos;
+        let (f, r) = (self.f, self.r);
+        let reach = link.room[0].max(link.room[1]) + 0.25;
+        [
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, 1.0),
+            (-1.0, -1.0),
+            (1.0, 0.0),
+            (-1.0, 0.0),
+        ]
+        .iter()
+        .any(|&(ka, kl)| {
+            let x = self.c[0] + f[0] * ka * self.hl + r[0] * kl * self.hw;
+            let z = self.c[1] + f[1] * ka * self.hl + r[1] * kl * self.hw;
+            let rel = [x - a[0], z - a[2]];
+            let s = dot(rel, link.dir);
+            s > -0.5 && s < link.length_m + 0.5 && dot(rel, left(link.dir)).abs() < reach
+        })
     }
 
     fn moving(&self) -> bool {
@@ -431,15 +642,17 @@ impl CarFrame {
     /// [`Self::danger`] with `margin` around the footprint and beside its path.
     fn danger_within(&self, p: [f32; 3], margin: f32) -> Option<(f32, f32)> {
         let (a, l) = self.rel(p);
+        let (pa, pl) = self.path(p);
         let reach = self.hl + DANGER_BASE_M + DANGER_S * self.v;
         let near = a.abs() <= self.hl + margin && l.abs() <= self.hw + margin;
-        let ahead = self.moving() && a > -self.hl - 0.3 && a < reach && l.abs() < self.hw + margin;
-        (near || ahead).then_some((a, l))
+        let ahead =
+            self.moving() && pa > -self.hl - 0.3 && pa < reach && pl.abs() < self.side(pa) + margin;
+        (near || ahead).then_some((pa.max(a), pl))
     }
 
     /// In the zone near the moving car's way where walkers do not walk toward it.
     fn watch(&self, p: [f32; 3]) -> bool {
-        let (a, l) = self.rel(p);
+        let (a, l) = self.path(p);
         let reach = self.hl + WATCH_BASE_M + WATCH_S * self.v;
         self.moving() && a > -self.hl - 1.0 && a < reach && l.abs() < self.hw + WATCH_SIDE_M
     }
@@ -451,17 +664,14 @@ impl CarFrame {
             let d = unit2([p[0] - self.c[0], p[2] - self.c[1]]);
             return if d == [0.0; 2] { fallback } else { d };
         }
-        let (_, l) = self.rel(p);
+        let (_, l) = self.path(p);
+        let r = self.path_right(p);
         if l.abs() < 0.05 {
-            let s = if dot(fallback, self.r) >= 0.0 {
-                1.0
-            } else {
-                -1.0
-            };
-            return [self.r[0] * s, self.r[1] * s];
+            let s = if dot(fallback, r) >= 0.0 { 1.0 } else { -1.0 };
+            return [r[0] * s, r[1] * s];
         }
         let s = if l > 0.0 { 1.0 } else { -1.0 };
-        [self.r[0] * s, self.r[1] * s]
+        [r[0] * s, r[1] * s]
     }
 }
 
@@ -480,6 +690,8 @@ pub struct Pedestrians {
     next_id: u32,
     target: usize,
     alive: usize,
+    /// The car's position `x, z`, heading, and 1 once seen, as of the last step.
+    car_prev: [f32; 4],
 }
 
 fn left(d: [f32; 2]) -> [f32; 2] {
@@ -580,6 +792,7 @@ impl Pedestrians {
             next_id: 0,
             target: 0,
             alive: 0,
+            car_prev: [0.0; 4],
         }
     }
 
@@ -663,7 +876,23 @@ impl Pedestrians {
     /// One 120 Hz step.
     pub fn step(&mut self, walks: &WalkGraph, lanes: &LaneGraph, input: &PedInput) {
         self.tick += 1;
-        let car = CarFrame::new(&input.player);
+        // The car's yaw rate from its heading last step (none after a jump).
+        let pl = &input.player;
+        let [px, pz, ph, seen] = self.car_prev;
+        let yaw_rate = if seen > 0.0 && len2([pl.pos[0] - px, pl.pos[2] - pz]) < 2.0 {
+            let mut dh = pl.heading - ph;
+            while dh > PI {
+                dh -= TAU;
+            }
+            while dh < -PI {
+                dh += TAU;
+            }
+            (dh / DT).clamp(-2.0, 2.0)
+        } else {
+            0.0
+        };
+        self.car_prev = [pl.pos[0], pl.pos[2], pl.heading, 1.0];
+        let car = CarFrame::new(pl, yaw_rate);
         if self.tick % TARGET_TICKS == 1 {
             self.update_target(walks, input);
         }
@@ -992,6 +1221,24 @@ impl Pedestrians {
     /// Where member `k` of walker `w` walks.
     fn walk_slot(&self, walks: &WalkGraph, w: usize, k: usize) -> [f32; 3] {
         let wk = &self.walkers[w];
+        if walks.links[wk.link as usize].kind == LinkKind::Spur {
+            // Single file out to the curb and waiting there, the first at the curb point
+            // and the rest behind on the walk side: nobody spreads along the curb edge.
+            let back = QUEUE_M * k as f32;
+            let s = link_s(walks, wk) + if wk.fwd { -back } else { back };
+            // Never past the curb point toward the road (followers coming off a crossing
+            // would stand in the gutter), and a little past the foot onto the walk.
+            let link = &walks.links[wk.link as usize];
+            let curb_at_b = walks.crossings[link.crossing as usize]
+                .curbs
+                .contains(&link.b);
+            let (lo, hi) = if curb_at_b {
+                (-0.5, link.length_m)
+            } else {
+                (0.0, link.length_m + 0.5)
+            };
+            return walks.point(wk.link, s.clamp(lo, hi), 0.0);
+        }
         let lat = wk.lat + abreast(wk.count, k as u8);
         let lat = if wk.fwd { lat } else { -lat };
         walks.point(wk.link, link_s(walks, wk), lat)
@@ -1120,17 +1367,39 @@ impl Pedestrians {
             }
             let at = |k: f32| [p.pos[0] + t[0] * k, p.pos[1], p.pos[2] + t[1] * k];
             let blocked = c.danger(at(1.0)).is_some() || c.danger(at(2.0)).is_some();
-            if (on_road && (blocked || c.danger(p.pos).is_some())) || p.dodge.stuck {
-                escape = Some(c.away(p.pos, back_dir(walks, &wk)));
+            // Moving off along the path only helps if it leads out of the car's way (not
+            // when the car comes along the path itself: then people step aside instead).
+            let e = c.away(p.pos, back_dir(walks, &wk));
+            let along = dot(e, t).abs() >= ALONG_MIN;
+            if along && ((on_road && (blocked || c.danger(p.pos).is_some())) || p.dodge.stuck) {
+                escape = Some(e);
             }
             let ahead = at(1.0);
-            if blocked || (c.watch(ahead) && c.rel(ahead).1.abs() < c.rel(p.pos).1.abs() - 0.2) {
+            if blocked || (c.watch(ahead) && c.path(ahead).1.abs() < c.path(p.pos).1.abs() - 0.2) {
                 hold = true;
             }
         }
         let dodging = wk.members[..usize::from(wk.count)]
             .iter()
             .any(|&m| self.peds[usize::from(m)].dodge.action != Action::None);
+        // Nobody is left behind on the road: on a crossing and the spur off it, or while
+        // they stand in a lane or the way back to their place crosses one, the walker waits
+        // for anyone the car kept from following (rather than drawing them on diagonally
+        // across a lane). Only then: on the walk, a car that blocks someone for good would
+        // hold the group for good.
+        let stranded = wk.members[..usize::from(wk.count)]
+            .iter()
+            .enumerate()
+            .any(|(k, &m)| {
+                let p = &self.peds[usize::from(m)];
+                let slot = self.walk_slot(walks, w, k);
+                p.sit == Sit::No
+                    && dist(p.base, slot) > STRANDED_M
+                    && (on_road
+                        || link.kind == LinkKind::Spur
+                        || walks.in_lane(p.base)
+                        || through_lane(walks, p.base, slot))
+            });
 
         let mut wk = wk;
         match wk.doing {
@@ -1180,6 +1449,16 @@ impl Pedestrians {
                 look,
             } => {
                 wk.v = approach(wk.v, 0.0, ACCEL * DT);
+                if let Some(e) = escape {
+                    // A car on the walk at the curb: off along the spur, away from it.
+                    if dot(e, t) < 0.0 {
+                        reverse(walks, &mut wk);
+                    }
+                    wk.doing = Doing::Escape {
+                        cross: false,
+                        calm: 0.0,
+                    };
+                }
                 let x = &walks.crossings[crossing as usize];
                 let clear = ((x.length_m / PACE_MIN + 2.0) * SIM_HZ as f32) as u64;
                 // The car neither on the crossing nor coming at it.
@@ -1206,7 +1485,7 @@ impl Pedestrians {
                         calm: 0.0,
                     };
                 } else if !hold && !dodging {
-                    wk.doing = Doing::Walk;
+                    wk.doing = if on_road { Doing::Cross } else { Doing::Walk };
                 } else if hold
                     && self.tick > since + (HOLD_TURN_S * SIM_HZ as f32) as u64
                     && (!c.moving() || self.tick > since + 3 * (HOLD_TURN_S * SIM_HZ as f32) as u64)
@@ -1227,12 +1506,17 @@ impl Pedestrians {
                         cross: wk.doing == Doing::Cross,
                         calm: 0.0,
                     };
-                } else if (hold || dodging) && !on_road {
+                } else if dodging || (hold && !on_road) {
+                    // On a crossing only while someone steps aside from a car coming along it.
                     wk.doing = Doing::Hold { since: self.tick };
                 }
                 let v = if on_road { wk.pace.max(1.3) } else { wk.pace };
                 wk.v = approach(wk.v, v, ACCEL * DT);
             }
+        }
+
+        if stranded {
+            wk.v = approach(wk.v, 0.0, ACCEL * 2.0 * DT);
         }
 
         // Move along, link to link.
@@ -1323,10 +1607,15 @@ impl Pedestrians {
     /// Group center target off the line (left of travel), inside the link's room.
     fn lat_target(&self, walks: &WalkGraph, wk: &Walker) -> f32 {
         let link = &walks.links[wk.link as usize];
+        // People walk near the walk line; the rest of the width is for stepping aside.
+        let room = [
+            link.room[0].min(WALK_SPREAD_M),
+            link.room[1].min(WALK_SPREAD_M),
+        ];
         let (r_right, r_left) = if wk.fwd {
-            (link.room[0], link.room[1])
+            (room[0], room[1])
         } else {
-            (link.room[1], link.room[0])
+            (room[1], room[0])
         };
         let half = abreast(wk.count, wk.count - 1).abs();
         let lo = -r_right + half + 0.15;
@@ -1438,9 +1727,18 @@ impl Pedestrians {
             };
             (p0, face)
         };
+        let on_road = walks.links[wk.link as usize].kind == LinkKind::Crossing;
+        // Off a crossing's band while the group is on it (back from stepping aside), or in
+        // a lane off the crossings: into the band of the group's link first, straight
+        // across, not on toward the slot through a lane.
+        let in_road = walks.in_lane(p.base) && !on_crossing_band(walks, p.base);
+        let want = if on_road || in_road {
+            into_band(walks, wk.link, p.base, want)
+        } else {
+            want
+        };
         // Ease toward the slot, but never into the car's way off the road (on it the
         // walker hurries everyone off), and not while dodging.
-        let on_road = walks.links[wk.link as usize].kind == LinkKind::Crossing;
         let mut dg = p.dodge;
         let max = (wk.v + CATCH_UP).max(if staying { 1.2 } else { 0.0 }) * DT;
         let d = [want[0] - p.base[0], want[2] - p.base[2]];
@@ -1458,35 +1756,56 @@ impl Pedestrians {
         let into_car = car.danger_within(next, SPOT_CLEAR_M).is_some()
             && (car.danger_within(p.base, SPOT_CLEAR_M).is_none()
                 || car.gap(next) < car.gap(p.base));
-        if dg.action == Action::None && (on_road || !into_car) {
+        if dg.action == Action::None && !into_car {
             p.base = next;
         }
         let moved = dist(before, p.base) / DT;
 
         // The car: off the road, step to the nearest spot across the walk out of its way
-        // (on the road the walker hurries off the crossing instead).
+        // (on the road the walker hurries off the crossing instead, unless that way is
+        // into the car: then step out of its way across the crossing or back to a curb).
         let off = dg.offset();
         let here = [p.base[0] + off[0], p.base[1], p.base[2] + off[1]];
-        match car.danger_within(here, SPOT_CLEAR_M) {
-            Some((a, _)) if !on_road => {
+        // Kept from following the group by the car and left behind (in a lane off the
+        // crossing, say): out of the way as if it threatened.
+        let left_behind = into_car && l > STRANDED_M && dg.action == Action::None;
+        let threat = car
+            .danger_within(here, SPOT_CLEAR_M)
+            .or_else(|| left_behind.then(|| car.path(here)));
+        match threat {
+            Some((a, _)) if !on_road || into_car || !along_helps(car, here, &wk, walks) => {
                 dg.calm = 0.0;
+                // A move under way keeps going while its spot is clear; if the car turns
+                // so the spot is in its way, the next one.
                 let to = [p.base[0] + dg.to[0], p.base[1], p.base[2] + dg.to[1]];
-                if dg.action == Action::None || car.danger_within(to, SPOT_CLEAR_M).is_some() {
-                    if let Some(target) = dodge_target(walks, wk.link, car, here) {
+                // A move under way may change course only once it has run a little, so
+                // a person never keeps restarting in place.
+                let busy = dg.action != Action::None && dg.t < 1.0 && dg.t * dg.dur < REPLAN_S;
+                let spot_ok = dg.action != Action::None && !car.blocks(to, SPOT_CLEAR_M);
+                if !busy && !spot_ok {
+                    if let Some(target) = dodge_target(walks, car, here, on_road) {
                         let delta = [target[0] - here[0], target[2] - here[2]];
                         let tti = if car.moving() {
                             (a - car.hl) / car.v
                         } else {
                             0.0
                         };
-                        let far = len2(delta) > ASIDE_M + 0.2;
+                        let d = len2(delta);
+                        let aside = tti >= HOP_TTI_S && d <= ASIDE_M + 0.2;
+                        // A startled or long hop runs the whole way at once; the
+                        // duration keeps the curve's steepest part under MAX_MPS.
+                        let quick = !aside && (tti < URGENT_TTI_S || d > HOP_M);
                         dg = Dodge {
-                            action: if tti < HOP_TTI_S || far {
-                                Action::Hop
-                            } else {
-                                Action::Aside
-                            },
+                            action: if aside { Action::Aside } else { Action::Hop },
                             t: 0.0,
+                            dur: if aside {
+                                ASIDE_S.max(ASIDE_SLOPE * d / MAX_MPS)
+                            } else if quick {
+                                URGENT_HOP_S.max(ASIDE_SLOPE * d / MAX_MPS)
+                            } else {
+                                HOP_S.max(HOP_SLOPE * d / MAX_MPS)
+                            },
+                            quick,
                             from: off,
                             to: [off[0] + delta[0], off[1] + delta[1]],
                             calm: 0.0,
@@ -1509,12 +1828,7 @@ impl Pedestrians {
             }
         }
         if dg.action != Action::None {
-            let dur = if dg.action == Action::Hop {
-                HOP_S
-            } else {
-                ASIDE_S
-            };
-            dg.t = (dg.t + DT / dur).min(1.0);
+            dg.t = (dg.t + DT / dg.dur).min(1.0);
             if dg.t >= 1.0 && dg.calm > CALM_S {
                 // Done: walk back from where the move left us.
                 p.base = [p.base[0] + dg.to[0], p.base[1], p.base[2] + dg.to[1]];
@@ -1601,47 +1915,195 @@ impl Pedestrians {
     }
 }
 
-/// Where to get out of the car's way from `p` on walk link `l`: the nearest point across
-/// the walk (within its width) clear of the car. If the car covers the whole walk, the
-/// gutter on the road side will do; failing even that (the car comes across the walk),
-/// `None`: the walker must move off along it.
-fn dodge_target(walks: &WalkGraph, l: u32, car: &CarFrame, p: [f32; 3]) -> Option<[f32; 3]> {
-    let link = &walks.links[l as usize];
-    let a = walks.nodes[link.a as usize].pos;
-    let n = left(link.dir);
-    let rel = [p[0] - a[0], p[2] - a[2]];
-    let (s, lat) = (dot(rel, link.dir), dot(rel, n));
-    let at = |c: f32| {
-        [
-            a[0] + link.dir[0] * s + n[0] * c,
-            p[1],
-            a[2] + link.dir[1] * s + n[1] * c,
-        ]
-    };
-    let (lo, hi) = (-link.room[0] + 0.05, link.room[1] - 0.05);
-    let road = f32::from(link.road_side);
-    for pass in 0..2 {
-        // Across the walk; then the road side (either side around a corner).
-        let (lo, hi) = match pass {
-            0 => (lo, hi),
-            _ if road > 0.0 => (hi, hi + ROAD_DODGE_M),
-            _ if road < 0.0 => (lo - ROAD_DODGE_M, lo),
-            _ => (lo - ROAD_DODGE_M, hi + ROAD_DODGE_M),
-        };
-        let mut best: Option<f32> = None;
-        let steps = ((hi - lo) / 0.1) as i32;
-        for k in 0..=steps {
-            let c = lo + (hi - lo) * k as f32 / steps as f32;
-            let clear = car.danger_within(at(c), SPOT_CLEAR_M).is_none();
-            if clear && best.is_none_or(|b| (c - lat).abs() < (b - lat).abs()) {
-                best = Some(c);
-            }
-        }
-        if let Some(c) = best {
-            return Some(at(c));
+/// Where to get out of the car's way from `p`: the nearest point within [`DODGE_REACH_M`]
+/// on the walk geometry around (walks, corners and spurs, within each link's width; on
+/// a crossing, its links too) at least [`SPOT_CLEAR_M`] clear of the car's footprint and
+/// path. `None` if there is none: the walker must move off along its path.
+fn dodge_target(walks: &WalkGraph, car: &CarFrame, p: [f32; 3], on_road: bool) -> Option<[f32; 3]> {
+    let c = walks.cell_of(xz(p))? as i32;
+    let w = walks.grid_cells[0] as i32;
+    let (cx, cz) = (c % w, c / w);
+    // Across the walk geometry first; only for a car on a walk itself, the gutter beside
+    // that walk too; failing both, the least bad spot (clearest of the car's way, still
+    // never into it), so nobody stands still in its path.
+    for pass in [Pass::Walk, Pass::Gutter, Pass::LeastBad] {
+        if let Some(q) = dodge_search(walks, car, p, on_road, (cx, cz, w), pass) {
+            return Some(q);
         }
     }
     None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    Walk,
+    Gutter,
+    LeastBad,
+}
+
+fn dodge_search(
+    walks: &WalkGraph,
+    car: &CarFrame,
+    p: [f32; 3],
+    on_road: bool,
+    (cx, cz, w): (i32, i32, i32),
+    pass: Pass,
+) -> Option<[f32; 3]> {
+    // Lower is better: the distance to a clear spot, or (least bad) how deep in the car's
+    // way it still is, then the distance.
+    let mut best: Option<(f32, [f32; 3])> = None;
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let (x, z) = (cx + dx, cz + dz);
+            if x < 0 || z < 0 || x >= w || z >= walks.grid_cells[1] as i32 {
+                continue;
+            }
+            for &l in walks.cell_links((z * w + x) as usize) {
+                let link = &walks.links[l as usize];
+                if link.kind == LinkKind::Crossing && !on_road {
+                    continue;
+                }
+                let a = walks.nodes[link.a as usize].pos;
+                let rel = [p[0] - a[0], p[2] - a[2]];
+                let along = dot(rel, link.dir);
+                let s0 = (along - DODGE_REACH_M).max(0.0);
+                let s1 = (along + DODGE_REACH_M).min(link.length_m);
+                if s1 < s0 || dot(rel, left(link.dir)).abs() > DODGE_REACH_M + 1.5 {
+                    continue;
+                }
+                let (mut lo, mut hi) = (-link.room[0] + 0.05, link.room[1] - 0.05);
+                // Around a corner the walk line keeps to the middle of the sidewalk: more
+                // of it on either side than its room.
+                let corner = link.kind == LinkKind::Walk && link.road_side == 0;
+                let edge = link.road_side != 0 || corner;
+                let gutter = pass == Pass::Gutter
+                    || (pass == Pass::LeastBad && edge && car.on_walk(walks, l));
+                if pass == Pass::Gutter && (!edge || !car.on_walk(walks, l)) {
+                    continue;
+                }
+                if gutter && corner {
+                    (lo, hi) = (lo - CORNER_DODGE_M, hi + CORNER_DODGE_M);
+                } else if gutter {
+                    // Only off the curb of a walk the car is on: the gutter alone, or
+                    // (least bad) the walk and its gutter together.
+                    let keep = pass == Pass::LeastBad;
+                    if link.road_side > 0 {
+                        (lo, hi) = (if keep { lo } else { hi }, hi + ROAD_DODGE_M);
+                    } else {
+                        (lo, hi) = (lo - ROAD_DODGE_M, if keep { hi } else { lo });
+                    }
+                }
+                let ns = ((s1 - s0) / DODGE_STEP_M) as i32 + 1;
+                let nc = ((hi - lo) / DODGE_STEP_M) as i32 + 1;
+                for i in 0..=ns {
+                    let s = s0 + (s1 - s0) * i as f32 / ns as f32;
+                    for k in 0..=nc {
+                        let lat = lo + (hi - lo) * k as f32 / nc as f32;
+                        let q = walks.point(l, s, lat);
+                        let d = dist(q, p);
+                        if d > DODGE_REACH_M
+                            || (link.kind != LinkKind::Crossing && walks.in_lane(q))
+                        {
+                            continue;
+                        }
+                        let cost = if pass == Pass::LeastBad {
+                            if !car.reachable(p, q, None) {
+                                continue;
+                            }
+                            // A way that gets past the car's way in time first, then one
+                            // that keeps out of the lanes.
+                            let late = if car.reachable(p, q, Some(0.0)) {
+                                0.0
+                            } else {
+                                100.0
+                            };
+                            let lane = on_road
+                                && link.kind != LinkKind::Crossing
+                                && through_lane(walks, p, q);
+                            late + if lane { 50.0 } else { 0.0 } - car.clearance(q) * 10.0 + d
+                        } else {
+                            if car.blocks(q, SPOT_CLEAR_M)
+                                || !car.reachable(p, q, Some(CROSS_SPARE_S))
+                                || (on_road
+                                    && link.kind != LinkKind::Crossing
+                                    && through_lane(walks, p, q))
+                            {
+                                continue;
+                            }
+                            d
+                        };
+                        if best.is_none_or(|b| cost < b.0) {
+                            best = Some((cost, q));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// Whether the straight way from `p` to `q` crosses a lane's band off the crossings.
+fn through_lane(walks: &WalkGraph, p: [f32; 3], q: [f32; 3]) -> bool {
+    (1..=8).any(|k| {
+        let x = crate::math::lerp3(p, q, k as f32 / 8.0);
+        walks.in_lane(x) && !on_crossing_band(walks, x)
+    })
+}
+
+/// Whether `p` lies on a crossing's road links, within their width.
+fn on_crossing_band(walks: &WalkGraph, p: [f32; 3]) -> bool {
+    let Some(c) = walks.cell_of(xz(p)) else {
+        return false;
+    };
+    let w = walks.grid_cells[0] as i32;
+    let (cx, cz) = (c as i32 % w, c as i32 / w);
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let (x, z) = (cx + dx, cz + dz);
+            if x < 0 || z < 0 || x >= w || z >= walks.grid_cells[1] as i32 {
+                continue;
+            }
+            for &l in walks.cell_links((z * w + x) as usize) {
+                let link = &walks.links[l as usize];
+                if link.kind != LinkKind::Crossing {
+                    continue;
+                }
+                let a = walks.nodes[link.a as usize].pos;
+                let rel = [p[0] - a[0], p[2] - a[2]];
+                let s = dot(rel, link.dir);
+                let lat = dot(rel, left(link.dir));
+                if s >= -0.3
+                    && s <= link.length_m + 0.3
+                    && lat >= -link.room[0]
+                    && lat <= link.room[1]
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Where someone at `p` heading for `want` on link `l` goes: `want` from within the link's
+/// width, else straight across into it.
+fn into_band(walks: &WalkGraph, l: u32, p: [f32; 3], want: [f32; 3]) -> [f32; 3] {
+    let link = &walks.links[l as usize];
+    let a = walks.nodes[link.a as usize].pos;
+    let rel = [p[0] - a[0], p[2] - a[2]];
+    let lat = dot(rel, left(link.dir));
+    let (lo, hi) = (-link.room[0] + 0.1, link.room[1] - 0.1);
+    if lat >= lo - 0.1 && lat <= hi + 0.1 {
+        return want;
+    }
+    let s = dot(rel, link.dir).clamp(0.0, link.length_m);
+    walks.point(l, s, lat.clamp(lo, hi))
+}
+
+/// Whether moving along walker `wk`'s path takes someone at `p` out of the car's way.
+fn along_helps(car: &CarFrame, p: [f32; 3], wk: &Walker, walks: &WalkGraph) -> bool {
+    dot(car.away(p, back_dir(walks, wk)), travel(walks, wk)).abs() >= ALONG_MIN
 }
 
 /// Unit ground direction walker `wk` travels.
