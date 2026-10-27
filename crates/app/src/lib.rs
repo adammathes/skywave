@@ -5,6 +5,13 @@
 //! [`ui`], and calls [`App::update`] unless a menu has the game paused), and draws
 //! [`App::scene_view`]. The simulation itself only ever advances in fixed `SIM_DT` steps:
 //! the car ([`drive`]), then its cameras ([`camera`]), then the clock ([`lighting`]).
+//!
+//! **Switching cars** ([`App::switch_vehicle`], the pause menu's Vehicle page, the
+//! `VehicleNext` key): a car's meshes are built and registered the first time it is driven
+//! and kept, so switching back reuses its ids. Meshes registered after load wait in
+//! [`App::take_new_meshes`], which the platform drains into the renderer every frame
+//! before drawing; the ids continue after [`App::meshes`]. A session registers at most
+//! one set of meshes per built-in car.
 
 pub mod camera;
 pub mod car;
@@ -41,7 +48,7 @@ pub use input::{
 };
 
 use camera::CameraRig;
-use car::{CarMeshes, CarModel};
+use car::{CarLayout, CarMeshes, CarModel};
 use drive::{Drive, DriveGround};
 use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec3};
@@ -150,6 +157,14 @@ pub struct App {
     time: TimeOfDay,
     meshes: Vec<Mesh>,
     car_meshes: CarMeshes,
+    /// Every car registered so far (the one driven among them), for switching back.
+    cars: Vec<RegisteredCar>,
+    /// Meshes registered since the platform last called [`App::take_new_meshes`].
+    pending_meshes: Vec<Mesh>,
+    /// Mesh ids handed out: `meshes`, then every pending batch.
+    mesh_count: u32,
+    /// The scene chose the car (`car=`): the saved vehicle setting does not replace it.
+    car_from_scene: bool,
     /// The world's instances, then this frame's car instances (refilled by `scene_view`).
     instances: Vec<MeshInstance>,
     world_instances: usize,
@@ -178,6 +193,14 @@ pub struct App {
     aspect: f32,
     /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
     target: Option<(u32, u32)>,
+}
+
+/// A car whose meshes the renderer has (or will have, once drained).
+#[derive(Clone, Copy, Debug)]
+struct RegisteredCar {
+    id: &'static str,
+    meshes: CarMeshes,
+    layout: CarLayout,
 }
 
 impl App {
@@ -212,6 +235,7 @@ impl App {
         stream: Option<StreamBudget>,
     ) -> Result<App, String> {
         let spec = vehicles::builtin_spec(vehicle_id)?;
+        let vehicle_index = ui::roster::index_of(vehicle_id).ok_or("not a built-in car")?;
         let shape = vehicles::builtin_shape(&spec)?;
         let model = CarModel::build(&spec, &shape)?;
         let place: Place = places::build(key, seed)?;
@@ -220,6 +244,7 @@ impl App {
         let drive = Drive::with_layout(spec, model.layout, start.0, start.1);
         let map = map::MapImage::rasterize(&place);
         let mut ui = ui::Ui::new();
+        ui.vehicle_switched(vehicle_index, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         let ground = drive::ground_for(&place);
         let chunk_size = place.header.chunk_size_m;
@@ -256,6 +281,12 @@ impl App {
         instances.reserve_exact(town.world_capacity - world_instances + extra);
         let camera = CameraRig::new(CameraMode::ChaseMid, &drive);
         let fly = fly_from(&camera.pose(&drive, 1.0));
+        let cars = vec![RegisteredCar {
+            id: vehicles::BUILTIN[vehicle_index].0,
+            meshes: car_meshes,
+            layout: model.layout,
+        }];
+        let mesh_count = meshes.len() as u32;
         Ok(App {
             clock: FixedStep::new(),
             ticks: 0,
@@ -272,6 +303,10 @@ impl App {
             time: TimeOfDay::default(),
             meshes,
             car_meshes,
+            cars,
+            pending_meshes: Vec::new(),
+            mesh_count,
+            car_from_scene: false,
             instances,
             world_instances,
             roles: town.roles,
@@ -304,6 +339,7 @@ impl App {
         app.drive = Drive::with_layout(app.drive.spec.clone(), app.drive.layout, ground, heading);
         app.drive.headlights = setup.headlights;
         app.camera_from_scene = setup.camera.is_some();
+        app.car_from_scene = setup.car_given;
         app.camera = CameraRig::new(setup.camera.unwrap_or(CameraMode::ChaseMid), &app.drive);
         app.curr = fly_from(&app.camera.pose(&app.drive, 1.0));
         app.prev = app.curr;
@@ -358,6 +394,81 @@ impl App {
     /// Meshes the scene refers to: upload them in order, so `meshes()[i]` gets `MeshId(i)`.
     pub fn meshes(&self) -> &[Mesh] {
         &self.meshes
+    }
+
+    /// Meshes registered since load or the last call (a car driven for the first time),
+    /// in id order: upload them after [`App::meshes`] and every earlier batch, so ids keep
+    /// counting up from `meshes().len()`. Call once a frame, after [`App::frame`] and
+    /// before [`App::scene_view`]; it is empty (and costs nothing) almost always.
+    pub fn take_new_meshes(&mut self) -> std::vec::Drain<'_, Mesh> {
+        self.pending_meshes.drain(..)
+    }
+
+    /// Mesh ids handed out so far: [`App::meshes`] and every batch of
+    /// [`App::take_new_meshes`], taken or not.
+    pub fn mesh_count(&self) -> usize {
+        self.mesh_count as usize
+    }
+
+    /// Swaps in the built-in car `vehicle_id` (see [`vehicles::BUILTIN`]) where the car is
+    /// now ([`Drive::switch_car`]), keeping the camera and the headlights, and remembers it
+    /// in the settings; its name shows on the HUD. Its meshes are built and queued for
+    /// [`App::take_new_meshes`] the first time; later switches reuse them.
+    pub fn switch_vehicle(&mut self, vehicle_id: &str) -> Result<(), String> {
+        let index = ui::roster::index_of(vehicle_id).ok_or(format!("no vehicle `{vehicle_id}`"))?;
+        self.switch_vehicle_at(index, true)
+    }
+
+    /// `VehicleNext`: the next car in [`vehicles::BUILTIN`], wrapping after the last.
+    pub fn cycle_vehicle(&mut self) {
+        let next = (self.ui.vehicle() + 1) % vehicles::BUILTIN.len();
+        self.switch_to(next, true);
+    }
+
+    /// [`App::switch_vehicle_at`]; a car that fails to build (never a built-in one, whose
+    /// specs and shapes are tested) leaves the current one.
+    fn switch_to(&mut self, index: usize, toast: bool) {
+        let switched = self.switch_vehicle_at(index, toast);
+        debug_assert!(switched.is_ok(), "{switched:?}");
+    }
+
+    /// Switches to `vehicles::BUILTIN[index]`, toasting its name or not. The car already
+    /// driven stays, and only the toast and the setting happen.
+    fn switch_vehicle_at(&mut self, index: usize, toast: bool) -> Result<(), String> {
+        let &(id, _) = vehicles::BUILTIN.get(index).ok_or("no such vehicle")?;
+        if self.drive.spec.id != id {
+            let spec = vehicles::builtin_spec(id)?;
+            let car = match self.cars.iter().find(|c| c.id == id) {
+                Some(car) => *car,
+                None => {
+                    let model = CarModel::build(&spec, &vehicles::builtin_shape(&spec)?)?;
+                    let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
+                    let meshes = model.register(|m| {
+                        pending.push(m.clone());
+                        next += 1;
+                        MeshId(next - 1)
+                    });
+                    self.mesh_count = next;
+                    let car = RegisteredCar {
+                        id,
+                        meshes,
+                        layout: model.layout,
+                    };
+                    self.cars.push(car);
+                    car
+                }
+            };
+            self.drive.switch_car(spec, car.layout, &self.ground);
+            self.car_meshes = car.meshes;
+            self.sound.set_car(&self.drive);
+            // The same camera, settled behind (or in) the new car.
+            let mut rig = CameraRig::new(self.camera.selected(), &self.drive);
+            rig.tuning = self.camera.tuning;
+            rig.prefs = self.camera.prefs;
+            self.camera = rig;
+        }
+        self.ui.vehicle_switched(index, true, toast);
+        Ok(())
     }
 
     /// Simulation steps run so far.
