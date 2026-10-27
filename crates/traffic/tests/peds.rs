@@ -65,7 +65,7 @@ const REGIONS: [(&str, &str); 3] = [
 /// The sim is a pure function of the place and its inputs, so this moves when pedestrian
 /// behaviour, the sidewalk graph, the lane graph or the place change; update it in its own
 /// commit with the reason.
-const COAST_SEED1_30S_HASH: u64 = 0;
+const COAST_SEED1_30S_HASH: u64 = 0x059a_d9e4_f456_d0c5;
 
 /// Most walk samples `world` lays another road's asphalt over (where two roads squeeze
 /// together it draws one's pavement across the other's sidewalk).
