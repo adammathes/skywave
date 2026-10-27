@@ -274,6 +274,33 @@ fn assert_lane_intervals(t: &Traffic, when: &str) {
     }
 }
 
+/// Asserts every car that was there a step ago moved no further than its speed allows
+/// and turned by a bounded angle: no jumps across lanes, turns or lane changes.
+fn assert_continuous(before: &[Car], cars: &[Car], when: &str) {
+    for c in cars {
+        let Some(o) = before.iter().find(|o| o.id == c.id) else {
+            continue;
+        };
+        let moved = ((c.pos[0] - o.pos[0]).powi(2) + (c.pos[2] - o.pos[2]).powi(2)).sqrt();
+        let most = c.speed.max(o.speed) / HZ as f32 * 1.05 + 0.02;
+        assert!(
+            moved <= most,
+            "{when}: car {} jumped {moved:.3} m (at most {most:.3}) on segment {}",
+            c.id,
+            c.seg
+        );
+        let mut turn = (c.heading - o.heading).abs();
+        if turn > std::f32::consts::PI {
+            turn = std::f32::consts::TAU - turn;
+        }
+        assert!(
+            turn < 0.1,
+            "{when}: car {} turned {turn:.3} rad in a step",
+            c.id
+        );
+    }
+}
+
 /// Asserts no two cars' bodies overlap.
 fn assert_no_contact(cars: &[Car], when: &str) {
     for (k, a) in cars.iter().enumerate() {
@@ -392,10 +419,28 @@ fn cars_stop_at_red_and_go_on_green() {
     assert!(waited >= 4, "some cars met a red");
 }
 
+/// Two lanes due east (lanes 0 and 1, slot 0 at z = 0, slot 1 at z = 3.5) for 3 km,
+/// going straight on into lanes 2 and 3.
+fn two_lanes() -> LaneGraph {
+    let mut b = Builder::new(3);
+    b.lane([0.0, 0.0], [3000.0, 0.0], [0, 1], Control::Free, 0);
+    b.lane([0.0, 3.5], [3000.0, 3.5], [0, 1], Control::Free, 0);
+    b.lane([3020.0, 0.0], [6000.0, 0.0], [1, 2], Control::Free, 0);
+    b.lane([3020.0, 3.5], [6000.0, 3.5], [1, 2], Control::Free, 0);
+    b.turn(0, 2);
+    b.turn(1, 3);
+    let mut g = b.build();
+    for (lane, edge, slot) in [(1, 0, 1), (3, 2, 1)] {
+        g.lanes[lane].edge = edge;
+        g.lanes[lane].slot = slot;
+    }
+    g
+}
+
 #[test]
-fn the_player_stopping_dead_is_never_hit() {
+fn the_player_stopping_dead_is_never_hit_and_is_passed() {
     let _quiet = shared();
-    let g = straight();
+    let g = two_lanes();
     let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(11));
     let mut px = 200.0f32;
     for k in 0..6 {
@@ -403,8 +448,9 @@ fn the_player_stopping_dead_is_never_hit() {
             .expect("room");
     }
     let mut min_gap = f32::INFINITY;
-    for tick in 0..40 * HZ as u64 {
-        // The player drives the lane at 12 m/s, then stops dead at 10 s.
+    let mut changes = 0;
+    for tick in 0..120 * HZ as u64 {
+        // The player drives lane 0 at 12 m/s, then stops dead at 10 s.
         let speed = if tick < 10 * HZ as u64 { 12.0 } else { 0.0 };
         px += speed / HZ as f32;
         let player = Player {
@@ -414,22 +460,100 @@ fn the_player_stopping_dead_is_never_hit() {
             half_len: 2.3,
             half_w: 0.9,
         };
+        let before: Vec<u32> = t.cars().iter().map(|c| c.seg).collect();
         t.step(&g, &scripted(tick, player));
         assert_lane_intervals(&t, "player");
-        for c in t.cars() {
+        assert_no_contact(t.cars(), "player");
+        for (c, was) in t.cars().iter().zip(before) {
+            changes += usize::from(was == 0 && c.seg == 1);
             assert!(
                 !overlap(&car_box(c), &player_box(&player)),
                 "car {} hit the player at tick {tick}",
                 c.id
             );
-            assert!(c.s <= px - 4.6, "car {} passed through the player", c.id);
-            min_gap = min_gap.min(px - 4.6 - c.s);
+            if c.seg == 0 {
+                assert!(c.s <= px - 4.6, "car {} passed through the player", c.id);
+                min_gap = min_gap.min(px - 4.6 - c.s);
+            }
         }
     }
-    let queued = t.cars().iter().all(|c| c.speed < 0.01);
-    println!("player stopped dead: closest approach {min_gap:.2} m, queue stopped {queued}");
-    assert!(queued);
+    let passed = t.cars().iter().filter(|c| c.pos[0] > px + 5.0).count();
+    println!(
+        "player stopped dead: closest approach {min_gap:.2} m, {changes} lane changes, \
+         {passed} of {} cars past",
+        t.cars().len()
+    );
     assert!(min_gap > 0.5);
+    assert_eq!(
+        passed,
+        t.cars().len(),
+        "every car passes the stopped player"
+    );
+}
+
+#[test]
+fn a_player_waiting_at_a_red_does_not_stop_the_green() {
+    let _quiet = shared();
+    let g = crossing();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    // Stopped at lane 0's line, all the time.
+    let player = Player {
+        pos: [-12.0 - 0.6 - 2.3, 0.0, 1.8],
+        heading: EAST,
+        speed: 0.0,
+        half_len: 2.3,
+        half_w: 0.9,
+    };
+    let mut crossed = 0;
+    for tick in 0..150 * HZ as u64 {
+        if tick % (7 * HZ as u64) == 0 && t.cars().iter().all(|c| c.seg != 2 || c.s > 40.0) {
+            t.spawn_at(&g, 2, 20.0, 10.0).expect("pool");
+        }
+        let before: Vec<(u32, u32)> = t.cars().iter().map(|c| (c.id, c.seg)).collect();
+        t.step(&g, &scripted(tick, player));
+        assert_no_contact(t.cars(), "player at red");
+        for c in t.cars() {
+            assert!(!overlap(&car_box(c), &player_box(&player)));
+            if before.contains(&(c.id, 2)) && c.seg != 2 {
+                crossed += 1;
+                assert_ne!(g.light(2, tick), Some(Light::Red));
+            }
+        }
+    }
+    println!("player waiting at the red: {crossed} cross-traffic cars went through");
+    assert!(crossed >= 10);
+}
+
+#[test]
+fn a_claim_held_up_behind_a_car_is_given_back() {
+    let _quiet = shared();
+    let g = crossing();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(9));
+    let len = g.lanes[0].length_m;
+    // Lane 0 is green until tick 3000, yellow to 3420, red after; lane 2 green from 3600.
+    let a = t.spawn_at(&g, 0, len - 30.0, 12.0).expect("pool");
+    let cross = t.spawn_at(&g, 2, 300.0, 10.0).expect("pool");
+    let held = |t: &Traffic, id: u32| t.cars().iter().find(|c| c.id == id).map(|c| c.held);
+    let mut cross_went = None;
+    for tick in 2950..6600u64 {
+        if tick == 3005 {
+            // A car appears stopped between A and the line: A must give its claim back.
+            assert_ne!(held(&t, a), Some(NONE), "A claimed its turn on green");
+            t.spawn_at(&g, 0, len - 8.0, 0.0).expect("pool");
+        }
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        assert_no_contact(t.cars(), "claim");
+        if tick > 3420 {
+            assert_eq!(held(&t, a), Some(NONE), "A kept its claim into the red");
+        }
+        let on_lane2 = t.cars().iter().any(|c| c.id == cross && c.seg == 2);
+        if cross_went.is_none() && !on_lane2 {
+            cross_went = Some(tick);
+        }
+    }
+    println!("held-up claim: cross traffic went at tick {cross_went:?}");
+    let went = cross_went.expect("the cross traffic went");
+    assert!((3600..6600).contains(&went));
 }
 
 #[test]
@@ -560,6 +684,7 @@ fn coast_traffic_obeys_signals_keeps_apart_and_hides_its_comings_and_goings() {
         most = most.max(cars.len());
         assert_lane_intervals(t, "coast");
         assert_no_contact(cars, "coast");
+        assert_continuous(before, cars, "coast");
         for c in cars {
             assert!(!overlap(&car_box(c), &pbox), "car {} hit the player", c.id);
             match before.iter().find(|o| o.id == c.id) {
@@ -654,6 +779,7 @@ fn every_region_drives_without_contact() {
                     drive(&b, &mut t, 60, Density::Busy, |t, inp, before| {
                         let when = format!("region {r} seed {seed} tick {}", inp.tick);
                         assert_no_contact(t.cars(), &when);
+                        assert_continuous(before, t.cars(), &when);
                         assert_lane_intervals(t, &when);
                         most = most.max(t.cars().len());
                         for c in t.cars() {

@@ -83,17 +83,17 @@ const REPICK_M: f32 = 60.0;
 const PASS_GAP_M: f32 = 40.0;
 /// Each car considers a lane change every this many ticks.
 const CHANGE_EVERY: u64 = 30;
-/// Sideways easing speed of a lane change (m/s).
+/// Speed a lane change's leftover offset eases out at (m/s).
 const SHIFT_MPS: f32 = 1.4;
 /// Stopped, for a stop sign: slower than this (m/s) within this of the line (m).
 const STOPPED_MPS: f32 = 0.3;
 const STOP_NEAR_M: f32 = 2.5;
 /// Wait at a stop sign once stopped, ticks (0.5 to 1.5 s).
 const STOP_WAIT: (u32, u32) = (SIM_HZ / 2, SIM_HZ * 3 / 2);
-/// The player closes a junction to claims while within this of it (m), or due within
-/// these seconds.
-const PLAYER_NODE_M: f32 = 14.0;
-const PLAYER_ETA_S: f32 = 4.0;
+/// A turn the player stands on, or will drive across within these seconds, cannot be
+/// claimed; turns further than this (m) from the player's reach are not checked.
+const PLAYER_ETA_S: f32 = 3.0;
+const PLAYER_NODE_M: f32 = 60.0;
 /// A spawn keeps this far from every car (m).
 const SPAWN_CLEAR_M: f32 = 12.0;
 /// Lanes checked for a spawn per step.
@@ -203,9 +203,9 @@ pub struct Car {
     pub v0: f32,
     /// Desired time gap to the car ahead, seconds.
     pub headway: f32,
-    /// Sideways offset left over from a lane change, meters to the right, and the lane
+    /// Ground offset `[x, z]` left over from a lane change, eased out, and the lane
     /// changed from while it lasts ([`NONE`] after): the car still blocks it.
-    pub shift: f32,
+    pub offset: [f32; 2],
     pub ghost: u32,
     pub stop: StopState,
     /// Ticks left to wait at a stop sign; the tick the wait ended.
@@ -347,8 +347,9 @@ pub struct Traffic {
     /// Per car slot, the car in front and behind on the same segment while planning.
     ahead: Vec<u32>,
     behind: Vec<u32>,
-    /// Per car slot, the planned acceleration and the most it may move this step.
-    plan: Vec<(f32, f32)>,
+    /// Per car slot, the planned acceleration, the most it may move this step, and the gap
+    /// to the player when the player is on its path.
+    plan: Vec<(f32, f32, f32)>,
     /// Claims held per turn.
     claims: Vec<u16>,
     /// Per turn, the turns it conflicts with (sorted), as offsets into `conflicts`.
@@ -509,6 +510,12 @@ fn free_accel(v: f32, v0: f32) -> f32 {
 /// Distance in which a car at `v` stops comfortably, plus a margin: where it commits.
 fn commit_m(v: f32) -> f32 {
     v * v / (2.0 * B_COMF) + 3.0
+}
+
+/// Within this of its lane's end a car stops trying to reach another lane for its turn:
+/// before it would commit to the turn.
+fn repick_m(v: f32) -> f32 {
+    REPICK_M.max(commit_m(v) + 10.0)
 }
 
 /// Seconds to cover `d` meters from `v`, gathering speed at half the maximum.
@@ -698,7 +705,7 @@ impl Traffic {
             tail: alloc::vec![NONE; nl + nt],
             ahead: alloc::vec![NONE; cap],
             behind: alloc::vec![NONE; cap],
-            plan: alloc::vec![(0.0, 0.0); cap],
+            plan: alloc::vec![(0.0, 0.0, f32::INFINITY); cap],
             claims: alloc::vec![0; nt],
             conflict_first,
             conflicts,
@@ -780,7 +787,7 @@ impl Traffic {
             clear_left: 0.0,
             v0,
             headway,
-            shift: 0.0,
+            offset: [0.0; 2],
             ghost: NONE,
             stop: StopState::Approach,
             wait: 0,
@@ -919,6 +926,31 @@ impl Traffic {
         }
     }
 
+    /// Whether the player stands on `turn` (at a junction around `node`), or is driving
+    /// across it within the next few seconds.
+    fn player_on_turn(g: &LaneGraph, turn: u32, ps: &PlayerShape, node: [f32; 2]) -> bool {
+        let p = ps.pts[1];
+        let reach = ps.speed * PLAYER_ETA_S;
+        if len2([node[0] - p[0], node[1] - p[1]]) > PLAYER_NODE_M + reach + ps.half_len {
+            return false;
+        }
+        let d = ps.dir;
+        let back = [p[0] - d[0] * ps.half_len, p[1] - d[1] * ps.half_len];
+        let ahead = ps.half_len + if ps.speed > 1.0 { reach } else { 0.0 };
+        let front = [p[0] + d[0] * ahead, p[1] + d[1] * ahead];
+        let clear = ps.r + CAR_HALF_W_M + 0.5;
+        let curve = &g.turns[turn as usize].curve;
+        let mut prev = xz(curve[0]);
+        for k in 1..=CURVE_STEPS {
+            let q = xz(bezier(curve, k as f32 / CURVE_STEPS as f32));
+            if seg_dist(prev, q, back, front) < clear {
+                return true;
+            }
+            prev = q;
+        }
+        false
+    }
+
     /// Whether car `i`, `d` meters from its stop line, may claim `turn` now.
     fn gate(
         &self,
@@ -969,15 +1001,7 @@ impl Traffic {
         {
             return false;
         }
-        // The player in the junction or rushing at it.
-        let n = self.node_pos[t.node as usize];
-        let rel = [n[0] - ps.pts[1][0], n[1] - ps.pts[1][1]];
-        let dn = len2(rel);
-        if dn < PLAYER_NODE_M + ps.half_len {
-            return false;
-        }
-        let closing = dot(ps.dir, rel) / dn * ps.speed;
-        if closing > 1.0 && (dn - PLAYER_NODE_M) / closing < PLAYER_ETA_S {
+        if Self::player_on_turn(g, turn, ps, self.node_pos[t.node as usize]) {
             return false;
         }
         // Cars with the right of way about to arrive.
@@ -1023,7 +1047,7 @@ impl Traffic {
     ) -> bool {
         let c = self.cars[i];
         let turn = c.next_turn;
-        if turn == NONE {
+        if turn == NONE || g.turns[turn as usize].from != c.seg {
             return false;
         }
         if c.held == turn {
@@ -1135,7 +1159,13 @@ impl Traffic {
     }
 
     /// Plans car `i` from the snapshot: its acceleration and the most it may move.
-    fn plan_car(&mut self, g: &LaneGraph, inp: &Inputs, ps: &PlayerShape, i: usize) -> (f32, f32) {
+    fn plan_car(
+        &mut self,
+        g: &LaneGraph,
+        inp: &Inputs,
+        ps: &PlayerShape,
+        i: usize,
+    ) -> (f32, f32, f32) {
         let nl = self.lanes;
         {
             let c = self.cars[i];
@@ -1143,8 +1173,15 @@ impl Traffic {
                 let l = &g.lanes[c.seg as usize];
                 let d = l.length_m - c.s;
                 let stranded = c.next_turn != NONE && g.turns[c.next_turn as usize].from != c.seg;
-                if c.held == NONE && stranded && d < REPICK_M {
+                if c.held == NONE && stranded && d < repick_m(c.speed) {
                     self.cars[i].next_turn = self.pick(g, c.seg, true);
+                }
+                // A claim stands only while the car is committed: a car held up (a car
+                // ahead, a slowdown) gives it back, and nobody keeps one on red.
+                let red = g.light(c.seg, inp.tick) == Some(Light::Red);
+                if c.held != NONE && (red || d > commit_m(c.speed) + 2.0) {
+                    self.claims[c.held as usize] -= 1;
+                    self.cars[i].held = NONE;
                 }
                 if l.control == Control::Stop {
                     match c.stop {
@@ -1234,19 +1271,21 @@ impl Traffic {
                 }
             }
         }
-        if let Some(gap) = self.player_gap(g, &c, &path, ps, look) {
+        let player = self.player_gap(g, &c, &path, ps, look);
+        if let Some(gap) = player {
             let vp = (dot(ps.dir, c.dir) * ps.speed).max(0.0);
             a = a.min(idm(v, v0, c.headway, gap, v - vp, PLAYER_S0));
             max_ds = max_ds.min(gap - PLAYER_GAP);
         }
-        (a.clamp(-B_MAX, A_MAX), max_ds)
+        let player = player.unwrap_or(f32::INFINITY);
+        (a.clamp(-B_MAX, A_MAX), max_ds, player)
     }
 
     /// Moves car `i` by its plan along its path, unless the move would bring its body
     /// into contact with another car's or the player's: a backstop under the plan's own
     /// limits for geometry they cannot see (roads that cross without a junction).
     fn move_car(&mut self, g: &LaneGraph, i: usize, ps: &PlayerShape) {
-        let (a, max_ds) = self.plan[i];
+        let (a, max_ds, _) = self.plan[i];
         let nl = self.lanes;
         let old = self.cars[i];
         let mut c = old;
@@ -1298,12 +1337,14 @@ impl Traffic {
         }
         c.speed = v;
         let step = SHIFT_MPS * DT;
-        c.shift = if c.shift.abs() <= step {
-            0.0
+        let off = len2(c.offset);
+        c.offset = if off <= step {
+            [0.0; 2]
         } else {
-            c.shift - step * c.shift.signum()
+            let k = (off - step) / off;
+            [c.offset[0] * k, c.offset[1] * k]
         };
-        if ds > 0.0 || c.shift != old.shift {
+        if ds > 0.0 || c.offset != old.offset {
             self.place(g, &mut c);
             if self.bumps(i, &old, &c, ps) {
                 self.cars[i] = Car { speed: 0.0, ..old };
@@ -1315,7 +1356,7 @@ impl Traffic {
                 self.claims[t as usize] -= 1;
             }
         }
-        if c.shift == 0.0 && c.ghost != NONE {
+        if c.offset == [0.0; 2] && c.ghost != NONE {
             c.ghost = NONE;
             self.ghosts -= 1;
         }
@@ -1400,10 +1441,16 @@ impl Traffic {
                 return None;
             }
         }
-        let p = g.pose(m, s2).pos;
-        let q = inp.player.pos;
-        if len2([p[0] - q[0], p[2] - q[2]]) < 12.0 + inp.player.half_len {
-            return None;
+        // Not into the player: on the target lane from just behind to well ahead.
+        let p = &inp.player;
+        let q = [p.pos[0], p.pos[2]];
+        if len2([q[0] - c.pos[0], q[1] - c.pos[2]]) < PASS_GAP_M + 20.0 {
+            let sp = project(g, m, q);
+            let lat = len2([q[0] - g.pose(m, sp).pos[0], q[1] - g.pose(m, sp).pos[2]]);
+            let on_lane = lat < p.half_w + CAR_HALF_W_M + 0.8;
+            if on_lane && sp > s2 - CAR_LEN_M - p.half_len - 3.0 && sp < s2 + 20.0 + 2.0 * v {
+                return None;
+            }
         }
         Some(s2)
     }
@@ -1422,7 +1469,7 @@ impl Traffic {
                 continue;
             }
             let l = &g.lanes[c.seg as usize];
-            if l.length_m - c.s < REPICK_M {
+            if l.length_m - c.s < repick_m(c.speed) {
                 continue;
             }
             let (lo, hi) = self.group(g, c.seg);
@@ -1452,13 +1499,13 @@ impl Traffic {
             {
                 // Pass a slower car ahead on this lane.
                 let v0 = c.v0 * l.speed_mps;
+                let slower = |speed: f32| speed < 0.85 * v0 && speed + 2.0 < v0;
                 let slow = self.cars.iter().any(|o| {
                     o.seg == c.seg
                         && o.s > c.s
                         && o.s - CAR_LEN_M - c.s < PASS_GAP_M
-                        && o.speed < 0.85 * v0
-                        && o.speed + 2.0 < v0
-                });
+                        && slower(o.speed)
+                }) || (self.plan[i].2 < PASS_GAP_M && slower(inp.player.speed));
                 if slow {
                     for m in [c.seg.wrapping_sub(1), c.seg + 1] {
                         if m < lo || m >= hi {
@@ -1472,23 +1519,22 @@ impl Traffic {
                 }
             }
             if let Some((m, s2, turn)) = target {
-                let old = self.cars[i].pos;
-                let p = g.pose(m, s2);
-                let car = &mut self.cars[i];
+                let mut car = c;
                 car.seg = m;
                 car.s = s2;
                 car.prev = NONE;
                 car.next_turn = turn;
                 car.stop = StopState::Approach;
-                let off = [old[0] - p.pos[0], old[2] - p.pos[2]];
-                car.shift = dot(off, right(p.dir)).clamp(-4.0, 4.0);
+                car.offset = [0.0; 2];
+                self.place(g, &mut car);
+                // The drawn car stays where it was and eases over.
+                car.offset = [c.pos[0] - car.pos[0], c.pos[2] - car.pos[2]];
+                car.pos = c.pos;
                 if car.ghost == NONE {
                     self.ghosts += 1;
                 }
                 car.ghost = c.seg;
-                let mut moved = *car;
-                self.place(g, &mut moved);
-                self.cars[i] = moved;
+                self.cars[i] = car;
                 return;
             }
         }
@@ -1501,7 +1547,15 @@ impl Traffic {
         let rear = if rs >= 0.0 {
             self.seg_pose(g, c.seg, rs).pos
         } else if c.prev != NONE {
-            self.seg_pose(g, c.prev, self.seg_len(g, c.prev) + rs).pos
+            let rp = self.seg_len(g, c.prev) + rs;
+            let p = self.seg_pose(g, c.prev, rp.max(0.0));
+            // Behind a segment shorter than the car, straight back from its start.
+            let back = (-rp).max(0.0);
+            [
+                p.pos[0] - p.dir[0] * back,
+                p.pos[1],
+                p.pos[2] - p.dir[1] * back,
+            ]
         } else {
             let f = front.pos;
             [
@@ -1515,11 +1569,10 @@ impl Traffic {
         if d == [0.0, 0.0] {
             d = front.dir;
         }
-        let r = right(d);
         c.pos = [
-            (f[0] + rear[0]) * 0.5 + r[0] * c.shift,
+            (f[0] + rear[0]) * 0.5 + c.offset[0],
             (f[1] + rear[1]) * 0.5,
-            (f[2] + rear[2]) * 0.5 + r[1] * c.shift,
+            (f[2] + rear[2]) * 0.5 + c.offset[1],
         ];
         if d != c.dir {
             c.heading = heading(d);
@@ -1679,7 +1732,8 @@ impl Traffic {
                 f(c.pos[0]) | f(c.pos[1]) << 32,
                 f(c.pos[2]) | f(c.heading) << 32,
                 u64::from(c.shape) | u64::from(c.lights) << 8 | u64::from(c.paint) << 32,
-                f(c.shift) | (c.stop as u64) << 32,
+                f(c.offset[0]) | f(c.offset[1]) << 32,
+                c.stop as u64,
                 u64::from(c.ghost),
             ];
             h = hash64(h, &w);
