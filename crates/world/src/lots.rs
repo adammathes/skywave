@@ -75,6 +75,9 @@ const STRIPE_W_M: f32 = 0.1;
 pub const HEDGE_RUN_M: f32 = 7.0;
 /// How far past an alley's curb a lot's rear line may lie for the lot to back onto it, m.
 const ALLEY_REACH_M: f32 = crate::procgen::buildings::ALLEY_REACH_M;
+/// How much narrower than its own width a beach stall or island may come out where its
+/// alley bends, m.
+const SQUEEZE_M: f32 = 0.3;
 /// Clearance of a beach stall from any other road's walk or curb top, m.
 const ROAD_CLEAR_M: f32 = 0.3;
 const SIN60: f32 = 0.866_025_4;
@@ -231,6 +234,12 @@ fn overlap(q: &[V2; 4], poly: &[V2]) -> bool {
     point_in_polygon(q[0], poly) || point_in_polygon(poly[0], q)
 }
 
+/// Whether quad `q` (aisle edge `q[0]`–`q[1]`, back edge `q[3]`–`q[2]`) is at least
+/// `min` wide along `along` at both edges (negative where it folds over).
+fn wide(q: &[V2; 4], along: V2, min: f32) -> bool {
+    (q[1] - q[0]).dot(along) >= min && (q[2] - q[3]).dot(along) >= min
+}
+
 /// Distance from `p` to polygon `poly`'s boundary, 0 inside.
 fn polygon_distance(p: V2, poly: &[V2]) -> f32 {
     if point_in_polygon(p, poly) {
@@ -342,10 +351,17 @@ pub fn stall_hours(rules: &LotRules, z: ZoneId, seed: u64, pos: V2) -> u32 {
             hours |= 1 << h;
         }
     }
-    hours
+    if hours == 0 {
+        0
+    } else {
+        hours | LOT_CAR
+    }
 }
 
 const KEY_STALL: u64 = 0x5354_414C;
+/// Bit 24 of a lot car's hour mask: it is a lot's (so never [`place::ALL_HOURS`]), and
+/// comes and goes with the clock even when its stall is taken all day.
+pub const LOT_CAR: u32 = 1 << 24;
 
 impl Ctx<'_> {
     /// The lot of a parcel's main building, if it gets one.
@@ -521,8 +537,15 @@ impl Ctx<'_> {
             };
             lot.cuts.push(cut);
             let ramp = RAMP_M.min(t_l);
+            // From the walk's back edge (the property line may lie a few cm off it).
+            let mut q = rect(c0, c1, 0.0, ramp);
+            let (end, _) = self.net.ends(edge);
+            for p in &mut q[..2] {
+                let (s, t) = path.project(*p);
+                *p = path.xz(s, (end.hw + end.sw).copysign(t));
+            }
             lot.ramps.push(Ramp {
-                q: rect(c0, c1, 0.0, ramp),
+                q,
                 edge: edge as u32,
             });
             if t_l > ramp {
@@ -757,11 +780,11 @@ impl Ctx<'_> {
                 let mut run: Option<f32> = None;
                 while s <= g1 - 1.0 {
                     let next = s + r.stall_w;
+                    let q = [at(s, 0.0), at(next, 0.0), at(next, depth), at(s, depth)];
+                    let along = path.left((s + next) * 0.5).right();
                     let clear = next <= g1 - 1.0
-                        && self.clear(
-                            &[at(s, 0.0), at(next, 0.0), at(next, depth), at(s, depth)],
-                            i,
-                        );
+                        && wide(&q, along, r.stall_w - SQUEEZE_M)
+                        && self.clear(&q, i);
                     match (clear, run) {
                         (true, None) => run = Some(s),
                         (false, Some(a)) => {
@@ -803,7 +826,23 @@ impl Ctx<'_> {
             module: r.stall_w,
         };
         let first = lot.stalls.len();
+        let mark = (lot.islands.len(), lot.stripes.len(), lot.stops.len());
         let quads = self.row(lot, rng, row, at, stops);
+        // Where the alley bends, the inside of the bend squeezes stalls and islands: a run
+        // with one too narrow across the car (or folded over its neighbour) is dropped.
+        let ok = lot.stalls[first..]
+            .iter()
+            .all(|st| wide(&st.q, st.nose.right() * sigma, r.stall_w - SQUEEZE_M))
+            && lot.islands[mark.0..]
+                .iter()
+                .all(|i| wide(&i.q, -i.pole_facing.right() * sigma, ISLAND_M - SQUEEZE_M));
+        if !ok {
+            lot.stalls.truncate(first);
+            lot.islands.truncate(mark.0);
+            lot.stripes.truncate(mark.1);
+            lot.stops.truncate(mark.2);
+            return;
+        }
         if lot.stalls.len() == first {
             return;
         }
@@ -855,7 +894,11 @@ impl Ctx<'_> {
         if self.fps.iter().any(|(fp, bb, _)| near(fp, *bb, 0.5)) {
             return false;
         }
-        !self.lots.iter().any(|(poly, bb)| near(poly, *bb, 0.0))
+        // Off every lot parcel: a lot stops at the property line.
+        !self
+            .lots
+            .iter()
+            .any(|(poly, bb)| overlaps(*bb, 0.0) && overlap(q, poly))
     }
 
     /// Whether quad `q` keeps [`ROAD_CLEAR_M`] off every road's walk or curb top but

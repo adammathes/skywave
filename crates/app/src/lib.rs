@@ -690,6 +690,12 @@ impl App {
         // Traffic switched on mid-game warms up a batch a frame, not all in one.
         let inputs = self.traffic_inputs();
         self.npcs.warm_up(&inputs, npc::WARMUP_BATCH);
+        // Lot cars come and go with the clock, out of sight.
+        let (eye, forward) = self.view_eye();
+        let t = self.time.clock.seconds_of_day as f32;
+        let (state, spec) = (&self.drive.state, &self.drive.spec);
+        self.ground
+            .advance_lot_cars(t, eye.into(), forward.into(), state, spec);
         if self.still {
             return Steps {
                 count: 0,
@@ -720,8 +726,6 @@ impl App {
             } else {
                 drive::vehicle_input(input)
             };
-            // Lot cars come and go with the clock.
-            self.ground.seconds_of_day = self.time.clock.seconds_of_day as f32;
             self.drive.step(car_input, &self.ground);
             self.sound.note_step(&self.drive.impact);
             if self.npcs.active() {
@@ -757,16 +761,27 @@ impl App {
         steps
     }
 
-    /// The traffic's view of the game now: the player's car, the camera, the clock.
-    fn traffic_inputs(&self) -> npc::StepInputs {
-        let (eye, forward, fov) = if self.fly {
+    /// Where the eye is now and the way it looks.
+    fn view_eye(&self) -> (Vec3, Vec3) {
+        let (eye, forward, _) = self.view();
+        (eye, forward)
+    }
+
+    /// The eye, the way it looks and the vertical field of view, rad.
+    fn view(&self) -> (Vec3, Vec3, f32) {
+        if self.fly {
             let c = &self.curr;
             let (s, co) = c.yaw.sin_cos();
             (c.pos, Vec3::new(-s, 0.0, -co), FLY_FOV_DEG.to_radians())
         } else {
             let pose = self.camera.pose(&self.drive, 1.0);
             (pose.eye, pose.forward(), pose.fov_y_rad)
-        };
+        }
+    }
+
+    /// The traffic's view of the game now: the player's car, the camera, the clock.
+    fn traffic_inputs(&self) -> npc::StepInputs {
+        let (eye, forward, fov) = self.view();
         npc::StepInputs {
             player: self.traffic_player(),
             view: npc::view(eye, forward, fov, self.aspect),
@@ -933,14 +948,14 @@ impl App {
             let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
             let lights = &self.lights;
             let rocking = &self.drive.rocking;
-            let t = self.time.clock.seconds_of_day as f32;
+            let lots = &self.ground.lot_cars;
             props.push(
                 eye,
                 live,
                 lights,
                 lamp_glow,
                 rocking,
-                t,
+                lots,
                 &mut self.instances,
             );
         }

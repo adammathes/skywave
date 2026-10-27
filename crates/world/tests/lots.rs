@@ -100,9 +100,52 @@ fn road_distance(net: &Network, e: usize, p: V2) -> f32 {
 #[test]
 fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
     let mut totals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-    for seed in 1..=4 {
+    let stall_w = grammar().lots.stall_w;
+    for seed in 1..=8 {
         let (place, net, lots) = coast(seed);
         assert!(!lots.is_empty(), "seed {seed}: no lots");
+        let parcels: Vec<(Vec<V2>, (V2, V2))> = place
+            .parcels
+            .iter()
+            .filter(|p| p.lot_kind == place::LotKind::Lot)
+            .map(|p| {
+                let poly: Vec<V2> = p.polygon.iter().map(|&q| V2::from_array(q)).collect();
+                let bb = bounds(&poly);
+                (poly, bb)
+            })
+            .collect();
+        // Every stall is a car wide (across the car, at both its ends), even where an
+        // alley bends.
+        for l in &lots {
+            for st in &l.stalls {
+                let across = st.nose.right();
+                let w = |a: V2, b: V2| ((b - a).dot(across)).abs();
+                let narrow = w(st.q[0], st.q[1]).min(w(st.q[3], st.q[2]));
+                assert!(
+                    narrow >= stall_w - 0.3,
+                    "seed {seed}: stall at {:?} only {narrow:.2} m wide",
+                    st.c
+                );
+            }
+        }
+        // Beach lots stay off every parcel; a parcel's lot stays within its own.
+        for l in &lots {
+            for st in &l.stalls {
+                let q = shrink(&st.q, 0.05);
+                let bb = bounds(&q);
+                let hits = parcels
+                    .iter()
+                    .filter(|(poly, pb)| boxes_meet(bb, *pb, 0.0) && overlap(&q, poly))
+                    .count();
+                let most = if l.zone == ZoneId::Beach { 0 } else { 1 };
+                assert!(
+                    hits <= most,
+                    "seed {seed}: {:?} stall at {:?} in {hits} parcels",
+                    l.zone,
+                    st.c
+                );
+            }
+        }
         let fps: Vec<(Vec<V2>, (V2, V2))> = place
             .buildings
             .iter()
@@ -233,7 +276,7 @@ fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
             }
         }
     }
-    println!("lots and stalls per zone, seeds 1-4: {totals:?}");
+    println!("lots and stalls per zone, seeds 1-8: {totals:?}");
     // Strip-mall front lots and alley lots on the strip, beach lots on the beach.
     for z in ["Beach", "Strip", "Commercial", "Downtown"] {
         assert!(totals.contains_key(z), "no lots in {z}: {totals:?}");
@@ -306,7 +349,7 @@ fn lots_fill_and_empty_by_zone_and_hour() {
     assert_eq!(lots::stall_hours(&r, ZoneId::Strip, 1, at), 0);
     assert_eq!(
         lots::stall_hours(&r, ZoneId::Beach, 1, at),
-        place::ALL_HOURS
+        place::ALL_HOURS | lots::LOT_CAR
     );
     assert_eq!(lots::stall_hours(&r, ZoneId::Suburb, 1, at), 0);
 }
@@ -361,7 +404,12 @@ fn lot_furniture_lifts_or_stops_the_car_and_paint_does_not() {
     let st = lot.stripes[lot.stripes.len() / 2];
     let m = (st[0] + st[1]) * 0.5;
     let (y, surface) = c.level_at([m.x, m.y]);
-    assert!((y - ground(m)).abs() < 0.01, "stripe at {}", y - ground(m));
+    let lift = lots::LOT_LIFT_M;
+    assert!(
+        (y - ground(m) - lift).abs() < 0.01,
+        "stripe at {}",
+        y - ground(m)
+    );
     assert_eq!(surface, Surface::Asphalt);
     // A light pole stops a car driving at it.
     let (pole, _) = lot.poles[0];
@@ -479,9 +527,10 @@ fn follow(
 fn a_car_drives_into_a_lot_parks_and_leaves() {
     let (place, net, lots) = coast(1);
     let mut c = WorldCollider::build(&place, &grammar());
-    // Before dawn: the shops' lots stand nearly empty.
-    c.seconds_of_day = 4.0 * 3600.0;
     let car = spec();
+    // Before dawn: the shops' lots stand nearly empty.
+    let far = VehicleState::spawn(&car, [0.0, 0.0, 0.0], 0.0);
+    c.advance_lot_cars(4.0 * 3600.0, [0.0; 3], [0.0, 0.0, -1.0], &far, &car);
     let lot = lots
         .iter()
         .find(|l| !l.on_alley && !l.aisles.is_empty())
@@ -498,11 +547,14 @@ fn a_car_drives_into_a_lot_parks_and_leaves() {
     let in_aisle = |p: V2| point_in_polygon(p, &aisle);
     let aisle_mid = (aisle[0] + aisle[1] + aisle[2] + aisle[3]) * 0.25;
     let busy = |q: V2| {
-        place.props.items.iter().any(|p| {
-            matches!(p.kind, PropKind::ParkedCar { hours, .. }
-                if parked_now(hours, p.pos, c.seconds_of_day))
+        let lot_car = |l: &world::collide::LotCar| {
+            l.present && (V2::new(l.at[0], l.at[2]) - q).length() < 4.0
+        };
+        let curb_car = |p: &place::Prop| {
+            matches!(p.kind, PropKind::ParkedCar { hours, .. } if hours == place::ALL_HOURS)
                 && (V2::new(p.pos[0], p.pos[2]) - q).length() < 4.0
-        })
+        };
+        c.lot_cars.iter().any(lot_car) || place.props.items.iter().any(curb_car)
     };
     let stall = lot
         .stalls
@@ -549,4 +601,165 @@ fn a_car_drives_into_a_lot_parks_and_leaves() {
         stall.c,
         xz(s.pos)
     );
+}
+
+/// The corners of box `b`, on the ground.
+fn corners(b: &world::collide::BoxSolid) -> [V2; 4] {
+    let u = V2::new(b.u[0], b.u[1]);
+    let v = u.left();
+    let c = V2::new(b.c[0], b.c[1]);
+    let (a, w) = (u * b.half[0], v * b.half[1]);
+    [c - a - w, c + a - w, c + a + w, c - a + w]
+}
+
+#[test]
+fn lot_cars_never_overlap_cars_or_poles() {
+    for seed in 1..=8 {
+        let (place, _, _) = coast(seed);
+        let c = WorldCollider::build(&place, &grammar());
+        let cars: Vec<[V2; 4]> = c
+            .boxes
+            .iter()
+            .filter(|b| matches!(b.kind, world::props::PropKind::ParkedCar { .. }))
+            .map(|b| shrink(&corners(b), 0.05))
+            .collect();
+        let lot: Vec<[V2; 4]> = c
+            .lot_cars
+            .iter()
+            .map(|l| shrink(&corners(&c.boxes[l.solid as usize]), 0.05))
+            .collect();
+        for q in &lot {
+            let bb = bounds(q);
+            let others = cars
+                .iter()
+                .filter(|o| *o != q && boxes_meet(bb, bounds(*o), 0.0) && overlap(q, *o))
+                .count();
+            assert_eq!(
+                others, 0,
+                "seed {seed}: lot car at {:?} overlaps a car",
+                q[0]
+            );
+            for p in &c.posts {
+                let at = V2::new(p.c[0], p.c[1]);
+                assert!(
+                    !point_in_polygon(at, q),
+                    "seed {seed}: a post stands in the lot car at {:?}",
+                    q[0]
+                );
+            }
+        }
+    }
+}
+
+/// Seconds since midnight of hour `h`.
+fn at_hour(h: f32) -> f32 {
+    h * 3600.0
+}
+
+#[test]
+fn lot_cars_never_come_or_go_in_view() {
+    let (place, _, lots) = coast(1);
+    let mut c = WorldCollider::build(&place, &grammar());
+    let car = spec();
+    let far = VehicleState::spawn(&car, [0.0, 0.0, 0.0], 0.0);
+    // The busiest lot, driven past for a game hour of the morning fill (8 to 9 am).
+    let lot = lots.iter().max_by_key(|l| l.stalls.len()).unwrap();
+    let a = lot.stalls[0].c;
+    let b = lot.stalls[lot.stalls.len() - 1].c;
+    let dir = (b - a).normalize();
+    let (from, to) = (a - dir * 120.0, b + dir * 120.0);
+    c.advance_lot_cars(
+        at_hour(8.0),
+        [from.x, 2.0, from.y],
+        [dir.x, 0.0, dir.y],
+        &far,
+        &car,
+    );
+    let steps = 3600;
+    let (mut seen, mut unseen) = (0, 0);
+    for k in 0..=steps {
+        let f = k as f32 / steps as f32;
+        // Back and forth along the lot, looking ahead.
+        let (p, d) = if f < 0.5 {
+            (from + (to - from) * (f * 2.0), dir)
+        } else {
+            (to + (from - to) * ((f - 0.5) * 2.0), -dir)
+        };
+        let eye = [p.x, 2.0, p.y];
+        let before: Vec<bool> = c.lot_cars.iter().map(|l| l.present).collect();
+        c.advance_lot_cars(at_hour(8.0 + f), eye, [d.x, 0.0, d.y], &far, &car);
+        for (l, &was) in c.lot_cars.iter().zip(&before) {
+            if l.present == was {
+                continue;
+            }
+            let to_car = V2::new(l.at[0], l.at[2]) - p;
+            let dist = to_car.length();
+            if dist < world::collide::HOLD_M && to_car.dot(d) > world::collide::HOLD_COS * dist {
+                seen += 1;
+            } else {
+                unseen += 1;
+            }
+        }
+    }
+    println!("lot cars came or went {unseen} times out of sight, {seen} in sight");
+    assert_eq!(seen, 0);
+    assert!(unseen > 0, "the lot never changed");
+}
+
+#[test]
+fn a_lot_car_never_arrives_on_the_player() {
+    let (place, _, _) = coast(1);
+    let mut c = WorldCollider::build(&place, &grammar());
+    let car = spec();
+    // A lot car that arrives during the morning: its hour after an hour it is away.
+    let (k, h) = c
+        .lot_cars
+        .iter()
+        .enumerate()
+        .find_map(|(k, l)| {
+            (6..11)
+                .find(|&h| {
+                    l.hours >> (h - 1) & 1 == 0
+                        && l.hours >> h & 1 == 1
+                        && l.hours >> (h + 1) & 1 == 1
+                })
+                .map(|h| (k, h))
+        })
+        .expect("a lot car arriving in the morning");
+    let at = c.lot_cars[k].at;
+    let far = VehicleState::spawn(&car, [0.0, 0.0, 0.0], 0.0);
+    let away = [at[0] + 500.0, 2.0, at[2] + 500.0];
+    let look = [1.0, 0.0, 0.0];
+    c.advance_lot_cars(at_hour(h as f32 - 1.0), away, look, &far, &car);
+    assert!(!c.lot_cars[k].present);
+    // The player parks in its stall, then the hour comes (seen from far off).
+    let mut s = VehicleState::spawn(&car, at, 0.0);
+    for _ in 0..STEPS_PER_S {
+        step(
+            &car,
+            &mut s,
+            &VehicleInput::default(),
+            &Assists::default(),
+            &c,
+        );
+        resolve(&mut s, &car, &c);
+    }
+    let parked = xz(s.pos);
+    c.advance_lot_cars(at_hour(h as f32 + 1.0), away, look, &s, &car);
+    assert!(!c.lot_cars[k].present, "a car arrived on the player");
+    for _ in 0..STEPS_PER_S {
+        step(
+            &car,
+            &mut s,
+            &VehicleInput::default(),
+            &Assists::default(),
+            &c,
+        );
+        let impact = resolve(&mut s, &car, &c);
+        assert!(!impact.contact, "shoved at {:?}", xz(s.pos));
+    }
+    assert!((xz(s.pos) - parked).length() < 0.3, "moved off the stall");
+    // Once the player has gone, it arrives.
+    c.advance_lot_cars(at_hour(h as f32 + 1.0), away, look, &far, &car);
+    assert!(c.lot_cars[k].present);
 }

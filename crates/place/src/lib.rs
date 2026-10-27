@@ -607,7 +607,7 @@ pub enum PropKind {
     /// bits, the paint (an index into the shape's palette, wrapping) in the high 4; the app
     /// maps the class onto a car shape. `hours`: bit `h` (0..24) set when the car is parked
     /// there through hour `h` of the day ([`ALL_HOURS`] for always), so a lot fills and
-    /// empties with the clock.
+    /// empties with the clock; a parking lot's cars also set bit 24.
     ParkedCar {
         vehicle_class: u8,
         hours: u32,

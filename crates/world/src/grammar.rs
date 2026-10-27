@@ -515,7 +515,7 @@ pub struct LotRules {
     /// A street frontage at least this long gets a second curb cut, m (an angled lot always
     /// has two).
     pub second_cut_m: f32,
-    /// Share of stalls with a concrete wheel stop.
+    /// Share of lots with a concrete wheel stop in every stall (drawn per lot).
     pub wheel_stop_256: u32,
     /// Light poles along a lot, m apart.
     pub pole_m: Range,

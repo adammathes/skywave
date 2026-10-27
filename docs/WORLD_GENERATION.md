@@ -227,14 +227,16 @@ zones with an `occupancy` curve get lots (the coast: strip, commercial, downtown
   its curb dropped along them.
 - **Beach lots** along the beach zone's alleys: a row of stalls each side opening onto the
   alley, wherever a stall's ground is clear of every other road, junction, building,
-  parcel and the water.
+  parcel and the water. Where the alley bends, a run whose stall or island comes out
+  more than 0.3 m narrower than its width (the inside of the bend) is dropped.
 - Every row is cut into runs of at most `run_max` stalls with a 1.8 m island between runs
   and at both ends, planted (`islands`) with a palm, a shrub or nothing. Light poles (the
   street light) stand in islands `pole_m` apart; a lot has wheel stops in every stall
   with chance `wheel_stop_256`; its stripes are yellow with chance `yellow_256`, else
   white. A lot is dropped whole if any stall or island would touch another road or a
   junction.
-- **Ground.** The asphalt lies 5 cm above the graded terrain, cut to the terrain's own
+- **Ground.** The concrete ramp runs from the walk's back edge; the asphalt lies 5 cm above
+  the graded terrain, cut to the terrain's own
   triangles (each piece in its triangle's plane), so it neither pokes through nor floats
   and never meets the road or walk meshes (lots stop at the property line); stripes and
   arrows lie a centimeter above it; islands (15 cm), wheel stops (12 cm), the walk and the
@@ -245,13 +247,18 @@ zones with an `occupancy` curve get lots (the coast: strip, commercial, downtown
   `backed_in_256`), in the built-in parked-car shapes and paints. Each stall has its own
   threshold (a hash of where it is) and is taken through each hour whose `occupancy` for
   the lot's zone is above it: the car's `hours` mask in the Place
-  (`place::PropKind::ParkedCar`). The app draws it, and the collider stops the car on it,
-  only through those hours (`props::parked_now`, each car coming or going at its own
-  minute past the hour). A chunk keeps at most `MAX_CARS_PER_CHUNK` (24) cars at its curbs
-  and in its driveways, as before, and `MAX_LOT_CARS_PER_CHUNK` (16) in its lots at any hour.
+  (`place::PropKind::ParkedCar`; a lot's car also sets bit 24, `lots::LOT_CAR`). The
+  clock says where each car should be (`props::parked_now`, each coming or going at its
+  own minute past the hour); `WorldCollider::advance_lot_cars` moves it there only out of
+  sight (beyond `HOLD_M`, 60 m, or outside a 70° cone round the camera's view) and never
+  onto the player's car, and the app draws, and the collider stops the car on, only the
+  cars that are there. A chunk keeps at most `MAX_CARS_PER_CHUNK` (24) cars at its curbs
+  and in its driveways, as before, and `MAX_LOT_CARS_PER_CHUNK` (16) in its lots at any
+  hour. That second cap is a choice for the draw cost: a long beach alley's lot never
+  looks full.
 - **Collision.** Islands and wheel stops are raised patches (the wheels climb them like
-  curbs), the walk a patch at curb height, the ramps planes, the asphalt a patch on the
-  terrain; poles and plants are props; the low walls boxes; paint has none.
+  curbs), the walk a patch at curb height, the ramps planes, the asphalt a patch 5 cm over
+  the terrain like the mesh; poles and plants are props; the low walls boxes; paint has none.
 - Determinism: a parcel's lot draws from `Rng::new(seed, [LOTS, parcel key])`, a beach
   alley's from `Rng::new(seed, [LOTS, ALLEY | edge])`, in a fixed order.
 

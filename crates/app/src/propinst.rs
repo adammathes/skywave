@@ -250,10 +250,10 @@ struct Entry {
     reach2: f32,
     /// A parked car: it sways when knocked ([`world::collide::Rocking`]).
     car: bool,
-    /// A parked car's hours ([`place::PropKind::ParkedCar`]; [`place::ALL_HOURS`] for
-    /// every other prop) and where it stands.
-    hours: u32,
-    at: [f32; 3],
+    /// A parking lot's car: its index into the collider's lot cars
+    /// ([`world::WorldCollider::lot_cars`], in `Props` order), drawn only while there;
+    /// [`world::collide::NO_LOT`] for every other prop.
+    lot: u32,
 }
 
 /// The instanced props of a place (see the module docs).
@@ -330,6 +330,7 @@ impl PropInstances {
             .map(|s| vec![None; s.palette.len() + shape::ERA_1980S_PAINT.len()])
             .collect();
         let mut entries = Vec::with_capacity(items.len());
+        let mut lots = 0u32;
         for p in items {
             let pos = Vec3::from(p.pos);
             let h = skywave_core::hash64(
@@ -405,11 +406,13 @@ impl PropInstances {
                 chunk,
                 reach2: reach * reach,
                 car,
-                hours: match p.kind {
-                    PropKind::ParkedCar { hours, .. } => hours,
-                    _ => place::ALL_HOURS,
+                lot: match p.kind {
+                    PropKind::ParkedCar { hours, .. } if hours != place::ALL_HOURS => {
+                        lots += 1;
+                        lots - 1
+                    }
+                    _ => world::collide::NO_LOT,
                 },
-                at: p.pos,
             });
         }
         // Stable, so each mesh's instances keep the table's order.
@@ -450,8 +453,8 @@ impl PropInstances {
     /// Appends the instances near `eye` whose chunk `live` says is drawn, at most
     /// [`MAX_PROP_INSTANCES`], each with the nearest of `lights` that reach it when within
     /// [`LIT_RADIUS_M`]; street lamp lenses glow by `lamp_glow`; parked cars `rocking`
-    /// knocked lean on their springs, and a lot's are there only through their hours at
-    /// `seconds_of_day` ([`world::props::parked_now`]). Returns how many.
+    /// knocked lean on their springs, and a lot's are there only while `lot_cars` (the
+    /// collider's) says so. Returns how many.
     #[allow(clippy::too_many_arguments)]
     pub fn push(
         &self,
@@ -460,7 +463,7 @@ impl PropInstances {
         lights: &FrameLights,
         lamp_glow: f32,
         rocking: &world::collide::Rocking,
-        seconds_of_day: f32,
+        lot_cars: &[world::collide::LotCar],
         out: &mut Vec<MeshInstance>,
     ) -> usize {
         let mut n = 0;
@@ -477,8 +480,8 @@ impl PropInstances {
                 if d2 > e.reach2 || !live(e.chunk) {
                     continue;
                 }
-                if e.hours != place::ALL_HOURS
-                    && !world::props::parked_now(e.hours, e.at, seconds_of_day)
+                if e.lot != world::collide::NO_LOT
+                    && !lot_cars.get(e.lot as usize).is_some_and(|c| c.present)
                 {
                     continue;
                 }
