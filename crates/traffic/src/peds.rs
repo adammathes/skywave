@@ -130,7 +130,7 @@ const REPLAN_S: f32 = 0.25;
 /// quicker.
 const URGENT_TTI_S: f32 = 0.8;
 const URGENT_HOP_S: f32 = 0.3;
-/// A walker waits for anyone this far from their place in the group.
+/// On the road a walker waits for anyone this far from their place in the group.
 const STRANDED_M: f32 = 1.0;
 /// Stepping across a moving car's path needs this long to spare before it arrives, s.
 const CROSS_SPARE_S: f32 = 0.8;
@@ -1382,14 +1382,23 @@ impl Pedestrians {
         let dodging = wk.members[..usize::from(wk.count)]
             .iter()
             .any(|&m| self.peds[usize::from(m)].dodge.action != Action::None);
-        // Nobody is left behind: the walker waits for anyone the car kept from following
-        // (rather than drawing them on diagonally across a lane off a crossing).
+        // Nobody is left behind on the road: on a crossing and the spur off it, or while
+        // they stand in a lane or the way back to their place crosses one, the walker waits
+        // for anyone the car kept from following (rather than drawing them on diagonally
+        // across a lane). Only then: on the walk, a car that blocks someone for good would
+        // hold the group for good.
         let stranded = wk.members[..usize::from(wk.count)]
             .iter()
             .enumerate()
             .any(|(k, &m)| {
                 let p = &self.peds[usize::from(m)];
-                p.sit == Sit::No && dist(p.base, self.walk_slot(walks, w, k)) > STRANDED_M
+                let slot = self.walk_slot(walks, w, k);
+                p.sit == Sit::No
+                    && dist(p.base, slot) > STRANDED_M
+                    && (on_road
+                        || link.kind == LinkKind::Spur
+                        || walks.in_lane(p.base)
+                        || through_lane(walks, p.base, slot))
             });
 
         let mut wk = wk;
@@ -1719,9 +1728,11 @@ impl Pedestrians {
             (p0, face)
         };
         let on_road = walks.links[wk.link as usize].kind == LinkKind::Crossing;
-        // Off a crossing's band while the group is on it (back from stepping aside): into
-        // the band first, straight across, not on toward the slot through a lane.
-        let want = if on_road {
+        // Off a crossing's band while the group is on it (back from stepping aside), or in
+        // a lane off the crossings: into the band of the group's link first, straight
+        // across, not on toward the slot through a lane.
+        let in_road = walks.in_lane(p.base) && !on_crossing_band(walks, p.base);
+        let want = if on_road || in_road {
             into_band(walks, wk.link, p.base, want)
         } else {
             want
