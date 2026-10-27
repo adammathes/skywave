@@ -174,6 +174,9 @@ pub struct VehicleSpec {
     /// Display name.
     pub name: String,
     pub era: Era,
+    /// The model year its archetype is dated to (a scenario lists only cars no newer than
+    /// its last year; see `docs/VEHICLES.md`).
+    pub year: u16,
     pub class: VehicleClass,
     pub mass_kg: f32,
     /// Body box `(length, width, height)`, m.
@@ -215,6 +218,8 @@ pub enum SpecError {
     EmptyId,
     EmptyName,
     EmptyShape,
+    /// The year is outside [`YEARS`].
+    YearOutOfRange,
     /// Some number is NaN or infinite.
     NonFinite,
     NonPositiveMass,
@@ -266,6 +271,9 @@ pub enum SpecError {
     },
 }
 
+/// The model years a spec may give, first and last.
+pub const YEARS: (u16, u16) = (1900, 2100);
+
 /// `lo <= v <= hi`; false for NaN.
 fn within(v: f32, lo: f32, hi: f32) -> bool {
     v >= lo && v <= hi
@@ -304,6 +312,9 @@ impl VehicleSpec {
         }
         if self.shape.is_empty() {
             return Err(SpecError::EmptyShape);
+        }
+        if !(YEARS.0..=YEARS.1).contains(&self.year) {
+            return Err(SpecError::YearOutOfRange);
         }
         if !self.all_finite() {
             return Err(SpecError::NonFinite);
@@ -552,6 +563,7 @@ mod tests {
             id: "test_car".to_string(),
             name: "Test Car".to_string(),
             era: Era::Eighties,
+            year: 1984,
             class: VehicleClass::Sports,
             mass_kg: 1250.0,
             dims_m: [4.3, 1.75, 1.15],
@@ -638,6 +650,8 @@ mod tests {
         rejects(|s| s.id.clear(), SpecError::EmptyId);
         rejects(|s| s.name.clear(), SpecError::EmptyName);
         rejects(|s| s.shape.clear(), SpecError::EmptyShape);
+        rejects(|s| s.year = 1899, SpecError::YearOutOfRange);
+        rejects(|s| s.year = 2101, SpecError::YearOutOfRange);
     }
 
     #[test]

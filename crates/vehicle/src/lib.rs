@@ -23,5 +23,5 @@ pub use sim::{
 };
 pub use spec::{
     Aero, Brakes, Drive, Engine, Era, Feel, Gauge, Interior, SpecError, SpeedUnit, Steer, Susp,
-    Tires, VehicleClass, VehicleSpec,
+    Tires, VehicleClass, VehicleSpec, YEARS,
 };

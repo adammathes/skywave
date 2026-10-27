@@ -11,7 +11,7 @@
 //!              "frame_rate": "panel" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0,
 //!            "overlay": "off" },
-//!   "world": { "clock_speed": 10.0, "traffic": "normal" },
+//!   "world": { "clock_speed": 10.0, "traffic": "normal", "scenario": "socal_beach_1984" },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
 //!              "mute_radio_unfocused": false },
 //!   "radio": { "volume": 0.8, "on": false, "last_station": null, "disabled": [],
@@ -390,6 +390,9 @@ pub struct Settings {
     pub clock_speed: f32,
     /// NPC traffic and pedestrian density (a scene's `traffic=` overrides it for the session).
     pub traffic: traffic::Density,
+    /// The world picked on the World page: a [`crate::scenario::BUILTIN`] id, or `None`
+    /// until one is picked. The game starts in it unless the scene names a place.
+    pub scenario: Option<&'static str>,
     /// The minimap at the bottom left.
     pub minimap: bool,
     /// The minimap turns with the car (its forward up); off is north-up.
@@ -429,6 +432,7 @@ impl Default for Settings {
             overlay: Overlay::Off,
             clock_speed: 10.0,
             traffic: traffic::Density::Normal,
+            scenario: None,
             minimap: true,
             minimap_rotate: true,
             minimap_range_m: MINIMAP_RANGES_M[DEFAULT_MINIMAP_RANGE],
@@ -576,6 +580,8 @@ struct World {
     clock_speed: f32,
     /// A traffic density name (`crate::npc::density_name`).
     traffic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scenario: Option<String>,
 }
 
 impl Default for World {
@@ -584,8 +590,17 @@ impl Default for World {
         World {
             clock_speed: s.clock_speed,
             traffic: density_name(s.traffic).to_owned(),
+            scenario: None,
         }
     }
+}
+
+/// The [`crate::scenario::BUILTIN`] id equal to `id`, if there is one.
+pub fn builtin_scenario(id: &str) -> Option<&'static str> {
+    crate::scenario::BUILTIN
+        .iter()
+        .map(|(s, _)| *s)
+        .find(|s| *s == id)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -706,6 +721,7 @@ impl Settings {
             "world": World {
                 clock_speed: self.clock_speed,
                 traffic: density_name(self.traffic).to_owned(),
+                scenario: self.scenario.map(str::to_owned),
             },
             "audio": Audio {
                 master: self.master_volume,
@@ -767,6 +783,7 @@ impl Settings {
             },
             clock_speed: world.clock_speed,
             traffic: density_from_name(&world.traffic).unwrap_or(d.traffic),
+            scenario: world.scenario.as_deref().and_then(builtin_scenario),
             minimap: hud.minimap,
             minimap_rotate: hud.minimap_rotate,
             minimap_range_m: hud.minimap_range_m,
@@ -808,6 +825,7 @@ mod tests {
             overlay: Overlay::Fps,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
+            scenario: Some("inland_basin_2001"),
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,
@@ -849,7 +867,7 @@ mod tests {
         // Partial sections, wrong types, out-of-range values, unknown keys.
         let (s, b) = Settings::from_json(
             r#"{ "video": { "ui_scale": 7, "bloom": false, "extra": 1 },
-                 "world": { "clock_speed": 12 }, "input": 5, "radio": {},
+                 "world": { "clock_speed": 12, "scenario": "atlantis" }, "input": 5, "radio": {},
                  "hud": { "minimap_rotate": false, "minimap_range_m": 120 },
                  "drive": { "handling": "light" },
                  "camera": { "mode": "orbit", "cockpit_fov_deg": 120, "seat_height_cm": -9,

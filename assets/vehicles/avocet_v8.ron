@@ -10,6 +10,7 @@ VehicleSpec(
     id: "avocet_v8",
     name: "Avocet V8",
     era: Eighties,
+    year: 1984,
     class: Sports,
 
     mass_kg: 1300,

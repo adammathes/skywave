@@ -1,7 +1,7 @@
 // HUD: textured quads over the finished frame, one instance per quad, in target pixels.
 // Glyphs sample the font atlas (coverage in .r) with nearest filtering; rectangles sample
 // its solid cell. Image quads sample the map texture (rotated content, explicit mip level)
-// or draw a flat fill or the player arrow, optionally cut to a circle or a rounded
+// or the stills texture, or draw a flat fill or the player arrow, optionally cut to a circle or a rounded
 // rectangle; their edges are anti-aliased here. Colors (and the map's texels, stored
 // unorm) arrive sRGB-encoded with straight alpha.
 
@@ -9,12 +9,14 @@
 @group(1) @binding(1) var font_sampler: sampler;
 @group(1) @binding(2) var map_texture: texture_2d<f32>;
 @group(1) @binding(3) var map_sampler: sampler;
+@group(1) @binding(4) var still_texture: texture_2d<f32>;
 
 // Quad kinds and masks; mirror `QUAD_*` and `MASK_*` in src/hud.rs.
 const QUAD_FONT: u32 = 0u;
 const QUAD_MAP: u32 = 1u;
 const QUAD_SOLID: u32 = 2u;
 const QUAD_ARROW: u32 = 3u;
+const QUAD_STILL: u32 = 4u;
 const MASK_CIRCLE: u32 = 1u;
 const MASK_ROUNDED: u32 = 2u;
 
@@ -25,7 +27,7 @@ struct HudIn {
     @location(1) uv: vec4<f32>,
     @location(2) color: vec4<f32>,
     // x: content rotation (rad, clockwise), y: map mip level, z: corner radius (px),
-    // w: kind + 4 * mask.
+    // w: kind + 8 * mask.
     @location(3) params: vec4<f32>,
 };
 
@@ -66,7 +68,7 @@ fn vs_hud(@builtin(vertex_index) index: u32, q: HudIn) -> HudOut {
         0.0,
         1.0
     );
-    let kind = u32(q.params.w + 0.5) & 3u;
+    let kind = u32(q.params.w + 0.5) & 7u;
     if kind == QUAD_MAP {
         out.uv = mix(q.uv.xy, q.uv.zw, content / (half_size * 2.0) + 0.5);
     } else {
@@ -107,19 +109,24 @@ fn arrow_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
 @fragment
 fn fs_hud(in: HudOut) -> @location(0) vec4<f32> {
     let flags = u32(in.shape.w + 0.5);
-    let kind = flags & 3u;
-    let mask = flags >> 2u;
+    let kind = flags & 7u;
+    let mask = flags >> 3u;
     var rgb = in.color.rgb;
     var alpha = in.color.a;
     // Sample both textures unconditionally (uniform control flow), then pick.
     let coverage = textureSampleLevel(font_atlas, font_sampler, in.uv, 0.0).r;
     let texel = textureSampleLevel(map_texture, map_sampler, in.uv, in.shape.z);
+    let still = textureSampleLevel(still_texture, map_sampler, in.uv, in.shape.z);
     if kind == QUAD_FONT {
         alpha *= coverage;
     } else if kind == QUAD_MAP {
         let inside = all(in.uv >= vec2<f32>(0.0)) && all(in.uv <= vec2<f32>(1.0));
         rgb *= texel.rgb;
         alpha *= select(0.0, texel.a, inside);
+    } else if kind == QUAD_STILL {
+        let inside = all(in.uv >= vec2<f32>(0.0)) && all(in.uv <= vec2<f32>(1.0));
+        rgb *= still.rgb;
+        alpha *= select(0.0, still.a, inside);
     } else if kind == QUAD_ARROW {
         alpha *= clamp(0.5 - arrow_distance(in.content, in.shape.xy), 0.0, 1.0);
     }

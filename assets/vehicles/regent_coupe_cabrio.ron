@@ -13,6 +13,7 @@ VehicleSpec(
     id: "regent_coupe_cabrio",
     name: "Regent Coupe Cabrio",
     era: Eighties,
+    year: 1987,
     class: Convertible,
 
     mass_kg: 1650,

@@ -85,6 +85,12 @@ pub fn vehicle_menu_from_query(query: &str) -> bool {
     query_param(query, "menu") == Some("vehicle")
 }
 
+/// True when the URL query asks to open the World page at startup (`menu=worlds`), for
+/// screenshots of it.
+pub fn worlds_menu_from_query(query: &str) -> bool {
+    query_param(query, "menu") == Some("worlds")
+}
+
 /// The graphics backends the browser build can run on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WebBackend {
@@ -461,6 +467,8 @@ mod tests {
         assert!(!menu_from_query(""));
         assert!(vehicle_menu_from_query("?still=1&menu=vehicle"));
         assert!(!vehicle_menu_from_query("?menu=1"));
+        assert!(worlds_menu_from_query("?menu=worlds&still=1"));
+        assert!(!worlds_menu_from_query("?menu=vehicle"));
         assert!(!menu_from_query("?menu=vehicle"));
     }
 

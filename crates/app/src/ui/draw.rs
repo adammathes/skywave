@@ -100,6 +100,17 @@ const SPEC_VALUE_X: f32 = 150.0;
 /// Paint swatch size and spacing.
 const SWATCH: f32 = 20.0;
 const SWATCH_GAP: f32 = 8.0;
+/// The World page: room for its cards, the gap between them, their padding, the lines of
+/// text under the still, and a card's backdrop.
+const CARDS_H: f32 = 360.0;
+/// Cards on one page of the World page (more page with left and right).
+pub(super) const CARDS_PER_PAGE: usize = 3;
+const CARD_GAP: f32 = 20.0;
+const CARD_PAD: f32 = 12.0;
+const CARD_LINES: usize = 4;
+const CARD: [u8; 4] = [30, 36, 56, 255];
+/// A stub world's still is greyed.
+const STUB_TINT: [u8; 4] = [120, 120, 128, 255];
 
 fn width(text: &str, scale: f32) -> f32 {
     font::text_width(text) as f32 * scale
@@ -337,6 +348,86 @@ impl Ui {
         );
     }
 
+    /// The World page: cards for the worlds side by side in `[x, y, w, h]` (each its still,
+    /// title, kind and year, cars and stations), the focused one framed, the one the app is
+    /// marked "here", a stub's still greyed and marked "coming". Up to [`CARDS_PER_PAGE`]
+    /// a page, the page with the focus shown and "< 1 / 2 >" under them when there are
+    /// more; past a UI scale of 1.5 one a page, its text beside the still.
+    fn draw_cards(&self, hud: &mut HudBuilder, area: [f32; 4], focus: usize) {
+        let [x, y, w, mut h] = area;
+        let n = self.items.len().max(1);
+        let side = self.settings.ui_scale > 1.5;
+        let per = if side { 1 } else { n.min(CARDS_PER_PAGE) };
+        let (page, pages) = (focus / per, n.div_ceil(per));
+        if pages > 1 {
+            h -= LINE_H + 6.0;
+            let args = format_args!("< {} / {} >", page + 1, pages);
+            text_center(hud, x + 0.5 * w, y + h + 6.0, S, DIM, args);
+        }
+        let cw = (w - CARD_GAP * (per - 1) as f32) / per as f32;
+        let (still_w, still_h) = crate::scenario::STILL_SIZE;
+        let aspect = still_w as f32 / still_h as f32;
+        let text_h = CARD_LINES as f32 * LINE_H + 10.0;
+        let (sw, sh) = if side {
+            let sh = (h - 2.0 * CARD_PAD).min(0.5 * cw / aspect).max(0.0);
+            (sh * aspect, sh)
+        } else {
+            let sh = ((cw - 2.0 * CARD_PAD) / aspect)
+                .min(h - text_h - 2.0 * CARD_PAD)
+                .max(0.0);
+            (sh * aspect, sh)
+        };
+        let first = page * per;
+        for (slot, item) in self.items.iter().enumerate().skip(first).take(per) {
+            let ItemId::World(k) = item.id else { continue };
+            let s = crate::scenario::get(k);
+            let cx = x + (slot - first) as f32 * (cw + CARD_GAP);
+            if slot == focus {
+                hud.rect(cx - 4.0, y - 4.0, cw + 8.0, h + 8.0, ACCENT);
+            }
+            hud.rect(cx, y, cw, h, CARD);
+            let (ix, iy) = if side {
+                (cx + CARD_PAD, y + 0.5 * (h - sh))
+            } else {
+                (cx + 0.5 * (cw - sw), y + CARD_PAD)
+            };
+            if sh >= 24.0 {
+                hud.image(HudImage {
+                    x: ix,
+                    y: iy,
+                    w: sw,
+                    h: sh,
+                    uv: crate::scenario::still_uv(k),
+                    texture: render::HudTexture::Still,
+                    mask: render::HudMask::Rounded(4.0),
+                    color: if s.stub { STUB_TINT } else { [255; 4] },
+                    ..HudImage::default()
+                });
+            }
+            let (tx, ty) = if side {
+                (ix + sw + CARD_PAD, y + 0.5 * (h - text_h) + 5.0)
+            } else {
+                (cx + CARD_PAD, iy + sh + 10.0)
+            };
+            let right = cx + cw - CARD_PAD;
+            hud.text(tx, ty, S, if s.stub { DIM } else { TEXT }, &s.title);
+            let line = |k: usize| ty + k as f32 * LINE_H;
+            hud.text_fmt(tx, line(1), S, DIM, format_args!("{}, {}", s.kind, s.year));
+            let cars = crate::scenario::lineup(k).cars.len();
+            let stations = crate::scenario::station_counts()[k];
+            hud.text_fmt(tx, line(2), S, DIM, format_args!("{cars} cars"));
+            hud.text_fmt(tx, line(3), S, DIM, format_args!("{stations} stations"));
+            // Beside the short lines, clear of the longer ones at any UI scale.
+            if k == self.scenario {
+                text_right(hud, right, line(2), S, GOOD, false, format_args!("here"));
+            }
+            if s.stub {
+                let at = line(3);
+                text_right(hud, right, at, S, ACCENT, false, format_args!("coming"));
+            }
+        }
+    }
+
     fn draw_menu(&mut self, hud: &mut HudBuilder) {
         let [sx, sy, sw, sh] = hud.safe_rect();
         let [vw, vh] = hud.size();
@@ -363,7 +454,12 @@ impl Ui {
         } else {
             0.0
         };
-        let wanted = HEADER_H + self.items.len().max(1) as f32 * ROW_H + note_h + FOOTER_H;
+        let content = if page == Page::Worlds {
+            CARDS_H
+        } else {
+            self.items.len().max(1) as f32 * ROW_H
+        };
+        let wanted = HEADER_H + content + note_h + FOOTER_H;
         let ph = wanted.min(sh);
         let mut pw = sw.min(MAX_PANEL_W);
         let mut px = sx + (sw - pw) * 0.5;
@@ -417,6 +513,18 @@ impl Ui {
         if self.items.is_empty() {
             let back = Glyph(self, d, Action::MenuBack);
             hud.text_fmt(px + PAD, footer, S, DIM, format_args!("[{back}] Back"));
+        } else if page == Page::Worlds {
+            hud.text_fmt(
+                px + PAD,
+                footer,
+                S,
+                DIM,
+                format_args!(
+                    "[{}] Go there   [{}] Back",
+                    Glyph(self, d, Action::MenuConfirm),
+                    Glyph(self, d, Action::MenuBack),
+                ),
+            );
         } else if page == Page::Vehicle {
             hud.text_fmt(
                 px + PAD,
@@ -482,8 +590,18 @@ impl Ui {
             self.draw_stage_title(hud, stage);
         }
 
-        // Rows.
+        // Rows (or the World page's cards).
         let rows_top = top + HEADER_H;
+        if page == Page::Worlds {
+            let area = [
+                px + PAD,
+                rows_top,
+                pw - 2.0 * PAD,
+                rows_bottom - rows_top - 8.0,
+            ];
+            self.draw_cards(hud, area, menu.focus());
+            return;
+        }
         // (A hair over, so a panel sized for n rows shows n.)
         let rows = (((rows_bottom - rows_top) / ROW_H + 1e-3).floor() as usize).max(1);
         let len = self.items.len();
@@ -1137,6 +1255,15 @@ impl Display for ToastText<'_> {
             }
             Toast::MusicRemoved => f.write_str("Music folder removed"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
+            Toast::World(i) => {
+                let s = crate::scenario::get(i);
+                write!(f, "{}, {}", s.title, s.year)
+            }
+            Toast::UnknownWorld => write!(
+                f,
+                "No such world; starting in {}",
+                crate::scenario::get(0).title
+            ),
         }
     }
 }
