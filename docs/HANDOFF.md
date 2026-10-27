@@ -65,7 +65,8 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   changed (#31: World/Ui/Skip frames, GPU near idle when paused, in menus or unfocused; a
   frame-rate cap of whole panel divisors, default the panel rate; Battery = half rate at 0.85
   scale; the game pauses when unfocused).
-- Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
+- Open PRs: native radio (#15, approved; the owner signed off on 2026-10-27 19:55 by asking for
+  stations to work locally; its session is refreshing it on main, then native music folders follow);
   natural map edges (#20, approved; refreshing on main after #24, then merges on green);
   Sessions building: parking lots
   (`bldg/parking-lots`, B10); era sports cars with open-top variants
