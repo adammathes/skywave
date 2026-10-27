@@ -5,11 +5,15 @@
 //! copy them; the audio thread only ever `try_lock`s it and keeps the last parameters when
 //! it is busy, so it never waits. The mixer itself lives on the audio thread. Devices
 //! that cannot run at 48 kHz, or no device at all, leave the game silent with a log line.
+//! The car radio's stream, when there is one, is added to the mixer's output here
+//! (`radio::Tap`).
 
 use std::sync::{Arc, Mutex};
 
 use audio::mixer::{Mixer, SAMPLE_RATE};
 use audio::synth::AudioParams;
+
+use crate::radio;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig};
 
@@ -25,9 +29,10 @@ pub struct Sfx {
 }
 
 impl Sfx {
-    /// Opens the default output device, or logs why not.
-    pub fn start() -> Option<Sfx> {
-        match open() {
+    /// Opens the default output device, or logs why not. `radio` is the car radio's
+    /// output, played with the mixer's.
+    pub fn start(radio: Option<Arc<radio::Output>>) -> Option<Sfx> {
+        match open(radio) {
             Ok(sfx) => Some(sfx),
             Err(e) => {
                 log::warn!("sound off: {e}");
@@ -44,7 +49,7 @@ impl Sfx {
     }
 }
 
-fn open() -> Result<Sfx, String> {
+fn open(radio: Option<Arc<radio::Output>>) -> Result<Sfx, String> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -79,10 +84,10 @@ fn open() -> Result<Sfx, String> {
     };
     let params = Arc::new(Mutex::new(AudioParams::default()));
     let stream = match supported.sample_format() {
-        SampleFormat::F32 => build::<f32>(&device, &config, &params),
-        SampleFormat::I16 => build::<i16>(&device, &config, &params),
-        SampleFormat::I32 => build::<i32>(&device, &config, &params),
-        SampleFormat::U16 => build::<u16>(&device, &config, &params),
+        SampleFormat::F32 => build::<f32>(&device, &config, &params, radio),
+        SampleFormat::I16 => build::<i16>(&device, &config, &params, radio),
+        SampleFormat::I32 => build::<i32>(&device, &config, &params, radio),
+        SampleFormat::U16 => build::<u16>(&device, &config, &params, radio),
         other => Err(format!("unsupported sample format {other}")),
     }?;
     stream.play().map_err(|e| e.to_string())?;
@@ -97,6 +102,7 @@ fn build<T>(
     device: &cpal::Device,
     config: &StreamConfig,
     params: &Arc<Mutex<AudioParams>>,
+    radio: Option<Arc<radio::Output>>,
 ) -> Result<cpal::Stream, String>
 where
     T: SizedSample + FromSample<f32>,
@@ -105,6 +111,7 @@ where
     let shared = Arc::clone(params);
     let mut mixer = Box::new(Mixer::new());
     let mut stereo = vec![0.0f32; CHUNK_FRAMES * 2];
+    let mut tap = radio.map(|out| radio::Tap::new(out, CHUNK_FRAMES * 2));
     let callback = move |out: &mut [T], _: &cpal::OutputCallbackInfo| {
         if let Ok(p) = shared.try_lock() {
             mixer.set_params(&p);
@@ -113,6 +120,9 @@ where
             let frames = chunk.len() / channels;
             let src = &mut stereo[..frames * 2];
             mixer.render(src);
+            if let Some(tap) = &mut tap {
+                tap.mix_into(src);
+            }
             spread(src, chunk, channels);
         }
     };
