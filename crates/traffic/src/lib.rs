@@ -1,0 +1,25 @@
+//! Skywave traffic over a place's roads (`docs/NPCS.md`).
+//!
+//! So far the lane graph ([`LaneGraph`]): built once from a `place::Place`'s road graph, it
+//! holds a centerline per road lane in its driving direction, a turn table per junction
+//! (which incoming lane may continue onto which outgoing lane, each with its curve across
+//! the junction), stop lines where traffic stops, and a fixed-cycle signal timer per
+//! signalized junction ([`signal`]). The queries are what car following needs: a pose at a
+//! distance along a lane or turn, the turns leaving a lane, the distance to its stop line and
+//! the light it faces.
+//!
+//! Plain structs and flat arrays: lanes index into one point pool, turns are stored grouped
+//! by the lane they leave. Building allocates; queries never do. Everything is a pure
+//! function of the place, so the same place gives a bit-identical graph everywhere.
+#![no_std]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+pub mod lanes;
+pub mod math;
+pub mod signal;
+
+pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
+pub use signal::{Light, SignalClock};
