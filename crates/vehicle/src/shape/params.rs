@@ -191,6 +191,9 @@ pub struct Parts {
     pub rims: Rims,
     /// Full wheel covers over the rims.
     pub hubcaps: bool,
+    /// A white band on the outer sidewalls. Optional (default off).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub whitewalls: bool,
 }
 
 /// Generic emblem outlines (never a real maker's mark).
@@ -276,6 +279,19 @@ impl Roof {
     }
 }
 
+/// The band across the dash face under the cluster and over the glovebox.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Applique {
+    /// Dash color, a shade darker.
+    #[default]
+    None,
+    /// Wood grain.
+    Wood,
+    /// Brushed metal.
+    Brushed,
+}
+
 /// Cockpit layout. `x` values are m from the nose, `y` above the ground.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -301,8 +317,24 @@ pub struct InteriorShape {
     pub dials: u8,
     /// Dash, seats, carpet, headliner, trim, accent: `#rrggbb` sRGB.
     pub colors: Vec<String>,
-    /// Radio and display glow, `#rrggbb`.
+    /// Radio, display and dial backlight glow, `#rrggbb`.
     pub display: String,
+    /// Seat center insert (two-tone velour or vinyl), `#rrggbb`; empty: the seat color a
+    /// shade lighter.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub insert: String,
+    /// Seam piping on the seats and door cards, `#rrggbb`; empty: the seat color darker.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub piping: String,
+    /// Dash top (the lighter upper pad), `#rrggbb`; empty: the dash color.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub dash_top: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub applique: Applique,
+    /// A clutch pedal and a stick in a gate (default: an automatic's two pedals and a
+    /// selector).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub manual: bool,
 }
 
 /// Everything the mesh generator needs for one car body.
@@ -337,7 +369,9 @@ pub struct ShapeSpec {
     /// Hardtop (the default when left out) or convertible.
     #[cfg_attr(feature = "serde", serde(default))]
     pub roof: Roof,
-    /// Era body colors `#rrggbb` (sRGB); one is chosen per instance.
+    /// Era body colors `#rrggbb` (sRGB), or `#upper/#lower` for two-tone paint split at the
+    /// first crease (or halfway up the side) with a pinstripe in `accent`; one is chosen per
+    /// instance.
     pub palette: Vec<String>,
     /// Stripe, vinyl and badge-field color, `#rrggbb`.
     pub accent: String,
@@ -401,7 +435,7 @@ pub enum ShapeError {
     },
     TooManyWipers,
     EmptyPalette,
-    /// Palette entry `index` is not `#rrggbb`.
+    /// Palette entry `index` is not `#rrggbb` or `#rrggbb/#rrggbb`.
     BadColor {
         index: u32,
     },
@@ -432,6 +466,19 @@ pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
         out[i] = nib(b[1 + 2 * i])? * 16 + nib(b[2 + 2 * i])?;
     }
     Some(out)
+}
+
+/// Parses a palette entry: `#rrggbb`, or `#upper/#lower` for two-tone paint.
+pub fn parse_paint(s: &str) -> Option<([u8; 3], Option<[u8; 3]>)> {
+    match s.split_once('/') {
+        Some((a, b)) => Some((parse_hex(a)?, Some(parse_hex(b)?))),
+        None => Some((parse_hex(s)?, None)),
+    }
+}
+
+/// An optional color: empty, or `#rrggbb`.
+fn opt_hex_ok(s: &str) -> bool {
+    s.is_empty() || parse_hex(s).is_some()
 }
 
 fn finite2(p: &[(f32, f32)]) -> bool {
@@ -656,7 +703,7 @@ impl ShapeSpec {
             return Err(ShapeError::EmptyPalette);
         }
         for (k, c) in self.palette.iter().enumerate() {
-            if parse_hex(c).is_none() {
+            if parse_paint(c).is_none() {
                 return Err(ShapeError::BadColor { index: k as u32 });
             }
         }
@@ -687,7 +734,10 @@ impl ShapeSpec {
             && (1..=3).contains(&i.dials)
             && i.colors.len() == 6
             && i.colors.iter().all(|c| parse_hex(c).is_some())
-            && parse_hex(&i.display).is_some();
+            && parse_hex(&i.display).is_some()
+            && [&i.insert, &i.piping, &i.dash_top]
+                .iter()
+                .all(|c| opt_hex_ok(c));
         if !ok {
             return Err(ShapeError::Interior);
         }

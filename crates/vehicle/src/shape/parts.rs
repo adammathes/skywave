@@ -93,6 +93,11 @@ impl<'a, 'b> Parts<'a, 'b> {
             self.antenna();
             self.plates();
             self.trunk_outline();
+            self.side_markers();
+            self.fuel_door();
+            if !self.b.convertible {
+                self.drip_rails();
+            }
         }
         self.spoiler();
         let details: Vec<Detail> = self.b.details.clone();
@@ -106,7 +111,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                 Detail::WoodPanel => self.wood_panel(false),
                 Detail::WoodApplique => self.wood_panel(true),
                 Detail::CorneringLamps => self.cornering_lamps(),
-                Detail::ChromeTrim if self.lod0() => self.rocker_trim(),
+                Detail::ChromeTrim | Detail::BlackTrim if self.lod0() => self.rocker_trim(),
                 Detail::VinylRoof if hardtop => self.vinyl_roof(),
                 Detail::RallyStripes if self.lod0() => self.rally_stripes(),
                 Detail::MudFlaps => self.mud_flaps(),
@@ -131,7 +136,7 @@ impl<'a, 'b> Parts<'a, 'b> {
         };
         let mat = match kind {
             Bumper::Chrome => self.m.chrome,
-            Bumper::Body => self.m.paint,
+            Bumper::Body => self.m.paint_low,
             Bumper::Rubber => self.m.rubber,
         };
         let l = self.b.length;
@@ -262,6 +267,39 @@ impl<'a, 'b> Parts<'a, 'b> {
             .aabb([x0, y0, f2.min(back)], [x1, y1, f2.max(back)], lens);
     }
 
+    /// Reflector facets over a lamp lens: a grid of small cells just proud of its face,
+    /// alternately brighter and darker (LOD0).
+    #[allow(clippy::too_many_arguments)]
+    fn facets(&mut self, band_s: f32, dir: f32, x0: f32, x1: f32, y0: f32, y1: f32, lens: Mat) {
+        if !self.lod0() {
+            return;
+        }
+        let z = band_s - self.b.axle[0] + dir * 0.0172;
+        let cell = 0.045;
+        let nx = (((x1 - x0) / cell) as usize).max(2);
+        let ny = (((y1 - y0) / cell) as usize).clamp(1, 4);
+        let (dx, dy) = ((x1 - x0) / nx as f32, (y1 - y0) / ny as f32);
+        for i in 0..nx {
+            for k in 0..ny {
+                let (a, b) = (x0 + dx * i as f32 + 0.002, x0 + dx * (i + 1) as f32 - 0.002);
+                let (c, d) = (y0 + dy * k as f32 + 0.002, y0 + dy * (k + 1) as f32 - 0.002);
+                let mat = if (i + k) % 2 == 0 {
+                    lens.shade(1.25)
+                } else {
+                    lens.shade(0.78)
+                };
+                self.lights.quad_dir(
+                    [a, c, z],
+                    [b, c, z],
+                    [b, d, z],
+                    [a, d, z],
+                    mat,
+                    [0.0, 0.0, dir],
+                );
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn lamp_round(&mut self, band_s: f32, dir: f32, x: f32, y: f32, r: f32, lens: Mat, bezel: Mat) {
         let az = band_s - self.b.axle[0];
@@ -332,6 +370,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                         head,
                         Some(bezel),
                     );
+                    self.facets(band.s, band.dir, x0, x1, yc - h * 0.5, yc + h * 0.5, head);
                 }
             }
             HeadLights::Quad => {
@@ -351,6 +390,15 @@ impl<'a, 'b> Parts<'a, 'b> {
                             yc + sz * 0.45,
                             lens,
                             Some(bezel),
+                        );
+                        self.facets(
+                            band.s,
+                            band.dir,
+                            x0 + 0.01,
+                            x1 - 0.01,
+                            yc - sz * 0.35,
+                            yc + sz * 0.35,
+                            lens,
                         );
                     }
                 }
@@ -396,19 +444,6 @@ impl<'a, 'b> Parts<'a, 'b> {
                         Some(m.trim),
                     );
                 }
-            }
-        }
-        // Side markers near the nose corners.
-        if self.lod0() && spec.front.lights != HeadLights::PopUp {
-            let s = 0.12;
-            for sx in [-1.0f32, 1.0] {
-                let x = sx * (self.side(s, yc) + 0.002);
-                let z = s - self.b.axle[0];
-                self.lights.aabb(
-                    [x.min(x - sx * 0.008), yc - 0.02, z - 0.05],
-                    [x.max(x - sx * 0.008), yc + 0.02, z + 0.05],
-                    m.amber,
-                );
             }
         }
     }
@@ -612,9 +647,9 @@ impl<'a, 'b> Parts<'a, 'b> {
                         m.trim
                     };
                     let nv = if spec.front.grille == Grille::Wide {
-                        9
+                        15
                     } else {
-                        7
+                        11
                     };
                     // Bars: front faces only, standing proud of the dark back plate.
                     let bz = az - 0.012;
@@ -630,9 +665,9 @@ impl<'a, 'b> Parts<'a, 'b> {
                         );
                     }
                     let nh = if spec.front.grille == Grille::Wide {
-                        2
-                    } else {
                         3
+                    } else {
+                        4
                     };
                     for k in 1..nh {
                         let y = lerp(gy0, gy1, k as f32 / nh as f32);
@@ -677,6 +712,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                 ];
                 for &(a, b, lens) in pieces.iter() {
                     self.lamp_rect(band.s, band.dir, a, b, ly0, ly1, lens, None);
+                    self.facets(band.s, band.dir, a, b, ly0, ly1, lens);
                 }
                 if let Some(bz) = bezel {
                     let az = band.s - self.b.axle[0];
@@ -708,6 +744,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                     let (x0, x1) = if sx > 0.0 { (a, b) } else { (-b, -a) };
                     let top = y1 - 0.01;
                     self.lamp_rect(band.s, band.dir, x0, x1, top - hh, top, m.tail, bezel);
+                    self.facets(band.s, band.dir, x0, x1, top - hh, top, m.tail);
                     let mid = top - hh - gap;
                     self.lamp_rect(
                         band.s,
@@ -750,6 +787,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                             lens,
                             bezel,
                         );
+                        self.facets(band.s, band.dir, x0, x1, yc - h * 0.5, yc + h * 0.5, lens);
                     }
                 }
             }
@@ -825,15 +863,34 @@ impl<'a, 'b> Parts<'a, 'b> {
                 );
             }
             let c = [sx * hx, y, z + 0.01];
-            self.body.obox(
-                c,
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                [0.06, 0.045, 0.035],
-                housing,
-            );
+            if self.lod0() {
+                // A rounded shell: a bullet-nosed profile swept across, the glass behind.
+                let prof: Vec<(f32, f32)> = (0..12)
+                    .map(|k| {
+                        let (sn, cs) = sin_cos(2.0 * PI * k as f32 / 12.0);
+                        let fwd = if cs < 0.0 { 1.35 } else { 1.0 };
+                        (cs * 0.035 * fwd, sn * 0.045)
+                    })
+                    .collect();
+                let path = [
+                    [sx * (hx - 0.06), y, z + 0.012],
+                    [sx * hx, y, z + 0.01],
+                    [sx * (hx + 0.06), y, z + 0.012],
+                ];
+                let us = [BACK; 3];
+                let vs = [UP; 3];
+                self.body.sweep(&path, &us, &vs, &prof, true, housing);
+            } else {
+                self.body.obox(
+                    c,
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    [0.06, 0.045, 0.035],
+                    housing,
+                );
+            }
             // Glass faces rearward.
             self.body.aabb(
-                [sx * hx - 0.05, y - 0.035, z + 0.044],
+                [sx * hx - 0.05, y - 0.035, z + 0.042],
                 [sx * hx + 0.05, y + 0.035, z + 0.047],
                 m.mirror,
             );
@@ -873,17 +930,43 @@ impl<'a, 'b> Parts<'a, 'b> {
                     }
                     Handles::Pull => {
                         self.body.aabb(
-                            [sx * (x - 0.002), y - 0.012, z - 0.075],
-                            [sx * (x + 0.004), y + 0.012, z + 0.075],
+                            [sx * (x - 0.002), y - 0.016, z - 0.08],
+                            [sx * (x + 0.004), y + 0.016, z + 0.08],
                             m.trim,
                         );
+                        // A bar on two posts over a dark finger cup.
                         self.body.aabb(
-                            [sx * (x + 0.004), y - 0.009, z - 0.07],
-                            [sx * (x + 0.02), y + 0.009, z + 0.07],
+                            [sx * (x + 0.004), y - 0.012, z - 0.06],
+                            [sx * (x + 0.005), y + 0.012, z + 0.06],
+                            m.liner,
+                        );
+                        for e in [-0.062f32, 0.062] {
+                            self.body.aabb(
+                                [sx * (x + 0.004), y - 0.008, z + e - 0.008],
+                                [sx * (x + 0.02), y + 0.008, z + e + 0.008],
+                                m.chrome,
+                            );
+                        }
+                        self.body.beam(
+                            [sx * (x + 0.024), y, z - 0.068],
+                            [sx * (x + 0.024), y, z + 0.068],
+                            [sx, 0.0, 0.0],
+                            0.009,
+                            0.005,
                             m.chrome,
                         );
                     }
                 }
+                // Key lock behind the handle.
+                self.body.cylinder(
+                    [sx * x, y, z + 0.11],
+                    [sx * (x + 0.006), y, z + 0.11],
+                    0.011,
+                    10,
+                    true,
+                    false,
+                    m.chrome,
+                );
             }
         }
     }
@@ -905,14 +988,40 @@ impl<'a, 'b> Parts<'a, 'b> {
             let y1 = self.top(s + 0.03, x1) + 0.012;
             let a = self.p(s, x0, y0);
             let b = self.p(s + 0.03, x1, y1);
+            // Blade frame with its rubber under it, the arm over it from the pivot.
             self.body.beam(a, b, UP, 0.008, 0.006, self.m.trim);
+            self.body.beam(
+                add(a, [0.0, -0.008, 0.0]),
+                add(b, [0.0, -0.008, 0.0]),
+                UP,
+                0.003,
+                0.003,
+                self.m.rubber,
+            );
+            let mid = scale(add(a, b), 0.5);
+            self.body.beam(
+                add(a, [0.0, 0.012, 0.0]),
+                add(mid, [0.0, 0.012, 0.0]),
+                UP,
+                0.006,
+                0.004,
+                self.m.trim,
+            );
+            for t in [0.25f32, 0.75] {
+                let c = add(lerp3(a, b, t), [0.0, 0.006, 0.0]);
+                self.body.aabb(
+                    sub(c, [0.012, 0.006, 0.006]),
+                    add(c, [0.012, 0.006, 0.006]),
+                    self.m.trim,
+                );
+            }
             // Pivot.
             self.body.cylinder(
                 add(a, [0.0, 0.006, 0.0]),
                 add(a, [0.0, -0.02, 0.0]),
                 0.012,
-                6,
-                false,
+                8,
+                true,
                 false,
                 self.m.trim,
             );
@@ -933,12 +1042,22 @@ impl<'a, 'b> Parts<'a, 'b> {
             let x = x0 * half.max(0.5) / 0.9 * 0.75;
             let a = [x, y, l - 0.35 - self.b.axle[0]];
             let b = [x, y, l + 0.04 - self.b.axle[0]];
-            self.body.cylinder(a, b, r, 10, false, false, self.m.chrome);
+            self.body.cylinder(a, b, r, 16, false, false, self.m.chrome);
+            // A rolled lip and the dark bore.
+            self.body.lathe(
+                b,
+                BACK,
+                &[(0.0, r), (0.004, r - 0.002), (0.0, r - 0.006)],
+                16,
+                0.0,
+                (-0.01, r - 0.003),
+                self.m.chrome,
+            );
             self.body.cylinder(
                 add(b, [0.0, 0.0, -0.005]),
                 add(b, [0.0, 0.0, -0.06]),
-                r - 0.004,
-                10,
+                r - 0.006,
+                16,
                 false,
                 true,
                 self.m.chassis,
@@ -946,9 +1065,29 @@ impl<'a, 'b> Parts<'a, 'b> {
             self.body.disc(
                 add(b, [0.0, 0.0, -0.04]),
                 BACK,
-                r - 0.004,
-                10,
+                r - 0.006,
+                16,
                 self.m.chassis,
+            );
+            // Muffler and the pipe ahead of it.
+            let mz = a[2] - 0.05;
+            self.body.cylinder(
+                [x, y + 0.02, mz - 0.42],
+                [x, y + 0.02, mz],
+                0.075,
+                12,
+                true,
+                false,
+                self.m.steel,
+            );
+            self.body.cylinder(
+                [x * 0.4, y + 0.04, mz - 1.2],
+                [x, y + 0.02, mz - 0.42],
+                0.025,
+                8,
+                false,
+                false,
+                self.m.steel,
             );
         }
     }
@@ -1003,6 +1142,30 @@ impl<'a, 'b> Parts<'a, 'b> {
             [0.15, mid + h, back],
             self.m.plate,
         );
+        // Bright frame and the plate lamp's hood over it.
+        let (e, f) = (0.012, back + 0.004);
+        for (a, b) in [
+            ([-0.15 - e, mid + h], [0.15 + e, mid + h + e]),
+            ([-0.15 - e, mid - h - e], [0.15 + e, mid - h]),
+            ([-0.15 - e, mid - h], [-0.15, mid + h]),
+            ([0.15, mid - h], [0.15 + e, mid + h]),
+        ] {
+            self.body
+                .aabb([a[0], a[1], back - 0.016], [b[0], b[1], f], self.m.chrome);
+        }
+        self.body.aabb(
+            [-0.05, mid + h + e, back - 0.016],
+            [0.05, mid + h + e + 0.018, back + 0.02],
+            self.m.trim,
+        );
+        self.lights.quad_dir(
+            [-0.04, mid + h + e - 0.0005, back + 0.004],
+            [0.04, mid + h + e - 0.0005, back + 0.004],
+            [0.04, mid + h + e - 0.0005, back + 0.016],
+            [-0.04, mid + h + e - 0.0005, back + 0.016],
+            self.m.reverse,
+            [0.0, -1.0, 0.0],
+        );
     }
 
     /// Tailgate outline on the tail when the deck is too short for a trunk lid.
@@ -1033,17 +1196,110 @@ impl<'a, 'b> Parts<'a, 'b> {
         q([x - t, y0], [x + t, y1]);
     }
 
-    fn arch_lips(&mut self) {
-        if !self.lod0() {
+    /// Amber markers on the front fenders and red ones on the rear quarters, in bezels.
+    fn side_markers(&mut self) {
+        let b = self.b;
+        let m = self.m;
+        let l = b.length;
+        let bezel = if b.has(Detail::ChromeTrim) {
+            m.chrome
+        } else {
+            m.trim
+        };
+        let front_s = (b.axle[0] - b.ra - 0.12).max(0.1);
+        let rear_s = (b.axle[1] + b.ra + 0.14).min(l - 0.1);
+        for (s, lens) in [(front_s, m.amber), (rear_s, m.tail)] {
+            let y = b.split_y(s).min(b.frame(s).y_ledge - 0.06);
+            let z = s - b.axle[0];
+            for sx in [-1.0f32, 1.0] {
+                let x = self.side(s, y);
+                self.body.aabb(
+                    [sx * (x - 0.004), y - 0.026, z - 0.056],
+                    [sx * (x + 0.003), y + 0.026, z + 0.056],
+                    bezel,
+                );
+                self.lights.aabb(
+                    [sx * (x - 0.002), y - 0.018, z - 0.046],
+                    [sx * (x + 0.006), y + 0.018, z + 0.046],
+                    lens,
+                );
+            }
+        }
+    }
+
+    /// A fuel filler door on the left rear quarter: a lid inside a seam.
+    fn fuel_door(&mut self) {
+        let b = self.b;
+        let l = b.length;
+        let behind = b.axle[1] + b.ra + 0.22;
+        let s = if behind + 0.1 < l - 0.12 {
+            behind
+        } else {
+            b.axle[1] - b.ra - 0.16
+        };
+        let f = b.frame(s);
+        let y = f.y_ledge - 0.13;
+        if y - 0.06 < self.arch_floor(s, 0.03) {
             return;
         }
+        let paint = b.paint_at(self.m, s, y);
+        let (h, w) = (0.055, 0.06);
+        self.side_patch(
+            -1.0,
+            s - w - 0.005,
+            s + w + 0.005,
+            [y - h - 0.005; 2],
+            [y + h + 0.005; 2],
+            0.0015,
+            self.m.seam,
+        );
+        self.side_patch(-1.0, s - w, s + w, [y - h; 2], [y + h; 2], 0.003, paint);
+    }
+
+    /// Rain gutters along the roof edges, bright with `ChromeTrim`, black with `BlackTrim`.
+    fn drip_rails(&mut self) {
         let b = self.b;
         let mat = if b.has(Detail::ChromeTrim) {
             self.m.chrome
         } else if b.has(Detail::BlackTrim) {
             self.m.trim
         } else {
-            self.m.paint
+            return;
+        };
+        let g = &b.spec.glass;
+        let (s0, s1) = (g.windshield.1 - 0.02, g.backlight.0 + 0.02);
+        let n = 10;
+        let pts: Vec<(f32, [f32; 2])> = (0..=n)
+            .map(|k| {
+                let s = lerp(s0, s1, k as f32 / n as f32);
+                let (p, _) = b.ring_plain(s);
+                (s, p[b.idx(super::body::Slot::RoofEdge)])
+            })
+            .collect();
+        for sx in [-1.0f32, 1.0] {
+            for k in 0..n {
+                let (sa, pa) = pts[k];
+                let (sb, pb) = pts[k + 1];
+                self.body.beam(
+                    self.p(sa, sx * (pa[0] + 0.004), pa[1] - 0.006),
+                    self.p(sb, sx * (pb[0] + 0.004), pb[1] - 0.006),
+                    UP,
+                    0.006,
+                    0.007,
+                    mat,
+                );
+            }
+        }
+    }
+
+    fn arch_lips(&mut self) {
+        let b = self.b;
+        let mat = if b.has(Detail::ChromeTrim) {
+            self.m.chrome
+        } else if b.has(Detail::BlackTrim) {
+            self.m.trim
+        } else {
+            self.m.paint_low
         };
         let lip = 0.03;
         let out = 0.012;
@@ -1357,15 +1613,12 @@ impl<'a, 'b> Parts<'a, 'b> {
                 if ya < self.arch_floor(a, 0.04) || yc < self.arch_floor(c, 0.04) {
                     continue;
                 }
-                self.side_patch(
-                    sx,
-                    a,
-                    c,
-                    [ya, yc],
-                    [ya + 0.03, yc + 0.03],
-                    0.004,
-                    self.m.chrome,
-                );
+                let mat = if self.b.has(Detail::ChromeTrim) {
+                    self.m.chrome
+                } else {
+                    self.m.trim
+                };
+                self.side_patch(sx, a, c, [ya, yc], [ya + 0.03, yc + 0.03], 0.004, mat);
             }
         }
     }

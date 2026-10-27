@@ -31,12 +31,13 @@ ShapeSpec(
     front: Front(lights: Rect, grille: Wide, bumper: Chrome, bumper_y: (0.30, 0.48)),
     rear: Rear(lights: FullWidth, spoiler: None, bumper: Chrome, bumper_y: (0.32, 0.48)),
     seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.80, creases: [(0.10, 0.74, 5.15, 0.75)]),
-    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: Mast, rims: Turbine, hubcaps: false),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: Mast, rims: Turbine, hubcaps: false, whitewalls: true),
     // VinylRoof on a convertible: the conversion shop's padded boot.
     details: [ChromeTrim, VinylRoof, CorneringLamps, Badge(Circle)],
     roof: Roof(kind: Convertible(top: Down)),
-    // Dark red, ivory, midnight blue, smoke gray.
-    palette: ["#6e1a22", "#e8e1cf", "#23283a", "#6b6a68"],
+    // Dark red, ivory, midnight blue, smoke gray, silver over midnight blue, champagne over
+    // brown.
+    palette: ["#6e1a22", "#e8e1cf", "#23283a", "#6b6a68", "#c8c9c9/#23283a", "#d9c8a4/#5a3c2c"],
     // The padded boot and the top: ivory vinyl.
     accent: "#ddd4c0",
     interior: InteriorShape(
@@ -50,8 +51,13 @@ ShapeSpec(
         driver_offset: 0.40,
         rear_seat: true,
         dials: 2,
-        // Dash, seats, carpet, headliner, trim, accent (oxblood leather, ivory, wood).
-        colors: ["#4a1c20", "#7a2a30", "#3e171a", "#c9bca6", "#5a2226", "#9a7044"],
+        // Dash, seats, carpet, headliner, trim, accent: oxblood leather with burgundy
+        // inserts and ivory piping, burgundy carpet, wood band, cyan-lit dials.
+        colors: ["#4e1c22", "#82283a", "#5a1824", "#c9bca6", "#5e2228", "#c8a060"],
         display: "#58e0ff",
+        insert: "#a43448",
+        piping: "#e2d6bc",
+        dash_top: "#6a2630",
+        applique: Wood,
     ),
 )

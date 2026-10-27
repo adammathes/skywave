@@ -31,8 +31,8 @@ ShapeSpec(
     seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.86, creases: [(0.15, 0.70, 5.10, 0.72)]),
     parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true),
     details: [WoodPanel, ChromeTrim, RoofRack, Badge(Bar)],
-    // Champagne, maroon, forest green, powder blue, cream, chocolate.
-    palette: ["#c7b89a", "#6b2d26", "#3d4a3c", "#8aa0b0", "#e8e3d3", "#5a4632"],
+    // Champagne, maroon, forest green, powder blue, cream, chocolate, tan over brown.
+    palette: ["#c7b89a", "#6b2d26", "#3d4a3c", "#8aa0b0", "#e8e3d3", "#5a4632", "#cdb894/#6a4e36"],
     accent: "#8a6a48",
     interior: InteriorShape(
         dash_height: 0.96,
@@ -45,8 +45,13 @@ ShapeSpec(
         driver_offset: 0.40,
         rear_seat: true,
         dials: 1,
-        // Dash, seats, carpet, headliner, trim, accent (tan velour, woodgrain-era browns).
-        colors: ["#6a5440", "#a07a52", "#5a4632", "#c9b99a", "#7a6248", "#b08a5a"],
+        // Dash, seats, carpet, headliner, trim, accent: two-tone tan velour, saddle carpet,
+        // a woodgrain band, amber-lit dial.
+        colors: ["#6e5238", "#a8794a", "#7a5430", "#d4c2a0", "#86664a", "#c88f50"],
         display: "#ffae3b",
+        insert: "#c99a62",
+        piping: "#5e3e22",
+        dash_top: "#8a6a4a",
+        applique: Wood,
     ),
 )

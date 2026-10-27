@@ -46,9 +46,12 @@ pub const DIAL_SWEEP_DEG: f32 = 270.0;
 /// How far the needles and scale ticks stand off the dial face, toward the driver, m.
 const NEEDLE_LIFT_M: f32 = 0.003;
 const TICK_LIFT_M: f32 = 0.0025;
-/// Needle glow: warm orange, intensity scale.
-const NEEDLE_RGB: [u8; 3] = [255, 112, 36];
-const NEEDLE_GLOW: f32 = 4.0;
+/// Needle glow: a white needle with a red tip, intensity scale.
+const NEEDLE_RGB: [u8; 3] = [240, 238, 230];
+const NEEDLE_TIP_RGB: [u8; 3] = [255, 40, 24];
+const NEEDLE_GLOW: f32 = 3.0;
+/// Where the red tip starts, as a share of the needle's reach.
+const NEEDLE_TIP_AT: f32 = 0.62;
 /// Scale ticks per dial and their glow.
 const DIAL_TICKS: usize = 9;
 const TICK_GLOW: f32 = 1.6;
@@ -374,6 +377,7 @@ impl CarModel {
                     color_index: 0,
                     lod,
                     popups_up: up,
+                    paint: None,
                 },
             )
             .map_err(|e| format!("shape `{}`: {e:?}", shape.id))
@@ -466,12 +470,24 @@ impl CarModel {
     }
 }
 
-/// A parked car: `shape` in palette color `paint` at level of detail 1, as one mesh (body,
-/// glass, lamps off and four wheels), its origin on the ground midway between the axles,
-/// nose toward `-z`.
-pub fn parked_mesh(shape: &ShapeSpec, paint: usize) -> Result<Mesh, String> {
-    let car =
-        shape::build_lod(shape, paint, 1).map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
+/// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
+/// detail 1, as one mesh (body, glass, lamps off and four wheels), its origin on the ground
+/// midway between the axles, nose toward `-z`.
+pub fn parked_mesh(
+    shape: &ShapeSpec,
+    paint: usize,
+    era: Option<&'static str>,
+) -> Result<Mesh, String> {
+    let car = shape::build_with(
+        shape,
+        &BuildOptions {
+            color_index: paint,
+            lod: 1,
+            popups_up: false,
+            paint: era,
+        },
+    )
+    .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
     let mid = 0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]);
     let offset = Vec3::new(0.0, 0.0, -mid);
     let mut out = convert(&car.body, offset, Surface::Body);
@@ -642,24 +658,28 @@ fn glass_tint(c: [u8; 4]) -> [u8; 4] {
 }
 
 /// A tapered needle for a dial of radius `r`: hub at the origin, pointing along `+y`,
-/// facing `+z`, glowing.
+/// facing `+z`, glowing white with a red tip.
 fn needle_mesh(r: f32) -> Mesh {
-    let glow = render::emissive(NEEDLE_RGB, NEEDLE_GLOW);
-    let color = [NEEDLE_RGB[0], NEEDLE_RGB[1], NEEDLE_RGB[2], 255];
     let (w_hub, w_tip) = ((0.06 * r).max(0.003), (0.02 * r).max(0.0012));
     let (tail, tip) = (-0.18 * r, 0.86 * r);
+    let mid = tail + (tip - tail) * NEEDLE_TIP_AT;
+    let w_mid = w_hub + (w_tip - w_hub) * NEEDLE_TIP_AT;
     let n = [0.0, 0.0, 1.0];
     let mut m = Mesh::default();
-    for p in [
-        [-w_hub, tail, 0.0],
-        [w_hub, tail, 0.0],
-        [w_tip, tip, 0.0],
-        [-w_tip, tip, 0.0],
+    for (rgb, y0, y1, w0, w1) in [
+        (NEEDLE_RGB, tail, mid, w_hub, w_mid),
+        (NEEDLE_TIP_RGB, mid, tip, w_mid, w_tip),
     ] {
-        m.vertices
-            .push(Vertex::new(p, n, color).with_emissive(glow));
+        let glow = render::emissive(rgb, NEEDLE_GLOW);
+        let color = [rgb[0], rgb[1], rgb[2], 255];
+        let i = m.vertices.len() as u32;
+        for p in [[-w0, y0, 0.0], [w0, y0, 0.0], [w1, y1, 0.0], [-w1, y1, 0.0]] {
+            m.vertices
+                .push(Vertex::new(p, n, color).with_emissive(glow));
+        }
+        m.indices
+            .extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
     }
-    m.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
     m
 }
 
@@ -769,12 +789,12 @@ mod tests {
                 assert_wound_like_normals(&lod.lights[1][1], id);
             }
             assert!(
-                (3000..=6000).contains(&m.exterior_triangles),
+                (8000..=14000).contains(&m.exterior_triangles),
                 "{id} {}",
                 m.exterior_triangles
             );
             assert!(
-                (1500..=3000).contains(&m.interior_triangles),
+                (4000..=8000).contains(&m.interior_triangles),
                 "{id} {}",
                 m.interior_triangles
             );

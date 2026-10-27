@@ -39,8 +39,8 @@ ShapeSpec(
     // The second color is the wood-grain edition.
     color_details: [(1, WoodApplique)],
     roof: Roof(kind: Convertible(top: Down)),
-    // White, white (wood-grain), powder blue, cranberry, silver, black.
-    palette: ["#f1efe8", "#ece8dc", "#9fb3c4", "#7a1f2a", "#b8b9b6", "#1e1f22"],
+    // White, white (wood-grain), powder blue, cranberry, silver, black, silver over blue.
+    palette: ["#f1efe8", "#ece8dc", "#9fb3c4", "#7a1f2a", "#b8b9b6", "#1e1f22", "#bfc2c4/#3b4d72"],
     // The top and its boot: tan canvas.
     accent: "#c4ab84",
     interior: InteriorShape(
@@ -54,8 +54,13 @@ ShapeSpec(
         driver_offset: 0.38,
         rear_seat: true,
         dials: 2,
-        // Dash, seats, carpet, headliner, trim, accent (tan vinyl and cloth).
-        colors: ["#9a7f5c", "#cdb48c", "#8a6f50", "#d8c8a8", "#a88d68", "#7a5f40"],
+        // Dash, seats, carpet, headliner, trim, accent: blue vinyl with light blue cloth
+        // inserts and white piping, blue carpet, a woodgrain band, amber-lit dials.
+        colors: ["#2c4064", "#36598e", "#28406a", "#c8ccd4", "#3a5582", "#d9a040"],
         display: "#ffae3b",
+        insert: "#5a7eb8",
+        piping: "#e4e6ea",
+        dash_top: "#24365a",
+        applique: Wood,
     ),
 )

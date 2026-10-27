@@ -20,6 +20,8 @@ use alloc::vec::Vec;
 pub const SEAM_HALF: f32 = 0.005;
 /// Seam depth, m.
 pub const SEAM_DEPTH: f32 = 0.006;
+/// How far the hood and trunk feature lines stand up, m.
+const LINE_RISE: f32 = 0.008;
 /// Width of the windshield frame on the top surface, m.
 const FRAME_W: f32 = 0.055;
 
@@ -40,6 +42,8 @@ pub enum Slot {
     Frame,
     /// Hood/trunk side seam, part 1 (outer edge), 0 (groove), -1 (inner edge).
     TopSeam(i8),
+    /// A raised feature line along the hood and the trunk lid (LOD0 with top seams).
+    HoodLine,
     Crown,
     Center,
 }
@@ -140,9 +144,7 @@ impl<'a> Body<'a> {
             }
         }
         slots.push(Slot::ShoulderLow);
-        if spec.section.shoulder < 0.92 {
-            slots.push(Slot::ShoulderMid);
-        }
+        slots.push(Slot::ShoulderMid);
         slots.extend([
             Slot::Ledge,
             Slot::GlassB,
@@ -152,7 +154,12 @@ impl<'a> Body<'a> {
         ]);
         let top_seam = seams && (spec.seams.hood || spec.seams.trunk);
         if top_seam {
-            slots.extend([Slot::TopSeam(1), Slot::TopSeam(0), Slot::TopSeam(-1)]);
+            slots.extend([
+                Slot::TopSeam(1),
+                Slot::TopSeam(0),
+                Slot::TopSeam(-1),
+                Slot::HoodLine,
+            ]);
         }
         slots.extend([Slot::Crown, Slot::Center]);
 
@@ -261,9 +268,9 @@ impl<'a> Body<'a> {
         let spec = self.spec;
         let l = self.length;
         let (n_base, gap, n_arc) = if self.lod == 0 {
-            (12, 0.065, 5)
+            (26, 0.04, 9)
         } else {
-            (8, 0.14, 3)
+            (24, 0.07, 6)
         };
         // (s, hard) candidates.
         let mut cand: Vec<(f32, bool)> = Vec::new();
@@ -410,10 +417,17 @@ impl<'a> Body<'a> {
                 order: 0,
             });
         }
-        // A convertible's opening must start and end on a station, even over an arch.
+        // A convertible's opening must start and end on a station, even over an arch: a
+        // plain station close by gives way to it.
         if spec.roof.convertible() {
             for s in [g.windshield.1, g.backlight.0] {
-                if st.iter().all(|t| (t.s - s).abs() > 0.01) {
+                let edge = |t: &Station| {
+                    self.axle.iter().any(|&ax| {
+                        (t.s - (ax - self.ra)).abs() < 1e-6 || (t.s - (ax + self.ra)).abs() < 1e-6
+                    })
+                };
+                st.retain(|t| (t.s - s).abs() > 0.01 || t.seam.is_some() || edge(t) || t.s == s);
+                if st.iter().all(|t| (t.s - s).abs() > 1e-6) {
                     st.push(Station {
                         s,
                         clamp: self.axle_over(s),
@@ -493,6 +507,13 @@ impl<'a> Body<'a> {
         let z_rr = z_gb - (y_rr - f.y_ledge) * self.tan_tumble;
         let z_f = (f.z_re - FRAME_W).max(f.z_re * 0.5);
         let z_seam = (spec.seams.hood_width * f.z_re).min(z_f - SEAM_HALF - 0.01);
+        let has_line = self.slots.contains(&Slot::HoodLine);
+        let z_line = z_seam * 0.7;
+        let z_crown = if has_line {
+            z_line * 0.5
+        } else {
+            f.z_re * 0.45
+        };
         let mut pts = Vec::with_capacity(self.slots.len());
         for &slot in &self.slots {
             let p = match slot {
@@ -524,7 +545,8 @@ impl<'a> Body<'a> {
                     let z = z_seam + part as f32 * SEAM_HALF;
                     [z, f.top_y(z)]
                 }
-                Slot::Crown => [f.z_re * 0.45, f.top_y(f.z_re * 0.45)],
+                Slot::HoodLine => [z_line, f.top_y(z_line)],
+                Slot::Crown => [z_crown, f.top_y(z_crown)],
                 Slot::Center => [0.0, f.yt],
             };
             pts.push(p);
@@ -564,6 +586,12 @@ impl<'a> Body<'a> {
                     pts[j][1] = ya;
                     raised[j] = true;
                 }
+            }
+        }
+        let in_lid = |r: Option<(f32, f32)>| r.is_some_and(|(a, b)| st.s > a && st.s < b);
+        if in_lid(self.hood) || in_lid(self.trunk) {
+            if let Some(j) = self.slots.iter().position(|&s| s == Slot::HoodLine) {
+                pts[j][1] += LINE_RISE;
             }
         }
         // Seam grooves: which slots get pushed in at this station.
@@ -622,6 +650,26 @@ impl<'a> Body<'a> {
         }
     }
 
+    /// Height of a two-tone paint split at `s`: the first crease, else partway up the side.
+    pub fn split_y(&self, s: f32) -> f32 {
+        match self.spec.seams.creases.first() {
+            Some(&(x0, y0, x1, y1)) => lerp(y0, y1, clamp((s - x0) / (x1 - x0), 0.0, 1.0)),
+            None => {
+                let f = self.frame(s);
+                lerp(f.yb, f.y_ledge, 0.55)
+            }
+        }
+    }
+
+    /// The paint at height `y` of station `s`: a two-tone's lower color under the split.
+    pub fn paint_at(&self, m: &Materials, s: f32, y: f32) -> Mat {
+        if m.two_tone && y < self.split_y(s) {
+            m.paint_low
+        } else {
+            m.paint
+        }
+    }
+
     /// Lateral position of the body side at `(s, y)` (un-cut shell, right side).
     pub fn side_z(&self, s: f32, y: f32) -> f32 {
         let (pts, _) = self.ring_plain(s);
@@ -665,6 +713,10 @@ impl<'a> Body<'a> {
         let i_rr = self.idx(Slot::RoofRail);
         let i_re = self.idx(Slot::RoofEdge);
         let i_rb = self.idx(Slot::RockerB);
+        let crease = self
+            .slots
+            .contains(&Slot::Crease(0, 0))
+            .then(|| (self.idx(Slot::Crease(0, -1)), self.idx(Slot::Crease(0, 1))));
         let g = &self.spec.glass;
         for i in 0..rings.len() - 1 {
             let (sa, sb) = (self.stations[i].s, self.stations[i + 1].s);
@@ -692,12 +744,22 @@ impl<'a> Body<'a> {
                     cross(sub(b, a), sub(c, a)),
                     cross(sub(c, a), sub(d, a)),
                 ));
-                let mut mat: Mat = m.paint;
+                // Two-tone: by the crease slots when the ring has them, else by height.
+                let mut mat: Mat = match crease {
+                    Some((lo, _)) if m.two_tone && j < lo => m.paint_low,
+                    Some((lo, hi)) if m.two_tone && j >= lo && j < hi => m.pinstripe,
+                    Some(_) => m.paint,
+                    None => {
+                        let y = (a[1] + b[1] + c[1] + d[1]) * 0.25;
+                        self.paint_at(m, (sa + sb) * 0.5, y)
+                    }
+                };
+                let stripe = mat == m.pinstripe && m.two_tone;
                 if j < i_rb {
                     mat = m.chassis;
                 } else if rais && (nrm[2].abs() > 0.5 || nrm[1] < -0.3 || nrm[0] < 0.3) {
                     mat = m.liner;
-                } else if disp {
+                } else if disp && !stripe {
                     mat = m.seam;
                 } else if gh && j == i_ledge && chrome {
                     mat = m.chrome;
@@ -728,7 +790,8 @@ impl<'a> Body<'a> {
                 let mat = if j < i_rb {
                     m.chassis
                 } else {
-                    m.paint.uv(super::mesh::Uv::Face)
+                    self.paint_at(m, s, (p[1] + q[1]) * 0.5)
+                        .uv(super::mesh::Uv::Face)
                 };
                 body.quad_dir(a, b, c, d, mat, [0.0, 0.0, dir]);
             }
