@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 use place::{BuildingUse, Place, PropKind, RoadClass, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::hash64;
 
-use crate::lanes::{lane_width, raw_line, Control, LaneGraph, NONE};
+use crate::lanes::{bezier, lane_width, raw_line, Control, LaneGraph, CURVE_STEPS, NONE};
 use crate::math::{dir, dist2, dot, len2, right, sin_cos, unit2};
 use crate::signal::Light;
 
@@ -196,8 +196,9 @@ pub struct WalkGraph {
     pub cell_links: Vec<u32>,
     pub cell_spot_start: Vec<u32>,
     pub cell_spots: Vec<u32>,
-    /// The lanes' painted bands, for [`WalkGraph::in_lane`].
+    /// The lanes' painted bands, for [`WalkGraph::in_lane`], and their turn curves.
     lane_cover: Cover,
+    turn_cover: TurnCover,
 }
 
 /// A road end at a node, as `world::roads` sees it.
@@ -897,12 +898,20 @@ impl WalkGraph {
                 n.link_count += 1;
             }
         }
+        // People keep out of the turn curves too, each as wide as the lane it leaves (the
+        // walks and crossings above are laid off the lanes alone: a few tight turns cut
+        // over a curb return, where the corner's walk still runs).
+        let turn_cover = TurnCover::new(lanes, |l| {
+            let lane = &lanes.lanes[l as usize];
+            0.5 * lane_width(&edges[lane.edge as usize], lane.forward)
+        });
         let mut g = WalkGraph {
             nodes,
             adj,
             links: b.links,
             crossings,
             lane_cover,
+            turn_cover,
             ..WalkGraph::default()
         };
         g.grid();
@@ -1026,17 +1035,29 @@ impl WalkGraph {
             + self.spots.len() * size_of::<Spot>()
             + self.lane_cover.start.len() * 4
             + self.lane_cover.segs.len() * size_of::<CoverSeg>()
+            + self.turn_cover.bytes()
     }
 
     /// Whether `p` is inside a lane's painted band, at its level (where the lane graph's
     /// lanes and the world's road ends differ near a junction, a walk's edge can be).
     pub fn in_lane(&self, p: [f32; 3]) -> bool {
-        self.lane_cover.near(p).iter().any(|&(s0, s1, half, _)| {
-            let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
-            let y = s0[1] + (s1[1] - s0[1]) * t;
-            d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
-        })
+        in_band(&self.lane_cover, p)
     }
+
+    /// [`Self::in_lane`], or inside a turn curve's band (as wide as the lane it leaves): a
+    /// tight turn can cut over a curb return, across the corner's sidewalk.
+    pub fn in_lane_or_turn(&self, p: [f32; 3]) -> bool {
+        self.in_lane(p) || self.turn_cover.inside(p)
+    }
+}
+
+/// Whether `p` is inside one of `cover`'s bands, at its level.
+fn in_band(cover: &Cover, p: [f32; 3]) -> bool {
+    cover.near(p).iter().any(|&(s0, s1, half, _)| {
+        let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
+        let y = s0[1] + (s1[1] - s0[1]) * t;
+        d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
+    })
 }
 
 /// The roads' pavement, as centerline segments with their half widths in a grid.
@@ -1143,6 +1164,112 @@ impl Cover {
                 d < hw + COVER_MARGIN_M && (p[1] - CURB_M - y).abs() < COVER_DY_M
             })
         })
+    }
+}
+
+/// The lane graph's turn curves as bands: each its [`CURVE_STEPS`] chords (17 points), as
+/// wide as the lane it leaves, listed in the 16 m cells its bounds touch.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct TurnCover {
+    origin: [f32; 2],
+    size: [i32; 2],
+    start: Vec<u32>,
+    /// Turn indices by cell.
+    turns: Vec<u32>,
+    /// `CURVE_STEPS + 1` points per turn, turn after turn.
+    points: Vec<[f32; 3]>,
+    half: Vec<f32>,
+}
+
+impl TurnCover {
+    /// The turns of `lanes`, each half as wide as `half(from lane)`.
+    fn new(lanes: &LaneGraph, half: impl Fn(u32) -> f32) -> TurnCover {
+        let n = CURVE_STEPS + 1;
+        let mut points = Vec::with_capacity(lanes.turns.len() * n);
+        let mut halves = Vec::with_capacity(lanes.turns.len());
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        let mut reach = 0.0f32;
+        for t in &lanes.turns {
+            let h = half(t.from);
+            halves.push(h);
+            reach = reach.max(h);
+            for k in 0..n {
+                let p = bezier(&t.curve, k as f32 / CURVE_STEPS as f32);
+                lo = [lo[0].min(p[0]), lo[1].min(p[2])];
+                hi = [hi[0].max(p[0]), hi[1].max(p[2])];
+                points.push(p);
+            }
+        }
+        if halves.is_empty() {
+            (lo, hi) = ([0.0; 2], [0.0; 2]);
+        }
+        let origin = [lo[0] - reach - COVER_CELL_M, lo[1] - reach - COVER_CELL_M];
+        let size = [
+            ((hi[0] - origin[0] + reach) / COVER_CELL_M) as i32 + 2,
+            ((hi[1] - origin[1] + reach) / COVER_CELL_M) as i32 + 2,
+        ];
+        let cell = |x: f32, z: f32| {
+            (
+                ((x - origin[0]) / COVER_CELL_M) as i32,
+                ((z - origin[1]) / COVER_CELL_M) as i32,
+            )
+        };
+        let mut of = Vec::new();
+        let mut ids = Vec::new();
+        for (t, pts) in points.chunks(n).enumerate() {
+            let g = halves[t];
+            let (mut a, mut b) = ([f32::MAX; 2], [f32::MIN; 2]);
+            for p in pts {
+                a = [a[0].min(p[0]), a[1].min(p[2])];
+                b = [b[0].max(p[0]), b[1].max(p[2])];
+            }
+            let (x0, z0) = cell(a[0] - g, a[1] - g);
+            let (x1, z1) = cell(b[0] + g, b[1] + g);
+            for z in z0..=z1 {
+                for x in x0..=x1 {
+                    of.push((z * size[0] + x) as usize);
+                    ids.push(t as u32);
+                }
+            }
+        }
+        let (start, order) = bucket((size[0] * size[1]) as usize, &of);
+        let turns = order.iter().map(|&k| ids[k as usize]).collect();
+        TurnCover {
+            origin,
+            size,
+            start,
+            turns,
+            points,
+            half: halves,
+        }
+    }
+
+    /// Whether `p` is inside a turn's band, at its level.
+    fn inside(&self, p: [f32; 3]) -> bool {
+        let x = ((p[0] - self.origin[0]) / COVER_CELL_M) as i32;
+        let z = ((p[2] - self.origin[1]) / COVER_CELL_M) as i32;
+        if x < 0 || z < 0 || x >= self.size[0] || z >= self.size[1] {
+            return false;
+        }
+        let c = (z * self.size[0] + x) as usize;
+        let n = CURVE_STEPS + 1;
+        self.turns[self.start[c] as usize..self.start[c + 1] as usize]
+            .iter()
+            .any(|&t| {
+                let pts = &self.points[t as usize * n..(t as usize + 1) * n];
+                let half = self.half[t as usize];
+                pts.windows(2).any(|w| {
+                    let (d, f) = seg_dist(xz(p), xz(w[0]), xz(w[1]));
+                    let y = w[0][1] + (w[1][1] - w[0][1]) * f;
+                    d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
+                })
+            })
+    }
+
+    fn bytes(&self) -> usize {
+        (self.start.len() + self.turns.len()) * 4
+            + self.points.len() * size_of::<[f32; 3]>()
+            + self.half.len() * 4
     }
 }
 

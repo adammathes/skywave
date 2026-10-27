@@ -272,6 +272,13 @@ impl Ui {
         }
     }
 
+    /// Takes down the start's card, if it is up (a new world in the same session).
+    pub(crate) fn drop_start_controls(&mut self) {
+        if matches!(self.controls.shown, Some(Shown::Start { .. })) {
+            self.controls.shown = None;
+        }
+    }
+
     /// Shows the card until the player closes it.
     pub(super) fn open_controls(&mut self) {
         self.controls.show(Shown::Asked);

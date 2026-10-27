@@ -2,11 +2,13 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Reset car · Vehicle › · Settings › · Controls (the controls card) ·
-//!            Quit (native only)
-//! Vehicle:   Car (left/right through every built-in car) · Paint (its palette) · Drive
-//!            this car; a turntable preview and the car's specs beside them, and Select on
-//!            any row swaps the car in where you are
+//! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Controls (the
+//!            controls card) · Quit (native only)
+//! Vehicle:   Car (left/right through every built-in car this world has) · Paint (its
+//!            palette) · Drive this car; a turntable preview and the car's specs beside
+//!            them, and Select on any row swaps the car in where you are
+//! Worlds:    one card per scenario, side by side, three a page (still, title, kind and
+//!            year, car and station counts; "coming" on a stub); Select loads that world
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
 //! Drive:     Handling (Arcade / Light / Off) · Headlights (Auto / Manual)
 //! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
@@ -51,6 +53,8 @@ pub enum Page {
     Pause,
     /// Pick a car and its paint, with a turntable preview.
     Vehicle,
+    /// Pick a world: one card per scenario.
+    Worlds,
     Settings,
     Drive,
     Camera,
@@ -83,8 +87,11 @@ pub enum ItemId {
     /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`] (in the
     /// paint chosen on the page).
     Vehicle(usize),
-    /// The Vehicle page's car being looked at: a [`crate::vehicles::BUILTIN`] index.
+    /// The Vehicle page's car being looked at; the choice is a position in this world's
+    /// [`crate::scenario::Lineup`].
     VehicleCar,
+    /// Load the world with this index in [`crate::scenario::BUILTIN`].
+    World(usize),
     /// The Vehicle page's paint: an entry of the car's palette.
     Paint,
     /// Look Y (and free-fly look Y) invert on a device.
@@ -163,6 +170,8 @@ pub struct PageCtx<'a> {
     pub panel_hz: f64,
     /// The Vehicle page's car (a [`crate::vehicles::BUILTIN`] index) and paint.
     pub browse: [usize; 2],
+    /// The world the app is: an index into [`crate::scenario::BUILTIN`].
+    pub scenario: usize,
 }
 
 /// Option names of the paint chooser, one per palette entry (the page draws swatches).
@@ -212,6 +221,7 @@ pub fn title(page: Page) -> &'static str {
     match page {
         Page::Pause => "Paused",
         Page::Vehicle => "Vehicle",
+        Page::Worlds => "Worlds",
         Page::Settings => "Settings",
         Page::Drive => "Drive",
         Page::Camera => "Camera",
@@ -286,6 +296,8 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             add(id, "Vehicle", w);
             let (id, w) = open(Page::Settings);
             add(id, "Settings", w);
+            let (id, w) = open(Page::Worlds);
+            add(id, "Worlds", w);
             add(ItemId::Controls, "Controls", Widget::Action);
             if ctx.can_quit {
                 add(ItemId::Quit, "Quit", Widget::Action);
@@ -671,16 +683,21 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 },
             );
         }
+        Page::Worlds => {
+            for (i, s) in crate::scenario::all().iter().enumerate() {
+                add(ItemId::World(i), s.title.as_str(), Widget::Action);
+            }
+        }
         Page::Vehicle => {
             let [car, paint] = ctx.browse;
-            let names = super::roster::names();
-            let car = car.min(names.len().saturating_sub(1));
+            let lineup = crate::scenario::lineup(ctx.scenario);
+            let car = car.min(super::roster::names().len().saturating_sub(1));
             add(
                 ItemId::VehicleCar,
                 "Car",
                 Widget::Choice {
-                    options: names,
-                    index: car,
+                    options: &lineup.names,
+                    index: lineup.position(car).unwrap_or(0),
                 },
             );
             let paints = super::roster::roster()
@@ -741,6 +758,7 @@ mod tests {
             frame_rate: FrameRate::Half,
             panel_hz: 90.0,
             browse: [3, 1],
+            scenario: 0,
         };
         let mut items = Vec::new();
         build(Page::Pause, &ctx, &mut items);
@@ -750,14 +768,21 @@ mod tests {
         );
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(
-            ids[..4],
+            ids,
             [
                 ItemId::Resume,
                 ItemId::ResetCar,
                 ItemId::Open(Page::Vehicle),
-                ItemId::Open(Page::Settings)
+                ItemId::Open(Page::Settings),
+                ItemId::Open(Page::Worlds),
+                ItemId::Controls,
             ]
         );
+        build(Page::Worlds, &ctx, &mut items);
+        let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
+        assert_eq!(ids, [ItemId::World(0), ItemId::World(1)]);
+        assert_eq!(items[1].label, "Inland Basin");
+        assert!(items.iter().all(|i| i.widget == Widget::Action));
         build(Page::Vehicle, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(3)]);

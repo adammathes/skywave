@@ -10,6 +10,7 @@ VehicleSpec(
     id: "appaloosa_gt",
     name: "Appaloosa GT",
     era: Eighties,
+    year: 1985,
     class: Coupe,
 
     mass_kg: 1400,
