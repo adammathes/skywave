@@ -24,6 +24,7 @@ pub mod lighting;
 mod lighttiles;
 pub mod map;
 pub mod npc;
+pub mod pacing;
 mod peds;
 mod places;
 pub mod preview;
@@ -39,7 +40,7 @@ pub mod vehicles;
 mod worldmesh;
 
 pub use settings::{
-    GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
+    FrameRate, GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
 };
 
 pub use camera::CameraMode;
