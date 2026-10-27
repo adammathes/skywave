@@ -6,9 +6,10 @@
 //!   "drive": { "handling": "arcade", "vehicle": "gannet_gt", "paint": 0 },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
-//!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "debug_overlay": false,
-//!              "quality": "auto", "frame_rate": "panel" },
-//!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0 },
+//!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
+//!              "frame_rate": "panel" },
+//!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0,
+//!            "overlay": "off" },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal" },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
 //!              "mute_radio_unfocused": false },
@@ -226,6 +227,43 @@ pub enum FrameRate {
     Quarter,
 }
 
+/// The performance overlay (F3 cycles it, in this order): nothing, the frame rate in the
+/// top left corner, or the full stats. Any menu or the full map hides it while open.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Overlay {
+    #[default]
+    Off,
+    Fps,
+    Full,
+}
+
+impl Overlay {
+    /// In cycle order, as Settings › HUD offers them.
+    pub const ALL: [Overlay; 3] = [Overlay::Off, Overlay::Fps, Overlay::Full];
+
+    /// Stable name (settings JSON).
+    pub fn name(self) -> &'static str {
+        match self {
+            Overlay::Off => "off",
+            Overlay::Fps => "fps",
+            Overlay::Full => "full",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Overlay> {
+        Overlay::ALL.into_iter().find(|o| o.name() == name)
+    }
+
+    /// The mode after this one, wrapping.
+    pub fn next(self) -> Overlay {
+        match self {
+            Overlay::Off => Overlay::Fps,
+            Overlay::Fps => Overlay::Full,
+            Overlay::Full => Overlay::Off,
+        }
+    }
+}
+
 /// The slowest cap offered, frames a second.
 pub const MIN_CAPPED_FPS: u32 = 20;
 
@@ -342,8 +380,8 @@ pub struct Settings {
     pub quality: Option<Quality>,
     /// The frame-rate cap (the panel's rate unless chosen).
     pub frame_rate: FrameRate,
-    /// The frame-stats overlay (F3).
-    pub debug_overlay: bool,
+    /// The performance overlay (F3).
+    pub overlay: Overlay,
     /// Game seconds per real second; one of [`CLOCK_SPEEDS`].
     pub clock_speed: f32,
     /// NPC traffic and pedestrian density (a scene's `traffic=` overrides it for the session).
@@ -383,7 +421,7 @@ impl Default for Settings {
             bloom: true,
             quality: None,
             frame_rate: FrameRate::Panel,
-            debug_overlay: false,
+            overlay: Overlay::Off,
             clock_speed: 10.0,
             traffic: traffic::Density::Normal,
             minimap: true,
@@ -466,7 +504,9 @@ struct Video {
     ui_scale: f32,
     resolution_scale: f32,
     bloom: bool,
-    debug_overlay: bool,
+    /// Read only: the on/off overlay before it had modes (on is now "full").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    debug_overlay: Option<bool>,
     /// A [`Quality`] name, or "auto".
     quality: String,
     /// A [`FrameRate`] name.
@@ -480,7 +520,7 @@ impl Default for Video {
             ui_scale: s.ui_scale,
             resolution_scale: s.resolution_scale,
             bloom: s.bloom,
-            debug_overlay: s.debug_overlay,
+            debug_overlay: None,
             quality: quality_name(s.quality).to_owned(),
             frame_rate: s.frame_rate.name().to_owned(),
         }
@@ -498,6 +538,8 @@ struct HudSection {
     minimap: bool,
     minimap_rotate: bool,
     minimap_range_m: f32,
+    /// An [`Overlay`] name; absent in documents older than the modes.
+    overlay: Option<String>,
 }
 
 impl Default for HudSection {
@@ -507,6 +549,7 @@ impl Default for HudSection {
             minimap: s.minimap,
             minimap_rotate: s.minimap_rotate,
             minimap_range_m: s.minimap_range_m,
+            overlay: None,
         }
     }
 }
@@ -633,7 +676,7 @@ impl Settings {
                 ui_scale: self.ui_scale,
                 resolution_scale: self.resolution_scale,
                 bloom: self.bloom,
-                debug_overlay: self.debug_overlay,
+                debug_overlay: None,
                 quality: quality_name(self.quality).to_owned(),
                 frame_rate: self.frame_rate.name().to_owned(),
             },
@@ -641,6 +684,7 @@ impl Settings {
                 minimap: self.minimap,
                 minimap_rotate: self.minimap_rotate,
                 minimap_range_m: self.minimap_range_m,
+                overlay: Some(self.overlay.name().to_owned()),
             },
             "world": World {
                 clock_speed: self.clock_speed,
@@ -698,7 +742,11 @@ impl Settings {
             bloom: video.bloom,
             quality: Quality::from_name(&video.quality),
             frame_rate: FrameRate::from_name(&video.frame_rate).unwrap_or_default(),
-            debug_overlay: video.debug_overlay,
+            overlay: match hud.overlay.as_deref() {
+                Some(name) => Overlay::from_name(name).unwrap_or_default(),
+                None if video.debug_overlay == Some(true) => Overlay::Full,
+                None => Overlay::Off,
+            },
             clock_speed: world.clock_speed,
             traffic: density_from_name(&world.traffic).unwrap_or(d.traffic),
             minimap: hud.minimap,
@@ -738,7 +786,7 @@ mod tests {
             bloom: false,
             quality: Some(Quality::Low),
             frame_rate: FrameRate::Third,
-            debug_overlay: true,
+            overlay: Overlay::Fps,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
             minimap: false,
@@ -936,6 +984,50 @@ mod tests {
         );
         assert_eq!(Quality::Battery.frame_rate(), Some(FrameRate::Half));
         assert_eq!(Quality::Deck.frame_rate(), None);
+    }
+
+    #[test]
+    fn overlay_modes_cycle_and_round_trip() {
+        assert_eq!(Settings::default().overlay, Overlay::Off);
+        let mut o = Overlay::Off;
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen.push(o);
+            o = o.next();
+        }
+        assert_eq!(
+            seen,
+            [Overlay::Off, Overlay::Fps, Overlay::Full, Overlay::Off]
+        );
+        let b = Bindings::default();
+        for overlay in Overlay::ALL {
+            let s = Settings {
+                overlay,
+                ..Settings::default()
+            };
+            let json = s.to_json(&b);
+            assert!(json.contains(&format!("\"overlay\": \"{}\"", overlay.name())));
+            assert!(
+                !json.contains("debug_overlay"),
+                "the old switch is not written"
+            );
+            assert_eq!(Settings::from_json(&json).0, s);
+        }
+        let read = |json| Settings::from_json(json).0.overlay;
+        assert_eq!(read(r#"{ "hud": { "overlay": "loud" } }"#), Overlay::Off);
+        // Documents from before the modes: the old switch on is the full overlay.
+        assert_eq!(
+            read(r#"{ "video": { "debug_overlay": true } }"#),
+            Overlay::Full
+        );
+        assert_eq!(
+            read(r#"{ "video": { "debug_overlay": false } }"#),
+            Overlay::Off
+        );
+        assert_eq!(
+            read(r#"{ "video": { "debug_overlay": true }, "hud": { "overlay": "fps" } }"#),
+            Overlay::Fps
+        );
     }
 
     #[test]

@@ -495,13 +495,18 @@ fn hud_shows_speed_time_and_the_overlay() {
     assert!(mph > 5.0, "{mph}");
     assert!(h.hud_text().contains(&format!("{mph:.0}")));
 
-    // F3 toggles the overlay, which shows the renderer's counters and a frame graph.
+    // F3 cycles the overlay: the frame rate alone, then the renderer's counters and a
+    // frame graph, then nothing.
     h.app.set_render_stats(RenderStats {
         backend: "WebGL2",
         draw_calls: 123,
         instances: 45,
         ..RenderStats::default()
     });
+    h.key(Key::F3);
+    assert_eq!(h.app.settings().overlay, Overlay::Fps);
+    let text = h.hud_text();
+    assert!(text.contains("60.0") && !text.contains("draws"), "{text}");
     h.key(Key::F3);
     let text = h.hud_text();
     assert!(text.contains("WebGL2  draws 123"), "{text}");
@@ -518,9 +523,155 @@ fn hud_shows_speed_time_and_the_overlay() {
         .filter(|i| matches!(i, render::HudItem::Rect { .. }))
         .count();
     assert!(rects >= FRAME_HISTORY, "graph bars: {rects}");
-    assert!(h.app.settings().debug_overlay);
+    assert_eq!(h.app.settings().overlay, Overlay::Full);
     h.key(Key::F3);
-    assert!(!h.hud_text().contains("draws"));
+    assert_eq!(h.app.settings().overlay, Overlay::Off);
+    let text = h.hud_text();
+    assert!(!text.contains("draws") && !text.contains("60.0"), "{text}");
+}
+
+#[test]
+fn the_overlay_mode_persists_and_is_on_the_hud_page() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    h.key(Key::F3);
+    let saved = store.0.borrow().clone().expect("saved");
+    assert_eq!(Settings::from_json(&saved).0.overlay, Overlay::Fps);
+    let mut again = Harness::with_store(&store);
+    assert_eq!(again.app.settings().overlay, Overlay::Fps);
+    // Settings › HUD offers the same three, in cycle order.
+    again.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    again.focus_on(ItemId::DebugOverlay);
+    let item = again.item(again.focus());
+    assert_eq!(
+        item.widget,
+        Widget::Choice {
+            options: &pages::OVERLAY_NAMES,
+            index: 1
+        }
+    );
+    again.pad(PadButton::DpadRight);
+    assert_eq!(again.app.settings().overlay, Overlay::Full);
+    again.pad(PadButton::Start);
+    let saved = store.0.borrow().clone().expect("saved");
+    assert_eq!(Settings::from_json(&saved).0.overlay, Overlay::Full);
+}
+
+/// The overlay's own words in the HUD: the full one's counters, or the FPS one's number.
+fn overlay_shown(h: &Harness) -> Option<Overlay> {
+    let text = h.hud_text();
+    if text.contains("steps/frame") {
+        Some(Overlay::Full)
+    } else if text.contains("60.0") {
+        Some(Overlay::Fps)
+    } else {
+        None
+    }
+}
+
+#[test]
+fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
+    let mut h = Harness::new();
+    h.app.ui.settings_mut().overlay = Overlay::Full;
+    h.frame();
+    assert_eq!(overlay_shown(&h), Some(Overlay::Full));
+    // The pause page, the vehicle select page, the settings page and each page under it.
+    let mut paths = vec![
+        vec![],
+        vec![ItemId::Open(Page::Vehicle)],
+        vec![ItemId::Open(Page::Settings)],
+    ];
+    let mut items = Vec::new();
+    pages::build(
+        Page::Settings,
+        &h.app.ui.page_ctx(&h.app.time.clock),
+        &mut items,
+    );
+    for item in &items {
+        if let Widget::Submenu(page) = item.widget {
+            paths.push(vec![ItemId::Open(Page::Settings), ItemId::Open(page)]);
+        }
+    }
+    assert!(paths.len() > 8, "{}", paths.len());
+    for path in &paths {
+        h.open(path);
+        assert!(h.app.menu_open());
+        assert_eq!(overlay_shown(&h), None, "under {path:?}");
+        h.pad(PadButton::Start);
+        assert!(!h.app.menu_open());
+        assert_eq!(overlay_shown(&h), Some(Overlay::Full), "after {path:?}");
+        assert_eq!(h.app.settings().overlay, Overlay::Full, "mode kept");
+    }
+    h.key(Key::KeyM);
+    assert!(h.app.ui().full_map_open());
+    assert_eq!(overlay_shown(&h), None, "under the map");
+    h.key(Key::KeyM);
+    assert_eq!(overlay_shown(&h), Some(Overlay::Full), "after the map");
+
+    // F3 under a menu cycles the saved mode, which shows once the menu closes.
+    h.open(&[ItemId::Open(Page::Settings)]);
+    h.key(Key::F3);
+    assert_eq!(h.app.settings().overlay, Overlay::Off);
+    h.key(Key::F3);
+    assert_eq!(h.app.settings().overlay, Overlay::Fps);
+    assert_eq!(overlay_shown(&h), None);
+    h.pad(PadButton::Start);
+    assert_eq!(overlay_shown(&h), Some(Overlay::Fps));
+}
+
+/// The HUD's quads as rectangles in target pixels on a `target`-sized screen.
+fn quad_rects(hud: &render::Hud, target: (u32, u32)) -> Vec<[f32; 4]> {
+    let layout = HudLayout::new(target, hud.ui_scale);
+    hud.items
+        .iter()
+        .map(|item| match *item {
+            render::HudItem::Text {
+                x, y, scale, text, ..
+            } => {
+                let w = render::font::text_width(hud.str(text)) as f32 * scale;
+                [x, y, w, render::font::LINE_HEIGHT as f32 * scale]
+            }
+            render::HudItem::Rect { x, y, w, h, .. } => [x, y, w, h],
+            render::HudItem::Image(m) => [m.x, m.y, m.w, m.h],
+        })
+        .map(|[x, y, w, h]| {
+            let [x0, y0] = layout.to_pixels(x, y);
+            let [x1, y1] = layout.to_pixels(x + w, y + h);
+            [x0, y0, x1, y1]
+        })
+        .collect()
+}
+
+#[test]
+fn the_fps_corner_overlaps_no_other_hud_quad() {
+    let overlaps =
+        |a: [f32; 4], b: [f32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    for scale in [1.0, 2.0] {
+        let mut h = Harness::new();
+        h.app.ui.settings_mut().ui_scale = scale;
+        // A toast over the minimap, the clock and the speed are all up.
+        h.app.ui.car_reset();
+        h.frame();
+        let driving = h.app.ui().hud().items.len();
+        assert!(h.app.ui().toast().is_some());
+        h.app.ui.settings_mut().overlay = Overlay::Fps;
+        h.frame();
+        let hud = h.app.ui().hud();
+        assert_eq!(hud.items.len(), driving + 2, "the number and its shadow");
+        // The Deck's 16:10 panel and a 1080p TV.
+        for target in [(1280, 800), (1920, 1080)] {
+            let rects = quad_rects(&hud, target);
+            let (others, fps) = rects.split_at(driving);
+            for (i, f) in fps.iter().enumerate() {
+                for (j, o) in others.iter().enumerate() {
+                    assert!(
+                        !overlaps(*f, *o),
+                        "fps quad {i} {f:?} over HUD quad {j} {o:?} at {scale}x {target:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

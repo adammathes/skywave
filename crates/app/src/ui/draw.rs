@@ -19,7 +19,7 @@ use super::names::{self, action_label, device_label, device_noun};
 use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
-use crate::settings::{FrameRate, Quality};
+use crate::settings::{FrameRate, Overlay, Quality};
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -242,8 +242,13 @@ impl Ui {
         } else {
             self.draw_driving(&mut hud, ctx);
         }
-        if self.settings.debug_overlay {
-            self.draw_overlay(&mut hud, ctx);
+        // Menus and the map hide the overlay (it would sit over them) and keep its mode.
+        if self.menu.is_none() && !self.map.full.open {
+            match self.settings.overlay {
+                Overlay::Off => {}
+                Overlay::Fps => self.draw_fps(&mut hud),
+                Overlay::Full => self.draw_overlay(&mut hud, ctx),
+            }
         }
         self.hud = hud;
     }
@@ -898,6 +903,30 @@ impl Ui {
         );
     }
 
+    /// The average frame time over [`FRAME_HISTORY`] frames (skipping empty slots), the
+    /// frame rate it makes and the slowest frame, ms.
+    fn frame_stats(&self) -> (f32, f32, f32) {
+        let (mut sum, mut n, mut max) = (0.0f32, 0u32, 0.0f32);
+        for &ms in self.frame_ms.iter().filter(|&&ms| ms > 0.0) {
+            sum += ms;
+            n += 1;
+            max = max.max(ms);
+        }
+        let avg = if n > 0 { sum / n as f32 } else { 0.0 };
+        let fps = if avg > 0.0 { 1000.0 / avg } else { 0.0 };
+        (avg, fps, max)
+    }
+
+    /// The FPS overlay: the frame rate alone, in the top left corner of the safe area,
+    /// which the driving HUD leaves empty (clock top right, speed bottom right, minimap
+    /// and toasts bottom left, station toast top center).
+    fn draw_fps(&self, hud: &mut HudBuilder) {
+        let [sx, sy, _, _] = hud.safe_rect();
+        let (_, fps, _) = self.frame_stats();
+        hud.text_fmt(sx + 2.0, sy + 2.0, 2.0, SHADOW, format_args!("{fps:.1}"));
+        hud.text_fmt(sx, sy, 2.0, TEXT, format_args!("{fps:.1}"));
+    }
+
     fn draw_overlay(&self, hud: &mut HudBuilder, ctx: &DrawCtx) {
         let [sx, sy, _, _] = hud.safe_rect();
         let s = 2.0;
@@ -917,14 +946,7 @@ impl Ui {
 
         let samples =
             || (0..FRAME_HISTORY).map(|i| self.frame_ms[(self.frame_head + i) % FRAME_HISTORY]);
-        let (mut sum, mut n, mut max) = (0.0f32, 0u32, 0.0f32);
-        for ms in samples().filter(|&ms| ms > 0.0) {
-            sum += ms;
-            n += 1;
-            max = max.max(ms);
-        }
-        let avg = if n > 0 { sum / n as f32 } else { 0.0 };
-        let fps = if avg > 0.0 { 1000.0 / avg } else { 0.0 };
+        let (avg, fps, max) = self.frame_stats();
         hud.text_fmt(
             sx,
             sy,
