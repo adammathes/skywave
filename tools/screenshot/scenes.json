@@ -39,6 +39,14 @@
     "about": "The procedural coast's strip at night from the near chase camera, headlights on: sodium lamps with coronas, neon sign bands and blade signs, shop fills on the walks.",
     "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-near", "t": "22:30", "lights": "1", "still": "1", "stream": "1" }
   },
+  "coast-traffic-night": {
+    "about": "Busy NPC traffic at the signalized strip junction of coast-traffic-noon at night, headlights on, from the mid chase camera waiting at the stop line: NPC low beams with coronas, glowing lamps (traffic warmed up 20 s before the frame).",
+    "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-mid", "t": "22:30", "lights": "1", "pos": "477.5,1001.2", "yaw": "347", "traffic": "busy", "still": "1", "stream": "1" }
+  },
+  "coast-traffic-dusk-chase": {
+    "about": "Busy NPC traffic on the coast highway at dusk from the mid chase camera, in the outer eastbound lane heading inland (traffic warmed up 20 s before the frame).",
+    "params": { "seed": "1", "place": "coast", "car": "corsair_gtx", "cam": "chase-mid", "t": "18:30", "lights": "1", "pos": "1290.2,1627.7", "yaw": "91.6", "traffic": "busy", "still": "1", "stream": "1" }
+  },
   "vehicle-select": {
     "about": "The pause menu's Vehicle page at golden hour: the Regent on the turntable beside the panel, its paint swatches and specs.",
     "params": { "menu": "vehicle", "car": "regent_coupe_cabrio", "t": "17:40", "still": "1", "stream": "0" }
