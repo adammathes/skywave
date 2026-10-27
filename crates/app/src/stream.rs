@@ -436,7 +436,7 @@ impl StreamBudget {
     /// 9×9 chunks, 2 ms a step; a pool for 4.96M vertices, 208 MB of buffers. With its
     /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
     /// stroke-lettered signs and the light tiles its street lamps cut, the coast's densest
-    /// 11×11 chunks (the ring and the chunks waiting to be evicted) take 1101 pages of 4096
+    /// 11×11 chunks (the ring and the chunks waiting to be evicted) take 1100 pages of 4096
     /// vertices on seed 1; this is 1211, a tenth more (trees, cars, lamps and small
     /// furniture are instances, outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
@@ -444,12 +444,12 @@ impl StreamBudget {
         step_budget_s: 0.002,
         pool_vertices: 4_960_000,
     };
-    /// 13×13 chunks, 4 ms a step; 6.63M vertices, 279 MB: room for the whole coast (1471
-    /// pages on seed 1) and a tenth more, 1619.
+    /// 13×13 chunks, 4 ms a step; 6.62M vertices, 278 MB: room for the whole coast (1470
+    /// pages on seed 1) and a tenth more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         step_budget_s: 0.004,
-        pool_vertices: 6_630_000,
+        pool_vertices: 6_620_000,
     };
 
     /// Chunks resident at most: the ring, and the ring one chunk out where chunks wait to
