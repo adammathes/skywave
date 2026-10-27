@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 use place::{BuildingUse, Place, PropKind, RoadClass, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::hash64;
 
-use crate::lanes::{lane_width, raw_line, Control, LaneGraph, NONE};
+use crate::lanes::{bezier, lane_width, raw_line, Control, LaneGraph, CURVE_STEPS, NONE};
 use crate::math::{dir, dist2, dot, len2, right, sin_cos, unit2};
 use crate::signal::Light;
 
@@ -196,8 +196,9 @@ pub struct WalkGraph {
     pub cell_links: Vec<u32>,
     pub cell_spot_start: Vec<u32>,
     pub cell_spots: Vec<u32>,
-    /// The lanes' painted bands, for [`WalkGraph::in_lane`].
+    /// The lanes' painted bands, for [`WalkGraph::in_lane`], and their turn curves.
     lane_cover: Cover,
+    turn_cover: Cover,
 }
 
 /// A road end at a node, as `world::roads` sees it.
@@ -897,12 +898,27 @@ impl WalkGraph {
                 n.link_count += 1;
             }
         }
+        // People keep out of the turn curves too, each as wide as the lane it leaves (the
+        // walks and crossings above are laid off the lanes alone: a few tight turns cut
+        // over a curb return, where the corner's walk still runs).
+        let mut turn_segs = Vec::with_capacity(lanes.turns.len() * CURVE_STEPS);
+        for t in &lanes.turns {
+            let lane = &lanes.lanes[t.from as usize];
+            let half = 0.5 * lane_width(&edges[lane.edge as usize], lane.forward);
+            let mut prev = t.curve[0];
+            for k in 1..=CURVE_STEPS {
+                let q = bezier(&t.curve, k as f32 / CURVE_STEPS as f32);
+                turn_segs.push((prev, q, half, t.from));
+                prev = q;
+            }
+        }
         let mut g = WalkGraph {
             nodes,
             adj,
             links: b.links,
             crossings,
             lane_cover,
+            turn_cover: Cover::new(&turn_segs, 0.0),
             ..WalkGraph::default()
         };
         g.grid();
@@ -1026,17 +1042,30 @@ impl WalkGraph {
             + self.spots.len() * size_of::<Spot>()
             + self.lane_cover.start.len() * 4
             + self.lane_cover.segs.len() * size_of::<CoverSeg>()
+            + self.turn_cover.start.len() * 4
+            + self.turn_cover.segs.len() * size_of::<CoverSeg>()
     }
 
     /// Whether `p` is inside a lane's painted band, at its level (where the lane graph's
     /// lanes and the world's road ends differ near a junction, a walk's edge can be).
     pub fn in_lane(&self, p: [f32; 3]) -> bool {
-        self.lane_cover.near(p).iter().any(|&(s0, s1, half, _)| {
-            let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
-            let y = s0[1] + (s1[1] - s0[1]) * t;
-            d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
-        })
+        in_band(&self.lane_cover, p)
     }
+
+    /// [`Self::in_lane`], or inside a turn curve's band (as wide as the lane it leaves): a
+    /// tight turn can cut over a curb return, across the corner's sidewalk.
+    pub fn in_lane_or_turn(&self, p: [f32; 3]) -> bool {
+        self.in_lane(p) || in_band(&self.turn_cover, p)
+    }
+}
+
+/// Whether `p` is inside one of `cover`'s bands, at its level.
+fn in_band(cover: &Cover, p: [f32; 3]) -> bool {
+    cover.near(p).iter().any(|&(s0, s1, half, _)| {
+        let (d, t) = seg_dist(xz(p), xz(s0), xz(s1));
+        let y = s0[1] + (s1[1] - s0[1]) * t;
+        d < half && (p[1] - CURB_M - y).abs() < COVER_DY_M
+    })
 }
 
 /// The roads' pavement, as centerline segments with their half widths in a grid.

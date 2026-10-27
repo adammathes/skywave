@@ -62,9 +62,10 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   ad-free presets and the player's own MP3 folders as stations (`m3/music-2`, NOTES 9; no
   synthetic music, the owner declined); idle frames, frame cap, Battery preset
   (`perf/idle-and-cap`, NOTES 10a); GPU timestamps per pass and per-frame cuts
-  (`perf/gpu-time`, NOTES 10b). Pedestrian follow-up to dispatch after #24: body-radius
-  clearance, public `Pedestrian::height`, turn curves in the lane cover, chained dodges,
-  standing in the road (probe: scratchpad `pr24d-probe_round4.rs`).
+  (`perf/gpu-time`, NOTES 10b). Pedestrian follow-ups (`m4/peds-followups`): body-radius
+  clearance, public `Pedestrian::height_m`, turn curves in the lane cover, bounded dodge
+  episodes, nobody standing on a crossing beside a stopped car; the round-4 probe's cases are
+  in the breadth test (3382 runs with every crossing, all counts zero).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
