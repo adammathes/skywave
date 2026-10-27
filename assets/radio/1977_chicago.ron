@@ -1,15 +1,59 @@
-// Radio preset: 1977 Chicago. Real stations whose stream URLs the broadcasters publish for
-// listening in other players (Radio Paradise's stream links for
-// WiFi radios and other players, WFMU's playlists, the college stations' own listen links);
-// names are the stations' own. Nothing is rehosted. tools/check-streams.mjs played 5 s of
-// audio from every URL, as the published page asks for it, on the date in `terms_checked`;
-// `verified` turns true after the owner's first listen. Format: crates/audio/src/station.rs,
-// docs/AUDIO_RADIO.md.
+// Radio preset: 1977 Chicago. Ad-free stations only (docs/AUDIO_RADIO.md, "the ad-free rule"):
+// listener-supported, public and college broadcasters that publish their stream URLs for
+// listening in other players, each checked for pre-roll and mid-roll ads as its
+// `ad-free:` note says. Names are the stations' own. Nothing is rehosted.
+// tools/check-streams.mjs plays every URL as the published page asks for it (its Referer
+// and Origin) and warns about a station without an `ad-free:` note; `verified` turns true
+// after the owner's first listen. Format: crates/audio/src/station.rs.
 RadioPreset(
     id: "1977_chicago",
     title: "1977 Chicago",
     scenario: "chicago_1977",
     stations: [
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, no commercials; both mirrors, both starts: a live DJ
+        // show, talk and 45s, no spots. Terms: wfmu.org publishes wfmu_rock.pls (this
+        // https URL is in it) for any player.
+        Station(
+            id: "wfmu_rocknsoul",
+            name: "WFMU Rock'n'Soul Radio",
+            era: "1960s",
+            format: "soul, R&B and rock 'n' roll 45s",
+            source: Stream(
+                urls: [
+                    "https://stream2.wfmu.org/rocknsoul",
+                    "https://stream0.wfmu.org/rocknsoul",
+                ],
+                homepage: "https://wfmu.org/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // volunteer-run and donation-supported; music from the first second both
+        // times, ICY titles are track credits. Terms: the channel page publishes this URL
+        // and lists outside player apps; no terms forbid it.
+        Station(
+            id: "intergalactic_disco",
+            name: "Intergalactic FM Disco Fetish",
+            era: "1970s",
+            format: "disco, boogie and soul",
+            source: Stream(
+                urls: ["https://radio.intergalactic.fm/2A"],
+                homepage: "https://www.intergalactic.fm/channels/disco-fetish",
+                codec: Aac,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // public radio (College of DuPage), listener-supported; music from the
+        // first second both times, no spots. Its own web player once served sponsor spots
+        // (old text on the support page); the direct stream inserts none. Terms: the
+        // support page points players at this stream.
         Station(
             id: "wdcb",
             name: "WDCB 90.9 FM",
@@ -24,6 +68,9 @@ RadioPreset(
                 verified: false,
             ),
         ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // non-commercial college station (UChicago); music both times, no
+        // spots. Terms: whpk.org links this stream; nothing forbids other players.
         Station(
             id: "whpk",
             name: "WHPK 88.5 FM",
@@ -38,23 +85,9 @@ RadioPreset(
                 verified: false,
             ),
         ),
-        Station(
-            id: "wfmu_rocknsoul",
-            name: "WFMU Rock'n'Soul Radio",
-            era: "1960s",
-            format: "soul, R&B and rock 'n' roll 45s",
-            source: Stream(
-                urls: [
-                    "https://stream2.wfmu.org/rocknsoul",
-                    "https://stream0.wfmu.org/rocknsoul",
-                ],
-                homepage: "https://wfmu.org/listen.shtml",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, commercial-free; music from the first second both times.
+        // Terms: URLs published for WiFi radios and other players.
         Station(
             id: "radioparadise_rock",
             name: "Radio Paradise Rock Mix",
@@ -64,6 +97,24 @@ RadioPreset(
                 urls: ["https://stream.radioparadise.com/rock-128"],
                 homepage: "https://radioparadise.com/listen/stream-links",
                 codec: Aac,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-27, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // listener-supported, no commercials; music both times. Terms:
+        // wfmu.org publishes wfmu_drummer.pls for any player (http there; the same host
+        // serves it over https).
+        Station(
+            id: "wfmu_drummer",
+            name: "WFMU Give the Drummer Radio",
+            era: "mixed",
+            format: "soul, funk, jazz and world grooves",
+            source: Stream(
+                urls: ["https://stream0.wfmu.org/drummer"],
+                homepage: "https://wfmu.org/",
+                codec: Mp3,
                 bitrate_kbps: 128,
                 terms_checked: "2026-10-27",
                 verified: false,
