@@ -116,7 +116,8 @@ building, from an `Rng` keyed by the building's door pick):
   (one at most, never on one storey); a front left with no way in gets its likeliest entrance
   in the middle. A storefront bay is, bottom up, a bulkhead (`bulkhead_h`), display glass with
   thin mullions to `glass_top`, a transom bar and a transom (`transom_h`; glazed with chance
-  `transom_glass_256`, else panelled), the awning from the transom's top, then the sign band.
+  `transom_glass_256`, else panelled). A run of adjacent storefront bays is one business: one
+  awning hung from the transoms' top and one sign band above it span the run.
   On a low ground floor the glass and then the transom give way to the sign band, never below
   the entry's height. The entry (`entry`) is centred or, with chance `side_entry_256`, at one
   side, and on a building with chance `recessed_256` it is recessed by `recess` behind a floor

@@ -611,10 +611,89 @@ mod tests {
     use alloc::vec;
 
     /// The rules the planner had in code before they moved into the grammar, written the
-    /// way the code wrote them; the three-band facade's fields (B4) are copied from `now`,
-    /// as is the 4–5 m ground floor of the styles that have a base band.
-    fn former(style: StyleTag, now: &StyleRules) -> StyleRules {
+    /// way the code wrote them, plus the three-band facade's starting values (B4, from
+    /// `docs/backlog/BUILDINGS.md`). `industrial` is the entry for industrial zones.
+    fn former(style: StyleTag, industrial: bool) -> StyleRules {
         use StyleTag as S;
+        let bays = |storefront, lobby, garage, wall, door| GroundBays {
+            storefront,
+            lobby,
+            garage,
+            wall,
+            door,
+        };
+        let none = GroundBays::default();
+        let (ground_office, ground_other) = match (style, industrial) {
+            (S::StuccoBox | S::Brick, true) => {
+                let o = if style == S::Brick {
+                    bays(2, 2, 0, 2, 0)
+                } else {
+                    bays(2, 2, 0, 1, 0)
+                };
+                (o, bays(0, 0, 3, 2, 1))
+            }
+            (S::StuccoBox, _) => (bays(2, 2, 0, 1, 0), bays(6, 0, 0, 1, 1)),
+            (S::Brick, _) => (bays(2, 2, 0, 2, 0), bays(5, 0, 0, 1, 2)),
+            (S::Deco, _) => (bays(2, 3, 0, 1, 0), bays(6, 0, 0, 1, 1)),
+            _ => (none, none),
+        };
+        let (front_bay_w, pier_w, transom_glass_256, recessed_256, side_entry_256) = match style {
+            S::StuccoBox => ((5.5, 8.0), (0.35, 0.5), 64, 64, 128),
+            S::Brick => ((5.0, 7.6), (0.5, 0.7), 200, 200, 96),
+            S::Deco => ((5.5, 8.0), (0.4, 0.55), 160, 160, 64),
+            _ => ((5.5, 8.0), (0.35, 0.5), 128, 0, 128),
+        };
+        let kinds = |punched, paired, ribbon, bay, picture| WindowKinds {
+            punched,
+            paired,
+            ribbon,
+            bay,
+            picture,
+        };
+        let one = kinds(1, 0, 0, 0, 0);
+        let window_kinds = match style {
+            S::StuccoBox => ByUse {
+                residential: kinds(3, 1, 0, 0, 1),
+                office: kinds(2, 1, 2, 0, 0),
+                other: kinds(3, 2, 0, 0, 1),
+            },
+            S::Brick => ByUse {
+                residential: kinds(3, 1, 0, 1, 0),
+                office: kinds(3, 1, 0, 0, 0),
+                other: kinds(3, 2, 0, 0, 0),
+            },
+            S::Deco => ByUse {
+                residential: kinds(2, 1, 0, 0, 1),
+                office: kinds(2, 0, 1, 0, 0),
+                other: kinds(2, 0, 1, 0, 0),
+            },
+            S::Craftsman => ByUse {
+                residential: kinds(2, 1, 0, 0, 0),
+                office: one,
+                other: one,
+            },
+            S::Tract70s => ByUse {
+                residential: kinds(2, 0, 0, 0, 1),
+                office: one,
+                other: one,
+            },
+            S::Dingbat => ByUse {
+                residential: kinds(1, 0, 0, 0, 1),
+                office: one,
+                other: one,
+            },
+            _ => ByUse {
+                residential: one,
+                office: one,
+                other: one,
+            },
+        };
+        let (top_kinds, cornice_d) = match style {
+            S::StuccoBox => ((3, 1, 1), 0.3),
+            S::Brick => ((0, 1, 0), 0.24),
+            S::Deco => ((1, 0, 3), 0.2),
+            _ => ((1, 0, 0), 0.2),
+        };
         let by = |f: &dyn Fn(BuildingUse) -> f32| ByUse {
             residential: f(BuildingUse::Residential),
             office: f(BuildingUse::Office),
@@ -667,7 +746,11 @@ mod tests {
         let banded = matches!(style, S::StuccoBox | S::Brick | S::Deco);
         StyleRules {
             style,
-            zones: now.zones,
+            zones: if industrial {
+                ZoneMask::from(ZoneList::Only(vec![ZoneId::Industrial]))
+            } else {
+                ZoneMask::ALL
+            },
             massing: Massing {
                 even_floors: ByUse {
                     residential: true,
@@ -686,10 +769,23 @@ mod tests {
                     office: (2.0, 2.6),
                     other: (2.0, 2.6),
                 },
-                ground: now.base.ground,
-                front_bay_w: now.base.front_bay_w,
-                pier_w: now.base.pier_w,
-                storefront: now.base.storefront,
+                ground: ByUse {
+                    residential: none,
+                    office: ground_office,
+                    other: ground_other,
+                },
+                front_bay_w,
+                pier_w,
+                storefront: Storefront {
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3.0),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256,
+                    entry: (1.1, 2.25),
+                    recessed_256,
+                    recess: (1.0, 1.8),
+                    side_entry_256,
+                },
             },
             body: Body {
                 window: ByUse {
@@ -697,15 +793,19 @@ mod tests {
                     office: window(false),
                     other: window(false),
                 },
-                kinds: now.body.kinds,
+                kinds: window_kinds,
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             },
             top: Top {
                 parapet_h: parapet,
-                kinds: now.top.kinds,
-                cornice_d: now.top.cornice_d,
+                kinds: TopKinds {
+                    parapet: top_kinds.0,
+                    cornice: top_kinds.1,
+                    stepped: top_kinds.2,
+                },
+                cornice_d,
             },
             addenda: Addenda {
                 // `rng.range(1, 3)` and `rng.range(2, 5)` are half-open.
@@ -731,8 +831,11 @@ mod tests {
         g.validate().expect("validate");
         assert_eq!(g.era, Era::Eighties);
         assert_eq!(g.template, "california_coast");
+        // Every style once for all zones, stucco and brick again for industrial zones.
+        assert_eq!(g.styles.len(), STYLES.len() + 2);
         for r in &g.styles {
-            assert_eq!(*r, former(r.style, r), "{:?}", r.style);
+            let industrial = r.zones != ZoneMask::ALL;
+            assert_eq!(*r, former(r.style, industrial), "{:?}", r.style);
         }
         assert_eq!(g.signs.lit_box_256, 70);
         assert_eq!(g.signs.shop_lit_256, 115);

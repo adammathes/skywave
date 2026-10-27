@@ -2246,7 +2246,8 @@ fn base_band(
         match kind {
             BayKind::Storefront => {
                 storefront_bay(m, f, x0, x1, y0, y1, bp, bp.entries[k], look, signs);
-                // One sign band over each run of storefront bays: one business.
+                // One awning and one sign band over each run of storefront bays: one
+                // business.
                 let last = k + 1 == kinds.len() || kinds[k + 1] != BayKind::Storefront;
                 let first = (0..=k)
                     .rev()
@@ -2255,9 +2256,12 @@ fn base_band(
                     .unwrap_or(k);
                 let (_, tt) = storefront_heights(bp, y0, y1, signs);
                 let (sy0, sy1) = (tt + 0.12, (tt + 0.92).min(y1 - 0.12));
+                let sx0 = pier(first as u32).1;
+                if last {
+                    storefront_awning(m, f, sx0, x1, tt, look);
+                }
                 if signs && last && sy1 - sy0 > 0.35 {
-                    let sx0 = pier(first as u32).1 + 0.1;
-                    sign_band(m, f, sx0, x1 - 0.1, sy0, sy1, look, rng);
+                    sign_band(m, f, sx0 + 0.1, x1 - 0.1, sy0, sy1, look, rng);
                 }
             }
             BayKind::Wall => rect(m, f, x0, y0, x1, y1, 0.0, false, look.wall),
@@ -2296,8 +2300,8 @@ fn storefront_heights(bp: &BasePlan, y0: f32, y1: f32, signs: bool) -> (f32, f32
 }
 
 /// One storefront bay between piers, bottom up: bulkhead, display glass with mullions,
-/// transom, then the awning (the sign band over a run of them is [`base_band`]'s); the
-/// entry flush or recessed.
+/// transom (the awning and sign band over a run of them are [`base_band`]'s); the entry
+/// flush or recessed.
 #[allow(clippy::too_many_arguments)]
 fn storefront_bay(
     m: &mut WorldMesh,
@@ -2316,9 +2320,10 @@ fn storefront_bay(
     let (gt, tt) = storefront_heights(bp, y0, y1, signs);
     let bh = bp.bulkhead_h.min(gt - y0 - 1.6).max(0.2);
     rect(m, f, x0, tt, x1, y1, 0.0, false, look.wall);
-    // Shallow returns in flat shade, uncut by the wall pattern's tiles.
+    // Shallow returns in flat shade, uncut by the wall pattern's tiles, with a floor from
+    // the wall line to the glass line.
     let reveal = Paint::new(look.reveal.rgb(), Pattern::Plain);
-    inset(m, f, x0, y0, x1, tt, g, false, reveal);
+    inset(m, f, x0, y0, x1, tt, g, true, reveal);
     let ew = bp.entry.0.min((x1 - x0) * 0.45);
     let ex0 = match entry {
         0 => x0 + 0.3,
@@ -2328,7 +2333,8 @@ fn storefront_bay(
     let ex1 = ex0 + ew;
     let dt = (y0 + bp.entry.1).min(gt - 0.05);
     let bulkhead = look.plinth;
-    for (a, c) in [(x0, ex0), (ex1, x1)] {
+    // Each bulkhead closed on its side toward the entry (the reveal hides the other end).
+    for (a, c, side) in [(x0, ex0, face::POS_X), (ex1, x1, face::NEG_X)] {
         if c - a < 0.05 {
             continue;
         }
@@ -2337,7 +2343,7 @@ fn storefront_bay(
             f,
             [a, y0, -g],
             [c, y0 + bh, -g + 0.06],
-            face::POS_Y | face::POS_Z,
+            face::POS_Y | face::POS_Z | side,
             bulkhead,
         );
         rect(m, f, a, y0 + bh, c, gt, -g, false, look.shop_glass);
@@ -2437,7 +2443,11 @@ fn storefront_bay(
             look.plinth,
         );
     }
-    // The awning hangs from the transom's top, clear of heads at its valance.
+}
+
+/// The awning over a run of storefronts from `x0` to `x1`, hung from the transoms' top
+/// `tt`, clear of heads at its valance.
+fn storefront_awning(m: &mut WorldMesh, f: &Frame, x0: f32, x1: f32, tt: f32, look: &Look) {
     let (ax0, ax1) = (x0 - 0.05, x1 + 0.05);
     match look.signage.map_or(0, |s| s.awning) {
         0 => awning(m, f, ax0, ax1, tt, 1.4, 0.6, look),
