@@ -6,7 +6,12 @@
 //!
 //! Panels, left to right: front three-quarter, side, rear three-quarter, cockpit from the
 //! driver's eye. Prints triangle counts.
+//!
+//! `cargo run -p shape-preview -- --figures out.png [--seed S]` instead draws a contact
+//! sheet of twelve seeded pedestrian figures mid-stride, seventies above, eighties below
+//! (seeds `S..S + 6` in each era).
 
+mod figures;
 mod png;
 mod raster;
 
@@ -178,6 +183,9 @@ fn main() {
     let mut opts = BuildOptions::default();
     let mut view: Option<usize> = None;
     let mut zoom = 1.0f32;
+    let mut figures_out: Option<String> = None;
+    // The first of six seeds per era; from 126 the twelve wear every outfit in both eras.
+    let mut seed = 126u64;
     let mut k = 1;
     while k < args.len() {
         match args[k].as_str() {
@@ -190,6 +198,14 @@ fn main() {
                 opts.lod = args.get(k).and_then(|v| v.parse().ok()).unwrap_or(0);
             }
             "--popups" => opts.popups_up = true,
+            "--figures" => {
+                k += 1;
+                figures_out = args.get(k).cloned();
+            }
+            "--seed" => {
+                k += 1;
+                seed = args.get(k).and_then(|v| v.parse().ok()).unwrap_or(seed);
+            }
             "--view" => {
                 k += 1;
                 view = args.get(k).and_then(|v| v.parse().ok());
@@ -201,6 +217,16 @@ fn main() {
             a => pos.push(a),
         }
         k += 1;
+    }
+    if let Some(out) = figures_out {
+        let (w, h, rgb) = figures::sheet(seed, 220, 360, SS);
+        let png = png::encode(w as u32, h as u32, &rgb);
+        std::fs::write(&out, png).unwrap_or_else(|e| {
+            eprintln!("{out}: {e}");
+            std::process::exit(1);
+        });
+        println!("wrote {out} ({w}x{h})");
+        return;
     }
     if pos.len() != 2 {
         eprintln!("usage: shape-preview <spec.shape.ron> <out.png> [--color N] [--lod L] [--popups] [--view 0-3] [--zoom Z]");
@@ -287,6 +313,26 @@ mod tests {
                 differ * 2 > total,
                 "panel {k}: {differ}/{total} pixels show the car"
             );
+        }
+    }
+
+    #[test]
+    fn renders_a_contact_sheet_of_figures() {
+        let (pw, ph) = (40, 64);
+        let (w, h, rgb) = figures::sheet(126, pw, ph, 1);
+        assert_eq!((w, h), (pw * figures::COLS, ph * 2));
+        // Every panel shows a figure: its middle column differs from the sky beside it.
+        for row in 0..2 {
+            for col in 0..figures::COLS {
+                let px = |x: usize, y: usize| {
+                    let o = ((row * ph + y) * w + col * pw + x) * 3;
+                    [rgb[o], rgb[o + 1], rgb[o + 2]]
+                };
+                let differ = (ph / 6..ph / 2)
+                    .filter(|&y| px(pw / 2, y) != px(2, y))
+                    .count();
+                assert!(differ > ph / 8, "panel {row},{col}: {differ}");
+            }
         }
     }
 }
