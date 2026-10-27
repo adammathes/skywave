@@ -1859,7 +1859,7 @@ impl Traffic {
                     f(c.yaw) | f(c.spin) << 32,
                     u64::from(c.hold),
                     f(c.room[0]) | f(c.room[1]) << 32,
-                    u64::from(f(c.room[2])),
+                    f(c.room[2]),
                 ];
                 h = hash64(h, &w);
             }
