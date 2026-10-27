@@ -10,7 +10,7 @@
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
 //!              "frame_rate": "panel" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0,
-//!            "overlay": "off" },
+//!            "overlay": "off", "controls_at_start": true, "controls_dismissed": 0 },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal", "scenario": "socal_beach_1984" },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
 //!              "mute_radio_unfocused": false },
@@ -399,6 +399,11 @@ pub struct Settings {
     pub minimap_rotate: bool,
     /// Meters across the minimap; one of [`MINIMAP_RANGES_M`].
     pub minimap_range_m: f32,
+    /// The controls card shows for a few seconds when a game starts.
+    pub controls_at_start: bool,
+    /// Sessions in which the player dismissed the card shown at the start; at
+    /// [`CONTROLS_DISMISSALS`] it stops showing there.
+    pub controls_dismissed: u32,
     /// Sound volumes, `[0, 1]`: everything, the engine, the world (tires, wind, ambience).
     pub master_volume: f32,
     pub engine_volume: f32,
@@ -436,6 +441,8 @@ impl Default for Settings {
             minimap: true,
             minimap_rotate: true,
             minimap_range_m: MINIMAP_RANGES_M[DEFAULT_MINIMAP_RANGE],
+            controls_at_start: true,
+            controls_dismissed: 0,
             master_volume: 0.8,
             engine_volume: 0.8,
             world_volume: 0.8,
@@ -447,6 +454,8 @@ impl Default for Settings {
 }
 
 pub const UI_SCALE_STEP: f32 = 0.25;
+/// Sessions with the start card dismissed after which it no longer shows at the start.
+pub const CONTROLS_DISMISSALS: u32 = 3;
 pub const RESOLUTION_SCALE_MIN: f32 = 0.5;
 pub const RESOLUTION_SCALE_STEP: f32 = 0.05;
 pub const VOLUME_STEP: f32 = 0.05;
@@ -560,6 +569,8 @@ struct HudSection {
     minimap_range_m: f32,
     /// An [`Overlay`] name; absent in documents older than the modes.
     overlay: Option<String>,
+    controls_at_start: bool,
+    controls_dismissed: u32,
 }
 
 impl Default for HudSection {
@@ -570,6 +581,8 @@ impl Default for HudSection {
             minimap_rotate: s.minimap_rotate,
             minimap_range_m: s.minimap_range_m,
             overlay: None,
+            controls_at_start: s.controls_at_start,
+            controls_dismissed: s.controls_dismissed,
         }
     }
 }
@@ -687,6 +700,7 @@ impl Settings {
             world_volume: fix(self.world_volume, 0.0, 1.0, d.world_volume),
             clock_speed: speed,
             minimap_range_m: range,
+            controls_dismissed: self.controls_dismissed.min(CONTROLS_DISMISSALS),
             radio: self.radio.sanitized(),
             ..self
         }
@@ -717,6 +731,8 @@ impl Settings {
                 minimap_rotate: self.minimap_rotate,
                 minimap_range_m: self.minimap_range_m,
                 overlay: Some(self.overlay.name().to_owned()),
+                controls_at_start: self.controls_at_start,
+                controls_dismissed: self.controls_dismissed,
             },
             "world": World {
                 clock_speed: self.clock_speed,
@@ -787,6 +803,8 @@ impl Settings {
             minimap: hud.minimap,
             minimap_rotate: hud.minimap_rotate,
             minimap_range_m: hud.minimap_range_m,
+            controls_at_start: hud.controls_at_start,
+            controls_dismissed: hud.controls_dismissed,
             master_volume: audio.master,
             engine_volume: audio.engine,
             world_volume: audio.world,
@@ -829,6 +847,8 @@ mod tests {
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,
+            controls_at_start: false,
+            controls_dismissed: 2,
             master_volume: 0.5,
             engine_volume: 0.25,
             world_volume: 1.0,
@@ -868,7 +888,8 @@ mod tests {
         let (s, b) = Settings::from_json(
             r#"{ "video": { "ui_scale": 7, "bloom": false, "extra": 1 },
                  "world": { "clock_speed": 12, "scenario": "atlantis" }, "input": 5, "radio": {},
-                 "hud": { "minimap_rotate": false, "minimap_range_m": 120 },
+                 "hud": { "minimap_rotate": false, "minimap_range_m": 120,
+                          "controls_dismissed": 40 },
                  "drive": { "handling": "light" },
                  "camera": { "mode": "orbit", "cockpit_fov_deg": 120, "seat_height_cm": -9,
                              "seat_forward_cm": 4 },
@@ -887,6 +908,7 @@ mod tests {
                 clock_speed: 10.0,
                 minimap_rotate: false,
                 minimap_range_m: 100.0,
+                controls_dismissed: CONTROLS_DISMISSALS,
                 master_volume: 1.0,
                 engine_volume: 0.0,
                 mute: true,

@@ -50,15 +50,15 @@ pub struct RadioDisplay {
     pub color: [u8; 4],
 }
 
-const TEXT: [u8; 4] = [238, 234, 222, 255];
-const DIM: [u8; 4] = [150, 158, 176, 255];
-const ACCENT: [u8; 4] = [255, 178, 62, 255];
+pub(super) const TEXT: [u8; 4] = [238, 234, 222, 255];
+pub(super) const DIM: [u8; 4] = [150, 158, 176, 255];
+pub(super) const ACCENT: [u8; 4] = [255, 178, 62, 255];
 const ON_ACCENT: [u8; 4] = [26, 18, 8, 255];
 const GOOD: [u8; 4] = [128, 222, 150, 255];
-const PANEL: [u8; 4] = [12, 16, 28, 246];
+pub(super) const PANEL: [u8; 4] = [12, 16, 28, 246];
 const DIALOG: [u8; 4] = [24, 30, 50, 250];
-const SHADE: [u8; 4] = [0, 0, 0, 110];
-const RULE: [u8; 4] = [60, 68, 92, 255];
+pub(super) const SHADE: [u8; 4] = [0, 0, 0, 110];
+pub(super) const RULE: [u8; 4] = [60, 68, 92, 255];
 const TRACK: [u8; 4] = [62, 70, 94, 255];
 const SHADOW: [u8; 4] = [0, 0, 0, 170];
 const GRAPH_OK: [u8; 4] = [110, 210, 130, 230];
@@ -112,7 +112,7 @@ const CARD: [u8; 4] = [30, 36, 56, 255];
 /// A stub world's still is greyed.
 const STUB_TINT: [u8; 4] = [120, 120, 128, 255];
 
-fn width(text: &str, scale: f32) -> f32 {
+pub(super) fn width(text: &str, scale: f32) -> f32 {
     font::text_width(text) as f32 * scale
 }
 
@@ -151,7 +151,7 @@ fn text_center(
     hud.shift_last(-w * 0.5);
 }
 
-struct BindingName<'a>(&'a Binding);
+pub(super) struct BindingName<'a>(pub(super) &'a Binding);
 
 impl Display for BindingName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -248,16 +248,21 @@ impl Ui {
     pub(super) fn draw(&mut self, ctx: &DrawCtx) {
         let mut hud = std::mem::take(&mut self.hud);
         hud.begin(self.settings.ui_scale);
-        if self.menu.is_some() {
+        let controls = self.controls_up();
+        if controls {
+            self.stage = None;
+            self.draw_controls(&mut hud);
+        } else if self.menu.is_some() {
             self.draw_menu(&mut hud);
         } else if self.map.full.open {
             self.draw_full_map(&mut hud, ctx);
         } else {
             self.draw_driving(&mut hud, ctx);
         }
-        // Menus and the map hide the overlay (it would sit over them) and keep its mode; so
-        // does the background, where frames are slow on purpose and should stay Skip.
-        if self.menu.is_none() && !self.map.full.open && self.focused {
+        // Menus, the map and the controls card hide the overlay (it would sit over them) and
+        // keep its mode; so does the background, where frames are slow on purpose and should
+        // stay Skip.
+        if self.menu.is_none() && !self.map.full.open && !controls && self.focused {
             match self.settings.overlay {
                 Overlay::Off => {}
                 Overlay::Fps => self.draw_fps(&mut hud),

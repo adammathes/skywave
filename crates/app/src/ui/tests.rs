@@ -200,6 +200,9 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     let mut expected = Vec::new();
     reachable(Page::Pause, &h.app, &mut expected);
     assert_eq!(visited, expected);
+    // The pause menu's Controls item among them.
+    let controls = h.ui().items().iter().position(|i| i.id == ItemId::Controls);
+    assert!(visited.contains(&(Page::Pause, controls.expect("Controls item"))));
     // Pause, Settings, Controls, 2 × (device, bindings, axes, 8 axes), Video, World, About.
     let mut pages: Vec<Page> = visited.iter().map(|v| v.0).collect();
     pages.dedup();
@@ -256,8 +259,10 @@ fn invert_y_toggle_flips_gamepad_look_and_persists() {
     assert!(h.input.state().axis(Action::FlyLookY) < -0.5);
     h.input.axis(RawInput::PadAxis(PadAxis::RightY), 0.0);
 
-    // Leaving the menu saves; the JSON round-trips into a fresh app and its mapper.
-    assert!(store.load().is_none());
+    // Leaving the menu saves (until then only the start card's dismissal was); the JSON
+    // round-trips into a fresh app and its mapper.
+    let early = store.load().and_then(|t| Settings::from_json(&t).1);
+    assert!(early.is_none_or(|b| !b.axis_options(pad, Action::LookY).invert));
     h.pad(PadButton::Start);
     assert!(!h.app.menu_open());
     let saved = store.load().expect("saved on close");
@@ -1164,7 +1169,7 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     let idle = p.engine.rpm;
     // Throttle revs it; the horn key sounds the horn.
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 1.0);
-    h.input.press(RawInput::Key(Key::KeyH));
+    h.input.press(RawInput::Key(Key::KeyB));
     for _ in 0..60 {
         h.frame();
     }
@@ -1175,7 +1180,7 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     );
     assert!(p.horn && p.speed_mps > 1.0);
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
-    h.input.release(RawInput::Key(Key::KeyH));
+    h.input.release(RawInput::Key(Key::KeyB));
     // Audio page: the master volume down a step, mute on; a menu pauses the sound.
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
     assert!(h.app.audio_params().paused);
@@ -2314,6 +2319,8 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         h.app.settings(),
         &Settings {
             scenario: Some("inland_basin_2001"),
+            // The first press dismissed the start's controls card, once for both worlds.
+            controls_dismissed: 1,
             ..settings
         }
     );
@@ -2377,3 +2384,5 @@ fn the_vehicle_page_lists_this_worlds_cars() {
     }
     assert_eq!(browsed(&h), (0, 0));
 }
+
+mod controls;

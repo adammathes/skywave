@@ -262,7 +262,7 @@ impl Bindings {
 
     /// The first other action in `action`'s context, on the binding's device, that already
     /// reads the same input.
-    fn find_conflict(&self, action: Action, binding: &Binding) -> Option<Action> {
+    pub(super) fn find_conflict(&self, action: Action, binding: &Binding) -> Option<Action> {
         let device = binding.raw.device();
         Action::ALL.iter().copied().find(|&other| {
             other != action
@@ -392,7 +392,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioOff => vec![key(Key::Backslash, Pos)],
             Action::Headlights => vec![key(Key::KeyL, Pos)],
             Action::HighBeams => vec![key(Key::KeyK, Pos)],
-            Action::Horn => vec![key(Key::KeyH, Pos)],
+            Action::Horn => vec![key(Key::KeyB, Pos)],
             Action::VehicleNext => vec![key(Key::KeyV, Pos)],
             Action::Reset => vec![key(Key::KeyR, Pos)],
             Action::MapToggle => vec![key(Key::KeyM, Pos)],
@@ -401,6 +401,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Pause => vec![key(Key::Escape, Pos)],
             Action::Screenshot => vec![key(Key::F12, Pos)],
             Action::DebugOverlay => vec![key(Key::F3, Pos)],
+            Action::Controls => vec![key(Key::KeyH, Pos), key(Key::F1, Pos)],
             Action::MenuUp => vec![key(Key::ArrowUp, Pos)],
             Action::MenuDown => vec![key(Key::ArrowDown, Pos)],
             Action::MenuLeft => vec![key(Key::ArrowLeft, Pos)],
@@ -445,6 +446,8 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
                 vec![axis(PadAxis::RightX, Full).while_held(RawInput::PadButton(PadButton::Select))]
             }
             Action::Pause => vec![btn(PadButton::Start)],
+            // Held, so a tap stays the pause menu.
+            Action::Controls => vec![btn(PadButton::Start).held_long()],
             Action::Screenshot | Action::DebugOverlay => vec![],
             Action::MenuUp => vec![btn(PadButton::DpadUp), axis(PadAxis::LeftY, Neg)],
             Action::MenuDown => vec![btn(PadButton::DpadDown), axis(PadAxis::LeftY, Pos)],
@@ -500,7 +503,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 21] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 22] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -567,7 +570,7 @@ mod tests {
                 vec![K(Key::KeyK)],
                 vec![B(PadButton::DpadUp)],
             ),
-            (Action::Horn, vec![K(Key::KeyH)], vec![B(PadButton::L3)]),
+            (Action::Horn, vec![K(Key::KeyB)], vec![B(PadButton::L3)]),
             (Action::VehicleNext, vec![K(Key::KeyV)], vec![]),
             (
                 Action::Reset,
@@ -591,6 +594,11 @@ mod tests {
             ),
             (Action::Screenshot, vec![K(Key::F12)], vec![]),
             (Action::DebugOverlay, vec![K(Key::F3)], vec![]),
+            (
+                Action::Controls,
+                vec![K(Key::KeyH), K(Key::F1)],
+                vec![B(PadButton::Start)],
+            ),
         ];
         for (action, keys, pads) in table {
             assert_eq!(raws(kb, action), keys, "{action:?} keyboard");
@@ -609,6 +617,8 @@ mod tests {
             Some(RawInput::PadButton(PadButton::Select))
         );
         assert_eq!(b.get(pad, Action::LookX)[0].hold, None);
+        // Start: a tap pauses, a hold shows the controls.
+        assert!(b.get(pad, Action::Controls)[0].long && !b.get(pad, Action::Pause)[0].long);
         let steer = b.axis_options(pad, Action::Steer);
         assert_eq!((steer.deadzone, steer.curve), (0.08, 1.5));
         assert_eq!(b.axis_options(kb, Action::Steer), AxisOptions::IDENTITY);
@@ -711,11 +721,11 @@ mod tests {
         assert_eq!(b.capture(Action::Horn, j), Ok(()));
         assert_eq!(
             b.get(kb, Action::Horn),
-            &[key(Key::KeyH, Sign::Positive), j]
+            &[key(Key::KeyB, Sign::Positive), j]
         );
 
-        // H is the horn: binding it to the headlights conflicts and changes nothing.
-        let h = key(Key::KeyH, Sign::Positive);
+        // B is the horn: binding it to the headlights conflicts and changes nothing.
+        let h = key(Key::KeyB, Sign::Positive);
         let before = b.clone();
         let conflict = b.capture(Action::Headlights, h).unwrap_err();
         assert_eq!(
@@ -732,7 +742,7 @@ mod tests {
         // Keeping the existing action is a no-op.
         assert!(!b.resolve_conflict(&conflict, Action::Horn));
         assert_eq!(b, before);
-        // Keeping the new one moves H.
+        // Keeping the new one moves B.
         assert!(b.resolve_conflict(&conflict, Action::Headlights));
         assert_eq!(b.get(kb, Action::Horn), &[j]);
         assert_eq!(
