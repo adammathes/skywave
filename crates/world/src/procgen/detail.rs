@@ -412,22 +412,7 @@ impl<'a> Detailer<'a> {
 
     /// The zone under ground point `p`.
     fn zone_at(&self, p: V2) -> ZoneId {
-        let h = &self.place.header;
-        let res = usize::from(self.place.terrain.res_per_chunk.max(1));
-        let [w, d] = place::Zones::cells_per_side(h, self.place.terrain.res_per_chunk);
-        let cell = h.chunk_size_m / res as f32;
-        let o = h.origin_m();
-        let (x, z) = ((p.x - o[0]) / cell, (p.y - o[1]) / cell);
-        if x < 0.0 || z < 0.0 || w == 0 || d == 0 {
-            return ZoneId::Water;
-        }
-        let (x, z) = ((x as usize).min(w - 1), (z as usize).min(d - 1));
-        self.place
-            .zones
-            .cells
-            .get(z * w + x)
-            .copied()
-            .unwrap_or(ZoneId::Water)
+        crate::zone_at(self.place, p)
     }
 
     fn ground(&self, p: V2) -> f32 {

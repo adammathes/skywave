@@ -17,7 +17,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use place::{BuildingUse, Era, StyleTag};
+use place::{BuildingUse, Era, StyleTag, ZoneId};
 
 use crate::template::{CountRange, Range};
 
@@ -45,7 +45,8 @@ pub struct Grammar {
     pub era: Era,
     /// The region template it dresses (`assets/regions/<template>.ron`).
     pub template: String,
-    /// One entry per [`StyleTag`].
+    /// Rules per [`StyleTag`] and zone: [`Grammar::style`] takes the first entry, in
+    /// file order, whose style matches and whose `zones` hold the building's zone.
     pub styles: Vec<StyleRules>,
     pub signs: SignRules,
     pub lots: LotRules,
@@ -72,12 +73,74 @@ impl<T: Copy> ByUse<T> {
     }
 }
 
-/// How one style is planned.
+/// A set of zones, one bit per [`ZoneId`]. Written in RON as `All` or
+/// `Only([Strip, Commercial])`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(from = "ZoneList", into = "ZoneList")
+)]
+pub struct ZoneMask(pub u16);
+
+impl ZoneMask {
+    pub const ALL: ZoneMask = ZoneMask(u16::MAX);
+
+    pub fn has(self, zone: ZoneId) -> bool {
+        self.0 & (1 << zone as u16) != 0
+    }
+}
+
+/// How a [`ZoneMask`] is written.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ZoneList {
+    All,
+    Only(Vec<ZoneId>),
+}
+
+impl From<ZoneList> for ZoneMask {
+    fn from(l: ZoneList) -> ZoneMask {
+        match l {
+            ZoneList::All => ZoneMask::ALL,
+            ZoneList::Only(zs) => ZoneMask(zs.iter().fold(0, |m, &z| m | 1 << z as u16)),
+        }
+    }
+}
+
+impl From<ZoneMask> for ZoneList {
+    fn from(m: ZoneMask) -> ZoneList {
+        if m == ZoneMask::ALL {
+            return ZoneList::All;
+        }
+        ZoneList::Only(ZONES.iter().copied().filter(|&z| m.has(z)).collect())
+    }
+}
+
+/// Every zone, in `ZoneId` order.
+pub const ZONES: [ZoneId; 12] = [
+    ZoneId::Downtown,
+    ZoneId::Strip,
+    ZoneId::Residential,
+    ZoneId::Suburb,
+    ZoneId::Industrial,
+    ZoneId::Commercial,
+    ZoneId::Park,
+    ZoneId::Beach,
+    ZoneId::Farmland,
+    ZoneId::Hills,
+    ZoneId::Highway,
+    ZoneId::Water,
+];
+
+/// How one style is planned in some zones.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct StyleRules {
     pub style: StyleTag,
+    /// The zones these rules dress.
+    pub zones: ZoneMask,
     pub massing: Massing,
     pub base: Base,
     pub body: Body,
@@ -111,6 +174,68 @@ pub struct Base {
     pub bay_w: ByUse<f32>,
     /// Entrance door `(width, height)`, m.
     pub door: ByUse<(f32, f32)>,
+    /// What the bays of the street front's ground floor are, by weight. All zero: no base
+    /// band, the ground floor is windows and a door like the floors above.
+    pub ground: ByUse<GroundBays>,
+    /// Base bay width, pier centre to pier centre, drawn per building, m.
+    pub front_bay_w: Range,
+    /// Pier width between base bays, m.
+    pub pier_w: Range,
+    pub storefront: Storefront,
+}
+
+/// Integer weights of the kinds of base bay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct GroundBays {
+    pub storefront: u16,
+    /// The office or hotel entrance (at most one per front).
+    pub lobby: u16,
+    pub garage: u16,
+    /// Blank wall.
+    pub wall: u16,
+    /// The door to the stairs of the flats above (at most one; none on one storey).
+    pub door: u16,
+}
+
+impl GroundBays {
+    pub fn total(&self) -> u32 {
+        [
+            self.storefront,
+            self.lobby,
+            self.garage,
+            self.wall,
+            self.door,
+        ]
+        .iter()
+        .map(|&w| u32::from(w))
+        .sum()
+    }
+}
+
+/// A storefront bay, bottom up: bulkhead, display glass, transom, sign band. Heights are
+/// drawn per building.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Storefront {
+    /// Bulkhead (the panel under the display glass), m.
+    pub bulkhead_h: Range,
+    /// Top of the display glass above the floor, m.
+    pub glass_top: Range,
+    /// Transom over the display glass, m.
+    pub transom_h: Range,
+    /// Transoms still glazed rather than panelled over.
+    pub transom_glass_256: u32,
+    /// Entry door `(width, height)`, m.
+    pub entry: (f32, f32),
+    /// Fronts whose entries are recessed (pre-war); the rest are flush.
+    pub recessed_256: u32,
+    /// How far a recessed entry sits back, m.
+    pub recess: Range,
+    /// Entries at one side of the bay rather than centred.
+    pub side_entry_256: u32,
 }
 
 /// The upper floors.
@@ -119,11 +244,42 @@ pub struct Base {
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Body {
     pub window: ByUse<Window>,
+    /// The kind of upper window, by weight, drawn per building.
+    pub kinds: ByUse<WindowKinds>,
     /// Smallest window height, m.
     pub window_h_min: f32,
     /// Sill above the plinth on the ground floor, above the floor on the others, m.
     pub sill_ground: f32,
     pub sill_upper: f32,
+}
+
+/// Integer weights of the kinds of window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct WindowKinds {
+    /// One window per bay.
+    pub punched: u16,
+    /// Two narrow windows per bay with a mullion pier between.
+    pub paired: u16,
+    /// A continuous band of glass across the facade, mullions on the bay lines.
+    pub ribbon: u16,
+    /// A projecting bay window (upper floors).
+    pub bay: u16,
+    /// One wide window per bay.
+    pub picture: u16,
+}
+
+impl WindowKinds {
+    pub fn weights(&self) -> [u16; 5] {
+        [
+            self.punched,
+            self.paired,
+            self.ribbon,
+            self.bay,
+            self.picture,
+        ]
+    }
 }
 
 /// A window's size from the bay and the floor.
@@ -146,6 +302,46 @@ pub struct Window {
 pub struct Top {
     /// Parapet above a flat roof, m (pitched roofs have none); at most 30% of the height.
     pub parapet_h: ByUse<f32>,
+    /// The kind of top on a flat roof, by weight, drawn per building.
+    pub kinds: TopKinds,
+    /// How far a cornice projects, m.
+    pub cornice_d: f32,
+}
+
+/// Integer weights of the kinds of flat-roof top.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct TopKinds {
+    /// A plain parapet with coping.
+    pub parapet: u16,
+    /// A projecting cornice.
+    pub cornice: u16,
+    /// A parapet stepped up over the middle of the street front.
+    pub stepped: u16,
+}
+
+impl TopKinds {
+    pub fn weights(&self) -> [u16; 3] {
+        [self.parapet, self.cornice, self.stepped]
+    }
+}
+
+/// The entry of `weights` that `r` picks (`r` reduced modulo the total; listed order is
+/// draw order). `None` when every weight is zero.
+pub fn pick(weights: &[u16], r: u32) -> Option<usize> {
+    let total: u32 = weights.iter().map(|&w| u32::from(w)).sum();
+    if total == 0 {
+        return None;
+    }
+    let mut r = r % total;
+    for (i, &w) in weights.iter().enumerate() {
+        if r < u32::from(w) {
+            return Some(i);
+        }
+        r -= u32::from(w);
+    }
+    None
 }
 
 /// What clutters a flat roof.
@@ -222,9 +418,10 @@ pub struct LotRules {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GrammarError {
     EmptyTemplate,
-    /// No rules, or more than one entry, for a style.
+    /// No rules for a style in a zone.
     Style {
         style: StyleTag,
+        zone: ZoneId,
     },
     /// A number is NaN, infinite, negative, or a range has `min > max`.
     Bad {
@@ -237,8 +434,8 @@ impl fmt::Display for GrammarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GrammarError::EmptyTemplate => write!(f, "template is empty"),
-            GrammarError::Style { style } => {
-                write!(f, "styles must list {style:?} exactly once")
+            GrammarError::Style { style, zone } => {
+                write!(f, "styles has no rules for {style:?} in {zone:?}")
             }
             GrammarError::Bad {
                 style: Some(s),
@@ -250,12 +447,13 @@ impl fmt::Display for GrammarError {
 }
 
 impl Grammar {
-    /// The rules for `style`. The grammar must have passed [`Grammar::validate`].
-    pub fn style(&self, style: StyleTag) -> &StyleRules {
+    /// The rules for `style` in `zone`: the first entry, in file order, of that style
+    /// whose zones hold `zone`. The grammar must have passed [`Grammar::validate`].
+    pub fn style(&self, style: StyleTag, zone: ZoneId) -> &StyleRules {
         self.styles
             .iter()
-            .find(|r| r.style == style)
-            .expect("a validated grammar has every style")
+            .find(|r| r.style == style && r.zones.has(zone))
+            .expect("a validated grammar has every style in every zone")
     }
 
     /// Checks every field; planning assumes a grammar that passed.
@@ -264,8 +462,14 @@ impl Grammar {
             return Err(GrammarError::EmptyTemplate);
         }
         for style in STYLES {
-            if self.styles.iter().filter(|r| r.style == style).count() != 1 {
-                return Err(GrammarError::Style { style });
+            for zone in ZONES {
+                if !self
+                    .styles
+                    .iter()
+                    .any(|r| r.style == style && r.zones.has(zone))
+                {
+                    return Err(GrammarError::Style { style, zone });
+                }
             }
         }
         for r in &self.styles {
@@ -276,7 +480,7 @@ impl Grammar {
         }
         let bad = |field| GrammarError::Bad { style: None, field };
         let s = &self.signs;
-        if s.awnings.iter().map(|&(_, w)| w).sum::<u32>() == 0 {
+        if s.awnings.iter().map(|&(_, w)| u64::from(w)).sum::<u64>() == 0 {
             return Err(bad("signs.awnings"));
         }
         if s.lit_box_256 > 256 {
@@ -313,6 +517,30 @@ impl StyleRules {
         )?;
         let b = &self.base;
         check(all(&b.plinth_h, |&h| h >= 0.0), "base.plinth_h")?;
+        check(
+            range(b.front_bay_w) && b.front_bay_w.0 >= 2.0,
+            "base.front_bay_w",
+        )?;
+        check(
+            range(b.pier_w) && b.pier_w.1 * 2.0 < b.front_bay_w.0,
+            "base.pier_w",
+        )?;
+        let s = &b.storefront;
+        check(range(s.bulkhead_h), "base.storefront.bulkhead_h")?;
+        check(
+            range(s.glass_top) && s.glass_top.0 > s.bulkhead_h.1 + 1.0,
+            "base.storefront.glass_top",
+        )?;
+        check(range(s.transom_h), "base.storefront.transom_h")?;
+        check(
+            positive(s.entry.0) && positive(s.entry.1) && s.entry.1 <= s.glass_top.0,
+            "base.storefront.entry",
+        )?;
+        check(range(s.recess), "base.storefront.recess")?;
+        check(
+            s.transom_glass_256 <= 256 && s.recessed_256 <= 256 && s.side_entry_256 <= 256,
+            "base.storefront",
+        )?;
         check(all(&b.bay_w, |&w| w >= 1.0), "base.bay_w")?;
         check(
             all(&b.door, |&(w, h)| positive(w) && positive(h)),
@@ -331,6 +559,15 @@ impl StyleRules {
         check(y.sill_ground >= 0.0, "body.sill_ground")?;
         check(y.sill_upper >= 0.0, "body.sill_upper")?;
         check(all(&self.top.parapet_h, |&h| h >= 0.0), "top.parapet_h")?;
+        check(self.top.kinds.weights().iter().any(|&w| w > 0), "top.kinds")?;
+        check(
+            self.top.cornice_d.is_finite() && (0.0..=1.0).contains(&self.top.cornice_d),
+            "top.cornice_d",
+        )?;
+        check(
+            all(&y.kinds, |k| k.weights().iter().any(|&w| w > 0)),
+            "body.kinds",
+        )?;
         let a = &self.addenda;
         check(all(&a.roof_vents, |c| c.0 <= c.1), "addenda.roof_vents")?;
         check(all(&a.roof_units, |c| c.0 <= c.1), "addenda.roof_units")?;
@@ -371,11 +608,92 @@ pub(crate) fn coast_80s() -> Grammar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     /// The rules the planner had in code before they moved into the grammar, written the
-    /// way the code wrote them.
-    fn former(style: StyleTag) -> StyleRules {
+    /// way the code wrote them, plus the three-band facade's starting values (B4, from
+    /// `docs/backlog/BUILDINGS.md`). `industrial` is the entry for industrial zones.
+    fn former(style: StyleTag, industrial: bool) -> StyleRules {
         use StyleTag as S;
+        let bays = |storefront, lobby, garage, wall, door| GroundBays {
+            storefront,
+            lobby,
+            garage,
+            wall,
+            door,
+        };
+        let none = GroundBays::default();
+        let (ground_office, ground_other) = match (style, industrial) {
+            (S::StuccoBox | S::Brick, true) => {
+                let o = if style == S::Brick {
+                    bays(2, 2, 0, 2, 0)
+                } else {
+                    bays(2, 2, 0, 1, 0)
+                };
+                (o, bays(0, 0, 3, 2, 1))
+            }
+            (S::StuccoBox, _) => (bays(2, 2, 0, 1, 0), bays(6, 0, 0, 1, 1)),
+            (S::Brick, _) => (bays(2, 2, 0, 2, 0), bays(5, 0, 0, 1, 2)),
+            (S::Deco, _) => (bays(2, 3, 0, 1, 0), bays(6, 0, 0, 1, 1)),
+            _ => (none, none),
+        };
+        let (front_bay_w, pier_w, transom_glass_256, recessed_256, side_entry_256) = match style {
+            S::StuccoBox => ((5.5, 8.0), (0.35, 0.5), 64, 64, 128),
+            S::Brick => ((5.0, 7.6), (0.5, 0.7), 200, 200, 96),
+            S::Deco => ((5.5, 8.0), (0.4, 0.55), 160, 160, 64),
+            _ => ((5.5, 8.0), (0.35, 0.5), 128, 0, 128),
+        };
+        let kinds = |punched, paired, ribbon, bay, picture| WindowKinds {
+            punched,
+            paired,
+            ribbon,
+            bay,
+            picture,
+        };
+        let one = kinds(1, 0, 0, 0, 0);
+        let window_kinds = match style {
+            S::StuccoBox => ByUse {
+                residential: kinds(3, 1, 0, 0, 1),
+                office: kinds(2, 1, 2, 0, 0),
+                other: kinds(3, 2, 0, 0, 1),
+            },
+            S::Brick => ByUse {
+                residential: kinds(3, 1, 0, 1, 0),
+                office: kinds(3, 1, 0, 0, 0),
+                other: kinds(3, 2, 0, 0, 0),
+            },
+            S::Deco => ByUse {
+                residential: kinds(2, 1, 0, 0, 1),
+                office: kinds(2, 0, 1, 0, 0),
+                other: kinds(2, 0, 1, 0, 0),
+            },
+            S::Craftsman => ByUse {
+                residential: kinds(2, 1, 0, 0, 0),
+                office: one,
+                other: one,
+            },
+            S::Tract70s => ByUse {
+                residential: kinds(2, 0, 0, 0, 1),
+                office: one,
+                other: one,
+            },
+            S::Dingbat => ByUse {
+                residential: kinds(1, 0, 0, 0, 1),
+                office: one,
+                other: one,
+            },
+            _ => ByUse {
+                residential: one,
+                office: one,
+                other: one,
+            },
+        };
+        let (top_kinds, cornice_d) = match style {
+            S::StuccoBox => ((3, 1, 1), 0.3),
+            S::Brick => ((0, 1, 0), 0.24),
+            S::Deco => ((1, 0, 3), 0.2),
+            _ => ((1, 0, 0), 0.2),
+        };
         let by = |f: &dyn Fn(BuildingUse) -> f32| ByUse {
             residential: f(BuildingUse::Residential),
             office: f(BuildingUse::Office),
@@ -425,8 +743,14 @@ mod tests {
             },
         };
         let motel = style == S::Motel;
+        let banded = matches!(style, S::StuccoBox | S::Brick | S::Deco);
         StyleRules {
             style,
+            zones: if industrial {
+                ZoneMask::from(ZoneList::Only(vec![ZoneId::Industrial]))
+            } else {
+                ZoneMask::ALL
+            },
             massing: Massing {
                 even_floors: ByUse {
                     residential: true,
@@ -434,7 +758,7 @@ mod tests {
                     other: motel,
                 },
                 floor_h: 3.3,
-                ground_floor_h: (3.8, 4.8),
+                ground_floor_h: if banded { (4.0, 5.0) } else { (3.8, 4.8) },
                 ground_share_max: 0.6,
             },
             base: Base {
@@ -445,6 +769,23 @@ mod tests {
                     office: (2.0, 2.6),
                     other: (2.0, 2.6),
                 },
+                ground: ByUse {
+                    residential: none,
+                    office: ground_office,
+                    other: ground_other,
+                },
+                front_bay_w,
+                pier_w,
+                storefront: Storefront {
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3.0),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256,
+                    entry: (1.1, 2.25),
+                    recessed_256,
+                    recess: (1.0, 1.8),
+                    side_entry_256,
+                },
             },
             body: Body {
                 window: ByUse {
@@ -452,11 +793,20 @@ mod tests {
                     office: window(false),
                     other: window(false),
                 },
+                kinds: window_kinds,
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             },
-            top: Top { parapet_h: parapet },
+            top: Top {
+                parapet_h: parapet,
+                kinds: TopKinds {
+                    parapet: top_kinds.0,
+                    cornice: top_kinds.1,
+                    stepped: top_kinds.2,
+                },
+                cornice_d,
+            },
             addenda: Addenda {
                 // `rng.range(1, 3)` and `rng.range(2, 5)` are half-open.
                 roof_vents: ByUse {
@@ -476,13 +826,16 @@ mod tests {
     }
 
     #[test]
-    fn shipped_grammar_is_the_former_constants() {
+    fn shipped_grammar_keeps_the_former_constants() {
         let g = coast_80s();
         g.validate().expect("validate");
         assert_eq!(g.era, Era::Eighties);
         assert_eq!(g.template, "california_coast");
-        for style in STYLES {
-            assert_eq!(*g.style(style), former(style), "{style:?}");
+        // Every style once for all zones, stucco and brick again for industrial zones.
+        assert_eq!(g.styles.len(), STYLES.len() + 2);
+        for r in &g.styles {
+            let industrial = r.zones != ZoneMask::ALL;
+            assert_eq!(*r, former(r.style, industrial), "{:?}", r.style);
         }
         assert_eq!(g.signs.lit_box_256, 70);
         assert_eq!(g.signs.shop_lit_256, 115);
@@ -511,15 +864,96 @@ mod tests {
     }
 
     #[test]
+    fn rules_are_chosen_by_zone_in_file_order() {
+        let g = coast_80s();
+        let industrial = g.style(StyleTag::Brick, ZoneId::Industrial);
+        let strip = g.style(StyleTag::Brick, ZoneId::Strip);
+        assert_eq!(
+            industrial.zones,
+            ZoneMask::from(ZoneList::Only(vec![ZoneId::Industrial]))
+        );
+        assert_eq!(strip.zones, ZoneMask::ALL);
+        // Industrial brick: loading doors, no shops; the same elsewhere.
+        assert_eq!(industrial.base.ground.other.storefront, 0);
+        assert!(strip.base.ground.other.storefront > 0);
+        assert_eq!(industrial.massing, strip.massing);
+        // Moving the `All` entry first hides the industrial one.
+        let mut g2 = g.clone();
+        let i = g2.styles.iter().position(|r| *r == *strip).unwrap();
+        let all = g2.styles.remove(i);
+        g2.styles.insert(0, all);
+        assert_eq!(g2.style(StyleTag::Brick, ZoneId::Industrial), strip);
+    }
+
+    #[test]
+    fn zone_lists_round_trip() {
+        for l in [
+            ZoneList::All,
+            ZoneList::Only(vec![]),
+            ZoneList::Only(vec![ZoneId::Strip, ZoneId::Beach]),
+        ] {
+            let m = ZoneMask::from(l.clone());
+            assert_eq!(ZoneList::from(m), l);
+        }
+        assert!(ZoneMask::ALL.has(ZoneId::Water));
+        assert!(!ZoneMask::from(ZoneList::Only(vec![ZoneId::Strip])).has(ZoneId::Beach));
+    }
+
+    #[test]
+    fn pick_follows_the_weights_in_order() {
+        assert_eq!(pick(&[0, 0], 5), None);
+        let counts = (0..60u32).fold([0; 3], |mut c, r| {
+            c[pick(&[1, 0, 2], r).unwrap()] += 1;
+            c
+        });
+        assert_eq!(counts, [20, 0, 40]);
+        assert_eq!(pick(&[1, 0, 2], 0), Some(0));
+        assert_eq!(pick(&[1, 0, 2], 1), Some(2));
+    }
+
+    #[test]
     fn validate_rejects_broken_grammars() {
         let mut g = coast_80s();
         g.styles.pop();
         assert_eq!(
             g.validate(),
             Err(GrammarError::Style {
-                style: StyleTag::Motel
+                style: StyleTag::Motel,
+                zone: ZoneId::Downtown,
             })
         );
+        // A zone left uncovered.
+        let mut g = coast_80s();
+        for r in &mut g.styles {
+            if r.style == StyleTag::Barn {
+                r.zones = ZoneMask::from(ZoneList::Only(vec![ZoneId::Farmland]));
+            }
+        }
+        assert_eq!(
+            g.validate(),
+            Err(GrammarError::Style {
+                style: StyleTag::Barn,
+                zone: ZoneId::Downtown,
+            })
+        );
+        let mut g = coast_80s();
+        g.styles[0].base.storefront.glass_top = (0.5, 0.6);
+        assert!(matches!(
+            g.validate(),
+            Err(GrammarError::Bad {
+                field: "base.storefront.glass_top",
+                ..
+            })
+        ));
+        let mut g = coast_80s();
+        g.styles[0].top.kinds = TopKinds::default();
+        assert!(g.validate().is_err());
+        let mut g = coast_80s();
+        g.styles[0].body.kinds.office = WindowKinds::default();
+        assert!(g.validate().is_err());
+        let mut g = coast_80s();
+        g.signs.awnings = vec![(Awning::Striped, u32::MAX), (Awning::None, 1)];
+        assert!(g.validate().is_ok());
         let mut g = coast_80s();
         g.styles[0].base.bay_w.office = f32::NAN;
         assert!(matches!(

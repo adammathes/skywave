@@ -4,28 +4,54 @@
 // by what the building is used for (residential, office, anything else); a `_256` share
 // is out of 256; count ranges are inclusive and `(0, 0)` draws nothing.
 //
+// Styles may have several entries: a building takes the first entry, in file order, of its
+// style whose `zones` hold its zone (`All`, or `Only([...])`), so zone-specific entries
+// come before the `All` one.
+//
 // Provenance: every value below is a starting value, not yet fitted (ADR 0005, "Fit"; B3
-// fits them). They reproduce the planner's former code constants exactly, so the coast
-// and the test town are bit-identical to before. A fitted number replaces one of these
-// with a comment naming its source and item (see CREDITS.md).
+// fits them). Most are the planner's former code constants. The three-band facade's
+// (B4: `ground`, `front_bay_w`, `pier_w`, `storefront`, body `kinds`, top `kinds` and
+// `cornice_d`, the 4–5 m ground floor) are starting values from docs/backlog/BUILDINGS.md
+// ("The grammar", the 1980s SoCal table): bulkhead 0.4–0.6 m, display glass to 2.6–3.0 m,
+// transom 0.5–0.9 m, recessed entries 1.0–1.8 m in pre-war fronts and flush in remodeled
+// ones. A fitted number replaces one of these with a comment naming its source and item
+// (see CREDITS.md).
 Grammar(
     era: Eighties,
     template: "california_coast",
 
     styles: [
-        // Shops and flats in smooth stucco; the lower parapet on flats.
+        // Stucco sheds and workshops in industrial zones: loading doors, no shops.
         StyleRules(
             style: StuccoBox,
+            zones: Only([Industrial]),
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
-                ground_floor_h: (3.8, 4.8),
+                ground_floor_h: (4, 5),
                 ground_share_max: 0.6,
             ),
             base: Base(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 2, lobby: 2, garage: 0, wall: 1, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 3, wall: 2, door: 1),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 64,
+                    entry: (1.1, 2.25),
+                    recessed_256: 64,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -33,11 +59,138 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 3, paired: 1, ribbon: 0, bay: 0, picture: 1),
+                    office: WindowKinds(punched: 2, paired: 1, ribbon: 2, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 3, paired: 2, ribbon: 0, bay: 0, picture: 1),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8)),
+            top: Top(
+                parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8),
+                kinds: TopKinds(parapet: 3, cornice: 1, stepped: 1),
+                cornice_d: 0.3,
+            ),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Shops and flats in smooth stucco; the lower parapet on flats.
+        StyleRules(
+            style: StuccoBox,
+            zones: All,
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (4, 5),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 2, lobby: 2, garage: 0, wall: 1, door: 0),
+                    other: GroundBays(storefront: 6, lobby: 0, garage: 0, wall: 1, door: 1),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 64,
+                    entry: (1.1, 2.25),
+                    recessed_256: 64,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                    other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
+                ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 3, paired: 1, ribbon: 0, bay: 0, picture: 1),
+                    office: WindowKinds(punched: 2, paired: 1, ribbon: 2, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 3, paired: 2, ribbon: 0, bay: 0, picture: 1),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(
+                parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8),
+                kinds: TopKinds(parapet: 3, cornice: 1, stepped: 1),
+                cornice_d: 0.3,
+            ),
+            addenda: Addenda(
+                roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
+                roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
+                bulkhead_floors: 4,
+                water_tank_1_in: 2,
+            ),
+        ),
+        // Brick sheds and workshops in industrial zones: loading doors, no shops.
+        StyleRules(
+            style: Brick,
+            zones: Only([Industrial]),
+            massing: Massing(
+                even_floors: ByUse(residential: true, office: false, other: false),
+                floor_h: 3.3,
+                ground_floor_h: (4, 5),
+                ground_share_max: 0.6,
+            ),
+            base: Base(
+                plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
+                bay_w: ByUse(residential: 3.6, office: 2.7, other: 2.7),
+                door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 2, lobby: 2, garage: 0, wall: 2, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 3, wall: 2, door: 1),
+                ),
+                front_bay_w: (5, 7.6),
+                pier_w: (0.5, 0.7),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 200,
+                    entry: (1.1, 2.25),
+                    recessed_256: 200,
+                    recess: (1, 1.8),
+                    side_entry_256: 96,
+                ),
+            ),
+            body: Body(
+                window: ByUse(
+                    residential: Window(w_share: 0, w: (1.3, 1.3), head: 1.35, h_max: 1.3),
+                    office: Window(w_share: 0, w: (1.1, 1.1), head: 1.3, h_max: 1.8),
+                    other: Window(w_share: 0, w: (1.1, 1.1), head: 1.3, h_max: 1.8),
+                ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 3, paired: 1, ribbon: 0, bay: 1, picture: 0),
+                    office: WindowKinds(punched: 3, paired: 1, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 3, paired: 2, ribbon: 0, bay: 0, picture: 0),
+                ),
+                window_h_min: 0.6,
+                sill_ground: 0.65,
+                sill_upper: 0.9,
+            ),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 0, cornice: 1, stepped: 0),
+                cornice_d: 0.24,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -48,16 +201,34 @@ Grammar(
         // Brick fronts: narrower bays and taller windows than stucco.
         StyleRules(
             style: Brick,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
-                ground_floor_h: (3.8, 4.8),
+                ground_floor_h: (4, 5),
                 ground_share_max: 0.6,
             ),
             base: Base(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.7, other: 2.7),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 2, lobby: 2, garage: 0, wall: 2, door: 0),
+                    other: GroundBays(storefront: 5, lobby: 0, garage: 0, wall: 1, door: 2),
+                ),
+                front_bay_w: (5, 7.6),
+                pier_w: (0.5, 0.7),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 200,
+                    entry: (1.1, 2.25),
+                    recessed_256: 200,
+                    recess: (1, 1.8),
+                    side_entry_256: 96,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -65,11 +236,20 @@ Grammar(
                     office: Window(w_share: 0, w: (1.1, 1.1), head: 1.3, h_max: 1.8),
                     other: Window(w_share: 0, w: (1.1, 1.1), head: 1.3, h_max: 1.8),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 3, paired: 1, ribbon: 0, bay: 1, picture: 0),
+                    office: WindowKinds(punched: 3, paired: 1, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 3, paired: 2, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 0, cornice: 1, stepped: 0),
+                cornice_d: 0.24,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -80,16 +260,34 @@ Grammar(
         // Streamline fronts: windows a fixed share of the bay.
         StyleRules(
             style: Deco,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
-                ground_floor_h: (3.8, 4.8),
+                ground_floor_h: (4, 5),
                 ground_share_max: 0.6,
             ),
             base: Base(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 2, lobby: 3, garage: 0, wall: 1, door: 0),
+                    other: GroundBays(storefront: 6, lobby: 0, garage: 0, wall: 1, door: 1),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.4, 0.55),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 160,
+                    entry: (1.1, 2.25),
+                    recessed_256: 160,
+                    recess: (1, 1.8),
+                    side_entry_256: 64,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -97,11 +295,20 @@ Grammar(
                     office: Window(w_share: 0.62, w: (0.5, 10), head: 1.45, h_max: 1.5),
                     other: Window(w_share: 0.62, w: (0.5, 10), head: 1.45, h_max: 1.5),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 2, paired: 1, ribbon: 0, bay: 0, picture: 1),
+                    office: WindowKinds(punched: 2, paired: 0, ribbon: 1, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 2, paired: 0, ribbon: 1, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 3),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -112,6 +319,7 @@ Grammar(
         // One storey behind a front lot; the tall parapet hides the roof units.
         StyleRules(
             style: StripMall,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -122,6 +330,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.25, other: 0.25),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -129,11 +354,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1.8, office: 1.8, other: 1.8)),
+            top: Top(
+                parapet_h: ByUse(residential: 1.8, office: 1.8, other: 1.8),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -144,6 +378,7 @@ Grammar(
         // Flats over open carports.
         StyleRules(
             style: Dingbat,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -154,6 +389,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -161,11 +413,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 1),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -176,6 +437,7 @@ Grammar(
         // Bungalows.
         StyleRules(
             style: Craftsman,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -186,6 +448,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -193,11 +472,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 2, paired: 1, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -208,6 +496,7 @@ Grammar(
         // Long, low houses with wide windows.
         StyleRules(
             style: Ranch,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -218,6 +507,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -225,11 +531,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -240,6 +555,7 @@ Grammar(
         // 1970s tract houses.
         StyleRules(
             style: Tract70s,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -250,6 +566,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -257,11 +590,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 2, paired: 0, ribbon: 0, bay: 0, picture: 1),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -272,6 +614,7 @@ Grammar(
         // Curtain-wall offices: wide bays.
         StyleRules(
             style: Glass,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -282,6 +625,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 4.5, office: 4.5, other: 4.5),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -289,11 +649,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -304,6 +673,7 @@ Grammar(
         // Pilastered sheds: the widest bays.
         StyleRules(
             style: Warehouse,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -314,6 +684,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 6, office: 6, other: 6),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -321,11 +708,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -336,6 +732,7 @@ Grammar(
         // Farm barns and silos.
         StyleRules(
             style: Barn,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: false, other: false),
                 floor_h: 3.3,
@@ -346,6 +743,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.6, office: 2.8, other: 3),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -353,11 +767,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
@@ -368,6 +791,7 @@ Grammar(
         // A door and window per room: every floor the same height.
         StyleRules(
             style: Motel,
+            zones: All,
             massing: Massing(
                 even_floors: ByUse(residential: true, office: true, other: true),
                 floor_h: 3.3,
@@ -378,6 +802,23 @@ Grammar(
                 plinth_h: ByUse(residential: 0.12, office: 0.45, other: 0.45),
                 bay_w: ByUse(residential: 3.8, office: 3.8, other: 3.8),
                 door: ByUse(residential: (1, 2.2), office: (2, 2.6), other: (2, 2.6)),
+                ground: ByUse(
+                    residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    office: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                    other: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
+                ),
+                front_bay_w: (5.5, 8),
+                pier_w: (0.35, 0.5),
+                storefront: Storefront(
+                    bulkhead_h: (0.4, 0.6),
+                    glass_top: (2.6, 3),
+                    transom_h: (0.5, 0.9),
+                    transom_glass_256: 128,
+                    entry: (1.1, 2.25),
+                    recessed_256: 0,
+                    recess: (1, 1.8),
+                    side_entry_256: 128,
+                ),
             ),
             body: Body(
                 window: ByUse(
@@ -385,11 +826,20 @@ Grammar(
                     office: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                     other: Window(w_share: 0.5, w: (0.9, 1.6), head: 1.3, h_max: 1.7),
                 ),
+                kinds: ByUse(
+                    residential: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    office: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                    other: WindowKinds(punched: 1, paired: 0, ribbon: 0, bay: 0, picture: 0),
+                ),
                 window_h_min: 0.6,
                 sill_ground: 0.65,
                 sill_upper: 0.9,
             ),
-            top: Top(parapet_h: ByUse(residential: 1, office: 1, other: 1)),
+            top: Top(
+                parapet_h: ByUse(residential: 1, office: 1, other: 1),
+                kinds: TopKinds(parapet: 1, cornice: 0, stepped: 0),
+                cornice_d: 0.2,
+            ),
             addenda: Addenda(
                 roof_vents: ByUse(residential: (1, 2), office: (2, 4), other: (2, 4)),
                 roof_units: ByUse(residential: (0, 0), office: (1, 2), other: (1, 2)),
