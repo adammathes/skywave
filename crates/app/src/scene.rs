@@ -25,10 +25,11 @@
 //! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
 //! - `stream=0`: build the whole place at load instead of streaming it round the camera
 //!   (`stream=1`, the default; see `app::stream`). The screenshot goldens use it.
-//! - `traffic=off|low|normal|busy`: NPC traffic density for this session, over the saved
-//!   setting (default: the setting, but `off` in a `still=1` scene, so the screenshot
-//!   goldens draw no traffic unless they ask). Traffic runs a while before the first
-//!   frame (`app::npc::WARMUP_S`), so even a still scene has cars on the streets.
+//! - `traffic=off|low|normal|busy`: NPC traffic and pedestrian density for this session,
+//!   over the saved setting (default: the setting, but `off` in a `still=1` scene, so the
+//!   screenshot goldens draw no traffic unless they ask). Traffic runs a while before the
+//!   first frame (`app::npc::WARMUP_S`, people longer), so even a still scene has cars on
+//!   the streets and people on the walks.
 
 use crate::camera::CameraMode;
 use crate::drive::DEFAULT_VEHICLE;

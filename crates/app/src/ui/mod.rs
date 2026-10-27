@@ -147,6 +147,8 @@ pub struct Ui {
     cpu_submit_ms: f32,
     /// Live NPC cars and the traffic sim's time per step (ms), for the overlay.
     pub(crate) traffic: (usize, f32),
+    /// Live pedestrians and the pedestrian sim's time per step (ms), for the overlay.
+    pub(crate) peds: (usize, f32),
     /// Adapter and backend, for the overlay.
     gpu_label: String,
 }
@@ -192,6 +194,7 @@ impl Ui {
             forced_quality: None,
             cpu_submit_ms: 0.0,
             traffic: (0, 0.0),
+            peds: (0, 0.0),
             gpu_label: String::new(),
         }
     }
@@ -1049,6 +1052,7 @@ impl App {
         };
         self.audio.traffic = self.npcs.voices(steps.alpha, eye, forward, velocity);
         self.ui.traffic = (self.npcs.count(), self.npcs.step_ms());
+        self.ui.peds = (self.npcs.crowd.count(), self.npcs.crowd.step_ms());
         steps
     }
 

@@ -822,6 +822,7 @@ impl Ui {
                  lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
                  traffic {} cars  step {:.3} ms\n\
+                 peds {} people  step {:.3} ms\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
                  hud {} quads  ({} dropped)",
@@ -857,6 +858,8 @@ impl Ui {
                 ctx.ticks,
                 self.traffic.0,
                 self.traffic.1,
+                self.peds.0,
+                self.peds.1,
                 d.sun_elevation_deg,
                 d.sun_azimuth_deg,
                 cx,

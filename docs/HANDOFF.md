@@ -42,18 +42,17 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   the credit line; art pass (era cabins, detailed exteriors, colored parked cars with LOD2, props);
   the full twelve-car 1980s roster (M4 #2); light collision physics with rocking parked cars;
   traffic lane graph (M4 #1), NPC car movement (M4 #4), pedestrian figure (M4 #3) and pedestrian
-  behaviour (M4 #5), all simulation-only in `crates/traffic`; reference-sources ADR 0005 and the
+  behaviour (M4 #5), all simulation-only in `crates/traffic`; NPC traffic in the game (M4 #6); reference-sources ADR 0005 and the
   buildings backlog; facade grammar loader (B1, B2); CI gates stabilised (median step budget, no
   worst-piece assert, one CI run per PR).
 - Open PRs: native radio (#15, approved, waits on the owner's sign-off for rustls+ring, ADR 0006);
-  NPC traffic drawn in the app with a density setting (M4 #6); sign pictograms and the invented-name
+  pedestrians drawn in the game (`m4/peds-in-app`); sign pictograms and the invented-name
   lexicon (B5+B6). Branches in progress: `m2/map-edges` (NOTES #3), `bldg/facade-bands` (B4),
   `m4/vehicle-select` (M4 #7).
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output is wanted; NOTES 4(a) life beyond traffic (window lights, parked cars that come
   and go); buildings B7-B15.
-- Next: M4 #8 (non-violence scenarios, density tests, gate screenshots) once #6 merges; pedestrians
-  drawn in the app (figure instancing) after #6; B8 awnings and B9 rooflines after B4; B10 parking
+- Next: M4 #8 (non-violence scenarios, density tests, gate screenshots); B8 awnings and B9 rooflines after B4; B10 parking
   lots after map edges; M5 (release polish, Deck verification); M6 place compiler; M7+ scenarios.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy; a PR that regenerates
