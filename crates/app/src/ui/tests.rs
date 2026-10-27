@@ -785,6 +785,80 @@ fn drive_page_switches_the_handling_and_persists() {
     assert_eq!(again.app.drive.assists, vehicle::Assists::OFF);
 }
 
+/// The headlight switches from the keyboard (L, K) and the pad (D-pad up tapped, and held
+/// for the high beams), through the mapper into the car, its lamps and the dash.
+#[test]
+fn headlights_and_high_beams_switch_from_keyboard_and_pad() {
+    let mut h = Harness::new();
+    let d = |h: &Harness| (h.app.drive.headlights, h.app.drive.high_beams_lit());
+    // Golden hour: Auto leaves them off.
+    assert_eq!(d(&h), (false, false));
+    h.key(Key::KeyL);
+    assert_eq!(d(&h), (true, false));
+    // Pop-ups up, lamps lit.
+    let ids = h.app.car_meshes.lods[0];
+    let view = h.app.scene_view(1.0, 1.5);
+    assert!(view.instances.iter().any(|i| i.mesh == ids.body[1]));
+    assert!(view.instances.iter().any(|i| i.mesh == ids.lights[1][0]));
+    h.key(Key::KeyL);
+    assert_eq!(d(&h), (false, false));
+    // High beams switch the headlights on with them, and off leaves the low beams.
+    h.key(Key::KeyK);
+    assert_eq!(d(&h), (true, true));
+    let (lights, _) = h.app.drive.lights(1.0);
+    assert!(lights[0].color[0] > crate::drive::HEADLIGHT_KCD);
+    h.key(Key::KeyK);
+    assert_eq!(d(&h), (true, false));
+    // With the headlights off, K always comes on with the high beams.
+    h.key(Key::KeyK);
+    h.key(Key::KeyL);
+    assert_eq!(d(&h), (false, false));
+    h.key(Key::KeyK);
+    assert_eq!(d(&h), (true, true));
+    h.key(Key::KeyK);
+    assert_eq!(d(&h), (true, false));
+    // The pad: a tap is the headlights (on release)...
+    h.pad(PadButton::DpadUp);
+    assert_eq!(d(&h), (false, false));
+    h.pad(PadButton::DpadUp);
+    assert_eq!(d(&h), (true, false));
+    // ...a hold the high beams, and not the headlights.
+    h.input.press(RawInput::PadButton(PadButton::DpadUp));
+    for _ in 0..70 {
+        h.frame();
+    }
+    h.input.release(RawInput::PadButton(PadButton::DpadUp));
+    h.frame();
+    assert_eq!(d(&h), (true, true));
+    // The cockpit's dash shows both tell-tales.
+    h.app.set_camera_mode(CameraMode::Cockpit);
+    let tt = h.app.car_meshes.telltales;
+    let view = h.app.scene_view(1.0, 1.5);
+    for m in tt {
+        assert!(view.instances.iter().any(|i| i.mesh == m), "{m:?}");
+    }
+    h.key(Key::KeyL);
+    let view = h.app.scene_view(1.0, 1.5);
+    assert!(!view.instances.iter().any(|i| tt.contains(&i.mesh)));
+}
+
+#[test]
+fn drive_page_sets_the_headlights_to_manual_and_persists() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    assert!(h.app.settings().headlights_auto, "auto by default");
+    assert!(h.app.drive.auto_headlights);
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Drive)]);
+    h.focus_on(ItemId::Headlights);
+    h.pad(PadButton::DpadRight);
+    assert!(!h.app.settings().headlights_auto);
+    assert!(!h.app.drive.auto_headlights);
+    h.pad(PadButton::Start);
+    let again = Harness::with_store(&store);
+    assert!(!again.app.settings().headlights_auto);
+    assert!(!again.app.drive.auto_headlights);
+}
+
 #[test]
 fn camera_page_sets_the_cockpit_and_the_camera_is_remembered() {
     let store = SharedStore::default();
@@ -1036,7 +1110,7 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert_eq!(ids.lods[0].body[0], render::MeshId(before as u32));
     assert_eq!(
         ids.dial_ticks,
-        render::MeshId((before + wagon_meshes - 1) as u32)
+        render::MeshId((before + wagon_meshes - 3) as u32)
     );
     assert_eq!(h.app.take_new_meshes().count(), wagon_meshes);
     assert_eq!(h.app.take_new_meshes().count(), 0);
@@ -1656,6 +1730,55 @@ fn the_master_volume_and_mute_reach_the_radio() {
 }
 
 #[test]
+fn the_game_pauses_in_the_background_and_resumes_in_front() {
+    let mut h = Harness::new();
+    h.frame();
+    let ticks = h.app.ticks();
+    h.app.set_focused(false);
+    for _ in 0..30 {
+        h.frame();
+    }
+    assert_eq!(h.app.ticks(), ticks, "paused in the background");
+    assert!(!h.app.menu_open(), "no menu put up");
+    h.app.set_focused(true);
+    h.frame();
+    assert!(h.app.ticks() > ticks, "running again");
+    // A menu the player opened stays open through it.
+    h.open(&[ItemId::Open(Page::Settings)]);
+    h.app.set_focused(false);
+    h.frame();
+    h.app.set_focused(true);
+    h.frame();
+    assert!(h.app.menu_open());
+}
+
+#[test]
+fn the_radio_keeps_playing_in_the_background_unless_set_to_mute() {
+    use audio::RadioCommand;
+    let mut h = Harness::new();
+    h.frame();
+    h.app.radio_commands().for_each(drop);
+    h.app.set_focused(false);
+    h.app.set_focused(true);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert!(
+        cmds.iter().all(|c| *c == RadioCommand::Volume(0.8 * 0.8)),
+        "it is a radio: {cmds:?}"
+    );
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.focus_on(ItemId::BackgroundRadio);
+    h.pad(PadButton::DpadRight);
+    assert!(h.app.settings().mute_radio_unfocused);
+    h.app.radio_commands().for_each(drop);
+    h.app.set_focused(false);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.0)], "muted in the background");
+    h.app.set_focused(true);
+    let cmds: Vec<_> = h.app.radio_commands().collect();
+    assert_eq!(cmds, [RadioCommand::Volume(0.8 * 0.8)], "back in front");
+}
+
+#[test]
 fn still_scenes_keep_the_radio_off() {
     let setup = crate::SceneSetup {
         still: true,
@@ -1813,11 +1936,33 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     });
     assert_eq!(h.app.ui().quality(), Quality::Deck);
     assert_eq!(h.app.scene_view(0.0, 1.6).quality.cascades, 2);
-    // Low on the Video page: cheaper shadows, 75% resolution, saved.
+    assert_eq!(
+        h.app.frame_rate(),
+        FrameRate::Panel,
+        "the panel's rate everywhere"
+    );
+    h.app.set_panel_hz(90.0);
+    // Battery on the Video page: the Deck's knobs at 85%, every other refresh.
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Video)]);
     h.focus_on(ItemId::Quality);
     h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.settings().quality, Some(Quality::Battery));
+    assert_eq!(h.app.settings().resolution_scale, 0.85);
+    assert_eq!(h.app.frame_rate(), FrameRate::Half);
+    assert!(h.hud_text().contains("45 fps"), "{}", h.hud_text());
+    // 90 Hz offers 45 and 30 and no slower: one more step comes round to the panel's.
+    h.focus_on(ItemId::FrameRate);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.frame_rate(), FrameRate::Third);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.app.frame_rate(), FrameRate::Panel);
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.app.frame_rate(), FrameRate::Third);
+    // Low: cheaper shadows, 75% resolution, saved; the cap stays.
+    h.focus_on(ItemId::Quality);
+    h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
+    assert_eq!(h.app.frame_rate(), FrameRate::Third);
     assert_eq!(h.app.settings().resolution_scale, 0.75);
     let low = h.app.renderer_options().quality;
     assert_eq!(low, Quality::Low.render(0.75));
@@ -1826,6 +1971,7 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     h.pad(PadButton::Start);
     let saved = store.0.borrow().clone().expect("saved");
     assert!(saved.contains("\"quality\": \"low\""), "{saved}");
+    assert!(saved.contains("\"frame_rate\": \"third\""), "{saved}");
     // A forced preset wins for the session with its own scale, unsaved.
     h.app.force_quality(Some(Quality::Ultra));
     assert_eq!(
@@ -1833,4 +1979,8 @@ fn quality_presets_apply_to_the_renderer_and_save() {
         Quality::Ultra.render(1.0)
     );
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
+    // `--quality battery` brings its cap too, for the session.
+    h.app.force_quality(Some(Quality::Battery));
+    assert_eq!(h.app.frame_rate(), FrameRate::Half);
+    assert_eq!(h.app.settings().frame_rate, FrameRate::Third);
 }

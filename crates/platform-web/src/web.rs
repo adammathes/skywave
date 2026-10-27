@@ -33,6 +33,12 @@ struct State {
     /// permissions policy): polling stops.
     pads_ok: bool,
     last_ms: Option<f64>,
+    /// The last animation frame's time, processed or skipped, ms.
+    last_tick_ms: Option<f64>,
+    /// The time between animation frames, smoothed, ms: the display's refresh.
+    refresh_ms: f64,
+    /// Animation frames skipped since the last one processed (the frame-rate cap).
+    skipped: u32,
     /// The streaming clock (`performance.now()`), when the page has one.
     performance: Option<web_sys::Performance>,
     /// What `window.skywaveStreamIdle` was last set to.
@@ -695,6 +701,9 @@ pub async fn run(
         pad: None,
         pads_ok: true,
         last_ms: None,
+        last_tick_ms: None,
+        refresh_ms: 1000.0 / 60.0,
+        skipped: 0,
         performance: window.performance(),
         stream_idle: None,
         backend,
@@ -1105,7 +1114,30 @@ impl State {
         }
     }
 
+    /// One animation frame: skipped unless it is the Nth since the last one processed
+    /// (the frame-rate cap: every Nth refresh); else the game's frame, drawing only what
+    /// changed (nothing at all when nothing did: the canvas keeps the last frame). The
+    /// game pauses while the page is hidden (a tab switch; the browser stops animation
+    /// frames then too).
     fn frame(&mut self, now_ms: f64) {
+        if let Some(last) = self.last_tick_ms {
+            // Refreshes run 4 to 50 ms apart; longer gaps are the page stalling.
+            let tick = now_ms - last;
+            if (4.0..50.0).contains(&tick) {
+                self.refresh_ms += 0.05 * (tick - self.refresh_ms);
+                self.app.set_panel_hz((1000.0 / self.refresh_ms).round());
+            }
+        }
+        self.last_tick_ms = Some(now_ms);
+        let hidden = web_sys::window()
+            .and_then(|w| w.document())
+            .is_some_and(|d| d.hidden());
+        self.app.set_focused(!hidden);
+        if self.skipped + 1 < self.app.frame_rate().divisor() {
+            self.skipped += 1;
+            return;
+        }
+        self.skipped = 0;
         let dt = self.last_ms.map_or(0.0, |last| (now_ms - last) / 1000.0);
         self.last_ms = Some(now_ms);
 
@@ -1156,23 +1188,35 @@ impl State {
             }
             self.stream_idle = Some(idle);
         }
-        let frame = match self.surface.get_current_texture() {
+        let mut reconfigured = false;
+        let (surface, device, config) = (&self.surface, &self.device, &self.config);
+        let acquire = || match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                let view = t.texture.create_view(&Default::default());
+                Some((t, view))
+            }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return;
+                surface.configure(device, config);
+                reconfigured = true;
+                None
             }
             other => {
                 log::warn!("skipping frame: {other:?}");
-                return;
+                None
             }
         };
-        let view = frame.texture.create_view(&Default::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
         let started = self.performance.as_ref().map(|p| p.now());
-        self.renderer
-            .render(&view, &self.app.scene_view(steps.alpha, aspect));
+        let scene = self.app.scene_view(steps.alpha, aspect);
+        let (_, frame) = self.renderer.draw(&scene, acquire);
+        if reconfigured {
+            // The new surface shows nothing yet.
+            self.renderer.screen_lost();
+        }
+        let Some(frame) = frame else {
+            return;
+        };
         if let (Some(p), Some(t)) = (&self.performance, started) {
             self.app.set_cpu_submit_ms((p.now() - t) as f32);
         }
