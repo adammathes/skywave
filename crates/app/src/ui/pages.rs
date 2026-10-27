@@ -2,7 +2,8 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Quit (native only)
+//! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Show controls (the
+//!            controls card) · Quit (native only)
 //! Vehicle:   Car (left/right through every built-in car this world has) · Paint (its
 //!            palette) · Drive this car; a turntable preview and the car's specs beside
 //!            them, and Select on any row swaps the car in where you are
@@ -22,7 +23,7 @@
 //! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (the
 //!            panel's, then its whole divisors: 45 / 30 at 90 Hz) · UI scale · Resolution
 //!            scale · Bloom · Performance overlay
-//! HUD:       Minimap · Rotate with car · Minimap zoom
+//! HUD:       Minimap · Rotate with car · Minimap zoom · Show controls at start
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Source
 //!            (Radio / Tape, CD or MP3 by era) · Deck mode (Normal / Shuffle / Continuous) ·
 //!            [Library ›, when there is music] · Preset · Radio in background · Stations › ·
@@ -85,6 +86,8 @@ pub enum ItemId {
     Resume,
     /// Put the car back on the nearest lane (and close the menu).
     ResetCar,
+    /// Show the controls card over the menu.
+    Controls,
     Quit,
     Open(Page),
     /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`] (in the
@@ -128,6 +131,7 @@ pub enum ItemId {
     Minimap,
     MinimapRotate,
     MinimapZoom,
+    ControlsAtStart,
     MasterVolume,
     /// The radio in the background: keep playing (0) or mute (1).
     BackgroundRadio,
@@ -313,6 +317,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             add(id, "Settings", w);
             let (id, w) = open(Page::Worlds);
             add(id, "Worlds", w);
+            add(ItemId::Controls, "Show controls", Widget::Action);
             if ctx.can_quit {
                 add(ItemId::Quit, "Quit", Widget::Action);
             }
@@ -613,6 +618,11 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     index,
                 },
             );
+            add(
+                ItemId::ControlsAtStart,
+                "Show controls at start",
+                Widget::Toggle(s.controls_at_start),
+            );
         }
         Page::Audio => {
             let s = ctx.settings;
@@ -814,6 +824,7 @@ mod tests {
                 ItemId::Open(Page::Vehicle),
                 ItemId::Open(Page::Settings),
                 ItemId::Open(Page::Worlds),
+                ItemId::Controls,
             ]
         );
         build(Page::Worlds, &ctx, &mut items);

@@ -10,9 +10,8 @@
 <!--
   Built into dist/ by tools/web-build.sh, which fills in the version and the wasm size.
   Query keys: see crates/platform-web/src/lib.rs (gl=1 forces WebGL2, gpu=1 WebGPU with no
-  fallback, diag=1 shows the start-up diagnostics instead of the game). Page-only keys:
-  help=1 always shows the controls; nohelp=1 (implied by still=1, selftest=1 and diag=1)
-  never does.
+  fallback, diag=1 shows the start-up diagnostics instead of the game). The controls are
+  the game's own card (app::ui::controls), drawn in the canvas.
   Hooks for tools/screenshot: window.skywaveReady (overlays are gone by then),
   window.skywaveBackend, window.skywaveError; also window.skywaveNotes (fallback and
   warning lines), window.skywaveDiag (the diag=1 report), window.skywavePanic.
@@ -45,7 +44,6 @@
     max-width: 34em; padding: 12px 16px; border-left: 3px solid var(--bad);
     background: rgba(90, 31, 31, 0.5); color: #f3d9d9; text-align: left;
   }
-  #help { background: rgba(0, 0, 0, 0.45); cursor: pointer; }
   .card {
     background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
     padding: 20px 26px; max-width: 640px; max-height: 90vh; overflow: auto;
@@ -85,27 +83,6 @@
   <div id="bar"><div id="fill"></div></div>
   <div id="status" aria-live="polite">Loading</div>
   <div id="error" role="alert" hidden></div>
-</div>
-<div id="help" class="overlay" hidden>
-  <div class="card">
-    <h2>HOW TO DRIVE</h2>
-    <table>
-      <tr><th></th><th>KEYBOARD / MOUSE</th><th>GAMEPAD</th></tr>
-      <tr><td>Throttle</td><td><kbd>W</kbd> / <kbd>↑</kbd></td><td>Right trigger</td></tr>
-      <tr><td>Brake, reverse</td><td><kbd>S</kbd> / <kbd>↓</kbd></td><td>Left trigger</td></tr>
-      <tr><td>Steer</td><td><kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd></td><td>Left stick</td></tr>
-      <tr><td>Handbrake</td><td><kbd>Space</kbd></td><td>Bottom face button (A)</td></tr>
-      <tr><td>Camera</td><td><kbd>C</kbd>, hold right mouse to look</td><td>Top face button (Y), right stick</td></tr>
-      <tr><td>Look back</td><td><kbd>Q</kbd></td><td>Right stick click</td></tr>
-      <tr><td>Radio</td><td><kbd>[</kbd> <kbd>]</kbd>, off <kbd>\</kbd></td><td>D-pad ← →, off ↓</td></tr>
-      <tr><td>Your music (deck)</td><td><kbd>'</kbd> radio/deck, <kbd>\</kbd> play, <kbd>[</kbd> <kbd>]</kbd> tracks, <kbd>O</kbd> <kbd>P</kbd> albums, <kbd>;</kbd> mode</td><td>Hold ↓ radio/deck, ↓ play, ← → tracks, hold ↓ + ← → albums</td></tr>
-      <tr><td>Headlights, high beams, horn</td><td><kbd>L</kbd>, <kbd>K</kbd>, <kbd>H</kbd></td><td>D-pad ↑ (hold for high beams), left stick click</td></tr>
-      <tr><td>Next car</td><td><kbd>V</kbd></td><td>Menu › Vehicle</td></tr>
-      <tr><td>Map</td><td><kbd>M</kbd>, zoom <kbd>-</kbd> <kbd>=</kbd></td><td>Select / View, zoom shoulders</td></tr>
-      <tr><td>Menu, settings</td><td><kbd>Esc</kbd></td><td>Start / Menu</td></tr>
-    </table>
-    <p>Press any key or button to start driving. Controls can be rebound in the menu.</p>
-  </div>
 </div>
 <div id="diag" class="overlay" hidden>
   <div class="card">
@@ -573,12 +550,8 @@
   const $ = (id) => document.getElementById(id);
   $("logo").src = document.querySelector("link[rel=icon]").href;
   const query = new URLSearchParams(location.search);
-  const HELP_KEY = "skywave.helpSeen";
-  const storage = (fn) => { try { return fn(localStorage); } catch { return null; } };
   const diag = query.get("diag") === "1";
   const forcedGpu = query.get("gpu") === "1" && query.get("gl") !== "1";
-  const quiet = diag || ["nohelp", "still", "selftest"].some((k) => query.get(k) === "1");
-  const wantHelp = query.get("help") === "1" || (!quiet && !storage((s) => s.getItem(HELP_KEY)));
   // Filled in by tools/web-build.sh; the server's Content-Length is the fallback (it is the
   // compressed size when the server gzips, so the bar would then finish early).
   const WASM_BYTES = Number("%SKYWAVE_WASM_BYTES%") || 0;
@@ -592,7 +565,6 @@
     if (window.skywaveError) return;
     window.skywaveError = msg;
     $("loading").hidden = false;
-    $("help").hidden = true;
     $("bar").hidden = true;
     $("status").hidden = true;
     $("error").textContent = msg;
@@ -690,37 +662,12 @@
     return WebAssembly.compile(await again.arrayBuffer());
   }
 
-  function showHelp() {
-    $("help").hidden = false;
-    let polling = true;
-    const done = (e) => {
-      if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
-      polling = false;
-      $("help").hidden = true;
-      document.body.classList.add("playing");
-      storage((s) => s.setItem(HELP_KEY, "1"));
-      for (const t of ["keydown", "mousedown", "touchstart"]) window.removeEventListener(t, done, true);
-      $("skywave").focus();
-    };
-    for (const t of ["keydown", "mousedown", "touchstart"]) window.addEventListener(t, done, true);
-    const poll = () => {
-      if (!polling) return;
-      let pads = [];
-      try { pads = navigator.getGamepads ? [...navigator.getGamepads()] : []; } catch {}
-      if (pads.some((p) => p && p.buttons.some((b) => b.pressed))) done();
-      else requestAnimationFrame(poll);
-    };
-    requestAnimationFrame(poll);
-  }
-
   function firstFrame(backend) {
     ready = true;
     $("loading").hidden = true;
     if (backend === "diag") {
       $("diag").hidden = false;
       window.skywaveStreamIdle = true;
-    } else if (wantHelp && backend !== "selftest") {
-      showHelp();
     } else {
       document.body.classList.add("playing");
     }

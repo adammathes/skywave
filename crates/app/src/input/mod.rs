@@ -66,6 +66,8 @@ pub enum Action {
     Pause,
     Screenshot,
     DebugOverlay,
+    /// Show or hide the controls card (a long press on the pad).
+    Controls,
     MenuUp,
     MenuDown,
     MenuLeft,
@@ -96,7 +98,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 40;
+    pub const COUNT: usize = 41;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -124,6 +126,7 @@ impl Action {
         Action::Pause,
         Action::Screenshot,
         Action::DebugOverlay,
+        Action::Controls,
         Action::MenuUp,
         Action::MenuDown,
         Action::MenuLeft,
@@ -238,6 +241,7 @@ impl Action {
             Action::Pause => "Pause",
             Action::Screenshot => "Screenshot",
             Action::DebugOverlay => "DebugOverlay",
+            Action::Controls => "Controls",
             Action::MenuUp => "MenuUp",
             Action::MenuDown => "MenuDown",
             Action::MenuLeft => "MenuLeft",

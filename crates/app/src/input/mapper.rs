@@ -732,24 +732,24 @@ mod tests {
             (s.pressed(Action::Horn), s.just_pressed(Action::Horn))
         };
         assert_eq!(horn(&mut m), (false, false));
-        m.press(key(Key::KeyH));
+        m.press(key(Key::KeyB));
         assert_eq!(horn(&mut m), (true, true));
         // Held, and OS key repeat while held: no new edge.
-        m.press(key(Key::KeyH));
+        m.press(key(Key::KeyB));
         assert_eq!(horn(&mut m), (true, false));
         assert_eq!(horn(&mut m), (true, false));
-        m.release(key(Key::KeyH));
+        m.release(key(Key::KeyB));
         assert_eq!(horn(&mut m), (false, false));
         // A tap entirely between two samples still fires exactly once.
-        m.press(key(Key::KeyH));
-        m.release(key(Key::KeyH));
+        m.press(key(Key::KeyB));
+        m.release(key(Key::KeyB));
         assert_eq!(horn(&mut m), (false, true));
         assert_eq!(horn(&mut m), (false, false));
         // Release and press again between samples: a second edge.
-        m.press(key(Key::KeyH));
+        m.press(key(Key::KeyB));
         assert_eq!(horn(&mut m), (true, true));
-        m.release(key(Key::KeyH));
-        m.press(key(Key::KeyH));
+        m.release(key(Key::KeyB));
+        m.press(key(Key::KeyB));
         assert_eq!(horn(&mut m), (true, true));
 
         // A stick crossing into a menu direction is an edge too, once.
@@ -922,7 +922,7 @@ mod tests {
         assert_eq!(m.take_capture(), None);
         // Mapping goes on while armed.
         m.arm_capture();
-        m.press(key(Key::KeyH));
+        m.press(key(Key::KeyB));
         assert!(m.sample(0.01).pressed(Action::Horn));
     }
 }
