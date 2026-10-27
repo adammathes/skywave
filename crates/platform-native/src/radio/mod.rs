@@ -5,11 +5,14 @@
 //! Each `Play` cuts the [`Ring`] (the old station falls silent and its thread stops
 //! writing) and starts a stream thread (`stream`) that fetches the URL (`http`), splits
 //! off the ICY titles (`icy`), decodes MP3 and resamples to 48 kHz (`decode`) into the
-//! ring. The sound sink's callback reads the ring through a [`Tap`] and adds the radio to
+//! ring. Each `PlayFile` (a track of the player's music folder, see `crate::music`) starts a
+//! file thread (`file`) that reads, seeks, decodes and resamples the same way. The sound
+//! sink's callback reads the ring through a [`Tap`] and adds the radio to
 //! the mixer's output. The game's thread only sends commands and polls a channel: it never
 //! waits on the network.
 
 mod decode;
+pub(crate) mod file;
 mod http;
 mod icy;
 mod ring;
@@ -93,15 +96,23 @@ impl Player {
                     self.tx.clone(),
                 );
             }
-            RadioCommand::PlayFile { token, .. } => {
-                // Natively the dial holds no file stations yet (music folders come next);
-                // fail rather than leave the radio waiting.
-                self.out.ring.cut();
+            RadioCommand::PlayFile {
+                key,
+                start_s,
+                token,
+            } => {
+                let epoch = self.out.ring.cut();
                 self.token = *token;
                 self.set_title(None);
-                let _ = self
-                    .tx
-                    .send(Note::Event(PlayerEvent::Failed { token: *token }));
+                log::info!("radio: play {key} from {start_s:.0} s");
+                file::spawn(
+                    key.clone(),
+                    *start_s,
+                    *token,
+                    epoch,
+                    Arc::clone(&self.out.ring),
+                    self.tx.clone(),
+                );
             }
             RadioCommand::Stop => {
                 self.out.ring.cut();
@@ -233,6 +244,54 @@ mod tests {
         mix = [0.1; 512];
         tap.mix_into(&mut mix);
         assert_eq!(mix, [0.1; 512]);
+    }
+
+    /// Plays a file through the player and the real callback tap (fed in callback-sized
+    /// pieces at about real time); returns the player's reports within 10 s.
+    fn play_through_the_tap(path: &str, start_s: f32) -> Vec<PlayerEvent> {
+        let out = Arc::new(Output::new());
+        let mut player = Player::new(Arc::clone(&out));
+        let mut tap = Tap::new(Arc::clone(&out), 1024);
+        player.command(&RadioCommand::PlayFile {
+            key: path.to_string(),
+            start_s,
+            token: 1,
+        });
+        let mut events = Vec::new();
+        let t0 = std::time::Instant::now();
+        while t0.elapsed() < std::time::Duration::from_secs(10) {
+            let mut mix = [0.0f32; 1024];
+            tap.mix_into(&mut mix);
+            while let Some(e) = player.poll() {
+                events.push(e);
+            }
+            if matches!(
+                events.last(),
+                Some(PlayerEvent::Ended { .. } | PlayerEvent::Failed { .. })
+            ) {
+                break;
+            }
+            // 512 frames at 48 kHz, a little faster than real time.
+            std::thread::sleep(std::time::Duration::from_millis(8));
+        }
+        events
+    }
+
+    /// The end of a track always plays out and `Ended` comes, even when less than the
+    /// tap's prebuffer is left: a short file, and one entered just before its end.
+    #[test]
+    fn a_track_ends_through_the_tap_however_little_is_left() {
+        use file::tests::{mp3_file, scratch};
+        let done = [
+            PlayerEvent::Started { token: 1 },
+            PlayerEvent::Ended { token: 1 },
+        ];
+        // 5 frames ≈ 0.13 s.
+        let short = scratch("tap-short.mp3", &mp3_file(5, &[]));
+        assert_eq!(play_through_the_tap(&short, 0.0), done);
+        // ~3 s, from 2.9 s.
+        let tail = scratch("tap-tail.mp3", &mp3_file(115, &[]));
+        assert_eq!(play_through_the_tap(&tail, 2.9), done);
     }
 
     #[test]
