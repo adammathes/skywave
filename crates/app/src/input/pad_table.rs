@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn feeding_a_standard_pad_drives_actions_and_release_clears_it() {
         let mut m = InputMapper::default();
-        m.press(RawInput::Key(Key::KeyH));
+        m.press(RawInput::Key(Key::KeyB));
         feed_button(&mut m, 7, 0.6, false); // right trigger, below the press threshold
         feed_button(&mut m, 0, 1.0, true); // A / Cross
         feed_axis(&mut m, 0, 0.54); // left stick right
