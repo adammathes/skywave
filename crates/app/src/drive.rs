@@ -386,6 +386,15 @@ impl Drive {
         self.horn = input.pressed(Action::Horn);
     }
 
+    /// After [`Drive::step`]: an NPC car touched this car (`npc::Npcs::collide`), heard
+    /// and felt like any other hit.
+    pub fn note_car_hit(&mut self, hit: world::Bump) {
+        self.impact.contact = true;
+        if hit.speed > self.impact.hit.speed {
+            self.impact.hit = hit;
+        }
+    }
+
     /// The high beams are lit: selected, with the headlights on.
     pub fn high_beams_lit(&self) -> bool {
         self.headlights && self.high_beams
