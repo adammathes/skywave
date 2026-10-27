@@ -602,7 +602,7 @@ fn a_shoved_car_brakes_stands_and_steers_back() {
     for tick in 0..30 * HZ as u64 {
         if tick == hit {
             let i = t.cars().iter().position(|c| c.id == a).unwrap();
-            t.shove(i, [2.0, 1.5], 0.4);
+            t.shove(i, [2.0, 1.5], 0.4, traffic::cars::FREE_ROOM);
         }
         let before = find(&t, a);
         t.step(&g, &scripted(tick, Player::ABSENT));
@@ -718,7 +718,7 @@ fn rear_ending_a_queue_at_twenty_shoves_the_last_car() {
             };
             if let Some(h) = hit_car(&mut car, &spec, &other) {
                 if h.bump.speed > 0.0 {
-                    t.shove(i, h.dv, h.dspin);
+                    t.shove(i, h.dv, h.dspin, traffic::cars::FREE_ROOM);
                     if hit.is_none() {
                         assert_eq!(c.id, last, "hit the car ahead");
                         hit = Some((tick, h.bump.speed));
@@ -772,6 +772,46 @@ fn rear_ending_a_queue_at_twenty_shoves_the_last_car() {
     assert!(shove == [0.0; 2] && yaw == 0.0, "{shove:?} {yaw}");
     assert_eq!(overlaps, 0);
     assert!(car.speed_mps.abs() < 0.3);
+}
+
+/// Ten broadside rams in a row (4 m/s across and the yaw cap each, half a second apart),
+/// then a three-second push at 2 m/s, on a car standing in its lane: the car never goes
+/// more than `SHOVE_SIDE_M` off its lane's line nor turns more than `SHOVE_YAW`, and once
+/// left alone it drives back onto its line.
+#[test]
+fn rams_never_push_a_car_off_its_lane() {
+    use traffic::cars::{SHOVE_SIDE_M, SHOVE_YAW};
+    let _quiet = shared();
+    let g = straight();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    let a = t.spawn_at(&g, 0, 300.0, 0.0).expect("room");
+    let (mut widest, mut most_yaw) = (0.0f32, 0.0f32);
+    let mut back = None;
+    let rams = 10 * HZ as u64 / 2;
+    let push = rams + 3 * HZ as u64;
+    for tick in 0..40 * HZ as u64 {
+        let i = t.cars().iter().position(|c| c.id == a).unwrap();
+        if tick < rams && tick % (HZ as u64 / 2) == 0 {
+            t.shove(i, [0.0, 4.0], 0.6, traffic::cars::FREE_ROOM);
+        } else if (rams..push).contains(&tick) {
+            // 2 m/s held against it: what it loses to friction each step, given back.
+            t.shove(i, [0.0, 8.0 / HZ as f32], 0.0, traffic::cars::FREE_ROOM);
+        }
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        let c = t.cars()[i];
+        widest = widest.max(c.pos[2].abs());
+        most_yaw = most_yaw.max((c.heading - EAST).abs());
+        if tick > push && back.is_none() && c.shove == [0.0; 2] && c.yaw == 0.0 {
+            back = Some((tick - push) as f32 / HZ as f32);
+        }
+    }
+    println!(
+        "ten rams and a 3 s push: at most {widest:.3} m off the line, {most_yaw:.3} rad \
+         turned; back on its line {back:?} s after"
+    );
+    assert!(widest <= SHOVE_SIDE_M + 1e-4, "{widest} m");
+    assert!(most_yaw <= SHOVE_YAW + 1e-4, "{most_yaw} rad");
+    assert!(back.expect("back on its line") < 15.0);
 }
 
 /// The player's car stands across a one-lane road: the cars coming queue behind it and

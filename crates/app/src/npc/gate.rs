@@ -658,6 +658,202 @@ fn reversing_into_a_queue_stops_against_it() {
     assert_eq!(cars, 0, "first at step {first:?}");
 }
 
+/// Ten broadside rams at 8 m/s, half a second apart, into the NPC car nearest the busiest
+/// block of the strip, pushing it toward the curb, with the people of that block about:
+/// the car's body never leaves the roadway (every corner on asphalt, level with the road
+/// at its lane's line), and nobody standing on a sidewalk is ever inside it.
+#[test]
+fn rams_never_push_an_npc_onto_the_sidewalk() {
+    // The busiest block of the strip at seed 1 (`peds::tests::STRIP`).
+    let mut app =
+        app("place=coast&car=gannet_gt&cam=chase-mid&pos=872.0,942.5&yaw=1&t=12:00&traffic=busy");
+    let me = app.traffic_player();
+    let hold = InputState::default();
+    // A car standing in the outermost lane (curb side) nearest a point 15 m up the road.
+    let ahead = forward(me.heading);
+    let target = [me.pos[0] + ahead[0] * 15.0, me.pos[2] + ahead[1] * 15.0];
+    let g = &app.npcs.graph;
+    let mut best = (f32::INFINITY, 0u32, 0.0f32);
+    for (l, lane) in g.lanes.iter().enumerate() {
+        let mut s = 8.0;
+        while s < lane.length_m - 8.0 {
+            let p = g.pose(l as u32, s).pos;
+            let d = (p[0] - target[0]).hypot(p[2] - target[1]);
+            if d < best.0 {
+                best = (d, l as u32, s);
+            }
+            s += 1.0;
+        }
+    }
+    let near = &g.lanes[best.1 as usize];
+    let lane = (0..g.lanes.len() as u32)
+        .filter(|&l| {
+            let o = &g.lanes[l as usize];
+            o.edge == near.edge && o.forward == near.forward
+        })
+        .max_by_key(|&l| g.lanes[l as usize].slot)
+        .unwrap();
+    let graph = app.npcs.graph.clone();
+    let id = app
+        .npcs
+        .traffic
+        .spawn_at(&graph, lane, best.2, 0.0)
+        .expect("room in the pool");
+    let spec = app.drive.spec.clone();
+    let (mut rams, mut off_road, mut inside, mut widest) = (0, 0, 0, 0.0f32);
+    let mut room = [0.0f32; 3];
+    let mut seen = 0;
+    for k in 0..15 * 120 {
+        let Some(i) = app.npcs.cars().iter().position(|c| c.id == id) else {
+            // Gone once it drove on, out of view far away.
+            assert!(rams == 10, "the car left");
+            break;
+        };
+        seen = k;
+        let c = app.npcs.cars()[i];
+        let b = app.npcs.body(&c);
+        if k < 10 * 60 && k % 60 == 0 {
+            // The player's car square on to the car's left side, nose a hair into it,
+            // closing at 8 m/s toward its right.
+            let r = [-c.dir[1], c.dir[0]];
+            let mid = [c.pos[0] - c.dir[0] * b.back, c.pos[2] - c.dir[1] * b.back];
+            let back = b.half[1] + 0.5 * spec.dims_m[0] - 0.03;
+            let at = [mid[0] - r[0] * back, c.pos[1], mid[1] - r[1] * back];
+            let mut ram = vehicle::VehicleState::spawn(&spec, at, (-r[0]).atan2(-r[1]));
+            ram.vel = [r[0] * 8.0, 0.0, r[1] * 8.0];
+            if app.npcs.collide(&mut ram, &spec, &app.ground).is_some() {
+                rams += 1;
+            }
+            room = app.npcs.cars()[i].room;
+        }
+        step(&mut app, &hold);
+        let Some(c) = app.npcs.cars().iter().find(|c| c.id == id).copied() else {
+            continue;
+        };
+        widest = widest.max((c.shove[0]).hypot(c.shove[1]));
+        let b = app.npcs.body(&c);
+        off_road += usize::from(!body_on_road(&app, &c, &b));
+        let rect = Rect::car(&app, &c);
+        for p in app.npcs.crowd.people() {
+            let (_, surface) = app.ground.level_from([p.pos[0], p.pos[2]], p.pos[1] + 0.5);
+            if surface != world::collide::Surface::Asphalt && rect.contains(p.pos) {
+                inside += 1;
+            }
+        }
+    }
+    eprintln!(
+        "ten rams toward the curb: {rams} hit, room {room:?}, shoved at most {widest:.2} m, \
+         {off_road} steps off the roadway, {inside} person-steps on a sidewalk inside it, \
+         watched {:.1} s",
+        seen as f32 / 120.0
+    );
+    assert_eq!(rams, 10);
+    assert_eq!(off_road, 0);
+    assert_eq!(inside, 0);
+}
+
+/// On the coast at seed 1, every 5 m of every lane 15 m clear of its ends, the largest
+/// traffic body standing on its lane: wherever it stands on the roadway, it still does
+/// shoved as far as the measured room allows to either side and turned either way as far
+/// as allowed (`npc::road_room`, checked here by an independent test of its corners).
+#[test]
+fn the_measured_room_keeps_every_shove_on_the_roadway() {
+    let app = app("place=coast&car=gannet_gt&cam=chase-mid&t=12:00&traffic=busy");
+    let g = &app.npcs.graph;
+    let template = app.npcs.cars()[0];
+    let shape = (0..crate::vehicles::TRAFFIC_SHAPES as u8)
+        .max_by(|&a, &b| {
+            let len = |k: u8| {
+                app.npcs
+                    .body(&traffic::Car {
+                        shape: k,
+                        ..template
+                    })
+                    .half[0]
+            };
+            len(a).total_cmp(&len(b))
+        })
+        .unwrap();
+    let (mut samples, mut road, mut full, mut none, mut left) = (0, 0, 0, 0, Vec::new());
+    for id in 0..g.lanes.len() as u32 {
+        let len = g.lanes[id as usize].length_m;
+        let mut s = 15.0;
+        while s < len - 15.0 {
+            let p = g.pose(id, s);
+            s += 5.0;
+            samples += 1;
+            let car = traffic::Car {
+                pos: p.pos,
+                heading: p.heading,
+                dir: p.dir,
+                shape,
+                shove: [0.0; 2],
+                yaw: 0.0,
+                ..template
+            };
+            let b = app.npcs.body(&car);
+            if !body_on_road(&app, &car, &b) {
+                continue;
+            }
+            road += 1;
+            let room = super::road_room(&app.ground, &car, &b);
+            full += usize::from(room == traffic::cars::FREE_ROOM);
+            none += usize::from(room[0] == 0.0 && room[1] == 0.0);
+            let side = right(p.dir);
+            for (k, sign) in [(0, 1.0), (1, -1.0)] {
+                for turn in [-room[2], room[2]] {
+                    let (sn, cs) = turn.sin_cos();
+                    let off = sign * room[k];
+                    let shoved = traffic::Car {
+                        pos: [p.pos[0] + side[0] * off, p.pos[1], p.pos[2] + side[1] * off],
+                        heading: p.heading + turn,
+                        dir: [p.dir[0] * cs + p.dir[1] * sn, p.dir[1] * cs - p.dir[0] * sn],
+                        shove: [side[0] * off, side[1] * off],
+                        yaw: turn,
+                        ..car
+                    };
+                    if !body_on_road(&app, &shoved, &b) {
+                        left.push((id, s - 5.0, room));
+                    }
+                }
+            }
+        }
+    }
+    eprintln!(
+        "measured room on the coast: {road} of {samples} lane points on the roadway, {full} \
+         with the full room, {none} with none to either side; {} shoved poses off it: {:?}",
+        left.len(),
+        &left[..left.len().min(6)]
+    );
+    assert!(road * 10 > samples * 9, "{road} of {samples}");
+    assert!(left.is_empty());
+}
+
+/// Whether NPC car `c`'s body (`b`) stands on the roadway: every corner on asphalt and
+/// level (within 8 cm) with the road at the same point along its path.
+fn body_on_road(app: &App, c: &traffic::Car, b: &super::CarBody) -> bool {
+    let (sn, cs) = c.yaw.sin_cos();
+    let d = [c.dir[0] * cs - c.dir[1] * sn, c.dir[1] * cs + c.dir[0] * sn];
+    let line = [c.pos[0] - c.shove[0], c.pos[2] - c.shove[1]];
+    let rect = Rect::car(app, c);
+    let y = c.pos[1] + 0.5;
+    [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)]
+        .iter()
+        .all(|&(u, v)| {
+            let r = right(rect.f);
+            let q = [
+                rect.c[0] + rect.f[0] * b.half[0] * u + r[0] * b.half[1] * v,
+                rect.c[1] + rect.f[1] * b.half[0] * u + r[1] * b.half[1] * v,
+            ];
+            let (yq, surface) = app.ground.level_from(q, y);
+            let along = dot([q[0] - line[0], q[1] - line[1]], d);
+            let (yl, _) = app
+                .ground
+                .level_from([line[0] + d[0] * along, line[1] + d[1] * along], y);
+            surface == world::collide::Surface::Asphalt && (yq - yl).abs() < 0.08
+        })
+}
+
 /// A tiny seeded generator for the bumping drive's choices.
 struct Lcg(u64);
 
@@ -735,7 +931,8 @@ fn a_minute_of_random_bumping_stays_finite_and_grounded() {
     );
     assert!(new_hits >= 5, "{new_hits} hits");
     assert!(worst <= 1.0, "{worst} m/s gained in a hit");
-    assert!(max_up < 2.0 && max_rise < 1.5, "{max_up} m/s, {max_rise} m");
+    // About twice what is measured (0.81 m/s, 0.18 m).
+    assert!(max_up < 1.6 && max_rise < 0.4, "{max_up} m/s, {max_rise} m");
 }
 
 /// The car-count band each of Low, Normal and Busy holds at every step of 120 s, of the

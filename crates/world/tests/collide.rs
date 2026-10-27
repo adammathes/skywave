@@ -1243,6 +1243,9 @@ struct CarRun {
     max_up: f32,
     max_rise: f32,
     max_spin: f32,
+    /// Fastest either car went backward against the way it was going at the start, m/s.
+    player_back: f32,
+    npc_back: f32,
 }
 
 /// Steps the player's car (driven by `drive`) and `npc` together for `secs` on flat
@@ -1259,6 +1262,7 @@ fn car_run(
         friction: 1.0,
     };
     let y0 = s.pos[1];
+    let (f0, d0) = (forward2(s), npc.dir());
     let mut run = CarRun::default();
     for _ in 0..secs * STEPS_PER_S {
         let inp = drive(s, run.hits > 0);
@@ -1284,39 +1288,144 @@ fn car_run(
         run.max_up = run.max_up.max(s.vel[1].abs());
         run.max_rise = run.max_rise.max(s.pos[1] - y0);
         run.max_spin = run.max_spin.max(npc.spin.abs());
+        run.player_back = run.player_back.max(-dot(xz(s.vel), f0));
+        run.npc_back = run.npc_back.max(-dot(npc.vel(), d0));
     }
     run
 }
 
-/// Head-on at 30 km/h closing, each car at 15 km/h: both stop, never overlapping, and no
-/// single hit changes either car's speed by more than the closing speed and the rebound.
+/// Head-on with each car at 15, 30 and 50 km/h: both stop, never overlapping, and neither
+/// is thrown back: the oncoming car's approach is stopped before any push away is capped,
+/// so the player's car is not left to take the whole exchange.
 #[test]
-fn head_on_at_thirty_closing_stops_both() {
+fn head_ons_stop_both_and_throw_nobody_back() {
     for spec in cars() {
-        let v = 30.0 / 3.6 / 2.0;
-        let mut s = launched(&spec, [0.0; 3], 0.0, v);
-        let mut npc = Npc::new([0.0, -12.0], std::f32::consts::PI, v);
-        let run = car_run(&spec, &mut s, &mut npc, 4, |s, hit| {
-            if hit {
-                halt(s)
-            } else {
-                cruise(s, v)
+        for kmh in [15.0, 30.0, 50.0] {
+            let v = kmh / 3.6;
+            let mut s = launched(&spec, [0.0; 3], 0.0, v);
+            let mut npc = Npc::new([0.0, -14.0], std::f32::consts::PI, v);
+            let run = car_run(&spec, &mut s, &mut npc, 4, |s, hit| {
+                if hit {
+                    halt(s)
+                } else {
+                    cruise(s, v)
+                }
+            });
+            eprintln!(
+                "{}: head-on at {kmh} km/h each {run:?}, after {:.2} / {:.2} m/s",
+                spec.id,
+                hspeed(&s),
+                npc.ground_speed()
+            );
+            assert!(run.hits > 0 && (run.first - 2.0 * v).abs() < 1.0, "{run:?}");
+            assert_eq!(run.overlaps, 0);
+            assert!(run.player_dv <= 1.2 * 2.0 * v + 0.2, "{run:?}");
+            assert!(
+                run.player_back < 1.0 && run.npc_back < 1.0,
+                "thrown back: {run:?}"
+            );
+            assert!(hspeed(&s) < 0.3 && npc.ground_speed() < 0.3, "still moving");
+            assert!(run.max_up < 0.5 && run.max_rise < 0.1, "{run:?}");
+        }
+    }
+}
+
+/// A plane rising `grade` per meter toward `-z`.
+struct Slope {
+    grade: f32,
+}
+
+impl Slope {
+    fn y(&self, x: f32, z: f32) -> f32 {
+        let _ = x;
+        -self.grade * z
+    }
+}
+
+impl vehicle::Ground for Slope {
+    fn probe(&self, o: [f32; 3], d: [f32; 3], max_len: f32) -> Option<vehicle::Hit> {
+        // Plane y + grade z = 0.
+        let den = d[1] + self.grade * d[2];
+        if den > -1e-6 {
+            return None;
+        }
+        let t = -(o[1] + self.grade * o[2]) / den;
+        if t > max_len {
+            return None;
+        }
+        let l = (1.0 + self.grade * self.grade).sqrt();
+        Some(vehicle::Hit {
+            t: t.max(0.0),
+            normal: [0.0, 1.0 / l, self.grade / l],
+            friction: 1.0,
+        })
+    }
+}
+
+/// Uphill at 20 m/s into a car standing in the lane, on 8, 12 and 15% grades: the hit
+/// stops the climb too, so the car never rises off the slope (the hill-launch lesson: the
+/// contact normal is level, the ground is not).
+#[test]
+fn uphill_hits_do_not_lift_the_car() {
+    for spec in cars() {
+        for grade in [0.08, 0.12, 0.15] {
+            let ground = Slope { grade };
+            let mut s = VehicleState::spawn(&spec, [0.0; 3], 0.0);
+            let v = 20.0;
+            let mut guard = 0;
+            while s.speed_mps < v {
+                step(
+                    &spec,
+                    &mut s,
+                    &input(1.0, 0.0),
+                    &Assists::default(),
+                    &ground,
+                );
+                guard += 1;
+                assert!(
+                    guard < 60 * STEPS_PER_S,
+                    "{} never reached {v} m/s",
+                    spec.id
+                );
             }
-        });
-        eprintln!(
-            "{}: head-on {run:?}, after {:.2} / {:.2} m/s",
-            spec.id,
-            hspeed(&s),
-            npc.ground_speed()
-        );
-        assert!(run.hits > 0 && (run.first - 2.0 * v).abs() < 0.6, "{run:?}");
-        assert_eq!(run.overlaps, 0);
-        assert!(
-            run.npc_dv <= 4.0 + 1e-3 && run.player_dv <= 1.2 * 2.0 * v + 0.2,
-            "{run:?}"
-        );
-        assert!(hspeed(&s) < 0.3 && npc.ground_speed() < 0.3, "still moving");
-        assert!(run.max_up < 0.5 && run.max_rise < 0.1, "{run:?}");
+            let f = forward2(&s);
+            let ahead = 0.5 * spec.dims_m[0] + 2.3 + 3.0;
+            let c = add(xz(s.pos), f, ahead);
+            let gy = ground.y(c[0], c[1]);
+            let mut npc = Npc::new(c, heading_of(f), 0.0);
+            let height = |s: &VehicleState| s.pos[1] - ground.y(s.pos[0], s.pos[2]);
+            let mut before = height(&s);
+            let (mut hit, mut rise, mut up) = (false, 0.0f32, 0.0f32);
+            for _ in 0..3 * STEPS_PER_S {
+                let inp = if hit { halt(&s) } else { cruise(&s, v) };
+                step(&spec, &mut s, &inp, &Assists::default(), &ground);
+                let mut other = npc.other();
+                other.body.y0 += gy;
+                other.body.y1 += gy;
+                if let Some(h) = hit_car(&mut s, &spec, &other) {
+                    if h.bump.speed > 0.0 {
+                        hit = true;
+                        npc.shove(h.dv, h.dspin);
+                    }
+                }
+                npc.step();
+                assert_finite(&s);
+                if hit {
+                    rise = rise.max(height(&s) - before);
+                    up = up.max(s.vel[1]);
+                } else {
+                    before = height(&s);
+                }
+            }
+            eprintln!(
+                "{}: uphill at {:.0}% into a standing car: rose {rise:.3} m, up at most \
+                 {up:.2} m/s",
+                spec.id,
+                grade * 100.0
+            );
+            assert!(hit, "never reached the car");
+            assert!(rise < 0.05, "rose {rise} m at {grade}");
+        }
     }
 }
 
@@ -1355,8 +1464,7 @@ fn a_hundred_into_a_standing_car_is_a_thud_not_a_launch() {
 }
 
 /// A side swipe: running alongside at 10 m/s, the player's car drifts into the NPC car at
-/// 1.5 m/s. Both keep going nearly as fast, the NPC car yaws a little and the player's car
-/// is turned away, not spun.
+/// 1.5 m/s. Both keep going nearly as fast and neither turns more than 0.02 rad.
 #[test]
 fn side_swipe_lets_both_drive_on() {
     for spec in cars() {
@@ -1379,8 +1487,9 @@ fn side_swipe_lets_both_drive_on() {
             hspeed(&s) > 0.8 * v && npc.ground_speed() > 0.8 * v,
             "{run:?}"
         );
+        // About twice what is measured (0.006 and 0.008 rad).
         assert!(
-            npc.heading.abs() < 0.15 && yaw.abs() < 0.3,
+            npc.heading.abs() < 0.02 && yaw.abs() < 0.02,
             "{yaw} {}",
             npc.heading
         );

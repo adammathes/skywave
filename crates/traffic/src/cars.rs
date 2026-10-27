@@ -80,6 +80,15 @@ const HOLD_S: (u32, u32) = (SIM_HZ, SIM_HZ * 2);
 /// and its yaw rate at this (rad/s²)...
 const SLIDE_DECEL: f32 = 8.0;
 const SPIN_DECEL: f32 = 3.0;
+/// ...but never further off its path than this sideways (m) nor turned more than this
+/// (rad), and less where the caller says the road has less room ([`Traffic::shove`]): a
+/// shove past it stops there. Pushed this far a car's body stays 0.6 m clear of a
+/// neighbouring lane's cars (lanes 3.3 m apart and more)...
+pub const SHOVE_SIDE_M: f32 = 0.5;
+pub const SHOVE_YAW: f32 = 0.12;
+/// The room [`Traffic::shove`] takes where the road has room for every shove: right, left
+/// (m) and the turn (rad).
+pub const FREE_ROOM: [f32; 3] = [SHOVE_SIDE_M, SHOVE_SIDE_M, SHOVE_YAW];
 /// ...then it steers back to its lane: the shove eases out by this per meter driven, the
 /// yaw with it in proportion (so the car never crabs), or by this (rad per meter) once the
 /// shove is gone.
@@ -246,6 +255,9 @@ pub struct Car {
     pub slide: [f32; 2],
     pub spin: f32,
     pub hold: u32,
+    /// How far it may be shoved off its path to its right and left (m) and turned (rad),
+    /// from the last hit.
+    pub room: [f32; 3],
     pub stop: StopState,
     /// Ticks left to wait at a stop sign; the tick the wait ended.
     pub wait: u32,
@@ -836,6 +848,7 @@ impl Traffic {
             slide: [0.0; 2],
             spin: 0.0,
             hold: 0,
+            room: [0.0; 3],
             stop: StopState::Approach,
             wait: 0,
             stop_tick: 0,
@@ -1394,7 +1407,11 @@ impl Traffic {
             let k = (off - step) / off;
             [c.offset[0] * k, c.offset[1] * k]
         };
-        let shoved = c.hold > 0 || c.shove != [0.0; 2] || c.yaw != 0.0 || c.spin != 0.0;
+        let shoved = c.hold > 0
+            || c.shove != [0.0; 2]
+            || c.yaw != 0.0
+            || c.slide != [0.0; 2]
+            || c.spin != 0.0;
         if shoved {
             unshove(&mut c, ds);
         }
@@ -1791,9 +1808,17 @@ impl Traffic {
     /// its way (and keeps it at or above standstill) goes into its speed on its path, which
     /// the car ahead and the stop line still limit; the rest slides it off its path. Either
     /// way, knocked by [`HOLD_DV`] or more, it stands on the brakes for 1 to 2 s; then it
-    /// drives on and steers back to its lane.
-    pub fn shove(&mut self, i: usize, dv: [f32; 2], dspin: f32) {
+    /// drives on and steers back to its lane. It is never shoved further off its path than
+    /// `room` (to its right and left, m, each at most [`SHOVE_SIDE_M`]) nor turned more
+    /// than `room[2]` (rad, at most [`SHOVE_YAW`]): the caller measures what keeps its body
+    /// on the roadway ([`FREE_ROOM`] where there is room for all of it).
+    pub fn shove(&mut self, i: usize, dv: [f32; 2], dspin: f32, room: [f32; 3]) {
         let c = &mut self.cars[i];
+        c.room = [
+            room[0].clamp(0.0, SHOVE_SIDE_M),
+            room[1].clamp(0.0, SHOVE_SIDE_M),
+            room[2].clamp(0.0, SHOVE_YAW),
+        ];
         let along = dot(dv, c.dir);
         let speed = (c.speed + along).max(0.0);
         let taken = speed - c.speed;
@@ -1833,6 +1858,8 @@ impl Traffic {
                     f(c.slide[0]) | f(c.slide[1]) << 32,
                     f(c.yaw) | f(c.spin) << 32,
                     u64::from(c.hold),
+                    f(c.room[0]) | f(c.room[1]) << 32,
+                    u64::from(f(c.room[2])),
                 ];
                 h = hash64(h, &w);
             }
@@ -1847,6 +1874,26 @@ impl Traffic {
 fn unshove(c: &mut Car, ds: f32) {
     c.shove = [c.shove[0] + c.slide[0] * DT, c.shove[1] + c.slide[1] * DT];
     c.yaw += c.spin * DT;
+    // Kept on the roadway: the path's direction is the drawn one less the yaw.
+    let (sn, cs) = sin_cos(c.yaw);
+    let path = [c.dir[0] * cs - c.dir[1] * sn, c.dir[1] * cs + c.dir[0] * sn];
+    let side = right(path);
+    let lat = dot(c.shove, side);
+    let most = if lat > 0.0 { c.room[0] } else { c.room[1] };
+    if lat.abs() > most {
+        let over = lat - most * lat.signum();
+        c.shove = [c.shove[0] - side[0] * over, c.shove[1] - side[1] * over];
+        let out = dot(c.slide, side);
+        if out * lat > 0.0 {
+            c.slide = [c.slide[0] - side[0] * out, c.slide[1] - side[1] * out];
+        }
+    }
+    if c.yaw.abs() > c.room[2] {
+        c.yaw = c.room[2] * c.yaw.signum();
+        if c.spin * c.yaw > 0.0 {
+            c.spin = 0.0;
+        }
+    }
     let v = len2(c.slide);
     c.slide = if v <= SLIDE_DECEL * DT {
         [0.0; 2]

@@ -1665,8 +1665,10 @@ pub struct CarHit {
 const CAR_RESTITUTION: f32 = 0.2;
 /// ...the player's car at most this fast, m/s: a hard hit is a thud, not a bounce.
 const CAR_REBOUND_MAX_MPS: f32 = 1.0;
-/// The most one hit changes the other car's speed, m/s, and its yaw rate, rad/s: past it
-/// the other car's tires take the rest, so a hit at 100 km/h shoves it, never launches it.
+/// The fastest a hit sends the other car away from the player's (after its own approach is
+/// stopped), and along the contact, m/s, and the most it changes its yaw rate, rad/s: past
+/// them the other car's tires take the rest, so a hit at 100 km/h shoves it, never launches
+/// it, and a car coming on is stopped rather than driving on into the player's.
 const SHOVE_MAX_MPS: f32 = 4.0;
 const SPIN_MAX: f32 = 0.6;
 /// Gap left between the two bodies after the push apart, m.
@@ -1678,7 +1680,9 @@ const CAR_SKIN_M: f32 = 0.002;
 /// inertias, at the contact point) with [`CAR_RESTITUTION`] and light friction along the
 /// contact. The other car's share is capped at [`SHOVE_MAX_MPS`] and [`SPIN_MAX`]; the
 /// player's car still leaves at the other car's new speed less a rebound, so it never
-/// drives on into it. Then the speed loss and the dip a wall gives. `None` when the boxes
+/// drives on into it. Then the speed loss and the dip a wall gives, and the vertical speed
+/// goes in proportion to the ground speed lost: the normal is horizontal, and on a hill
+/// the climb would otherwise carry on upward once the car is stopped. `None` when the boxes
 /// do not touch; a touch that is not closing is a hit of speed 0 that changes nothing but
 /// the push apart.
 pub fn hit_car(state: &mut VehicleState, spec: &VehicleSpec, other: &OtherCar) -> Option<CarHit> {
@@ -1687,8 +1691,9 @@ pub fn hit_car(state: &mut VehicleState, spec: &VehicleSpec, other: &OtherCar) -
     let n = [c.n[0], 0.0, c.n[1]];
     state.pos[0] += c.n[0] * (c.depth + CAR_SKIN_M);
     state.pos[2] += c.n[1] * (c.depth + CAR_SKIN_M);
-    let y = state.pos[1].clamp(c.y0, c.y1.max(c.y0));
-    let r = sub3([c.p[0], y, c.p[1]], state.pos);
+    // At the center of mass's height: bumpers meet bumpers, and on a hill the other car's
+    // box stands higher or lower than this one's, which would tip it.
+    let r = sub3([c.p[0], state.pos[1], c.p[1]], state.pos);
     let at = rotate_inv(state.rot, r);
     // The other car: a box on the ground, spinning about its center.
     let m2 = other.mass_kg;
@@ -1733,14 +1738,13 @@ pub fn hit_car(state: &mut VehicleState, spec: &VehicleSpec, other: &OtherCar) -
     };
     // The other car's share: pushed away along the normal, dragged along the slide.
     let push = [-c.n[0] * j + t[0] * jt, -c.n[1] * j + t[1] * jt];
-    let mut dv = [push[0] / m2, push[1] / m2];
-    let dv_len = sqrt(dot2(dv, dv));
-    if dv_len > SHOVE_MAX_MPS {
-        dv = [
-            dv[0] * SHOVE_MAX_MPS / dv_len,
-            dv[1] * SHOVE_MAX_MPS / dv_len,
-        ];
-    }
+    // Its approach is taken away in full, then it leaves at most SHOVE_MAX_MPS, less the
+    // speed it came on at (but the rebound): a car standing is shoved, one coming on stops.
+    let away = -dot2(other.vel, c.n);
+    let leave = (SHOVE_MAX_MPS + away.min(0.0)).max(CAR_REBOUND_MAX_MPS);
+    let dv_n = (j / m2).min((leave - away).max(0.0));
+    let dv_t = (jt / m2).min(SHOVE_MAX_MPS);
+    let dv = [-c.n[0] * dv_n + t[0] * dv_t, -c.n[1] * dv_n + t[1] * dv_t];
     let dspin = (arm(push) / i2).clamp(-SPIN_MAX, SPIN_MAX);
     // The player's car leaves the other car's new speed at the contact by the rebound.
     let v2 = point2(
@@ -1751,8 +1755,13 @@ pub fn hit_car(state: &mut VehicleState, spec: &VehicleSpec, other: &OtherCar) -
     let rebound = (CAR_RESTITUTION * closing).min(CAR_REBOUND_MAX_MPS);
     let jn = ((closing_now + rebound) / inv1).max(0.0);
     let impulse = [c.n[0] * jn - t[0] * jt, 0.0, c.n[1] * jn - t[1] * jt];
+    let ground0 = sqrt(state.vel[0] * state.vel[0] + state.vel[2] * state.vel[2]);
     sim::knock(spec, state, r, impulse);
     scrub_and_dip(state, spec, n, closing);
+    let ground1 = sqrt(state.vel[0] * state.vel[0] + state.vel[2] * state.vel[2]);
+    if ground1 < ground0 {
+        state.vel[1] *= ground1 / ground0;
+    }
     state.speed_mps = dot3(state.vel, rotate(state.rot, [0.0, 0.0, -1.0]));
     Some(CarHit {
         bump: Bump {
