@@ -133,8 +133,6 @@ impl Roads<'_> {
     }
 }
 
-/// Meshes of a procedural place: well formed, within the chunk budget, roads on their
-/// profiles, the ground graded under them, water planes only where there is water.
 /// The coast's edges bound it (`docs/WORLD_GENERATION.md`, "Map edges"), seeds 1-8: every
 /// road stays in the playable rectangle (none runs into an edge band or off the place), so
 /// every dead end is interior (a cul-de-sac at the foot of the hills at most) or on the
@@ -263,6 +261,8 @@ fn edges_bound_the_coast() {
     }
 }
 
+/// Meshes of a procedural place: well formed, within the chunk budget, roads on their
+/// profiles, the ground graded under them, water planes only where there is water.
 #[test]
 fn coast_meshes_sit_roads_on_the_terrain() {
     use world::math::V2;

@@ -162,6 +162,8 @@ fn report_and_check(t: &RegionTemplate, zones: &BTreeMap<u8, ZoneStats>, seed_on
         }
         sampled += 1;
         let cov = z.built_m2 / z.lot_m2;
+        // 15% rather than 10%: seed 1 alone met 10% on `main` by chance (pooled over seeds
+        // 1-4 its strip sat at 70%), so the check pools four seeds and allows their spread.
         assert!(
             (cov - target).abs() <= target * 0.15,
             "{zone:?}: coverage {:.1}% vs target {:.0}%",
@@ -207,6 +209,8 @@ fn report_and_check(t: &RegionTemplate, zones: &BTreeMap<u8, ZoneStats>, seed_on
     // Farmsteads are built.
     assert!(zones[&(ZoneId::Farmland as u8)].built >= 1);
     println!("seed 1: {seed_one} buildings");
+    // 1100 rather than 1200: the edge bands take the land past the hills' foot from the
+    // town, so seed 1 has fewer lots to build on.
     assert!(seed_one > 1100, "only {seed_one} buildings");
 }
 

@@ -3759,8 +3759,6 @@ struct BEdge {
     ys: Vec<f32>,
 }
 
-/// The node for a piece end: border nodes by key, arterial points by position on the
-/// arterial, free ends by exact position.
 /// Arc length along `pts` to fraction `t` of segment `seg`.
 fn arc_to(pts: &[V2], seg: usize, t: f32) -> f32 {
     let mut acc = 0.0;
@@ -3770,6 +3768,8 @@ fn arc_to(pts: &[V2], seg: usize, t: f32) -> f32 {
     acc + t * (pts[seg + 1] - pts[seg]).length()
 }
 
+/// The node for a piece end: border nodes by key, arterial points by position on the
+/// arterial, free ends by exact position.
 fn add_node(nodes: &mut Vec<BNode>, pos: V2, y: f32, end: PEnd) -> u32 {
     let pin = match end {
         PEnd::Free => Pin::Inner,

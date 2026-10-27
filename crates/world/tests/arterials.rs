@@ -293,6 +293,8 @@ fn seed_one_has_highway_ramps_overpasses_and_beachfront() {
         }
     }
     println!("seeds 1-8: {ramp_count} ramps, best overpass clearance {best:.1} m");
+    // Four across seeds 1-8 rather than two on seed 1: town roads now mostly meet the
+    // bypass at grade, and only straight, level stretches with shallow banks get ramps.
     assert!(ramp_count >= 4, "only {ramp_count} ramps");
     assert!(best >= 5.0, "best overpass clearance {best}");
 

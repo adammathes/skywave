@@ -217,7 +217,6 @@ fn other_bad_fields_are_rejected() {
     );
 }
 
-/// Zones that build have massing; the coverage targets of `docs/WORLD_GENERATION.md`.
 #[test]
 fn edges_put_water_on_the_coast_side_only() {
     use place::EdgeKind;
@@ -244,6 +243,7 @@ fn edges_put_water_on_the_coast_side_only() {
     assert_eq!(bad(&|t| t.edges.north = EdgeKind::Open), err("edges.north"));
 }
 
+/// Zones that build have massing; the coverage targets of `docs/WORLD_GENERATION.md`.
 #[test]
 fn california_masses_its_zones() {
     let t = parse(CALIFORNIA);
