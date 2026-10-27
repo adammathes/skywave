@@ -238,13 +238,15 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
   full stick, then full throttle (the keyboard case, where the owner's fishtail reproduced); a quarter-stick
   launch from rest to 30 mph (at most 6 s); and a 30 mph quarter-stick handbrake turn. Bands: in Arcade the
   rear stays within 1.1× its tires' peak slip angle in the lane change and the corner, the lane change
-  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.7× out of the junction; with
+  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.9× out of the junction (4× for
+  the Destrier, built to wag its tail out of slow corners); with
   traction control the launch is a little wheelspin, never a spin; the handbrake slides the rear past 1.5×
   its peak in every preset, 2× in Arcade. With no assists the sports and muscle cars may still spin a
   quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
   stay lively there on purpose. The tuning that set these (stability gain 12 from 8, Arcade stability 1.0
   from 0.8, Light 0.5/0.7 from 0.3/0.5, the handbrake times `grip_boost`, `oversteer_bias` halved on the
-  Basilisks, Avocets, Appaloosas and the Halcyon) took the sports cars' Arcade lane-change overshoot from
+  Basilisks, Avocets, Appaloosas, Halcyon, Tanager and Destrier; the Halberds keep 0.16, their skidpad has no room; the
+  Tanager's handbrake 3400 N·m so it locks its rears) took the sports cars' Arcade lane-change overshoot from
   32 to 22°/s, their Light junction rear slip from 36° to 18° (the inside rear had been spinning at twice its
   peak under Light's traction control), and made the six cars that did not slide on Arcade's handbrake slide
   31–50°. A softer tire tail (85% for 70%) was measured and left out: it gives overdriven front tires more bite
