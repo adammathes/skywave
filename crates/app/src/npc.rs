@@ -309,7 +309,9 @@ impl Npcs {
 
     /// Runs the whole warm-up still due before anything is drawn (the scene loading):
     /// [`PEDS_PREROLL_S`] of pedestrians, then as [`Npcs::warm_up`]. Nobody is watching,
-    /// so people may appear and walk where the camera will look; the cars still keep out
+    /// so the people's view cone is narrowed to a line ahead of the camera (`View::sees`
+    /// still covers a beam a person wide along it and a couple of meters round the eye)
+    /// and they may appear and walk where the camera will look; the cars still keep out
     /// of its view. The pedestrians' first seconds run before the signal clock's tick 0:
     /// at ticks a whole number of every junction's cycle later, which show the same lights,
     /// so the signals and the cars are just as without them.
@@ -558,7 +560,11 @@ fn signal_period(graph: &LaneGraph) -> u64 {
         .iter()
         .filter(|j| j.phases > 0)
         .map(|j| u64::from(traffic::signal::cycle_ticks(j.phases)))
-        .fold(1, |l, c| l / gcd(l, c) * c)
+        .fold(1, |l, c| {
+            (l / gcd(l, c))
+                .checked_mul(c)
+                .expect("signal cycles have a common period")
+        })
 }
 
 /// Head lights come on [`TWILIGHT_S`] after sunset at `latitude_deg` on `day_of_year`, and

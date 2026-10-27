@@ -181,6 +181,8 @@ impl Crowd {
             for p in &mut self.prev {
                 p.alive = false;
             }
+            // Ids count up again from the empty pool's: a new person may reuse an old id.
+            self.scale.fill((u32::MAX, 1.0));
         }
         self.density = density;
     }
@@ -503,6 +505,27 @@ mod tests {
         let hash = app.npcs.crowd.hash();
         app.npcs.step_peds(&inputs);
         assert_eq!(app.npcs.crowd.hash(), hash);
+        // On again: the people who reuse old ids are drawn at their own heights.
+        app.npcs.set_density(Density::Busy);
+        app.npcs.warm_up_unseen(&inputs);
+        part_instances(&mut app, 1.0);
+        let era = app.npcs.crowd.peds.era();
+        let mut checked = 0;
+        for (i, p) in app.npcs.crowd.peds.pedestrians().iter().enumerate() {
+            // Everyone drawn has a scale under their id (the rest are out of reach).
+            if p.alive && app.npcs.crowd.scale[i].0 == p.id {
+                checked += 1;
+                let v = app.npcs.crowd.variants[variant_of(p.seed)].height_m;
+                let h = FigureSpec::from_seed(p.seed, era).height_m.clamp(1.4, 2.1);
+                let drawn = app.npcs.crowd.scale[i].1 * v;
+                assert!(
+                    (drawn - h).abs() < 1e-4,
+                    "person {} drawn {drawn} m, is {h} m",
+                    p.id
+                );
+            }
+        }
+        assert!(checked > 50, "{checked} people drawn");
     }
 
     /// How far `p` is inside the car's footprint, m (negative outside).
@@ -532,15 +555,25 @@ mod tests {
         parts
     }
 
-    /// Driving 2 m/s for 60 s up and down 60 m of walk through the thickest crowd on the strip, the
+    #[test]
+    fn driving_through_a_crowd_never_has_a_figure_inside_the_car() {
+        drive_through_a_crowd(2.0);
+    }
+
+    /// The same reversing at 5 m/s: the people behind the car are in its way.
+    #[test]
+    fn reversing_through_a_crowd_never_has_a_figure_inside_the_car() {
+        drive_through_a_crowd(-5.0);
+    }
+
+    /// Driving at `speed` (m/s, negative reversing) for 60 s up and down 60 m of walk through the thickest crowd on the strip, the
     /// car placed on its line each step (on the ground alone: no prop or wall in the
     /// collider to push it off) and the app stepping and drawing the people round it: no
     /// figure (where it stands, its pelvis, torso and head) is ever inside its footprint
     /// (but anyone it appears on at the first step, for 1.5 s), no hand or foot more than
     /// 5 cm, people step aside and hop where it is seen, and every figure stays in one
     /// piece.
-    #[test]
-    fn driving_through_a_crowd_never_has_a_figure_inside_the_car() {
+    fn drive_through_a_crowd(speed: f32) {
         let mut app = app(&format!("{STRIP}&t=12:00&traffic=busy"));
         let crowd = &app.npcs.crowd;
         let all: Vec<Vec3> = crowd
@@ -588,18 +621,20 @@ mod tests {
         app.ground = crate::drive::ground_for(&bare);
         let mut steps = 0u32;
         while steps < 60 * skywave_core::SIM_HZ {
-            // Up and down 60 m of walk through the crowd, turning at each end.
-            let u = (2.0 * steps as f32 / skywave_core::SIM_HZ as f32) % 120.0;
+            // Up and down 60 m of walk through the crowd, turning at each end; reversing,
+            // the car faces away from where it goes.
+            let u = (speed.abs() * steps as f32 / skywave_core::SIM_HZ as f32) % 120.0;
             let (p, dir) = if u < 60.0 {
                 (at + dir * (u - 30.0), dir)
             } else {
                 (at + dir * (90.0 - u), -dir)
             };
-            let heading = (-dir.x).atan2(-dir.z);
+            let facing = dir * speed.signum();
+            let heading = (-facing.x).atan2(-facing.z);
             let (y, _) = app.ground.level_at([p.x, p.z]);
             let mut s = vehicle::VehicleState::spawn(&app.drive.spec, [p.x, y, p.z], heading);
-            s.vel = (dir * 2.0).to_array();
-            s.speed_mps = 2.0;
+            s.vel = (dir * speed.abs()).to_array();
+            s.speed_mps = speed;
             app.drive.state = s;
             app.drive.prev = s;
             steps += app.update(&none, 1.0 / skywave_core::SIM_HZ as f64).count;
@@ -636,7 +671,7 @@ mod tests {
             }
         }
         eprintln!(
-            "2 m/s through a crowd: {inside_steps} person-steps inside, {} came near, {} \
+            "{speed} m/s through a crowd: {inside_steps} person-steps inside, {} came near, {} \
              stepped aside or hopped, limbs at most {limb:.2} m inside",
             near.len(),
             dodged.len()

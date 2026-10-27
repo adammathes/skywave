@@ -1006,7 +1006,7 @@ mod tests {
     const MEDIUM_TRIS: u64 = 465_000;
     const MEDIUM_SHADOW: u64 = 1_325_000;
     /// Instances one pedestrian adds: a figure's parts.
-    const FIGURE_PARTS: u32 = 13;
+    const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 
     /// What busy traffic and pedestrians in view cost the GPU at a coast junction on the
     /// no-op device, streamed at the web budget: the cars and people are drawn (at least

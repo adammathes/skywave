@@ -653,10 +653,12 @@ impl App {
             }
             if self.npcs.crowd.active() {
                 let t = now();
-                let inp = npc::StepInputs {
-                    player: self.traffic_player(),
-                    ..inputs
+                // Signed: a reversing car's danger zone is behind it (the cars' is not).
+                let player = traffic::Player {
+                    speed: self.drive.state.speed_mps,
+                    ..self.traffic_player()
                 };
+                let inp = npc::StepInputs { player, ..inputs };
                 self.npcs.step_peds(&inp);
                 peds_s += now() - t;
             }
@@ -915,6 +917,9 @@ fn paint_of(index: usize, paint: usize) -> usize {
         0
     }
 }
+
+/// Instances one pedestrian draws: a part each.
+pub const FIGURE_PARTS: usize = traffic::figure::PARTS;
 
 /// Most dynamic lights a frame has: the player's car's, then the traffic's.
 const DYNAMIC_LIGHTS: usize = drive::CAR_LIGHTS + npc::NPC_LIGHTS;
