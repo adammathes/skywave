@@ -10,9 +10,13 @@ use super::Materials;
 
 const AXIS: V3 = [1.0, 0.0, 0.0];
 
-/// Rim radius for a tire of outer radius `r` (80s tires had tall sidewalls).
-pub fn rim_radius(r: f32) -> f32 {
-    r * 0.62
+/// Rim radius for a tire of outer radius `r` on `rims`: 80s tires had tall sidewalls, an
+/// aftermarket rim wears a low-profile tire.
+pub fn rim_radius(r: f32, rims: Rims) -> f32 {
+    match rims {
+        Rims::Twin => r * 0.73,
+        _ => r * 0.62,
+    }
 }
 
 pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
@@ -20,7 +24,7 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
     let mut s = Soup::new(40.0);
     let r = w.radius;
     let hw = w.width * 0.5;
-    let rr = rim_radius(r);
+    let rr = rim_radius(r, rims);
     let o = [0.0; 3];
     let mid = (r + rr) * 0.5;
     let white = m.whitewall;
@@ -375,6 +379,50 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
             );
             lugs(&mut s, fx + 0.008, 0.045, 5, m.chrome);
             s.disc([fx + 0.012, 0.0, 0.0], AXIS, 0.024, 10, m.trim);
+        }
+        Rims::Twin => {
+            // Six pairs of thin spokes from a small cap out to a wide polished lip; the
+            // spokes dish in toward the hub so the lip stands proud.
+            s.annulus(
+                [face - 0.002, 0.0, 0.0],
+                AXIS,
+                rr - 0.045,
+                rr - 0.008,
+                24,
+                m.chrome,
+            );
+            s.lathe(
+                o,
+                AXIS,
+                &[(face - 0.002, rr - 0.045), (face - 0.016, rr - 0.052)],
+                24,
+                0.0,
+                (-1.0, rr),
+                m.chrome,
+            );
+            let n = 6;
+            for k in 0..n {
+                for split in [-0.09f32, 0.09] {
+                    let a = 2.0 * PI * k as f32 / n as f32;
+                    let (sn, cs) = sin_cos(a);
+                    let (sn1, cs1) = sin_cos(a + split);
+                    let p0 = [hub_x + 0.014, cs * 0.05, sn * 0.05];
+                    let p1 = [face - 0.016, cs1 * (rr - 0.05), sn1 * (rr - 0.05)];
+                    s.beam(p0, p1, AXIS, 0.009, 0.008, m.rim);
+                }
+            }
+            s.cylinder(
+                [hub_x - 0.02, 0.0, 0.0],
+                [hub_x + 0.02, 0.0, 0.0],
+                0.058,
+                12,
+                false,
+                false,
+                m.rim,
+            );
+            s.disc([hub_x + 0.02, 0.0, 0.0], AXIS, 0.058, 12, m.chrome);
+            lugs(&mut s, hub_x + 0.022, 0.04, 5, m.chrome.shade(0.8));
+            s.disc([hub_x + 0.028, 0.0, 0.0], AXIS, 0.02, 10, m.trim);
         }
     }
     s

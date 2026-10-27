@@ -516,15 +516,20 @@ fn tilted(transform: [[f32; 4]; 4], tilt: [f32; 2]) -> [[f32; 4]; 4] {
 mod tests {
     use super::*;
 
-    /// The built-in shapes no place parks: the exotics and the sports cars' open versions,
-    /// which only the player drives.
-    const UNPARKED: [&str; 6] = [
+    /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
+    /// the 2001 hero cars, which only the player drives.
+    const UNPARKED: [&str; 11] = [
         "basilisk_v12",
         "basilisk_roadster",
         "avocet_v8",
         "avocet_spider",
         "longbow_convertible",
         "appaloosa_convertible",
+        "halberd_coupe",
+        "halberd_targa",
+        "tanager_awd",
+        "destrier_coupe",
+        "siskin_coupe",
     ];
 
     #[test]

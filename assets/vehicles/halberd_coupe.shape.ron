@@ -1,0 +1,60 @@
+// Halberd Coupe body: a mid-90s front-engined inline-six twin-turbo grand tourer, 2+2.
+//
+// Intent: a very long, smooth hood over the six, the cabin set well back, a rounded roof
+// sweeping into a long fastback glass and a short, high tail with a small wing on posts.
+// Slim rectangular lamps over a wide mouth, a soft shoulder, black glass trim, two oval
+// lamps per side at the tail and five-spoke alloys. Front engine, rear drive. Generic
+// period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "halberd_coupe",
+    side: [
+        (0.00, 0.52), (0.05, 0.62), (0.30, 0.70), (1.74, 0.86), (1.80, 0.88),
+        (2.36, 1.21), (2.46, 1.26), (2.84, 1.25), (3.40, 1.10), (3.92, 0.99), (4.40, 0.97),
+        (4.52, 0.90),
+        (4.52, 0.30), (4.35, 0.22), (3.90, 0.17), (0.70, 0.15), (0.14, 0.19), (0.00, 0.28),
+    ],
+    plan: [
+        (0.00, 0.70), (0.15, 0.83), (0.60, 0.895), (1.00, 0.905), (3.90, 0.905), (4.30, 0.89),
+        (4.52, 0.85),
+    ],
+    belt: [(1.80, 0.87), (2.84, 0.91), (3.92, 0.98)],
+    section: Section(shoulder: 0.86, tumblehome_deg: 26, greenhouse_frac: 0.72, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.82, 2.36),
+        backlight: (2.96, 3.88),
+        side: [(1.90, 2.84), (2.92, 3.30)],
+    ),
+    wheels: Wheels(radius: 0.33, width: 0.24, arch_clearance: 0.05, front_x: 0.92, rear_x: 3.47, track: 1.53),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.24, 0.40)),
+    rear: Rear(lights: Dual, spoiler: Wing, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.80, creases: [(0.20, 0.56, 4.46, 0.60)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, Badge(Circle)],
+    // Deep red, black, white, silver, dark blue, pearl yellow.
+    palette: ["#a31621", "#141518", "#eceae4", "#b7bbc0", "#1f3364", "#c9a227"],
+    accent: "#141416",
+    interior: InteriorShape(
+        dash_height: 0.84,
+        dash_x: 2.00,
+        wheel_pos: (2.38, 0.66),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (2.30, 1.15),
+        seat: (2.72, 0.38),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash and black hide with red
+        // inserts and piping, black carpet, a gray headliner, a brushed band, orange dials.
+        colors: ["#1b1c1f", "#202124", "#1c1d20", "#5c5e62", "#2a2b2f", "#c03030"],
+        display: "#ff8a2a",
+        insert: "#7a1e22",
+        piping: "#a8262c",
+        dash_top: "#222327",
+        applique: Brushed,
+        manual: true,
+    ),
+)

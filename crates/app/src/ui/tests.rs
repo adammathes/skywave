@@ -1405,7 +1405,8 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
 
 #[test]
 fn the_vehicle_page_cycles_every_car_on_one_turntable() {
-    let builtin = &crate::vehicles::BUILTIN;
+    // The coast's cars: the 1980s roster, the first of the built-in ones.
+    let builtin = &crate::vehicles::BUILTIN[..crate::scenario::lineup(0).cars.len()];
     let mut h = Harness::new();
     assert!(turntable(&mut h).is_empty(), "driving");
     h.open(&[ItemId::Open(Page::Vehicle)]);
@@ -1702,7 +1703,8 @@ const SHADE_TEST: [u8; 4] = [0, 0, 0, 110];
 
 #[test]
 fn v_cycles_through_every_builtin_and_wraps() {
-    let builtin = &crate::vehicles::BUILTIN;
+    // The coast's cars: the 1980s roster, the first of the built-in ones.
+    let builtin = &crate::vehicles::BUILTIN[..crate::scenario::lineup(0).cars.len()];
     let mut h = Harness::new();
     let before = h.app.mesh_count();
     let new: usize = builtin[1..].iter().map(|(id, _)| car_mesh_count(id)).sum();
