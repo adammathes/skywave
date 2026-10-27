@@ -45,6 +45,9 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
   cars with LOD2, richer props); traffic lane graph (M4 #1, `crates/traffic`); reference-sources
   ADR 0005 and the buildings facade grammar backlog (`docs/backlog/BUILDINGS.md`); CI gates
   stabilised (no single-worst-piece wall-clock assert; one CI run per PR).
+- Signage (B5, B6, branch `bldg/pictograms-lexicon`): 32 pictograms, four stroke letterforms,
+  the closed lexicon (`assets/grammar/lexicon.ron`) and shop signs on the blade signs; the
+  sign bands and billboards move onto them in B7.
 - Open PRs: light collision physics (#7, approved, merging main); reset key + radio dial sweep
   (#9, approved after fixes, in CI). Branches in progress: `m4/pedestrian-figure` (M4 #3),
   `m4/roster` (M4 #2, eight more cars), `m2/map-edges` (NOTES #3, natural boundaries).

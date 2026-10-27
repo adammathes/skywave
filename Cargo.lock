@@ -1929,6 +1929,7 @@ dependencies = [
  "ron",
  "traffic",
  "vehicle",
+ "world",
 ]
 
 [[package]]

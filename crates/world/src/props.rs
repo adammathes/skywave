@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 
 use place::{Place, RoadClass, ZoneId};
-use skywave_core::{Rng, Seed};
+use skywave_core::{mix64, Rng, Seed};
 
 use crate::math::{atan2, point_in_polygon, sin_cos, TAU, V2, V3};
 use crate::mesh::{
@@ -17,6 +17,9 @@ use crate::mesh::{
 use crate::palette::{mix, shade, Palette};
 use crate::roads::Network;
 use crate::signs;
+use crate::signs::letters::{Finish, LetterStyle, Strokes};
+use crate::signs::lexicon::{Lexicon, ShopSign};
+use crate::signs::pictogram::{self, Pictogram, Tints};
 use crate::{CURB_M, LOT_Y};
 
 const KEY_STREET: u64 = 0x5354_5245;
@@ -403,7 +406,7 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         PropKind::Hedge { len_dm } => hedge(m, base, p.dir, f32::from(len_dm) * 0.1, pal, &mut rng),
         PropKind::Fence { len_dm } => fence(m, base, p.dir, f32::from(len_dm) * 0.1, pal, &mut rng),
         PropKind::StreetSign => street_sign(m, base, p.dir, pal, p.seed),
-        PropKind::NeonSign { palette } => neon_sign(m, base, p.dir, palette, pal, p.seed),
+        PropKind::NeonSign { palette } => neon_sign(m, base, p.dir, palette, pal, p.seed, None),
         PropKind::Pier { len_m } => pier(m, base, p.dir, f32::from(len_m), pal, &mut rng),
     }
 }
@@ -1068,9 +1071,9 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
     }
 }
 
-/// Lettering of `text` in the frame's XY plane at depth `z` (facing -Z if `back`), its
-/// left end at `x0`, baseline at `y0`, `px` meters a font pixel. Seen from behind, the
-/// text still reads left to right.
+/// Lettering of `text` in block capitals in the frame's XY plane at depth `z` (facing -Z
+/// if `back`), its left end at `x0`, baseline at `y0`, `px` meters a fifth of the cap
+/// height. Seen from behind, the text still reads left to right.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn letters(
     m: &mut WorldMesh,
@@ -1083,15 +1086,12 @@ pub(crate) fn letters(
     back: bool,
     paint: Paint,
 ) {
-    let w = signs::text_width(text) as f32;
-    signs::text_rects(text, |a, b, c, d| {
-        let (xa, xb) = if back {
-            (x0 + (w - c) * px, x0 + (w - a) * px)
-        } else {
-            (x0 + a * px, x0 + c * px)
-        };
-        rect(m, f, xa, y0 + b * px, xb, y0 + d * px, z, back, paint);
-    });
+    let mut s = signs::letters::layout(text, signs::letters::LetterStyle::Block);
+    s.place(5.0 * px, x0, y0);
+    if back {
+        s.mirror(x0 + s.ink_w() * 0.5);
+    }
+    signs::letters::flat(m, f, &s, z, back, paint);
 }
 
 /// A eucalyptus: a tall, leaning, pale trunk, a few limbs and a sparse crown of tall
@@ -1442,9 +1442,33 @@ fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
     }
 }
 
-/// A vertical neon blade sign on brackets out from a wall: a dark box with a word in
-/// stacked neon letters on both faces, outlined in a neon tube of another color.
-fn neon_sign(m: &mut WorldMesh, base: V3, out: V2, palette: u8, pal: &Palette, seed: u32) {
+/// Builds a blade sign prop `p` lettered as the shop sign `sign` with words from `lex`
+/// (`p` must be a [`PropKind::NeonSign`]).
+pub fn shop_sign(m: &mut WorldMesh, p: &Prop, pal: &Palette, sign: &ShopSign, lex: &Lexicon) {
+    if let PropKind::NeonSign { palette } = p.kind {
+        let base = p.pos.at(p.y);
+        neon_sign(m, base, p.dir, palette, pal, p.seed, Some((sign, lex)));
+    }
+}
+
+/// Most triangles a blade sign spends (`docs/RENDERING.md`: signs 50-300).
+pub const BLADE_TRIANGLES: usize = 300;
+
+/// A vertical blade sign on brackets out from a wall: a box with the shop's pictogram at
+/// the top and its word below on both faces, a second line at the foot when the triangle
+/// budget leaves room for it. A neon sign is a dark box with neon lettering and the
+/// pictogram outlined in neon of another color; a backlit one ([`ShopSign::lit_box`]) a lit
+/// panel with dark lettering. Without a sign (a prop built on its own) only the pictogram.
+fn neon_sign(
+    m: &mut WorldMesh,
+    base: V3,
+    out: V2,
+    palette: u8,
+    pal: &Palette,
+    seed: u32,
+    sign: Option<(&ShopSign, &Lexicon)>,
+) {
+    let start = m.triangle_count();
     let neons = pal.neon();
     let c = neons[usize::from(palette) % neons.len()];
     let tube = Paint::new(c, Pattern::Plain).glowing(c, Glow::Neon);
@@ -1455,37 +1479,216 @@ fn neon_sign(m: &mut WorldMesh, base: V3, out: V2, palette: u8, pal: &Palette, s
     // X out from the wall, Y up, the faces toward ±Z.
     let f = Frame::upright(base, out);
     let (x0, x1, y0, y1, t) = (0.3, 1.5, NEON_SIGN_Y.0, NEON_SIGN_Y.1, 0.12);
+    let cx = (x0 + x1) * 0.5;
     for y in [y0 + 0.4, y1 - 0.4] {
+        let (lo, hi) = ([0.0, y - 0.05, -0.05], [x0, y + 0.05, 0.05]);
         boxf(
             m,
             &f,
-            [0.0, y - 0.05, -0.05],
-            [x0, y + 0.05, 0.05],
-            face::ALL,
+            lo,
+            hi,
+            face::ALL & !(face::NEG_X | face::POS_X),
             steel,
         );
     }
     boxf(m, &f, [x0, y0, -t], [x1, y1, t], face::ALL, dark);
-    let word = signs::blade_word(u64::from(seed), 5);
-    let px = 0.12;
-    let n = word.len().max(1) as f32;
-    let pitch = ((y1 - y0 - 0.5) / n).min(6.5 * px);
-    let top = (y0 + y1) * 0.5 + pitch * n * 0.5;
-    for back in [false, true] {
-        let z = if back { -t - 0.01 } else { t + 0.01 };
-        for (k, &ch) in word.iter().enumerate() {
-            let w = signs::text_width(&[ch]) as f32 * px;
-            let x = (x0 + x1) * 0.5 - w * 0.5;
-            let y = top - pitch * (k as f32 + 1.0) + (pitch - 5.0 * px) * 0.5;
-            letters(m, &f, &[ch], x, y, px, z, back, tube);
+    let lit_box = sign.is_some_and(|(s, _)| s.lit_box);
+    let ink = if lit_box {
+        let glow = shade(mix(c, [255, 244, 214], 190), 140);
+        let panel = Paint::new(glow, Pattern::Plain).glowing(glow, Glow::Neon);
+        for back in [false, true] {
+            let z = if back { -t - 0.003 } else { t + 0.003 };
+            rect(
+                m,
+                &f,
+                x0 + 0.05,
+                y0 + 0.05,
+                x1 - 0.05,
+                y1 - 0.05,
+                z,
+                back,
+                panel,
+            );
         }
-        // The outline tube.
-        let (a, b, d) = (x0 + 0.07, x1 - 0.07, 0.05);
-        rect(m, &f, a, y0 + 0.07, b, y0 + 0.07 + d, z, back, border);
-        rect(m, &f, a, y1 - 0.07 - d, b, y1 - 0.07, z, back, border);
-        rect(m, &f, a, y0 + 0.07, a + d, y1 - 0.07, z, back, border);
-        rect(m, &f, b - d, y0 + 0.07, b, y1 - 0.07, z, back, border);
+        Paint::new(shade(pal.navy, 110), Pattern::Plain)
+    } else {
+        tube
+    };
+    // The pictogram, a slab through the box standing 4 cm proud of each face.
+    let h = mix64(u64::from(seed) ^ 0x5049_4354);
+    let colors = [
+        pal.salmon,
+        pal.mint,
+        pal.sky_blue,
+        pal.paint_yellow,
+        pal.peach,
+        pal.pastel_pink,
+        pal.stucco_white,
+        pal.lavender,
+    ];
+    let body = colors[(h % colors.len() as u64) as usize];
+    let accent = colors[((h >> 8) % colors.len() as u64) as usize];
+    let accent = if accent == body { pal.teal } else { accent };
+    let tints = Tints {
+        body: Paint::new(body, Pattern::Paint),
+        accent: Paint::new(accent, Pattern::Paint),
+        dark: Paint::new(shade(pal.navy, 90), Pattern::Paint),
+        light: Paint::new(pal.stucco_white, Pattern::Paint),
+    };
+    let picture = match sign {
+        Some((s, _)) => s.pictogram,
+        None => Some(Pictogram::ALL[((h >> 16) % Pictogram::ALL.len() as u64) as usize]),
+    };
+    let size = 0.92;
+    let pic_y = y1 - 0.1 - size * 0.5;
+    let parts = picture.map(pictogram::parts).unwrap_or_default();
+    let (za, zb) = (-t - 0.04, t + 0.04);
+    let top = if parts.is_empty() {
+        y1 - 0.15
+    } else {
+        pic_y - size * 0.5 - 0.12
+    };
+    // Triangles: the pictogram's slab, its neon (two faces), then the words (two faces).
+    let slab: usize = parts
+        .iter()
+        .map(|q| 2 * (q.poly.len() - 2) + if q.solid { 2 * q.poly.len() } else { 0 })
+        .sum();
+    let outline = if lit_box {
+        0
+    } else {
+        4 * pictogram::outline_len(&parts)
+    };
+    let left = BLADE_TRIANGLES.saturating_sub(m.triangle_count() - start + slab);
+    let finish = if lit_box {
+        Finish::Backlit
+    } else {
+        Finish::Neon
+    };
+    let bottom = y0 + 0.15;
+    // The word: on its side in script, else stacked, else the trade; with the pictogram's
+    // neon if both fit, without it if only the word does.
+    let mut main = None;
+    if let Some((s, lex)) = sign {
+        let mut words: Vec<Strokes> = Vec::with_capacity(3);
+        if s.style == LetterStyle::Script {
+            let text = s.text(lex);
+            words.push(sideways_word(
+                &text,
+                s.style,
+                cx,
+                bottom + 0.45,
+                top,
+                x1 - x0 - 0.2,
+            ));
+        }
+        let stack =
+            |text: &[u8]| stacked_word(text, s.style, cx, bottom + 0.45, top, x1 - x0 - 0.25);
+        words.push(stack(&s.word(lex)));
+        words.push(stack(lex.trades[usize::from(s.trade)].as_bytes()));
+        let fits = |budget: usize| words.iter().position(|w| 4 * w.segments() <= budget);
+        main = match fits(left.saturating_sub(outline)) {
+            Some(i) => Some((words.swap_remove(i), true)),
+            None => fits(left).map(|i| (words.swap_remove(i), false)),
+        };
     }
+    let with_neon = main.as_ref().map_or(true, |m| m.1);
+    if !parts.is_empty() {
+        pictogram::extrude(m, &f, &parts, cx, pic_y, size, za, zb, true, &tints);
+        if !lit_box && with_neon {
+            for back in [false, true] {
+                let z = if back { za - 0.016 } else { zb + 0.016 };
+                pictogram::neon_outline(m, &f, &parts, cx, pic_y, size, z, back, 0.035, border);
+            }
+        }
+    }
+    let both_faces = |m: &mut WorldMesh, st: &Strokes| {
+        for back in [false, true] {
+            let mut q = st.clone();
+            if back {
+                q.mirror(cx);
+            }
+            let z = if back { -t } else { t };
+            signs::letters::build(m, &f, &q, finish, z, back, ink, ink, 0.0);
+        }
+    };
+    if let Some((st, _)) = &main {
+        both_faces(m, st);
+    }
+    let second = sign.and_then(|(s, lex)| s.second_text(lex));
+    if let Some(text) = second {
+        let mut st = signs::letters::layout(&text, LetterStyle::Condensed);
+        let cap = (0.24f32).min((x1 - x0 - 0.2) / st.ink_w().max(1e-3));
+        st.place(cap, cx - st.ink_w() * cap * 0.5, bottom);
+        if m.triangle_count() - start + 4 * st.segments() <= BLADE_TRIANGLES {
+            both_faces(m, &st);
+        }
+    }
+}
+
+/// `text` as letters stacked down a blade, centered on `cx`, filling `bottom..top`, at most
+/// `width` across.
+fn stacked_word(
+    text: &[u8],
+    style: LetterStyle,
+    cx: f32,
+    bottom: f32,
+    top: f32,
+    width: f32,
+) -> Strokes {
+    let style = if style == LetterStyle::Script {
+        LetterStyle::Block
+    } else {
+        style
+    };
+    let slots: f32 = text
+        .iter()
+        .map(|&ch| if ch == b' ' { 0.5 } else { 1.0 })
+        .sum();
+    let pitch = ((top - bottom) / slots.max(1.0)).min(0.62);
+    let mut out = Strokes::default();
+    let mut y = top;
+    for &ch in text {
+        if ch == b' ' {
+            y -= pitch * 0.5;
+            continue;
+        }
+        let mut g = signs::letters::layout(&[ch], style);
+        let cap = (pitch * 0.74).min(width / g.ink_w().max(1e-3));
+        g.place(
+            cap,
+            cx - g.ink_w() * cap * 0.5,
+            y - pitch + (pitch - cap) * 0.5,
+        );
+        y -= pitch;
+        out.width = g.width;
+        for line in g.lines() {
+            out.starts.push(out.points.len() as u32);
+            out.points.extend_from_slice(line);
+        }
+    }
+    out
+}
+
+/// `text` on its side reading upward along a blade, centered on `cx` in `bottom..top`, its
+/// letters at most `width` tall.
+fn sideways_word(
+    text: &[u8],
+    style: LetterStyle,
+    cx: f32,
+    bottom: f32,
+    top: f32,
+    width: f32,
+) -> Strokes {
+    let mut s = signs::letters::layout(text, style);
+    let k = ((top - bottom) / s.ink_w().max(1e-3))
+        .min(width / s.ink_h().max(1e-3))
+        .min(0.6);
+    let [bx0, by0, bx1, by1] = s.bounds;
+    let (mx, my) = ((bx0 + bx1) * 0.5, (by0 + by1) * 0.5);
+    let yc = (bottom + top) * 0.5;
+    // Turned a quarter counter-clockwise: the tops of the letters toward the wall.
+    s.transform([0.0, -k, k, 0.0, cx + k * my, yc - k * mx], k);
+    s
 }
 
 /// Height range of a neon blade sign's box above its base, m.
@@ -2718,6 +2921,60 @@ mod tests {
                 assert!(budget.contains(&n), "{kind:?} seed {seed}: {n}");
             }
         }
+    }
+
+    /// Every shop sign the coast grammar draws keeps to the sign budget, letters its words
+    /// when the triangles allow, and glows only where it is neon.
+    #[test]
+    fn shop_signs_keep_the_sign_budget() {
+        let g = crate::grammar::coast_80s();
+        let pal = Palette::socal_1985();
+        let mut worded = 0;
+        let n = 3000u64;
+        for h in 0..n {
+            let s = ShopSign::draw(&g.signs, &g.lexicon, g.era, mix64(h));
+            let p = Prop {
+                pos: V2::new(3.0, 4.0),
+                y: CURB_M,
+                dir: V2::new(0.6, 0.8),
+                kind: PropKind::NeonSign {
+                    palette: (h % 5) as u8,
+                },
+                seed: h as u32,
+            };
+            let mut m = WorldMesh::default();
+            shop_sign(&mut m, &p, &pal, &s, &g.lexicon);
+            let tris = m.triangle_count();
+            assert!(
+                tris <= BLADE_TRIANGLES,
+                "{:?}: {tris}",
+                core::str::from_utf8(&s.text(&g.lexicon))
+            );
+            // Without words: the brackets, the box (and a lit box's panels), the slab and,
+            // on neon, the pictogram's outline.
+            let parts = s.pictogram.map(pictogram::parts).unwrap_or_default();
+            let slab: usize = parts
+                .iter()
+                .map(|q| 2 * (q.poly.len() - 2) + if q.solid { 2 * q.poly.len() } else { 0 })
+                .sum();
+            let bare = 28 + slab + if s.lit_box { 4 } else { 0 };
+            let outline = if s.lit_box {
+                0
+            } else {
+                4 * pictogram::outline_len(&parts)
+            };
+            if tris != bare && tris != bare + outline {
+                worded += 1;
+            }
+            assert!(m.vertices.iter().all(|v| v
+                .pos
+                .iter()
+                .chain(&v.normal)
+                .all(|c| c.is_finite())));
+            assert!(m.vertices.iter().any(|v| v.emissive[3] == Glow::Neon as u8));
+        }
+        // Nearly every sign has room for its word.
+        assert!(worded * 100 >= n * 95, "{worded} of {n} signs lettered");
     }
 
     /// The full-detail kit changes only the instanced kinds, and a street light's lens (the

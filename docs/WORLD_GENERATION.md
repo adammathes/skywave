@@ -71,6 +71,7 @@ planner's former code constants, so it reproduces the earlier look bit for bit
 As built (B2):
 ```
 Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules }
+            (+ lexicon: Lexicon, attached by the loader from assets/grammar/lexicon.ron)
 StyleRules  { style: StyleTag, massing, base, body, top, addenda }   one per StyleTag, exactly
   massing:  even_floors: ByUse<bool>, floor_h, ground_floor_h: (min, max), ground_share_max
   base:     plinth_h: ByUse<f32>, bay_w: ByUse<f32>, door: ByUse<(w, h)>
@@ -80,7 +81,13 @@ StyleRules  { style: StyleTag, massing, base, body, top, addenda }   one per Sty
   addenda:  roof_vents: ByUse<(min, max)>, roof_units: ByUse<(min, max)>,
             bulkhead_floors, water_tank_1_in
 ByUse<T>    { residential, office, other }   other: commercial, industrial, civic, hotel, parking
-SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256, shop_lit_256 }
+SignRules   { awnings: [(Striped | Solid | Canopy | None, weight)], lit_box_256, shop_lit_256,
+              lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
+              wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
+TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
+              lines: [(Word(String) | Since, weight)] }
+Lexicon     { id, syllables: { onsets, nuclei, codas }, given, surnames, descriptors, trades,
+              lines }
 LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
 ```
 How the planner reads it, for a building of style `s` and use `u` (rules `r = grammar.style(s)`,
@@ -99,6 +106,29 @@ every `ByUse` taken at `u`):
   `water_tank_1_in` of those a water tank.
 - **Signs** (terrain places). The awning is drawn from `awnings` by weight in listed order;
   `lit_box_256` and `shop_lit_256` are shares out of 256 of backlit-box signs and late shops.
+- **Shop signs** (the blade signs the detailing hangs on storefronts; `world::signs`). Each
+  draws a trade from `trades` by weight, a form from `forms` (`Name's`, `Name's Trade`,
+  `Descriptor Trade`, `Trade`), a name from the lexicon's given names and surnames, a
+  descriptor, a pictogram from its trade's `pictograms`, a lettering style from `wordmarks`
+  and, `line_256` times in 256, a secondary line from its trade's `lines` (`SINCE` and a year
+  2-35 years before the era). `Descriptor Trade` that would say a word twice becomes
+  `Name's Trade`; a line that repeats the trade is dropped. `ChunkPlan` assigns them in prop
+  order and redraws (up to 24 times) any sign whose main line or name a sign within
+  `name_radius` already has. Every word comes from the lexicon (`assets/grammar/lexicon.ron`,
+  closed and reviewed; names are two or three syllables from its `syllables` tables), which
+  `app::places::load_grammar` attaches to the grammar after checking its `id` against
+  `signs.lexicon`. A grammar parsed without it gets plain blade signs (a pictogram, no words).
+  The blade: the pictogram (`signs::pictogram`, 32 generic shapes as 2D polygons, extruded
+  4 cm proud of both faces and outlined in neon) above the word, stacked, or reading upward
+  in script; a backlit box (`lit_box_256`) letters dark on a lit panel and drops the neon
+  outline. A sign spends at most 300 triangles (`props::BLADE_TRIANGLES`): a word that does
+  not fit gives way to the trade, then the pictogram's neon gives way to the word; the
+  second line goes on only if it still fits.
+- **Letterforms** (`signs::letters`): stroke polylines on a 20-unit cap grid, ours, in four
+  styles (block capitals, condensed sans, connected script, slab serif), built as neon tubes,
+  dark strokes on a backlit box, extruded channel letters or flat paint. The sign bands and
+  billboards letter their (still syllable-built, `signs::business_name`) names in the block
+  capitals until B7 moves the band carriers onto the shop signs.
 - **Lots** (terrain places). Strip malls with at least `front_min_yard` of open ground in front
   get nose-in stalls `stall_w` wide, a `front_fill` share of them taken; beach aisles take a
   stall with chance `aisle_fill`.

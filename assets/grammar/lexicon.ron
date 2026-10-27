@@ -1,0 +1,48 @@
+// The words shop signs may carry: a closed list, reviewed by a person, never extended by
+// code. Format: crates/world/src/signs/lexicon.rs (`Lexicon`); how signs combine the words:
+// docs/WORLD_GENERATION.md ("Signs") and docs/backlog/BUILDINGS.md ("Signage").
+//
+// Rules for reviewers (CLAUDE.md): no real brand, chain, station or street name; no real
+// person's name; nothing that reads as placeholder text. Names are invented: two or three
+// syllables built from the tables below (the tests check every name splits into them), so
+// they read as names and not syllable soup, and checked against a blocklist of known
+// brands that lives only in the tests (crates/world/testdata). Uppercase A-Z; trades may
+// hold a space. Names are at most 7 letters (a blade sign stacks one), other words at
+// most 10.
+Lexicon(
+    id: "us_roadside",
+
+    syllables: Syllables(
+        onsets: ["B", "BR", "C", "D", "DR", "F", "G", "H", "J", "K", "L", "M", "N", "P",
+                 "PR", "QU", "R", "S", "SK", "ST", "T", "TR", "V", "W"],
+        nuclei: ["A", "E", "I", "O", "U", "Y", "EY", "IE", "OW"],
+        codas: ["CK", "D", "K", "L", "LL", "N", "NT", "R", "RD", "RS", "S", "SH", "T", "TT",
+                "V"],
+    ),
+
+    given: [
+        "ORLAN", "DELVA", "RENNA", "KESTA", "LORNIE", "BRELLA", "SOVIE", "DORVAN", "GILVA",
+        "HOLVIS", "IVELLA", "JORVEN", "KALDER", "LISSET", "MARVO", "NELVA", "OTTAL",
+        "PERVIS", "RAVELLE", "SELVIN", "TERVA", "VELDO", "WILVER", "ARDELL", "BEVRO",
+        "CORLIE", "DESVIE", "FENLO", "HARVIE", "MIRELL",
+    ],
+    surnames: [
+        "DALVEY", "KESSICK", "TORVELL", "HADLEN", "BRANNOK", "CORVEY", "PELLARD", "WESKIN",
+        "MORVANE", "LINVER", "GASKEN", "RUDLOW", "SORVIK", "TAVERLY", "BELVANE", "HOLLEN",
+        "DRESKY", "FALVEN", "KILDER", "MARSKY", "NOLVIN", "PADVEN", "QUILLAN", "RASKELL",
+        "STARVEY", "TOLVERY", "VARLOCK", "WENDRIK", "ABERNY", "OSMERE", "ELVANT", "GORVETT",
+        "HESKIN", "LARKEN", "MELVICK", "PRESKIL", "TRAVISH", "BRODLEY", "KERVAN", "DUNVIK",
+    ],
+    descriptors: [
+        "SUNSET", "HARBOR", "LAKESHORE", "CORNER", "GOLDEN", "COAST", "NORTHSIDE",
+        "AVENUE", "ROYAL", "STAR", "OCEAN", "PALM", "BAYSIDE", "HILLTOP", "SEASIDE", "SILVER",
+        "PIER",
+    ],
+    trades: [
+        "DONUTS", "CAFE", "DINER", "BURGERS", "TACOS", "PIZZA", "ICE CREAM", "HOT DOGS",
+        "SEAFOOD", "COCKTAILS", "LOUNGE", "TAVERN", "LIQUOR", "SURFBOARDS", "MOTEL",
+        "RECORDS", "TV REPAIR", "PHOTO", "VIDEO", "BARBER", "SHOES", "KEYS", "GARAGE", "TIRES",
+        "DENTAL", "DRUGS", "CLEANERS", "BOOKS", "BIKES", "BOWL", "FLOWERS",
+    ],
+    lines: ["OPEN", "COCKTAILS", "VACANCY", "SINCE"],
+)

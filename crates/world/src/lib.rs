@@ -216,6 +216,10 @@ pub struct ChunkPlan {
     /// parked cars, the house sites', the streets'; on a terrain place its `Props` table
     /// but for the kinds the app instances ([`props::instanced`]).
     props: Vec<props::Prop>,
+    /// Per prop, the shop sign a blade sign is lettered with (`None` for every other kind).
+    shop_signs: Vec<Option<signs::lexicon::ShopSign>>,
+    /// The words the shop signs are lettered from.
+    lexicon: signs::lexicon::Lexicon,
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
     chunk_range: [[i32; 2]; 2],
@@ -315,6 +319,18 @@ impl ChunkPlan {
             props.extend(props::place(place, &net, &side_zone, &parks, seed));
         }
 
+        // Every blade sign a shop sign of the grammar's, no name repeated nearby.
+        let blades: Vec<usize> = (0..props.len())
+            .filter(|&i| matches!(props[i].kind, props::PropKind::NeonSign { .. }))
+            .collect();
+        let at: Vec<V2> = blades.iter().map(|&i| props[i].pos).collect();
+        let drawn =
+            signs::lexicon::assign(&grammar.signs, &grammar.lexicon, grammar.era, seed, &at);
+        let mut shop_signs = alloc::vec![None; props.len()];
+        for (&i, s) in blades.iter().zip(drawn) {
+            shop_signs[i] = Some(s);
+        }
+
         // The place's chunks and the terrain apron's.
         let o = place.header.chunk_origin;
         let n = place.header.size_chunks;
@@ -346,6 +362,8 @@ impl ChunkPlan {
             footings,
             fronts,
             props,
+            shop_signs,
+            lexicon: grammar.lexicon.clone(),
             kit: props::PropKit::new(),
             chunk_range: [lo, hi],
         }
@@ -500,7 +518,11 @@ impl ChunkPlan {
             Stage::Props => {
                 for (i, p) in self.props.iter().enumerate().skip(from) {
                     if out.wants(p.pos) {
-                        props::build(out.at(p.pos, MeshKind::Prop), p, palette, &self.kit);
+                        let m = out.at(p.pos, MeshKind::Prop);
+                        match &self.shop_signs[i] {
+                            Some(s) => props::shop_sign(m, p, palette, s, &self.lexicon),
+                            None => props::build(m, p, palette, &self.kit),
+                        }
                         if out.kept_vertices() >= max_vertices {
                             return Some(i + 1);
                         }
