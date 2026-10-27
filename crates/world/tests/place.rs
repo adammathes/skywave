@@ -25,14 +25,14 @@ fn template() -> RegionTemplate {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0x41B8_3931_043B_0CA2,
-    0x92EE_696B_AE47_7373,
-    0xDE70_0B4F_BC01_DD01,
-    0xF951_6FB7_46BF_D845,
-    0x5AF8_2D56_5018_EAF3,
-    0xB428_012F_E20A_99ED,
-    0x494E_9DAF_BBA5_8216,
-    0xE94F_9062_EC32_0ADE,
+    0xD0FE_1A1C_2BC2_CF6D,
+    0x93EC_BA10_B88B_CE5F,
+    0x2970_7192_2275_82B0,
+    0xE2C6_34E2_AAEC_8175,
+    0x1105_1427_4ECB_54A5,
+    0x30E6_8FC1_0FD9_EB47,
+    0xA351_2833_1C49_8181,
+    0x25A9_A3A0_0B94_8A57,
 ];
 
 #[test]

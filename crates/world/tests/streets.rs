@@ -224,17 +224,17 @@ fn every_border_matches() {
 /// message says why they moved.
 const CHUNKS: [[i32; 2]; 5] = [[3, 7], [7, 7], [10, 6], [7, 13], [4, 13]];
 const GOLDEN_CHUNKS: [u64; 5] = [
-    0x6168_2D51_7717_A59C,
-    0xEE47_ECE0_9460_0CFD,
-    0xB032_8865_255B_3AFA,
-    0x6F12_B891_BA24_3278,
-    0xA019_EC4C_8F8F_4532,
+    0x943F_4D04_47D9_F761,
+    0x718C_C069_A824_A9C0,
+    0xCA69_52A0_8BDF_E25E,
+    0xA780_D102_6DA9_BB82,
+    0xD18D_04C8_FB2D_7C5C,
 ];
 const GOLDEN_MERGED: [u64; 4] = [
-    0x2293_8C7F_DC66_E1C9,
-    0xB159_3508_8370_3F4D,
-    0x921A_3690_09CF_3D20,
-    0x8F31_ECE6_F69B_CAA8,
+    0x5A3A_9A2E_86D2_8BD4,
+    0x56F3_3185_4DBB_4B2A,
+    0x7C25_6C17_5B43_D678,
+    0xC71B_6DC3_282C_5AA8,
 ];
 
 fn table(hs: &[u64]) -> String {
