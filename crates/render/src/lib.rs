@@ -4264,6 +4264,7 @@ mod tests {
             };
             let mut r = Renderer::with_options(&device, &queue, format, (64, 48), options);
             let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+            let other = r.add_mesh(&Mesh::unit_block([255, 0, 0, 255]));
             let mut instances = [MeshInstance::new(block, Mat4::IDENTITY.to_cols_array_2d())];
             let lights = lamps(3);
             let mut hud = HudBuilder::new();
@@ -4327,6 +4328,26 @@ mod tests {
             };
             assert_eq!(draw(&mut r, &scene), FrameWork::World, "the block moved");
             assert_eq!(draw(&mut r, &scene), FrameWork::Skip);
+            // A car's lamp state is another mesh, its lamps' glow a multiplier, an NPC's
+            // brake lamps one more instance: each redraws the world.
+            let mut swapped = instances;
+            swapped[0].mesh = other;
+            let at = |x: &[MeshInstance], r: &mut Renderer| {
+                draw(
+                    r,
+                    &SceneView {
+                        hud: hud.view(),
+                        ..test_scene_lit(x, &dimmer)
+                    },
+                )
+            };
+            assert_eq!(at(&swapped, &mut r), FrameWork::World, "a lamp state");
+            assert_eq!(at(&swapped, &mut r), FrameWork::Skip);
+            swapped[0].glow = 2.0;
+            assert_eq!(at(&swapped, &mut r), FrameWork::World, "a lamp glow");
+            let overlay = [swapped[0], MeshInstance::new(block, swapped[0].transform)];
+            assert_eq!(at(&overlay, &mut r), FrameWork::World, "an overlay");
+            assert_eq!(at(&overlay, &mut r), FrameWork::Skip);
             r.resize((32, 24));
             assert_eq!(r.plan(&scene), FrameWork::World, "resized");
             r.resize((64, 48));
