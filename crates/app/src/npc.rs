@@ -280,6 +280,11 @@ impl Npcs {
         self.density = density;
     }
 
+    /// Starts the junction lights at signal tick `tick` (a scene's `phase=`).
+    pub fn set_signal_tick(&mut self, tick: u64) {
+        self.signals.tick = tick;
+    }
+
     /// Whether the traffic runs: on, or cars still to clear.
     pub fn active(&self) -> bool {
         self.density != Density::Off || self.count() > 0

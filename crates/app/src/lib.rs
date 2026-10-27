@@ -428,6 +428,9 @@ impl App {
         }
         // A scene's density applies now; the setting's once the settings are loaded.
         app.traffic_scene = setup.traffic_density();
+        if let Some(t) = setup.phase {
+            app.npcs.set_signal_tick(t);
+        }
         if let Some(d) = app.traffic_scene {
             app.apply_traffic(d);
             app.finish_warm_up();

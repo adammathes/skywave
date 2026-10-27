@@ -34,6 +34,9 @@
 //!   screenshot goldens draw no traffic unless they ask). Traffic runs a while before the
 //!   first frame (`app::npc::WARMUP_S`, people longer), so even a still scene has cars on
 //!   the streets and people on the walks.
+//! - `phase=<tick>`: the signal tick (120 a second) the junction lights start at before
+//!   that warm-up (default 0), so a still scene can pick where in their cycle the lights
+//!   are: a red with a queue at it, say.
 
 use crate::camera::CameraMode;
 use crate::drive::DEFAULT_VEHICLE;
@@ -89,6 +92,8 @@ pub struct SceneSetup {
     pub stream: bool,
     /// Traffic density over the setting, or `None` for the setting.
     pub traffic: Option<traffic::Density>,
+    /// Signal tick the junction lights start at, or `None` for 0.
+    pub phase: Option<u64>,
 }
 
 impl Default for SceneSetup {
@@ -110,6 +115,7 @@ impl Default for SceneSetup {
             ui_scale: None,
             stream: true,
             traffic: None,
+            phase: None,
         }
     }
 }
@@ -135,9 +141,9 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 15] = [
+    pub const KEYS: [&'static str; 16] = [
         "seed", "place", "car", "paint", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map",
-        "ui", "stream", "traffic",
+        "ui", "stream", "traffic", "phase",
     ];
 
     /// Sets one key (see the module docs).
@@ -175,6 +181,7 @@ impl SceneSetup {
             "map" => self.map = parse_switch(value).ok_or_else(bad)?,
             "stream" => self.stream = parse_switch(value).ok_or_else(bad)?,
             "traffic" => self.traffic = Some(crate::npc::density_from_name(value).ok_or_else(bad)?),
+            "phase" => self.phase = Some(value.parse().map_err(|_| bad())?),
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;
                 if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {
