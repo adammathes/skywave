@@ -162,16 +162,19 @@ Medium with traffic off and busy:
 | Medium, traffic off | 395 | 396 | 394k | 1109k |
 | Medium, busy cars only (before pedestrians) | 399 | 414 | 408k | 1201k |
 | Medium, busy cars and people | 581 | 530 | 422k | 1204k |
-| Deck, busy cars and people, NPC brake lamps (two cars braking) | 583 | 387 | 425k | 674k |
-| Medium, busy cars and people, NPC brake lamps | 583 | 532 | 425k | 1209k |
+| Deck, busy cars and people after the sports cars, NPC brake lamps off | 619 | 372 | 430k | 674k |
+| Deck, the same with NPC brake lamps (two overlays drawn) | 621 | 374 | 430k | 674k |
+| Medium, busy cars and people after the sports cars, NPC brake lamps off | 619 | 506 | 430k | 1209k |
+| Medium, the same with NPC brake lamps | 621 | 508 | 430k | 1209k |
 
 Cars of one mesh share one instanced draw, so four cars cost eight draws at Deck (their
 level-1 meshes in the forward pass and the cascades), about 3.5k triangles each forward and
 again per cascade. A person is 13 part instances of about 1k triangles in all; people drawn
 as one figure share its 13 draws per pass, so the draws grow with the figures in view (at
 most 8 × 13 per pass), not the people, and only people within 40 m cast shadows. A braking
-car adds its shape's brake lamp overlay (a few dozen triangles, forward pass only, one
-instanced draw per shape and level in view). Under
+car adds its shape's brake lamp overlay (about a hundred triangles, forward pass only, no
+shadow, one instanced draw per shape and level in view): two draws and two instances here,
+no measurable triangles. Under
 `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 425 draws, 465k forward and 740k shadow
 triangles; Medium 585 draws, 465k and 1325k** (the busy numbers plus about 10%), and if
 fewer than three cars' and three people's instances more are in the forward pass than with

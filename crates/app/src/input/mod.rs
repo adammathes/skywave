@@ -41,7 +41,7 @@ pub enum Action {
     RadioPrev,
     RadioOff,
     Headlights,
-    /// High beams on/off (they switch the headlights on with them).
+    /// High beams on/off with the headlights on; with them off, headlights on with high beams.
     HighBeams,
     Horn,
     /// Swap to the next built-in vehicle, in place.

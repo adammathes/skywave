@@ -428,8 +428,8 @@ fn cars_stop_at_red_and_go_on_green() {
 }
 
 /// Brake lamps: a car queued at a red shows them for as long as it stands, the car behind
-/// it too, and both go dark pulling away on green; a car cruising a free road never shows
-/// them.
+/// it too, and both go dark pulling away on green; a car closing on a slower one shows them
+/// while it slows; a car cruising a free road never shows them.
 #[test]
 fn queued_cars_show_brake_lamps_and_cruising_ones_do_not() {
     let _quiet = shared();
@@ -448,6 +448,32 @@ fn queued_cars_show_brake_lamps_and_cruising_ones_do_not() {
             );
         }
     }
+
+    // Closing on a slower car: the follower slows to its pace with its brake lamps lit,
+    // and the leader, cruising slowly, never shows them.
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    let lead = t.spawn_at(&g, 0, 150.0, 4.0).expect("room");
+    let follow = t.spawn_at(&g, 0, 20.0, 15.0).expect("room");
+    let mut lit = 0;
+    for tick in 0..30 * HZ as u64 {
+        let before: Vec<Car> = t.cars().to_vec();
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        for c in t.cars() {
+            let b = before.iter().find(|b| b.id == c.id).expect("same cars");
+            if c.id == follow && b.speed - c.speed > 1.0 / HZ as f32 {
+                assert!(
+                    c.braking,
+                    "slowing at {:.1} m/s²",
+                    (b.speed - c.speed) * HZ as f32
+                );
+                lit += 1;
+            }
+            if c.id == lead && tick > 10 * HZ as u64 {
+                assert!(!c.braking, "the slow leader shows brake lamps");
+            }
+        }
+    }
+    assert!(lit > HZ / 4, "the follower braked for {lit} steps");
 
     let g = crossing();
     let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(3));

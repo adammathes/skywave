@@ -809,6 +809,14 @@ fn headlights_and_high_beams_switch_from_keyboard_and_pad() {
     assert!(lights[0].color[0] > crate::drive::HEADLIGHT_KCD);
     h.key(Key::KeyK);
     assert_eq!(d(&h), (true, false));
+    // With the headlights off, K always comes on with the high beams.
+    h.key(Key::KeyK);
+    h.key(Key::KeyL);
+    assert_eq!(d(&h), (false, false));
+    h.key(Key::KeyK);
+    assert_eq!(d(&h), (true, true));
+    h.key(Key::KeyK);
+    assert_eq!(d(&h), (true, false));
     // The pad: a tap is the headlights (on release)...
     h.pad(PadButton::DpadUp);
     assert_eq!(d(&h), (false, false));

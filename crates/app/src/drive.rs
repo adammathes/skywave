@@ -96,6 +96,8 @@ const CABIN_WALL_TINT: f32 = 0.3;
 /// A car switched to while the old one rolls slower than this keeps its velocity; faster,
 /// it starts at rest, m/s.
 pub const KEEP_SPEED_MPS: f32 = 5.0;
+/// At or under this the car is standing, for the brake lamps, m/s.
+const STANDING_MPS: f32 = 0.05;
 /// Below this the car counts as fallen out of the world and is put back at its start, m.
 const FLOOR_Y: f32 = -100.0;
 /// A reset looks this far for a lane; with none that close the car goes back to its
@@ -373,8 +375,8 @@ impl Drive {
             self.headlights = !self.headlights;
         }
         if input.just_pressed(Action::HighBeams) {
-            self.high_beams = !self.high_beams;
-            self.headlights |= self.high_beams;
+            self.high_beams = !self.headlights || !self.high_beams;
+            self.headlights = true;
         }
         self.horn = input.pressed(Action::Horn);
     }
@@ -478,8 +480,12 @@ impl Drive {
 
     /// Whether the brake lamps are lit: the driver asked the service brakes for anything
     /// in the last step (the brake pedal, or in reverse the throttle, which brakes there;
-    /// reversing on the brake pedal and coasting leave them dark).
+    /// reversing on the brake pedal and coasting leave them dark), or held the brake
+    /// standing still, whatever gear brake-to-reverse picked (waiting at a light).
     pub fn braking(&self) -> bool {
+        if self.state.speed_mps.abs() < STANDING_MPS && self.input.brake > 0.0 {
+            return true;
+        }
         let pedal = if self.state.gear < 0 {
             self.input.throttle
         } else {
@@ -723,14 +729,37 @@ mod tests {
             ..Default::default()
         }
         .daylight();
-        let exposed = brake
-            * crate::lighting::EMISSIVE_BOOST
+        let k = crate::lighting::EMISSIVE_BOOST
             * crate::lighting::car_glow(&noon).lamps
             * render::exposure_from_ev100(noon.ev100);
+        let (brake_noon, tail_noon) = (brake * k, lit * k);
         assert!(
-            exposed > 4.0,
-            "brake lens at {exposed} after exposure at noon"
+            (2.0..3.0).contains(&brake_noon) && tail_noon < 1.0,
+            "brake lens at {brake_noon}, tail at {tail_noon} after exposure at noon"
         );
+
+        // Standing on the brake, the lamps stay lit after brake-to-reverse picks reverse.
+        let mut d = Drive::new("corsair_gtx").unwrap();
+        let ground = flat();
+        let mut reversed = false;
+        for _ in 0..120 {
+            d.step(
+                VehicleInput {
+                    brake: 1.0,
+                    ..VehicleInput::default()
+                },
+                &ground,
+            );
+            if d.state.speed_mps.abs() < STANDING_MPS {
+                reversed |= d.state.gear < 0;
+                assert!(
+                    d.braking(),
+                    "standing on the brake in gear {}",
+                    d.state.gear
+                );
+            }
+        }
+        assert!(reversed, "brake-to-reverse picked reverse while standing");
 
         let ground = flat();
         let mut d = Drive::new("corsair_gtx").unwrap();

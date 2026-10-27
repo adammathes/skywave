@@ -594,7 +594,7 @@ fn parked_mesh_and_lamps(
 /// How far a brake overlay's lenses stand off the parked mesh's, at levels of detail 1 and
 /// 2, m: enough to win the depth test over the lens under them at the distance each level
 /// is drawn.
-const BRAKE_OVERLAY_LIFT_M: [f32; 2] = [0.006, 0.03];
+const BRAKE_OVERLAY_LIFT_M: [f32; 2] = [0.006, 0.06];
 
 /// The brake lamps of `shape`'s [`parked_mesh`] at level of detail `lod` (1 or 2), lit:
 /// its tail lenses alone at [`BRAKE_GLOW`], each lifted off its lens along the normal, in

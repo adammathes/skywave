@@ -51,9 +51,10 @@ The odometer, headlights and camera are kept, and "Car reset" shows for 2 s. On 
 hold that scrubbed time (the right stick moved, however late) fires neither. A remap of Reset to another pad
 button is a long press too. Every other action on a long-press button acts on release rather than press (the
 Bindings page says so under its rows); that is what keeps a tap and a hold apart.
-`Headlights` toggles the low beams (pop-up lamps rise and fall with it); `HighBeams` toggles the high
-beams, which switch the headlights on with them (a taller, brighter, longer spot, 40 kcd per lamp to 140 m,
-against the low beam's 14 kcd to 60 m) and stay selected while the headlights are switched off and on again.
+`Headlights` toggles the low beams (pop-up lamps rise and fall with it). `HighBeams` with the headlights
+on toggles the high beams (a taller, brighter, longer spot, 40 kcd per lamp to 140 m, against the low beam's
+14 kcd to 60 m); with them off it switches them on on high beams. The high beams stay selected while the
+headlights are switched off and on again with `Headlights`.
 On the pad both share D-pad up: a tap is the headlights, a hold of 1 s or more (`Binding::long`, as for
 `Reset`) the high beams, so the headlights act on release there. The cockpit dash shows a green tell-tale
 on the first dial while the headlights are on and a blue one beside it with the high beams. Settings ›
@@ -61,7 +62,8 @@ Drive › Headlights is Auto (the default) or Manual: Auto switches them on at d
 NPC drivers' first lamps switch: 25 min after sunset, 25 min before sunrise) and the switch overrides them in
 between until the next dusk or dawn; Manual leaves them to the switch. Brake lamps light while the service
 brakes are asked for anything: the brake pedal, or the throttle while reversing (reversing on the brake
-pedal and coasting leave them dark).
+pedal and coasting leave them dark), and whenever the car stands with the brake held, whatever gear
+brake-to-reverse has picked.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
 

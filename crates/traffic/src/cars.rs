@@ -50,8 +50,10 @@ const DT: f32 = 1.0 / SIM_HZ as f32;
 pub const BRAKE_LAMP_DECEL: f32 = 0.6;
 /// ...and they stay lit while the car keeps slowing, or creeps under this speed (m/s)...
 const CREEP_MPS: f32 = 1.0;
-/// ...and does not speed up faster than this (m/s²): pulling away.
+/// ...and does not speed up faster than this (m/s²): pulling away. A car standing (at or
+/// under `STANDING_MPS`) and not pulling away shows them however gently it stopped.
 const PULL_AWAY: f32 = 0.3;
+const STANDING_MPS: f32 = 0.05;
 /// Intelligent-driver model: maximum acceleration, comfortable and emergency braking
 /// (m/s²), jam distance behind a car, a stop line and the player (m).
 const A_MAX: f32 = 1.4;
@@ -193,8 +195,8 @@ pub struct Car {
     /// Head lights on.
     pub lights: bool,
     /// Brake lamps lit: slowing harder than [`BRAKE_LAMP_DECEL`] in the last step, and
-    /// after that while still slowing or standing in a queue or at a line, until it pulls
-    /// away.
+    /// after that while still slowing or creeping in a queue or at a line, until it pulls
+    /// away; and whenever it stands still and is not pulling away.
     pub braking: bool,
     /// Lane id, or the lane count plus a turn id while on a turn.
     pub seg: u32,
@@ -1764,7 +1766,8 @@ impl Traffic {
 fn brake_lamps(old: &Car, speed: f32) -> bool {
     let dv = speed - old.speed;
     let held = speed < old.speed || (speed < CREEP_MPS && dv <= PULL_AWAY * DT);
-    dv < -BRAKE_LAMP_DECEL * DT || (old.braking && held)
+    let standing = speed <= STANDING_MPS && dv <= PULL_AWAY * DT;
+    dv < -BRAKE_LAMP_DECEL * DT || standing || (old.braking && held)
 }
 
 #[cfg(test)]
