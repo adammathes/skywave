@@ -10,6 +10,7 @@ VehicleSpec(
     id: "basilisk_v12",
     name: "Basilisk V12",
     era: Eighties,
+    year: 1985,
     class: Sports,
 
     mass_kg: 1490,

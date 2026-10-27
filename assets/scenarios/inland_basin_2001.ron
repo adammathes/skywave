@@ -1,0 +1,20 @@
+// Inland Basin, 2001 (docs/SCENARIOS.md, docs/backlog/INLAND2001.md). STUB: the region template,
+// the grammar, the palette and the radio preset are the coast's until the `socal_basin`
+// template, the `socal_basin_2001` grammar, the `sodium_night` palette and the `2001_basin`
+// preset land (INLAND2001 items 2, 3 and 8); the World page marks it "coming". Its years
+// already filter the roster: every car up to 2001 may appear.
+Scenario(
+    id: "inland_basin_2001",
+    title: "Inland Basin",
+    year: 2001,
+    kind: "Inland grid",
+    region: "california_coast",
+    grammar: "california_coast_80s.ron",
+    radio: "1984_socal",
+    palette: "socal_1985",
+    default_time: (22, 30),
+    default_vehicle: "gannet_gt",
+    years: (1965, 2001),
+    heroes: [],
+    stub: true,
+)

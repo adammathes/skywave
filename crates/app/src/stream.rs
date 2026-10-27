@@ -329,8 +329,14 @@ pub struct PlaceSource {
 }
 
 impl PlaceSource {
+    /// `place` dressed by the coast's grammar.
     pub fn new(place: Place, palette: Palette) -> PlaceSource {
-        let plan = ChunkPlan::new(&place, &palette, crate::places::grammar());
+        PlaceSource::with_grammar(place, palette, crate::places::grammar())
+    }
+
+    /// `place` dressed by `grammar`.
+    pub fn with_grammar(place: Place, palette: Palette, grammar: &world::Grammar) -> PlaceSource {
+        let plan = ChunkPlan::new(&place, &palette, grammar);
         let mut statics: Vec<StaticLight> = place
             .lights
             .items

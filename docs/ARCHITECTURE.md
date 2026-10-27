@@ -63,6 +63,7 @@ Web (primary; what CI tests) → **Steam Deck** (Linux x86_64 binary, Vulkan, 12
 | Chunk vertices | 256k per chunk max | same |
 | Vehicle instances | 64 | 128 |
 | Pedestrians | 256 | 512 |
+| Lane graph, sidewalk graph (per place) | 768 KiB, 4 MiB | same |
 | Point lights per frame | 256 | 1024 |
 | WASM download (brotli) | < 4 MB | n/a |
 | Time to first frame | < 1 s after download | < 0.5 s |

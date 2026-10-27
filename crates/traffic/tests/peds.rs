@@ -74,6 +74,10 @@ const REGIONS: [(&str, &str); 3] = [
 /// commit with the reason.
 const COAST_SEED1_30S_HASH: u64 = 0x6194_6509_e22a_b1e6;
 
+/// Size ceiling for a place's sidewalk graph (16×16 chunks), about 1.3 times the largest
+/// region's at seed 1 (2.9 MiB; the coast's 2.2 MiB, 0.55 MiB of it the turn curves).
+const MAX_WALK_BYTES: usize = 4 * 1024 * 1024;
+
 /// Most walk samples `world` lays another road's asphalt over (where two roads squeeze
 /// together it draws one's pavement across the other's sidewalk).
 const MAX_WALK_ON_ASPHALT: f32 = 0.03;
@@ -260,6 +264,12 @@ fn walks_lie_on_sidewalks_and_crossings_on_the_road() {
         );
         assert!(bad < MAX_WALK_ON_ASPHALT, "{}: {bad}", b.name);
         assert!(road > 0.85, "{}: {road}", b.name);
+        assert!(
+            g.bytes() <= MAX_WALK_BYTES,
+            "{}: {} bytes",
+            b.name,
+            g.bytes()
+        );
         assert!(g.crossings.iter().any(|c| c.signal), "{}", b.name);
         for c in &g.crossings {
             assert!(c.lane == NONE || b.lanes.lanes[c.lane as usize].end_node == c.node);
@@ -511,7 +521,7 @@ struct Drive {
 }
 
 /// Drives `drive` through the people from signal tick `t0`: no one is ever inside the
-/// car's footprint. Excluded: a seated person (the bench is solid, the car stops at
+/// car's footprint or within [`BODY_GAP_M`] of it. Excluded: a seated person (the bench is solid, the car stops at
 /// it), and anyone already in its way within its warning reach when it appears out of
 /// nowhere at the first step (a real car comes from farther off). Returns the people who
 /// stepped aside or hopped.
@@ -575,8 +585,9 @@ fn car_pass(
             }
             let (along, across) = rel(p.pos, car.pos);
             assert!(
-                along.abs() > half[1] || across.abs() > half[0],
-                "person {} inside the car at {along:.2}, {across:.2} (step {k})",
+                gap(&car, p.pos) >= BODY_GAP_M,
+                "person {} inside the car or within {BODY_GAP_M} m of it at {along:.2}, \
+                 {across:.2} (step {k})",
                 p.id
             );
         }
@@ -931,8 +942,26 @@ fn inside(car: &Player, p: [f32; 3]) -> bool {
     along.abs() <= car.half_len && across.abs() <= car.half_w
 }
 
+/// A person's centre must stay at least this far from the car's outline: the figure is
+/// about 0.4 m wide (hands and feet are the app's crowd test's, at 5 cm).
+const BODY_GAP_M: f32 = 0.15;
+
+/// How far the car's outline is from `p`, m (negative inside it).
+fn gap(car: &Player, p: [f32; 3]) -> f32 {
+    let f = [-car.heading.sin(), -car.heading.cos()];
+    let d = [p[0] - car.pos[0], p[2] - car.pos[2]];
+    let a = (d[0] * f[0] + d[1] * f[1]).abs() - car.half_len;
+    let c = (d[0] * -f[1] + d[1] * f[0]).abs() - car.half_w;
+    if a <= 0.0 && c <= 0.0 {
+        a.max(c)
+    } else {
+        (a.max(0.0).powi(2) + c.max(0.0).powi(2)).sqrt()
+    }
+}
+
 /// Steps `secs` from signal tick `t0` with the player's car at `path(seconds)` and the
-/// camera on it: returns the person-steps inside its footprint and how many people came
+/// camera on it: returns the person-steps inside its footprint or with its outline within
+/// [`BODY_GAP_M`] of them, and how many people came
 /// within 8 m of it (people at the curb of a wide road are that far from its middle).
 /// Anyone the car appears on at the first step (it comes out of nowhere) gets 1.5 s to
 /// get out, then counts like everyone else.
@@ -967,7 +996,8 @@ fn obstacle(
         peds.step(&b.walks, &b.lanes, &inp);
         for p in peds.iter() {
             let grace = landed.contains(&p.id) && k < 180;
-            if inside(&car, p.pos) && !grace {
+            // Inside, or the car's outline within a body's half width of their centre.
+            if gap(&car, p.pos) < BODY_GAP_M && !grace {
                 steps_inside += 1;
             }
             let f = [-car.heading.sin(), -car.heading.cos()];
@@ -1023,7 +1053,9 @@ fn nobody_enters_a_car_stopped_on_a_crosswalk() {
     let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |_| {
         slow_car(mid, along, 0.0, 0.0)
     });
-    println!("stopped on a crosswalk: {n} person-steps inside, {near} people came near");
+    println!(
+        "stopped on a crosswalk: {n} person-steps inside or within 0.15 m, {near} people came near"
+    );
     assert_eq!(n, 0);
     assert!(near > 0);
 }
@@ -1036,7 +1068,9 @@ fn nobody_enters_a_car_creeping_over_a_crosswalk() {
     let (n, near, _) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
         slow_car(mid, along, -8.0 + 0.25 * t, 0.25)
     });
-    println!("creeping at 0.25 m/s: {n} person-steps inside, {near} people came near");
+    println!(
+        "creeping at 0.25 m/s: {n} person-steps inside or within 0.15 m, {near} people came near"
+    );
     assert_eq!(n, 0);
     assert!(near > 0);
 }
@@ -1054,7 +1088,9 @@ fn nobody_enters_a_car_parked_on_the_sidewalk() {
         let t = t.min(8.0);
         slow_car(at, dir, -20.0 + 2.5 * t, if t < 8.0 { 2.5 } else { 0.0 })
     });
-    println!("parked on the sidewalk: {n} person-steps inside, {near} people came near");
+    println!(
+        "parked on the sidewalk: {n} person-steps inside or within 0.15 m, {near} people came near"
+    );
     assert_eq!(n, 0);
     assert!(near > 0);
 }
@@ -1072,7 +1108,7 @@ fn nobody_enters_a_car_driving_slowly_through_a_crowd() {
         let s = -60.0 + 2.0 * t - 3.0 * (t / 3.0).cos() + 3.0;
         slow_car(at, dir, s, 2.0 + (t / 3.0).sin())
     });
-    println!("1-3 m/s through a crowd: {n} person-steps inside, {close} people within 5 m");
+    println!("1-3 m/s through a crowd: {n} person-steps inside or within 0.15 m, {close} people within 5 m");
     assert_eq!(n, 0);
     assert!(close >= 5, "{close}");
 }
@@ -1139,8 +1175,9 @@ fn people_stepping_aside_stay_on_the_walk() {
 
 /// Coast seeds 1–4, each built fresh: 60 s busy with the player's car (and the camera)
 /// driving 4–8 m/s through the busiest stretch. Nobody off a crossing (stepping aside or
-/// not) stands in a lane on the road (within [`LANE_CLEAR_M`] of its band, on asphalt), nobody ever stands inside the car (but anyone it
-/// appears on at its first step, for 1.5 s), and everyone stays finite. "In a lane": inside
+/// not) stands in a lane on the road (within [`LANE_CLEAR_M`] of its band, on asphalt), nobody ever stands inside the car or within
+/// [`BODY_GAP_M`] of it (but anyone it appears on at its first step, for 1.5 s), and everyone
+/// stays finite. "In a lane": inside
 /// a lane's band by the lane graph and on asphalt by the world's collider (near junctions
 /// where a road bends into its node the lane graph's lanes and the world's straightened
 /// road ends differ by up to a meter, so the band alone flags people on the curb).
@@ -1150,7 +1187,7 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
     let ron = REGIONS[0].1;
     let t: RegionTemplate = ron::from_str(ron).expect("parse");
     let grammar = grammar();
-    type Sweep = (u64, usize, f32, usize, usize, usize, f32);
+    type Sweep = (u64, usize, f32, usize, usize, usize, f32, f32);
     let results: Vec<Sweep> = std::thread::scope(|scope| {
         let jobs: Vec<_> = (1..=4u64)
             .map(|seed| {
@@ -1193,15 +1230,16 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
                         let t = k as f32 / 120.0;
                         slow_car(at, dir, -60.0 + 6.0 * t, 6.0 + 2.0 * (t * 0.5).sin())
                     };
+                    // Anyone the car appears on ([`appears_on`]) gets 1.5 s to get out.
                     let landed: HashSet<u32> = peds
                         .iter()
-                        .filter(|p| inside(&path(0), p.pos))
+                        .filter(|p| appears_on(&path(0), p.pos))
                         .map(|p| p.id)
                         .collect();
                     let collider = WorldCollider::build(&place, grammar);
                     let (mut inside_steps, mut nearest, mut checked, mut in_lane) =
                         (0, f32::MAX, 0, 0usize);
-                    let (mut dodges, mut off_walk) = (0usize, 0.0f32);
+                    let (mut dodges, mut off_walk, mut nearest_gap) = (0usize, 0.0f32, f32::MAX);
                     // Per slot: who, and where their move out of the way began.
                     let mut began: Vec<Option<(u32, [f32; 3])>> =
                         vec![None; peds.pedestrians().len()];
@@ -1232,8 +1270,13 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
                             if peds.dodging(i) {
                                 dodged[i] = (p.id, k);
                             }
-                            if inside(&car, p.pos) && !(landed.contains(&p.id) && k < 180) {
-                                inside_steps += 1;
+                            if !(landed.contains(&p.id) && k < 180) {
+                                let g = gap(&car, p.pos);
+                                nearest_gap = nearest_gap.min(g);
+                                // Inside, or within a body's half width of the outline.
+                                if g < BODY_GAP_M {
+                                    inside_steps += 1;
+                                }
                             }
                             if k % 6 == 0 && !peds.on_crossing(&walks, i) {
                                 checked += 1;
@@ -1266,17 +1309,19 @@ fn other_seeds_keep_people_on_the_walks_and_clear_of_the_car() {
                         in_lane,
                         dodges,
                         off_walk,
+                        nearest_gap,
                     )
                 })
             })
             .collect();
         jobs.into_iter().map(|j| j.join().expect("seed")).collect()
     });
-    for (seed, inside_steps, nearest, checked, in_lane, dodges, off_walk) in results {
+    for (seed, inside_steps, nearest, checked, in_lane, dodges, off_walk, nearest_gap) in results {
         println!(
-            "coast seed {seed}: {inside_steps} person-steps inside the car, at least \
-             {nearest:.2} m outside every lane over {checked} samples; {dodges} dodging \
-             samples, at most {off_walk:.2} m off a walk line"
+            "coast seed {seed}: {inside_steps} person-steps inside the car or within \
+             {BODY_GAP_M} m of it (nearest {nearest_gap:.2} m), at least {nearest:.2} m \
+             outside every lane over {checked} samples; {dodges} dodging samples, at most \
+             {off_walk:.2} m off a walk line"
         );
         // The car drives along the busiest walk: the gutter beside it is a way out too.
         assert!(
@@ -1308,6 +1353,40 @@ struct Reach {
     longest_move: f32,
     /// The fastest anyone moved in one step (m/s), sitting down and getting up aside.
     fastest: f32,
+    /// Person-steps outside the car with its outline within [`BODY_GAP_M`] of them.
+    short: usize,
+    /// The nearest the car's outline came to anyone's centre (negative inside), m.
+    nearest: f32,
+    /// The farthest one dodge episode (moves back to back) carried anyone from where it
+    /// began, less what it carried them past [`EPISODE_M`] while the car was still coming
+    /// at them ([`coming`]).
+    episode: f32,
+    /// The longest anyone stood within [`STOPPED_NEAR_M`] of the car while it stood
+    /// still, s.
+    stood: f32,
+}
+
+/// A dodge episode carries nobody farther than this once the car is no longer coming.
+const EPISODE_M: f32 = 3.0;
+/// Nobody stays within this of a stopped car for longer than [`STOPPED_S`].
+const STOPPED_NEAR_M: f32 = 0.5;
+const STOPPED_S: f32 = 3.0;
+
+/// Whether the car of `script` is still coming at `p` at time `t`: where it will be over
+/// the next 3 s, or where it would be going straight on at its speed now, comes within
+/// 2.5 m of it (its warning reach, the widening ahead of a fast car, and a margin).
+fn coming(script: &Script, t: f32, p: [f32; 3]) -> bool {
+    let now = script(t);
+    let f = [-now.heading.sin(), -now.heading.cos()];
+    (0..=12).any(|k| {
+        let dt = k as f32 * 0.25;
+        let s = now.speed * dt;
+        let on = Player {
+            pos: [now.pos[0] + f[0] * s, now.pos[1], now.pos[2] + f[1] * s],
+            ..now
+        };
+        gap(&script(t + dt), p) < 2.5 || (now.speed.abs() > 0.05 && gap(&on, p) < 2.5)
+    })
 }
 
 /// One seed's place with what the checks need.
@@ -1330,32 +1409,85 @@ fn appears_on(car: &Player, p: [f32; 3]) -> bool {
     along >= -car.half_len - 0.5 && along <= ahead && across.abs() <= car.half_w + 0.5
 }
 
+/// Whether the car's footprint is over a walk: any of its corners, its middle or the
+/// middles of its ends within 0.25 m of a walk or spur link's band.
+fn on_walk(g: &WalkGraph, car: &Player) -> bool {
+    let f = [-car.heading.sin(), -car.heading.cos()];
+    let r = [-f[1], f[0]];
+    [
+        (0.0, 0.0),
+        (1.0, 1.0),
+        (1.0, -1.0),
+        (-1.0, 1.0),
+        (-1.0, -1.0),
+        (1.0, 0.0),
+        (-1.0, 0.0),
+    ]
+    .iter()
+    .any(|&(a, l)| {
+        let p = [
+            car.pos[0] + f[0] * a * car.half_len + r[0] * l * car.half_w,
+            car.pos[1],
+            car.pos[2] + f[1] * a * car.half_len + r[1] * l * car.half_w,
+        ];
+        outside_walks(g, p) <= 0.25
+    })
+}
+
 /// Runs `script` for `secs` from the warmed people `warm`, signal tick `t0`, with the
-/// camera on the car (anyone it appears on, [`appears_on`], gets 1.5 s to get out).
+/// camera on the car (anyone it appears on, [`appears_on`], at its first step or where it
+/// jumps to, gets 1.5 s to get out).
 fn drive_script(s: &Scene, warm: &Pedestrians, t0: u64, secs: f32, script: &Script) -> Reach {
     let mut peds = warm.clone();
-    let first = script(0.0);
-    let landed: HashSet<u32> = peds
-        .iter()
-        .filter(|p| appears_on(&first, p.pos))
-        .map(|p| p.id)
-        .collect();
-    let mut r = Reach::default();
+    // Who the car appeared on, and the step it did.
+    let mut landed: HashMap<u32, u64> = HashMap::new();
+    let mut was: Option<Player> = None;
+    let mut r = Reach {
+        nearest: f32::MAX,
+        ..Reach::default()
+    };
     let mut near = HashSet::new();
     // Per slot: id, last position, whether sitting, where the current move out of the
-    // way started and how far through it is.
-    type Last = (u32, [f32; 3], bool, Option<[f32; 3]>, f32);
+    // way started and how far through it is, where the dodge episode (moves back to back)
+    // started, and steps stood near the car stopped.
+    type Last = (
+        u32,
+        [f32; 3],
+        bool,
+        Option<[f32; 3]>,
+        f32,
+        Option<[f32; 3]>,
+        u32,
+    );
     let mut last: Vec<Last> = peds
         .pedestrians()
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let start = peds.dodging(i).then_some(p.pos);
-            (p.id, p.pos, p.pose.action == Action::Sit, start, p.pose.t)
+            (
+                p.id,
+                p.pos,
+                p.pose.action == Action::Sit,
+                start,
+                p.pose.t,
+                start,
+                0,
+            )
         })
         .collect();
+    // Per slot: how far the current episode may carry them.
+    let mut allow = vec![EPISODE_M; last.len()];
+    // Per slot: whether the car was coming when the current move began.
+    let mut pushed = vec![false; last.len()];
     for k in 0..(secs * 120.0) as u64 {
         let car = script(k as f32 / 120.0);
+        if was.is_none_or(|w| dist(w.pos, car.pos) > 1.0) {
+            for p in peds.iter().filter(|p| appears_on(&car, p.pos)) {
+                landed.insert(p.id, k);
+            }
+        }
+        was = Some(car);
         let inp = PedInput {
             tick: t0 + k,
             density: Density::Busy,
@@ -1367,9 +1499,9 @@ fn drive_script(s: &Scene, warm: &Pedestrians, t0: u64, secs: f32, script: &Scri
             player: car,
         };
         peds.step(s.walks, s.lanes, &inp);
-        // The car's middle within a walk's curb-side room and its own half width of a
-        // walk line: on that walk.
-        let car_on_walk = near_link(s.walks, car.pos, false) < 1.45 + car.half_w;
+        // On a walk: its footprint (corners, middle, the middles of its ends) within a
+        // quarter meter of a walk's band.
+        let car_on_walk = on_walk(s.walks, &car);
         for (i, p) in peds.pedestrians().iter().enumerate() {
             let prev = last[i];
             let sitting = p.pose.action == Action::Sit;
@@ -1381,12 +1513,50 @@ fn drive_script(s: &Scene, warm: &Pedestrians, t0: u64, secs: f32, script: &Scri
                 _ if prev.0 == p.id => Some(prev.1),
                 _ => Some(p.pos),
             };
-            last[i] = (p.id, p.pos, sitting, start, p.pose.t);
+            let episode = match prev.5 {
+                _ if !dodging => None,
+                Some(a) if prev.0 == p.id => Some(a),
+                _ if prev.0 == p.id => Some(prev.1),
+                _ => Some(p.pos),
+            };
+            let g = gap(&car, p.pos);
+            let stood = if prev.0 == p.id && car.speed.abs() < 0.3 && g < STOPPED_NEAR_M {
+                prev.6 + 1
+            } else {
+                0
+            };
+            last[i] = (p.id, p.pos, sitting, start, p.pose.t, episode, stood);
             if !p.alive {
                 continue;
             }
-            if inside(&car, p.pos) && !(landed.contains(&p.id) && k < 180) {
-                r.inside += 1;
+            r.stood = r.stood.max(stood as f32 / 120.0);
+            if !landed.get(&p.id).is_some_and(|&at| k < at + 180) {
+                r.nearest = r.nearest.min(g);
+                if g <= 0.0 && inside(&car, p.pos) {
+                    r.inside += 1;
+                } else if g < BODY_GAP_M {
+                    r.short += 1;
+                }
+            }
+            // An episode carries people past EPISODE_M only while the car keeps coming
+            // (or in a move begun while it was): how far it has, beyond what the car's way
+            // already took them.
+            if let Some(a) = episode {
+                let d = dist(a, p.pos);
+                if prev.0 != p.id || prev.5.is_none() {
+                    allow[i] = EPISODE_M;
+                }
+                if start != prev.3 || prev.0 != p.id {
+                    pushed[i] = coming(script, k as f32 / 120.0, p.pos);
+                }
+                if d > allow[i] {
+                    if pushed[i] || coming(script, k as f32 / 120.0, p.pos) {
+                        allow[i] = d;
+                    } else {
+                        r.episode = r.episode.max(d - allow[i] + EPISODE_M);
+                    }
+                }
+                r.episode = r.episode.max(d.min(EPISODE_M));
             }
             if dist(p.pos, car.pos) < 6.0 {
                 near.insert(p.id);
@@ -1449,9 +1619,14 @@ fn pull_away(t: f32, t0: f32, v: f32) -> (f32, f32) {
 /// The scripted cars at crossing `c`: along it at 1, 2 and 3 m/s, forward and reversing,
 /// from 12 m before one curb to 12 m past the other; along it at 2 m/s stopping on it
 /// for 6 s and driving on; turning across it both ways at 3 and 6 m/s on 6 and 9 m
-/// radii (12 m straight in, then half a circle through its middle); and appearing on its
-/// curb queue and standing there.
-fn crossing_scripts(walks: &WalkGraph, c: usize) -> Vec<(String, f32, Script<'static>)> {
+/// radii (12 m straight in, then half a circle through its middle); appearing on its
+/// curb queue and standing there; along it to its middle, 3 s there and backing out, or
+/// 6 s there and away to 8 m/s; and down the road along its lanes (below).
+fn crossing_scripts(
+    walks: &WalkGraph,
+    lanes: &LaneGraph,
+    c: usize,
+) -> Vec<(String, f32, Script<'static>)> {
     let x = &walks.crossings[c];
     let (a, z) = (
         walks.nodes[x.curbs[0] as usize].pos,
@@ -1528,16 +1703,255 @@ fn crossing_scripts(walks: &WalkGraph, c: usize) -> Vec<(String, f32, Script<'st
         8.0,
         Box::new(move |_| car_at(a, d, 0.0)),
     ));
+    // Creeping along it onto the curb queue for 20 s, slower than the sim counts as moving
+    // and slower than it counts as creeping.
+    for (speed, back) in [(0.04f32, 3.5f32), (0.2, 6.0)] {
+        scripts.push((
+            format!("crossing {c} creep {speed} m/s"),
+            20.0,
+            Box::new(move |t| car_at(at(a, -back + speed * t), d, speed)),
+        ));
+    }
+    // Along the crosswalk at 2 m/s to its middle, 3 s there, and back out in reverse
+    // (2 m/s² up to 2 m/s).
+    let half = 0.5 * l;
+    scripts.push((
+        format!("crossing {c} along, stop, reverse"),
+        (12.0 + half) + 5.0,
+        Box::new(move |t| {
+            let to_mid = (12.0 + half) / 2.0;
+            if t < to_mid {
+                return car_at(at(a, -12.0 + 2.0 * t), d, 2.0);
+            }
+            let (back, v) = pull_away(t, to_mid + 3.0, 2.0);
+            car_at(at(a, half - back), d, -v)
+        }),
+    ));
+    // Down the road both ways, each along a lane through the crosswalk (as the lane graph
+    // lays it, straight on past its ends): stopping on it and backing out; stopping 6 s
+    // and pulling away to 8 m/s; 8 m/s along the curb lane, the car's side 0.3 m off the
+    // curb face; two passes 3 s apart.
+    let x = &walks.crossings[c];
+    let road = walks
+        .links
+        .iter()
+        .find(|k| {
+            k.kind == LinkKind::Crossing
+                && k.crossing == c as u32
+                && !x.curbs.contains(&k.a)
+                && !x.curbs.contains(&k.b)
+        })
+        .map_or(mid, |k| {
+            let (p, q) = (walks.nodes[k.a as usize].pos, walks.nodes[k.b as usize].pos);
+            [
+                (p[0] + q[0]) * 0.5,
+                (p[1] + q[1]) * 0.5,
+                (p[2] + q[2]) * 0.5,
+            ]
+        });
+    let hw = 0.5 * x.length_m - 0.35;
+    let across = [d[1], -d[0]];
+    for way in [1.0f32, -1.0] {
+        let Some(path) = lane_through(lanes, x.node, road, hw, [across[0] * way, across[1] * way])
+        else {
+            continue;
+        };
+        let at_xing = path.nearest(road);
+        // Only where the lane's line runs clear of the curbs (where the road bends into
+        // the junction its line straight on would not).
+        let clear = (-40..=40).all(|s| {
+            let (p, _) = path.at(at_xing + s as f32);
+            x.curbs
+                .iter()
+                .all(|&n| dist(p, walks.nodes[n as usize].pos) > 1.8)
+        });
+        if !clear {
+            continue;
+        }
+        let path = std::sync::Arc::new(path);
+        let (p0, f0) = path.at(at_xing);
+        let right = [-f0[1], f0[0]];
+        // The lane's middle off the road's, to the car's right, and the shift that puts
+        // the car's side 0.3 m off the curb.
+        let lat0 = (p0[0] - road[0]) * right[0] + (p0[2] - road[2]) * right[1];
+        let curb = hw - 0.3 - 0.9 - lat0;
+        let on = {
+            let path = path.clone();
+            move |s: f32, shift: f32, v: f32| {
+                let (p, f) = path.at(at_xing + s);
+                let r = [-f[1], f[0]];
+                car_at([p[0] + r[0] * shift, p[1], p[2] + r[1] * shift], f, v)
+            }
+        };
+        let o = on.clone();
+        scripts.push((
+            format!("crossing {c} road {way} stop, reverse"),
+            5.0 + 3.0 + 1.0 + 7.0,
+            Box::new(move |t| {
+                if t < 5.0 {
+                    return o(-15.0 + 3.0 * t, 0.0, 3.0);
+                }
+                let (back, v) = pull_away(t, 8.0, 2.0);
+                o(-back, 0.0, -v)
+            }),
+        ));
+        let o = on.clone();
+        scripts.push((
+            format!("crossing {c} road {way} stop 6 s, away to 8 m/s"),
+            5.0 + 6.0 + 4.0 + 3.0,
+            Box::new(move |t| {
+                if t < 5.0 {
+                    return o(-15.0 + 3.0 * t, 0.0, 3.0);
+                }
+                let (s, v) = pull_away(t, 11.0, 8.0);
+                o(s, 0.0, v)
+            }),
+        ));
+        let o = on.clone();
+        scripts.push((
+            format!("crossing {c} road {way} curb lane 8 m/s"),
+            10.0,
+            Box::new(move |t| o(-40.0 + 8.0 * t, curb, 8.0)),
+        ));
+        // At 6 m/s, the second car taking over 9 m back once the first is 9 m past.
+        scripts.push((
+            format!("crossing {c} road {way} two passes"),
+            10.0,
+            Box::new(move |t| {
+                let s = -20.0 + 6.0 * t;
+                on(if s > 9.0 { s - 18.0 } else { s }, 0.0, 6.0)
+            }),
+        ));
+    }
+    // Along the crosswalk to its middle, 6 s there, then away at 2 m/s² to 8 m/s.
+    scripts.push((
+        format!("crossing {c} along, stop 6 s, away to 8 m/s"),
+        (12.0 + half) / 2.0 + 6.0 + 4.0 + 2.0,
+        Box::new(move |t| {
+            let to_mid = (12.0 + half) / 2.0;
+            if t < to_mid {
+                return car_at(at(a, -12.0 + 2.0 * t), d, 2.0);
+            }
+            let (s, v) = pull_away(t, to_mid + 6.0, 8.0);
+            car_at(at(a, half + s), d, v)
+        }),
+    ));
     scripts
+}
+
+/// A lane's centerline, straight on past both its ends, by arc length.
+struct LanePath {
+    pts: Vec<[f32; 3]>,
+    arc: Vec<f32>,
+}
+
+impl LanePath {
+    fn new(mut pts: Vec<[f32; 3]>) -> LanePath {
+        let ext = |a: [f32; 3], b: [f32; 3]| {
+            let l = dist(a, b).max(1e-3);
+            [
+                b[0] + (b[0] - a[0]) / l * 80.0,
+                b[1],
+                b[2] + (b[2] - a[2]) / l * 80.0,
+            ]
+        };
+        let n = pts.len();
+        let (head, tail) = (ext(pts[1], pts[0]), ext(pts[n - 2], pts[n - 1]));
+        pts.insert(0, head);
+        pts.push(tail);
+        let mut arc = vec![0.0];
+        for w in pts.windows(2) {
+            arc.push(arc.last().unwrap() + dist(w[0], w[1]));
+        }
+        LanePath { pts, arc }
+    }
+
+    /// Position and ground direction `s` along.
+    fn at(&self, s: f32) -> ([f32; 3], [f32; 2]) {
+        let k = self.arc[1..]
+            .partition_point(|&a| a < s)
+            .min(self.pts.len() - 2);
+        let (a, b) = (self.pts[k], self.pts[k + 1]);
+        let l = (self.arc[k + 1] - self.arc[k]).max(1e-3);
+        let t = (s - self.arc[k]) / l;
+        let p = [a[0] + (b[0] - a[0]) * t, a[1], a[2] + (b[2] - a[2]) * t];
+        (p, [(b[0] - a[0]) / l, (b[2] - a[2]) / l])
+    }
+
+    /// Arc length of the point nearest `p`.
+    fn nearest(&self, p: [f32; 3]) -> f32 {
+        let mut best = (f32::MAX, 0.0);
+        for (k, w) in self.pts.windows(2).enumerate() {
+            let l = dist(w[0], w[1]).max(1e-3);
+            let d = [(w[1][0] - w[0][0]) / l, (w[1][2] - w[0][2]) / l];
+            let t = ((p[0] - w[0][0]) * d[0] + (p[2] - w[0][2]) * d[1]).clamp(0.0, l);
+            let q = [w[0][0] + d[0] * t, p[1], w[0][2] + d[1] * t];
+            if dist(p, q) < best.0 {
+                best = (dist(p, q), self.arc[k] + t);
+            }
+        }
+        best.1
+    }
+}
+
+/// A lane into or out of junction `node` through the crosswalk with its road's middle at
+/// `road` (half width `hw`), driving along `dir` there: one whose end there is within
+/// a few meters of the crosswalk, at its level.
+fn lane_through(
+    lanes: &LaneGraph,
+    node: u32,
+    road: [f32; 3],
+    hw: f32,
+    dir: [f32; 2],
+) -> Option<LanePath> {
+    lanes
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.end_node == node || l.start_node == node)
+        .filter_map(|(i, l)| {
+            let pts = lanes.points(i as u32);
+            let end = if l.end_node == node {
+                pts[pts.len() - 1]
+            } else {
+                pts[0]
+            };
+            if dist(end, road) > hw + 8.0 || (end[1] - road[1]).abs() > 0.5 {
+                return None;
+            }
+            let path = LanePath::new(pts.to_vec());
+            let (p, f) = path.at(path.nearest(road));
+            let off = dist(p, road);
+            (off < hw && f[0] * dir[0] + f[1] * dir[1] > 0.9).then_some((off, path))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|b| b.1)
+}
+
+/// Turning across crossing `c` at 6 m/s on 6 and 9 m radii both ways, as in
+/// [`crossing_scripts`]: run from a moment with five or more people on it.
+fn crowded_scripts(
+    walks: &WalkGraph,
+    lanes: &LaneGraph,
+    c: usize,
+) -> Vec<(String, f32, Script<'static>)> {
+    crossing_scripts(walks, lanes, c)
+        .into_iter()
+        .filter(|(name, _, _)| name.contains("turn 6 m/s"))
+        .map(|(name, secs, script)| (format!("{name} crowded"), secs, script))
+        .collect()
 }
 
 /// The ways a player's car reaches people, on coast seeds 1–4: the crossings scripts
 /// ([`crossing_scripts`]) at the two crossings with the most people near them (every
 /// crossing with anyone within 25 m with `SKYWAVE_ALL_CROSSINGS=1`), and on the busiest
 /// walk, standing 2.4 m short of someone and pulling away toward them, and parking after
-/// a 2.5 m/s approach. Nobody is ever inside the car or in a lane off a crossing; a dodge
-/// on the sidewalk stays within the walks' bands (the gutter beside a walk the car is on,
-/// at most), carries nobody more than 2 m and nobody moves faster than 4 m/s.
+/// a 2.5 m/s approach; the 6 m/s turns again on each crossing once five or more people are
+/// on it. Nobody is ever inside the car or within [`BODY_GAP_M`] of it, or in a lane off a
+/// crossing; a dodge on the sidewalk stays within the walks' bands (the gutter beside a
+/// walk the car is on, at most), carries nobody more than 2 m, an episode of them no more
+/// than [`EPISODE_M`] once the car stops coming; nobody stays by a stopped car longer than
+/// [`STOPPED_S`] and nobody moves faster than 4 m/s.
 #[test]
 fn nobody_is_reached_by_a_scripted_car() {
     let _quiet = shared();
@@ -1593,8 +2007,9 @@ fn nobody_is_reached_by_a_scripted_car() {
                         .collect();
                     busy.sort_by_key(|b| std::cmp::Reverse(b.0));
                     let take = if all { busy.len() } else { 2 };
-                    for &(_, c) in busy.iter().take(take) {
-                        for (name, secs, script) in crossing_scripts(&walks, c) {
+                    let chosen: Vec<usize> = busy.iter().take(take).map(|b| b.1).collect();
+                    for &c in &chosen {
+                        for (name, secs, script) in crossing_scripts(&walks, &lanes, c) {
                             if only
                                 .as_ref()
                                 .is_some_and(|o| format!("seed {seed} {name}") != *o)
@@ -1602,6 +2017,52 @@ fn nobody_is_reached_by_a_scripted_car() {
                                 continue;
                             }
                             let r = drive_script(&scene, &warm, t0, secs, &script);
+                            out.push((format!("seed {seed} {name}"), r));
+                        }
+                    }
+                    // On from the warm people with no car, the first moment each chosen
+                    // crossing has five or more people on it (at its curbs or across):
+                    // the turns at 6 m/s from there.
+                    let mut crowded: Vec<Option<(u64, Pedestrians)>> = vec![None; chosen.len()];
+                    let mut on = warm.clone();
+                    let mut count = vec![0usize; walks.crossings.len()];
+                    for k in 0..120 * 60u64 {
+                        if k % 12 == 0 {
+                            count.fill(0);
+                            for i in 0..on.pedestrians().len() {
+                                if let Some(x) = on.crossing_of(&walks, i) {
+                                    count[x as usize] += 1;
+                                }
+                            }
+                            for (j, &c) in chosen.iter().enumerate() {
+                                if crowded[j].is_none() && count[c] >= 5 {
+                                    crowded[j] = Some((t0 + k, on.clone()));
+                                }
+                            }
+                            if crowded.iter().all(Option::is_some) {
+                                break;
+                            }
+                        }
+                        let inp = PedInput {
+                            tick: t0 + k,
+                            density: Density::Busy,
+                            view: view_at(eye, t0 + k),
+                            player: Player::ABSENT,
+                        };
+                        on.step(&walks, &lanes, &inp);
+                    }
+                    for (&c, at) in chosen.iter().zip(&crowded) {
+                        let Some((tick, people)) = at else {
+                            continue;
+                        };
+                        for (name, secs, script) in crowded_scripts(&walks, &lanes, c) {
+                            if only
+                                .as_ref()
+                                .is_some_and(|o| format!("seed {seed} {name}") != *o)
+                            {
+                                continue;
+                            }
+                            let r = drive_script(&scene, people, *tick, secs, &script);
                             out.push((format!("seed {seed} {name}"), r));
                         }
                     }
@@ -1653,22 +2114,42 @@ fn nobody_is_reached_by_a_scripted_car() {
             .collect();
         jobs.into_iter().map(|j| j.join().expect("seed")).collect()
     });
-    let mut sum = Reach::default();
-    let mut runs = 0;
+    let mut sum = Reach {
+        nearest: f32::MAX,
+        ..Reach::default()
+    };
+    let (mut runs, mut crowded) = (0, 0);
     for (name, r) in results.iter().flatten() {
         let bad = r.inside > 0
+            || r.short > 0
             || r.in_lane > 0
             || r.off_walk > 0.15
             || r.longest_move > 2.05
-            || r.fastest > 4.05;
+            || r.fastest > 4.05
+            || r.episode > EPISODE_M + 0.05
+            || r.stood > STOPPED_S;
         if bad {
             println!(
-                "{name}: {} person-steps inside, {} lane samples, {:.2} m out of the walks, \
-                 longest move {:.2} m, fastest {:.2} m/s",
-                r.inside, r.in_lane, r.off_walk, r.longest_move, r.fastest
+                "{name}: {} person-steps inside, {} within {BODY_GAP_M} m (nearest {:.3} m), \
+                 {} lane samples, {:.2} m out of the walks, longest move {:.2} m, episode \
+                 {:.2} m, fastest {:.2} m/s, stood {:.1} s by the stopped car",
+                r.inside,
+                r.short,
+                r.nearest,
+                r.in_lane,
+                r.off_walk,
+                r.longest_move,
+                r.episode,
+                r.fastest,
+                r.stood
             );
         }
+        crowded += usize::from(name.ends_with("crowded"));
         sum.inside += r.inside;
+        sum.short += r.short;
+        sum.nearest = sum.nearest.min(r.nearest);
+        sum.episode = sum.episode.max(r.episode);
+        sum.stood = sum.stood.max(r.stood);
         sum.near += r.near;
         sum.in_lane += r.in_lane;
         sum.off_walk = sum.off_walk.max(r.off_walk);
@@ -1677,12 +2158,29 @@ fn nobody_is_reached_by_a_scripted_car() {
         runs += 1;
     }
     println!(
-        "{runs} scripted runs, {} people within 6 m, {} person-steps inside the car, {} lane \
-         samples off a crossing, dodges at most {:.2} m out of the walks, longest move {:.2} m, \
-         fastest {:.2} m/s",
-        sum.near, sum.inside, sum.in_lane, sum.off_walk, sum.longest_move, sum.fastest
+        "{runs} scripted runs ({crowded} on crowded crossings), {} people within 6 m, {} \
+         person-steps inside the car, {} within {BODY_GAP_M} m of it (nearest {:.3} m), {} \
+         lane samples off a crossing, dodges at most {:.2} m out of the walks, longest move \
+         {:.2} m, longest episode {:.2} m, fastest {:.2} m/s, at most {:.1} s by a stopped car",
+        sum.near,
+        sum.inside,
+        sum.short,
+        sum.nearest,
+        sum.in_lane,
+        sum.off_walk,
+        sum.longest_move,
+        sum.episode,
+        sum.fastest,
+        sum.stood
     );
     assert_eq!(sum.inside, 0);
+    assert_eq!(sum.short, 0, "nearest {}", sum.nearest);
+    assert!(sum.episode <= EPISODE_M + 0.05, "{}", sum.episode);
+    assert!(sum.stood <= STOPPED_S, "{}", sum.stood);
+    assert!(
+        crowded > 0 || only.is_some(),
+        "no crossing had five people on it"
+    );
     assert_eq!(sum.in_lane, 0);
     // A few centimeters for how the walks' straight bands meet at their nodes (around a
     // corner people may step 0.3 m past a corner's room, still on the sidewalk).
