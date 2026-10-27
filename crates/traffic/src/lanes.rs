@@ -306,6 +306,19 @@ fn lane_offset(e: &place::Edge, slot: u8, n: u8) -> f32 {
     }
 }
 
+/// Painted width of a lane of `e` driving forward (from `a` to `b`) or back.
+pub(crate) fn lane_width(e: &place::Edge, forward: bool) -> f32 {
+    let n = f32::from(if forward { e.lanes_fwd } else { e.lanes_back }.max(1));
+    let inner = e.width_m * 0.5 - GUTTER_M;
+    if e.oneway {
+        2.0 * inner / n
+    } else if e.class == RoadClass::Highway {
+        HIGHWAY_LANE_M
+    } else {
+        inner / n
+    }
+}
+
 /// Point on cubic `c` at parameter `t`.
 pub(crate) fn bezier(c: &[[f32; 3]; 4], t: f32) -> [f32; 3] {
     let u = 1.0 - t;
