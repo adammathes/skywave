@@ -1,7 +1,8 @@
-// Radio preset: 1977 Chicago. Real, listener-supported internet stations whose stream URLs
-// their broadcasters publish for listening (SomaFM's .pls playlists, Radio Paradise's
-// stream links); names are the services' own channel names. Nothing is rehosted.
-// tools/check-streams.mjs answered audio for every URL on the date in `terms_checked`;
+// Radio preset: 1977 Chicago. Real stations whose stream URLs the broadcasters publish for
+// listening in other players (181.FM's stream links page, Radio Paradise's stream links for
+// WiFi radios and other players, WFMU's playlists, the college stations' own listen links);
+// names are the stations' own. Nothing is rehosted. tools/check-streams.mjs played 5 s of
+// audio from every URL, as the published page asks for it, on the date in `terms_checked`;
 // `verified` turns true after the owner's first listen. Format: crates/audio/src/station.rs,
 // docs/AUDIO_RADIO.md.
 RadioPreset(
@@ -10,38 +11,89 @@ RadioPreset(
     scenario: "chicago_1977",
     stations: [
         Station(
-            id: "somafm_7soul",
-            name: "SomaFM Seven Inch Soul",
-            era: "1960s",
-            format: "vintage soul from 45s",
+            id: "181fm_soul",
+            name: "181.FM Soul",
+            era: "1970s",
+            format: "classic soul and R&B",
             source: Stream(
-                urls: [
-                    "https://ice2.somafm.com/7soul-128-mp3",
-                    "https://ice6.somafm.com/7soul-128-mp3",
-                    "https://ice5.somafm.com/7soul-128-mp3",
-                ],
-                homepage: "https://somafm.com/7soul/",
+                urls: ["https://listen.181fm.com/181-soul_128k.mp3"],
+                homepage: "https://www.181.fm/links",
                 codec: Mp3,
                 bitrate_kbps: 128,
-                terms_checked: "2026-10-26",
+                terms_checked: "2026-10-27",
                 verified: false,
             ),
         ),
         Station(
-            id: "somafm_seventies",
-            name: "SomaFM Left Coast 70s",
+            id: "181fm_super70s",
+            name: "181.FM Super 70s",
             era: "1970s",
-            format: "mellow 70s album rock",
+            format: "70s pop and rock hits",
             source: Stream(
-                urls: [
-                    "https://ice2.somafm.com/seventies-128-mp3",
-                    "https://ice6.somafm.com/seventies-128-mp3",
-                    "https://ice5.somafm.com/seventies-128-mp3",
-                ],
-                homepage: "https://somafm.com/seventies/",
+                urls: ["https://listen.181fm.com/181-70s_128k.mp3"],
+                homepage: "https://www.181.fm/links",
                 codec: Mp3,
                 bitrate_kbps: 128,
-                terms_checked: "2026-10-26",
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "wdcb",
+            name: "WDCB 90.9 FM",
+            era: "mixed",
+            format: "Chicago jazz and blues",
+            source: Stream(
+                urls: ["https://wdcb-ice.streamguys1.com/wdcb128"],
+                homepage: "https://www.cod.edu/wdcb/streaming-support",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "181fm_trueblues",
+            name: "181.FM True Blues",
+            era: "mixed",
+            format: "electric and classic blues",
+            source: Stream(
+                urls: ["https://listen.181fm.com/181-blues_128k.mp3"],
+                homepage: "https://www.181.fm/links",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "whpk",
+            name: "WHPK 88.5 FM",
+            era: "mixed",
+            format: "Hyde Park college radio: jazz, blues, soul, rock",
+            source: Stream(
+                urls: ["https://whpk-stream.uchicago.edu/stream"],
+                homepage: "https://whpk.org/",
+                codec: Mp3,
+                bitrate_kbps: 256,
+                terms_checked: "2026-10-27",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "wfmu_rocknsoul",
+            name: "WFMU Rock'n'Soul Radio",
+            era: "1960s",
+            format: "soul, R&B and rock 'n' roll 45s",
+            source: Stream(
+                urls: [
+                    "https://stream2.wfmu.org/rocknsoul",
+                    "https://stream0.wfmu.org/rocknsoul",
+                ],
+                homepage: "https://wfmu.org/listen.shtml",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-27",
                 verified: false,
             ),
         ),
@@ -52,46 +104,10 @@ RadioPreset(
             format: "classic and album rock",
             source: Stream(
                 urls: ["https://stream.radioparadise.com/rock-128"],
-                homepage: "https://radioparadise.com/",
+                homepage: "https://radioparadise.com/listen/stream-links",
                 codec: Aac,
                 bitrate_kbps: 128,
-                terms_checked: "2026-10-26",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "somafm_illstreet",
-            name: "SomaFM Illinois Street Lounge",
-            era: "1960s",
-            format: "bachelor pad lounge and exotica",
-            source: Stream(
-                urls: [
-                    "https://ice2.somafm.com/illstreet-128-mp3",
-                    "https://ice6.somafm.com/illstreet-128-mp3",
-                    "https://ice5.somafm.com/illstreet-128-mp3",
-                ],
-                homepage: "https://somafm.com/illstreet/",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-26",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "somafm_sonicuniverse",
-            name: "SomaFM Sonic Universe",
-            era: "mixed",
-            format: "jazz, classic to adventurous",
-            source: Stream(
-                urls: [
-                    "https://ice2.somafm.com/sonicuniverse-128-mp3",
-                    "https://ice6.somafm.com/sonicuniverse-128-mp3",
-                    "https://ice5.somafm.com/sonicuniverse-128-mp3",
-                ],
-                homepage: "https://somafm.com/sonicuniverse/",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-26",
+                terms_checked: "2026-10-27",
                 verified: false,
             ),
         ),
