@@ -258,7 +258,7 @@ function silentMp3(secs, title, artist) {
 }
 
 async function runMusic() {
-  const { page, problems } = await open("music", "?stream=0&nohelp=1");
+  const { page, problems } = await open("music", "?stream=0");
   const frames = (n) =>
     page.evaluate(
       (n) => new Promise((ok) => {
