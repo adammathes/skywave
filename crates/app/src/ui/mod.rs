@@ -41,7 +41,7 @@ use crate::map::view::{
 };
 use crate::map::MapPoi;
 use crate::radio::{self, CarRadio};
-use crate::settings::{FrameRate, GpuInfo, Handling, Quality, Settings, SettingsStore};
+use crate::settings::{FrameRate, GpuInfo, Handling, Overlay, Quality, Settings, SettingsStore};
 use crate::App;
 use audio::deck::Source;
 use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
@@ -653,8 +653,9 @@ impl Ui {
                 self.toast = None;
             }
         }
+        // Cycles the saved mode under menus too; it shows once they close.
         if s.just_pressed(Action::DebugOverlay) {
-            self.settings.debug_overlay = !self.settings.debug_overlay;
+            self.settings.overlay = self.settings.overlay.next();
             self.dirty = true;
             self.save_if_dirty();
         }
@@ -800,6 +801,10 @@ impl Ui {
                 self.deck.set_mode(mode);
                 self.readout_s = 0.0;
             }
+            Effect::Choose(ItemId::DebugOverlay, i) => {
+                self.settings.overlay = Overlay::ALL[i.min(Overlay::ALL.len() - 1)];
+                self.dirty = true;
+            }
             Effect::Choose(ItemId::BackgroundRadio, i) => {
                 self.settings.mute_radio_unfocused = i == 1;
                 self.radio_settings_changed();
@@ -852,10 +857,6 @@ impl Ui {
             ItemId::Invert(d, a) => self.edit_axes(d, &[a], |o| o.invert = on),
             ItemId::Bloom => {
                 self.settings.bloom = on;
-                self.dirty = true;
-            }
-            ItemId::DebugOverlay => {
-                self.settings.debug_overlay = on;
                 self.dirty = true;
             }
             ItemId::Minimap => {

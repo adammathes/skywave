@@ -24,7 +24,7 @@ fn load(text: &str) -> ShapeSpec {
     s
 }
 
-/// The rest of the 1980s roster, as `(shape, spec)` texts.
+/// The rest of the roster (the 1980s cars, then the 2001 heroes), as `(shape, spec)` texts.
 macro_rules! car {
     ($id:literal) => {
         (
@@ -33,7 +33,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 16] = [
+const ROSTER: [(&str, &str); 21] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -50,10 +50,19 @@ const ROSTER: [(&str, &str); 16] = [
     car!("longbow_convertible"),
     car!("appaloosa_gt"),
     car!("appaloosa_convertible"),
+    car!("halberd_coupe"),
+    car!("halberd_targa"),
+    car!("tanager_awd"),
+    car!("destrier_coupe"),
+    car!("siskin_coupe"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
 const WEDGE: &str = ROSTER[1].0;
+const GT: &str = ROSTER[16].0;
+const TARGA: &str = ROSTER[17].0;
+const MUSCLE: &str = ROSTER[19].0;
+const TUNER: &str = ROSTER[20].0;
 
 /// Every built-in shape with its vehicle spec: the first four cars, then the roster.
 fn pairs() -> Vec<(&'static str, &'static str)> {
@@ -98,7 +107,7 @@ fn hash(car: &CarMesh) -> u64 {
             h = h.wrapping_mul(0x0000_0100_0000_01b3);
         }
     };
-    for m in car.meshes() {
+    for m in car.meshes().into_iter().chain([&car.underglow]) {
         for p in &m.positions {
             for v in p {
                 eat(&v.to_bits().to_le_bytes());
@@ -500,7 +509,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 20] = [
+    let expected: [u64; 25] = [
         0xd8c8_d201_ca40_efe2,
         0xedbe_0c75_ff0b_96c9,
         0x0cc6_c3d4_6210_49af,
@@ -521,8 +530,13 @@ fn builds_are_deterministic() {
         0xba3c_37a1_d8c9_574a,
         0xb634_e87c_d647_169d,
         0x68c4_40f9_4786_c5e6,
+        0xed84_455c_c64e_604d,
+        0x859b_f5fa_f8a0_c9c2,
+        0xd65d_5358_f319_7f93,
+        0x2c3c_378d_c6d4_94ab,
+        0x46fb_2007_975f_096b,
     ];
-    let mut got = [0u64; 20];
+    let mut got = [0u64; 25];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -654,6 +668,158 @@ fn popups_raise() {
         top(&up.body),
         top(&down.body)
     );
+}
+
+/// Body, interior and glass vertices over the middle of a targa's opening, above the side
+/// glass's top edge less 5 cm, as `(body, interior)`: where the roof and the headliner were.
+fn over_the_targa(spec: &ShapeSpec, car: &CarMesh) -> (usize, usize) {
+    let (s0, s1) = (spec.glass.windshield.1 + 0.1, spec.glass.side[0].1 - 0.1);
+    let ax = spec.wheels.front_x;
+    let b = body::Body::new(spec, 0, 0);
+    let f = b.frame((s0 + s1) * 0.5);
+    let roofline = f.y_edge - 0.05;
+    let count = |m: &MeshData| {
+        m.positions
+            .iter()
+            .filter(|p| p[2] + ax > s0 && p[2] + ax < s1)
+            .filter(|p| p[0].abs() < f.z_re - 0.12 && p[1] > roofline - 0.06)
+            .count()
+    };
+    (count(&car.body) + count(&car.glass), count(&car.interior))
+}
+
+#[test]
+fn a_targa_opens_the_roof_over_the_front_seats() {
+    let targa = load(TARGA);
+    let coupe = load(GT);
+    for lod in 0..2 {
+        let open = over_the_targa(&targa, &build_lod(&targa, 0, lod).unwrap());
+        assert_eq!(open, (0, 0), "lod{lod}");
+    }
+    let (roof, headliner) = over_the_targa(&coupe, &build(&coupe, 0).unwrap());
+    assert!(roof > 8 && headliner > 8, "{roof} {headliner}");
+    // The same shell otherwise: the side glass stays up.
+    let side_glass = |spec: &ShapeSpec| {
+        let w = spec.glass.side[0];
+        let ax = spec.wheels.front_x;
+        let car = build(spec, 0).unwrap();
+        car.glass
+            .positions
+            .iter()
+            .filter(|p| p[2] + ax > w.0 + 0.05 && p[2] + ax < w.1 - 0.05 && p[0].abs() > 0.5)
+            .count()
+    };
+    assert!(side_glass(&targa) > 4);
+    assert_eq!(side_glass(&targa), side_glass(&coupe));
+    // A targa needs a hardtop with a door window to end at.
+    rejects(TARGA, |s| s.glass.side.clear(), ShapeError::Targa);
+    rejects(
+        TARGA,
+        |s| s.roof.kind = RoofKind::Convertible { top: Top::Down },
+        ShapeError::Targa,
+    );
+}
+
+/// The lowest body vertex and the highest one behind the rear axle, model space.
+fn low_and_tail_top(car: &CarMesh, spec: &ShapeSpec) -> (f32, f32) {
+    let rear = spec.wheels.rear_x - spec.wheels.front_x;
+    let low = car.body.positions.iter().fold(f32::MAX, |m, p| m.min(p[1]));
+    let top = car
+        .body
+        .positions
+        .iter()
+        .filter(|p| p[2] > rear)
+        .fold(0.0f32, |m, p| m.max(p[1]));
+    (low, top)
+}
+
+#[test]
+fn the_tuner_wears_a_kit_a_tall_wing_rims_and_underglow() {
+    let tuner = load(TUNER);
+    let mut plain = tuner.clone();
+    plain
+        .details
+        .retain(|d| !matches!(d, Detail::BodyKit | Detail::Underglow(_)));
+    plain.rear.spoiler = Spoiler::Wing;
+    plain.parts.rims = Rims::Alloy5;
+    for lod in 0..3 {
+        let (kit, bare) = (
+            build_lod(&tuner, 0, lod).unwrap(),
+            build_lod(&plain, 0, lod).unwrap(),
+        );
+        let ((kit_low, tall), (bare_low, low_wing)) = (
+            low_and_tail_top(&kit, &tuner),
+            low_and_tail_top(&bare, &plain),
+        );
+        // The kit hangs lower than the sills; the tall wing stands well over a plain one.
+        assert!(
+            kit_low < bare_low - 0.04,
+            "lod{lod}: {kit_low} vs {bare_low}"
+        );
+        assert!(kit_low > 0.05, "lod{lod}: the kit scrapes at {kit_low}");
+        assert!(tall > low_wing + 0.15, "lod{lod}: {tall} vs {low_wing}");
+        // Underglow: lit tubes under the car at the near levels, none far away, none on
+        // a car without it; never in the lamp mesh.
+        assert!(bare.underglow.positions.is_empty());
+        assert_eq!(kit.lights, bare.lights, "lod{lod}");
+        let tubes = &kit.underglow;
+        if lod == 2 {
+            assert!(tubes.positions.is_empty());
+            continue;
+        }
+        assert!(tubes.triangle_count() > 20, "lod{lod}");
+        let blue = emissive(TubeColor::Blue.rgb(), 3.0);
+        assert!(tubes.emissive.iter().all(|e| *e == blue));
+        assert!(tubes.positions.iter().all(|p| p[1] > 0.05 && p[1] < 0.2));
+    }
+    // The aftermarket rim is bigger, on a lower-profile tire.
+    let rim = |spec: &ShapeSpec| {
+        let w = build(spec, 0).unwrap().wheels[0].clone();
+        // The rim's bright lip is the widest chrome ring on the outer face.
+        let chrome = Materials::new(spec, 0, None).chrome.color;
+        w.positions
+            .iter()
+            .zip(&w.colors)
+            .filter(|(_, c)| **c == chrome)
+            .fold(0.0f32, |m, (p, _)| m.max(p[1].hypot(p[2])))
+    };
+    let r = tuner.wheels.radius;
+    assert!(rim(&tuner) > 0.7 * r && rim(&tuner) < r, "{}", rim(&tuner));
+    // Every car but the tuner is dark underneath.
+    for spec in shapes() {
+        let has = spec
+            .details
+            .iter()
+            .any(|d| matches!(d, Detail::Underglow(_)));
+        assert_eq!(has, spec.id == tuner.id, "{}", spec.id);
+        assert_eq!(
+            build(&spec, 0).unwrap().underglow.positions.is_empty(),
+            !has
+        );
+    }
+}
+
+#[test]
+fn a_blower_stands_through_the_hood() {
+    let muscle = load(MUSCLE);
+    let s = muscle.glass.windshield.0 * 0.55;
+    let z = s - muscle.wheels.front_x;
+    let hood = body::Body::new(&muscle, 0, 0).frame(s).yt;
+    let over = |spec: &ShapeSpec, lod: u8| {
+        build_lod(spec, 0, lod)
+            .unwrap()
+            .body
+            .positions
+            .iter()
+            .filter(|p| (p[2] - z).abs() < 0.3 && p[0].abs() < 0.25)
+            .fold(0.0f32, |m, p| m.max(p[1]))
+    };
+    let mut bare = muscle.clone();
+    bare.details.retain(|&d| d != Detail::Blower);
+    for lod in 0..3 {
+        assert!(over(&muscle, lod) > hood + 0.3, "lod{lod}");
+        assert!(over(&bare, lod) < hood + 0.05, "lod{lod}");
+    }
 }
 
 fn rejects(text: &str, f: impl FnOnce(&mut ShapeSpec), expected: ShapeError) {
@@ -913,7 +1079,12 @@ fn every_option_builds() {
         TailLights::Triple,
         TailLights::Round,
     ];
-    let spoilers = [Spoiler::None, Spoiler::Lip, Spoiler::Wing];
+    let spoilers = [
+        Spoiler::None,
+        Spoiler::Lip,
+        Spoiler::Wing,
+        Spoiler::TallWing,
+    ];
     let rims = [
         Rims::Steel,
         Rims::Alloy5,
@@ -921,6 +1092,7 @@ fn every_option_builds() {
         Rims::Turbine,
         Rims::Dish,
         Rims::Slotted,
+        Rims::Twin,
     ];
     let details = [
         Detail::Louvers,
@@ -945,6 +1117,11 @@ fn every_option_builds() {
         Detail::SideStrakes,
         Detail::NacaDucts,
         Detail::EngineLouvers,
+        Detail::BodyKit,
+        Detail::Blower,
+        Detail::Underglow(TubeColor::Blue),
+        Detail::Underglow(TubeColor::Violet),
+        Detail::Underglow(TubeColor::Green),
     ];
     // Each shape starts the option lists somewhere else, so every rim and detail is built.
     for (i, base) in shapes().into_iter().enumerate() {

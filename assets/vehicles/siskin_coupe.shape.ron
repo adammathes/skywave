@@ -1,0 +1,60 @@
+// Siskin Coupe body: a 2000 front-drive compact coupe built up as a street tuner.
+//
+// Intent: a short wedge nose with clear lamps, a cab-forward cabin and a short deck, sat
+// low on big polished twin-spoke rims and low-profile tires. A body kit in the paint (an
+// air dam with a black splitter, side skirts, a valance over a dark diffuser), a tall
+// wing on uprights over the deck and neon tubes under the sills. Front engine, front
+// drive. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "siskin_coupe",
+    side: [
+        (0.00, 0.56), (0.05, 0.64), (0.25, 0.72), (1.25, 0.86), (1.33, 0.88),
+        (2.00, 1.27), (2.08, 1.30), (2.70, 1.29), (3.40, 1.03), (3.48, 1.01),
+        (4.34, 1.00), (4.42, 0.94),
+        (4.42, 0.30), (4.26, 0.22), (3.80, 0.17), (0.70, 0.16), (0.12, 0.19), (0.00, 0.28),
+    ],
+    plan: [
+        (0.00, 0.72), (0.12, 0.83), (0.50, 0.865), (1.00, 0.87), (4.00, 0.87), (4.30, 0.855),
+        (4.42, 0.83),
+    ],
+    belt: [(1.31, 0.87), (2.70, 0.92), (3.40, 0.99)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 24, greenhouse_frac: 0.74, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.35, 1.98),
+        backlight: (2.76, 3.36),
+        side: [(1.42, 2.56), (2.62, 2.98)],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.21, arch_clearance: 0.04, front_x: 0.86, rear_x: 3.48, track: 1.49),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.24, 0.40)),
+    rear: Rear(lights: Dual, spoiler: TallWing, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.75, creases: [(0.20, 0.60, 4.36, 0.66)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Single, antenna: None, rims: Twin, hubcaps: false),
+    details: [BodyKit, BlackTrim, Underglow(Blue), Badge(Bar)],
+    // Electric blue, silver, black, bright yellow, white, candy red, lime.
+    palette: ["#1d5fd0", "#c3c7cc", "#141518", "#f2c812", "#f0efea", "#b0101e", "#8acb2a"],
+    accent: "#141416",
+    interior: InteriorShape(
+        dash_height: 0.82,
+        dash_x: 1.56,
+        wheel_pos: (1.96, 0.66),
+        wheel_radius: 0.17,
+        column_angle_deg: 22,
+        mirror_pos: (1.86, 1.18),
+        seat: (2.34, 0.38),
+        driver_offset: 0.37,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, black racing buckets
+        // with blue inserts and piping, black carpet, a brushed band, blue-lit dials.
+        colors: ["#1c1d20", "#1d1e21", "#1e1f22", "#55575b", "#2a2b2e", "#2f6ad8"],
+        display: "#4aa8ff",
+        insert: "#1f4fa8",
+        piping: "#2f6ad8",
+        dash_top: "#232428",
+        applique: Brushed,
+        manual: true,
+    ),
+)

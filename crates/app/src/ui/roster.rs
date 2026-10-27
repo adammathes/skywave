@@ -18,7 +18,7 @@ pub const MAX_PAINTS: usize = 12;
 
 /// `(id, seconds from rest to 60 mph, top speed in mph)` of every built-in car, as the sim
 /// measures them (see the module docs).
-const MEASURED: [(&str, f32, f32); 20] = [
+const MEASURED: [(&str, f32, f32); 25] = [
     ("gannet_gt", 5.60, 155.0),
     ("homestead_wagon", 12.60, 110.0),
     ("seabreeze_convertible", 12.51, 106.0),
@@ -39,6 +39,11 @@ const MEASURED: [(&str, f32, f32); 20] = [
     ("longbow_convertible", 6.10, 149.0),
     ("appaloosa_gt", 6.34, 141.0),
     ("appaloosa_convertible", 6.63, 134.0),
+    ("halberd_coupe", 5.81, 160.0),
+    ("halberd_targa", 6.03, 158.0),
+    ("tanager_awd", 5.48, 148.0),
+    ("destrier_coupe", 6.22, 133.0),
+    ("siskin_coupe", 6.45, 137.0),
 ];
 
 /// One row of the Vehicle page.
@@ -134,6 +139,7 @@ fn entry(id: &'static str, spec: VehicleSpec) -> RosterEntry {
 
 fn era_name(era: Era) -> &'static str {
     match era {
+        Era::Sixties => "1960s",
         Era::Eighties => "1980s",
         Era::Nineties => "1990s",
         Era::Aughts => "2000s",
@@ -308,8 +314,11 @@ mod tests {
                 "{}",
                 car.id
             );
-            assert_eq!(car.era, "1980s");
         }
+        // The 1980s roster, then the 2001 heroes of their own decades.
+        let eras: Vec<&str> = r.iter().map(|c| c.era).collect();
+        assert!(eras[..20].iter().all(|&e| e == "1980s"));
+        assert_eq!(eras[20..], ["1990s", "1990s", "1990s", "1960s", "2000s"]);
         // docs/VEHICLES.md: the Gannet 5.6 s and 70 m/s, the Regent 9.9 s and 55 m/s.
         let gannet = &r[index_of("gannet_gt").unwrap()];
         assert!(

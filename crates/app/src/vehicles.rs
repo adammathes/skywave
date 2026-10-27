@@ -13,9 +13,10 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
     Ok(spec)
 }
 
-/// The vehicle specs compiled into the game, as `(id, RON text)`: the 1980s roster, in the
-/// order the Vehicle page lists it (the everyday cars, then the sports cars).
-pub const BUILTIN: [(&str, &str); 20] = [
+/// The vehicle specs compiled into the game, as `(id, RON text)`, in the order the Vehicle
+/// page lists them: the 1980s roster (the everyday cars, then the sports cars), then the
+/// 2001 hero cars.
+pub const BUILTIN: [(&str, &str); 25] = [
     (
         "gannet_gt",
         include_str!("../../../assets/vehicles/gannet_gt.ron"),
@@ -96,6 +97,26 @@ pub const BUILTIN: [(&str, &str); 20] = [
         "appaloosa_convertible",
         include_str!("../../../assets/vehicles/appaloosa_convertible.ron"),
     ),
+    (
+        "halberd_coupe",
+        include_str!("../../../assets/vehicles/halberd_coupe.ron"),
+    ),
+    (
+        "halberd_targa",
+        include_str!("../../../assets/vehicles/halberd_targa.ron"),
+    ),
+    (
+        "tanager_awd",
+        include_str!("../../../assets/vehicles/tanager_awd.ron"),
+    ),
+    (
+        "destrier_coupe",
+        include_str!("../../../assets/vehicles/destrier_coupe.ron"),
+    ),
+    (
+        "siskin_coupe",
+        include_str!("../../../assets/vehicles/siskin_coupe.ron"),
+    ),
 ];
 
 /// Built-in vehicle ids that were renamed, `(old, new)`: a saved setting or a scene URL
@@ -135,7 +156,7 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 /// `VehicleSpec::shape` names one. The first [`TRAFFIC_SHAPES`] are the everyday cars NPC
 /// traffic drives; new shapes go at the end, so the place's parked-car paints (seeded by
 /// index) keep theirs.
-pub const BUILTIN_SHAPES: [(&str, &str); 20] = [
+pub const BUILTIN_SHAPES: [(&str, &str); 25] = [
     (
         "gannet_gt.shape.ron",
         include_str!("../../../assets/vehicles/gannet_gt.shape.ron"),
@@ -216,11 +237,31 @@ pub const BUILTIN_SHAPES: [(&str, &str); 20] = [
         "appaloosa_convertible.shape.ron",
         include_str!("../../../assets/vehicles/appaloosa_convertible.shape.ron"),
     ),
+    (
+        "halberd_coupe.shape.ron",
+        include_str!("../../../assets/vehicles/halberd_coupe.shape.ron"),
+    ),
+    (
+        "halberd_targa.shape.ron",
+        include_str!("../../../assets/vehicles/halberd_targa.shape.ron"),
+    ),
+    (
+        "tanager_awd.shape.ron",
+        include_str!("../../../assets/vehicles/tanager_awd.shape.ron"),
+    ),
+    (
+        "destrier_coupe.shape.ron",
+        include_str!("../../../assets/vehicles/destrier_coupe.shape.ron"),
+    ),
+    (
+        "siskin_coupe.shape.ron",
+        include_str!("../../../assets/vehicles/siskin_coupe.shape.ron"),
+    ),
 ];
 
 /// How many of [`BUILTIN_SHAPES`], from the first, NPC traffic draws from: the twelve
-/// everyday cars and the two common sports cars. The exotics and the new convertibles are
-/// the player's to drive.
+/// everyday cars and the two common sports cars. The exotics, the new convertibles and the
+/// 2001 hero cars are the player's to drive.
 pub const TRAFFIC_SHAPES: usize = 14;
 
 /// Loads the built-in shape `spec.shape` names.
@@ -235,6 +276,7 @@ pub fn builtin_shape(spec: &VehicleSpec) -> Result<ShapeSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vehicle::shape::Detail::Targa;
     use vehicle::{Drive, Era, VehicleClass};
 
     const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
@@ -347,10 +389,13 @@ mod tests {
             ("basilisk_v12", "basilisk_roadster"),
             ("longbow_coupe", "longbow_convertible"),
             ("appaloosa_gt", "appaloosa_convertible"),
+            ("halberd_coupe", "halberd_targa"),
         ] {
             let (c, o) = (builtin_spec(closed).unwrap(), builtin_spec(open).unwrap());
-            assert!(!builtin_shape(&c).unwrap().roof.convertible(), "{closed}");
-            assert!(builtin_shape(&o).unwrap().roof.convertible(), "{open}");
+            let (cs, os) = (builtin_shape(&c).unwrap(), builtin_shape(&o).unwrap());
+            let open_top = |s: &ShapeSpec| s.roof.convertible() || s.details.contains(&Targa);
+            assert!(!open_top(&cs), "{closed}");
+            assert!(open_top(&os), "{open}");
             assert_eq!(o.class, VehicleClass::Convertible);
             // The same car with its roof off: the chassis and engine, a little heavier.
             assert_eq!(c.engine.torque_nm, o.engine.torque_nm, "{open}");
@@ -367,7 +412,7 @@ mod tests {
             .iter()
             .map(|(id, _)| builtin_spec(id).unwrap())
             .collect();
-        assert_eq!(specs.len(), 20);
+        assert_eq!(specs.len(), 25);
         for class in [
             Sports,
             Coupe,
@@ -382,7 +427,9 @@ mod tests {
             assert!(specs.iter().any(|s| s.class == class), "{class:?}");
         }
         for (k, s) in specs.iter().enumerate() {
-            assert_eq!(s.era, Era::Eighties, "{}", s.id);
+            // The 1980s roster, then the 2001 heroes.
+            let eighties = k < 20;
+            assert_eq!(s.era == Era::Eighties, eighties, "{}", s.id);
             assert!(specs[k + 1..]
                 .iter()
                 .all(|o| o.id != s.id && o.name != s.name));

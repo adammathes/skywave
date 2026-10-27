@@ -20,7 +20,7 @@ use super::names::{self, action_label, device_label, device_noun};
 use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
-use crate::settings::{FrameRate, Quality};
+use crate::settings::{FrameRate, Overlay, Quality};
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -73,6 +73,8 @@ const ARROW_EDGE: [u8; 4] = [24, 16, 8, 255];
 const RIM: f32 = 4.0;
 const MINI_ARROW: f32 = 24.0;
 const FULL_ARROW: f32 = 26.0;
+/// Lines in the full overlay's stats block, under the graph.
+const STAT_LINES: f32 = 13.0;
 /// Room under the full map for its controls line, virtual units.
 pub(super) const FULL_MAP_FOOTER: f32 = 32.0;
 
@@ -261,8 +263,15 @@ impl Ui {
             self.draw_readout(&mut hud, avoid);
             self.readout_span = (start, hud.len());
         }
-        if self.settings.debug_overlay && !controls {
-            self.draw_overlay(&mut hud, ctx);
+        // Menus, the map and the controls card hide the overlay (it would sit over them) and
+        // keep its mode; so does the background, where frames are slow on purpose and should
+        // stay Skip.
+        if self.menu.is_none() && !self.map.full.open && !controls && self.focused {
+            match self.settings.overlay {
+                Overlay::Off => {}
+                Overlay::Fps => self.draw_fps(&mut hud),
+                Overlay::Full => self.draw_overlay(&mut hud, ctx),
+            }
         }
         self.hud = hud;
     }
@@ -338,15 +347,12 @@ impl Ui {
             text_center(hud, cx, y, scale, color, args);
         };
         shadowed(hud, ty, scale, TEXT, format_args!("{}", car.name));
-        let n = roster::roster().len();
+        // Counted among this world's cars, as the chooser lists them.
+        let lineup = crate::scenario::lineup(self.scenario);
+        let n = lineup.cars.len();
+        let at = lineup.position(self.browse[0]).unwrap_or(0) + 1;
         let line = ty + scale * font::LINE_HEIGHT as f32 + 2.0;
-        shadowed(
-            hud,
-            line,
-            S,
-            TEXT,
-            format_args!("{} of {n}", self.browse[0] + 1),
-        );
+        shadowed(hud, line, S, TEXT, format_args!("{at} of {n}"));
     }
 
     /// The World page: cards for the worlds side by side in `[x, y, w, h]` (each its still,
@@ -1031,6 +1037,37 @@ impl Ui {
         );
     }
 
+    /// The average frame time over [`FRAME_HISTORY`] frames (skipping empty slots), the
+    /// frame rate it makes and the slowest frame, ms.
+    fn frame_stats(&self) -> (f32, f32, f32) {
+        let (mut sum, mut n, mut max) = (0.0f32, 0u32, 0.0f32);
+        for &ms in self.frame_ms.iter().filter(|&&ms| ms > 0.0) {
+            sum += ms;
+            n += 1;
+            max = max.max(ms);
+        }
+        let avg = if n > 0 { sum / n as f32 } else { 0.0 };
+        let fps = if avg > 0.0 { 1000.0 / avg } else { 0.0 };
+        (avg, fps, max)
+    }
+
+    /// The FPS overlay: the frame rate alone, in the top left corner of the safe area,
+    /// which the driving HUD leaves empty (clock top right, speed bottom right, minimap
+    /// and toasts bottom left). The station toast's two lines are centered at the top and
+    /// a long name reaches the corner at large UI scales, so while it is up the number sits
+    /// below them.
+    fn draw_fps(&self, hud: &mut HudBuilder) {
+        let [sx, sy, _, _] = hud.safe_rect();
+        let sy = if self.radio.toast().is_some() {
+            sy + 2.0 * LINE_H + 4.0
+        } else {
+            sy
+        };
+        let (_, fps, _) = self.frame_stats();
+        hud.text_fmt(sx + 2.0, sy + 2.0, 2.0, SHADOW, format_args!("{fps:.1}"));
+        hud.text_fmt(sx, sy, 2.0, TEXT, format_args!("{fps:.1}"));
+    }
+
     fn draw_overlay(&self, hud: &mut HudBuilder, ctx: &DrawCtx) {
         let [sx, sy, _, _] = hud.safe_rect();
         let s = 2.0;
@@ -1039,7 +1076,7 @@ impl Ui {
         let r = &self.render_stats;
         let gpu_line = r.gpu_timing as u32 as f32;
         let label_line = !self.gpu_label.is_empty() as u32 as f32;
-        let lines = 11.0 + gpu_line + label_line;
+        let lines = STAT_LINES + gpu_line + label_line;
         hud.rect(
             sx - 10.0,
             sy - 10.0,
@@ -1050,14 +1087,7 @@ impl Ui {
 
         let samples =
             || (0..FRAME_HISTORY).map(|i| self.frame_ms[(self.frame_head + i) % FRAME_HISTORY]);
-        let (mut sum, mut n, mut max) = (0.0f32, 0u32, 0.0f32);
-        for ms in samples().filter(|&ms| ms > 0.0) {
-            sum += ms;
-            n += 1;
-            max = max.max(ms);
-        }
-        let avg = if n > 0 { sum / n as f32 } else { 0.0 };
-        let fps = if avg > 0.0 { 1000.0 / avg } else { 0.0 };
+        let (avg, fps, max) = self.frame_stats();
         hud.text_fmt(
             sx,
             sy,
@@ -1155,7 +1185,7 @@ impl Ui {
                 r.skipped_frames,
             ),
         );
-        let mut y = y + 11.0 * line;
+        let mut y = y + STAT_LINES * line;
         if r.gpu_timing {
             // Medians over the last 64 frames read back; the parts (each cascade; the
             // depth pre-pass, meshes and sky) where timestamps work inside passes.

@@ -11,6 +11,8 @@ use alloc::vec::Vec;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Era {
+    /// A late-60s car, rare and old in every world so far.
+    Sixties,
     Eighties,
     Nineties,
     Aughts,
@@ -177,6 +179,11 @@ pub struct VehicleSpec {
     /// The model year its archetype is dated to (a scenario lists only cars no newer than
     /// its last year; see `docs/VEHICLES.md`).
     pub year: u16,
+    /// The year the car as drawn was built up, for an old car carrying later parts (a
+    /// blower, wheels): no world before it shows the car, though its age still counts from
+    /// `year`. Optional; 0 (the default) is `year`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub built: u16,
     pub class: VehicleClass,
     pub mass_kg: f32,
     /// Body box `(length, width, height)`, m.
@@ -218,7 +225,7 @@ pub enum SpecError {
     EmptyId,
     EmptyName,
     EmptyShape,
-    /// The year is outside [`YEARS`].
+    /// The year is outside [`YEARS`], or `built` is before it or past them.
     YearOutOfRange,
     /// Some number is NaN or infinite.
     NonFinite,
@@ -302,6 +309,11 @@ impl Engine {
 }
 
 impl VehicleSpec {
+    /// The first year a world may show the car: [`VehicleSpec::built`], else its `year`.
+    pub fn first_shown(&self) -> u16 {
+        self.year.max(self.built)
+    }
+
     /// Checks that the spec is physically sane. Does not judge whether it is fun.
     pub fn validate(&self) -> Result<(), SpecError> {
         if self.id.is_empty() {
@@ -313,7 +325,9 @@ impl VehicleSpec {
         if self.shape.is_empty() {
             return Err(SpecError::EmptyShape);
         }
-        if !(YEARS.0..=YEARS.1).contains(&self.year) {
+        if !(YEARS.0..=YEARS.1).contains(&self.year)
+            || !(self.built == 0 || (self.year..=YEARS.1).contains(&self.built))
+        {
             return Err(SpecError::YearOutOfRange);
         }
         if !self.all_finite() {
@@ -564,6 +578,7 @@ mod tests {
             name: "Test Car".to_string(),
             era: Era::Eighties,
             year: 1984,
+            built: 0,
             class: VehicleClass::Sports,
             mass_kg: 1250.0,
             dims_m: [4.3, 1.75, 1.15],
@@ -652,6 +667,8 @@ mod tests {
         rejects(|s| s.shape.clear(), SpecError::EmptyShape);
         rejects(|s| s.year = 1899, SpecError::YearOutOfRange);
         rejects(|s| s.year = 2101, SpecError::YearOutOfRange);
+        rejects(|s| s.built = s.year - 1, SpecError::YearOutOfRange);
+        rejects(|s| s.built = 2101, SpecError::YearOutOfRange);
     }
 
     #[test]

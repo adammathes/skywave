@@ -397,6 +397,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::AlbumPrev => vec![key(Key::KeyO, Pos)],
             Action::Headlights => vec![key(Key::KeyL, Pos)],
             Action::HighBeams => vec![key(Key::KeyK, Pos)],
+            Action::Underglow => vec![key(Key::KeyU, Pos)],
             Action::Horn => vec![key(Key::KeyB, Pos)],
             Action::VehicleNext => vec![key(Key::KeyV, Pos)],
             Action::Reset => vec![key(Key::KeyR, Pos)],
@@ -443,6 +444,8 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Headlights => vec![btn(PadButton::DpadUp)],
             // Held, so a tap stays the headlights.
             Action::HighBeams => vec![btn(PadButton::DpadUp).held_long()],
+            // A keyboard switch only: the pad's buttons are spoken for.
+            Action::Underglow => vec![],
             Action::Horn => vec![btn(PadButton::L3)],
             // The pad picks a car on the pause menu's Vehicle page.
             Action::VehicleNext => vec![],
@@ -514,7 +517,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 26] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 27] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -601,6 +604,7 @@ mod tests {
                 vec![K(Key::KeyK)],
                 vec![B(PadButton::DpadUp)],
             ),
+            (Action::Underglow, vec![K(Key::KeyU)], vec![]),
             (Action::Horn, vec![K(Key::KeyB)], vec![B(PadButton::L3)]),
             (Action::VehicleNext, vec![K(Key::KeyV)], vec![]),
             (

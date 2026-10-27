@@ -79,21 +79,23 @@ pub const ROWS: [Row; 25] = [
     row("Camera", "Look back", &[Action::LookBack]),
     row("Lights", "Headlights", &[Action::Headlights]),
     row("Lights", "High beams", &[Action::HighBeams]),
-    // The deck shares the radio's keys: on/off plays and pauses it, the dial its tracks.
+    row("Lights", "Underglow", &[Action::Underglow]),
+    // The deck shares the radio's keys (on/off plays and pauses it, the dial its tracks);
+    // two rows in all, so the card stays one Deck screen.
     row(
         "Radio",
-        "Power, source",
-        &[Action::RadioOff, Action::DeckSource],
+        "Power, source, mode",
+        &[Action::RadioOff, Action::DeckSource, Action::DeckMode],
     ),
-    row(
+    merged(
         "Radio",
-        "Station, track",
-        &[Action::RadioNext, Action::RadioPrev],
-    ),
-    row(
-        "Radio",
-        "Album, mode",
-        &[Action::AlbumNext, Action::AlbumPrev, Action::DeckMode],
+        "Station, track, album",
+        &[
+            Action::RadioNext,
+            Action::RadioPrev,
+            Action::AlbumNext,
+            Action::AlbumPrev,
+        ],
     ),
     row("Menus", "Pause menu", &[Action::Pause]),
     row("Menus", "Map", &[Action::MapToggle]),

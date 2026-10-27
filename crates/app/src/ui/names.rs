@@ -36,6 +36,7 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::AlbumPrev, _) => "Previous album",
         (Action::Headlights, _) => "Headlights",
         (Action::HighBeams, _) => "High beams",
+        (Action::Underglow, _) => "Underglow",
         (Action::Horn, _) => "Horn",
         (Action::VehicleNext, _) => "Next vehicle",
         (Action::Reset, _) => "Reset car",
