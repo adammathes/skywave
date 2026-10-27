@@ -1466,8 +1466,10 @@ pub struct Impact {
     pub curb_kick: bool,
     /// ...the fastest such wheel: its speed, up, and its contact patch.
     pub curb: Bump,
-    /// The parked car hit hardest this step, an index into [`WorldCollider::boxes`].
+    /// The parked car hit hardest this step, an index into [`WorldCollider::boxes`], and
+    /// that hit.
     pub parked: Option<u32>,
+    pub parked_hit: Bump,
 }
 
 /// Pushes the car out of walls, posts and boxes and answers each contact with a plain
@@ -1488,7 +1490,6 @@ pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCol
         + 1.0;
     let lo = [state.pos[0] - reach, state.pos[2] - reach];
     let hi = [state.pos[0] + reach, state.pos[2] + reach];
-    let mut parked_speed = 0.0;
     if let Some([x0, x1, z0, z1]) = collider.cell_range(lo, hi) {
         for _ in 0..CONTACT_PASSES {
             let mut touched = false;
@@ -1503,9 +1504,9 @@ pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCol
                         if hit.speed > impact.hit.speed {
                             impact.hit = hit;
                         }
-                        if parked.is_some() && hit.speed > parked_speed {
-                            parked_speed = hit.speed;
+                        if parked.is_some() && hit.speed > impact.parked_hit.speed {
                             impact.parked = parked;
+                            impact.parked_hit = hit;
                         }
                     };
                     resolve_cell(state, spec, collider, cell, moved, &mut on);
@@ -1574,8 +1575,8 @@ impl Rocking {
                 on: true,
             };
         }
-        let n = impact.hit.normal;
-        car.rock.knock([-n[0], -n[2]], impact.hit.speed);
+        let hit = &impact.parked_hit;
+        car.rock.knock([-hit.normal[0], -hit.normal[2]], hit.speed);
     }
 
     /// One sim step of every swaying car; a settled one frees its slot.

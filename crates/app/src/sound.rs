@@ -231,6 +231,7 @@ mod tests {
             curb_kick,
             curb: bump(if curb_kick { 15.0 } else { 0.0 }, -1.2),
             parked: None,
+            parked_hit: world::Bump::default(),
         }
     }
 
