@@ -894,3 +894,37 @@ fn ninety_six_cars_step_within_budget() {
         assert!(p99 < 2.0, "p99 {p99:.3} ms per step");
     }
 }
+
+#[test]
+fn shape_weights_pick_shapes_and_all_ones_change_nothing() {
+    let g = straight();
+    let budget = TrafficBudget {
+        shapes: 12,
+        ..TrafficBudget::default()
+    };
+    let spawn = |weights: Option<&[u32]>| {
+        let mut t = Traffic::new(&g, budget, Seed(5));
+        if let Some(w) = weights {
+            t.set_shape_weights(w);
+        }
+        for k in 0..90 {
+            t.spawn_at(&g, 0, 4500.0 - 40.0 * k as f32, 10.0)
+                .expect("room");
+        }
+        t.cars().iter().map(|c| c.shape).collect::<Vec<u8>>()
+    };
+    let plain = spawn(None);
+    assert_eq!(spawn(Some(&[1; 12])), plain);
+    assert_eq!(spawn(Some(&[0; 12])), plain, "no weight at all: unweighted");
+    // Shape 4 weighs nothing: it never comes, and the others still do.
+    let mut w = [1; 12];
+    w[4] = 0;
+    let shapes = spawn(Some(&w));
+    assert!(!shapes.contains(&4));
+    assert!((0..12u8).filter(|&k| k != 4).all(|k| shapes.contains(&k)));
+    // Heavier shapes come more often.
+    let mut w = [1; 12];
+    w[7] = 40;
+    let shapes = spawn(Some(&w));
+    assert!(shapes.iter().filter(|&&k| k == 7).count() > 45);
+}

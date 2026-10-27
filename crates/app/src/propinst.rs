@@ -109,26 +109,49 @@ pub(crate) fn place_paints(seed: u64, s: usize, n_own: usize) -> (Vec<usize>, Ve
 }
 
 /// The [`vehicles::BUILTIN_SHAPES`] index a parked car of `vehicle_class` is drawn as,
-/// picked from its [`PARKED`] list by `roll` (any number).
-fn parked_shape(vehicle_class: u8, roll: u32) -> usize {
-    let list = PARKED
-        .get(usize::from(vehicle_class & 15))
-        .copied()
-        .unwrap_or(&[("palisade_wagon", 1)]);
-    let total: u32 = list.iter().map(|e| e.1).sum();
+/// picked from its [`PARKED`] list by `roll` (any number), each entry's weight times the
+/// world's era weight of the car (`era`, by shape index: [`crate::scenario::Lineup`]'s,
+/// 0 for a car the world does not have). Equal era weights pick as the list alone does
+/// ([`crate::scenario::reduced`]); a list the world has none of falls back to the world's
+/// heaviest car.
+fn parked_shape(vehicle_class: u8, roll: u32, era: &[u32]) -> usize {
+    parked_pick(
+        PARKED
+            .get(usize::from(vehicle_class & 15))
+            .copied()
+            .unwrap_or(&[("palisade_wagon", 1)]),
+        roll,
+        era,
+    )
+}
+
+/// [`parked_shape`] over one list.
+fn parked_pick(list: &[(&str, u32)], roll: u32, era: &[u32]) -> usize {
+    let index = |id: &str| {
+        vehicles::BUILTIN_SHAPES
+            .iter()
+            .position(|(file, _)| file.strip_suffix(".shape.ron") == Some(id))
+            .unwrap_or(0)
+    };
+    let mut weights = [0u32; 8];
+    let weights = &mut weights[..list.len().min(8)];
+    for (w, &(id, k)) in weights.iter_mut().zip(list) {
+        *w = k * era.get(index(id)).copied().unwrap_or(0);
+    }
+    crate::scenario::reduced(weights);
+    let total: u32 = weights.iter().sum();
+    if total == 0 {
+        let heaviest = era.iter().copied().max().unwrap_or(0);
+        return era.iter().position(|&w| w == heaviest).unwrap_or(0);
+    }
     let mut r = roll % total;
-    let mut id = list[0].0;
-    for &(name, w) in list {
+    for (&w, &(id, _)) in weights.iter().zip(list) {
         if r < w {
-            id = name;
-            break;
+            return index(id);
         }
         r -= w;
     }
-    vehicles::BUILTIN_SHAPES
-        .iter()
-        .position(|(file, _)| file.strip_suffix(".shape.ron") == Some(id))
-        .unwrap_or(0)
+    index(list[0].0)
 }
 
 /// Instances farther than this from the eye are lit by the sun and sky only, m.
@@ -237,10 +260,12 @@ pub struct PropInstances {
 
 impl PropInstances {
     /// The instanced props of `place`, each filed under the chunk `chunk_of` gives for its
-    /// ground point. `None` when it has none.
+    /// ground point, its parked cars picked by the world's era weights `era` (per built-in
+    /// shape; see [`parked_shape`]). `None` when it has none.
     pub fn new(
         place: &Place,
         palette: &Palette,
+        era: &[u32],
         chunk_of: impl Fn([f32; 2]) -> [i32; 2],
     ) -> Result<Option<PropInstances>, String> {
         let items: Vec<&place::Prop> = place
@@ -306,7 +331,7 @@ impl PropInstances {
             let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
                 PropKind::ParkedCar { vehicle_class } => {
-                    let s = parked_shape(vehicle_class, (h >> 44) as u32) % shapes.len();
+                    let s = parked_shape(vehicle_class, (h >> 44) as u32, era) % shapes.len();
                     // A third in the car's own palette, the rest in the era's street colors.
                     let n_own = shapes[s].palette.len();
                     let nibble = usize::from(vehicle_class >> 4);
@@ -512,7 +537,10 @@ mod tests {
             }
             // Every entry is reachable.
             let total: u32 = list.iter().map(|e| e.1).sum();
-            let picked: Vec<usize> = (0..total).map(|r| parked_shape(class as u8, r)).collect();
+            let era = &crate::scenario::lineup(0).weights;
+            let picked: Vec<usize> = (0..total)
+                .map(|r| parked_shape(class as u8, r, era))
+                .collect();
             for &(id, _) in *list {
                 assert!(picked.iter().any(|&k| shapes[k].id == id), "{id}");
             }
@@ -521,7 +549,62 @@ mod tests {
             parked.iter().all(|&p| p),
             "every built-in shape parks somewhere"
         );
-        assert_eq!(shapes[parked_shape(15, 7)].id, "palisade_wagon");
+        let era = &crate::scenario::lineup(0).weights;
+        assert_eq!(shapes[parked_shape(15, 7, era)].id, "palisade_wagon");
+    }
+
+    /// The pick before era weights: by the list's own weights alone.
+    fn unweighted(list: &[(&str, u32)], roll: u32) -> &'static str {
+        let total: u32 = list.iter().map(|e| e.1).sum();
+        let mut r = roll % total;
+        for &(id, w) in list {
+            if r < w {
+                return vehicles::BUILTIN.iter().find(|b| b.0 == id).unwrap().0;
+            }
+            r -= w;
+        }
+        unreachable!()
+    }
+
+    #[test]
+    fn the_1984_world_parks_as_before_era_weights() {
+        let era = &crate::scenario::lineup(0).weights;
+        for (class, list) in PARKED.iter().enumerate() {
+            for roll in (0..5000).chain([u32::MAX - 3, u32::MAX]) {
+                let k = parked_shape(class as u8, roll, era);
+                let file = vehicles::BUILTIN_SHAPES[k].0;
+                assert_eq!(
+                    file.strip_suffix(".shape.ron"),
+                    Some(unweighted(list, roll)),
+                    "class {class} roll {roll}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_2001_car_never_parks_in_1984() {
+        // The Halcyon dated 2001: it parks in the 2001 world, never in 1984, and the rest of
+        // its lists take its place.
+        let k = vehicles::BUILTIN
+            .iter()
+            .position(|b| b.0 == "halcyon_turbo")
+            .unwrap();
+        let l84 = crate::scenario::lineup_with_2001_car(0, "halcyon_turbo");
+        let l01 = crate::scenario::lineup_with_2001_car(1, "halcyon_turbo");
+        let (mut in84, mut in01) = (0, 0);
+        for class in 0..16u8 {
+            for roll in 0..2000 {
+                in84 += usize::from(parked_shape(class, roll, &l84.weights) == k);
+                in01 += usize::from(parked_shape(class, roll, &l01.weights) == k);
+            }
+        }
+        assert_eq!(in84, 0);
+        assert!(in01 > 0);
+        // A list of only cars the world does not have parks its heaviest car.
+        let mut only = vec![0; vehicles::BUILTIN.len()];
+        only[3] = 7;
+        assert_eq!(parked_pick(&[("halcyon_turbo", 1)], 5, &only), 3);
     }
 
     #[test]
@@ -548,7 +631,8 @@ mod tests {
     fn parked_car_meshes_stay_within_budget() {
         let place =
             crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
-        let mut props = PropInstances::new(&place, &Palette::socal_1985(), |_| [0, 0])
+        let era = &crate::scenario::lineup(0).weights;
+        let mut props = PropInstances::new(&place, &Palette::socal_1985(), era, |_| [0, 0])
             .unwrap()
             .unwrap();
         let ids = (0..props.meshes().len() as u32).map(MeshId).collect();
@@ -570,7 +654,7 @@ mod tests {
         assert!(cars.len() <= 12 * (OWN_PAINTS + ERA_PAINTS) * 2);
         // The traffic takes the parked cars' era paints, sharing their meshes; it builds
         // only the (shape, paint) pairs the place does not park, inside the same budget.
-        let mut npcs = crate::npc::Npcs::new(&place, skywave_core::Seed(1));
+        let mut npcs = crate::npc::Npcs::new(&place, skywave_core::Seed(1), era);
         let mut built = 0;
         npcs.build_meshes(Some(&props), |_| {
             built += 1;

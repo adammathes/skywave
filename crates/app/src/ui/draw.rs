@@ -98,6 +98,15 @@ const SPEC_VALUE_X: f32 = 150.0;
 /// Paint swatch size and spacing.
 const SWATCH: f32 = 20.0;
 const SWATCH_GAP: f32 = 8.0;
+/// The World page: room for its cards, the gap between them, their padding, the lines of
+/// text under the still, and a card's backdrop.
+const CARDS_H: f32 = 360.0;
+const CARD_GAP: f32 = 20.0;
+const CARD_PAD: f32 = 12.0;
+const CARD_LINES: usize = 4;
+const CARD: [u8; 4] = [30, 36, 56, 255];
+/// A stub world's still is greyed.
+const STUB_TINT: [u8; 4] = [120, 120, 128, 255];
 
 fn width(text: &str, scale: f32) -> f32 {
     font::text_width(text) as f32 * scale
@@ -330,6 +339,69 @@ impl Ui {
         );
     }
 
+    /// The World page: one card per world side by side in `[x, y, w, h]` (its still, title,
+    /// kind and year, cars and stations), the focused one framed, the one the app is
+    /// marked "here", a stub's still greyed and marked "coming".
+    fn draw_cards(&self, hud: &mut HudBuilder, area: [f32; 4], focus: usize) {
+        let [x, y, w, h] = area;
+        let n = self.items.len().max(1);
+        let all = crate::scenario::BUILTIN.len() as f32;
+        let cw = (w - CARD_GAP * (n - 1) as f32) / n as f32;
+        let (still_w, still_h) = crate::scenario::STILL_SIZE;
+        let aspect = still_w as f32 / still_h as f32;
+        let text_h = CARD_LINES as f32 * LINE_H + 10.0;
+        let sh = ((cw - 2.0 * CARD_PAD) / aspect)
+            .min(h - text_h - 2.0 * CARD_PAD)
+            .max(0.0);
+        let sw = sh * aspect;
+        for (i, item) in self.items.iter().enumerate() {
+            let ItemId::World(k) = item.id else { continue };
+            let s = crate::scenario::get(k);
+            let cx = x + i as f32 * (cw + CARD_GAP);
+            if i == focus {
+                hud.rect(cx - 4.0, y - 4.0, cw + 8.0, h + 8.0, ACCENT);
+            }
+            hud.rect(cx, y, cw, h, CARD);
+            let sy = y + CARD_PAD;
+            if sh >= 24.0 {
+                hud.image(HudImage {
+                    x: cx + 0.5 * (cw - sw),
+                    y: sy,
+                    w: sw,
+                    h: sh,
+                    uv: [k as f32 / all, 0.0, (k + 1) as f32 / all, 1.0],
+                    texture: render::HudTexture::Still,
+                    mask: render::HudMask::Rounded(4.0),
+                    color: if s.stub { STUB_TINT } else { [255; 4] },
+                    ..HudImage::default()
+                });
+            }
+            let (tx, right) = (cx + CARD_PAD, cx + cw - CARD_PAD);
+            let ty = sy + sh + 10.0;
+            hud.text(tx, ty, S, if s.stub { DIM } else { TEXT }, &s.title);
+            if k == self.scenario {
+                text_right(hud, right, ty, S, GOOD, false, format_args!("here"));
+            }
+            let line = |k: usize| ty + k as f32 * LINE_H;
+            hud.text_fmt(tx, line(1), S, DIM, format_args!("{}, {}", s.kind, s.year));
+            if s.stub {
+                text_right(
+                    hud,
+                    right,
+                    line(1),
+                    S,
+                    ACCENT,
+                    false,
+                    format_args!("coming"),
+                );
+            }
+            let cars = crate::scenario::lineup(k).cars.len();
+            let stations = crate::scenario::station_counts()[k];
+            hud.text_fmt(tx, line(2), S, DIM, format_args!("{cars} cars"));
+            hud.text_fmt(tx, line(3), S, DIM, format_args!("{stations} stations"));
+        }
+    }
+
     fn draw_menu(&mut self, hud: &mut HudBuilder) {
         let [sx, sy, sw, sh] = hud.safe_rect();
         let [vw, vh] = hud.size();
@@ -356,7 +428,12 @@ impl Ui {
         } else {
             0.0
         };
-        let wanted = HEADER_H + self.items.len().max(1) as f32 * ROW_H + note_h + FOOTER_H;
+        let content = if page == Page::Worlds {
+            CARDS_H
+        } else {
+            self.items.len().max(1) as f32 * ROW_H
+        };
+        let wanted = HEADER_H + content + note_h + FOOTER_H;
         let ph = wanted.min(sh);
         let mut pw = sw.min(MAX_PANEL_W);
         let mut px = sx + (sw - pw) * 0.5;
@@ -410,6 +487,18 @@ impl Ui {
         if self.items.is_empty() {
             let back = Glyph(self, d, Action::MenuBack);
             hud.text_fmt(px + PAD, footer, S, DIM, format_args!("[{back}] Back"));
+        } else if page == Page::Worlds {
+            hud.text_fmt(
+                px + PAD,
+                footer,
+                S,
+                DIM,
+                format_args!(
+                    "[{}] Go there   [{}] Back",
+                    Glyph(self, d, Action::MenuConfirm),
+                    Glyph(self, d, Action::MenuBack),
+                ),
+            );
         } else if page == Page::Vehicle {
             hud.text_fmt(
                 px + PAD,
@@ -475,8 +564,18 @@ impl Ui {
             self.draw_stage_title(hud, stage);
         }
 
-        // Rows.
+        // Rows (or the World page's cards).
         let rows_top = top + HEADER_H;
+        if page == Page::Worlds {
+            let area = [
+                px + PAD,
+                rows_top,
+                pw - 2.0 * PAD,
+                rows_bottom - rows_top - 8.0,
+            ];
+            self.draw_cards(hud, area, menu.focus());
+            return;
+        }
         // (A hair over, so a panel sized for n rows shows n.)
         let rows = (((rows_bottom - rows_top) / ROW_H + 1e-3).floor() as usize).max(1);
         let len = self.items.len();
@@ -1053,6 +1152,13 @@ impl Display for ToastText {
             Toast::CarReset => f.write_str("Car reset"),
             Toast::StreamAdded => f.write_str("Stream added to the stations"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
+            Toast::World(i) => {
+                let s = crate::scenario::get(i);
+                write!(f, "{}, {}", s.title, s.year)
+            }
+            Toast::UnknownWorld => {
+                write!(f, "No such world: {}", crate::scenario::get(0).title)
+            }
         }
     }
 }

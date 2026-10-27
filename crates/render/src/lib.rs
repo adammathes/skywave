@@ -1040,8 +1040,13 @@ pub struct Renderer {
     font_view: wgpu::TextureView,
     font_sampler: wgpu::Sampler,
     map_sampler: wgpu::Sampler,
+    /// The map and the stills the HUD group holds, kept to rebuild it when one changes.
+    map_view: wgpu::TextureView,
+    stills_view: wgpu::TextureView,
     /// Texels of the uploaded map (1×1 transparent until [`Renderer::upload_map`]).
     map_size: [u32; 2],
+    /// Texels of the uploaded stills (1×1 transparent until [`Renderer::upload_stills`]).
+    stills_size: [u32; 2],
     /// Room for [`MAX_HUD_QUADS`] quads, allocated once.
     hud_buffer: wgpu::Buffer,
     hud_staging: Vec<HudQuad>,
@@ -1478,13 +1483,15 @@ impl Renderer {
                 sampler_entry(1, wgpu::SamplerBindingType::Filtering),
                 texture_entry(2, wgpu::TextureSampleType::Float { filterable: true }),
                 sampler_entry(3, wgpu::SamplerBindingType::Filtering),
+                texture_entry(4, wgpu::TextureSampleType::Float { filterable: true }),
             ],
         });
         let no_map = upload_map_texture(&device, &queue, 1, 1, &[0; 4]);
+        let no_stills = upload_map_texture(&device, &queue, 1, 1, &[0; 4]);
         let hud_group = hud_group(
             &device,
             &hud_layout,
-            [&font_view, &no_map],
+            [&font_view, &no_map, &no_stills],
             [&font_sampler, &map_sampler],
         );
         let hud_module = module("hud", shaders::HUD);
@@ -1697,7 +1704,10 @@ impl Renderer {
             font_view,
             font_sampler,
             map_sampler,
+            map_view: no_map,
+            stills_view: no_stills,
             map_size: [1, 1],
+            stills_size: [1, 1],
             hud_buffer,
             hud_staging: Vec::with_capacity(MAX_HUD_QUADS),
             corona_pipeline,
@@ -1882,14 +1892,39 @@ impl Renderer {
         } else {
             (1, 1, &empty[..])
         };
-        let view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
+        self.map_view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
+        self.map_size = [w, h];
+        self.rebuild_hud_group();
+    }
+
+    /// Uploads the pictures [`HudTexture::Still`] quads show, side by side in one `width ×
+    /// height` image (RGBA8, sRGB-encoded, row-major from the top-left, straight alpha),
+    /// with mipmaps, under the same rules as [`Renderer::upload_map`].
+    pub fn upload_stills(&mut self, width: u32, height: u32, rgba: &[u8]) {
+        let (w, h) = (width.clamp(1, MAX_MAP_SIZE), height.clamp(1, MAX_MAP_SIZE));
+        let empty = [0; 4];
+        let (w, h, rgba) = if (w, h) == (width, height) && rgba.len() == (w * h * 4) as usize {
+            (w, h, rgba)
+        } else {
+            (1, 1, &empty[..])
+        };
+        self.stills_view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
+        self.stills_size = [w, h];
+        self.rebuild_hud_group();
+    }
+
+    /// Size in texels of the stills [`Renderer::upload_stills`] last uploaded (1×1 before).
+    pub fn stills_size(&self) -> [u32; 2] {
+        self.stills_size
+    }
+
+    fn rebuild_hud_group(&mut self) {
         self.hud_group = hud_group(
             &self.device,
             &self.hud_layout,
-            [&self.font_view, &view],
+            [&self.font_view, &self.map_view, &self.stills_view],
             [&self.font_sampler, &self.map_sampler],
         );
-        self.map_size = [w, h];
     }
 
     /// Size in texels of the map [`Renderer::upload_map`] last uploaded (1×1 before).
@@ -2177,6 +2212,7 @@ impl Renderer {
             &scene.hud,
             self.size,
             self.map_size,
+            self.stills_size,
             &mut self.hud_staging,
             MAX_HUD_QUADS,
         );
@@ -2771,11 +2807,11 @@ fn upload_font(
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-/// The HUD bind group: font atlas and sampler, map and sampler.
+/// The HUD bind group: font atlas and sampler, map and sampler, stills (the map's sampler).
 fn hud_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    views: [&wgpu::TextureView; 2],
+    views: [&wgpu::TextureView; 3],
     samplers: [&wgpu::Sampler; 2],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2797,6 +2833,10 @@ fn hud_group(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::Sampler(samplers[1]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(views[2]),
             },
         ],
     })
@@ -3939,7 +3979,7 @@ mod tests {
                 "{name}"
             );
         }
-        // Two textures and two samplers: far under WebGL2's 16 per stage.
+        // Three textures and two samplers: far under WebGL2's 16 per stage.
         assert!(wgsl.contains("@group(1) @binding(3) var map_sampler: sampler;"));
     }
 
@@ -3993,6 +4033,34 @@ mod tests {
         assert_eq!(r.map_size(), [1, 1]);
         r.upload_map(MAX_MAP_SIZE + 1, 1, &[]);
         assert_eq!(r.map_size(), [1, 1]);
+        // Stills likewise, drawn in the same call.
+        assert_eq!(r.stills_size(), [1, 1]);
+        r.upload_stills(32, 16, &rgba[..32 * 16 * 4]);
+        assert_eq!(r.stills_size(), [32, 16]);
+        let still = HudImage {
+            x: 300.0,
+            y: 100.0,
+            w: 160.0,
+            h: 100.0,
+            uv: [0.5, 0.0, 1.0, 1.0],
+            texture: HudTexture::Still,
+            ..HudImage::default()
+        };
+        let mut stills = HudBuilder::new();
+        stills.begin(1.0);
+        stills.image(still);
+        stills.image(HudImage {
+            color: [255; 4],
+            ..still
+        });
+        stills.text(300.0, 80.0, 2.0, [255; 4], "A");
+        let mut with_stills = test_scene(&instances);
+        with_stills.hud = stills.view();
+        render_frames(&device, &mut r, format, &with_stills, &[(128, 72)]);
+        assert_eq!(r.stats().draw_calls, base + 1);
+        assert_eq!(r.stats().hud_quads, 2, "the transparent still is skipped");
+        r.upload_stills(32, 16, &[]);
+        assert_eq!(r.stills_size(), [1, 1]);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 

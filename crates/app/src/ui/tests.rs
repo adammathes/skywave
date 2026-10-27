@@ -1753,3 +1753,107 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     );
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
 }
+
+/// The images of `texture` on the HUD the app last laid out.
+fn images(h: &mut Harness, texture: render::HudTexture) -> Vec<render::HudImage> {
+    h.app
+        .scene_view(0.0, 1.0)
+        .hud
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            render::HudItem::Image(m) if m.texture == texture => Some(*m),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    let settings = h.app.settings().clone();
+    h.open(&[ItemId::Open(Page::Worlds)]);
+    assert_eq!(
+        (h.page(), h.focus()),
+        (Page::Worlds, 0),
+        "on the world it is"
+    );
+    // A card per world, side by side: left and right (and up and down) move, wrapping.
+    let text = h.hud_text();
+    for line in [
+        "Pacific Shore",
+        "Beach town, 1984",
+        "12 cars",
+        "Basin City",
+        "coming",
+        "here",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+    let stills = images(&mut h, render::HudTexture::Still);
+    assert_eq!(stills.len(), 2);
+    assert_eq!((stills[0].uv[0], stills[1].uv[0]), (0.0, 0.5));
+    assert!(stills[1].color[0] < 200, "the stub's still is greyed");
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.focus(), 1);
+    h.pad(PadButton::DpadRight);
+    assert_eq!(h.focus(), 0, "wraps");
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.focus(), 1);
+    h.pad(PadButton::DpadDown);
+    h.pad(PadButton::DpadUp);
+    assert_eq!(h.focus(), 1);
+    assert_eq!(h.app.take_world_pick(), None, "nothing picked yet");
+    // Select closes the menu, remembers the world and asks the platform to load it.
+    h.pad(PadButton::South);
+    assert!(!h.app.menu_open());
+    assert_eq!(h.app.take_world_pick(), Some(1));
+    assert_eq!(h.app.take_world_pick(), None, "once");
+    let saved = store.0.borrow().clone().expect("saved");
+    assert_eq!(
+        Settings::from_json(&saved).0.scenario,
+        Some("la_basin_2001")
+    );
+
+    // The platform's load: the same settings in the other world, its place, the radio off.
+    let old = std::mem::replace(&mut h.app, App::new(Seed(1)));
+    h.app = old.switch_world(&crate::SceneSetup::default(), 1).unwrap();
+    h.frame();
+    assert_eq!(h.app.scenario(), 1);
+    assert!(
+        h.hud_text().contains("Basin City, 2001"),
+        "{}",
+        h.hud_text()
+    );
+    assert!(!h.app.radio().is_on());
+    assert_eq!(
+        h.app.settings(),
+        &Settings {
+            scenario: Some("la_basin_2001"),
+            ..settings
+        }
+    );
+    // The pause menu's World page now opens on it.
+    h.open(&[ItemId::Open(Page::Worlds)]);
+    assert_eq!(h.focus(), 1);
+    // The next session starts there unless the scene names a place.
+    let saved = store.0.borrow().clone();
+    let next = crate::SceneSetup::default().with_saved_world(saved.as_deref());
+    assert_eq!((next.scenario, next.place), (1, crate::PlaceKey::Coast));
+}
+
+#[test]
+fn the_vehicle_page_lists_this_worlds_cars() {
+    let mut h = Harness::new();
+    h.open(&[ItemId::Open(Page::Vehicle)]);
+    let Widget::Choice { options, .. } = h.item(0).widget else {
+        panic!("{:?}", h.item(0))
+    };
+    assert_eq!(options, &crate::scenario::lineup(0).names[..]);
+    // Every car of the world, by the pad, ends where it started.
+    for _ in 0..options.len() {
+        h.pad(PadButton::DpadRight);
+    }
+    assert_eq!(browsed(&h), (0, 0));
+}

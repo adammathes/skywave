@@ -7,7 +7,12 @@
 //! - `seed=<u64>`: seed of the place (default 1): the test town's detail, or the whole
 //!   procedural place.
 //! - `place=<name>`: `town` (the hand-laid test town, the default) or `coast` (the
-//!   procedural `california_coast` place for the seed).
+//!   procedural place of the scenario's region template for the seed).
+//! - `scenario=<id>`: the world (`crate::scenario`, `assets/scenarios/<id>.ron`) and its
+//!   procedural place (`place=coast`; a later `place=town` puts its cars and light in the
+//!   test town). An id that is not built in is the first scenario, and a toast says so.
+//!   Default: the first scenario, or the world last picked on the World page when the
+//!   scene names neither a place nor a scenario ([`SceneSetup::with_saved_world`]).
 //! - `car=<id>`: built-in vehicle id (default: the vehicle setting, the car last picked,
 //!   else [`DEFAULT_VEHICLE`]).
 //! - `paint=<n>`: the car's palette entry, counting from 0 (default: 0 with `car=`, else the
@@ -44,7 +49,7 @@ pub enum PlaceKey {
     /// The hand-laid test town (`place::Place::test_grid`).
     #[default]
     TestTown,
-    /// The procedural `california_coast` place of the scene's seed.
+    /// The procedural place of the scene's seed and its scenario's region template.
     Coast,
 }
 
@@ -63,6 +68,12 @@ impl PlaceKey {
 pub struct SceneSetup {
     pub seed: u64,
     pub place: PlaceKey,
+    /// The scene named the place (`place=`) or the world (`scenario=`).
+    pub place_given: bool,
+    /// The world: an index into [`crate::scenario::BUILTIN`].
+    pub scenario: usize,
+    /// `scenario=` named a world that is not built in (the scene is in the first).
+    pub unknown_scenario: bool,
     pub car: String,
     /// The scene named the car (`car=`): the saved vehicle setting does not replace it.
     pub car_given: bool,
@@ -96,6 +107,9 @@ impl Default for SceneSetup {
         SceneSetup {
             seed: 1,
             place: PlaceKey::TestTown,
+            place_given: false,
+            scenario: 0,
+            unknown_scenario: false,
             car: DEFAULT_VEHICLE.to_string(),
             car_given: false,
             paint: None,
@@ -135,17 +149,69 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 15] = [
-        "seed", "place", "car", "paint", "cam", "t", "pos", "yaw", "lights", "fly", "still", "map",
-        "ui", "stream", "traffic",
+    pub const KEYS: [&'static str; 16] = [
+        "seed", "place", "scenario", "car", "paint", "cam", "t", "pos", "yaw", "lights", "fly",
+        "still", "map", "ui", "stream", "traffic",
     ];
+
+    /// World `scenario` and its procedural place; its own car unless the scene named one.
+    fn set_world(&mut self, scenario: usize) {
+        self.scenario = scenario;
+        self.place = PlaceKey::Coast;
+        if !self.car_given {
+            self.car = crate::scenario::get(scenario).default_vehicle.clone();
+        }
+    }
+
+    /// The scene of the same seed, camera, light and session options in world `scenario`:
+    /// its procedural place, its start, its default time and the car the settings pick
+    /// for it (what picking a card on the World page loads).
+    pub fn for_world(&self, scenario: usize) -> SceneSetup {
+        let mut setup = SceneSetup {
+            place_given: true,
+            unknown_scenario: false,
+            car_given: false,
+            paint: None,
+            time_s: None,
+            pos: None,
+            heading_rad: None,
+            headlights: false,
+            fly: false,
+            map: false,
+            ..self.clone()
+        };
+        setup.set_world(scenario);
+        setup
+    }
+
+    /// Unless the scene names a place or a world, the world last picked on the World page
+    /// (`settings_json`, the saved settings document), if any.
+    pub fn with_saved_world(mut self, settings_json: Option<&str>) -> SceneSetup {
+        if self.place_given {
+            return self;
+        }
+        let saved = settings_json.and_then(|t| crate::settings::Settings::from_json(t).0.scenario);
+        if let Some(i) = saved.and_then(crate::scenario::index_of) {
+            self.set_world(i);
+        }
+        self
+    }
 
     /// Sets one key (see the module docs).
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
         let bad = || format!("bad scene value {key}={value}");
         match key {
             "seed" => self.seed = value.parse().map_err(|_| bad())?,
-            "place" => self.place = PlaceKey::from_name(value).ok_or_else(bad)?,
+            "place" => {
+                self.place = PlaceKey::from_name(value).ok_or_else(bad)?;
+                self.place_given = true;
+            }
+            "scenario" => {
+                let index = crate::scenario::index_of(value);
+                self.set_world(index.unwrap_or(0));
+                self.unknown_scenario = index.is_none();
+                self.place_given = true;
+            }
             "car" => {
                 self.car = value.to_string();
                 self.car_given = true;
@@ -247,6 +313,49 @@ mod tests {
         let start = crate::drive::START_HEADING_RAD;
         assert!((east.heading_rad.unwrap() - start).abs() < 1e-6);
         assert_eq!(SceneSetup::default().place, PlaceKey::TestTown);
+        assert!(s.place_given && !SceneSetup::default().place_given);
+        assert_eq!(s.scenario, 0);
+    }
+
+    #[test]
+    fn scenario_names_the_world_and_its_place() {
+        let s = SceneSetup::from_query("?scenario=la_basin_2001&seed=3").unwrap();
+        assert_eq!(
+            (s.scenario, s.place, s.place_given),
+            (1, PlaceKey::Coast, true)
+        );
+        assert!(!s.unknown_scenario);
+        let s = SceneSetup::from_query("?scenario=atlantis").unwrap();
+        assert_eq!(
+            (s.scenario, s.place, s.unknown_scenario),
+            (0, PlaceKey::Coast, true)
+        );
+        let s = SceneSetup::from_query("?scenario=la_basin_2001&place=town").unwrap();
+        assert_eq!((s.scenario, s.place), (1, PlaceKey::TestTown));
+        // The world picked last, unless the scene names one or a place.
+        let mut picked = crate::settings::Settings::default();
+        picked.scenario = Some("la_basin_2001");
+        let json = picked.to_json(&crate::input::Bindings::default());
+        let s = SceneSetup::default().with_saved_world(Some(&json));
+        assert_eq!((s.scenario, s.place), (1, PlaceKey::Coast));
+        let s = SceneSetup::from_query("place=town").unwrap();
+        assert_eq!(s.clone().with_saved_world(Some(&json)), s);
+        assert_eq!(
+            SceneSetup::default().with_saved_world(None),
+            SceneSetup::default()
+        );
+        assert_eq!(
+            SceneSetup::default().with_saved_world(Some("{}")),
+            SceneSetup::default()
+        );
+        // A world's scene keeps the session's options and drops the spot and the car.
+        let base =
+            SceneSetup::from_query("seed=9&car=pipit_hatch&t=12:00&pos=1,2&cam=cockpit&ui=2")
+                .unwrap();
+        let w = base.for_world(1);
+        assert_eq!((w.seed, w.scenario, w.place), (9, 1, PlaceKey::Coast));
+        assert_eq!((w.camera, w.ui_scale), (base.camera, base.ui_scale));
+        assert!(!w.car_given && w.time_s.is_none() && w.pos.is_none());
     }
 
     #[test]

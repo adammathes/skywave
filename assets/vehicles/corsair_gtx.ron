@@ -11,6 +11,7 @@ VehicleSpec(
     id: "corsair_gtx",
     name: "Corsair GTX",
     era: Eighties,
+    year: 1981,
     class: Sports,
 
     mass_kg: 1250,

@@ -10,6 +10,7 @@ VehicleSpec(
     id: "halcyon_turbo",
     name: "Halcyon Turbo",
     era: Eighties,
+    year: 1986,
     class: Coupe,
 
     mass_kg: 1300,

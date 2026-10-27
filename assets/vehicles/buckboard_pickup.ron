@@ -11,6 +11,7 @@ VehicleSpec(
     id: "buckboard_pickup",
     name: "Buckboard Pickup",
     era: Eighties,
+    year: 1982,
     class: Pickup,
 
     mass_kg: 1700,

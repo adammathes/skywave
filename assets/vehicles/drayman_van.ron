@@ -11,6 +11,7 @@ VehicleSpec(
     id: "drayman_van",
     name: "Drayman Van",
     era: Eighties,
+    year: 1980,
     class: Van,
 
     mass_kg: 1900,
