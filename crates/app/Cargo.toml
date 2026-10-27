@@ -15,6 +15,7 @@ world.workspace = true
 render.workspace = true
 vehicle.workspace = true
 glam.workspace = true
+traffic.workspace = true
 ron.workspace = true
 serde = { workspace = true, features = ["std"] }
 serde_json.workspace = true

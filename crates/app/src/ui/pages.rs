@@ -22,7 +22,7 @@
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
 //!            Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
 //! Stations:  one on/off row per station of the preset and per added stream
-//! World:     Time of day · Clock speed
+//! World:     Time of day · Clock speed · Traffic
 //! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
 //! ```
@@ -109,6 +109,7 @@ pub enum ItemId {
     Mute,
     TimeOfDay,
     ClockSpeed,
+    Traffic,
     RadioVolume,
     RadioPreset,
     /// Row `i` of `CarRadio::rows`: the station on the dial or not.
@@ -567,6 +568,18 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     index,
                 },
             );
+            let index = crate::npc::DENSITIES
+                .iter()
+                .position(|&d| d == ctx.settings.traffic)
+                .unwrap_or(2);
+            add(
+                ItemId::Traffic,
+                "Traffic",
+                Widget::Choice {
+                    options: &crate::npc::DENSITY_NAMES,
+                    index,
+                },
+            );
         }
         Page::Vehicle => {
             for (i, car) in super::roster::roster().iter().enumerate() {
@@ -663,6 +676,11 @@ mod tests {
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));
+        assert_eq!(items[2].id, ItemId::Traffic);
+        assert!(
+            matches!(items[2].widget, Widget::Choice { index: 2, .. }),
+            "normal traffic"
+        );
         build(Page::Drive, &ctx, &mut items);
         assert!(
             matches!(items[0].widget, Widget::Choice { index: 0, .. }),
