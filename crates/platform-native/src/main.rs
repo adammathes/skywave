@@ -1928,6 +1928,10 @@ mod tests {
         let mut mapper = InputMapper::default();
         let started = Instant::now();
         let clock = || started.elapsed().as_secs_f64();
+        // The world holds still while the place streams: how many frames that takes depends
+        // on the machine, and the traffic measured after must not.
+        let still = app.still();
+        app.set_still(true);
         while !app.stream_idle() {
             app.frame(&mut mapper, 1.0 / 60.0, &clock);
             app.sync_chunks(&mut r);
@@ -1935,6 +1939,7 @@ mod tests {
                 r.add_mesh(&m);
             }
         }
+        app.set_still(still);
         (app, r)
     }
 

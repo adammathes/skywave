@@ -697,6 +697,17 @@ impl App {
         self.ticks
     }
 
+    /// Whether the simulation is held (a scene's `still=1`): frames draw and stream but run
+    /// no steps.
+    pub fn still(&self) -> bool {
+        self.still
+    }
+
+    /// Holds the simulation still, or lets it run again.
+    pub fn set_still(&mut self, still: bool) {
+        self.still = still;
+    }
+
     /// Advances real time by `dt_real` seconds, running as many fixed steps as are due.
     /// Pass the returned `alpha` to [`App::scene_view`].
     pub fn update(&mut self, input: &InputState, dt_real: f64) -> Steps {
