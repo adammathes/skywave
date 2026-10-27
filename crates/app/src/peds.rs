@@ -41,6 +41,8 @@ pub const DRAW_RADIUS_M: f32 = traffic::peds::DESPAWN_M;
 pub const SHADOW_RADIUS_M: f32 = 40.0;
 /// People nearer than this are lit by the frame's lights, m.
 const LIT_RADIUS_M: f32 = crate::propinst::LIT_RADIUS_M;
+/// How far a figure's parts reach from where it stands, m (a hand on a 2.1 m person).
+pub const REACH_M: f32 = 1.0;
 /// Light-culling half size round a person and the height of its middle, m.
 const FIGURE_HALF_M: f32 = 1.0;
 /// The outfits the variants wear in turn.
@@ -286,23 +288,26 @@ impl Crowd {
     }
 
     /// Appends one instance per part of every live person within [`DRAW_RADIUS_M`] of
-    /// `eye`, `alpha` of the way through the step, in mesh order, lit by the frame's
-    /// `lights` when close. Returns how many instances.
+    /// `eye` and not within `clear_m` of it (whole figures, never some parts),
+    /// `alpha` of the way through the step, in mesh order, lit by the frame's `lights`
+    /// when close. Returns how many instances.
     pub fn push(
         &mut self,
         alpha: f32,
         eye: Vec3,
+        clear_m: f32,
         lights: &FrameLights,
         out: &mut Vec<MeshInstance>,
     ) -> usize {
         if self.variants.is_empty() {
             return 0;
         }
-        let draw2 = DRAW_RADIUS_M * DRAW_RADIUS_M;
+        let (draw2, clear2) = (DRAW_RADIUS_M * DRAW_RADIUS_M, clear_m * clear_m);
         let mut order = core::mem::take(&mut self.order);
         order.clear();
         for (i, p) in self.peds.pedestrians().iter().enumerate() {
-            if p.alive && Vec3::from(p.pos).distance_squared(eye) <= draw2 {
+            let d2 = Vec3::from(p.pos).distance_squared(eye);
+            if p.alive && d2 <= draw2 && d2 >= clear2 {
                 order.push((variant_of(p.seed) as u16, i as u16));
             }
         }

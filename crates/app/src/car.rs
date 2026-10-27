@@ -369,12 +369,22 @@ pub struct CarModel {
 impl CarModel {
     /// Builds the car `shape` describes for `spec` in palette color 0.
     pub fn build(spec: &VehicleSpec, shape: &ShapeSpec) -> Result<CarModel, String> {
+        CarModel::build_painted(spec, shape, 0)
+    }
+
+    /// Builds the car in palette entry `paint` (which wraps). Only the body (and so the
+    /// inside-out shell) depends on the paint.
+    pub fn build_painted(
+        spec: &VehicleSpec,
+        shape: &ShapeSpec,
+        paint: usize,
+    ) -> Result<CarModel, String> {
         let popups = shape.front.lights == HeadLights::PopUp;
         let make = |lod: u8, up: bool| {
             shape::build_with(
                 shape,
                 &BuildOptions {
-                    color_index: 0,
+                    color_index: paint,
                     lod,
                     popups_up: up,
                     paint: None,
@@ -467,6 +477,28 @@ impl CarModel {
             ],
             dial_ticks: add(&self.dial_ticks),
         }
+    }
+
+    /// Registers only what depends on the paint (each level's bodies and inside-out shell)
+    /// through `add`, and returns `base` (the ids of the same car in another paint) with
+    /// those replaced.
+    pub fn register_paint(
+        &self,
+        base: &CarMeshes,
+        mut add: impl FnMut(&Mesh) -> MeshId,
+    ) -> CarMeshes {
+        let mut out = *base;
+        for (ids, l) in out.lods.iter_mut().zip(&self.lods) {
+            let down = add(&l.body[0]);
+            let up = if l.body[1] == l.body[0] {
+                down
+            } else {
+                add(&l.body[1])
+            };
+            ids.body = [down, up];
+            ids.shell_inside = add(&l.shell_inside);
+        }
+        out
     }
 }
 
