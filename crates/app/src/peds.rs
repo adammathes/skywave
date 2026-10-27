@@ -87,9 +87,6 @@ pub struct Crowd {
     place_seed: u64,
     density: Density,
     prev: Vec<Snap>,
-    /// Per slot: the person id its scale is for, and the scale (sim height over the
-    /// variant's).
-    scale: Vec<(u32, f32)>,
     variants: Vec<Variant>,
     built_bytes: usize,
     /// Scratch for drawing in mesh order: variant and slot.
@@ -120,7 +117,6 @@ impl Crowd {
             place_seed: place.header.seed,
             density: Density::Off,
             prev: vec![rest; cap],
-            scale: vec![(u32::MAX, 1.0); cap],
             variants: Vec::new(),
             built_bytes: 0,
             order: Vec::with_capacity(cap),
@@ -181,8 +177,6 @@ impl Crowd {
             for p in &mut self.prev {
                 p.alive = false;
             }
-            // Ids count up again from the empty pool's: a new person may reuse an old id.
-            self.scale.fill((u32::MAX, 1.0));
         }
         self.density = density;
     }
@@ -257,15 +251,9 @@ impl Crowd {
     }
 
     /// Slot `i`'s figure scale: its height in the sim over its variant's.
-    fn scale(&mut self, i: usize) -> f32 {
+    fn scale(&self, i: usize) -> f32 {
         let p = &self.peds.pedestrians()[i];
-        if self.scale[i].0 != p.id {
-            let v = &self.variants[variant_of(p.seed)];
-            let h = FigureSpec::from_seed(p.seed, self.peds.era()).height_m;
-            // As the sim clamps it.
-            self.scale[i] = (p.id, h.clamp(1.4, 2.1) / v.height_m);
-        }
-        self.scale[i].1
+        p.height_m() / self.variants[variant_of(p.seed)].height_m
     }
 
     /// Slot `i`'s person `alpha` of the way through the step: each part's model-to-world
@@ -514,12 +502,12 @@ mod tests {
         let era = app.npcs.crowd.peds.era();
         let mut checked = 0;
         for (i, p) in app.npcs.crowd.peds.pedestrians().iter().enumerate() {
-            // Everyone drawn has a scale under their id (the rest are out of reach).
-            if p.alive && app.npcs.crowd.scale[i].0 == p.id {
+            if p.alive {
                 checked += 1;
                 let v = app.npcs.crowd.variants[variant_of(p.seed)].height_m;
                 let h = FigureSpec::from_seed(p.seed, era).height_m.clamp(1.4, 2.1);
-                let drawn = app.npcs.crowd.scale[i].1 * v;
+                assert_eq!(p.height_m(), h, "person {}", p.id);
+                let drawn = app.npcs.crowd.scale(i) * v;
                 assert!(
                     (drawn - h).abs() < 1e-4,
                     "person {} drawn {drawn} m, is {h} m",

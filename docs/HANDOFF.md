@@ -42,7 +42,7 @@ coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered 
 dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
-- Done on `main` (2026-10-27 20:10 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
+- Done on `main` (2026-10-27 21:35 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
@@ -72,28 +72,33 @@ dispatching the next session, and updates statuses as PRs open and merge.
   changed (#31: World/Ui/Skip frames, GPU near idle when paused, in menus or unfocused; a
   frame-rate cap of whole panel divisors, default the panel rate; Battery = half rate at 0.85
   scale; the game pauses when unfocused); brake lamps that read in the sun, NPC brake lamps, high
-  beams, auto headlights and tell-tales (#29).
-- Open PRs: native radio (#15, approved; the owner signed off on 2026-10-27 19:55 by asking for
-  stations to work locally; its session is refreshing it on main, then native music folders follow);
-  natural map edges (#20, approved; refreshing on main after #24, then merges on green);
-  Sessions building: parking lots
-  (`bldg/parking-lots`, B10); era sports cars with open-top variants
-  (`m4/sports-cars`, NOTES 7); NPC brake lights and headlight controls (`m4/lamps`, NOTES 8);
-  ; idle frames, frame cap, Battery preset
- pedestrian follow-ups (`m4/peds-followups`: body-width gap in
-  the sweep, public height, turn curves in the lane cover, chained dodges, standing in the
-  road); scenario switching and the era filter (`m8/scenarios`, M8 #1); the rename of
-  two roster cars that shared real model names (#33, now the Gannet GT and the Homestead Wagon). PRs in review:
-  idle frames and the frame cap
-  
+  beams, auto headlights and tell-tales (#29); native radio playback of the station streams (#15:
+  rustls+ring and nanomp3-core, ADR 0006 accepted on the owner's word; 13 of 16 stations play
+  natively, two are AAC-only and one server lacks the cipher suites rustls ships); pedestrian
+  follow-ups (#36: 0.15 m body gap, 3,382-run crossing sweep at zero, dodge episodes capped at
+  3 m, people clear a stopped car, the turn-curve cover at 0.55 MiB); scenario switching and the
+  era filter (#35, M8 #1: `VehicleSpec::year`, scenario `years`/`heroes`, integer era weights per
+  roster car and per body shape, the Worlds page in the pause menu with raw `.still` atlases,
+  `?scenario=` / `--scenario`, music and panel rate carried across a world switch; the second
+  world is a stub on the coast's template until M8 #2 lands).
+- Open PRs: natural map edges (#20, approved; re-siting the strip goldens to the neon storefront
+  run and the junction goldens to a red-light queue, then merges on green); car collisions
+  without damage (#38; review found three blockers, the session is verifying its fixes; the
+  probes re-run on its next push before merge); parking lots (#37, B10, reviewer running);
+  native music folders (#39, NOTES 9c/13, reviewer running). Sessions building: 2001 hero cars
+  part 1 (`m8/heroes-1`, M8 #4); overlay modes (`ui/overlay-modes`, NOTES 12); the Deck: tapes,
+  CDs or an MP3 player for the player's own music (`m3/deck`, NOTES 15); the controls card
+  (`ui/controls-help`, NOTES 16). The owner's board (above) is the queue of record for what
+  comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; no player–NPC collision
   yet (reversing into a queue passes through; ignored test with numbers); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #20, #35; M8 waves (region template `socal_basin` and the 2001 grammar after #20,
-  hero cars after #28, traffic cars, set pieces, the 2001 preset); B7 facade sign bands on the
+- Next: merge #20, #37, #38, #39; NPC cars see pedestrians (board order 15, after #38); M8 waves
+  (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
+  set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
