@@ -21,7 +21,7 @@ version = "0.1.0"
 edition = "2021"
 license = "BSD-3-Clause"
 publish = false
-rust-version = "1.89"
+rust-version = "1.87"
 
 [workspace.dependencies]
 # Internal crates.

@@ -56,8 +56,11 @@ not ship and cannot check.
   `CONNECT`) unless `NO_PROXY` names the host. `http://` works too (tests use a server on
   the loopback); the radio only ever hands it `https://` URLs.
 - **MP3:** `nanomp3-core` with default features off (no `wide` SIMD, no Layer I/II):
-  6.3k lines, no dependencies. Its manifest asks for Rust 1.89, so the workspace's
-  `rust-version` moves from 1.87 to 1.89 (CI builds on stable).
+  6.3k lines, no dependencies. Its manifest declares Rust 1.89 (what its `wide` SIMD
+  feature needs; its README gives 1.80 without it), so `platform-native` builds on 1.89 or
+  newer (CI and releases build on stable) or with `--ignore-rust-version`. The workspace's
+  own `rust-version` stays 1.87: raising it turns on newer clippy lints across crates this
+  change does not otherwise touch.
 - **AAC:** not decoded natively. A stream whose content type is not MP3 fails at once, so
   the radio tries the station's next URL, as it does for a dead mirror. The three AAC
   stations list their channel's MP3 URL second; the web keeps playing the AAC first, the
