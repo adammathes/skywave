@@ -255,8 +255,9 @@ impl Ui {
         } else {
             self.draw_driving(&mut hud, ctx);
         }
-        // Menus and the map hide the overlay (it would sit over them) and keep its mode.
-        if self.menu.is_none() && !self.map.full.open {
+        // Menus and the map hide the overlay (it would sit over them) and keep its mode; so
+        // does the background, where frames are slow on purpose and should stay Skip.
+        if self.menu.is_none() && !self.map.full.open && self.focused {
             match self.settings.overlay {
                 Overlay::Off => {}
                 Overlay::Fps => self.draw_fps(&mut hud),
@@ -1039,9 +1040,16 @@ impl Ui {
 
     /// The FPS overlay: the frame rate alone, in the top left corner of the safe area,
     /// which the driving HUD leaves empty (clock top right, speed bottom right, minimap
-    /// and toasts bottom left, station toast top center).
+    /// and toasts bottom left). The station toast's two lines are centered at the top and
+    /// a long name reaches the corner at large UI scales, so while it is up the number sits
+    /// below them.
     fn draw_fps(&self, hud: &mut HudBuilder) {
         let [sx, sy, _, _] = hud.safe_rect();
+        let sy = if self.radio.toast().is_some() {
+            sy + 2.0 * LINE_H + 4.0
+        } else {
+            sy
+        };
         let (_, fps, _) = self.frame_stats();
         hud.text_fmt(sx + 2.0, sy + 2.0, 2.0, SHADOW, format_args!("{fps:.1}"));
         hud.text_fmt(sx, sy, 2.0, TEXT, format_args!("{fps:.1}"));

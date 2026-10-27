@@ -557,16 +557,19 @@ fn the_overlay_mode_persists_and_is_on_the_hud_page() {
     assert_eq!(Settings::from_json(&saved).0.overlay, Overlay::Full);
 }
 
-/// The overlay's own words in the HUD: the full one's counters, or the FPS one's number.
+/// Which overlay the HUD shows: the full one's counters, or the FPS one's lone number at
+/// the safe area's left edge.
 fn overlay_shown(h: &Harness) -> Option<Overlay> {
-    let text = h.hud_text();
-    if text.contains("steps/frame") {
-        Some(Overlay::Full)
-    } else if text.contains("60.0") {
-        Some(Overlay::Fps)
-    } else {
-        None
+    if h.hud_text().contains("steps/frame") {
+        return Some(Overlay::Full);
     }
+    let hud = h.app.ui().hud();
+    let [sx, ..] = HudLayout::safe_rect(hud.ui_scale);
+    let fps = hud.items.iter().any(|item| {
+        matches!(*item, render::HudItem::Text { x, text, .. }
+            if x == sx && hud.str(text).parse::<f32>().is_ok())
+    });
+    fps.then_some(Overlay::Fps)
 }
 
 #[test]
@@ -625,6 +628,15 @@ fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
     assert_eq!(overlay_shown(&h), None);
     h.pad(PadButton::Start);
     assert_eq!(overlay_shown(&h), Some(Overlay::Fps));
+
+    // In the background it is hidden too, and back in front it returns.
+    h.app.set_focused(false);
+    h.frame();
+    assert_eq!(overlay_shown(&h), None, "unfocused");
+    assert_eq!(h.app.settings().overlay, Overlay::Fps);
+    h.app.set_focused(true);
+    h.frame();
+    assert_eq!(overlay_shown(&h), Some(Overlay::Fps), "focused again");
 }
 
 #[test]
@@ -666,24 +678,27 @@ fn the_full_overlay_lines_do_not_overlap() {
 }
 
 /// The HUD's quads as rectangles in target pixels on a `target`-sized screen.
+/// Text is measured at the whole target pixels per font pixel the HUD really draws.
 fn quad_rects(hud: &render::Hud, target: (u32, u32)) -> Vec<[f32; 4]> {
     let layout = HudLayout::new(target, hud.ui_scale);
+    let box_px = |x: f32, y: f32, w: f32, h: f32| {
+        let [x0, y0] = layout.to_pixels(x, y);
+        let [x1, y1] = layout.to_pixels(x + w, y + h);
+        [x0, y0, x1, y1]
+    };
     hud.items
         .iter()
         .map(|item| match *item {
             render::HudItem::Text {
                 x, y, scale, text, ..
             } => {
-                let w = render::font::text_width(hud.str(text)) as f32 * scale;
-                [x, y, w, render::font::LINE_HEIGHT as f32 * scale]
+                let px = layout.font_pixels(scale) as f32;
+                let [x0, y0] = layout.to_pixels(x, y);
+                let w = render::font::text_width(hud.str(text)) as f32 * px;
+                [x0, y0, x0 + w, y0 + render::font::LINE_HEIGHT as f32 * px]
             }
-            render::HudItem::Rect { x, y, w, h, .. } => [x, y, w, h],
-            render::HudItem::Image(m) => [m.x, m.y, m.w, m.h],
-        })
-        .map(|[x, y, w, h]| {
-            let [x0, y0] = layout.to_pixels(x, y);
-            let [x1, y1] = layout.to_pixels(x + w, y + h);
-            [x0, y0, x1, y1]
+            render::HudItem::Rect { x, y, w, h, .. } => box_px(x, y, w, h),
+            render::HudItem::Image(m) => box_px(m.x, m.y, m.w, m.h),
         })
         .collect()
 }
@@ -692,20 +707,35 @@ fn quad_rects(hud: &render::Hud, target: (u32, u32)) -> Vec<[f32; 4]> {
 fn the_fps_corner_overlaps_no_other_hud_quad() {
     let overlaps =
         |a: [f32; 4], b: [f32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-    for scale in [1.0, 2.0] {
+    for scale in [1.0, 1.5, 2.0] {
         let mut h = Harness::new();
         h.app.ui.settings_mut().ui_scale = scale;
+        // A station toast with a long name (an added stream is named after its host),
+        // tuned to with the radio key.
+        h.app.set_text_entry(true);
+        h.app
+            .add_stream_url("https://listen.example-community-radio.org/stream");
+        for _ in 0..64 {
+            if h.hud_text().contains("example-community-radio") {
+                break;
+            }
+            h.key(Key::BracketRight);
+        }
+        assert!(h
+            .hud_text()
+            .contains("Stream listen.example-community-radio.org"));
         // A toast over the minimap, the clock and the speed are all up.
         h.app.ui.car_reset();
         h.frame();
         let driving = h.app.ui().hud().items.len();
         assert!(h.app.ui().toast().is_some());
+        assert!(h.app.ui().radio().toast().is_some());
         h.app.ui.settings_mut().overlay = Overlay::Fps;
         h.frame();
         let hud = h.app.ui().hud();
         assert_eq!(hud.items.len(), driving + 2, "the number and its shadow");
-        // The Deck's 16:10 panel and a 1080p TV.
-        for target in [(1280, 800), (1920, 1080)] {
+        // The Deck's 16:10 panel, a 1080p TV and a 4K one.
+        for target in [(1280, 800), (1920, 1080), (3840, 2160)] {
             let rects = quad_rects(&hud, target);
             let (others, fps) = rects.split_at(driving);
             for (i, f) in fps.iter().enumerate() {

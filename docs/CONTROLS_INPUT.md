@@ -31,7 +31,10 @@ same average the full overlay shows) in the top left corner, which the driving H
 every counter and the frame graph. The mode is saved (`hud.overlay`: `"off"`, `"fps"` or `"full"`; default
 off) and is also on Settings › HUD › Performance overlay. Any menu (pause, settings, vehicle select, worlds) and the
 full map hide the overlay while open and bring it back when they close, without changing the mode. F3 still
-cycles the saved mode under a menu, so it can be set from there; it shows once the menu closes.
+cycles the saved mode under a menu, so it can be set from there; it shows once the menu closes. The window
+in the background hides it too. While a station toast is up the FPS number sits below its two lines (a
+long station name reaches the corner at large UI scales). Holding F3 and pressing C (Camera cycle) toggles the
+free-fly camera; the F3 press that starts the chord also moves the overlay one mode.
 
 While the full map is open the sim keeps running, but the car gets no driving input (it coasts): the menu
 directions (arrows, d-pad, left stick) pan the map, Map zoom and the wheel zoom it, and Map toggle, Back or
