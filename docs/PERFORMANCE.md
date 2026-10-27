@@ -1,0 +1,256 @@
+# Performance
+
+Read with `docs/RENDERING.md` (the pipeline) and `docs/ARCHITECTURE.md` (budgets). This is
+how a frame spends the GPU, what each quality preset buys, how to measure on a real
+machine, and what is still unverified.
+
+The reference machine is the **Steam Deck**: RDNA2 APU (8 CUs, ~1.6 TFLOPS, 88 GB/s shared
+LPDDR5), 1280×800, and a **90 Hz panel on the OLED model** (60 Hz on the LCD one). With vsync on
+a 90 Hz panel a frame must finish in **11.1 ms** or it waits for the next refresh (and
+the rate falls toward 45 or 60 Hz, depending on the compositor). The first report from a
+Deck: ~65 fps with the GPU at 99%, so GPU bound at roughly 15 ms a frame.
+
+## Cost model
+
+Per frame, in order (`crates/render/src/lib.rs`):
+
+| Pass | Work | Scales with |
+|---|---|---|
+| Shadow | depth-only, every caster once per cascade (3 cascades, `size²` each, side by side in one `Depth32Float` atlas) | casters × cascades (vertex), `size²` × cascades (depth fill and clear) |
+| Forward | sky (one fullscreen triangle) then every visible instance: atlas texel, Lambert sun with 3×3 PCF (twice in the cascade blend band), hemisphere ambient, up to 8 point/spot lights, fog, emissive | visible triangles (vertex), pixels × overdraw × lights (fragment) |
+| Coronas | one instanced quad per light with a corona (≤ 258), 5 depth taps each in the vertex shader | lights at night, sprite size on screen |
+| Bloom | prefilter (13 taps) into half the scene's size, then down and up a chain of 4–5 levels | scene pixels / 4, levels |
+| Tonemap | one fullscreen triangle: exposure, bloom, AgX, vignette, dither, upscale when scaled | swapchain pixels |
+| HUD | one instanced draw of ≤ 4096 quads | quads |
+
+Where the time goes at 1280×800, reasoned from the pipeline and the CPU-side counts (no
+GPU here to measure on; `--stats` with timestamps will replace this with numbers):
+
+- **Geometry dominated the shadow pass.** Before culling every instance (every resident chunk
+  tile of the 13×13 ring, every prop, the car, the far terrain) was drawn four times: three
+  cascades and the forward pass. Most of it cannot be seen: the camera sees about a quarter
+  of the ring, the near cascade a few tiles, the middle one a tenth of the ring. The numbers
+  for the coast are in "Measured on the CPU" below.
+- **Shadow fill.** Three 2048² cascades are 12.6 M depth texels cleared and written per frame
+  (50 MB of `Depth32Float`). 1536² is 44% less; two cascades a third less again.
+- **Forward fragments.** About 1 M pixels × overdraw, each with the PCF kernel and the light
+  loop. Resolution scale cuts this linearly with the pixel count (0.75 → 56%).
+- **Bloom and tonemap** are a few percent: bloom works at a quarter of the pixels and below.
+- **Coronas** are cheap by day (none drawn) and can be large additive quads at night.
+
+## What changed, and what each item should save
+
+| Item | Change | Expected GPU saving (reasoned) |
+|---|---|---|
+| Frustum culling | every instance tested on the CPU against the camera frustum (forward pass) and each cascade's box including its caster margin toward the sun (shadow pass), with mesh or chunk-part bounds; survivors packed per pass, no allocation | the largest: vertex work in the shadow and forward passes drops to what each pass can see (see the measured triangle counts); fill is unchanged |
+| Glow meshes cast no shadow | neon/signal and lamp-lens meshes skip the shadow pass (`MeshInstance::casts_shadow`) | small: a few draws and their triangles per cascade |
+| Small casters | casters under N texels of a cascade skipped in it (Medium/Deck 2, Low 3) | small to moderate in the far cascade: hydrants, mailboxes, benches, signs at 0.3–0.5 m per texel |
+| Far cascade every other frame | the farthest cascade is kept from the frame before while its map (fitted 8% larger) still holds this frame's slice and the sun has not moved; only the drawn cascades are cleared | up to half of the far cascade's cost, which is the largest of the three (largest area, most casters) |
+| Shadow resolution | 1024 / 1536 / 2048 / 3072 per cascade by preset | fill and clear scale with `size²`: 1536 is −44% vs 2048, 1024 −75% |
+| Two cascades (Low, Deck) | 0–50 m and 45–400 m (`render::TWO_CASCADE_SPLITS`) | a third of the shadow pass; shadows end at 400 m |
+| Resolution scale | the HDR target and depth at `scale ×` the swapchain, bilinear upscale in the tonemap pass, HUD at native resolution | forward, coronas and bloom fill scale with `scale²` (0.75 → −44%) |
+| Bloom levels | 4 levels at Low/Deck, 5 from Medium up; `bloom_strength = 0` (Bloom off) skips every bloom pass (tested) | the dropped level is the smallest (40×25 at 1280×800): two passes of pass overhead, well under 0.1 ms; bloom off saves all of it (~5% of the frame) |
+| Far terrain drawn last | `MeshInstance::late`: the far terrain (under the chunks everywhere) is drawn after them, so hidden pixels fail the depth test before shading | the far terrain's overdraw under the ring (it covers the ground under every chunk) |
+| Coronas off at Low | no corona pass | night scenes only; one draw, potentially large additive quads |
+| Present mode | `AutoVsync` by default (it was already); `--no-vsync` for benchmarks | none; makes measurements honest |
+
+Checked and left alone:
+
+- **Corona pass**: one instanced draw of quads; occlusion reads the depth texture in the
+  vertex shader (5 taps per sprite, at most 258 sprites). Depth is single-sampled, so there
+  is no resolve; reading it needs the forward pass's depth `Store`, which it has.
+- **sRGB swapchain**: the tonemap writes an `*Srgb` format and the hardware encodes on write.
+  No MSAA, no resolve; switching to a linear format would only move the encode into the
+  shader. Kept.
+- **DPI**: the native window asks for 1280×720 logical pixels, so a 1.5× desktop scale renders
+  1920×1080. That is the honest size of the window; `--stats` prints physical and logical
+  sizes and the scale factor, and resolution scale is the knob when it is too much.
+
+## Quality presets
+
+Settings → Video → Quality. `Settings::quality` is `None` until the player picks one; then
+it is saved (`"video": { "quality": "deck" }`). Until then the game picks per device each
+run (`Quality::auto`): **Deck** when the adapter is the Deck's APU ("Van Gogh",
+"Sephiroth", "Custom GPU 0405"), an AMD integrated GPU, or the surface is 1280×800 on
+Linux; **Medium** everywhere else. `--quality NAME` forces one for a session (not saved).
+
+| Preset | Cascades | Cascade size | Far cascade | Small casters | Resolution | Bloom levels | Coronas | For |
+|---|---|---|---|---|---|---|---|---|
+| Low | 2 (50 / 400 m) | 1024² | every other frame | < 3 texels skipped | 75% | 4 | off | weak integrated GPUs |
+| Deck | 2 (50 / 400 m) | 1536² | every other frame | < 2 texels | 100% | 4 | on | Steam Deck, 1280×800 @ 90 Hz |
+| Medium (default) | 3 (40 / 160 / 600 m) | 1536² | every other frame | < 2 texels | 100% | 5 | on | everything else until chosen |
+| High | 3 | 2048² | every frame | all | 100% | 5 | on | desktop GPUs (the renderer's own default, `RenderQuality::default()`) |
+| Ultra | 3 | 3072² (where the device allows 9216-wide textures) | every frame | all | 100% | 5 | on | big desktop GPUs |
+
+Choosing a preset sets the resolution scale slider to the preset's value; the slider can
+then move it (50–100%). Far terrain detail is the same at every preset: it is one mesh of
+~8k triangles drawn last (a coarser level is a follow-up). Bloom on/off stays its own
+toggle.
+
+The screenshot goldens are taken on the web build in a fresh profile (SwiftShader), so
+they render at **Medium**. Medium keeps the fifth bloom level for them: with four, the wide
+halos round the coast's neon at night change about 2% of the night golden's pixels, for a
+saving too small to measure (with five the night golden matches exactly). Its smaller
+cascades and every-other-frame far cascade stay well inside the goldens' tolerance (at most
+0.4% of pixels past the threshold, in the day scenes).
+
+## Measured on the CPU
+
+`cargo test --release -p platform-native -- --ignored --nocapture culling_on_the_coast` streams the
+coast at the native budget (13×13 chunks) and renders it at 1280×800 on wgpu's no-op
+device, printing the renderer's counts per preset. From this container (seed 1, the start
+on the strip, chase camera):
+
+```
+high, no culling: instances 2828 fwd 2828 shadow [2765, 2765, 2765] (3 cascades) | tris fwd 2878k shadow 8572k a frame | draws 4452
+            high: instances 2828 fwd 838 shadow [79, 402, 1192] (3 cascades) | tris fwd 725k shadow 1634k a frame | draws 1056
+          medium: instances 2828 fwd 838 shadow [79, 402, 1296] (3 cascades) | tris fwd 725k shadow 1119k a frame | draws 570
+            deck: instances 2828 fwd 838 shadow [100, 1086, 0] (2 cascades) | tris fwd 725k shadow 625k a frame | draws 436
+             low: instances 2828 fwd 838 shadow [101, 1054, 0] (2 cascades) | tris fwd 725k shadow 625k a frame | draws 435
+```
+
+`shadow` is the most instances drawn into each cascade over 40 frames (a kept far cascade
+draws none on alternate frames), and its triangles are the mean a frame. So the GPU used to
+be handed **11.45 M triangles a frame** (2.9 M forward, 8.6 M shadow) in 4452 draws; with
+culling it is **2.36 M at High (−79%), 1.84 M at Medium (−84%) and 1.35 M at Deck (−88%)**
+in 436–1056 draws. The medium far cascade holds a few more casters than High's because its
+map is fitted 8% wider so it can be kept. Recording the frame (`render()` on the no-op
+device, which still culls, packs and encodes) went from 3.0 ms to 0.5–0.8 ms on this
+shared 4-vCPU container (under heavy load from other builds, so read these as upper
+bounds).
+
+`cargo test --release -p render -- --ignored --nocapture cull_cost` times the culling
+itself:
+
+```
+cull_and_pack: 16384 instances, 26317 kept over 4 passes: 1.881 ms (114.8 ns each)
+  the same packing everything into every pass (no culling): 1.906 ms
+```
+
+The box tests themselves are nearly free next to writing the instance records: culling 16k
+instances against four passes costs no more than packing them all unculled (same loaded
+container). The coast submits under 3k instances, so this is a fraction of a millisecond.
+
+## Capturing numbers on the machine
+
+Build a release binary (`cargo build --release -p platform-native`, binary
+`target/release/skywave`; on the Deck the nightly AppImage works the same), then:
+
+```sh
+# 600 frames on the coast, vsync off so the number is the GPU's, not the panel's:
+skywave --stats --no-vsync --frames 600 --exit --scene place=coast 2> stats.txt
+# The same with vsync (what the player sees), and per preset:
+skywave --stats --frames 600 --exit --scene place=coast 2> stats-vsync.txt
+for q in low deck medium high; do
+  skywave --stats --no-vsync --frames 600 --exit --quality $q --scene place=coast 2> stats-$q.txt
+done
+# Culling off, to see what it saves:
+skywave --stats --no-vsync --frames 600 --exit --no-cull --scene place=coast 2> stats-nocull.txt
+# Another backend (Vulkan is the default on Linux; GL is the fallback):
+WGPU_BACKEND=gl skywave --stats --no-vsync --frames 600 --exit --scene place=coast 2> stats-gl.txt
+# Quieter logs:
+RUST_LOG=wgpu_hal=warn skywave --stats ...
+```
+
+Useful scenes: `--scene t=22:30 --scene lights=1` (night: coronas and lamps),
+`--scene cam=cockpit`, `--scene stream=0` (the test town built at load).
+
+### The `--stats` output
+
+At startup:
+
+```
+adapter: AMD Custom GPU 0405 (RADV VANGOGH) | Vulkan, radv Mesa 24.1.0 | IntegratedGpu
+surface: 1280x800 px (scale factor 1, 1280x800 logical) Bgra8UnormSrgb present AutoVsync (supported [Fifo, Mailbox, Immediate])
+quality: deck RenderQuality { shadow_size: 1536, cascades: 2, ... } culling on
+gpu timing: timestamp queries per pass
+```
+
+Then once a second (one line, wrapped here):
+
+```
+[stats] t=12s frames=88 fps=88.0 frame_ms avg=11.36 p99=14.20 max=16.90 cpu_ms avg=1.92 p99=2.40
+  | inst=5123 fwd=1432 sh=890/1201/2240 draws=412 tris_fwd=812k tris_sh=1630k shadow=1536x2 drawn=1
+    view=1280x800 surface=1280x800 bloom=4
+  | gpu_ms total=9.80 shadow=3.10 forward=4.90 corona=0.10 bloom=0.60 tonemap=0.30 hud=0.10
+  | present=AutoVsync quality=deck
+```
+
+- `frame_ms`: time between frames (avg, 99th percentile, max over the second). With vsync it
+  is the display's pace; with `--no-vsync` it is the slower of CPU and GPU.
+- `cpu_ms`: CPU time to build the scene view and record and submit the frame (not waiting
+  for the swapchain).
+- `inst`: instances submitted; `fwd`: drawn in the forward pass; `sh`: drawn into each
+  cascade (0 for one kept from the frame before); `drawn`: cascades drawn this frame.
+- `tris_fwd`, `tris_sh`: triangles drawn in the forward pass and in all cascades together.
+- `shadow=SIZExN`: cascade edge in texels and cascade count; `view`: the scene's target
+  (scaled); `surface`: the swapchain; `bloom`: levels drawn.
+- `gpu_ms`: GPU time per pass from timestamp queries, a frame or two old; only when the
+  adapter has `TIMESTAMP_QUERY` (Vulkan, Metal, DX12; not GL).
+
+`--frames N` ends with a `[summary]` line over the run after 60 warmup frames.
+
+The F3 overlay shows the same numbers in game (web and native): draws, CPU time, instances
+per pass, triangles, cascades, view and surface size, GPU time per pass where available,
+and the adapter.
+
+### What to send back
+
+1. `stats.txt`, `stats-vsync.txt`, the per-preset files and `stats-nocull.txt`.
+2. Which Deck (LCD 60 Hz or OLED 90 Hz), SteamOS version, Game Mode or Desktop Mode, and
+   the frame limiter / refresh settings in the Quick Access menu.
+3. A screenshot with F3 on at the slowest spot you find.
+4. If one pass stands out, a RenderDoc capture (below).
+
+### A frame capture with RenderDoc
+
+RenderDoc is free (MIT) and runs on Linux and the Deck's Desktop Mode.
+
+```sh
+renderdoccmd capture --wait-for-exit ./skywave --scene place=coast
+# press F12 (or PrtScn) in game at the slow spot; the .rdc lands in /tmp/RenderDoc/
+```
+
+Or the GUI: File → Launch Application, executable `skywave`, arguments
+`--scene place=coast`, Launch, then F12 in game. Send the `.rdc` (compressed) and, from
+the GUI, the Event Browser timings (Tools → Performance counters, or the clock icon:
+"Time durations for the drawcalls") as a screenshot or CSV. Use the Vulkan backend
+(RenderDoc does not capture wgpu's GL path well).
+
+## Checklist: confirm these first
+
+- **Vsync and the panel**: with `AutoVsync` on a 60 Hz panel the rate cannot pass 60; on the
+  OLED Deck's 90 Hz panel, 90. Missing 11.1 ms drops a frame. Measure with `--no-vsync`.
+- **The frame limiter**: SteamOS's Quick Access menu can cap the rate (and halve it).
+- **Compositor**: Game Mode (gamescope) vs Desktop Mode (KWin) present differently; note which.
+- **DPI scale**: `--stats` prints the physical size and scale factor; a 2× desktop scale
+  renders 4× the pixels of the window's logical size.
+- **Which GPU**: on laptops with two GPUs check the `adapter:` line names the one expected
+  (`DRI_PRIME=1` picks the discrete one on Mesa).
+- **Backend**: the `adapter:` line should say Vulkan; GL is slower and has no timestamps.
+- **Thermals and power**: the Deck's TDP slider and a warm APU change clocks; note them.
+- **Debug build**: numbers only mean something from `--release`.
+
+## Performance follow-ups
+
+What could not be verified without a GPU here:
+
+- **Real pass timings.** Every saving above is reasoned from counts; the `gpu_ms` numbers
+  from a Deck will say which pass dominates. Re-rank this list by them.
+- **Whether keeping the far cascade shows.** The map is fitted 8% wider and re-drawn as soon
+  as the slice leaves it or the sun moves; check fast turns at speed for a one-frame edge
+  at 400–600 m.
+- **The small-caster threshold.** Check that 2 texels does not pop props' shadows in and out
+  at the far cascade's distance.
+- **Bilinear upscale quality** at 75% and below on the Deck's panel; a sharpening pass (or
+  an FSR-1-like spatial upscale) if it looks soft.
+- **Fragment cost of the forward pass**: if `forward` dominates, a depth prepass (native)
+  or front-to-back sorting of chunk tiles would cut shading overdraw; light-loop cost at
+  night with 8 lights per draw.
+- **Mailbox vs FIFO** on gamescope for latency at 90 Hz.
+- **Far terrain detail level** (a coarser mesh at Low) and **chunk facade LOD beyond 400 m**
+  (`docs/RENDERING.md`), not implemented.
+- **Corona fill at night**: large sprites near lamps; measure before limiting their size.
+- **The web build on integrated GPUs**: WebGL2 has no timestamps; measure frame time only.
+- **Automatic preset by measured frame time** (drop a preset after N slow seconds) instead
+  of by adapter name.
