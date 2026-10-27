@@ -59,7 +59,7 @@ dispatching the next session, and updates statuses as PRs open and merge.
   (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof); pedestrian hardening
   (#24: four review rounds, 2040-run crossing sweep at zero reached, 0.4 m step-aside clearance);
   the radio starts off every session (ce560a3) and the 181.FM presets are gone (7ca473c, pre-roll
-  ads); the M8 spec for the second world, Basin City 2001 (`docs/backlog/LA2001.md`); the 1980s sports cars
+  ads); the M8 spec for the second world, Inland Basin 2001 (`docs/backlog/INLAND2001.md`); the 1980s sports cars
   and their open versions (#28: 20 cars, exotics player-only, `TRAFFIC_SHAPES`); ad-free radio
   presets (#30: 7 / 6 / 6 listener-supported, public and college stations, each cold-start
   checked; the checker gained --listen/--save/--url and ad-sign warnings); the rename of the
