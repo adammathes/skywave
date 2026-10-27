@@ -121,6 +121,7 @@ impl<'a, 'b> Parts<'a, 'b> {
                 Detail::RallyStripes if self.lod0() => self.rally_stripes(),
                 Detail::MudFlaps => self.mud_flaps(),
                 Detail::RoofRack if hardtop => self.roof_rack(),
+                Detail::SpareTire => self.spare_tire(),
                 Detail::Badge(shape) if self.lod0() => {
                     self.badge(shape, true);
                     self.badge(shape, false);
@@ -1810,6 +1811,60 @@ impl<'a, 'b> Parts<'a, 'b> {
                     self.m.trim,
                 );
             }
+        }
+    }
+
+    /// A spare wheel standing off the tail on a bracket, its tread showing round a cover
+    /// in the accent color with a bright center ring.
+    fn spare_tire(&mut self) {
+        let b = self.b;
+        let wh = &b.spec.wheels;
+        let r = wh.radius * 0.92;
+        let y = b.spec.rear.bumper_y.1 + r + 0.02;
+        let z0 = b.length - b.axle[0] + 0.07;
+        let z1 = z0 + wh.width * 0.9;
+        let segs = match b.lod {
+            0 => 20,
+            1 => 12,
+            _ => 8,
+        };
+        self.body.aabb(
+            [-0.06, y - 0.06, z0 - 0.08],
+            [0.06, y + 0.06, z0],
+            self.m.trim,
+        );
+        self.body.cylinder(
+            [0.0, y, z0],
+            [0.0, y, z1],
+            r,
+            segs,
+            true,
+            false,
+            self.m.tire,
+        );
+        // The cover: a band over the outer half of the tread and a flat face.
+        let zc = (z0 + z1) * 0.5;
+        let cover = self.m.accent;
+        self.body.cylinder(
+            [0.0, y, zc],
+            [0.0, y, z1 + 0.012],
+            r + 0.008,
+            segs,
+            false,
+            false,
+            cover,
+        );
+        self.body
+            .disc([0.0, y, z1 + 0.012], BACK, r + 0.008, segs, cover);
+        if self.lod0() {
+            self.body.annulus(
+                [0.0, y, z1 + 0.014],
+                BACK,
+                r * 0.3,
+                r * 0.36,
+                segs,
+                self.m.chrome,
+            );
         }
     }
 

@@ -231,6 +231,13 @@ pub enum Detail {
     WoodApplique,
     /// Clear lamps in the front fender sides, behind the headlamps.
     CorneringLamps,
+    /// An open cargo bed from just behind the cab's rear window to the tailgate: rail caps,
+    /// inner walls, a ribbed floor and wheel tubs. The top over it must sit at the belt.
+    PickupBed,
+    /// A full-size spare wheel in a cover (the accent color) on the tail.
+    SpareTire,
+    /// Two tinted glass roof panels either side of a body-colored center bar (hardtops).
+    TTop,
 }
 
 /// Where a convertible's fabric top is.
@@ -447,6 +454,9 @@ pub enum ShapeError {
     OpenTop,
     /// A `color_details` index past the end of the palette.
     ColorDetail,
+    /// A `PickupBed` on a convertible, shorter than a meter, or under a top that is not at
+    /// the belt.
+    Bed,
 }
 
 /// Parses `#rrggbb` into sRGB bytes.
@@ -758,6 +768,32 @@ impl ShapeSpec {
                 return Err(ShapeError::OpenTop);
             }
         }
+        if let Some((s0, s1)) = self.bed() {
+            let at = super::math::polyline_at;
+            let flat = (0..=8).all(|k| {
+                let x = s0 + (s1 - s0) * k as f32 / 8.0;
+                (at(&top, x) - at(&self.belt, x)).abs() < 0.05
+            });
+            if self.roof.convertible() || s1 - s0 < 1.0 || !flat {
+                return Err(ShapeError::Bed);
+            }
+        }
         Ok(())
     }
+
+    /// The open range of a `PickupBed` along the car: from the bulkhead behind the cab's
+    /// rear window to the tailgate.
+    pub(crate) fn bed(&self) -> Option<(f32, f32)> {
+        self.details.contains(&Detail::PickupBed).then(|| {
+            (
+                self.glass.backlight.1 + BED_BULKHEAD,
+                self.length() - BED_TAILGATE,
+            )
+        })
+    }
 }
+
+/// Bulkhead between the cab's rear window and a pickup bed, m.
+pub(crate) const BED_BULKHEAD: f32 = 0.08;
+/// Tailgate thickness behind a pickup bed, m.
+pub(crate) const BED_TAILGATE: f32 = 0.06;

@@ -91,6 +91,8 @@ impl Frame {
 
 pub struct Ring {
     pub pts: Vec<[f32; 2]>,
+    /// Each point's height before the arches lifted it.
+    pub plain_y: Vec<f32>,
     pub raised: Vec<bool>,
     pub displaced: Vec<bool>,
     pub f: Frame,
@@ -123,6 +125,8 @@ pub struct Body<'a> {
     /// A convertible: the cabin is open above the belt from the windshield header to the
     /// boot, and the windshield range has no side faces (the frame is a part).
     pub convertible: bool,
+    /// A pickup's open bed: the top is left out over this range (`bed.rs` lines it).
+    pub bed: Option<(f32, f32)>,
 }
 
 impl<'a> Body<'a> {
@@ -169,8 +173,10 @@ impl<'a> Body<'a> {
         let hood = (seams && spec.seams.hood).then_some((0.05, g.windshield.0 - 0.05));
         let deck = (g.backlight.1 + 0.05, length - 0.05);
         let deck_ok = deck.1 - deck.0 >= 0.25;
-        let trunk = (seams && spec.seams.trunk && deck_ok).then_some(deck);
-        let tailgate = seams && spec.seams.trunk && !deck_ok;
+        // A pickup's deck is its open bed: the trunk seams outline the tailgate instead.
+        let bed = spec.bed();
+        let trunk = (seams && spec.seams.trunk && deck_ok && bed.is_none()).then_some(deck);
+        let tailgate = seams && spec.seams.trunk && (!deck_ok || bed.is_some());
 
         let ra = wh.radius + wh.arch_clearance;
         let n_colors = spec.palette.len().max(1);
@@ -199,6 +205,7 @@ impl<'a> Body<'a> {
             stations: Vec::new(),
             details,
             convertible: spec.roof.convertible(),
+            bed,
         };
         if seams {
             body.door_seams = body.door_lines();
@@ -219,12 +226,15 @@ impl<'a> Body<'a> {
     /// car is a convertible: everything above the belt over the open cabin, and the side
     /// faces (where the door glass would be) beside the windshield.
     fn open_cut(&self, j: usize, a: f32, b: f32) -> bool {
+        let within = |r: (f32, f32)| a >= r.0 - 1e-4 && b <= r.1 + 1e-4;
+        let i_ledge = self.idx(Slot::Ledge);
+        if self.bed.is_some_and(within) {
+            return j >= i_ledge;
+        }
         if !self.convertible {
             return false;
         }
         let g = &self.spec.glass;
-        let within = |r: (f32, f32)| a >= r.0 - 1e-4 && b <= r.1 + 1e-4;
-        let i_ledge = self.idx(Slot::Ledge);
         if within((g.windshield.1, g.backlight.0)) {
             return j >= i_ledge;
         }
@@ -419,24 +429,29 @@ impl<'a> Body<'a> {
                 order: 0,
             });
         }
-        // A convertible's opening must start and end on a station, even over an arch: a
-        // plain station close by gives way to it.
+        // A convertible's opening (or a pickup's bed) must start and end on a station, even
+        // over an arch: a plain station close by gives way to it.
+        let mut open = Vec::new();
         if spec.roof.convertible() {
-            for s in [g.windshield.1, g.backlight.0] {
-                let edge = |t: &Station| {
-                    self.axle.iter().any(|&ax| {
-                        (t.s - (ax - self.ra)).abs() < 1e-6 || (t.s - (ax + self.ra)).abs() < 1e-6
-                    })
-                };
-                st.retain(|t| (t.s - s).abs() > 0.01 || t.seam.is_some() || edge(t) || t.s == s);
-                if st.iter().all(|t| (t.s - s).abs() > 1e-6) {
-                    st.push(Station {
-                        s,
-                        clamp: self.axle_over(s),
-                        seam: None,
-                        order: 0,
-                    });
-                }
+            open.extend([g.windshield.1, g.backlight.0]);
+        }
+        if let Some((s0, s1)) = self.bed {
+            open.extend([s0, s1]);
+        }
+        for s in open {
+            let edge = |t: &Station| {
+                self.axle.iter().any(|&ax| {
+                    (t.s - (ax - self.ra)).abs() < 1e-6 || (t.s - (ax + self.ra)).abs() < 1e-6
+                })
+            };
+            st.retain(|t| (t.s - s).abs() > 0.01 || t.seam.is_some() || edge(t) || t.s == s);
+            if st.iter().all(|t| (t.s - s).abs() > 1e-6) {
+                st.push(Station {
+                    s,
+                    clamp: self.axle_over(s),
+                    seam: None,
+                    order: 0,
+                });
             }
         }
         st.sort_by(|a, b| {
@@ -578,6 +593,7 @@ impl<'a> Body<'a> {
     /// The ring at a station with arches and seams cut in.
     pub fn ring(&self, st: &Station) -> Ring {
         let (mut pts, f) = self.ring_plain(st.s);
+        let plain_y: Vec<f32> = pts.iter().map(|p| p[1]).collect();
         let n = pts.len();
         let mut raised = alloc::vec![false; n];
         let mut displaced = alloc::vec![false; n];
@@ -646,6 +662,7 @@ impl<'a> Body<'a> {
         }
         Ring {
             pts,
+            plain_y,
             raised,
             displaced,
             f,
@@ -746,13 +763,17 @@ impl<'a> Body<'a> {
                     cross(sub(b, a), sub(c, a)),
                     cross(sub(c, a), sub(d, a)),
                 ));
-                // Two-tone: by the crease slots when the ring has them, else by height.
+                // Two-tone: by the crease slots when the ring has them, else by height (the
+                // height before the arches lift the points, so the lower color runs over
+                // the arches as it does between crease slots).
                 let mut mat: Mat = match crease {
                     Some((lo, _)) if m.two_tone && j < lo => m.paint_low,
                     Some((lo, hi)) if m.two_tone && j >= lo && j < hi => m.pinstripe,
                     Some(_) => m.paint,
                     None => {
-                        let y = (a[1] + b[1] + c[1] + d[1]) * 0.25;
+                        let y =
+                            (ra.plain_y[j] + ra.plain_y[j + 1] + rb.plain_y[j] + rb.plain_y[j + 1])
+                                * 0.25;
                         self.paint_at(m, (sa + sb) * 0.5, y)
                     }
                 };
