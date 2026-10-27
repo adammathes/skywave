@@ -1,6 +1,6 @@
 //! Skywave traffic over a place's roads (`docs/NPCS.md`).
 //!
-//! So far the lane graph ([`LaneGraph`]): built once from a `place::Place`'s road graph, it
+//! The lane graph ([`LaneGraph`]): built once from a `place::Place`'s road graph, it
 //! holds a centerline per road lane in its driving direction, a turn table per junction
 //! (which incoming lane may continue onto which outgoing lane, each with its curve across
 //! the junction), stop lines where traffic stops, and a fixed-cycle signal timer per
@@ -11,15 +11,21 @@
 //! Plain structs and flat arrays: lanes index into one point pool, turns are stored grouped
 //! by the lane they leave. Building allocates; queries never do. Everything is a pure
 //! function of the place, so the same place gives a bit-identical graph everywhere.
+//!
+//! NPC cars drive on it ([`Traffic`], [`cars`]): a fixed pool stepped at 120 Hz with car
+//! following, signals and stop signs, right of way, lane changes, and spawning by density
+//! out of the player's view.
 #![no_std]
 
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod cars;
 pub mod lanes;
 pub mod math;
 pub mod signal;
 
+pub use cars::{Car, Clock, Density, Inputs, Player, Traffic, TrafficBudget, View};
 pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
 pub use signal::{Light, SignalClock};
