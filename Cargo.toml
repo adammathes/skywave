@@ -21,7 +21,7 @@ version = "0.1.0"
 edition = "2021"
 license = "BSD-3-Clause"
 publish = false
-rust-version = "1.87"
+rust-version = "1.89"
 
 [workspace.dependencies]
 # Internal crates.
@@ -64,6 +64,12 @@ gilrs = "=0.11.2"
 # Native audio output (platform-native only; Apache-2.0). ALSA on Linux (libasound2-dev to
 # build), CoreAudio on macOS, WASAPI on Windows.
 cpal = { version = "=0.18.2", default-features = false }
+
+# Native radio streams (platform-native only; docs/adr/0006-native-streams.md). TLS with the
+# ring provider and the system's trust store; an MP3 frame decoder (MIT/Apache, no deps).
+rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+rustls-native-certs = "=0.8.5"
+nanomp3-core = { version = "=0.2.0", default-features = false }
 
 # Web.
 wasm-bindgen = "=0.2.129"

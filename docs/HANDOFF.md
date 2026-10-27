@@ -51,9 +51,9 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
 - Owner feedback not yet acted on: `docs/backlog/NOTES.md` 4(a) life (traffic behaviour M4 #4-#6,
   pedestrians #5, window lights, parked cars that come and go) and 4(b) buildings
   (`docs/backlog/BUILDINGS.md` B1-B15); mobile (NOTES #5, after Deck verification); the owner's
-  Deck `--stats` output is wanted (`docs/PERFORMANCE.md`); native radio playback.
+  Deck `--stats` output is wanted (`docs/PERFORMANCE.md`).
 - Next: M4 #4 car following (after lane graph), #5 pedestrians (after figure), #6 density settings,
-  #7 vehicle select polish; M3 remainder (local music files, native streams, ambience by zone);
+  #7 vehicle select polish; M3 remainder (local music files, ICY titles on the dash, ambience by zone; native streams in `m3/native-radio`, ADR 0006);
   buildings B1-B5 can start now (B4/B8/B9/B11/B13 touch `world::buildings` and run one at a time);
   M5 (release polish, Deck verification), M6 (place compiler), M7+ (eras, Chicago scenarios).
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff

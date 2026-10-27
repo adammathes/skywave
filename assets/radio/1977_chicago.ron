@@ -103,7 +103,11 @@ RadioPreset(
             era: "mixed",
             format: "classic and album rock",
             source: Stream(
-                urls: ["https://stream.radioparadise.com/rock-128"],
+                urls: [
+                    "https://stream.radioparadise.com/rock-128",
+                    // The same channel in MP3, for players without AAC (native).
+                    "https://stream.radioparadise.com/rock-192",
+                ],
                 homepage: "https://radioparadise.com/listen/stream-links",
                 codec: Aac,
                 bitrate_kbps: 128,

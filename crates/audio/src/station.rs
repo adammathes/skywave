@@ -40,7 +40,9 @@ pub enum Codec {
 #[serde(deny_unknown_fields)]
 pub enum Source {
     /// Internet radio over HTTPS (Icecast/SHOUTcast MP3 or AAC). `urls` are tried in order
-    /// (mirrors of the same stream); `homepage` credits the broadcaster; `terms_checked` is
+    /// (mirrors of the same stream, or the same channel in another codec for players that
+    /// lack the first one's; `codec` and `bitrate_kbps` describe the first URL); `homepage`
+    /// credits the broadcaster; `terms_checked` is
     /// the date (`YYYY-MM-DD`) its listening terms were read; `verified` turns true once
     /// someone has heard it play from the listed URL (`tools/check-streams.mjs`).
     Stream {
