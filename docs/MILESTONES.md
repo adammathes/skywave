@@ -196,7 +196,8 @@ scripted drive, `selftest.json`; the cockpit screenshot goldens were regenerated
 
 ### M4 status (2026-10-27, autonomous run)
 Traffic is in the game; pedestrians are simulated but not yet drawn. On `main`: the full
-twelve-car 1980s roster with distinct feel (0–60, top speed and skidpad ordering tests); the
+twelve-car 1980s roster with distinct feel (0–60, top speed and skidpad ordering tests) and the
+vehicle select screen (pause menu, Vehicle page: turntable preview, specs, paints); the
 lane graph with junction turn tables, stop lines and signal timers; NPC cars (car following,
 claims at junctions, lane changes to pass, spawning out of view, headlights at dusk) drawn as
 instances of the parked-car meshes, lit by their own low beams at night and heard as they pass;
