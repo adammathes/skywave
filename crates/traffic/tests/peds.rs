@@ -844,10 +844,11 @@ fn step_budget_for_128_people() {
     run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
     let _quiet = QUIET.write().unwrap_or_else(|e| e.into_inner());
     // The car drives slowly through the people the whole time, so reactions are timed.
-    // Three 5 s windows; the best one is gated, so a burst of load on a shared machine
-    // does not fail the build, but a real regression shows in every window.
+    // Three 5 s windows, the best of each figure gated, as for the cars: the median is what
+    // the sim costs when the machine is not busy and does not move when a shared runner
+    // steals a few slices; the p99 only catches gross regressions, with fourfold slack.
     let dir = walk_dir_near(b, eye);
-    let mut best = (f64::MAX, f64::MAX);
+    let (mut median, mut p99) = (f64::MAX, f64::MAX);
     let mut k = 0u64;
     for window in 0..3 {
         let mut times = Vec::with_capacity(600);
@@ -863,24 +864,19 @@ fn step_budget_for_128_people() {
             k += 1;
         }
         times.sort_by(f64::total_cmp);
-        let (median, p99) = (times[times.len() / 2], times[times.len() * 99 / 100]);
+        let (m, p) = (times[times.len() / 2], times[times.len() * 99 / 100]);
         println!(
-            "window {window}: {} people, median {median:.3} ms, p99 {p99:.3} ms per step",
+            "window {window}: {} people, median {m:.3} ms, p99 {p:.3} ms per step",
             peds.count()
         );
-        if p99 < best.1 {
-            best = (median, p99);
-        }
+        median = median.min(m);
+        p99 = p99.min(p);
     }
     assert!(peds.count() >= 100, "{}", peds.count());
-    // Budget 0.5 ms p99 for 128 people in a debug build, in the best window.
+    // Budget for 128 people in a debug build: median under 0.5 ms, p99 under 2 ms.
     if std::env::var_os("SKYWAVE_ENFORCE_BUDGETS").is_some() {
-        assert!(
-            best.1 < 0.5,
-            "best window: median {} ms, p99 {} ms",
-            best.0,
-            best.1
-        );
+        assert!(median < 0.5, "median {median:.3} ms per step");
+        assert!(p99 < 2.0, "p99 {p99:.3} ms per step");
     }
 }
 

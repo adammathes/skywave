@@ -156,7 +156,8 @@ again per cascade. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 310 dra
 forward and 740k shadow triangles; Medium 455 draws, 450k and 1320k** (the busy numbers plus
 about 10%), and if fewer than three NPC cars are in the forward pass. The traffic sim (step
 and populate, busy) has a median under 0.5 ms a step in a debug build (`app::npc` and
-`traffic` budget tests).
+`traffic` budget tests), and so do 128 pedestrians with the car among them; both gate the
+p99 under 2 ms, the best of three 5 s windows.
 
 The scene itself had grown since the first measurement (below: 725k forward triangles and
 436 draws at Deck), before traffic, with the detailed cars and props.
