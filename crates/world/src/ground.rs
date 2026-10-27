@@ -87,6 +87,7 @@ pub fn build(
     blocks: &[Block],
     fronts: &[usize],
     pal: &Palette,
+    stall_w: f32,
     seed: u64,
     out: &mut MeshSet,
 ) -> Vec<Prop> {
@@ -114,6 +115,7 @@ pub fn build(
                     fronts[i],
                     b,
                     pal,
+                    stall_w,
                     seed ^ i as u64,
                     out,
                     &mut cars,
@@ -363,6 +365,7 @@ pub(crate) fn parking_lot(
     front: usize,
     b: &Block,
     pal: &Palette,
+    stall_w: f32,
     seed: u64,
     out: &mut MeshSet,
     cars: &mut Vec<Prop>,
@@ -428,10 +431,10 @@ pub(crate) fn parking_lot(
             );
             // Busier near the shops.
             let chance = if k < 2 { 150 } else { 80 };
-            if s + 2.8 < s1 - 2.0 && rng.range(0, 256) < chance {
+            if s + stall_w < s1 - 2.0 && rng.range(0, 256) < chance {
                 let nose = if k % 2 == 0 { -normal } else { normal };
                 cars.push(Prop {
-                    pos: a + along * (s + 1.46) + normal * ((t0 + t1) * 0.5),
+                    pos: a + along * (s + (stall_w + 0.12) * 0.5) + normal * ((t0 + t1) * 0.5),
                     y: LOT_Y,
                     dir: if rng.range(0, 5) == 0 { -nose } else { nose },
                     kind: PropKind::ParkedCar {
@@ -440,7 +443,7 @@ pub(crate) fn parking_lot(
                     seed: rng.next_u32(),
                 });
             }
-            s += 2.8;
+            s += stall_w;
         }
     }
 }
