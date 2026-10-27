@@ -226,7 +226,8 @@ fn sixty_through_a_red_light_touches_no_car() {
     let g = &coast().lanes;
     let lane = lane_ending_at(g, APPROACH_END);
     let len = g.lanes[lane as usize].length_m;
-    let start = g.pose(lane, 6.0);
+    // 200 m before the stop line: the run-up reaches 60 mph by it within 12 s.
+    let start = g.pose(lane, (len - 200.0).max(6.0));
     // How long the run-up takes to the stop line, alone on the road.
     let mut alone = app_at(start.pos, start.heading, "t=12:00&traffic=off");
     let half_len = alone.traffic_player().half_len;

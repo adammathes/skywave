@@ -895,6 +895,27 @@ fn crowd(peds: &Pedestrians) -> [f32; 3] {
         .expect("people")
 }
 
+/// The walk link with the most people along 60 m of it (the thickest crowd's own walk can
+/// be a short one at a corner): a point on its walk line and its direction.
+fn crowd_walk(b: &Built, peds: &Pedestrians) -> ([f32; 3], [f32; 2]) {
+    let g = &b.walks;
+    let along = |at: [f32; 3], d: [f32; 2]| {
+        peds.iter()
+            .filter(|p| {
+                let r = [p.pos[0] - at[0], p.pos[2] - at[2]];
+                (r[0] * d[0] + r[1] * d[1]).abs() < 30.0 && (r[0] * d[1] - r[1] * d[0]).abs() < 3.0
+            })
+            .count()
+    };
+    g.links
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.kind == LinkKind::Walk && l.road_side != 0 && l.length_m > 4.0)
+        .map(|(i, l)| (g.point(i as u32, 0.5 * l.length_m, 0.0), l.dir))
+        .max_by_key(|&(at, d)| along(at, d))
+        .expect("walks")
+}
+
 /// The direction of the walk link nearest `p`.
 fn walk_dir_near(b: &Built, p: [f32; 3]) -> [f32; 2] {
     walk_near(b, p).1
@@ -1066,7 +1087,7 @@ fn nobody_enters_a_car_driving_slowly_through_a_crowd() {
     let eye = busy_eye(&b.walks);
     let mut peds = new_peds(b, PedestrianBudget::LARGE);
     run(b, &mut peds, eye, 0, 120 * 40, Density::Busy);
-    let (at, dir) = walk_near(b, crowd(&peds));
+    let (at, dir) = crowd_walk(b, &peds);
     // Between 1 and 3 m/s for 60 s along the walk through the busiest stretch.
     let (n, _, close) = obstacle(b, &mut peds, eye, 120 * 40, 60.0, |t| {
         let s = -60.0 + 2.0 * t - 3.0 * (t / 3.0).cos() + 3.0;
