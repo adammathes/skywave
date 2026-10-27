@@ -1162,6 +1162,6 @@ mod tests {
             }
         }
         // Pinned: a change to any shape moves this on purpose.
-        assert_eq!(h, h);
+        assert_eq!(h, 0x9a09_dbee_86c8_63e8, "{h:#018x}");
     }
 }
