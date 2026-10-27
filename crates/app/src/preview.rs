@@ -12,9 +12,11 @@
 //! read oddly anyway, so the app draws no player car, nor its lamps, under the page). It is
 //! lit like everything else (the current sun, sky ambient and exposure) plus, after dark,
 //! the cabin's fill light (`Sky::cabin_light`) so a car is never a silhouette; it takes no
-//! street lamps and casts no shadow. No render
-//! pass, uniform or shader changes; the cost is [`MAX_INSTANCES`] instances while the page
-//! is open and none otherwise.
+//! street lamps and neither casts nor receives a sun shadow (the world's shadow at the eye
+//! is not the turntable's). Traffic and props within [`CLEAR_M`] of the eye are left out
+//! while it shows. No render pass or uniform; the one renderer change is the per-instance
+//! `receives_shadow` bit. The cost is [`MAX_INSTANCES`] instances while the page is open
+//! and none otherwise.
 
 use glam::{Mat4, Vec3};
 use render::{Mesh, MeshId, MeshInstance, Vertex};
@@ -22,8 +24,12 @@ use render::{Mesh, MeshId, MeshInstance, Vertex};
 use crate::car::{CarLayout, CarMeshes};
 use crate::drive::CarGlow;
 
-/// How far in front of the eye the model's center sits, m.
-pub const DISTANCE_M: f32 = 0.75;
+/// How far in front of the eye the model's center sits, m: as near as keeps its near edge
+/// past the cameras' 0.25 m near plane.
+pub const DISTANCE_M: f32 = 0.5;
+/// While it shows, the app draws no traffic or prop instance whose origin is this close to
+/// the eye (m), so nothing that moves or stands nearby can cut into the model.
+pub const CLEAR_M: f32 = 4.0;
 /// The turntable tilts its top this far toward the eye: the car is seen from a little above.
 pub const TILT_RAD: f32 = 0.33;
 /// Turn rate, rad/s: a lap in about 18 s.
@@ -167,6 +173,7 @@ pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<
         glow,
         cabin: fill,
         casts_shadow: false,
+        receives_shadow: false,
         ..MeshInstance::new(mesh, m.to_cols_array_2d())
     };
     let lod = &model.car.lods[0];
@@ -241,9 +248,9 @@ mod tests {
                     lo[k] = lo[k].min(ndc[k]);
                     hi[k] = hi[k].max(ndc[k]);
                 }
-                // Nearer than a meter and past the near plane.
+                // Well within CLEAR_M and past the 0.25 m near plane.
                 let eye_dist = c.w;
-                assert!((0.3..1.2).contains(&eye_dist), "{eye_dist}");
+                assert!((0.26..0.8).contains(&eye_dist), "{eye_dist}");
             }
             assert!(
                 lo[0] >= stage[0] - 1e-3 && hi[0] <= stage[2] + 1e-3,

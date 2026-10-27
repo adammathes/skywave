@@ -179,6 +179,8 @@ pub struct App {
     mesh_count: u32,
     /// The scene chose the car (`car=`): the saved vehicle setting does not replace it.
     car_from_scene: bool,
+    /// The scene chose a paint but no car (`paint=` alone): it paints the saved car too.
+    paint_from_scene: Option<usize>,
     /// The world's instances, then this frame's car instances (refilled by `scene_view`).
     instances: Vec<MeshInstance>,
     world_instances: usize,
@@ -345,6 +347,7 @@ impl App {
             pending_meshes: Vec::new(),
             mesh_count,
             car_from_scene: false,
+            paint_from_scene: None,
             instances,
             world_instances,
             roles: town.roles,
@@ -371,13 +374,16 @@ impl App {
     /// [`App::set_stream_budget`] changes that.
     pub fn from_setup(setup: &SceneSetup) -> Result<App, String> {
         let stream = setup.stream.then_some(StreamBudget::WEB);
-        let mut app = App::build(
-            Seed(setup.seed),
-            &setup.car,
-            setup.paint,
-            setup.place,
-            stream,
-        )?;
+        // A paint for a named car must be one of its own; without a car it paints whichever
+        // car the game starts in (see `set_settings_store`).
+        let paint = match (setup.car_given, setup.paint) {
+            (true, paint) => paint.unwrap_or(0),
+            (false, paint) => {
+                ui::roster::index_of(&setup.car).map_or(0, |i| paint_of(i, paint.unwrap_or(0)))
+            }
+        };
+        let mut app = App::build(Seed(setup.seed), &setup.car, paint, setup.place, stream)?;
+        app.paint_from_scene = setup.paint.filter(|_| !setup.car_given);
         let pos = setup.pos.unwrap_or([app.start.0[0], app.start.0[2]]);
         let heading = setup.heading_rad.unwrap_or(app.start.1);
         let (y, _) = app.ground.level_at(pos);
@@ -469,7 +475,7 @@ impl App {
     /// reuse them.
     pub fn switch_vehicle(&mut self, vehicle_id: &str) -> Result<(), String> {
         let index = ui::roster::index_of(vehicle_id).ok_or(format!("no vehicle `{vehicle_id}`"))?;
-        self.switch_vehicle_at(index, 0, true)
+        self.switch_vehicle_at(index, 0, true, true)
     }
 
     /// `VehicleNext`: the next car in [`vehicles::BUILTIN`], wrapping after the last, in
@@ -501,14 +507,21 @@ impl App {
     /// [`App::switch_vehicle_at`]; a car that fails to build (never a built-in one, whose
     /// specs and shapes are tested) leaves the current one.
     fn switch_to(&mut self, index: usize, paint: usize, toast: bool) {
-        let switched = self.switch_vehicle_at(index, paint, toast);
+        let switched = self.switch_vehicle_at(index, paint, toast, true);
         debug_assert!(switched.is_ok(), "{switched:?}");
     }
 
     /// Switches to `vehicles::BUILTIN[index]` in palette entry `paint` (its first when it
-    /// has no such entry), toasting its name or not. The car already driven stays, and
-    /// only the paint, the toast and the setting happen.
-    fn switch_vehicle_at(&mut self, index: usize, paint: usize, toast: bool) -> Result<(), String> {
+    /// has no such entry), toasting its name or not and remembering it in the settings or
+    /// not. The car already driven stays, and only the paint, the toast and the setting
+    /// happen.
+    fn switch_vehicle_at(
+        &mut self,
+        index: usize,
+        paint: usize,
+        toast: bool,
+        remember: bool,
+    ) -> Result<(), String> {
         let paint = paint_of(index, paint);
         let car = self.registered(index, paint)?;
         if self.drive.spec.id != car.id {
@@ -518,7 +531,7 @@ impl App {
             self.settle_camera();
         }
         self.car_meshes = car.meshes;
-        self.ui.vehicle_switched(index, paint, true, toast);
+        self.ui.vehicle_switched(index, paint, remember, toast);
         Ok(())
     }
 
@@ -821,6 +834,19 @@ impl App {
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs
             .push(alpha, eye, &self.lights, npc_glow, &mut self.instances);
+        if self.preview.is_some() {
+            // Nothing that moves or stands by the eye cuts into the turntable: drop the
+            // traffic and props near it (in place, keeping their order).
+            let mut keep = self.world_instances;
+            for k in self.world_instances..self.instances.len() {
+                let at = Vec3::from_slice(&self.instances[k].transform[3][..3]);
+                if at.distance_squared(eye) > preview::CLEAR_M * preview::CLEAR_M {
+                    self.instances.swap(keep, k);
+                    keep += 1;
+                }
+            }
+            self.instances.truncate(keep);
+        }
         let start = self.instances.len();
         if let Some((car, stage)) = &self.preview {
             let stage = self.stage_ndc(*stage, aspect);

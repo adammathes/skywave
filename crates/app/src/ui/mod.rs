@@ -1226,12 +1226,15 @@ impl App {
             self.camera.set_mode(self.ui.settings.camera);
         }
         if !self.car_from_scene {
+            // The saved car, in the scene's paint (not saved) or its saved one.
             let saved = self.ui.settings.vehicle.and_then(roster::index_of);
-            let paint = self.ui.settings.paint;
+            let paint = self.paint_from_scene.unwrap_or(self.ui.settings.paint);
             if let Some(i) =
                 saved.filter(|&i| (i, paint) != (self.ui.vehicle, self.ui.vehicle_paint))
             {
-                self.switch_to(i, paint, false);
+                let remember = self.paint_from_scene.is_none();
+                let switched = self.switch_vehicle_at(i, paint, false, remember);
+                debug_assert!(switched.is_ok(), "{switched:?}");
             }
         }
         self.apply_clock_speed();

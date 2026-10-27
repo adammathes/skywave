@@ -10,8 +10,10 @@
 //!   procedural `california_coast` place for the seed).
 //! - `car=<id>`: built-in vehicle id (default: the vehicle setting, the car last picked,
 //!   else [`DEFAULT_VEHICLE`]).
-//! - `paint=<n>`: the car's palette entry, counting from 0 (default 0); past the end of
-//!   its palette is an error. Without `car=`, a saved vehicle setting replaces both.
+//! - `paint=<n>`: the car's palette entry, counting from 0 (default: 0 with `car=`, else the
+//!   paint saved with the vehicle setting). With `car=`, past the end of its palette is an
+//!   error; without, it paints the car the game starts in (the saved one, else the default),
+//!   its first paint when that car has fewer. Not saved.
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
 //!   which starts at `chase-mid` and remembers the last one picked).
 //! - `t=HH:MM`: time of day; when given the clock is frozen there (default 17:40, running).
@@ -63,8 +65,8 @@ pub struct SceneSetup {
     pub car: String,
     /// The scene named the car (`car=`): the saved vehicle setting does not replace it.
     pub car_given: bool,
-    /// The car's palette entry.
-    pub paint: usize,
+    /// The car's palette entry, if the scene gave one.
+    pub paint: Option<usize>,
     /// The camera, or `None` for the player's camera setting.
     pub camera: Option<CameraMode>,
     /// Seconds of day the clock is frozen at, or `None` for the default running clock.
@@ -95,7 +97,7 @@ impl Default for SceneSetup {
             place: PlaceKey::TestTown,
             car: DEFAULT_VEHICLE.to_string(),
             car_given: false,
-            paint: 0,
+            paint: None,
             camera: None,
             time_s: None,
             pos: None,
@@ -147,7 +149,7 @@ impl SceneSetup {
                 self.car = value.to_string();
                 self.car_given = true;
             }
-            "paint" => self.paint = value.parse().map_err(|_| bad())?,
+            "paint" => self.paint = Some(value.parse().map_err(|_| bad())?),
             "cam" => self.camera = Some(CameraMode::from_name(value).ok_or_else(bad)?),
             "t" => self.time_s = Some(parse_clock(value).ok_or_else(bad)?),
             "pos" => {
@@ -232,7 +234,7 @@ mod tests {
         assert_eq!(s.place, PlaceKey::Coast);
         assert_eq!(s.car, "palisade_wagon");
         assert!(s.car_given && !SceneSetup::default().car_given);
-        assert_eq!((s.paint, SceneSetup::default().paint), (2, 0));
+        assert_eq!((s.paint, SceneSetup::default().paint), (Some(2), None));
         assert_eq!(s.camera, Some(CameraMode::Cockpit));
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
         assert_eq!(s.pos, Some([-200.5, 97.0]));

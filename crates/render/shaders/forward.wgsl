@@ -140,7 +140,8 @@ struct MeshOut {
     @location(4) emissive: vec3<f32>,
     // Share of the frame's cabin light.
     @location(5) cabin: f32,
-    // x: lights in the instance's set, y, z: their indices, a byte each.
+    // x: lights in the instance's set (+256: no sun shadow), y, z: their indices, a byte
+    // each.
     @location(6) @interpolate(flat) lights: vec3<u32>,
 };
 
@@ -172,7 +173,7 @@ fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
     let glow = bitcast<f32>(i.params.x);
     out.emissive = cap_emissive(v.emissive.rgb * (scale * window * frame.emissive.x * glow));
     out.cabin = f32(i.params.y & 0xffffu) * (1.0 / 65535.0);
-    out.lights = vec3<u32>(min(i.params.y >> 16u, LIGHTS_PER_DRAW), i.params.z, i.params.w);
+    out.lights = vec3<u32>(min((i.params.y >> 16u) & 255u, LIGHTS_PER_DRAW) | ((i.params.y >> 16u) & 256u), i.params.z, i.params.w);
     return out;
 }
 
@@ -238,7 +239,7 @@ fn spot_cos(d: vec3<f32>, axis: vec3<f32>, squash: f32) -> f32 {
 // light's cone covers every direction.
 fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec3<u32>) -> vec3<f32> {
     var sum = vec3<f32>(0.0);
-    for (var k = 0u; k < light_set.x; k++) {
+    for (var k = 0u; k < (light_set.x & 255u); k++) {
         let word = select(light_set.z, light_set.y, k < 4u);
         let index = min((word >> ((k & 3u) * 8u)) & 255u, MAX_LIGHTS - 1u);
         let packed = frame.lights[index];
@@ -323,8 +324,9 @@ fn shade(in: MeshOut) -> vec3<f32> {
     let albedo = in.color.rgb * texel.rgb;
     let n = normalize(in.normal);
     let ndl = max(dot(n, frame.sun_dir.xyz), 0.0);
-    var vis = 0.0;
-    if ndl > 0.0 {
+    // 1: unshadowed (it only ever scales ndl); bit 8 of the light count skips the test.
+    var vis = 1.0;
+    if ndl > 0.0 && (in.lights.x & 256u) == 0u {
         vis = sun_visibility(in.world_pos, n, ndl);
     }
     // Hemisphere ambient from the sky model: mean sky radiance above, lit ground below. A car's

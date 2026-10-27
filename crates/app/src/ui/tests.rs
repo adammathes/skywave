@@ -943,7 +943,9 @@ fn turntable(h: &mut Harness) -> Vec<render::MeshId> {
     let view = h.app.scene_view(1.0, 16.0 / 9.0);
     assert_eq!(range.end, view.instances.len());
     let shown = &view.instances[range];
-    assert!(shown.iter().all(|i| !i.casts_shadow && i.lights.is_empty()));
+    assert!(shown
+        .iter()
+        .all(|i| !i.casts_shadow && !i.receives_shadow && i.lights.is_empty()));
     let meshes: Vec<_> = shown.iter().map(|i| i.mesh).collect();
     assert!(meshes.is_empty() || meshes.last() == Some(&disc));
     meshes
@@ -1232,6 +1234,27 @@ fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
     });
     let setup = crate::SceneSetup::from_query("car=regent_coupe_cabrio&paint=7&stream=0").unwrap();
     assert!(App::from_setup(&setup).is_err(), "seven paints");
+    // Without car=, the paint goes to the car the game starts in: the saved Regent here,
+    // and it is not saved; past that car's palette, its first paint.
+    let saved = SharedStore::default();
+    *saved.0.borrow_mut() =
+        Some(r#"{ "drive": { "vehicle": "regent_coupe_cabrio", "paint": 2 } }"#.to_owned());
+    for (query, paint) in [("paint=5", 5), ("paint=7", 0), ("", 2)] {
+        let setup = crate::SceneSetup::from_query(&format!("{query}&stream=0")).unwrap();
+        let mut scene = App::from_setup(&setup).unwrap();
+        scene.set_settings_store(Box::new(saved.clone()));
+        assert_eq!(scene.drive.spec.id, "regent_coupe_cabrio", "{query}");
+        assert_eq!(scene.ui().vehicle_paint(), paint, "{query}");
+        assert_eq!(Settings::from_json(&saved.load().unwrap()).0.paint, 2);
+    }
+    // ...and with nothing saved, the default car (eight paints).
+    let setup = crate::SceneSetup::from_query("paint=7&stream=0").unwrap();
+    let mut scene = App::from_setup(&setup).unwrap();
+    scene.set_settings_store(Box::new(SharedStore::default()));
+    assert_eq!(
+        (scene.drive.spec.id.as_str(), scene.ui().vehicle_paint()),
+        ("corsair_gtx", 7)
+    );
     // A saved paint the car does not have is its first.
     let store = SharedStore::default();
     *store.0.borrow_mut() =
@@ -1243,67 +1266,128 @@ fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
 
 #[test]
 fn the_vehicle_page_fits_the_deck_and_a_tv() {
+    // The widest rows: the longest name, and the most paints.
+    let r = roster::roster();
+    let longest = (0..r.len()).max_by_key(|&i| r[i].name.len()).unwrap();
+    let most = (0..r.len()).max_by_key(|&i| r[i].paints.len()).unwrap();
+    assert_eq!(r[longest].name, "Seabreeze Convertible");
+    assert_eq!(r[most].paints.len(), roster::MAX_PAINTS.min(8));
     for target in [(1280, 800), (1920, 1080)] {
         for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
             let mut h = Harness::new();
             h.app.set_target_size(target.0, target.1);
             h.app.ui.force_ui_scale(scale);
             h.open(&[ItemId::Open(Page::Vehicle)]);
-            let ui = h.ui();
-            let [sx, sy, sw, sh] = render::HudLayout::safe_rect(scale);
-            let hud = ui.hud();
-            let stage = ui.preview().map(|p| p.2);
-            // Every glyph and box but the shade inside the safe area; the panel's left of
-            // the stage, and only the car's name and number (and their shadows) over it.
-            for item in hud.items {
-                let (x, y, w, h) = match *item {
-                    render::HudItem::Text {
-                        x,
-                        y,
-                        scale: s,
-                        text,
-                        ..
-                    } => {
-                        let t = hud.str(text);
-                        let w = render::font::text_width(t) as f32 * s;
-                        let h = render::font::GLYPH_H as f32 * s;
-                        (x, y, w, h)
-                    }
-                    render::HudItem::Rect { color, .. } if color == SHADE_TEST => continue,
-                    render::HudItem::Rect { x, y, w, h, .. } => (x, y, w, h),
-                    render::HudItem::Image(i) => (i.x, i.y, i.w, i.h),
-                };
-                let what = format!("{target:?} x{scale} {item:?}");
-                assert!(x >= sx - 0.5 && x + w <= sx + sw + 0.5, "{what}");
-                assert!(y >= sy - 0.5 && y + h <= sy + sh + 0.5, "{what}");
-                if let Some([stx, sty, ..]) = stage {
-                    if x < stx {
-                        assert!(x + w <= stx, "into the stage: {what}");
-                    } else {
-                        assert!(y + h <= sty + 4.0, "over the turntable: {what}");
-                    }
+            for car in [most, longest] {
+                while browsed(&h).0 != car {
+                    h.pad(PadButton::DpadRight);
                 }
-            }
-            // The car, its paint and Drive always show; the specs as room allows.
-            let text = h.hud_text();
-            for want in ["Corsair GTX", "Paint", "Drive this car", "Sports"] {
-                assert!(text.contains(want), "{target:?} x{scale}: {text}");
-            }
-            if scale <= 1.5 {
-                assert!(text.contains("Top speed"), "x{scale}: {text}");
-                assert!(stage.is_some(), "x{scale}: room for the turntable");
-            }
-            match stage {
-                Some(stage) => {
-                    let [x0, y0, x1, y1] = h.app.stage_ndc(stage, 16.0 / 9.0);
-                    let inside = |v: f32| (-1.0..=1.0).contains(&v);
-                    assert!(inside(x0) && inside(x1) && inside(y0) && inside(y1));
-                    assert!(x1 - x0 > 0.3 && y1 - y0 > 0.6, "{:?}", [x0, y0, x1, y1]);
-                    assert!(!turntable(&mut h).is_empty());
-                }
-                None => assert!(turntable(&mut h).is_empty()),
+                // On the paint row, its last swatch chosen, then back on the car row.
+                h.pad(PadButton::DpadDown);
+                h.pad(PadButton::DpadLeft);
+                h.pad(PadButton::DpadUp);
+                assert_eq!(browsed(&h), (car, r[car].paints.len() - 1));
+                fits(
+                    &mut h,
+                    &format!("{target:?} x{scale} {}", r[car].name),
+                    scale,
+                );
             }
         }
+    }
+}
+
+/// The Vehicle page as drawn now fits the safe area at `scale`: every glyph and box but
+/// the shade inside it, the panel left of the stage and only the car's name and number
+/// (and their shadows) over it, the rows always shown and the specs as room allows, and the
+/// stage (when there is room for it) a sane rectangle on screen with the turntable in it.
+fn fits(h: &mut Harness, what: &str, scale: f32) {
+    let ui = h.ui();
+    let [sx, sy, sw, sh] = render::HudLayout::safe_rect(scale);
+    let hud = ui.hud();
+    let stage = ui.preview().map(|p| p.2);
+    for item in hud.items {
+        let (x, y, w, h) = match *item {
+            render::HudItem::Text {
+                x,
+                y,
+                scale: s,
+                text,
+                ..
+            } => {
+                let t = hud.str(text);
+                let w = render::font::text_width(t) as f32 * s;
+                let h = render::font::GLYPH_H as f32 * s;
+                (x, y, w, h)
+            }
+            render::HudItem::Rect { color, .. } if color == SHADE_TEST => continue,
+            render::HudItem::Rect { x, y, w, h, .. } => (x, y, w, h),
+            render::HudItem::Image(i) => (i.x, i.y, i.w, i.h),
+        };
+        let at = format!("{what}: {item:?}");
+        assert!(x >= sx - 0.5 && x + w <= sx + sw + 0.5, "{at}");
+        assert!(y >= sy - 0.5 && y + h <= sy + sh + 0.5, "{at}");
+        if let Some([stx, sty, ..]) = stage {
+            if x < stx {
+                assert!(x + w <= stx, "into the stage: {at}");
+            } else {
+                assert!(y + h <= sty + 4.0, "over the turntable: {at}");
+            }
+        }
+    }
+    let text = h.hud_text();
+    for want in ["Car", "Paint", "Drive this car"] {
+        assert!(text.contains(want), "{what}: {text}");
+    }
+    if scale <= 1.5 {
+        assert!(text.contains("Top speed"), "{what}: {text}");
+        assert!(stage.is_some(), "{what}: room for the turntable");
+    }
+    match stage {
+        Some(stage) => {
+            let [x0, y0, x1, y1] = h.app.stage_ndc(stage, 16.0 / 9.0);
+            let inside = |v: f32| (-1.0..=1.0).contains(&v);
+            assert!(
+                inside(x0) && inside(x1) && inside(y0) && inside(y1),
+                "{what}"
+            );
+            assert!(
+                x1 - x0 > 0.3 && y1 - y0 > 0.6,
+                "{what}: {:?}",
+                [x0, y0, x1, y1]
+            );
+            assert!(!turntable(h).is_empty(), "{what}");
+        }
+        None => assert!(turntable(h).is_empty(), "{what}"),
+    }
+}
+
+#[test]
+fn nothing_near_the_eye_cuts_into_the_turntable() {
+    // Busy traffic round the start, then the page: no NPC car or prop instance is left
+    // within CLEAR_M of the eye, and the turntable's own instances are all there.
+    let setup = crate::SceneSetup::from_query("place=town&t=12:00&traffic=busy&stream=0").unwrap();
+    let mut h = Harness {
+        app: App::from_setup(&setup).unwrap(),
+        input: InputMapper::default(),
+    };
+    for _ in 0..240 {
+        h.frame();
+    }
+    assert!(h.app.npcs.count() > 0, "traffic is running");
+    h.open(&[ItemId::Open(Page::Vehicle)]);
+    let n = turntable(&mut h).len();
+    assert_eq!(n, 8);
+    let world = h.app.world_instances;
+    let eye = h.app.camera.pose(&h.app.drive, 1.0).eye;
+    let range = h.app.preview_instances();
+    let view = h.app.scene_view(1.0, 16.0 / 9.0);
+    for inst in &view.instances[world..range.start] {
+        let at = glam::Vec3::from_slice(&inst.transform[3][..3]);
+        assert!(
+            at.distance(eye) > crate::preview::CLEAR_M,
+            "{at} by the eye {eye}"
+        );
     }
 }
 
