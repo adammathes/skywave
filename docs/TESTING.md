@@ -35,6 +35,9 @@ Regenerating every golden (after a deliberate visual change) is one line: `tools
 
 WebGL2 under SwiftShader is slow (seconds per frame); the tool waits for `window.skywaveReady` and ten more frames, allows the capture 180 s, and uses a 1280×720 viewport. A blank capture fails and never becomes a golden. CI captures `strip-golden-chase` only, diffs it and runs the self-test, and uploads `out/` as an artifact; run the full set locally.
 
+## Shaders and the web start-up
+`crates/render` tests parse and validate every WGSL module with naga and translate every entry point to GLSL ES 3.00 (WebGL2), MSL 2.1 and SPIR-V; build the whole renderer on wgpu's no-op backend under WebGL2 limits in both HDR modes and both corona depth reads; and check that the shaders stay core WGSL (no `enable`, `f16`, `override`, storage or sample-index use). The MSL translation is the stand-in for Safari, which compiles WGSL to Metal itself: it catches much of what Metal rejects (depth reads, packing builtins, interpolation, reserved names). `crates/platform-web` tests the backend decision (`fallback`: every WebGPU start-up failure kind retries on WebGL2 unless `gpu=1`) and the canvas sizing. In the browser, `?diag=1` shows the start-up checks as a report and `?gl=1` / `?gpu=1` pin the backend (docs/RENDERING.md); `tools/web-build.sh` fails when the wasm uses a feature Safari 15 lacks (SIMD, threads, memory64, exception handling, tail calls).
+
 ## Determinism
 - `core::hash64` has fixed test vectors. `Rng` sequences are pinned.
 - World: `crates/world/tests/golden.rs` holds a hash per chunk for seeds 1..=8 (whole 16×16 place). A mismatch fails with the chunk coordinates and the stage that diverged (each stage hashes its output).

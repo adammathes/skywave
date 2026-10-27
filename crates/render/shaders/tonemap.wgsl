@@ -1,4 +1,4 @@
-// HDR -> display: exposure, bloom, AgX, vignette and dither, sRGB encode when the target
+// HDR -> display: upscale from a scaled target, exposure, bloom, AgX, vignette and dither, sRGB encode when the target
 // format does not do it in hardware (see `display_exposed` in common.wgsl). Prepended
 // with bloom.wgsl for its sampler and tent filter.
 
@@ -11,7 +11,14 @@ fn vs_tonemap(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32>
 
 @fragment
 fn fs_tonemap(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
-    var c = textureLoad(hdr, vec2<i32>(frag.xy), 0).rgb * frame.params.x;
+    var c: vec3<f32>;
+    if all(frame.render_size.xy == frame.screen.xy) {
+        c = textureLoad(hdr, vec2<i32>(frag.xy), 0).rgb;
+    } else {
+        // A scaled target: bilinear upscale to the swapchain.
+        c = textureSampleLevel(hdr, bloom_sampler, frag.xy * frame.screen.zw, 0.0).rgb;
+    }
+    c *= frame.params.x;
     // Level 0 of the bloom chain holds the sum of all five levels, wide and narrow.
     c += tent9(bloom_src, frag.xy * frame.screen.zw) * frame.post.x;
     return display_exposed(c, frag.xy);

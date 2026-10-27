@@ -23,6 +23,7 @@ mod lighttiles;
 pub mod map;
 mod places;
 mod propinst;
+pub mod radio;
 pub mod scene;
 pub mod selftest;
 mod settings;
@@ -32,7 +33,9 @@ pub mod ui;
 pub mod vehicles;
 mod worldmesh;
 
-pub use settings::{Handling, MemoryStore, Settings, SettingsStore, SETTINGS_VERSION};
+pub use settings::{
+    GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
+};
 
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
@@ -186,6 +189,10 @@ pub struct App {
     /// The sound's view of the game, and what it made of the last frame.
     sound: sound::Sound,
     audio: audio::synth::AudioParams,
+    /// Width over height of the last frame drawn (for placing the dash's radio text).
+    aspect: f32,
+    /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
+    target: Option<(u32, u32)>,
 }
 
 /// A car whose meshes the renderer has (or will have, once drained).
@@ -313,6 +320,8 @@ impl App {
             props,
             sound,
             audio: audio::synth::AudioParams::default(),
+            aspect: 16.0 / 9.0,
+            target: None,
         })
     }
 
@@ -533,6 +542,7 @@ impl App {
     pub fn scene_view(&mut self, alpha: f32, aspect: f32) -> SceneView<'_> {
         let alpha = alpha.clamp(0.0, 1.0);
         let aspect = aspect.max(1e-3);
+        self.aspect = aspect;
         let (view, proj) = if self.fly {
             let cam = self.prev.lerp(&self.curr, alpha);
             let proj = directx::perspective(FLY_FOV_DEG.to_radians(), aspect, 0.25, 3000.0);
@@ -594,6 +604,7 @@ impl App {
             instances: &self.instances,
             lights: self.lights.lights(),
             hud: self.ui.hud(),
+            quality: self.ui.render_quality(),
         }
     }
 }
@@ -685,7 +696,8 @@ fn resident_town(place: &Place) -> Town {
     }
 }
 
-/// The instance drawing a world mesh or chunk part of role `role`.
+/// The instance drawing a world mesh or chunk part of role `role`. Neon, signals and lamp
+/// lenses glow rather than block the sun: they cast no shadow.
 fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
     MeshInstance {
         color: if role == PartRole::Glow {
@@ -693,6 +705,7 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
         } else {
             [1.0; 4]
         },
+        casts_shadow: role == PartRole::Tile,
         ..MeshInstance::new(mesh, Mat4::IDENTITY.to_cols_array_2d())
     }
 }
@@ -714,7 +727,11 @@ fn streamed_town(place: Place, budget: StreamBudget) -> Town {
     let mut roles = Vec::with_capacity(capacity);
     let mut bounds = Vec::with_capacity(capacity);
     for i in 0..fixed {
-        instances.push(world_instance(MeshId(i as u32), PartRole::Tile));
+        // Under the chunks everywhere: drawn after them, so they hide it before shading.
+        instances.push(MeshInstance {
+            late: true,
+            ..world_instance(MeshId(i as u32), PartRole::Tile)
+        });
         roles.push(PartRole::Tile);
         bounds.push(None);
     }

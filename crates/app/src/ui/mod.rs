@@ -9,6 +9,9 @@
 //! map while MapZoom and the mouse wheel zoom it; MapToggle, Back or Pause close it. Every
 //! frame the UI draws itself into a [`HudBuilder`] that [`crate::App::scene_view`] hands to
 //! the renderer.
+//!
+//! The UI also owns the car radio ([`CarRadio`]): its settings live with the others, the
+//! station keys act while driving, and its toast and dash text are part of the HUD.
 
 mod draw;
 mod menu;
@@ -29,9 +32,10 @@ use crate::map::view::{
     FullMap, MapGeom, MINIMAP_RANGES_M, ZOOM_OCTAVES_PER_NOTCH, ZOOM_OCTAVES_PER_S,
 };
 use crate::map::MapPoi;
-use crate::settings::{Handling, Settings, SettingsStore};
+use crate::radio::{self, CarRadio};
+use crate::settings::{GpuInfo, Handling, Quality, Settings, SettingsStore};
 use crate::App;
-use render::{Hud, HudBuilder, HudLayout, RenderStats, Sky};
+use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
 use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 
 /// Seconds a remap capture waits for an input before giving up.
@@ -75,6 +79,10 @@ pub enum Toast {
     Reset(DeviceKind),
     /// Switched to the built-in car with this index (its name).
     Vehicle(usize),
+    /// A stream was added to the stations.
+    StreamAdded,
+    /// The text given for a stream was not an `https://` URL (or there are too many).
+    StreamRejected,
 }
 
 /// What the minimap and the full map show, set once when the place loads.
@@ -121,6 +129,20 @@ pub struct Ui {
     map: MapHud,
     /// A UI scale the scene asked for, kept over whatever the store loads.
     forced_ui_scale: Option<f32>,
+    radio: CarRadio,
+    /// The platform can ask the user for a line of text (the "Add stream URL" item).
+    text_entry: bool,
+    /// The preset [`Quality::auto`] picked for this device (Medium until the platform
+    /// says what the GPU is).
+    auto_quality: Quality,
+    /// A preset the command line forced this session (not saved; a choice on the Video
+    /// page replaces it).
+    forced_quality: Option<Quality>,
+    /// CPU time the platform spent recording and submitting the last frame, ms (0:
+    /// not measured).
+    cpu_submit_ms: f32,
+    /// Adapter and backend, for the overlay.
+    gpu_label: String,
 }
 
 impl Default for Ui {
@@ -157,6 +179,28 @@ impl Ui {
             hud: HudBuilder::new(),
             map: MapHud::default(),
             forced_ui_scale: None,
+            radio: CarRadio::new(),
+            text_entry: false,
+            auto_quality: Quality::Medium,
+            forced_quality: None,
+            cpu_submit_ms: 0.0,
+            gpu_label: String::new(),
+        }
+    }
+
+    /// The graphics preset in effect: forced, else saved, else picked for the device.
+    pub fn quality(&self) -> Quality {
+        self.forced_quality
+            .or(self.settings.quality)
+            .unwrap_or(self.auto_quality)
+    }
+
+    /// What the renderer may spend this frame: the preset at the resolution scale setting
+    /// (a forced preset brings its own scale).
+    pub fn render_quality(&self) -> RenderQuality {
+        match self.forced_quality {
+            Some(q) => q.render(q.resolution_scale()),
+            None => self.quality().render(self.settings.resolution_scale),
         }
     }
 
@@ -165,7 +209,7 @@ impl Ui {
     pub fn force_ui_scale(&mut self, s: f32) {
         self.forced_ui_scale = Some(s);
         self.settings.ui_scale = s;
-        self.settings = self.settings.sanitized();
+        self.settings = std::mem::take(&mut self.settings).sanitized();
     }
 
     /// The map the HUD draws: its image's place in the world and the labelled POIs.
@@ -307,7 +351,7 @@ impl Ui {
     fn remember_camera(&mut self, mode: CameraMode) {
         if mode != self.settings.camera {
             self.settings.camera = mode;
-            self.settings = self.settings.sanitized();
+            self.settings = std::mem::take(&mut self.settings).sanitized();
             self.dirty = true;
             self.save_if_dirty();
         }
@@ -325,10 +369,12 @@ impl Ui {
         }
         if let Some(s) = self.forced_ui_scale {
             self.settings.ui_scale = s;
-            self.settings = self.settings.sanitized();
+            self.settings = std::mem::take(&mut self.settings).sanitized();
         }
         self.store = Some(store);
         self.dirty = false;
+        self.radio.set_gain(self.radio_gain());
+        self.radio.apply(&self.settings.radio);
     }
 
     /// Writes the settings document if anything changed since the last save.
@@ -364,6 +410,9 @@ impl Ui {
             bindings: &self.bindings,
             clock,
             can_quit: self.can_quit,
+            radio: &self.radio,
+            text_entry: self.text_entry,
+            quality: self.quality(),
         }
     }
 
@@ -471,6 +520,17 @@ impl Ui {
                 self.settings.dashboard = i == 0;
                 self.dirty = true;
             }
+            Effect::Choose(ItemId::RadioPreset, i) => {
+                radio::choose_preset(&mut self.settings.radio, i);
+                self.radio_settings_changed();
+            }
+            Effect::Choose(ItemId::Quality, i) => {
+                let q = Quality::ALL[i.min(Quality::ALL.len() - 1)];
+                self.settings.quality = Some(q);
+                self.settings.resolution_scale = q.resolution_scale();
+                self.forced_quality = None;
+                self.dirty = true;
+            }
             Effect::Choose(..) => {}
             Effect::Activate(id) => self.activate(id),
             Effect::Capture {
@@ -539,7 +599,14 @@ impl Ui {
             }
             ItemId::Mute => {
                 self.settings.mute = on;
-                self.dirty = true;
+                self.radio_settings_changed();
+            }
+            ItemId::Station(i) => {
+                if let Some(row) = self.radio.rows().get(i) {
+                    let id = row.id.clone();
+                    self.settings.radio.set_enabled(&id, on);
+                    self.radio_settings_changed();
+                }
             }
             _ => {}
         }
@@ -579,7 +646,7 @@ impl Ui {
             }
             ItemId::MasterVolume => {
                 self.settings.master_volume = v;
-                self.dirty = true;
+                self.radio_settings_changed();
             }
             ItemId::EngineVolume => {
                 self.settings.engine_volume = v;
@@ -592,9 +659,13 @@ impl Ui {
             ItemId::TimeOfDay => {
                 clock.seconds_of_day = (f64::from(v) * 3600.0).rem_euclid(DAY_SECONDS);
             }
+            ItemId::RadioVolume => {
+                self.settings.radio.volume = v;
+                self.radio_settings_changed();
+            }
             _ => {}
         }
-        self.settings = self.settings.sanitized();
+        self.settings = std::mem::take(&mut self.settings).sanitized();
     }
 
     fn activate(&mut self, id: ItemId) {
@@ -629,7 +700,49 @@ impl Ui {
                 self.bindings_edited();
             }
             ItemId::KeepExisting | ItemId::UseNew => self.settle_conflict(id == ItemId::UseNew),
+            ItemId::AddStream => self.radio.request_url(),
+            ItemId::ClearStreams => {
+                self.settings.radio.clear_custom();
+                self.radio_settings_changed();
+            }
             _ => {}
+        }
+    }
+
+    /// The radio follows a change to its settings, which are saved with the next save.
+    fn radio_settings_changed(&mut self) {
+        self.settings.radio = std::mem::take(&mut self.settings.radio).sanitized();
+        self.radio.set_gain(self.radio_gain());
+        self.radio.apply(&self.settings.radio);
+        self.dirty = true;
+    }
+
+    /// One frame of the radio (never in a still scene): it starts from the settings on
+    /// the first, takes the station keys when `keys` (driving, no menu or map up), runs its
+    /// tune noise, and saves the power and station when they change.
+    fn radio_frame(&mut self, s: &InputState, dt: f32, keys: bool) {
+        self.radio.set_gain(self.radio_gain());
+        self.radio.start(&self.settings.radio);
+        if keys {
+            self.radio.press(s);
+        }
+        self.radio.tick(dt);
+        if self.radio.store(&mut self.settings.radio) {
+            self.dirty = true;
+            self.save_if_dirty();
+        }
+    }
+
+    pub fn radio(&self) -> &CarRadio {
+        &self.radio
+    }
+
+    /// The master volume scales the radio too, and mute silences it.
+    fn radio_gain(&self) -> f32 {
+        if self.settings.mute {
+            0.0
+        } else {
+            self.settings.master_volume
         }
     }
 
@@ -821,6 +934,10 @@ impl App {
         }
         self.apply_clock_speed();
         self.apply_settings();
+        let radio_keys = !was_open && !self.ui.is_open() && !self.ui.full_map_open();
+        if !self.still {
+            self.ui.radio_frame(&state, dt as f32, radio_keys);
+        }
         let steps = if self.ui.is_open() {
             Steps {
                 count: 0,
@@ -858,6 +975,7 @@ impl App {
             self.camera.pose(&self.drive, steps.alpha).eye
         };
         let (car, heading) = self.map_focus(steps.alpha);
+        let radio_display = self.radio_display(steps.alpha);
         let ctx = draw::DrawCtx {
             daylight: &daylight,
             clock: &self.time.clock,
@@ -865,6 +983,7 @@ impl App {
             ticks: self.ticks,
             car,
             heading,
+            radio_display,
         };
         self.ui.draw(&ctx);
         self.audio = self.sound.params(
@@ -874,6 +993,10 @@ impl App {
             &self.ui.settings,
             self.ui.is_open(),
         );
+        // The engine and the world duck under a station that is playing.
+        if self.ui.radio.radio().is_live() {
+            self.audio.radio = self.ui.settings.radio.volume;
+        }
         steps
     }
 
@@ -896,6 +1019,89 @@ impl App {
                 [pose.pos.x, pose.pos.z],
                 crate::map::view::heading_of([f.x, f.z]),
             )
+        }
+    }
+
+    /// Where the radio's display quad is on screen this frame, in the cockpit view only:
+    /// its corners in normalized device coordinates, with the aspect they were projected
+    /// at and the display's glow color. `None` when it is behind the eye.
+    fn radio_display(&self, alpha: f32) -> Option<draw::RadioDisplay> {
+        if self.fly || self.camera.mode() != crate::CameraMode::Cockpit {
+            return None;
+        }
+        let pose = self.camera.pose(&self.drive, alpha);
+        let proj = glam::camera::rh::proj::directx::perspective(
+            pose.fov_y_rad,
+            self.aspect,
+            pose.near_m,
+            pose.far_m,
+        );
+        let clip_from_world = proj * pose.view();
+        let body = self.drive.pose(alpha);
+        let mut ndc = [[0.0; 2]; 4];
+        for (out, &p) in ndc.iter_mut().zip(&self.drive.layout.radio_display) {
+            let c = clip_from_world * body.point(p).extend(1.0);
+            if c.w <= pose.near_m * 0.5 {
+                return None;
+            }
+            *out = [c.x / c.w, c.y / c.w];
+        }
+        let [r, g, b] = self.drive.layout.radio_glow;
+        Some(draw::RadioDisplay {
+            ndc,
+            aspect: self.aspect,
+            target: self.target,
+            color: [r, g, b, 255],
+        })
+    }
+
+    /// The size of the target the HUD is drawn on, pixels (the platform calls this at
+    /// start and on every resize; it sizes the dash's radio text).
+    pub fn set_target_size(&mut self, width: u32, height: u32) {
+        self.target = Some((width.max(1), height.max(1)));
+    }
+
+    /// The radio's commands for the platform's player since the last call (see
+    /// [`audio::RadioCommand`]). Call once a frame, after [`App::frame`].
+    pub fn radio_commands(&mut self) -> std::vec::Drain<'_, audio::RadioCommand> {
+        self.ui.radio.commands()
+    }
+
+    /// A report from the platform's player.
+    pub fn radio_event(&mut self, event: audio::PlayerEvent) {
+        self.ui.radio.on_event(event);
+    }
+
+    /// The radio's state, station list and volume.
+    pub fn radio(&self) -> &audio::Radio {
+        self.ui.radio.radio()
+    }
+
+    /// The platform can ask the user for a stream URL: the Audio page offers "Add stream
+    /// URL", and [`App::take_stream_url_request`] says when it was chosen.
+    pub fn set_text_entry(&mut self, on: bool) {
+        self.ui.text_entry = on;
+    }
+
+    /// True once after the user chose "Add stream URL": ask for one and pass it to
+    /// [`App::add_stream_url`].
+    pub fn take_stream_url_request(&mut self) -> bool {
+        self.ui.radio.take_url_request()
+    }
+
+    /// Adds a stream the user typed to the stations (an `https://` URL), and says so.
+    pub fn add_stream_url(&mut self, url: &str) {
+        if url.trim().is_empty() {
+            return;
+        }
+        let ui = &mut self.ui;
+        match ui.settings.radio.add_custom(url) {
+            Ok(_) => {
+                ui.radio_settings_changed();
+                ui.save_if_dirty();
+                ui.show(Toast::StreamAdded);
+            }
+            Err(_) => ui.show(Toast::StreamRejected),
         }
     }
 
@@ -942,6 +1148,38 @@ impl App {
     /// The renderer's counters for the last frame, for the performance overlay.
     pub fn set_render_stats(&mut self, stats: RenderStats) {
         self.ui.render_stats = stats;
+    }
+
+    /// CPU time the platform spent in the last frame's `scene_view` and
+    /// `Renderer::render` (recording and submitting), ms, for the overlay.
+    pub fn set_cpu_submit_ms(&mut self, ms: f32) {
+        self.ui.cpu_submit_ms = ms;
+    }
+
+    /// What the GPU is: picks the preset for a player who has not chosen one
+    /// ([`Quality::auto`]) and labels the overlay. Call once, before the first frame.
+    pub fn set_gpu_info(&mut self, gpu: &GpuInfo) {
+        self.ui.auto_quality = Quality::auto(gpu);
+        self.ui.gpu_label = if gpu.backend.is_empty() {
+            gpu.name.clone()
+        } else {
+            format!("{} ({})", gpu.name, gpu.backend)
+        };
+    }
+
+    /// Uses preset `q` this session whatever is saved (`None` goes back to the setting).
+    pub fn force_quality(&mut self, q: Option<Quality>) {
+        self.ui.forced_quality = q;
+    }
+
+    /// The renderer's construction options for this app: its chunk pool and the
+    /// quality in effect (each frame's `SceneView::quality` keeps it current).
+    pub fn renderer_options(&self) -> render::RendererOptions {
+        render::RendererOptions {
+            chunk_pool: self.chunk_pool_config(),
+            quality: self.ui.render_quality(),
+            ..render::RendererOptions::default()
+        }
     }
 
     /// Opens the settings menu (over the pause menu), e.g. at startup for screenshots.

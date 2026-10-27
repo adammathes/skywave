@@ -9,11 +9,6 @@
 // so a lamp passing behind a pole or a palm fades instead of popping. The vertex shader
 // does the test once per corner; the fragment shader only draws the profile.
 
-// The scene's depth, read through a nearest, non-comparison sampler: on GL a float depth
-// texture is incomplete (reads 0) unless sampled with nearest filtering.
-@group(1) @binding(0) var scene_depth: texture_2d<f32>;
-@group(1) @binding(1) var depth_sampler: sampler;
-
 struct CoronaIn {
     // xyz: world position (m), w: radius (m); or, for a body at infinity (the sun, the
     // moon), xyz the unit direction toward it and w minus its angular radius (rad).
@@ -34,16 +29,9 @@ struct CoronaOut {
 // lamp's own head and lens sit closer than this to its light.
 const CORONA_DEPTH_MARGIN: f32 = 0.4;
 
-// 1 when the scene depth at pixel `pix` is not in front of `limit` (NDC depth), 0 when
-// it is or when `pix` is off the screen.
-fn depth_clear(pix: vec2<f32>, limit: f32) -> f32 {
-    let size = vec2<f32>(textureDimensions(scene_depth));
-    if any(pix < vec2<f32>(0.0)) || any(pix >= size) {
-        return 0.0;
-    }
-    let d = textureSampleLevel(scene_depth, depth_sampler, (floor(pix) + 0.5) / size, 0.0).r;
-    return select(0.0, 1.0, d >= limit);
-}
+// `depth_clear(pix, limit)` comes from corona_sample.wgsl (GL) or corona_load.wgsl (WebGPU
+// and native): 1 when the scene depth at pixel `pix` is not in front of `limit` (NDC depth),
+// 0 when it is or when `pix` is off the screen.
 
 @vertex
 fn vs_corona(@builtin(vertex_index) index: u32, c: CoronaIn) -> CoronaOut {
@@ -86,7 +74,7 @@ fn vs_corona(@builtin(vertex_index) index: u32, c: CoronaIn) -> CoronaOut {
     fade *= sqrt(clamp(radius_px / r, 0.0, 1.0));
 
     let ndc = p.xy / p.w;
-    let pix = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * frame.screen.xy;
+    let pix = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * frame.render_size.xy;
     let spread = clamp(0.2 * r, 1.0, 6.0);
     let seen = depth_clear(pix, limit)
         + depth_clear(pix + vec2<f32>(spread, 0.0), limit)
@@ -98,7 +86,7 @@ fn vs_corona(@builtin(vertex_index) index: u32, c: CoronaIn) -> CoronaOut {
         return out;
     }
     let corner = vec2<f32>(f32(index & 1u), f32(index >> 1u)) * 2.0 - 1.0;
-    out.clip = vec4<f32>(ndc + corner * (2.0 * r) * frame.screen.zw, 0.0, 1.0);
+    out.clip = vec4<f32>(ndc + corner * (2.0 * r) * frame.render_size.zw, 0.0, 1.0);
     out.local = corner;
     out.color = c.color.rgb * fade;
     return out;

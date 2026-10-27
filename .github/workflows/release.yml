@@ -9,7 +9,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    branches: [main, claude/intelligent-hypatia-vnrj1a]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:

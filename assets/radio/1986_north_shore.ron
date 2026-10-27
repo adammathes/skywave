@@ -1,0 +1,95 @@
+// Radio preset: 1986 North Shore. Real, listener-supported internet stations whose stream URLs
+// their broadcasters publish for listening (SomaFM's .pls playlists, Radio Paradise's
+// stream links); names are the services' own channel names. Nothing is rehosted.
+// tools/check-streams.mjs answered audio for every URL on the date in `terms_checked`;
+// `verified` turns true after the owner's first listen. Format: crates/audio/src/station.rs,
+// docs/AUDIO_RADIO.md.
+RadioPreset(
+    id: "1986_north_shore",
+    title: "1986 North Shore",
+    scenario: "north_shore_suburb_1986",
+    stations: [
+        Station(
+            id: "somafm_u80s",
+            name: "SomaFM Underground 80s",
+            era: "1980s",
+            format: "early 80s synthpop and new wave",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/u80s-128-mp3",
+                    "https://ice6.somafm.com/u80s-128-mp3",
+                    "https://ice5.somafm.com/u80s-128-mp3",
+                ],
+                homepage: "https://somafm.com/u80s/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "radioparadise_rock",
+            name: "Radio Paradise Rock Mix",
+            era: "mixed",
+            format: "classic and album rock",
+            source: Stream(
+                urls: ["https://stream.radioparadise.com/rock-128"],
+                homepage: "https://radioparadise.com/",
+                codec: Aac,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "radioparadise_main",
+            name: "Radio Paradise Main Mix",
+            era: "mixed",
+            format: "eclectic album rock",
+            source: Stream(
+                urls: ["https://stream.radioparadise.com/mp3-128"],
+                homepage: "https://radioparadise.com/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "somafm_seventies",
+            name: "SomaFM Left Coast 70s",
+            era: "1970s",
+            format: "mellow 70s album rock",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/seventies-128-mp3",
+                    "https://ice6.somafm.com/seventies-128-mp3",
+                    "https://ice5.somafm.com/seventies-128-mp3",
+                ],
+                homepage: "https://somafm.com/seventies/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+        Station(
+            id: "somafm_7soul",
+            name: "SomaFM Seven Inch Soul",
+            era: "1960s",
+            format: "vintage soul from 45s",
+            source: Stream(
+                urls: [
+                    "https://ice2.somafm.com/7soul-128-mp3",
+                    "https://ice6.somafm.com/7soul-128-mp3",
+                    "https://ice5.somafm.com/7soul-128-mp3",
+                ],
+                homepage: "https://somafm.com/7soul/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-26",
+                verified: false,
+            ),
+        ),
+    ],
+)

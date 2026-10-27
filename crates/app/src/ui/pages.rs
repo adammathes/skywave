@@ -16,9 +16,12 @@
 //!            this device; select to remap
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
-//! Video:     UI scale · Resolution scale · Bloom · Performance overlay
+//! Video:     Quality (Low / Deck / Medium / High / Ultra) · UI scale · Resolution scale ·
+//!            Bloom · Performance overlay
 //! HUD:       Minimap · Rotate with car · Minimap zoom
-//! Audio:     Master volume · Engine volume · World volume · Mute
+//! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
+//!            Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
+//! Stations:  one on/off row per station of the preset and per added stream
 //! World:     Time of day · Clock speed
 //! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
@@ -28,10 +31,11 @@ use crate::camera::CameraMode;
 use crate::daylight::{Clock, CLOCK_SPEEDS};
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
+use crate::radio::{CarRadio, PRESET_TITLES};
 use crate::settings::{
-    Handling, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP, RESOLUTION_SCALE_MIN,
-    RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM, UI_SCALE_STEP,
-    VOLUME_STEP,
+    Handling, Quality, Settings, COCKPIT_FOV_MAX, COCKPIT_FOV_MIN, COCKPIT_FOV_STEP,
+    RESOLUTION_SCALE_MIN, RESOLUTION_SCALE_STEP, SEAT_FORWARD_CM, SEAT_HEIGHT_CM, SEAT_STEP_CM,
+    UI_SCALE_STEP, VOLUME_STEP,
 };
 
 use super::menu::{Item, Unit, Widget};
@@ -52,6 +56,8 @@ pub enum Page {
     Video,
     Hud,
     Audio,
+    /// The stations of the preset on the dial, and the added streams.
+    Stations,
     World,
     About,
     /// A remap hit an input another action uses; see `Ui::conflict`.
@@ -87,6 +93,7 @@ pub enum ItemId {
     SeatForward,
     Dashboard,
     CameraShake,
+    Quality,
     UiScale,
     ResolutionScale,
     Bloom,
@@ -100,6 +107,12 @@ pub enum ItemId {
     Mute,
     TimeOfDay,
     ClockSpeed,
+    RadioVolume,
+    RadioPreset,
+    /// Row `i` of `CarRadio::rows`: the station on the dial or not.
+    Station(usize),
+    AddStream,
+    ClearStreams,
     KeepExisting,
     UseNew,
 }
@@ -111,6 +124,11 @@ pub struct PageCtx<'a> {
     pub bindings: &'a Bindings,
     pub clock: &'a Clock,
     pub can_quit: bool,
+    pub radio: &'a CarRadio,
+    /// The platform can ask the user for a line of text (a stream URL).
+    pub text_entry: bool,
+    /// The preset in effect (the saved one, else the one picked for the device).
+    pub quality: Quality,
 }
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
@@ -121,6 +139,8 @@ pub const HANDLING_NAMES: [&str; Handling::ALL.len()] = ["Arcade", "Light", "Off
 /// Names of [`CameraMode::CYCLE`].
 pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
     ["Cockpit", "Hood", "Chase near", "Chase mid", "Chase far"];
+/// Names of [`Quality::ALL`].
+pub const QUALITY_NAMES: [&str; Quality::ALL.len()] = ["Low", "Deck", "Medium", "High", "Ultra"];
 /// The Dashboard choice: index 0 draws it, 1 is hood only.
 pub const DASHBOARD_NAMES: [&str; 2] = ["Full cockpit", "Hood only"];
 
@@ -157,6 +177,7 @@ pub fn title(page: Page) -> &'static str {
         Page::Video => "Video",
         Page::Hud => "HUD",
         Page::Audio => "Audio",
+        Page::Stations => "Stations",
         Page::World => "World",
         Page::About => "About",
         Page::Conflict => "Input already in use",
@@ -176,12 +197,19 @@ pub fn note(page: Page) -> Option<&'static str> {
             "The marked car is the one you are driving.\n\
              Select another to swap it in right where you are.",
         ),
-        Page::Video => Some("Resolution scale is saved for an upcoming renderer option."),
+        Page::Video => Some(
+            "Quality sets shadows, bloom and glow; Deck targets 90 fps there.\n\
+             Resolution scale draws the world smaller and upscales it.",
+        ),
         Page::Drive => Some(
             "Arcade: grippy, short stops, forgiving.\n\
              Light: looser, the car slides more. Off: no help.",
         ),
         Page::Camera => Some("The camera you pick or cycle to is the one the game starts in."),
+        Page::Audio => Some(
+            "Real internet radio: [ and ] change station, \\ turns it off.\n\
+             Streams play where the network allows; nothing is stored.",
+        ),
         _ => None,
     }
 }
@@ -409,6 +437,18 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
         }
         Page::Video => {
             let s = ctx.settings;
+            let index = Quality::ALL
+                .iter()
+                .position(|&q| q == ctx.quality)
+                .unwrap_or(2);
+            add(
+                ItemId::Quality,
+                "Quality",
+                Widget::Choice {
+                    options: &QUALITY_NAMES,
+                    index,
+                },
+            );
             add(
                 ItemId::UiScale,
                 "UI scale",
@@ -437,6 +477,16 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 "Performance overlay",
                 Widget::Toggle(s.debug_overlay),
             );
+        }
+        Page::Stations => {
+            for (i, row) in ctx.radio.rows().iter().enumerate() {
+                // The label is the station's name, drawn from the row.
+                add(
+                    ItemId::Station(i),
+                    "",
+                    Widget::Toggle(ctx.settings.radio.is_enabled(&row.id)),
+                );
+            }
         }
         Page::Hud => {
             let s = ctx.settings;
@@ -473,7 +523,24 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 volume(s.engine_volume),
             );
             add(ItemId::WorldVolume, "World volume", volume(s.world_volume));
+            add(ItemId::RadioVolume, "Radio volume", volume(s.radio.volume));
             add(ItemId::Mute, "Mute", Widget::Toggle(s.mute));
+            add(
+                ItemId::RadioPreset,
+                "Preset",
+                Widget::Choice {
+                    options: &PRESET_TITLES,
+                    index: ctx.radio.preset_index(),
+                },
+            );
+            let (id, w) = open(Page::Stations);
+            add(id, "Stations", w);
+            if ctx.text_entry {
+                add(ItemId::AddStream, "Add stream URL", Widget::Action);
+            }
+            if !s.radio.custom.is_empty() {
+                add(ItemId::ClearStreams, "Remove added streams", Widget::Action);
+            }
         }
         Page::World => {
             let hours = (ctx.clock.seconds_of_day / 3600.0) as f32;
@@ -530,11 +597,15 @@ mod tests {
         o.invert = true;
         bindings.set_axis_options(DeviceKind::Gamepad, Action::LookY, o);
         let clock = Clock::new(100, 6.5 * 3600.0);
+        let radio = CarRadio::new();
         let ctx = PageCtx {
             settings: &settings,
             bindings: &bindings,
             clock: &clock,
             can_quit: false,
+            radio: &radio,
+            text_entry: false,
+            quality: Quality::Deck,
         };
         let mut items = Vec::new();
         build(Page::Pause, &ctx, &mut items);
@@ -574,7 +645,14 @@ mod tests {
         assert!(matches!(items[2].widget, Widget::Choice { index: 1, .. }));
         build(Page::Audio, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 0.8));
-        assert_eq!(items[3].widget, Widget::Toggle(false));
+        assert_eq!(items[3].id, ItemId::RadioVolume);
+        assert!(matches!(items[3].widget, Widget::Slider { value, .. } if value == 0.8));
+        assert_eq!(items[4].widget, Widget::Toggle(false), "not muted");
+        assert!(matches!(items[5].widget, Widget::Choice { index: 0, .. }));
+        assert_eq!(items.len(), 7, "no text entry, no added streams");
+        build(Page::Stations, &ctx, &mut items);
+        assert_eq!(items.len(), radio.rows().len());
+        assert!(items.iter().all(|i| i.widget == Widget::Toggle(true)));
         build(Page::World, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 6.5));
         assert!(matches!(items[1].widget, Widget::Choice { index: 2, .. }));
@@ -594,5 +672,11 @@ mod tests {
             "dashboard"
         );
         assert_eq!(items[5].widget, Widget::Toggle(true));
+        build(Page::Video, &ctx, &mut items);
+        assert_eq!(items[0].id, ItemId::Quality);
+        assert!(
+            matches!(items[0].widget, Widget::Choice { index: 1, .. }),
+            "deck"
+        );
     }
 }

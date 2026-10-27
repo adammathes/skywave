@@ -1,0 +1,555 @@
+//! The radio's switching state machine.
+//!
+//! ```text
+//!            next/prev/power                tick ≥ TUNE_SECONDS
+//!   Off ───────────────────▶ Tuning ─────────────────────────▶ Playing ──┐
+//!    ▲                        ▲  │ next/prev (restart)            │      │ Failed, URLs left:
+//!    │ off                    │  └─────────┘                      │      │ Play the next URL
+//!    └────────────────────────┼─────────────── off ───────────────┘◀─────┘
+//!                             │ next/prev                         │ Failed, no URL left
+//!                             └──────────────── Error ◀───────────┘
+//! ```
+//!
+//! Switching stops the old station and plays [`TUNE_SECONDS`] of tune noise before the new
+//! one starts. Every `Play` carries a token; a [`PlayerEvent`] about an older token (a
+//! station already switched away from) is ignored. The radio allocates only when it
+//! starts a station (the URL in the `Play` command).
+
+/// How long the tune-noise burst between stations lasts, s.
+pub const TUNE_SECONDS: f32 = 0.15;
+
+/// A station the radio can play: a stream station of a preset or one the user added.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Channel {
+    pub id: String,
+    pub name: String,
+    pub format: String,
+    /// Tried in order until one plays; never empty.
+    pub urls: Vec<String>,
+}
+
+impl Channel {
+    /// The channel of a stream station; `None` for a files station (or one without URLs).
+    pub fn from_station(s: &crate::Station) -> Option<Channel> {
+        let urls = s.urls();
+        (!urls.is_empty()).then(|| Channel {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            format: s.format.clone(),
+            urls: urls.to_vec(),
+        })
+    }
+}
+
+/// Why a station is not playing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorReason {
+    /// Every URL of the station failed to play.
+    NoSignal,
+}
+
+/// What the radio is doing. Stations are indices into [`Radio::channels`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RadioState {
+    Off,
+    /// Between stations: tune noise for [`TUNE_SECONDS`]; `t` is the time spent so far.
+    Tuning {
+        from: Option<usize>,
+        to: usize,
+        t: f32,
+    },
+    /// Asked the player to play (see [`Radio::is_live`] for whether sound came out).
+    Playing {
+        station: usize,
+    },
+    Error {
+        station: usize,
+        reason: ErrorReason,
+    },
+}
+
+/// What the platform's player should do, in order.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RadioCommand {
+    /// Play this stream (replacing whatever played); report back with `token`.
+    Play { url: String, token: u32 },
+    /// Silence.
+    Stop,
+    /// Radio volume, 0 to 1.
+    Volume(f32),
+    /// A short burst of tuning noise (synthesized by the platform, not a sample).
+    TuneNoise { seconds: f32 },
+}
+
+/// What the platform's player reports about the `Play` with `token`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerEvent {
+    /// Sound is coming out.
+    Started { token: u32 },
+    /// The URL did not play (network, format, refused).
+    Failed { token: u32 },
+    /// The browser wants a user gesture before it plays sound; the platform retries on the
+    /// next one.
+    Blocked { token: u32 },
+}
+
+/// The car radio: its stations, its state and the commands waiting for the platform.
+#[derive(Clone, Debug)]
+pub struct Radio {
+    channels: Vec<Channel>,
+    state: RadioState,
+    /// The station last tuned: where turning the radio on resumes.
+    last: Option<usize>,
+    /// Which of the playing station's URLs is being tried.
+    url: usize,
+    token: u32,
+    live: bool,
+    blocked: bool,
+    volume: f32,
+    out: Vec<RadioCommand>,
+}
+
+impl Radio {
+    /// An off radio with these stations at full volume.
+    pub fn new(channels: Vec<Channel>) -> Radio {
+        Radio {
+            channels,
+            state: RadioState::Off,
+            last: None,
+            url: 0,
+            token: 0,
+            live: false,
+            blocked: false,
+            volume: 1.0,
+            out: Vec::with_capacity(8),
+        }
+    }
+
+    pub fn channels(&self) -> &[Channel] {
+        &self.channels
+    }
+
+    pub fn state(&self) -> RadioState {
+        self.state
+    }
+
+    pub fn is_on(&self) -> bool {
+        self.state != RadioState::Off
+    }
+
+    /// The station tuned, being tuned to or failing.
+    pub fn station(&self) -> Option<usize> {
+        match self.state {
+            RadioState::Off => None,
+            RadioState::Tuning { to, .. } => Some(to),
+            RadioState::Playing { station } | RadioState::Error { station, .. } => Some(station),
+        }
+    }
+
+    pub fn channel(&self) -> Option<&Channel> {
+        self.station().and_then(|i| self.channels.get(i))
+    }
+
+    /// The id of the station last tuned (what settings keep).
+    pub fn last_id(&self) -> Option<&str> {
+        self.last
+            .and_then(|i| self.channels.get(i))
+            .map(|c| c.id.as_str())
+    }
+
+    /// Makes `id` the station turning the radio on resumes (ignored if unknown).
+    pub fn restore(&mut self, id: &str) {
+        if let Some(i) = self.channels.iter().position(|c| c.id == id) {
+            self.last = Some(i);
+        }
+    }
+
+    /// Sound is coming out of the playing station.
+    pub fn is_live(&self) -> bool {
+        self.live
+    }
+
+    /// The player waits for a user gesture before it can play.
+    pub fn is_blocked(&self) -> bool {
+        self.blocked
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    /// Sets the volume (clamped to 0–1) and tells the player when it changed.
+    pub fn set_volume(&mut self, v: f32) {
+        let v = if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        if v != self.volume {
+            self.volume = v;
+            self.out.push(RadioCommand::Volume(v));
+        }
+    }
+
+    /// Replaces the stations (the user enabled or disabled some, or picked another
+    /// preset). The station playing keeps playing when it is still there (found by id);
+    /// otherwise the radio turns off.
+    pub fn set_channels(&mut self, channels: Vec<Channel>) {
+        let id = |i: Option<usize>| i.and_then(|i| self.channels.get(i)).map(|c| c.id.clone());
+        let (current, last) = (id(self.station()), id(self.last));
+        let find = |id: &Option<String>| {
+            id.as_ref()
+                .and_then(|id| channels.iter().position(|c| &c.id == id))
+        };
+        let (new_current, new_last) = (find(&current), find(&last));
+        self.channels = channels;
+        self.last = new_last;
+        match (self.state, new_current) {
+            (RadioState::Off, _) => {}
+            (_, None) => self.off(),
+            (RadioState::Tuning { t, .. }, Some(to)) => {
+                self.state = RadioState::Tuning { from: None, to, t };
+            }
+            (RadioState::Playing { .. }, Some(station)) => {
+                self.state = RadioState::Playing { station };
+            }
+            (RadioState::Error { reason, .. }, Some(station)) => {
+                self.state = RadioState::Error { station, reason };
+            }
+        }
+    }
+
+    /// Next station up the dial (from off: the last station, or the first).
+    pub fn next(&mut self) {
+        self.step(1);
+    }
+
+    /// Next station down the dial (from off: the last station, or the last one).
+    pub fn prev(&mut self) {
+        self.step(-1);
+    }
+
+    fn step(&mut self, dir: i32) {
+        let n = self.channels.len();
+        if n == 0 {
+            return;
+        }
+        let to = match self.station() {
+            Some(i) if dir > 0 => (i + 1) % n,
+            Some(i) => (i + n - 1) % n,
+            None => match self.last {
+                Some(i) if i < n => i,
+                _ if dir > 0 => 0,
+                _ => n - 1,
+            },
+        };
+        self.tune(to);
+    }
+
+    /// Turns the radio on at the last station (or the first).
+    pub fn power_on(&mut self) {
+        if self.state == RadioState::Off {
+            self.step(1);
+        }
+    }
+
+    pub fn off(&mut self) {
+        if self.state != RadioState::Off {
+            self.state = RadioState::Off;
+            self.live = false;
+            self.blocked = false;
+            self.out.push(RadioCommand::Stop);
+        }
+    }
+
+    /// The power button: off when on, on (at the last station) when off.
+    pub fn toggle_power(&mut self) {
+        if self.is_on() {
+            self.off();
+        } else {
+            self.power_on();
+        }
+    }
+
+    /// Tunes to station `to` (ignored when there is no such station).
+    pub fn tune(&mut self, to: usize) {
+        if to >= self.channels.len() {
+            return;
+        }
+        let from = self.station();
+        if matches!(self.state, RadioState::Playing { .. }) {
+            self.out.push(RadioCommand::Stop);
+        }
+        self.live = false;
+        self.blocked = false;
+        self.state = RadioState::Tuning { from, to, t: 0.0 };
+        self.last = Some(to);
+        self.out.push(RadioCommand::TuneNoise {
+            seconds: TUNE_SECONDS,
+        });
+    }
+
+    /// Advances the tune-noise phase by `dt` seconds; the new station starts at its end.
+    pub fn tick(&mut self, dt: f32) {
+        if let RadioState::Tuning { from, to, t } = self.state {
+            let t = t + dt.max(0.0);
+            if t >= TUNE_SECONDS {
+                self.state = RadioState::Playing { station: to };
+                self.url = 0;
+                self.play_url();
+            } else {
+                self.state = RadioState::Tuning { from, to, t };
+            }
+        }
+    }
+
+    fn play_url(&mut self) {
+        let RadioState::Playing { station } = self.state else {
+            return;
+        };
+        self.token = self.token.wrapping_add(1);
+        let url = self.channels[station].urls[self.url].clone();
+        self.out.push(RadioCommand::Play {
+            url,
+            token: self.token,
+        });
+    }
+
+    /// Takes a report from the player. Reports about an earlier `Play` are ignored.
+    pub fn on_event(&mut self, event: PlayerEvent) {
+        let RadioState::Playing { station } = self.state else {
+            return;
+        };
+        match event {
+            PlayerEvent::Started { token } if token == self.token => {
+                self.live = true;
+                self.blocked = false;
+            }
+            PlayerEvent::Blocked { token } if token == self.token => self.blocked = true,
+            PlayerEvent::Failed { token } if token == self.token => {
+                self.live = false;
+                self.blocked = false;
+                self.url += 1;
+                if self.url < self.channels[station].urls.len() {
+                    self.play_url();
+                } else {
+                    self.state = RadioState::Error {
+                        station,
+                        reason: ErrorReason::NoSignal,
+                    };
+                    self.out.push(RadioCommand::Stop);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The commands for the player since the last call, oldest first.
+    pub fn drain_commands(&mut self) -> std::vec::Drain<'_, RadioCommand> {
+        self.out.drain(..)
+    }
+
+    /// The token of the latest `Play`.
+    pub fn token(&self) -> u32 {
+        self.token
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use RadioCommand::{Play, Stop, TuneNoise, Volume};
+
+    fn channel(id: &str, urls: &[&str]) -> Channel {
+        Channel {
+            id: id.into(),
+            name: id.to_uppercase(),
+            format: "test".into(),
+            urls: urls.iter().map(|u| u.to_string()).collect(),
+        }
+    }
+
+    fn radio() -> Radio {
+        Radio::new(vec![
+            channel("a", &["https://a/1", "https://a/2"]),
+            channel("b", &["https://b/1"]),
+            channel("c", &["https://c/1"]),
+        ])
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum In {
+        Next,
+        Prev,
+        Off,
+        Power,
+        Tick(f32),
+        /// A report about the latest Play (or, with a nonzero offset, an older one).
+        Started(u32),
+        Failed(u32),
+        Blocked(u32),
+    }
+
+    /// Short state names for the table.
+    fn kind(s: RadioState) -> String {
+        match s {
+            RadioState::Off => "off".into(),
+            RadioState::Tuning { from, to, .. } => format!("tuning {from:?}->{to}"),
+            RadioState::Playing { station } => format!("playing {station}"),
+            RadioState::Error { station, .. } => format!("error {station}"),
+        }
+    }
+
+    fn noise() -> RadioCommand {
+        TuneNoise {
+            seconds: TUNE_SECONDS,
+        }
+    }
+
+    fn play(url: &str, token: u32) -> RadioCommand {
+        Play {
+            url: url.into(),
+            token,
+        }
+    }
+
+    #[test]
+    fn switching_table() {
+        use In::*;
+        // (input, state after, commands it sent)
+        let table: Vec<(In, &str, Vec<RadioCommand>)> = vec![
+            (Tick(1.0), "off", vec![]),
+            (Started(0), "off", vec![]),
+            (Off, "off", vec![]),
+            (Next, "tuning None->0", vec![noise()]),
+            (Tick(0.1), "tuning None->0", vec![]),
+            (Tick(0.06), "playing 0", vec![play("https://a/1", 1)]),
+            (Started(0), "playing 0", vec![]),
+            // Switching stops the old station, then tunes.
+            (Next, "tuning Some(0)->1", vec![Stop, noise()]),
+            // Pressing again while tuning restarts from the target.
+            (Next, "tuning Some(1)->2", vec![noise()]),
+            (Tick(0.2), "playing 2", vec![play("https://c/1", 2)]),
+            (Next, "tuning Some(2)->0", vec![Stop, noise()]),
+            (Tick(0.2), "playing 0", vec![play("https://a/1", 3)]),
+            // A stale report is ignored; a fresh failure tries the next URL...
+            (Failed(1), "playing 0", vec![]),
+            (Failed(0), "playing 0", vec![play("https://a/2", 4)]),
+            // ...and when none is left the station is in error, silent.
+            (Failed(0), "error 0", vec![Stop]),
+            (Failed(0), "error 0", vec![]),
+            // From an error the dial still moves (nothing to stop).
+            (Prev, "tuning Some(0)->2", vec![noise()]),
+            (Tick(0.15), "playing 2", vec![play("https://c/1", 5)]),
+            (Blocked(0), "playing 2", vec![]),
+            (Off, "off", vec![Stop]),
+            // Power resumes the last station; prev from off does too.
+            (Power, "tuning None->2", vec![noise()]),
+            (Power, "off", vec![Stop]),
+            (Prev, "tuning None->2", vec![noise()]),
+            (Off, "off", vec![Stop]),
+        ];
+        let mut r = radio();
+        for (i, (input, want, cmds)) in table.into_iter().enumerate() {
+            let token = r.token();
+            match input {
+                Next => r.next(),
+                Prev => r.prev(),
+                Off => r.off(),
+                Power => r.toggle_power(),
+                Tick(dt) => r.tick(dt),
+                Started(back) => r.on_event(PlayerEvent::Started {
+                    token: token - back,
+                }),
+                Failed(back) => r.on_event(PlayerEvent::Failed {
+                    token: token - back,
+                }),
+                Blocked(back) => r.on_event(PlayerEvent::Blocked {
+                    token: token - back,
+                }),
+            }
+            assert_eq!(kind(r.state()), want, "row {i}: {input:?}");
+            let got: Vec<RadioCommand> = r.drain_commands().collect();
+            assert_eq!(got, cmds, "row {i}: {input:?}");
+        }
+    }
+
+    #[test]
+    fn live_and_blocked_follow_the_player() {
+        let mut r = radio();
+        r.next();
+        r.tick(TUNE_SECONDS);
+        assert!(!r.is_live());
+        let token = r.token();
+        r.on_event(PlayerEvent::Blocked { token });
+        assert!(r.is_blocked() && !r.is_live());
+        r.on_event(PlayerEvent::Started { token });
+        assert!(r.is_live() && !r.is_blocked());
+        assert_eq!(r.channel().map(|c| c.id.as_str()), Some("a"));
+        r.next();
+        assert!(!r.is_live(), "switching drops live");
+    }
+
+    #[test]
+    fn no_stations_stays_off() {
+        let mut r = Radio::new(Vec::new());
+        r.next();
+        r.prev();
+        r.toggle_power();
+        r.tune(0);
+        r.tick(1.0);
+        assert_eq!(r.state(), RadioState::Off);
+        assert_eq!(r.drain_commands().count(), 0);
+    }
+
+    #[test]
+    fn volume_is_clamped_and_sent_on_change() {
+        let mut r = radio();
+        r.set_volume(0.5);
+        r.set_volume(0.5);
+        r.set_volume(3.0);
+        r.set_volume(f32::NAN);
+        r.set_volume(-1.0);
+        let got: Vec<_> = r.drain_commands().collect();
+        assert_eq!(got, [Volume(0.5), Volume(1.0), Volume(0.0)]);
+        assert_eq!(r.volume(), 0.0);
+    }
+
+    #[test]
+    fn restore_and_set_channels_keep_stations_by_id() {
+        let mut r = radio();
+        r.restore("b");
+        r.restore("nope");
+        assert_eq!(r.last_id(), Some("b"));
+        r.power_on();
+        r.tick(1.0);
+        assert_eq!(r.state(), RadioState::Playing { station: 1 });
+        r.drain_commands().for_each(drop);
+        // "a" disabled: "b" moves to index 0 and keeps playing.
+        r.set_channels(vec![channel("b", &["https://b/1"]), channel("c", &["x"])]);
+        assert_eq!(r.state(), RadioState::Playing { station: 0 });
+        assert_eq!(r.last_id(), Some("b"));
+        assert_eq!(r.drain_commands().count(), 0);
+        // "b" gone too: the radio turns off.
+        r.set_channels(vec![channel("c", &["x"])]);
+        assert_eq!(r.state(), RadioState::Off);
+        assert_eq!(r.drain_commands().collect::<Vec<_>>(), [Stop]);
+        assert_eq!(r.last_id(), None);
+        r.next();
+        assert_eq!(r.station(), Some(0));
+    }
+
+    #[test]
+    fn files_stations_have_no_channel() {
+        let s = crate::Station {
+            id: "mine".into(),
+            name: "Mine".into(),
+            era: "1980s".into(),
+            format: "mine".into(),
+            source: crate::Source::Files {
+                folder_hint: "x".into(),
+            },
+        };
+        assert_eq!(Channel::from_station(&s), None);
+    }
+}

@@ -68,13 +68,18 @@ struct Frame {
     // x: bloom strength (0 = no bloom), y: bloom threshold (post-exposure), z: vignette
     // strength, w: highest post-exposure value fed to bloom.
     post: vec4<f32>,
-    // xy: color target size (px), zw: its reciprocal.
+    // xy: swapchain size (px), zw: its reciprocal.
     screen: vec4<f32>,
     // rgb: cabin ambient radiance, scaled per instance by its cabin share.
     cabin_light: vec4<f32>,
     // x: focal length (px, vertical), y: shortest corona radius (px), z: longest corona
     // radius (px), w: unused.
     corona: vec4<f32>,
+    // xy: size of the scene's color and depth targets (px; the swapchain scaled by the
+    // resolution scale), zw: its reciprocal.
+    render_size: vec4<f32>,
+    // x: shadow cascades drawn (2 or 3), yzw: unused.
+    shadow_params: vec4<f32>,
     lights: array<PackedLight, 256>,
 };
 

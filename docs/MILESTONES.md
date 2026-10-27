@@ -54,7 +54,7 @@ Scenarios `chicago_1977` and `north_shore_suburb_1986` (templates `great_lakes_c
 (appended after each gate)
 
 ### M1 status (2026-10-26, autonomous run)
-Everything in the M1 scope is merged on `claude/intelligent-hypatia-vnrj1a`: raycast-car sim with two
+Everything in the M1 scope is merged on `main`: raycast-car sim with two
 cars, parametric car meshes (exterior + cockpit), detailed test town with atlas patterns, cascaded
 shadows, Preetham sky, bloom, Daylight model, world collision, cockpit/hood/chase cameras, HUD,
 gamepad + mouse on web and native, remappable bindings with invert Y, gamepad-navigable settings

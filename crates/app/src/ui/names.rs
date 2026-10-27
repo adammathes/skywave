@@ -29,7 +29,7 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::LookBack, _) => "Look back",
         (Action::RadioNext, _) => "Next station",
         (Action::RadioPrev, _) => "Previous station",
-        (Action::RadioOff, _) => "Radio off",
+        (Action::RadioOff, _) => "Radio on/off",
         (Action::Headlights, _) => "Headlights",
         (Action::Horn, _) => "Horn",
         (Action::VehicleNext, _) => "Next vehicle",

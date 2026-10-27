@@ -11,12 +11,15 @@ use crate::daylight::{Clock, Daylight};
 use crate::input::{Action, Binding, DeviceKind, Sign};
 use crate::map;
 use crate::map::view::{MapGeom, Minimap, MINIMAP_DIAMETER};
+use crate::radio::ndc_to_hud;
 
 use super::menu::{Unit, Widget};
 use super::names::{self, action_label, device_label, device_noun};
-use super::pages::{self, ItemId, Page};
+
+use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
 use super::{covers, Toast, Ui, FRAME_HISTORY};
+use crate::settings::Quality;
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -28,6 +31,23 @@ pub struct DrawCtx<'a> {
     /// convention), for the maps.
     pub car: [f32; 2],
     pub heading: f32,
+    /// The car radio's display on screen (cockpit view only).
+    pub radio_display: Option<RadioDisplay>,
+}
+
+/// The radio display quad as the cockpit camera sees it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadioDisplay {
+    /// Corners in normalized device coordinates (y up): bottom-left, bottom-right,
+    /// top-right, top-left as the driver sees them.
+    pub ndc: [[f32; 2]; 4],
+    /// Width over height of the target they were projected for.
+    pub aspect: f32,
+    /// The target's size in pixels, when the platform said (text is drawn at whole target
+    /// pixels per font pixel, so how much fits depends on it).
+    pub target: Option<(u32, u32)>,
+    /// The display's glow, sRGB.
+    pub color: [u8; 4],
 }
 
 const TEXT: [u8; 4] = [238, 234, 222, 255];
@@ -358,6 +378,10 @@ impl Ui {
                     fg,
                     format_args!("{}{}", item.label, action_label(p.conflict.wanted, p.sign)),
                 ),
+                (ItemId::Station(i), _) => {
+                    let name = self.radio.rows().get(i).map_or("?", |r| r.name.as_str());
+                    hud.text(px + PAD, ty, S, fg, name);
+                }
                 _ => hud.text(px + PAD, ty, S, fg, item.label),
             }
             match item.widget {
@@ -537,6 +561,70 @@ impl Ui {
             let args = ToastText(t);
             hud.text_fmt(sx, toast_y, 2.0, ACCENT, format_args!("{args}"));
         }
+        if let Some(d) = &ctx.radio_display {
+            self.draw_radio_display(hud, d);
+        }
+        // The station toast: two lines centered at the top.
+        if let Some(t) = self.radio.toast() {
+            let cx = sx + sw * 0.5;
+            let title = t.title();
+            text_center(
+                hud,
+                cx + 2.0,
+                sy + 2.0,
+                2.0,
+                SHADOW,
+                format_args!("{title}"),
+            );
+            text_center(hud, cx, sy, 2.0, ACCENT, format_args!("{title}"));
+            let detail = t.detail();
+            let y = sy + LINE_H;
+            text_center(
+                hud,
+                cx + 2.0,
+                y + 2.0,
+                2.0,
+                SHADOW,
+                format_args!("{detail}"),
+            );
+            text_center(hud, cx, y, 2.0, TEXT, format_args!("{detail}"));
+        }
+    }
+
+    /// The station on the radio's display: the quad's screen box darkened like an unlit
+    /// segment display, the name (scrolling when long) in the display's glow color,
+    /// centered vertically. Nothing while the radio is off.
+    fn draw_radio_display(&self, hud: &mut HudBuilder, d: &RadioDisplay) {
+        let size = hud.size();
+        let pts = d.ndc.map(|p| ndc_to_hud(p, d.aspect, size));
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for [x, y] in pts {
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+        let (w, h) = (x1 - x0, y1 - y0);
+        let on_screen = x1 > 0.0 && y1 > 0.0 && x0 < size[0] && y0 < size[1];
+        if !on_screen || h < 6.0 || w < 3.0 * h || w > size[0] {
+            return;
+        }
+        // Capitals about 45% of the display's height. The HUD draws a font pixel as a whole
+        // number of target pixels, so measure with what it will draw; without the target's
+        // size, allow for rounding up by half.
+        let scale = (h * 0.45 / font::CAP_HEIGHT as f32).max(0.5);
+        let drawn = match d.target {
+            Some(t) => {
+                let ppv = render::HudLayout::new(t, hud.ui_scale()).scale;
+                (scale * ppv).round().max(1.0) / ppv
+            }
+            None => scale * 1.5,
+        };
+        let pad = h * 0.15;
+        let chars = ((w - 2.0 * pad) / (font::CELL_W as f32 * drawn)).floor() as usize;
+        let Some(text) = self.radio.dash(chars.max(1)) else {
+            return;
+        };
+        hud.rect(x0, y0, w, h, [4, 8, 6, 225]);
+        let ty = y0 + (h - font::CAP_HEIGHT as f32 * drawn) * 0.5;
+        hud.text_fmt(x0 + pad, ty, scale, d.color, format_args!("{text}"));
     }
 
     /// The minimap's circle at the bottom left of the safe area: the map around the car
@@ -667,11 +755,14 @@ impl Ui {
         let s = 2.0;
         let line = font::LINE_HEIGHT as f32 * s;
         let (graph_w, graph_h) = (FRAME_HISTORY as f32 * 2.0, 48.0);
-        let lines = 6.0;
+        let r = &self.render_stats;
+        let gpu_line = r.gpu_timing as u32 as f32;
+        let label_line = !self.gpu_label.is_empty() as u32 as f32;
+        let lines = 10.0 + gpu_line + label_line;
         hud.rect(
             sx - 10.0,
             sy - 10.0,
-            440.0,
+            760.0,
             20.0 + line + graph_h + 10.0 + lines * line,
             [0, 0, 0, 160],
         );
@@ -714,7 +805,6 @@ impl Ui {
             [255, 255, 255, 110],
         );
 
-        let r = &self.render_stats;
         let d = ctx.daylight;
         let [cx, cy, cz] = ctx.camera;
         let y = gy + graph_h + 10.0;
@@ -724,16 +814,41 @@ impl Ui {
             s,
             TEXT,
             format_args!(
-                "draws {}  (shadow {}, bloom {})\n\
-                 instances {}  lights {}/{}  coronas {}\n\
+                "{}  draws {}  (shadow {}, bloom {})  cpu {:.2} ms\n\
+                 instances {}  drawn {}  shadow {}/{}/{}\n\
+                 tris {:.0}k  shadow {:.0}k\n\
+                 shadow {} x{} ({} drawn)  {} {}\n\
+                 view {}x{} of {}x{}  bloom {}\n\
+                 lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
                  sun {:.1} deg  az {:.0}\n\
                  cam {:.1}, {:.1}, {:.1}\n\
                  hud {} quads  ({} dropped)",
+                if r.backend.is_empty() { "?" } else { r.backend },
                 r.draw_calls,
                 r.shadow_draw_calls,
                 r.bloom_draw_calls,
+                self.cpu_submit_ms,
                 r.instances,
+                r.instances_drawn,
+                r.shadow_instances[0],
+                r.shadow_instances[1],
+                r.shadow_instances[2],
+                r.triangles as f64 / 1000.0,
+                r.shadow_triangles as f64 / 1000.0,
+                r.shadow_size,
+                r.cascades,
+                r.cascades_drawn,
+                QUALITY_NAMES[Quality::ALL
+                    .iter()
+                    .position(|&q| q == self.quality())
+                    .unwrap_or(2)],
+                if self.settings.bloom { "" } else { "bloom off" },
+                r.render_size.0,
+                r.render_size.1,
+                r.surface_size.0,
+                r.surface_size.1,
+                r.bloom_levels,
                 r.lights_used,
                 r.lights_submitted,
                 r.coronas,
@@ -748,6 +863,31 @@ impl Ui {
                 r.hud_quads_dropped,
             ),
         );
+        let mut y = y + 10.0 * line;
+        if r.gpu_timing {
+            let ms = |p: usize| r.gpu_us[p] as f32 / 1000.0;
+            let total: u32 = r.gpu_us.iter().sum();
+            hud.text_fmt(
+                sx,
+                y,
+                s,
+                TEXT,
+                format_args!(
+                    "gpu {:.2} ms: sh {:.2} fw {:.2} co {:.2} bl {:.2} tm {:.2} hud {:.2}",
+                    total as f32 / 1000.0,
+                    ms(0),
+                    ms(1),
+                    ms(2),
+                    ms(3),
+                    ms(4),
+                    ms(5),
+                ),
+            );
+            y += line;
+        }
+        if !self.gpu_label.is_empty() {
+            hud.text(sx, y, s, DIM, &self.gpu_label);
+        }
     }
 }
 
@@ -774,6 +914,8 @@ impl Display for ToastText {
                 Some(car) => f.write_str(&car.name),
                 None => Ok(()),
             },
+            Toast::StreamAdded => f.write_str("Stream added to the stations"),
+            Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
         }
     }
 }
