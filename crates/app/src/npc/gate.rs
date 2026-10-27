@@ -185,13 +185,13 @@ fn along(g: &LaneGraph, lane: u32, p: [f32; 3]) -> f32 {
     g.lanes[lane as usize].length_m - 10.0 + dot([p[0] - a.pos[0], p[2] - a.pos[2]], a.dir)
 }
 
-/// The end of the approach the junction scenario runs: a straight two-lane arterial
-/// (14 m/s, one 252 m lane) into a signalized four-way junction on the coast's north
+/// The end of the approach the junction scenario runs: a two-lane arterial (14 m/s, one
+/// 319 m lane bending gently) into a signalized four-way junction on the coast's north
 /// side. Moved with the map edges (the old point is off every lane there): of the
-/// signalized four-way approaches straight for 200 m or more, the one with the most NPC
-/// cars about its junction at busy density (13.6 within 40 m on average over 30 s at
-/// noon; the next has 11.0).
-const APPROACH_END: [f32; 2] = [735.73, 461.05];
+/// signalized four-way approaches with 200 m or more of run-up, the one with the most
+/// cross traffic at its junction at busy density (7.5 NPC cars on the other phases within
+/// 40 m on average over 60 s at noon; the next has 6.9).
+const APPROACH_END: [f32; 2] = [952.21, 347.89];
 
 /// The signalized lane whose end lies at `end`.
 fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
@@ -205,11 +205,25 @@ fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
 }
 
 /// Drives `app` from a standstill along `lane` at full throttle up to 60 mph and on,
-/// `ticks` steps, calling `each` after every step.
+/// `ticks` steps, calling `each` after every step: on the lane's centerline where the car
+/// is beside it (the lane may bend gently), on its [`end_line`] past its end.
 fn run_up(app: &mut App, lane: u32, ticks: u32, mut each: impl FnMut(&App)) {
     let g = &coast().lanes;
-    let a = g.pose(lane, 0.0);
+    let len = g.lanes[lane as usize].length_m;
+    let d2 = |a: [f32; 3], b: [f32; 3]| (a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2);
+    let mut s = 0.0f32;
     for _ in 0..ticks {
+        let p = app.traffic_player().pos;
+        // The nearest point of the lane, searched just round the last one.
+        s = (0..=28)
+            .map(|k| (s - 2.0 + 0.25 * k as f32).clamp(0.0, len))
+            .min_by(|a, b| d2(g.pose(lane, *a).pos, p).total_cmp(&d2(g.pose(lane, *b).pos, p)))
+            .unwrap();
+        let a = if s < len - 10.0 {
+            g.pose(lane, s)
+        } else {
+            end_line(g, lane)
+        };
         let input = follow(app, a.pos, a.dir, MPH_60);
         step(app, &input);
         each(app);
