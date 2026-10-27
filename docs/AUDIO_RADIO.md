@@ -5,10 +5,10 @@ The radio is half the experience. It plays **real music the user owns or real st
 ## Stations
 ```
 Station(
-  id: "181fm_yachtrock", name: "181.FM Yacht Rock", era: "1970s",
+  id: "radioparadise_mellow", name: "Radio Paradise Mellow Mix", era: "1970s",
   format: "yacht rock and smooth soft rock",
-  source: Stream(urls: ["https://listen.181fm.com/181-yachtrock_128k.mp3", ...],
-                 homepage: "https://www.181.fm/links", codec: Mp3, bitrate_kbps: 128,
+  source: Stream(urls: ["https://stream.radioparadise.com/mellow-128", ...],
+                 homepage: "https://radioparadise.com/listen/stream-links", codec: Aac, bitrate_kbps: 128,
                  terms_checked: "2026-10-27", verified: false)
         | Files(folder_hint: "yacht-rock"),
 )
@@ -26,7 +26,7 @@ Next/previous station, radio off, volume. Switching plays a 0.5 s dial sweep (st
 
 ### As built (M3, web first)
 - **`crates/audio`** (std, platform-neutral). `Radio` is the switching state machine: `Off`, `Tuning { from, to, t }` (`TUNE_SECONDS`, 0.5 s, of the dial sweep), `Playing { station }`, `Error { station, reason }`. Next/previous from off resume the last station; `\` is the power button. It emits `RadioCommand`s (`Play { url, token }`, `Stop`, `Volume(f32)`), counts its tunes (`Radio::tunes`, which the app copies into `AudioParams::tunes` so the mixer plays the sweep; the automatic move after "no signal" is a tune too) and takes `PlayerEvent`s (`Started`, `Failed`, `Blocked`, each with the token of its `Play`; stale ones are ignored). A failed URL moves to the station's next URL; when none is left the station is in `Error` ("NO SIGNAL" on the dash and in the toast) for `NO_SIGNAL_SECONDS` (2 s), then the radio tunes the next station up the dial by itself. A station that failed is remembered for the session (by id) and skipped by next, previous, power-on and the automatic move, until it plays again; when every station has failed, "NO SIGNAL" stays and the dial turns plainly, so the user can retry. `RadioSettings` (volume, power, last station, disabled stations, added streams, preset per scenario) is the `radio` section of the settings JSON. Native will consume the same commands.
-- **`app::radio`**. The built-in presets, the keys (`]` `[` `\`, d-pad right/left/down), the toast ("1/7  181.FM Yacht Rock" over its format, 3 s; "Press any key for radio" while the browser holds playback), and the dash: in the cockpit view the radio display quad's corners are projected to the screen and the station name is drawn there as HUD text in the display's glow color, scrolling a character at a time when it does not fit. The radio is off when a session starts, always: nothing plays until the power key, whatever the last session ended with (no stream, and so no station's ad, ever plays unasked). The last station is restored so that power resumes it. Still scenes never start it (screenshot goldens stay silent). Settings → Audio (one page with the sound effects' volumes): master, engine, world and radio volume, mute, preset (per scenario), Stations (on/off per station and added stream), "Add stream URL" (web: a text prompt; `https://` only), "Remove added streams". The master volume scales the radio too and mute silences it; while a station plays, its volume setting is `AudioParams::radio`, which ducks the engine and world buses.
+- **`app::radio`**. The built-in presets, the keys (`]` `[` `\`, d-pad right/left/down), the toast ("1/3  Radio Paradise Mellow Mix" over its format, 3 s; "Press any key for radio" while the browser holds playback), and the dash: in the cockpit view the radio display quad's corners are projected to the screen and the station name is drawn there as HUD text in the display's glow color, scrolling a character at a time when it does not fit. The radio is off when a session starts, always: nothing plays until the power key, whatever the last session ended with (no stream, and so no station's ad, ever plays unasked). The last station is restored so that power resumes it. Still scenes never start it (screenshot goldens stay silent). Settings → Audio (one page with the sound effects' volumes): master, engine, world and radio volume, mute, preset (per scenario), Stations (on/off per station and added stream), "Add stream URL" (web: a text prompt; `https://` only), "Remove added streams". The master volume scales the radio too and mute silences it; while a station plays, its volume setting is `AudioParams::radio`, which ducks the engine and world buses.
 - **Web** (`platform-web` + the radio block of `web/index.html`). One hidden `<audio preload="none">` element: `Play` sets its `src` and calls `play()`; `error` events, rejected plays and a stream that neither plays nor errors within 10 s come back as `failed`, a `NotAllowedError` (no user gesture yet) as `blocked`, retried on the next key, click or touch (the key that dismisses the help card counts). The dial sweep is not played here: it comes from the mixer through the sfx worklet, like the engine. Media Session metadata carries the station name. `window.skywaveRadio` is the debug handle (`.log`, `.state`, `.audio`). Nothing is fetched until the user tunes a station.
 
 ## Presets
@@ -40,33 +40,22 @@ Real stations whose broadcasters publish their stream URLs for listening in othe
 1. Find the station's own listen or stream-links page (or its `.pls`/`.m3u` playlist) and read its terms: the stream URL must be published for listening, and nothing may forbid other players. That page goes in `homepage`, today's date in `terms_checked`.
 2. Take the `https://` URL (mirrors in order in `urls`), and its real codec and bitrate (the `icy-br` header, or measured).
 3. The id is lowercase letters, digits and `_`; the name is the station's own name (at most 48 printable ASCII characters).
-4. Run the checker; every URL must pass. Keep a preset at 5 to 7 stations (a test checks).
+4. Run the checker; every URL must pass. Keep a preset at 3 to 7 stations (a test checks; the floor is 3 until ad-free replacements for the dropped aggregator streams land, NOTES 9).
 
 | Preset | Station | Format | Stream | Published at |
 |---|---|---|---|---|
-| `1984_socal` | 181.FM Yacht Rock | yacht rock and smooth soft rock | `https://listen.181fm.com/181-yachtrock_128k.mp3` (MP3 128) | 181.FM stream links |
-| | 181.FM Mellow Gold | 70s and 80s soft rock | `.../181-mellow_128k.mp3` | |
-| | 181.FM Lite 80's | 80s soft hits | `.../181-lite80s_128k.mp3` | |
-| | 181.FM Awesome 80's | 80s pop and rock hits | `.../181-awesome80s_128k.mp3` | |
-| | Radio Paradise Mellow Mix | mellow rock and soft pop | `https://stream.radioparadise.com/mellow-128` (AAC 128) | Radio Paradise stream links |
+| `1984_socal` | Radio Paradise Mellow Mix | mellow rock and soft pop | `https://stream.radioparadise.com/mellow-128` (AAC 128) | Radio Paradise stream links |
 | | Radio Paradise Main Mix | eclectic album rock | `.../mp3-128` (MP3 128) | |
 | | Radio Paradise Global Mix | world music and eclectic grooves | `.../global-128` (AAC 128) | |
-| `1977_chicago` | 181.FM Soul | classic soul and R&B | `.../181-soul_128k.mp3` | 181.FM stream links |
-| | 181.FM Super 70s | 70s pop and rock hits | `.../181-70s_128k.mp3` | |
-| | WDCB 90.9 FM | Chicago jazz and blues | `https://wdcb-ice.streamguys1.com/wdcb128` (MP3 128) | WDCB streaming support page |
-| | 181.FM True Blues | electric and classic blues | `.../181-blues_128k.mp3` | |
+| `1977_chicago` | WDCB 90.9 FM | Chicago jazz and blues | `https://wdcb-ice.streamguys1.com/wdcb128` (MP3 128) | WDCB streaming support page |
 | | WHPK 88.5 FM | Hyde Park college radio | `https://whpk-stream.uchicago.edu/stream` (MP3 256) | whpk.org listen link |
 | | WFMU Rock'n'Soul Radio | soul, R&B and rock 'n' roll 45s | `https://stream{2,0}.wfmu.org/rocknsoul` (MP3 128) | WFMU's `wfmu_rock.pls` |
 | | Radio Paradise Rock Mix | classic and album rock | `.../rock-128` (AAC 128) | |
-| `1986_north_shore` | 181.FM Awesome 80's | 80s pop and rock hits | as above | |
-| | 181.FM Classic Buzz | classic alternative and new wave | `.../181-classicbuzz_128k.mp3` | |
-| | WNUR 89.3 FM | Evanston student freeform, jazz and rock | `https://stream.rcs.revma.com/w4pmmfkdx4zuv` (MP3 ~192) | wnur.org's own player |
-| | 181.FM Lite 80's | 80s soft hits | as above | |
-| | 181.FM The Eagle | classic rock | `.../181-eagle_128k.mp3` | |
+| `1986_north_shore` | WNUR 89.3 FM | Evanston student freeform, jazz and rock | `https://stream.rcs.revma.com/w4pmmfkdx4zuv` (MP3 ~192) | wnur.org's own player |
 | | Radio Paradise Rock Mix | classic and album rock | as above | |
 | | Radio Paradise Main Mix | eclectic album rock | as above | |
 
-Left out: SomaFM (the referer rule); KCRW Eclectic24, WLUW and Vocalo (no stream URL published on their own pages that we could find; their players only); KEXP, WWOZ, WXPN and The Current answer the checker but fit neither era nor place. Gaps: no openly streamed disco station with a stable published URL; users add their own by URL (and, next, from their own files).
+Left out: 181.FM (its streams open with pre-roll ads; the owner dropped them on 2026-10-27); SomaFM (the referer rule); KCRW Eclectic24, WLUW and Vocalo (no stream URL published on their own pages that we could find; their players only); KEXP, WWOZ, WXPN and The Current answer the checker but fit neither era nor place. Gaps: no openly streamed disco station with a stable published URL; users add their own by URL (and, next, from their own files).
 
 ## Engine and world sound
 No recorded audio in v1; everything is synthesized at 48 kHz by the `audio` crate (std; the synth and mixer use no dependencies, only the radio's presets need `ron` and `serde`). The app fills one plain `audio::synth::AudioParams` per frame (`app::sound`, read with `App::audio_params`): engine (profile, rpm, idle and redline, throttle pedal, gear, shift time), forward speed, per wheel (combined slip relative to the tire's peak, load relative to rest, tire speed, grounded, surface under the contact from the collider), curb-kick and wall-hit counters with the last kick's and hit's speed and side of the car (from `world::Bump`) (counted per sim step from `world::Impact`, rising edges only, so no event is lost or doubled between frames), the horn, ocean and bird amounts, the nearest passing NPC cars (`TrafficVoice`: level, pan, heard frequency), the volumes, mute and paused. All synth math is `+ - * /`, `floor` and `sqrt` with a polynomial sine and `exp2` (`audio::synth::dsp`), so a scripted drive renders bit-identically everywhere; its WAV is pinned by hash in `mixer::tests`.

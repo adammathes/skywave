@@ -404,7 +404,9 @@ mod tests {
         assert_eq!(radio.preset().id, "1984_socal");
         assert_eq!(radio.preset().scenario, SCENARIO);
         for p in &radio.presets {
-            assert!((5..=7).contains(&p.stations.len()), "{}", p.id);
+            // Three to seven: the commercial aggregator presets were dropped for their pre-roll
+            // ads, and ad-free replacements are still being found (docs/backlog/NOTES.md 9).
+            assert!((3..=7).contains(&p.stations.len()), "{}", p.id);
         }
         // Off until started, and silent.
         assert!(!radio.radio().is_on());
@@ -428,9 +430,9 @@ mod tests {
         assert!(press(&mut r, Action::RadioNext));
         let first = r.radio().channels()[0].clone();
         let t = r.toast().unwrap();
-        assert_eq!(t, ToastLines::Station(1, 7, &first));
-        assert_eq!(t.title().to_string(), "1/7  181.FM Yacht Rock");
-        assert_eq!(t.detail().to_string(), "yacht rock and smooth soft rock");
+        assert_eq!(t, ToastLines::Station(1, 3, &first));
+        assert_eq!(t.title().to_string(), "1/3  Radio Paradise Mellow Mix");
+        assert_eq!(t.detail().to_string(), "mellow rock and soft pop");
         assert_eq!(r.radio().tunes(), 1);
         r.tick(audio::TUNE_SECONDS);
         let cmds: Vec<_> = r.commands().collect();
@@ -442,13 +444,13 @@ mod tests {
             let token = r.radio().token();
             r.on_event(PlayerEvent::Failed { token });
         }
-        assert!(matches!(r.toast(), Some(ToastLines::NoSignal(1, 7, _))));
+        assert!(matches!(r.toast(), Some(ToastLines::NoSignal(1, 3, _))));
         assert_eq!(r.dash(12).unwrap().to_string(), "NO SIGNAL");
         // Then the radio moves on by itself, and the dial skips the failed station.
         r.tick(audio::NO_SIGNAL_SECONDS);
-        assert!(matches!(r.toast(), Some(ToastLines::Station(2, 7, _))));
+        assert!(matches!(r.toast(), Some(ToastLines::Station(2, 3, _))));
         assert!(press(&mut r, Action::RadioPrev));
-        assert_eq!(r.radio().station(), Some(6));
+        assert_eq!(r.radio().station(), Some(2));
         assert!(press(&mut r, Action::RadioOff));
         assert_eq!(r.toast(), Some(ToastLines::Off));
         assert!(r.dash(12).is_none());
@@ -496,13 +498,13 @@ mod tests {
         let mut r = CarRadio::new();
         let mut s = RadioSettings::default();
         s.presets.insert(SCENARIO.into(), "1986_north_shore".into());
-        s.set_enabled("181fm_awesome80s", false);
+        s.set_enabled("wnur", false);
         s.add_custom("https://example.org/live").unwrap();
         r.apply(&s);
         assert_eq!(r.preset_index(), 2);
-        assert_eq!(r.rows().len(), 8, "every station and the added stream");
+        assert_eq!(r.rows().len(), 4, "every station and the added stream");
         let ids: Vec<&str> = r.radio().channels().iter().map(|c| c.id.as_str()).collect();
-        assert!(!ids.contains(&"181fm_awesome80s") && ids.contains(&"custom_1"));
+        assert!(!ids.contains(&"wnur") && ids.contains(&"custom_1"));
         s.presets.insert(SCENARIO.into(), "no_such_preset".into());
         r.apply(&s);
         assert_eq!(r.preset_index(), 0);
@@ -520,11 +522,11 @@ mod tests {
         let mut r = CarRadio::new();
         r.start(&RadioSettings::default());
         press(&mut r, Action::RadioNext);
-        // "181.FM Yacht Rock" is 17 characters.
-        assert_eq!(r.dash(40).unwrap().to_string(), "181.FM Yacht Rock");
-        assert_eq!(r.dash(8).unwrap().to_string(), "181.FM Y");
+        // "Radio Paradise Mellow Mix" is 25 characters.
+        assert_eq!(r.dash(40).unwrap().to_string(), "Radio Paradise Mellow Mix");
+        assert_eq!(r.dash(8).unwrap().to_string(), "Radio Pa");
         r.tick(1.0 + 2.0 / SCROLL_CHARS_PER_S);
-        assert_eq!(r.dash(8).unwrap().to_string(), "1.FM Yac");
+        assert_eq!(r.dash(8).unwrap().to_string(), "dio Para");
         let wrap = DashText {
             text: "ABCDE",
             start: 3,

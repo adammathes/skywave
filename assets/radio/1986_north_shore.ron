@@ -1,5 +1,5 @@
 // Radio preset: 1986 North Shore. Real stations whose stream URLs the broadcasters publish for
-// listening in other players (181.FM's stream links page, Radio Paradise's stream links for
+// listening in other players (Radio Paradise's stream links for
 // WiFi radios and other players, WFMU's playlists, the college stations' own listen links);
 // names are the stations' own. Nothing is rehosted. tools/check-streams.mjs played 5 s of
 // audio from every URL, as the published page asks for it, on the date in `terms_checked`;
@@ -11,34 +11,6 @@ RadioPreset(
     scenario: "north_shore_suburb_1986",
     stations: [
         Station(
-            id: "181fm_awesome80s",
-            name: "181.FM Awesome 80's",
-            era: "1980s",
-            format: "80s pop and rock hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-awesome80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_classicbuzz",
-            name: "181.FM Classic Buzz",
-            era: "1980s",
-            format: "classic alternative and new wave",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-classicbuzz_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
             id: "wnur",
             name: "WNUR 89.3 FM",
             era: "mixed",
@@ -48,34 +20,6 @@ RadioPreset(
                 homepage: "https://wnur.org/",
                 codec: Mp3,
                 bitrate_kbps: 192,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_lite80s",
-            name: "181.FM Lite 80's",
-            era: "1980s",
-            format: "80s soft hits",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-lite80s_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
-                terms_checked: "2026-10-27",
-                verified: false,
-            ),
-        ),
-        Station(
-            id: "181fm_eagle",
-            name: "181.FM The Eagle",
-            era: "1970s",
-            format: "classic rock",
-            source: Stream(
-                urls: ["https://listen.181fm.com/181-eagle_128k.mp3"],
-                homepage: "https://www.181.fm/links",
-                codec: Mp3,
-                bitrate_kbps: 128,
                 terms_checked: "2026-10-27",
                 verified: false,
             ),

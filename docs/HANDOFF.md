@@ -36,7 +36,7 @@ rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWA
 
 ## Where things stand (keep current)
 - Done on `main` (2026-10-27 16:00 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
-  7 working stations per era and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
+  ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
   physics; the hill-launch fix (wheel rays meet the ground's tangent plane); traffic lane graph
