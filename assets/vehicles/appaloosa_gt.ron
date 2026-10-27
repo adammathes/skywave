@@ -1,0 +1,46 @@
+// Appaloosa GT: a mid-80s American pony-car notchback with a small V8.
+//
+// Intent: cheap thrills. A light car with a torquey small V8, a live axle and soft,
+// tall tires: it launches hard, squirms a little, leans into corners and lets the tail
+// out easily. The softest of the sports cars, and the most fun to throw around. Class
+// Coupe on purpose: it is slower than the Halcyon, which a Sports car may not be.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "appaloosa_gt",
+    name: "Appaloosa GT",
+    era: Eighties,
+    class: Coupe,
+
+    mass_kg: 1400,
+    dims_m: (4.56, 1.75, 1.32),    // length, width, height
+    wheelbase_m: 2.55,
+    track_m: 1.45,
+    cg_height_m: 0.5,
+    cg_fore_aft: 0.47,             // 53% front
+
+    engine: Engine(
+        idle_rpm: 750,
+        redline_rpm: 5500,
+        torque_nm: [(1000, 280), (2400, 345), (3200, 366), (4200, 350), (5000, 290), (5500, 250)],
+    ),
+    gears: [3.35, 1.93, 1.29, 1.0, 0.8],
+    final_drive: 3.08,
+    reverse: 3.2,
+    shift_ms: 220,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.14, grip_long: 1.0, load_sens: 0.08, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 26000, damper: 2600, travel_m: 0.17, antiroll: 0.3),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 10.0),
+    brakes: Brakes(max_nm: 3000, bias_front: 0.64, abs: false, handbrake_nm: 3000),
+    aero: Aero(cd: 0.38, frontal_m2: 2.0, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.18, body_roll: 0.6, engine_sound: "v8_lazy", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 7000)],
+        radio: "digital_blue",
+    ),
+    shape: "appaloosa_gt.shape.ron",
+)

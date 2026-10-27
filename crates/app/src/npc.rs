@@ -4,8 +4,9 @@
 //!
 //! - **Setup.** [`Npcs::new`] builds the lane graph and the pool (sized for
 //!   [`Density::Busy`]) at scene setup. The first time traffic is on, [`Npcs::build_meshes`]
-//!   finds the meshes: every built-in shape in the place's four era street colors for it
-//!   (`propinst::place_paints`, the parked cars' own) at levels of detail 1 and 2, the
+//!   finds the meshes: every traffic shape (`vehicles::TRAFFIC_SHAPES`) in the place's four
+//!   era street colors for it (`propinst::place_paints`, the parked cars' own) at levels
+//!   of detail 1 and 2, the
 //!   parked cars' meshes where the place parks that shape and paint, built
 //!   ([`car::parked_mesh`]) only where it does not; a session with traffic off never
 //!   builds any. Lamps are built lit so the instance's glow switches them.
@@ -157,7 +158,7 @@ impl Npcs {
     pub fn new(place: &Place, seed: Seed) -> Npcs {
         let graph = LaneGraph::new(place);
         let budget = TrafficBudget {
-            shapes: vehicles::BUILTIN_SHAPES.len() as u8,
+            shapes: vehicles::TRAFFIC_SHAPES as u8,
             ..TrafficBudget::default()
         };
         let traffic = Traffic::new(&graph, budget, seed);
@@ -197,7 +198,7 @@ impl Npcs {
         parked: Option<&crate::propinst::PropInstances>,
         mut register: impl FnMut(Mesh) -> MeshId,
     ) -> Result<(), String> {
-        let shapes: Vec<shape::ShapeSpec> = vehicles::BUILTIN_SHAPES
+        let shapes: Vec<shape::ShapeSpec> = vehicles::BUILTIN_SHAPES[..vehicles::TRAFFIC_SHAPES]
             .iter()
             .map(|(_, text)| vehicles::load_shape(text))
             .collect::<Result<_, _>>()?;
@@ -820,6 +821,21 @@ mod tests {
             .count();
         assert!(braking > 0, "someone waits at the light");
         let brakes = app.npcs.brakes.clone();
+        // Every traffic shape has its overlay at both levels, and it has lenses.
+        assert_eq!(brakes.len(), crate::vehicles::TRAFFIC_SHAPES * 2);
+        for (k, (_, text)) in crate::vehicles::BUILTIN_SHAPES[..crate::vehicles::TRAFFIC_SHAPES]
+            .iter()
+            .enumerate()
+        {
+            let sh = crate::vehicles::load_shape(text).unwrap();
+            for lod in [1, 2] {
+                let m = car::brake_overlay_mesh(&sh, lod).unwrap();
+                assert!(
+                    !m.indices.is_empty(),
+                    "shape {k} level {lod} has no tail lenses"
+                );
+            }
+        }
         let view = app.scene_view(1.0, 16.0 / 9.0);
         let overlays: Vec<_> = view
             .instances

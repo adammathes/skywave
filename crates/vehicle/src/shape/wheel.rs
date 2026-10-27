@@ -293,6 +293,89 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
             s.disc([hub_x + 0.027, 0.0, 0.0], AXIS, 0.03, 12, m.trim);
             lugs(&mut s, hub_x + 0.028, 0.05, 5, m.chrome);
         }
+        Rims::Dish => {
+            // A wide polished lip falls to a face sunk well inside it.
+            let deep = hub_x - 0.02;
+            s.lathe(
+                o,
+                AXIS,
+                &[
+                    (face + 0.002, rr - 0.004),
+                    (face - 0.002, rr - 0.04),
+                    (deep + 0.004, rr - 0.05),
+                    (deep, rr * 0.8),
+                ],
+                24,
+                0.0,
+                (-1.0, rr),
+                m.chrome,
+            );
+            s.disc([deep, 0.0, 0.0], AXIS, rr * 0.8, 24, m.rim);
+            // Five round holes round the hub, dark through to the barrel.
+            for k in 0..5 {
+                let a = 2.0 * PI * (k as f32 + 0.5) / 5.0;
+                let (sn, cs) = sin_cos(a);
+                s.disc(
+                    [deep + 0.002, cs * rr * 0.5, sn * rr * 0.5],
+                    AXIS,
+                    rr * 0.17,
+                    12,
+                    m.liner,
+                );
+            }
+            s.cylinder(
+                [deep, 0.0, 0.0],
+                [deep + 0.03, 0.0, 0.0],
+                0.06,
+                12,
+                false,
+                false,
+                m.rim,
+            );
+            s.disc([deep + 0.03, 0.0, 0.0], AXIS, 0.06, 12, m.rim.shade(1.1));
+            lugs(&mut s, deep + 0.032, 0.04, 5, m.chrome);
+            s.disc([deep + 0.036, 0.0, 0.0], AXIS, 0.02, 10, m.trim);
+        }
+        Rims::Slotted => {
+            // A nearly flat face just inside the lip with a ring of long radial slots.
+            let fx = face - 0.012;
+            s.annulus(
+                [face - 0.003, 0.0, 0.0],
+                AXIS,
+                rr - 0.03,
+                rr - 0.012,
+                24,
+                m.rim,
+            );
+            s.lathe(
+                o,
+                AXIS,
+                &[(face - 0.003, rr - 0.03), (fx, rr - 0.04)],
+                24,
+                0.0,
+                (-1.0, rr),
+                m.rim,
+            );
+            s.disc([fx, 0.0, 0.0], AXIS, rr - 0.04, 24, m.rim);
+            let n = 10;
+            for k in 0..n {
+                let a = 2.0 * PI * (k as f32 + 0.5) / n as f32;
+                let (sn, cs) = sin_cos(a);
+                let dir = [0.0, cs, sn];
+                let t = [0.0, -sn, cs];
+                let c = madd([fx + 0.001, 0.0, 0.0], dir, rr * 0.66);
+                s.obox(c, [AXIS, dir, t], [0.002, rr * 0.17, 0.014], m.liner);
+            }
+            s.disc(
+                [fx + 0.004, 0.0, 0.0],
+                AXIS,
+                rr * 0.36,
+                16,
+                m.rim.shade(1.1),
+            );
+            lugs(&mut s, fx + 0.008, 0.045, 5, m.chrome);
+            s.disc([fx + 0.012, 0.0, 0.0], AXIS, 0.024, 10, m.trim);
+        }
     }
     s
 }
