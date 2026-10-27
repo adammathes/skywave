@@ -8,7 +8,8 @@
 //!   procedural place.
 //! - `place=<name>`: `town` (the hand-laid test town, the default) or `coast` (the
 //!   procedural `california_coast` place for the seed).
-//! - `car=<id>`: built-in vehicle id (default [`DEFAULT_VEHICLE`]).
+//! - `car=<id>`: built-in vehicle id (default: the vehicle setting, the car last picked,
+//!   else [`DEFAULT_VEHICLE`]).
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
 //!   which starts at `chase-mid` and remembers the last one picked).
 //! - `t=HH:MM`: time of day; when given the clock is frozen there (default 17:40, running).
@@ -54,6 +55,8 @@ pub struct SceneSetup {
     pub seed: u64,
     pub place: PlaceKey,
     pub car: String,
+    /// The scene named the car (`car=`): the saved vehicle setting does not replace it.
+    pub car_given: bool,
     /// The camera, or `None` for the player's camera setting.
     pub camera: Option<CameraMode>,
     /// Seconds of day the clock is frozen at, or `None` for the default running clock.
@@ -81,6 +84,7 @@ impl Default for SceneSetup {
             seed: 1,
             place: PlaceKey::TestTown,
             car: DEFAULT_VEHICLE.to_string(),
+            car_given: false,
             camera: None,
             time_s: None,
             pos: None,
@@ -121,7 +125,10 @@ impl SceneSetup {
         match key {
             "seed" => self.seed = value.parse().map_err(|_| bad())?,
             "place" => self.place = PlaceKey::from_name(value).ok_or_else(bad)?,
-            "car" => self.car = value.to_string(),
+            "car" => {
+                self.car = value.to_string();
+                self.car_given = true;
+            }
             "cam" => self.camera = Some(CameraMode::from_name(value).ok_or_else(bad)?),
             "t" => self.time_s = Some(parse_clock(value).ok_or_else(bad)?),
             "pos" => {
@@ -199,6 +206,7 @@ mod tests {
         assert_eq!(s.seed, 7);
         assert_eq!(s.place, PlaceKey::Coast);
         assert_eq!(s.car, "palisade_wagon");
+        assert!(s.car_given && !SceneSetup::default().car_given);
         assert_eq!(s.camera, Some(CameraMode::Cockpit));
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
         assert_eq!(s.pos, Some([-200.5, 97.0]));

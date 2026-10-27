@@ -2,7 +2,9 @@
 //! and clock.
 //!
 //! ```text
-//! Pause:     Resume · Settings › · Quit (native only)
+//! Pause:     Resume · Vehicle › · Settings › · Quit (native only)
+//! Vehicle:   one row per built-in car (name, then class, kW/t, drive, gearbox), the one
+//!            driven marked; select to swap it in where you are
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
 //! Drive:     Handling (Arcade / Light / Off)
 //! Camera:    Camera · Cockpit FOV · Seat height · Seat forward · Dashboard (Full cockpit /
@@ -21,7 +23,7 @@
 //!            Stations › · [web: Add stream URL] · [Remove added streams, when there are some]
 //! Stations:  one on/off row per station of the preset and per added stream
 //! World:     Time of day · Clock speed
-//! About:     (license text)
+//! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
 //! ```
 
@@ -41,6 +43,8 @@ use super::menu::{Item, Unit, Widget};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Pause,
+    /// Pick a car: one row per [`crate::vehicles::BUILTIN`] entry.
+    Vehicle,
     Settings,
     Drive,
     Camera,
@@ -66,6 +70,8 @@ pub enum ItemId {
     Resume,
     Quit,
     Open(Page),
+    /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`].
+    Vehicle(usize),
     /// Look Y (and free-fly look Y) invert on a device.
     InvertLookY(DeviceKind),
     InvertLookX(DeviceKind),
@@ -159,6 +165,7 @@ pub fn binding_rows() -> impl Iterator<Item = (Action, Sign)> {
 pub fn title(page: Page) -> &'static str {
     match page {
         Page::Pause => "Paused",
+        Page::Vehicle => "Vehicle",
         Page::Settings => "Settings",
         Page::Drive => "Drive",
         Page::Camera => "Camera",
@@ -181,10 +188,15 @@ pub fn title(page: Page) -> &'static str {
 pub fn note(page: Page) -> Option<&'static str> {
     match page {
         Page::About => Some(
-            "Skywave is free software under the BSD-3-Clause license.\n\
+            "Created by Adam Mathes\n\
+             Skywave is free software under the BSD-3-Clause license.\n\
              Code, font and art: ours. Music: whatever you tune in.",
         ),
         Page::Bindings(_) => Some("Select a row, then press the new input."),
+        Page::Vehicle => Some(
+            "The marked car is the one you are driving.\n\
+             Select another to swap it in right where you are.",
+        ),
         Page::Video => Some(
             "Quality sets shadows, bloom and glow; Deck targets 90 fps there.\n\
              Resolution scale draws the world smaller and upscales it.",
@@ -222,6 +234,8 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
     match page {
         Page::Pause => {
             add(ItemId::Resume, "Resume", Widget::Action);
+            let (id, w) = open(Page::Vehicle);
+            add(id, "Vehicle", w);
             let (id, w) = open(Page::Settings);
             add(id, "Settings", w);
             if ctx.can_quit {
@@ -548,6 +562,11 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                 },
             );
         }
+        Page::Vehicle => {
+            for (i, car) in super::roster::roster().iter().enumerate() {
+                add(ItemId::Vehicle(i), car.name.as_str(), Widget::Action);
+            }
+        }
         Page::About => {}
         Page::Conflict => {
             add(ItemId::KeepExisting, "Keep on ", Widget::Action);
@@ -594,6 +613,26 @@ mod tests {
             items.iter().all(|i| i.id != ItemId::Quit),
             "no quit on the web"
         );
+        let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids[..3],
+            [
+                ItemId::Resume,
+                ItemId::Open(Page::Vehicle),
+                ItemId::Open(Page::Settings)
+            ]
+        );
+        build(Page::Vehicle, &ctx, &mut items);
+        assert_eq!(items.len(), crate::vehicles::BUILTIN.len());
+        for (i, item) in items.iter().enumerate() {
+            assert_eq!(item.id, ItemId::Vehicle(i));
+            assert_eq!(item.widget, Widget::Action);
+            let spec = crate::vehicles::builtin_spec(crate::vehicles::BUILTIN[i].0).unwrap();
+            assert_eq!(item.label, spec.name);
+        }
+        assert!(note(Page::About)
+            .unwrap()
+            .contains("Created by Adam Mathes"));
         build(Page::Device(DeviceKind::Gamepad), &ctx, &mut items);
         assert_eq!(items[0].widget, Widget::Toggle(true));
         assert_eq!(items[1].widget, Widget::Toggle(false));
