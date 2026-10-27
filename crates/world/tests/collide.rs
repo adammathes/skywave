@@ -1042,3 +1042,79 @@ fn probe_and_resolve_do_not_allocate() {
         assert_eq!(allocations() - before, 0, "{} allocated", spec.id);
     }
 }
+
+/// The test town's collider with a graded hill 400 m west of it: flat terrain at `y = 0`
+/// south of `z_foot`, rising at `grade` (rise over run) northward (toward `-z`) beyond it.
+/// Returns the collider and `[x, z]` of the middle of the foot.
+fn hill(grade: f32) -> (WorldCollider, [f32; 2]) {
+    let (_, mut c) = town();
+    let (cell, n) = (2.0, 101);
+    let origin = [c.origin[0] - 500.0, c.origin[1]];
+    let foot = [origin[0] + 100.0, origin[1] + 100.0];
+    let mut heights = Vec::with_capacity(n * n);
+    for iz in 0..n {
+        let z = origin[1] + iz as f32 * cell;
+        for _ in 0..n {
+            heights.push((foot[1] - z).max(0.0) * grade);
+        }
+    }
+    c.terrain = Some(world::TerrainGrid {
+        origin,
+        cell,
+        w: n,
+        h: n,
+        heights,
+        flip: vec![0; (n - 1) * (n - 1)],
+        water_level: -100.0,
+    });
+    (c, foot)
+}
+
+/// Drives at `mps` onto `c`'s hill from 20 m short of `foot`, `yaw_deg` off its fall line,
+/// holding that speed for 10 s (full throttle once the hill slows it). Returns the worst
+/// height of the center of mass over its ride height above the ground under it, m, and
+/// the worst speed, m/s.
+fn hill_run(
+    spec: &VehicleSpec,
+    c: &WorldCollider,
+    foot: [f32; 2],
+    mps: f32,
+    yaw_deg: f32,
+) -> (f32, f32) {
+    let yaw = yaw_deg.to_radians();
+    let back = [yaw.sin(), yaw.cos()];
+    let start = add(foot, back, 20.0);
+    let mut s = launched(spec, [start[0], 0.0, start[1]], yaw, mps);
+    let (mut high, mut fast) = (f32::MIN, 0.0f32);
+    for _ in 0..10 * STEPS_PER_S {
+        let inp = cruise(&s, mps);
+        tick(spec, &mut s, inp, c);
+        assert_finite(&s);
+        let ground = c.ground_at(xz(s.pos)).y;
+        high = high.max(s.pos[1] - ground - spec.cg_height_m);
+        let v = s.vel;
+        fast = fast.max((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
+    }
+    (high, fast)
+}
+
+#[test]
+fn steep_hills_do_not_launch_the_car() {
+    let (c, foot) = hill(1.0);
+    let mut bad = Vec::new();
+    for spec in cars() {
+        for &mps in &[10.0, 20.0, 30.0] {
+            for &yaw in &[0.0, 30.0] {
+                let (high, fast) = hill_run(&spec, &c, foot, mps, yaw);
+                println!(
+                    "{:15} 45° hill at {mps:2} m/s, {yaw:2}° off the fall line: {high:+7.2} m up, {fast:6.1} m/s",
+                    spec.id
+                );
+                if high >= 2.0 || fast >= mps + 2.0 {
+                    bad.push((spec.id.clone(), mps, yaw, high, fast));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "launched off the hill: {bad:?}");
+}

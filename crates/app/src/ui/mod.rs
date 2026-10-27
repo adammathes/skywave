@@ -103,12 +103,19 @@ pub struct Ui {
     bindings_changed: bool,
     /// The Camera page picked another camera.
     camera_changed: bool,
-    /// The Vehicle page picked the built-in car with this index; the app switches to it.
-    vehicle_pick: Option<usize>,
+    /// The Vehicle page picked the built-in car with this index, in this paint; the app
+    /// switches to it.
+    vehicle_pick: Option<(usize, usize)>,
     /// The pause menu's "Reset car" was chosen; the app resets the car.
     reset_pick: bool,
-    /// The car being driven, an index into `vehicles::BUILTIN` (marked on the Vehicle page).
+    /// The car being driven, an index into `vehicles::BUILTIN`, and its paint.
     vehicle: usize,
+    vehicle_paint: usize,
+    /// The car and paint the Vehicle page shows (on the turntable).
+    browse: [usize; 2],
+    /// Where the Vehicle page left room for the turntable, virtual HUD units `[x, y, w,
+    /// h]`, as last drawn (`None`: no room, or another page).
+    stage: Option<[f32; 4]>,
     /// Something changed since the last save.
     dirty: bool,
     store: Option<Box<dyn SettingsStore>>,
@@ -167,6 +174,9 @@ impl Ui {
             vehicle_pick: None,
             reset_pick: false,
             vehicle: 0,
+            vehicle_paint: 0,
+            browse: [0, 0],
+            stage: None,
             dirty: false,
             store: None,
             menu: None,
@@ -325,8 +335,8 @@ impl Ui {
         std::mem::take(&mut self.camera_changed)
     }
 
-    /// Takes the car the Vehicle page picked, once.
-    fn take_vehicle_pick(&mut self) -> Option<usize> {
+    /// Takes the car (and paint) the Vehicle page picked, once.
+    fn take_vehicle_pick(&mut self) -> Option<(usize, usize)> {
         self.vehicle_pick.take()
     }
 
@@ -345,23 +355,51 @@ impl Ui {
         self.vehicle
     }
 
-    /// The Vehicle page opens on the car being driven.
+    /// The paint the car being driven wears: a palette entry.
+    pub fn vehicle_paint(&self) -> usize {
+        self.vehicle_paint
+    }
+
+    /// The Vehicle page opens on the car being driven, in its paint, the car chooser
+    /// focused.
     fn focus_current_vehicle(&mut self) {
         if let Some(menu) = &mut self.menu {
             if menu.page() == Page::Vehicle {
-                menu.set_focus(self.vehicle);
+                self.browse = [self.vehicle, self.vehicle_paint];
+                menu.set_focus(0);
             }
         }
     }
 
-    /// The app now drives the built-in car `index`. With `remember`, it becomes the vehicle
-    /// setting (saved now, so the next session starts in it); with `toast`, its name shows
-    /// for [`VEHICLE_TOAST_SECONDS`].
-    pub(crate) fn vehicle_switched(&mut self, index: usize, remember: bool, toast: bool) {
+    /// The car and paint on the turntable and where it goes on screen (virtual HUD units
+    /// `[x, y, w, h]`), while the Vehicle page is up and has room for it.
+    pub fn preview(&self) -> Option<(usize, usize, [f32; 4])> {
+        let page = self.menu.as_ref()?.page();
+        let stage = self.stage?;
+        (page == Page::Vehicle && self.capture.is_none()).then_some((
+            self.browse[0],
+            self.browse[1],
+            stage,
+        ))
+    }
+
+    /// The app now drives the built-in car `index` in palette entry `paint`. With
+    /// `remember`, they become the vehicle setting (saved now, so the next session starts
+    /// in it); with `toast`, its name shows for [`VEHICLE_TOAST_SECONDS`].
+    pub(crate) fn vehicle_switched(
+        &mut self,
+        index: usize,
+        paint: usize,
+        remember: bool,
+        toast: bool,
+    ) {
         self.vehicle = index;
+        self.vehicle_paint = paint;
         let id = crate::vehicles::BUILTIN.get(index).map(|(id, _)| *id);
-        if remember && id.is_some() && self.settings.vehicle != id {
+        if remember && id.is_some() && (self.settings.vehicle != id || self.settings.paint != paint)
+        {
             self.settings.vehicle = id;
+            self.settings.paint = paint;
             self.dirty = true;
             self.save_if_dirty();
         }
@@ -437,6 +475,7 @@ impl Ui {
             radio: &self.radio,
             text_entry: self.text_entry,
             quality: self.quality(),
+            browse: self.browse,
         }
     }
 
@@ -509,6 +548,10 @@ impl Ui {
         self.rebuild(clock);
         if let Some(nav) = self.repeat.update(&input, dt) {
             let effect = match &mut self.menu {
+                // Select drives the car shown from any row of the Vehicle page.
+                Some(menu) if menu.page() == Page::Vehicle && nav == Nav::Confirm => {
+                    Effect::Activate(ItemId::Vehicle(self.browse[0]))
+                }
                 Some(menu) => menu.apply(nav, &self.items),
                 None => Effect::None,
             };
@@ -523,6 +566,16 @@ impl Ui {
             Effect::None | Effect::Moved | Effect::Opened(_) => {}
             Effect::Toggle(id, on) => self.set_toggle(id, on),
             Effect::Slide(id, v) => self.set_slider(id, v, clock),
+            Effect::Choose(ItemId::VehicleCar, i) => {
+                // Another car: the paint it is driven in, else its first.
+                let paint = if i == self.vehicle {
+                    self.vehicle_paint
+                } else {
+                    0
+                };
+                self.browse = [i, paint];
+            }
+            Effect::Choose(ItemId::Paint, k) => self.browse[1] = k,
             Effect::Choose(ItemId::ClockSpeed, i) => {
                 self.settings.clock_speed = CLOCK_SPEEDS[i.min(CLOCK_SPEEDS.len() - 1)];
                 self.dirty = true;
@@ -707,7 +760,12 @@ impl Ui {
             }
             ItemId::Vehicle(i) => {
                 // Back to the road to see it.
-                self.vehicle_pick = Some(i);
+                let paint = if i == self.browse[0] {
+                    self.browse[1]
+                } else {
+                    0
+                };
+                self.vehicle_pick = Some((i, paint));
                 self.close();
             }
             ItemId::Quit => {
@@ -961,8 +1019,8 @@ impl App {
             self.camera.set_mode(self.ui.settings.camera);
         }
         let driving = !was_open && !self.ui.is_open() && !self.ui.full_map_open() && !self.still;
-        if let Some(i) = self.ui.take_vehicle_pick() {
-            self.switch_to(i, true);
+        if let Some((i, paint)) = self.ui.take_vehicle_pick() {
+            self.switch_to(i, paint, true);
         } else if state.just_pressed(Action::VehicleNext) && driving {
             self.cycle_vehicle();
         }
@@ -1023,6 +1081,7 @@ impl App {
             radio_display,
         };
         self.ui.draw(&ctx);
+        self.update_preview(dt as f32);
         self.audio = self.sound.params(
             &self.drive,
             &self.ground,
@@ -1158,18 +1217,24 @@ impl App {
     }
 
     /// Loads settings and bindings from `store` (the bindings reach the mapper on the next
-    /// [`App::frame`]) and saves there from now on. The saved vehicle replaces the car the
-    /// app was built with unless a scene named that one (`car=`); its meshes then wait in
-    /// [`App::take_new_meshes`].
+    /// [`App::frame`]) and saves there from now on. The saved vehicle and paint replace the
+    /// car the app was built with unless a scene named that one (`car=`); its meshes then
+    /// wait in [`App::take_new_meshes`].
     pub fn set_settings_store(&mut self, store: Box<dyn SettingsStore>) {
         self.ui.set_store(store);
         if !self.camera_from_scene {
             self.camera.set_mode(self.ui.settings.camera);
         }
         if !self.car_from_scene {
+            // The saved car, in the scene's paint (not saved) or its saved one.
             let saved = self.ui.settings.vehicle.and_then(roster::index_of);
-            if let Some(i) = saved.filter(|&i| i != self.ui.vehicle) {
-                self.switch_to(i, false);
+            let paint = self.paint_from_scene.unwrap_or(self.ui.settings.paint);
+            if let Some(i) =
+                saved.filter(|&i| (i, paint) != (self.ui.vehicle, self.ui.vehicle_paint))
+            {
+                let remember = self.paint_from_scene.is_none();
+                let switched = self.switch_vehicle_at(i, paint, false, remember);
+                debug_assert!(switched.is_ok(), "{switched:?}");
             }
         }
         self.apply_clock_speed();

@@ -14,7 +14,8 @@
 //! lock keep a free cursor, and `movementX/Y` still drive the look.
 //!
 //! Settings and bindings are kept in `localStorage` (key `skywave.settings`). `?menu=1`
-//! opens the settings menu at startup, `?menu=vehicle` the Vehicle page.
+//! opens the settings menu at startup, `?menu=vehicle` the Vehicle page (on the car and paint
+//! of `car=` and `paint=`).
 //!
 //! The town streams round the camera within `app::stream::StreamBudget::WEB`, timed with
 //! `performance.now()`; `window.skywaveStreamIdle` turns true when nothing is left to
