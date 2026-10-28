@@ -97,7 +97,17 @@ pub struct WorldSynth {
     bird_level: f32,
 
     traffic: [Engine; TRAFFIC_VOICES],
+
+    bell_level: Slew,
+    bell_clock: f32,
+    bell: Decay,
+    bell_phase: [f32; 3],
 }
+
+/// A crossing bell: strikes a second, and its partials (Hz) and their levels.
+const BELL_STRIKES_HZ: f32 = 2.2;
+const BELL_HZ: [f32; 3] = [880.0, 2390.0, 3610.0];
+const BELL_AMP: [f32; 3] = [1.0, 0.55, 0.3];
 
 /// A passing car's engine voice.
 #[derive(Clone, Debug)]
@@ -188,6 +198,10 @@ impl WorldSynth {
             bird_pan: [0.7, 0.7],
             bird_level: 0.0,
             traffic: core::array::from_fn(|_| Engine::new()),
+            bell_level: Slew::new(0.0, 0.05),
+            bell_clock: 0.0,
+            bell: Decay::SILENT,
+            bell_phase: [0.0; 3],
         }
     }
 
@@ -460,6 +474,27 @@ impl WorldSynth {
             }
         }
 
+        // Crossing bells: a struck ding a little over twice a second while they ring.
+        let bell = self.bell_level.step(p.bell);
+        if bell > 1e-4 || self.bell.active() {
+            self.bell_clock += BELL_STRIKES_HZ * DT;
+            if self.bell_clock >= 1.0 {
+                self.bell_clock -= 1.0;
+                if bell > 1e-3 {
+                    self.bell = Decay::hit(1.0, 0.18);
+                }
+            }
+            let e = self.bell.step();
+            let mut tone = 0.0;
+            for ((ph, hz), amp) in self.bell_phase.iter_mut().zip(BELL_HZ).zip(BELL_AMP) {
+                tone += sin_turns(*ph) * amp;
+                *ph = fract(*ph + hz * DT);
+            }
+            let b = tone * e * bell * 0.09;
+            l += b;
+            r += b;
+        }
+
         if l.is_finite() && r.is_finite() && horn.is_finite() {
             [l, r, horn]
         } else {
@@ -501,6 +536,20 @@ fn side_gains(side: f32) -> [f32; 2] {
 mod tests {
     use super::*;
     use crate::synth::WheelParams;
+
+    #[test]
+    fn crossing_bells_ring_only_when_near() {
+        let quiet = render(&AudioParams::default(), 48_000);
+        let ringing = render(
+            &AudioParams {
+                bell: 1.0,
+                ..AudioParams::default()
+            },
+            48_000,
+        );
+        assert!(rms(&quiet) < 1e-4, "{}", rms(&quiet));
+        assert!(rms(&ringing) > 5e-3, "{}", rms(&ringing));
+    }
 
     fn rms(x: &[f32]) -> f32 {
         (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()

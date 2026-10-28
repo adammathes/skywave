@@ -282,11 +282,12 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
             })
             .collect();
         let crossings = tracks.iter().filter(|t| t.0 == TRACK_CROSSING).count();
+        // (A spur's pieces carry `TRACK_SPUR`; none crosses a road.)
         let signs = p
             .props
             .items
             .iter()
-            .filter(|x| x.kind == PropKind::Crossbuck)
+            .filter(|x| matches!(x.kind, PropKind::CrossingGate { .. }))
             .count();
         let out_lines = b.lines.len() - b.cross;
         assert!(crossings >= out_lines, "seed {seed}: {crossings} crossings");

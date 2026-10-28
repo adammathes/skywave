@@ -179,6 +179,12 @@ coast's Place is unchanged.
   line, and the board shows the time and the speed over the line, with a toast. Only the last run is kept.
 - **The overlooks.** At the end of each overlook road: a guard rail 9 m past the end across the view, two
   benches facing out, a lamp.
+- **The grade crossings.** Every road the rail line crosses at grade: a `GradeCrossing` landmark on the track's
+  middle, and a `CrossingGate` (mast, crossed blades, twin lamps, bell, the arm's pivot) on each approach on the
+  right, its arm reaching across the approach to 0.3 m short of the road's middle (across the whole road on a
+  one-way road, which gets the gate on its one approach only); they replace the crossing signs. The spurs' track
+  pieces carry `TRACK_SPUR`, so the main line is the pieces without it. The train and the gates run in the game
+  (`docs/NPCS.md`, "The train").
 - **The channel ramps.** Chain-link along both lips of the flood channel, 0.6 m outside them, open within 4 m
   of any road (the bridges) and round each ramp: along a ramp's outer edge from 12 m below its top, and across
   its foot. A `ChannelRamp` landmark marks each ramp's top.

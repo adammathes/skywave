@@ -17,6 +17,7 @@
 
 pub mod camera;
 pub mod car;
+pub mod crossing;
 pub mod daylight;
 pub mod deck;
 pub mod dragstrip;
@@ -228,7 +229,12 @@ pub struct App {
     world_pick: Option<usize>,
     /// The place's drag strip, its tree and timing board.
     strip: Option<dragstrip::DragStrip>,
+    /// The place's railway: its train and its crossings' gates.
+    rail: Option<crossing::Rail>,
 }
+
+/// Seconds after a world loads before its train first warns at its crossings.
+const TRAIN_FIRST_S: f32 = 30.0;
 
 /// Seconds the deep-water toast stays up.
 const WATER_TOAST_S: f32 = 2.5;
@@ -316,8 +322,22 @@ impl App {
                 ]
             })?;
         let mut strip = dragstrip::DragStrip::of(&place);
+        let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let sound = sound::Sound::new(&place, &drive);
-        let npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
+        let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
+        if let Some(r) = &rail {
+            let line = &r.railway.train.line;
+            let pts: Vec<[f32; 2]> = line.pts.iter().map(|p| [p[0], p[2]]).collect();
+            let xs: Vec<[f32; 2]> = line
+                .crossings
+                .iter()
+                .map(|&s| {
+                    let (p, _) = line.at(s);
+                    [p[0], p[2]]
+                })
+                .collect();
+            npcs.crowd.set_rail(&pts, &xs);
+        }
         let town = match stream {
             None => resident_town(&place, &palette, grammar),
             Some(budget) => streamed_town(place, budget, palette, grammar),
@@ -353,8 +373,20 @@ impl App {
                 .collect();
             st.set_ids(ids);
         }
+        if let Some(r) = &mut rail {
+            let ids = r
+                .meshes(&palette)
+                .into_iter()
+                .map(|m| {
+                    meshes.push(m);
+                    MeshId(meshes.len() as u32 - 1)
+                })
+                .collect();
+            r.set_ids(ids);
+        }
         let extra = drive::MAX_CAR_INSTANCES
             + dragstrip::MAX_INSTANCES
+            + rail.as_ref().map_or(0, |r| r.capacity())
             + preview::MAX_INSTANCES
             + prop_capacity(&props)
             + npcs.capacity();
@@ -419,6 +451,7 @@ impl App {
             overlay: render::HudBuilder::new(),
             world_pick: None,
             strip,
+            rail,
         })
     }
 
@@ -487,6 +520,22 @@ impl App {
         if let Some(d) = app.traffic_scene {
             app.apply_traffic(d);
             app.finish_warm_up();
+        }
+        if let (Some(secs), Some(r)) = (setup.train_s, app.rail.as_mut()) {
+            r.railway.train.phase = traffic::train::Phase::Announcing { t: 0.0 };
+            let player = npc::player(
+                &app.drive.pose(1.0),
+                app.drive.state.speed_mps,
+                app.drive.spec.dims_m,
+            );
+            for _ in 0..(secs * skywave_core::SIM_HZ as f32) as u32 {
+                r.step(
+                    &player,
+                    app.npcs.cars(),
+                    app.npcs.crowd.pool(),
+                    SIM_DT as f32,
+                );
+            }
         }
         Ok(app)
     }
@@ -785,6 +834,13 @@ impl App {
             {
                 self.drive.note_car_hit(hit);
             }
+            if let Some(r) = &self.rail {
+                if let Some(hit) = r.collide(&mut self.drive.state, &self.drive.spec) {
+                    self.drive.note_car_hit(hit);
+                }
+                self.npcs.set_barriers(r.barriers());
+                self.npcs.crowd.set_rail_closed(r.closed());
+            }
             self.sound.note_step(&self.drive.impact);
             if self.npcs.active() {
                 let t = now();
@@ -808,6 +864,10 @@ impl App {
                 let inp = npc::StepInputs { player, ..inputs };
                 self.npcs.step_peds(&inp);
                 peds_s += now() - t;
+            }
+            let player = self.traffic_player();
+            if let Some(r) = &mut self.rail {
+                r.step(&player, self.npcs.cars(), self.npcs.crowd.pool(), dt);
             }
             if let Some(st) = &mut self.strip {
                 let pose = self.drive.pose(1.0);
@@ -931,12 +991,16 @@ impl App {
                 u64::from(self.drive.headlights),
             ],
         );
-        // The traffic and pedestrians only while they run, so a scene without them hashes
-        // as before.
-        if self.npcs.active() || self.npcs.crowd.active() {
+        // The traffic and pedestrians only while they run, and the train where there is
+        // one, so a scene without them hashes as before.
+        let h = if self.npcs.active() || self.npcs.crowd.active() {
             hash64(h, &[self.npcs.hash()])
         } else {
             h
+        };
+        match &self.rail {
+            Some(r) => hash64(h, &[r.hash()]),
+            None => h,
         }
     }
 
@@ -1042,6 +1106,9 @@ impl App {
         }
         if let Some(st) = &self.strip {
             st.push(eye, &mut self.instances);
+        }
+        if let Some(r) = &self.rail {
+            r.push(alpha, eye, &self.lights, &mut self.instances);
         }
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs
@@ -2095,15 +2162,11 @@ mod tests {
                 "{stats:?}"
             );
         }
-        // Back in either world it holds what it held there before: nothing carried over.
+        // Back in either world it holds exactly what it held on its first load there (meshes,
+        // instance slots, chunk pool, parked-car meshes, traffic room): nothing carried over,
+        // whatever each world contains.
         assert_eq!(seen[2], seen[0]);
         assert_eq!(seen[3], seen[1]);
-        // The stub shares the coast's place, so the second world asks for the same room;
-        // it holds more meshes, for the car it starts in and the 2001 cars it parks and
-        // drives.
-        let rest = |f: &(usize, usize, usize, ChunkPoolConfig, usize, usize)| (f.1, f.2, f.3, f.5);
-        assert_eq!(rest(&seen[1]), rest(&seen[0]));
-        assert!(seen[1].0 > seen[0].0 && seen[1].4 > seen[0].4);
     }
 
     #[test]

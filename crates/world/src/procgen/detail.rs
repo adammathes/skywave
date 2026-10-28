@@ -99,6 +99,8 @@ const BRIDGE_DROP_M: f32 = 2.0;
 /// A crossing sign stands this far from the track along the road, out past the curb.
 const CROSSBUCK_BACK_M: f32 = 5.0;
 const CROSSBUCK_OUT_M: f32 = 1.2;
+/// A gate's arm stops this short of the road's middle (or of the far curb).
+const GATE_ARM_SHORT_M: f32 = 0.3;
 /// Key of the order the lots' cars are capped in.
 const KEY_LOT_CAR: u64 = 0x4C4F_5443;
 
@@ -230,6 +232,7 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::TacoStand { name_seed } => (29, name_seed),
             PropKind::HeroCar { slot } => (30, u64::from(slot)),
             PropKind::PicnicTable => (31, 0),
+            PropKind::CrossingGate { arm_dm } => (32, u64::from(arm_dm)),
         };
         words.push(tag);
         words.push(payload);
@@ -1652,6 +1655,7 @@ impl<'a> Detailer<'a> {
                     } else {
                         bed
                     };
+                    let bed = if spur { bed | place::TRACK_SPUR } else { bed };
                     self.props.push(prop(
                         mid,
                         y,
@@ -1662,19 +1666,25 @@ impl<'a> Detailer<'a> {
                         },
                     ));
                 }
-                // A crossing sign on each road approach to the track, on the right.
+                // A crossing gate on each road approach to the track, on the right, its arm
+                // across the approach (the whole road on a one-way road, whose traffic
+                // only comes the one way).
                 if bed == place::TRACK_CROSSING && !spur {
                     if let Some((i, r)) = run[run.len() / 2].4 {
                         let x = run[run.len() / 2].0;
-                        let hw = 0.5 * place.roads.edges[i].width_m
-                            + if place.roads.edges[i].sidewalk {
-                                place::SIDEWALK_WIDTH_M
-                            } else {
-                                0.0
-                            };
+                        let e = &place.roads.edges[i];
+                        let walk = if e.sidewalk {
+                            place::SIDEWALK_WIDTH_M
+                        } else {
+                            0.0
+                        };
+                        let hw = 0.5 * e.width_m + walk;
                         let right_hand =
                             self.template.driving_side == crate::template::DrivingSide::Right;
                         for sigma in [1.0f32, -1.0] {
+                            if e.oneway && sigma < 0.0 {
+                                continue;
+                            }
                             let heading = r * sigma;
                             let side = if right_hand {
                                 heading.right()
@@ -1683,7 +1693,15 @@ impl<'a> Detailer<'a> {
                             };
                             let q = x - heading * CROSSBUCK_BACK_M + side * (hw + CROSSBUCK_OUT_M);
                             let y = self.ground(q);
-                            self.props.push(prop(q, y, -heading, PropKind::Crossbuck));
+                            let reach = hw + CROSSBUCK_OUT_M - GATE_ARM_SHORT_M;
+                            let arm = if e.oneway { reach + e.width_m } else { reach };
+                            let arm_dm = (arm * 10.0).min(255.0) as u8;
+                            self.props.push(prop(
+                                q,
+                                y,
+                                -heading,
+                                PropKind::CrossingGate { arm_dm },
+                            ));
                         }
                     }
                 }

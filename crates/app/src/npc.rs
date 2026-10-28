@@ -442,6 +442,13 @@ impl Npcs {
         self.traffic.populate(&self.graph, &inputs);
     }
 
+    /// The gate lines the cars must not cross from the next step on (closed railroad
+    /// crossings).
+    pub fn set_barriers(&mut self, barriers: &[traffic::Barrier]) {
+        self.traffic.set_barriers(barriers);
+        self.empty.set_barriers(barriers);
+    }
+
     /// The body of car `c`, as the player's car hits it.
     pub fn body(&self, c: &traffic::Car) -> CarBody {
         self.bodies[usize::from(c.shape)]
