@@ -92,8 +92,9 @@ crew garage (a warehouse with the hero cars parked and a lit sign), a taco stand
 
 "Change worlds": a World page listing every scenario as a card (title, year, a still, the cars and
 stations it ships with); picking one reloads the place and persists; `?scenario=` on the web. Built (see
-the format above), in the pause menu. Until the basin's template, grammar, palette and preset land,
-`mirage_valley_2001` is a stub on the coast's, marked "coming" on its card.
+the format above), in the pause menu. Mirage Valley's place is its own, the `socal_basin` region template
+(`docs/WORLD_GENERATION.md`, "Inland basins"); until its grammar, palette and preset land it dresses in the
+coast's and is marked "coming" on its card.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

@@ -47,6 +47,8 @@ pub fn wall(kind: EdgeKind) -> Option<Wall> {
         // A wooded bluff, and a rail embankment.
         EdgeKind::Forest => ((20.0, 30.0), 24.0),
         EdgeKind::RailYards => ((7.0, 9.0), 9.0),
+        // Mesas: a broken escarpment, lower than the hills.
+        EdgeKind::Desert => ((32.0, 48.0), 40.0),
         EdgeKind::Open | EdgeKind::Ocean | EdgeKind::Lake | EdgeKind::Bay => return None,
     };
     Some(Wall { height_m, ramp_m })
@@ -160,6 +162,14 @@ pub fn beyond(seed: u64, side: usize, kind: EdgeKind, along: f32, out: f32) -> f
         }
         EdgeKind::Forest => 4.0 * soft + 6.0 * soft * value_noise(k, along, out, 110.0),
         EdgeKind::RailYards => 1.2 * soft * value_noise(k, along, out, 60.0),
+        // The desert floor running off flat to the horizon, with buttes standing out of it:
+        // flat-topped where the ridge noise is high, gone where it is low.
+        EdgeKind::Desert => {
+            let butte = smoothstep(0.62, 0.7, ridge(k, along, out, 340.0));
+            -6.0 * soft
+                + 3.0 * value_noise(k ^ 3, along, out, 120.0)
+                + 70.0 * soft * butte * (0.6 + 0.4 * value_noise(k ^ 5, along, out, 900.0))
+        }
         EdgeKind::Ocean | EdgeKind::Lake | EdgeKind::Open => -40.0,
         EdgeKind::Bay => {
             let shore = smoothstep(1500.0, 2300.0, out);
@@ -180,6 +190,7 @@ mod tests {
             EdgeKind::HighwayLoop,
             EdgeKind::Forest,
             EdgeKind::RailYards,
+            EdgeKind::Desert,
         ] {
             let w = wall(kind).unwrap();
             let steepest = 1.5 * w.height_m.0 / ((FACE.1 - FACE.0) * w.ramp_m);

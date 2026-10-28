@@ -63,6 +63,7 @@ pub enum RegionId {
     CaliforniaCoast = 1,
     GreatLakesCity = 2,
     NorthShoreSuburb = 3,
+    SocalBasin = 4,
 }
 
 /// The decade a place is dressed for; selects the detailing palette (`docs/PLACES.md`, "Era
@@ -151,6 +152,9 @@ pub enum WaterKind {
     Lake = 1,
     River = 2,
     Canal = 3,
+    /// A dry concrete flood channel: no water, its polygon is the concrete between its
+    /// lips (and down its ramps) that the ground mesh paints.
+    Channel = 4,
 }
 
 /// What bounds a place along one side (`docs/WORLD_GENERATION.md`, "Map edges"): what the
@@ -177,6 +181,9 @@ pub enum EdgeKind {
     HighwayLoop = 7,
     /// A rail embankment with yards and industry beyond.
     RailYards = 8,
+    /// A low escarpment of mesas with open desert beyond: the desert highway turns back
+    /// along it.
+    Desert = 9,
 }
 
 impl EdgeKind {
@@ -668,7 +675,25 @@ pub enum PropKind {
     Pier {
         len_m: u8,
     },
+    /// A length of railway track `len_dm` decimeters long centered on `pos`, along the
+    /// facing, on its `bed` ([`TRACK_BALLAST`] and the others).
+    Track {
+        len_dm: u16,
+        bed: u8,
+    },
+    /// A railroad crossing sign (the crossed blades and the twin lamps) on a post; facing:
+    /// toward the drivers it warns.
+    Crossbuck,
 }
+
+/// [`PropKind::Track`] beds: on a ballast embankment over the ground...
+pub const TRACK_BALLAST: u8 = 0;
+/// ...set flush in a road it crosses at grade (`pos` on the road's surface)...
+pub const TRACK_CROSSING: u8 = 1;
+/// ...on a steel deck bridging the ground under it (`pos` at the deck's top)...
+pub const TRACK_BRIDGE: u8 = 2;
+/// ...or on ballast, ending at a bumper at its far end along the facing (a spur's end).
+pub const TRACK_END: u8 = 3;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

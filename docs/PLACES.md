@@ -38,11 +38,14 @@ Sidewalks    { polylines with crossings }                                       
 Facades      { per building: window grid, ground-floor type, awning, sign slots, emissive windows mask }
 Props        { Vec<Prop { pos, yaw, kind: StreetLight|PalmTree|Oak|Hedge{len_dm}|Bench|Hydrant|Mailbox|Sign{text_seed}|
                          NeonSign{palette}|Billboard|PowerPole|Fence{len_dm}|ParkedCar{vehicle_class, hours}|
-                         Eucalyptus|TrashCan|StopSign|Signal{arm_dm}|Pier{len_m} }> }
+                         Eucalyptus|TrashCan|StopSign|Signal{arm_dm}|Pier{len_m}|Track{len_dm, bed}|Crossbuck }> }
 Lights       { Vec<Light { pos, color, radius, kind: Street|Neon|Window|Headlight }> }
 Chunk index  { per chunk: byte ranges into every table above, plus bounds and a content hash }
 ```
-A prop's `pos` is where it stands (a hedge's or fence's run is centered on it, a pier starts there) and its `yaw` gives its facing `(-sin yaw, -cos yaw)` in `(x, z)`, a spawn's heading convention. `ParkedCar::vehicle_class` packs the vehicle crate's `VehicleClass` (low 4 bits) and the paint, an index into the car shape's palette (high 4 bits). `ParkedCar::hours` has bit `h` (0..24) set when the car is there through hour `h` of the day (`ALL_HOURS`, the low 24 bits, for a car always there; a parking lot's cars also set bit 24, so they are never `ALL_HOURS`): a parking lot's cars come and go with its zone's occupancy (`docs/WORLD_GENERATION.md`, "Parking lots").
+`Track` is a length of railway centered on `pos` along its facing, on its `bed`: `TRACK_BALLAST` (on a
+ballast prism over the ground), `TRACK_CROSSING` (flush panels in a road it crosses at grade, `pos` on the
+road's surface), `TRACK_BRIDGE` (a girder deck, `pos` at its top) or `TRACK_END` (ballast ending at a bumper);
+a `Crossbuck` faces the drivers it warns. A prop's `pos` is where it stands (a hedge's or fence's run is centered on it, a pier starts there) and its `yaw` gives its facing `(-sin yaw, -cos yaw)` in `(x, z)`, a spawn's heading convention. `ParkedCar::vehicle_class` packs the vehicle crate's `VehicleClass` (low 4 bits) and the paint, an index into the car shape's palette (high 4 bits). `ParkedCar::hours` has bit `h` (0..24) set when the car is there through hour `h` of the day (`ALL_HOURS`, the low 24 bits, for a car always there; a parking lot's cars also set bit 24, so they are never `ALL_HOURS`): a parking lot's cars come and go with its zone's occupancy (`docs/WORLD_GENERATION.md`, "Parking lots").
 
 Chunking: every object table is sorted by chunk; the chunk index holds byte ranges into the 14 object tables, a per-chunk hash (which also covers the chunk's height samples and zone cells) and bounds. The terrain grid, zones and water bodies are read once for the whole place (a height grid cannot be sliced per chunk as a byte range); only object tables stream per chunk. Objects straddling chunks belong to the chunk of their centroid; roads are split at chunk borders by the producer.
 

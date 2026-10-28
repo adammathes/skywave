@@ -30,6 +30,9 @@ pub struct SelfTest {
     pub drive_hash: u64,
     /// `VehicleState::hash` after the vehicle crate's 10 s replay (gannet, homestead).
     pub replay_hashes: [u64; 2],
+    /// `Place::content_hash` of the 2001 world's procedural place, seed 1 (the basin:
+    /// `world/tests/basin.rs` pins it too).
+    pub basin_content_hash: u64,
 }
 
 impl SelfTest {
@@ -45,6 +48,12 @@ impl SelfTest {
             map_image_hash: MapImage::rasterize(&place).hash(),
             drive_hash: app.state_hash(),
             replay_hashes: [replay("gannet_gt"), replay("homestead_wagon")],
+            basin_content_hash: crate::places::build_in(
+                crate::PlaceKey::Coast,
+                Seed(1),
+                crate::scenario::get(1),
+            )
+            .map_or(0, |p| p.content_hash()),
         }
     }
 
@@ -59,6 +68,7 @@ impl SelfTest {
         m.insert("drive_hash".into(), hex(self.drive_hash));
         m.insert("replay_gannet_gt".into(), hex(self.replay_hashes[0]));
         m.insert("replay_homestead_wagon".into(), hex(self.replay_hashes[1]));
+        m.insert("basin_content_hash".into(), hex(self.basin_content_hash));
         m
     }
 

@@ -12,7 +12,7 @@ RegionTemplate(
     sign_language: EnUs,
     era: EraDefaults(year: 1986, street_lights: MercuryVapor, palette: "brick_red_beige"),
 
-    coast: Coast(
+    coast: Some(Coast(
         side: East,
         water: Lake,
         offset_m: (120, 180),
@@ -21,12 +21,12 @@ RegionTemplate(
         bay_depth_m: (0, 0),
         bay_width_m: (500, 800),
         canals: None,
-    ),
+    )),
 
     // Edges: the lake east, the forest preserve west, the expressway looping back north and south.
     edges: Edges(north: HighwayLoop, east: Lake, south: HighwayLoop, west: Forest),
 
-    elevation: Elevation(
+    elevation: Some(Elevation(
         water_level_m: 176,
         shelf_depth_m: 6,
         beach_width_m: (20, 50),
@@ -42,9 +42,9 @@ RegionTemplate(
         valley_length_m: (400, 600),
         valley_width_m: (200, 300),
         valley_floor_m: (0, 0),
-    ),
+    )),
 
-    layout: Layout(
+    layout: Some(Layout(
         // The "strip" here is the main shopping avenue a few blocks back from the bluff.
         strip: StripRule(length_m: (900, 1400), inland_m: (250, 400), width_m: (60, 80)),
         downtown_inland_m: (300, 500),
@@ -52,7 +52,7 @@ RegionTemplate(
         parks: ParkRule(count: (3, 4), radius_m: (90, 160)),
         pier: false,
         overlooks: (0, 0),
-    ),
+    )),
 
     zones: Zones(
         downtown: ZoneRule(

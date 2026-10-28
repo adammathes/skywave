@@ -45,10 +45,10 @@ use alloc::vec::Vec;
 use place::{Edge, Node, RoadClass, RoadGraph, ZoneId};
 use skywave_core::{hash_bytes, Rng, Seed};
 
-use super::macro_map::{MacroMap, MacroPoiKind};
+use super::macro_map::{BasinPlan, MacroMap, MacroPoiKind};
 use super::terrain::{box_blur, bump, smoothstep};
 use super::{stage, CELL_M, ZONE_CELL_M};
-use crate::math::{abs, clamp, lerp, segment_distance, sin_cos, sqrt, TAU, V2};
+use crate::math::{abs, clamp, lerp, segment_distance, sin_cos, sqrt, PI as PI_F, TAU, V2};
 use crate::template::{DrivingSide, RegionTemplate, StreetPattern};
 
 /// Streamline integration step.
@@ -87,6 +87,15 @@ pub const RURAL_WIDTH_M: f32 = 8.0;
 pub const BEACHFRONT_WIDTH_M: f32 = 12.0;
 /// A one-lane ramp with shoulders.
 pub const RAMP_WIDTH_M: f32 = 8.0;
+/// Width of a lane of a boulevard's carriageway.
+pub const BOULEVARD_LANE_M: f32 = 3.4;
+/// A runway's width when the plan does not say.
+const RUNWAY_M: f32 = 30.0;
+
+/// Curb-to-curb width of a boulevard carriageway of `lanes` lanes (gutters included).
+pub fn carriageway_m(lanes: u8) -> f32 {
+    f32::from(lanes) * BOULEVARD_LANE_M + 0.9
+}
 
 /// Tensor field cell size.
 const FIELD_M: f32 = 32.0;
@@ -170,6 +179,13 @@ enum Kind {
     Highway,
     Ramp,
     Connector,
+    /// A basin's grid arterial.
+    Grid,
+    /// One carriageway of a basin's boulevard: one-way, along its points.
+    Boulevard,
+    /// A basin airfield's runway and its taxiway.
+    Runway,
+    Taxiway,
 }
 
 /// Why a trace (or an explicit line) ends.
@@ -201,21 +217,69 @@ struct Line {
     ends: [Stop; 2],
 }
 
-/// Generates the arterial network and highway of `macro_map`. See the module docs.
+/// Generates the arterial network and highway of `macro_map`. See the module docs; an
+/// inland basin's are built from its grid instead ([`basin_lines`]).
 pub fn arterials(seed: Seed, template: &RegionTemplate, macro_map: &MacroMap) -> RoadGraph {
     let m = macro_map;
-    let ctx = Ctx::new(template, m);
+    let mut ctx = Ctx::new(template, m);
     let mut rng = Rng::new(seed, &[stage::ARTERIALS]);
+    if let Some(plan) = &m.basin {
+        let (lines, classes, ends) = basin_lines(&ctx, plan);
+        let mut index = Index::new(ctx.ext);
+        for (i, l) in lines.iter().enumerate() {
+            index.insert(i as u32, &l.pts);
+        }
+        ctx.hwy.terminal = [Some(ends[0]), Some(ends[1])];
+        let b = template.basin.as_ref().expect("a basin template");
+        let f = &b.freeway;
+        let opts = Assembly {
+            interchanges: (u32::from(f.interchanges.0), u32::from(f.interchanges.1) + 1),
+            loops: usize::from(f.loops),
+            junctions: false,
+        };
+        return assemble(&ctx, m, &mut rng, lines, classes, &index, &opts);
+    }
     let (lines, index) = trace_stage(&ctx, m);
-    let mut lines = lines;
-    let mut classes: Vec<Vec<RoadClass>> = lines.iter().map(|l| classify(&ctx, l)).collect();
+    let classes: Vec<Vec<RoadClass>> = lines.iter().map(|l| classify(&ctx, l)).collect();
+    let opts = Assembly {
+        interchanges: (2, 5),
+        loops: 0,
+        junctions: true,
+    };
+    assemble(&ctx, m, &mut rng, lines, classes, &index, &opts)
+}
 
-    // Highway line from the beachfront road, interchanges and ramps.
+/// How [`assemble`] joins the highway: how many interchanges it aims for (a range drawn
+/// from), how many of them get a loop on-ramp, and whether road ends near the highway join
+/// it at grade.
+struct Assembly {
+    interchanges: (u32, u32),
+    loops: usize,
+    junctions: bool,
+}
+
+/// Stages 5–7: the highway line, its terminals, interchanges and junctions, the graph, its
+/// cleanup and profiles.
+fn assemble(
+    ctx: &Ctx<'_>,
+    m: &MacroMap,
+    rng: &mut Rng,
+    mut lines: Vec<Line>,
+    mut classes: Vec<Vec<RoadClass>>,
+    index: &Index,
+    opts: &Assembly,
+) -> RoadGraph {
+    // Highway line from its terminals, interchanges and ramps.
     let mut forced: Vec<(usize, f32, u32)> = Vec::new();
     let mut end_nodes: Vec<(usize, usize, u32)> = Vec::new();
     let mut nodes: Vec<V2> = Vec::new();
     let mut hw_arc: Vec<Option<f32>> = Vec::new();
-    let mut oneway_rev: Vec<(usize, bool)> = Vec::new();
+    let mut oneway_rev: Vec<(usize, bool)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.kind == Kind::Boulevard)
+        .map(|(i, _)| (i, false))
+        .collect();
     let hw = &ctx.hwy;
     let hw_line = lines.len();
     if hw.pts.len() >= 2 {
@@ -241,15 +305,49 @@ pub fn arterials(seed: Seed, template: &RegionTemplate, macro_map: &MacroMap) ->
                 lines[hw_line].ends[end] = Stop::Fixed;
             }
         }
-        let crossings = highway_crossings(&ctx, &lines[..hw_line], &classes);
-        let target = rng.range(2, 5) as usize;
-        let chosen = choose_interchanges(&ctx, &lines, &crossings, target);
+        // Boulevards (their carriageways) get no interchanges. A grid line crossing at one
+        // of its points is found on both segments there: once is the crossing.
+        let mut crossings: Vec<Crossing> = Vec::new();
+        for c in highway_crossings(ctx, &lines[..hw_line], &classes) {
+            let kind = lines[c.line].kind;
+            let twice = kind == Kind::Grid
+                && crossings
+                    .iter()
+                    .any(|o| o.line == c.line && abs(o.s - c.s) < 1.0);
+            if kind != Kind::Boulevard && !twice {
+                crossings.push(c);
+            }
+        }
+        let target = rng.range(opts.interchanges.0, opts.interchanges.1) as usize;
+        let chosen = choose_interchanges(ctx, &lines, &crossings, target);
+        let mut loops = opts.loops;
         for c in &chosen {
+            let mut out = HighwayNodes {
+                nodes: &mut nodes,
+                hw_arc: &mut hw_arc,
+                forced: &mut forced,
+                end_nodes: &mut end_nodes,
+            };
+            if loops > 0
+                && build_loop_interchange(
+                    ctx,
+                    &mut lines,
+                    &mut classes,
+                    index,
+                    c,
+                    hw_line,
+                    &mut out,
+                    &mut oneway_rev,
+                )
+            {
+                loops -= 1;
+                continue;
+            }
             build_interchange(
-                &ctx,
+                ctx,
                 &mut lines,
                 &mut classes,
-                &index,
+                index,
                 c,
                 hw_line,
                 &mut nodes,
@@ -259,13 +357,15 @@ pub fn arterials(seed: Seed, template: &RegionTemplate, macro_map: &MacroMap) ->
                 &mut oneway_rev,
             );
         }
-        let mut hw_nodes = HighwayNodes {
-            nodes: &mut nodes,
-            hw_arc: &mut hw_arc,
-            forced: &mut forced,
-            end_nodes: &mut end_nodes,
-        };
-        junctions(&ctx, &mut lines, &mut classes, hw_line, &mut hw_nodes);
+        if opts.junctions {
+            let mut hw_nodes = HighwayNodes {
+                nodes: &mut nodes,
+                hw_arc: &mut hw_arc,
+                forced: &mut forced,
+                end_nodes: &mut end_nodes,
+            };
+            junctions(ctx, &mut lines, &mut classes, hw_line, &mut hw_nodes);
+        }
     }
 
     let mut g = build_graph(
@@ -277,8 +377,60 @@ pub fn arterials(seed: Seed, template: &RegionTemplate, macro_map: &MacroMap) ->
         hw_arc,
         &oneway_rev,
     );
-    cleanup(&ctx, &mut g);
-    finish(&ctx, m, g)
+    cleanup(ctx, &mut g);
+    finish(ctx, m, g)
+}
+
+/// A basin's grid as explicit lines ([`BasinPlan::lines`] in order, a boulevard as its two
+/// carriageways, each one-way along its points on the side traffic keeps to, capped by a
+/// short link where an end meets no other line), then the runway and its taxiway; their
+/// classes; and the lines the freeway's ends meet.
+fn basin_lines(ctx: &Ctx<'_>, plan: &BasinPlan) -> (Vec<Line>, Vec<Vec<RoadClass>>, [usize; 2]) {
+    let mut lines: Vec<Line> = Vec::new();
+    let mut of_grid = vec![0usize; plan.lines.len()];
+    let off = 0.5 * (carriageway_m(plan.boulevard_lanes) + plan.median_m);
+    let right_hand = ctx.t.driving_side == DrivingSide::Right;
+    // Whether `p` lies on a grid line other than `k`.
+    let on_other = |k: usize, p: V2| {
+        plan.lines.iter().enumerate().any(|(j, g)| {
+            j != k && segment_distance(p, V2::from_array(g.a), V2::from_array(g.b)).0 < 1.0
+        })
+    };
+    for (k, g) in plan.lines.iter().enumerate() {
+        let (a, b) = (V2::from_array(g.a), V2::from_array(g.b));
+        of_grid[k] = lines.len();
+        if !g.boulevard {
+            lines.push(ctx.explicit(Kind::Grid, resample(&[a, b], STEP_M)));
+            continue;
+        }
+        let side = (b - a).normalize().right() * off;
+        let fwd = if right_hand { side } else { -side };
+        lines.push(ctx.explicit(Kind::Boulevard, resample(&[a + fwd, b + fwd], STEP_M)));
+        lines.push(ctx.explicit(Kind::Boulevard, resample(&[b - fwd, a - fwd], STEP_M)));
+        for (end, p) in [a, b].into_iter().enumerate() {
+            if !on_other(k, p) {
+                let (from, to) = if end == 0 {
+                    (p - fwd, p + fwd)
+                } else {
+                    (p + fwd, p - fwd)
+                };
+                lines.push(ctx.explicit(Kind::Grid, resample(&[from, to], STEP_M)));
+            }
+        }
+    }
+    let (r0, r1) = (
+        V2::from_array(plan.runway[0]),
+        V2::from_array(plan.runway[1]),
+    );
+    lines.push(ctx.explicit(Kind::Runway, resample(&[r0, r1], STEP_M)));
+    let (t0, t1) = (
+        V2::from_array(plan.taxiway[0]),
+        V2::from_array(plan.taxiway[1]),
+    );
+    lines.push(ctx.explicit(Kind::Taxiway, resample(&[t0, t1], STEP_M)));
+    let classes = lines.iter().map(|l| classify(ctx, l)).collect();
+    let ends = [of_grid[plan.freeway_ends[0]], of_grid[plan.freeway_ends[1]]];
+    (lines, classes, ends)
 }
 
 /// Stages 3–4: the explicit lines and the streamlines, ends joined.
@@ -707,7 +859,14 @@ impl<'a> Ctx<'a> {
             );
             height[c] = ctx.height(p);
             let near_hwy = ctx.hwy.pts.len() >= 2 && ctx.hwy.nearest(p).0 < 30.0;
-            if !ctx.inside(p) || !ctx.land(p) || abs(ctx.cut_at(p)) > CUT_BARRIER_M || near_hwy {
+            // A basin's rail line and channel are no place for a routed road either.
+            let row = m.basin.is_some() && m.zones[c] == ZoneId::Highway;
+            if !ctx.inside(p)
+                || !ctx.land(p)
+                || abs(ctx.cut_at(p)) > CUT_BARRIER_M
+                || near_hwy
+                || row
+            {
                 blocked[c] = 1;
             }
         }
@@ -717,8 +876,18 @@ impl<'a> Ctx<'a> {
         ctx
     }
 
+    /// The ground at `p` (in a basin with its channel filled: roads bridge it).
     fn height(&self, p: V2) -> f32 {
-        self.m.height_at(p.x, p.y)
+        match &self.m.basin {
+            Some(b) => super::terrain::grid_height(
+                &b.bridge_heights,
+                self.m.width as usize,
+                self.m.height as usize,
+                p.x,
+                p.y,
+            ),
+            None => self.m.height_at(p.x, p.y),
+        }
     }
 
     fn zone(&self, p: V2) -> ZoneId {
@@ -2145,6 +2314,19 @@ fn classify(ctx: &Ctx<'_>, line: &Line) -> Vec<RoadClass> {
         Kind::Spine => return vec![RoadClass::Arterial; n],
         Kind::Ring | Kind::Ramp | Kind::Connector => return vec![RoadClass::Collector; n],
         Kind::Highway => return vec![RoadClass::Highway; n],
+        Kind::Runway | Kind::Taxiway => return vec![RoadClass::Collector; n],
+        Kind::Boulevard => return vec![RoadClass::Arterial; n],
+        // A grid line is an arterial in town, a rural road out in the desert.
+        Kind::Grid => {
+            return line
+                .pts
+                .iter()
+                .map(|&p| match ctx.zone(p) {
+                    ZoneId::Farmland | ZoneId::Hills => RoadClass::Rural,
+                    _ => RoadClass::Arterial,
+                })
+                .collect()
+        }
         Kind::Stream => {}
     }
     let raw: Vec<u8> = line
@@ -2470,6 +2652,176 @@ fn build_interchange(
         let off = delta == -keep;
         oneway_rev.push((li, !off));
     }
+}
+
+/// A ramp of a loop interchange: its points (highway to road), its highway point's
+/// index, its foot on the crossing road (parameter, point) and whether it is an off-ramp.
+type LoopRamp = (Vec<V2>, usize, (f32, V2), bool);
+
+/// Radius of a loop on-ramp.
+const LOOP_RADIUS_M: f32 = 38.0;
+/// Where along the crossing road (from the highway's centerline) the loop leaves it...
+const LOOP_FOOT_M: f32 = 85.0;
+/// ...and how far past the crossing it merges.
+const LOOP_MERGE_M: f32 = 220.0;
+/// The off-ramp that shares the loop's quadrant leaves the highway this far before the
+/// crossing and meets the road this far out, round the outside of the loop.
+const LOOP_OFF_S_M: f32 = 230.0;
+const LOOP_OFF_FOOT_M: f32 = 132.0;
+
+/// A partial cloverleaf: traffic on the crossing road leaving the highway on the side
+/// `+tan` traffic keeps to turns off it (right, where traffic keeps right) into a loop
+/// that circles 225° round the quadrant before the crossing and merges with `+tan` traffic
+/// past the bridge; that direction's off-ramp runs round the outside of the loop; the
+/// other direction has the diamond's two ramps. Returns `false` (and builds nothing) when
+/// the loop does not fit, so a diamond goes there instead.
+#[allow(clippy::too_many_arguments)]
+fn build_loop_interchange(
+    ctx: &Ctx<'_>,
+    lines: &mut Vec<Line>,
+    classes: &mut Vec<Vec<RoadClass>>,
+    index: &Index,
+    c: &Crossing,
+    hw_line: usize,
+    out: &mut HighwayNodes<'_>,
+    oneway_rev: &mut Vec<(usize, bool)>,
+) -> bool {
+    let hw = &ctx.hwy;
+    let road = lines[c.line].pts.clone();
+    let (_, _, tan) = hw.nearest(c.point);
+    let right = tan.right();
+    let keep = if ctx.t.driving_side == DrivingSide::Right {
+        1.0
+    } else {
+        -1.0
+    };
+    // A point `dist` from the highway along the crossing road on side `side`.
+    let foot = |dist: f32, side: f32| {
+        [dist, -dist].into_iter().find_map(|d| {
+            let (param, p) = walk(&road, c.param, d)?;
+            ((p - c.point).dot(right) * side > 0.0).then_some((param, p))
+        })
+    };
+    let highway_at = |s: f32| {
+        let hi = nearest_index(&hw.arc, s);
+        (hi > 0 && hi + 1 < hw.pts.len()).then_some(hi)
+    };
+    // The loop: off the road heading away from the highway and turned 45° toward the
+    // quadrant, round to heading along `tan`, then a merge curve to the highway.
+    let Some((loop_param, s0)) = foot(LOOP_FOOT_M, keep) else {
+        return false;
+    };
+    let away = right * keep;
+    let h0 = (away - tan).normalize();
+    // The turn's center lies off the start heading toward `-tan`'s side of it.
+    let n = if h0.left().dot(-tan - away) > 0.0 {
+        h0.left()
+    } else {
+        h0.right()
+    };
+    let center = s0 + n * LOOP_RADIUS_M;
+    let v0 = s0 - center;
+    let rot = |v: V2, a: f32| {
+        let (sn, cs) = sin_cos(a);
+        V2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs)
+    };
+    let sense = if (rot(v0, 0.01) - v0).dot(h0) > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let mut pts: Vec<V2> = vec![s0];
+    let step = STEP_M / LOOP_RADIUS_M;
+    let mut a = 0.0;
+    let mut end = s0;
+    while a < TAU {
+        a += step;
+        let p = center + rot(v0, sense * a);
+        let heading = (p - end).normalize();
+        pts.push(p);
+        end = p;
+        if a > PI_F && heading.dot(tan) > 0.995 {
+            break;
+        }
+    }
+    let Some(hi) = highway_at(c.s + LOOP_MERGE_M) else {
+        return false;
+    };
+    let h = hw.pts[hi];
+    let merge = bezier(
+        end,
+        end + tan * 60.0,
+        h - tan * 80.0 + away * 6.0,
+        h,
+        STEP_M,
+    );
+    pts.extend_from_slice(&merge[1..]);
+    if !ramp_ok(ctx, lines, index, &pts, c.line) {
+        return false;
+    }
+    // Every ramp runs from the highway to the road, as the diamond's do.
+    pts.reverse();
+    // The off-ramp round the loop, and the other side's diamond ramps:
+    // (points, highway point, foot on the road, off-ramp).
+    let mut ramps: Vec<LoopRamp> = vec![(pts, hi, (loop_param, s0), false)];
+    if let (Some(hi), Some(f)) = (highway_at(c.s - LOOP_OFF_S_M), foot(LOOP_OFF_FOOT_M, keep)) {
+        let h = hw.pts[hi];
+        let pts = bezier(
+            h,
+            h + tan * 80.0 + away * 12.0,
+            f.1 - tan * 70.0,
+            f.1,
+            STEP_M,
+        );
+        if ramp_ok(ctx, lines, index, &pts, c.line) {
+            ramps.push((pts, hi, f, true));
+        }
+    }
+    if let Some(f) = foot(RAMP_FOOT_M, -keep) {
+        for delta in [1.0f32, -1.0] {
+            let Some(hi) = highway_at(c.s + delta * RAMP_RUN_M) else {
+                continue;
+            };
+            let h = hw.pts[hi];
+            let p1 = h - tan * (delta * 60.0) - away * 10.0;
+            let p2 = f.1 + tan * (delta * 40.0);
+            let pts = bezier(h, p1, p2, f.1, STEP_M);
+            if ramp_ok(ctx, lines, index, &pts, c.line) {
+                // `-tan` traffic leaves before the crossing (on its way: from `+s`).
+                ramps.push((pts, hi, f, delta > 0.0));
+            }
+        }
+    }
+    let mut feet: Vec<(f32, u32)> = Vec::new();
+    for (pts, hi, (param, p), off) in ramps {
+        let id = out.nodes.len() as u32;
+        out.nodes.push(hw.pts[hi]);
+        out.hw_arc.push(Some(hw.arc[hi]));
+        out.forced.push((hw_line, hi as f32, id));
+        let jn = match feet.iter().find(|x| abs(x.0 - param) < 1e-3) {
+            Some(x) => x.1,
+            None => {
+                let id = out.nodes.len() as u32;
+                out.nodes.push(p);
+                out.hw_arc.push(None);
+                out.forced.push((c.line, param, id));
+                feet.push((param, id));
+                id
+            }
+        };
+        let (a, b) = (id, jn);
+        let li = lines.len();
+        let np = pts.len();
+        let mut line = ctx.explicit(Kind::Ramp, pts);
+        line.ends = [Stop::Fixed, Stop::Fixed];
+        lines.push(line);
+        classes.push(vec![RoadClass::Collector; np]);
+        out.end_nodes.push((li, 0, a));
+        out.end_nodes.push((li, 1, b));
+        // Off-ramps run highway → road; on-ramps are reversed.
+        oneway_rev.push((li, !off));
+    }
+    true
 }
 
 fn nearest_index(xs: &[f32], x: f32) -> usize {
@@ -2823,7 +3175,7 @@ fn remove_stubs(ctx: &Ctx<'_>, g: &mut Graph) {
         let deg = degrees(g);
         let mut changed = false;
         for e in g.edges.iter_mut() {
-            if !e.alive || matches!(e.kind, Kind::Highway | Kind::Ramp) {
+            if !e.alive || matches!(e.kind, Kind::Highway | Kind::Ramp | Kind::Boulevard) {
                 continue;
             }
             let len = polyline_length(&e.pts);
@@ -3448,7 +3800,9 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
         profiles[i] = ys;
     }
     let (w, h) = (m.width as usize, m.height as usize);
-    let ground = |p: V2| sample_nodes(&m.heights, w, h, p);
+    // Roads bridge a basin's channel: they read the ground with it filled.
+    let heights = m.basin.as_ref().map_or(&m.heights, |b| &b.bridge_heights);
+    let ground = |p: V2| sample_nodes(heights, w, h, p);
     // Overpass crossings: (edge, arc along it, highway height there).
     let mut cross: Vec<(usize, f32, f32)> = Vec::new();
     for (i, e) in es.iter().enumerate() {
@@ -3641,6 +3995,18 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
             let zone = majority_zone(ctx, &e.pts);
             let (lanes_fwd, lanes_back, width_m, sidewalk, speed_kph) = match (e.kind, e.class) {
                 (Kind::Ramp, _) => (1, 0, RAMP_WIDTH_M, false, 60),
+                (Kind::Boulevard, _) => {
+                    let lanes = m.basin.as_ref().map_or(3, |b| b.boulevard_lanes);
+                    (lanes, 0, carriageway_m(lanes), true, 60)
+                }
+                (Kind::Taxiway, _) => (1, 1, COLLECTOR_WIDTH_M, false, 30),
+                (Kind::Runway, _) => (
+                    1,
+                    1,
+                    m.basin.as_ref().map_or(RUNWAY_M, |b| b.runway_m),
+                    false,
+                    40,
+                ),
                 (_, RoadClass::Highway) => (2, 2, HIGHWAY_WIDTH_M, false, 100),
                 (_, RoadClass::Arterial) => (2, 2, ARTERIAL_WIDTH_M, true, 50),
                 (_, RoadClass::Beachfront) => (1, 1, BEACHFRONT_WIDTH_M, true, 40),

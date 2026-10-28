@@ -139,7 +139,8 @@ pub struct Lane {
     /// Turns leaving the lane: `turns[first_turn..first_turn + turn_count]`.
     pub first_turn: u32,
     pub turn_count: u32,
-    /// The zone under the middle of its centerline, `ZoneId::Highway` on a freeway lane.
+    /// The zone under the middle of its centerline (else under an end, else `Industrial`,
+    /// where that is a right of way), `ZoneId::Highway` on a freeway lane only.
     pub zone: ZoneId,
     /// On a freeway (a `RoadClass::Highway` road).
     pub freeway: bool,
@@ -706,8 +707,16 @@ impl LaneGraph {
                         zone: if freeway {
                             ZoneId::Highway
                         } else {
-                            let m = pts[pts.len() / 2];
-                            crate::walks::zone_at(place, [m[0], m[2]])
+                            // Only a freeway lane is a freeway's: a road through a right
+                            // of way (over the corridor, across a rail line) takes the
+                            // zone at either end of it, else industry's.
+                            let at =
+                                |k: usize| crate::walks::zone_at(place, [pts[k][0], pts[k][2]]);
+                            [pts.len() / 2, 0, pts.len() - 1]
+                                .into_iter()
+                                .map(at)
+                                .find(|&z| z != ZoneId::Highway)
+                                .unwrap_or(ZoneId::Industrial)
                         },
                         freeway,
                     });

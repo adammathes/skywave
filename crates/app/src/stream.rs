@@ -1122,14 +1122,28 @@ mod tests {
     #[test]
     fn every_coast_chunk_fits_the_pool_and_the_far_terrain_is_small() {
         let place = crate::places::build(crate::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+        fits_the_pool(place, "coast");
+    }
+
+    /// The 2001 world's basin the same.
+    #[test]
+    fn every_basin_chunk_fits_the_pool_and_the_far_terrain_is_small() {
+        let s = crate::scenario::get(1);
+        assert_eq!(s.region, "socal_basin");
+        let place =
+            crate::places::build_in(crate::PlaceKey::Coast, skywave_core::Seed(1), s).unwrap();
+        fits_the_pool(place, "basin");
+    }
+
+    fn fits_the_pool(place: place::Place, name: &str) {
         let t = std::time::Instant::now();
         let src = PlaceSource::new(place, Palette::socal_1985());
         let made = t.elapsed();
-        let far = src.far_terrain().expect("the coast has terrain");
+        let far = src.far_terrain().expect("a terrain place");
         let tris = far.indices.len() / 3;
         let c = build_all(&src);
         eprintln!(
-            "coast source {made:?}; far terrain {} vertices, {tris} triangles; {} vertices (most \
+            "{name} source {made:?}; far terrain {} vertices, {tris} triangles; {} vertices (most \
              {} in a chunk), {} parts (most {}); {} pieces (most {} a chunk); stage ms total \
              {:.1?}; pieces p99/worst {:.2?}; worst whole stage {:.2?}",
             far.vertices.len(),

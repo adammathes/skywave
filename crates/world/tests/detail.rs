@@ -49,6 +49,8 @@ fn name(k: PropKind) -> &'static str {
         PropKind::StopSign => "stop sign",
         PropKind::Signal { .. } => "signal",
         PropKind::Pier { .. } => "pier",
+        PropKind::Track { .. } => "track",
+        PropKind::Crossbuck => "crossbuck",
     }
 }
 

@@ -14,11 +14,15 @@ use crate::scenario::Scenario;
 use crate::scene::PlaceKey;
 
 const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
+const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-const REGIONS: [(&str, &str); 1] = [("california_coast", CALIFORNIA_COAST)];
+const REGIONS: [(&str, &str); 2] = [
+    ("california_coast", CALIFORNIA_COAST),
+    ("socal_basin", SOCAL_BASIN),
+];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
 const GRAMMARS: [(&str, &str); 1] = [("california_coast_80s.ron", CALIFORNIA_COAST_80S)];
 
