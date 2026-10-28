@@ -35,9 +35,9 @@ VehicleSpec(
     tires: Tires(grip_lat: 1.308, grip_long: 1.25, load_sens: 0.08, slip_peak_deg: 7.0),
     suspension: Susp(spring_n_m: 36000, damper: 3600, travel_m: 0.15, antiroll: 0.45),
     steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 10.0),
-    brakes: Brakes(max_nm: 4000, bias_front: 0.62, abs: true, handbrake_nm: 3000),
+    brakes: Brakes(max_nm: 4000, bias_front: 0.62, abs: true, handbrake_nm: 3400),
     aero: Aero(cd: 0.345, frontal_m2: 2.0, downforce_coef: 0.04),
-    feel: Feel(oversteer_bias: 0.08, body_roll: 0.3, engine_sound: "v6", shift_jerk: 0.25),
+    feel: Feel(oversteer_bias: 0.04, body_roll: 0.3, engine_sound: "v6", shift_jerk: 0.25),
     interior: Interior(
         dash: "sport_90s",
         gauges: [Speedo(0, 180, mph), Tach(0, 8000)],
