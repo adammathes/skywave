@@ -13,8 +13,8 @@ use place::StopLine;
 use skywave_core::Seed;
 use traffic::cars::{CAR_HALF_W_M, CAR_LEN_M};
 use traffic::{
-    Car, Clock, Control, Density, Inputs, Junction, Lane, LaneGraph, Light, Player, Traffic,
-    TrafficBudget, Turn, TurnKind, View, NONE,
+    Car, Clock, Control, Density, Inputs, Junction, Lane, LaneGraph, Light, Player, ShapeRule,
+    Traffic, TrafficBudget, Turn, TurnKind, View, NONE,
 };
 use world::procgen::build_place;
 use world::template::RegionTemplate;
@@ -130,6 +130,8 @@ impl Builder {
             stop_line,
             first_turn: 0,
             turn_count: 0,
+            zone: place::ZoneId::Residential,
+            freeway: false,
         });
         id
     }
@@ -257,26 +259,26 @@ fn overlap(a: &[[f32; 2]; 4], b: &[[f32; 2]; 4]) -> bool {
 }
 
 fn car_box(c: &Car) -> [[f32; 2]; 4] {
-    corners(c.pos, c.heading, CAR_LEN_M * 0.5, CAR_HALF_W_M)
+    corners(c.pos, c.heading, c.len * 0.5, c.half_w)
 }
 
 fn player_box(p: &Player) -> [[f32; 2]; 4] {
     corners(p.pos, p.heading, p.half_len, p.half_w)
 }
 
-/// Asserts no two cars on one lane or turn are closer than a car length.
+/// Asserts no two cars on one lane or turn are closer than the front one's length.
 fn assert_lane_intervals(t: &Traffic, when: &str) {
-    let mut by_seg: BTreeMap<u32, Vec<f32>> = BTreeMap::new();
+    let mut by_seg: BTreeMap<u32, Vec<(f32, f32)>> = BTreeMap::new();
     for c in t.cars() {
-        by_seg.entry(c.seg).or_default().push(c.s);
+        by_seg.entry(c.seg).or_default().push((c.s, c.len));
     }
     for (seg, mut s) in by_seg {
-        s.sort_by(f32::total_cmp);
+        s.sort_by(|a, b| a.0.total_cmp(&b.0));
         for w in s.windows(2) {
             assert!(
-                w[1] - w[0] >= CAR_LEN_M,
+                w[1].0 - w[0].0 >= w[1].1,
                 "{when}: two cars {:.2} m apart on segment {seg}",
-                w[1] - w[0]
+                w[1].0 - w[0].0
             );
         }
     }
@@ -313,7 +315,8 @@ fn assert_continuous(before: &[Car], cars: &[Car], when: &str) {
 fn assert_no_contact(cars: &[Car], when: &str) {
     for (k, a) in cars.iter().enumerate() {
         for b in &cars[k + 1..] {
-            let close = (a.pos[0] - b.pos[0]).abs() < 6.0 && (a.pos[2] - b.pos[2]).abs() < 6.0;
+            let r = 0.5 * (a.len + b.len) + 1.4;
+            let close = (a.pos[0] - b.pos[0]).abs() < r && (a.pos[2] - b.pos[2]).abs() < r;
             assert!(
                 !close || !overlap(&car_box(a), &car_box(b)),
                 "{when}: cars {} and {} touch",
@@ -1281,4 +1284,105 @@ fn shape_weights_pick_shapes_and_all_ones_change_nothing() {
     w[7] = 40;
     let shapes = spawn(Some(&w));
     assert!(shapes.iter().filter(|&&k| k == 7).count() > 45);
+}
+
+/// A freeway lane east (lane 0) forking at its end onto a freeway lane on (1) and a local
+/// street off to the side (2).
+fn fork() -> LaneGraph {
+    let mut b = Builder::new(4);
+    b.lane([0.0, 0.0], [3000.0, 0.0], [0, 1], Control::Free, 0);
+    b.lane([3000.0, 0.0], [6000.0, 0.0], [1, 2], Control::Free, 0);
+    b.lane([3000.0, 0.0], [5000.0, 2000.0], [1, 3], Control::Free, 0);
+    b.turn(0, 1);
+    b.turn(0, 2);
+    let mut g = b.build();
+    for l in [0, 1] {
+        g.lanes[l].freeway = true;
+        g.lanes[l].zone = place::ZoneId::Highway;
+    }
+    g
+}
+
+/// Shape 1 of two: weighed only on freeway lanes, 17.5 m long and 2.6 m wide (a semi).
+fn semi_rules() -> [ShapeRule; 2] {
+    let mut zones = [0; traffic::cars::ZONES];
+    zones[place::ZoneId::Highway as usize] = 3;
+    [
+        ShapeRule::default(),
+        ShapeRule {
+            zones,
+            len_m: 17.5,
+            half_w_m: 1.3,
+        },
+    ]
+}
+
+#[test]
+fn shape_rules_weigh_by_zone_and_alike_change_nothing() {
+    let g = fork();
+    let budget = TrafficBudget {
+        shapes: 2,
+        ..TrafficBudget::default()
+    };
+    let spawn = |rules: Option<&[ShapeRule]>, lane: u32| {
+        let mut t = Traffic::new(&g, budget, Seed(5));
+        if let Some(r) = rules {
+            t.set_shape_rules(r);
+        }
+        for k in 0..60 {
+            t.spawn_at(&g, lane, 1900.0 - 30.0 * k as f32, 10.0)
+                .expect("room");
+        }
+        t.cars().to_vec()
+    };
+    // Rules alike everywhere (whatever their weight) pick as no rules at all.
+    let plain = spawn(None, 2);
+    let alike = [ShapeRule {
+        zones: [2; traffic::cars::ZONES],
+        ..ShapeRule::default()
+    }; 2];
+    assert_eq!(spawn(Some(&alike), 2), plain);
+    // The semi comes on the freeway only, and is as long as its rule says.
+    let rules = semi_rules();
+    assert!(rules[1].freeway_only() && !rules[0].freeway_only());
+    let local = spawn(Some(&rules), 2);
+    assert!(local.iter().all(|c| c.shape == 0 && c.len == CAR_LEN_M));
+    let freeway = spawn(Some(&rules), 0);
+    let semis: Vec<&Car> = freeway.iter().filter(|c| c.shape == 1).collect();
+    // Three to one on the freeway.
+    assert!(semis.len() > 35 && semis.len() < 60, "{}", semis.len());
+    assert!(semis.iter().all(|c| c.len == 17.5 && c.half_w == 1.3));
+    // At the fork the semi keeps to the freeway; a car takes either way.
+    let to = |c: &Car| g.turns[c.next_turn as usize].to;
+    assert!(semis.iter().all(|c| to(c) == 1));
+    let cars: Vec<&Car> = freeway.iter().filter(|c| c.shape == 0).collect();
+    assert!(cars.iter().any(|c| to(c) == 2) && cars.iter().any(|c| to(c) == 1));
+}
+
+#[test]
+fn a_car_behind_a_semi_keeps_clear_of_its_tail() {
+    let _quiet = shared();
+    let g = straight();
+    let budget = TrafficBudget {
+        shapes: 2,
+        ..TrafficBudget::default()
+    };
+    let mut t = Traffic::new(&g, budget, Seed(3));
+    let mut rules = semi_rules();
+    rules[1].zones = [1; traffic::cars::ZONES];
+    t.set_shape_rules(&rules);
+    t.set_shape_weights(&[0, 1]);
+    t.spawn_at(&g, 0, 300.0, 4.0).expect("room");
+    t.set_shape_weights(&[1, 0]);
+    t.spawn_at(&g, 0, 200.0, 16.0).expect("room");
+    let mut closest = f32::INFINITY;
+    for tick in 0..60 * HZ as u64 {
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        let (semi, car) = (t.cars()[0], t.cars()[1]);
+        assert_eq!((semi.shape, car.shape), (1, 0));
+        assert!(!overlap(&car_box(&semi), &car_box(&car)), "touch at {tick}");
+        closest = closest.min(semi.s - semi.len - car.s);
+    }
+    println!("closest gap behind the semi {closest:.2} m");
+    assert!(closest > 1.0, "{closest}");
 }

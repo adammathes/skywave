@@ -200,11 +200,15 @@ pub struct RosterCar<'a> {
     pub shown: u16,
     /// Its body: a `VehicleSpec::shape` file name.
     pub shape: &'a str,
+    /// Only traffic drives it (`VehicleSpec::traffic_only`): weighed for its body, never
+    /// on the Vehicle page.
+    pub traffic_only: bool,
 }
 
-/// The cars a world shows: the roster indices it allows, in roster order, their names (for
-/// the Vehicle page's chooser), every roster car's [`era_weight`] (0 for the ones it does
-/// not allow), and the same weights per built-in body shape, in
+/// The cars a world shows: the roster indices the player may drive in it, in roster order,
+/// their names (for the Vehicle page's chooser), every roster car's [`era_weight`] (0 for
+/// the ones it does not have; a traffic-only car is weighed but never in `cars`), and the
+/// same weights per built-in body shape, in
 /// [`vehicles::BUILTIN_SHAPES`] order (the heaviest car of that shape's; 0 for a shape no
 /// allowed car has), which is what traffic and parked cars index.
 #[derive(Clone, Debug, PartialEq)]
@@ -229,7 +233,9 @@ impl Lineup {
                 }
             })
             .collect();
-        let cars: Vec<usize> = (0..roster.len()).filter(|&i| weights[i] > 0).collect();
+        let cars: Vec<usize> = (0..roster.len())
+            .filter(|&i| weights[i] > 0 && !roster[i].traffic_only)
+            .collect();
         let shapes = vehicles::BUILTIN_SHAPES
             .iter()
             .map(|(file, _)| {
@@ -250,9 +256,9 @@ impl Lineup {
         }
     }
 
-    /// Whether roster car `index` appears in this world.
+    /// Whether the player may drive roster car `index` in this world.
     pub fn allows(&self, index: usize) -> bool {
-        self.weights.get(index).is_some_and(|&w| w > 0)
+        self.cars.binary_search(&index).is_ok()
     }
 
     /// Where roster car `index` is in [`Lineup::cars`].
@@ -290,6 +296,7 @@ pub(crate) struct OwnedCar {
     year: u16,
     shown: u16,
     shape: String,
+    traffic_only: bool,
 }
 
 impl OwnedCar {
@@ -300,6 +307,7 @@ impl OwnedCar {
             year: self.year,
             shown: self.shown,
             shape: &self.shape,
+            traffic_only: self.traffic_only,
         }
     }
 }
@@ -316,12 +324,14 @@ fn builtin_roster(year_of: impl Fn(&str) -> Option<u16>) -> Vec<OwnedCar> {
             let year = year_of(id).or(spec.as_ref().map(|s| s.year));
             let year = year.unwrap_or(u16::MAX);
             let built = spec.as_ref().map_or(0, |s| s.built);
+            let traffic_only = spec.as_ref().is_some_and(|s| s.traffic_only);
             OwnedCar {
                 id,
                 name: names[i],
                 year,
                 shown: year.max(built),
                 shape: spec.map(|s| s.shape).unwrap_or_default(),
+                traffic_only,
             }
         })
         .collect()
@@ -538,8 +548,66 @@ mod tests {
         assert_eq!(w, [0, 0]);
     }
 
-    /// The 1980s roster: the first twenty built-in cars.
+    /// The 1980s roster: the first twenty built-in cars; then the five 2001 heroes and the
+    /// seven 2001 traffic cars.
     const EIGHTIES: usize = 20;
+    const HEROES: usize = 5;
+    const TRAFFIC_2001: [&str; 7] = [
+        "plover_sedan",
+        "sorrel_utility",
+        "wren_minivan",
+        "percheron_pickup",
+        "linnet_hatch",
+        "sledge_box_truck",
+        "anvil_semi",
+    ];
+
+    #[test]
+    fn the_2001_traffic_cars_never_list_in_1984_and_list_last_in_2001() {
+        let (l84, l01) = (lineup(0), lineup(1));
+        let names = crate::ui::roster::names();
+        let first = EIGHTIES + HEROES;
+        let ids: Vec<&str> = vehicles::BUILTIN[first..].iter().map(|c| c.0).collect();
+        assert_eq!(ids, TRAFFIC_2001);
+        for (j, id) in TRAFFIC_2001.iter().enumerate() {
+            let k = first + j;
+            let spec = vehicles::builtin_spec(id).unwrap();
+            assert!((1996..=2001).contains(&spec.year), "{id}: {}", spec.year);
+            assert_eq!(spec.built, 0);
+            // Never in 1984: not listed, not weighed, its body neither parks nor drives.
+            assert!(!l84.allows(k) && l84.position(k).is_none(), "{id}");
+            assert_eq!(l84.weights[k], 0, "{id}");
+            assert!(!l84.names.contains(&names[k]), "{id}");
+            let s = vehicles::BUILTIN_SHAPES
+                .iter()
+                .position(|b| b.0 == spec.shape)
+                .unwrap();
+            assert_eq!(l84.shapes[s], 0, "{id}'s body");
+            assert!(vehicles::TRAFFIC_SHAPES.contains(&s), "{id} drives");
+            // In 2001 at weight one, its body weighed for traffic and parking; listed at the
+            // end of the Vehicle page, but for the semi, which only traffic drives.
+            assert_eq!(
+                (l01.weights[k], l01.shapes[s]),
+                (WEIGHT_ONE, WEIGHT_ONE),
+                "{id}"
+            );
+            let semi = *id == "anvil_semi";
+            assert_eq!(spec.traffic_only, semi);
+            assert_eq!(l01.allows(k), !semi, "{id}");
+            assert_eq!(l01.names.contains(&names[k]), !semi, "{id}");
+        }
+        assert_eq!(
+            &l01.names[l01.names.len() - 6..],
+            &names[first..first + 6],
+            "the six at the end"
+        );
+        let mut next = 0;
+        for _ in 0..2 * vehicles::BUILTIN.len() {
+            next = l84.next_after(next);
+            assert!(next < EIGHTIES, "{next}");
+            assert_ne!(l01.next_after(next), vehicles::BUILTIN.len() - 1);
+        }
+    }
 
     #[test]
     fn the_1984_lineup_is_the_whole_80s_roster_at_weight_one() {
@@ -553,10 +621,13 @@ mod tests {
             let y = vehicles::builtin_spec(id).unwrap().year;
             assert!((1979..=1987).contains(&y), "{id}: {y}");
         }
-        // The 2001 world has every car: its heroes at weight one (the old muscle coupe by
-        // its age), the 1980s cars old and rarer.
+        // The 2001 world has every car: its heroes and traffic cars at weight one (the old
+        // muscle coupe by its age), the 1980s cars old and rarer; the player may drive all
+        // but the semi, which comes last.
         let l01 = lineup(1);
-        assert_eq!(l01.cars, (0..vehicles::BUILTIN.len()).collect::<Vec<_>>());
+        let n = vehicles::BUILTIN.len();
+        assert_eq!(vehicles::BUILTIN[n - 1].0, "anvil_semi");
+        assert_eq!(l01.cars, (0..n - 1).collect::<Vec<_>>());
         for (k, (id, _)) in vehicles::BUILTIN.iter().enumerate() {
             let w = l01.weights[k];
             match *id {
@@ -572,7 +643,10 @@ mod tests {
         let basin = get(1);
         assert_eq!(basin.default_vehicle, "halberd_coupe");
         assert!(basin.heroes.contains(&basin.default_vehicle));
-        let ids: Vec<&str> = vehicles::BUILTIN[EIGHTIES..].iter().map(|c| c.0).collect();
+        let ids: Vec<&str> = vehicles::BUILTIN[EIGHTIES..EIGHTIES + HEROES]
+            .iter()
+            .map(|c| c.0)
+            .collect();
         assert_eq!(basin.heroes, ids);
         assert!(get(0).heroes.is_empty());
     }

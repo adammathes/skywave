@@ -59,7 +59,9 @@ fn era_index(roll: u32) -> usize {
 /// (`world::props::parked_car_size`, by class, in `crates/world`) and no more than 10 cm
 /// wider; a class past the end (`Utility`, which the world
 /// does not park) parks as the wagon. The exotics and the sports cars' open versions never
-/// park: the street sees the everyday cars and the two common sports cars.
+/// park: the street sees the everyday cars and the two common sports cars, and in 2001 the
+/// traffic cars that fit a stall (the box truck and the semi do not). The 2001 cars come
+/// last in each list, so the 1984 coast, which has none of them, picks as before.
 const PARKED: [&[(&str, u32)]; 10] = [
     &[
         ("gannet_gt", 3),
@@ -67,29 +69,47 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("pipit_hatch", 2),
         ("longbow_coupe", 2),
         ("appaloosa_gt", 2),
+        ("linnet_hatch", 3),
     ], // Sports
     &[
         ("bancroft_sedan", 3),
         ("prescott_landau", 3),
         ("homestead_wagon", 1),
         ("buckboard_pickup", 2),
+        ("plover_sedan", 3),
+        ("sorrel_utility", 1),
+        ("wren_minivan", 1),
+        ("percheron_pickup", 1),
     ], // Sedan
     &[
         ("homestead_wagon", 3),
         ("meadow_minivan", 3),
         ("drayman_van", 1),
         ("buckboard_pickup", 1),
+        ("sorrel_utility", 3),
+        ("wren_minivan", 3),
+        ("plover_sedan", 1),
+        ("percheron_pickup", 1),
     ], // Wagon
     &[
         ("seabreeze_convertible", 3),
         ("halcyon_turbo", 2),
         ("burro_4x4", 2),
+        ("plover_sedan", 2),
     ], // Coupe
-    &[("buckboard_pickup", 1)],                           // Pickup
-    &[("meadow_minivan", 1), ("drayman_van", 1)],         // Van
-    &[("pipit_hatch", 1)],                                // Hatch
-    &[("seabreeze_convertible", 1)],                      // Convertible
-    &[("regent_coupe_cabrio", 1), ("bancroft_sedan", 1)], // Luxury
+    &[("buckboard_pickup", 1), ("percheron_pickup", 1)], // Pickup
+    &[
+        ("meadow_minivan", 1),
+        ("drayman_van", 1),
+        ("wren_minivan", 1),
+    ], // Van
+    &[("pipit_hatch", 1), ("linnet_hatch", 1)],          // Hatch
+    &[("seabreeze_convertible", 1)],                     // Convertible
+    &[
+        ("regent_coupe_cabrio", 1),
+        ("bancroft_sedan", 1),
+        ("plover_sedan", 1),
+    ], // Luxury
     &[("gannet_gt", 1), ("halcyon_turbo", 1), ("appaloosa_gt", 1)], // Muscle
 ];
 
@@ -115,13 +135,14 @@ pub(crate) fn place_paints(seed: u64, s: usize, n_own: usize) -> (Vec<usize>, Ve
     (own, era)
 }
 
-/// The [`vehicles::BUILTIN_SHAPES`] index a parked car of `vehicle_class` is drawn as,
-/// picked from its [`PARKED`] list by `roll` (any number), each entry's weight times the
-/// world's era weight of the shape (`era`, per built-in shape: [`crate::scenario::Lineup::shapes`],
-/// 0 for a car the world does not have). Equal era weights pick as the list alone does
-/// ([`crate::scenario::reduced`]); a list the world has none of falls back to the world's
-/// heaviest car.
-fn parked_shape(vehicle_class: u8, roll: u32, era: &[u32]) -> usize {
+/// The [`vehicles::BUILTIN_SHAPES`] index a parked car of `vehicle_class` in `zone` is
+/// drawn as, picked from its [`PARKED`] list by `roll` (any number), each entry's weight
+/// times the world's era weight of the shape (`era`, per built-in shape:
+/// [`crate::scenario::Lineup::shapes`], 0 for a car the world does not have) times the
+/// shape's weight in that zone ([`vehicles::zone_weights`]). Equal weights pick as the list
+/// alone does ([`crate::scenario::reduced`]); a list the world has none of falls back to the
+/// world's heaviest car.
+fn parked_shape(vehicle_class: u8, roll: u32, era: &[u32], zone: place::ZoneId) -> usize {
     parked_pick(
         PARKED
             .get(usize::from(vehicle_class & 15))
@@ -129,11 +150,19 @@ fn parked_shape(vehicle_class: u8, roll: u32, era: &[u32]) -> usize {
             .unwrap_or(&[("homestead_wagon", 1)]),
         roll,
         era,
+        zone,
     )
 }
 
+/// The shape of the parked car of `vehicle_class` at `pos` (its seeded hash `h`), by the
+/// zone it stands in.
+fn parked_at(place: &Place, pos: [f32; 3], vehicle_class: u8, h: u64, era: &[u32]) -> usize {
+    let zone = world::zone_at(place, world::math::V2::new(pos[0], pos[2]));
+    parked_shape(vehicle_class, (h >> 44) as u32, era, zone)
+}
+
 /// [`parked_shape`] over one list.
-fn parked_pick(list: &[(&str, u32)], roll: u32, era: &[u32]) -> usize {
+fn parked_pick(list: &[(&str, u32)], roll: u32, era: &[u32], zone: place::ZoneId) -> usize {
     let index = |id: &str| {
         vehicles::BUILTIN_SHAPES
             .iter()
@@ -143,7 +172,8 @@ fn parked_pick(list: &[(&str, u32)], roll: u32, era: &[u32]) -> usize {
     let mut weights = [0u32; 8];
     let weights = &mut weights[..list.len().min(8)];
     for (w, &(id, k)) in weights.iter_mut().zip(list) {
-        *w = k * era.get(index(id)).copied().unwrap_or(0);
+        let z = u32::from(vehicles::zone_weights(id)[zone as usize]);
+        *w = k * z * era.get(index(id)).copied().unwrap_or(0);
     }
     crate::scenario::reduced(weights);
     let total: u32 = weights.iter().sum();
@@ -343,7 +373,7 @@ impl PropInstances {
             let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
                 PropKind::ParkedCar { vehicle_class, .. } => {
-                    let s = parked_shape(vehicle_class, (h >> 44) as u32, era) % shapes.len();
+                    let s = parked_at(place, p.pos, vehicle_class, h, era) % shapes.len();
                     // A third in the car's own palette, the rest in the era's street colors.
                     let n_own = shapes[s].palette.len();
                     let nibble = usize::from(vehicle_class >> 4);
@@ -536,9 +566,13 @@ fn tilted(transform: [[f32; 4]; 4], tilt: [f32; 2]) -> [[f32; 4]; 4] {
 mod tests {
     use super::*;
 
+    /// Any zone: the 1980s cars weigh alike in all of them.
+    const Z: place::ZoneId = place::ZoneId::Residential;
+
     /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
-    /// the 2001 hero cars, which only the player drives.
-    const UNPARKED: [&str; 11] = [
+    /// the 2001 hero cars, which only the player drives, and the two trucks too long for a
+    /// stall, which only traffic drives.
+    const UNPARKED: [&str; 13] = [
         "basilisk_v12",
         "basilisk_roadster",
         "avocet_v8",
@@ -550,6 +584,8 @@ mod tests {
         "tanager_awd",
         "destrier_coupe",
         "siskin_coupe",
+        "sledge_box_truck",
+        "anvil_semi",
     ];
 
     #[test]
@@ -558,12 +594,12 @@ mod tests {
             .iter()
             .map(|(_, text)| vehicles::load_shape(text).unwrap())
             .collect();
-        // The shapes that never park are the ones traffic leaves out.
-        let tail: Vec<&str> = shapes[vehicles::TRAFFIC_SHAPES..]
-            .iter()
-            .map(|s| s.id.as_str())
+        // The shapes that never park are the ones traffic leaves out, and its two trucks.
+        let unparked: Vec<&str> = (0..shapes.len())
+            .filter(|k| !vehicles::TRAFFIC_SHAPES.contains(k) || shapes[*k].length() > 7.0)
+            .map(|k| shapes[k].id.as_str())
             .collect();
-        assert_eq!(tail, UNPARKED);
+        assert_eq!(unparked, UNPARKED);
         let mut parked = vec![false; shapes.len()];
         for (class, list) in PARKED.iter().enumerate() {
             let [box_len, box_w, _] = world::props::parked_car_size(class as u8);
@@ -584,11 +620,10 @@ mod tests {
                 );
                 parked[k] = true;
             }
-            // Every entry is reachable.
-            let total: u32 = list.iter().map(|e| e.1).sum();
-            let era = &crate::scenario::lineup(0).shapes;
-            let picked: Vec<usize> = (0..total)
-                .map(|r| parked_shape(class as u8, r, era))
+            // Every entry is reachable in the 2001 world, which has every car.
+            let era = &crate::scenario::lineup(1).shapes;
+            let picked: Vec<usize> = (0..20_000u32)
+                .map(|r| parked_shape(class as u8, r * 7919, era, Z))
                 .collect();
             for &(id, _) in *list {
                 assert!(picked.iter().any(|&k| shapes[k].id == id), "{id}");
@@ -603,11 +638,20 @@ mod tests {
             );
         }
         let era = &crate::scenario::lineup(0).shapes;
-        assert_eq!(shapes[parked_shape(15, 7, era)].id, "homestead_wagon");
+        assert_eq!(shapes[parked_shape(15, 7, era, Z)].id, "homestead_wagon");
     }
 
-    /// The pick before era weights: by the list's own weights alone.
+    /// The pick before era weights: by the list's own weights alone, over the 1980s cars
+    /// (the list as it was before the 2001 cars joined its end).
     fn unweighted(list: &[(&str, u32)], roll: u32) -> &'static str {
+        let eighties = list
+            .iter()
+            .take_while(|e| vehicles::builtin_spec(e.0).unwrap().year < 1990)
+            .count();
+        assert!(list[eighties..]
+            .iter()
+            .all(|e| vehicles::builtin_spec(e.0).unwrap().year > 1990));
+        let list = &list[..eighties];
         let total: u32 = list.iter().map(|e| e.1).sum();
         let mut r = roll % total;
         for &(id, w) in list {
@@ -624,7 +668,7 @@ mod tests {
         let era = &crate::scenario::lineup(0).shapes;
         for (class, list) in PARKED.iter().enumerate() {
             for roll in (0..5000).chain([u32::MAX - 3, u32::MAX]) {
-                let k = parked_shape(class as u8, roll, era);
+                let k = parked_shape(class as u8, roll, era, Z);
                 let file = vehicles::BUILTIN_SHAPES[k].0;
                 assert_eq!(
                     file.strip_suffix(".shape.ron"),
@@ -648,8 +692,8 @@ mod tests {
         let (mut in84, mut in01) = (0, 0);
         for class in 0..16u8 {
             for roll in 0..2000 {
-                in84 += usize::from(parked_shape(class, roll, &l84.shapes) == k);
-                in01 += usize::from(parked_shape(class, roll, &l01.shapes) == k);
+                in84 += usize::from(parked_shape(class, roll, &l84.shapes, Z) == k);
+                in01 += usize::from(parked_shape(class, roll, &l01.shapes, Z) == k);
             }
         }
         assert_eq!(in84, 0);
@@ -657,7 +701,7 @@ mod tests {
         // A list of only cars the world does not have parks its heaviest car.
         let mut only = vec![0; vehicles::BUILTIN_SHAPES.len()];
         only[3] = 7;
-        assert_eq!(parked_pick(&[("halcyon_turbo", 1)], 5, &only), 3);
+        assert_eq!(parked_pick(&[("halcyon_turbo", 1)], 5, &only, Z), 3);
     }
 
     #[test]
@@ -668,7 +712,7 @@ mod tests {
         let mut parked = vec![0u32; vehicles::BUILTIN_SHAPES.len()];
         for class in 0..16u8 {
             for roll in 0..4000 {
-                parked[parked_shape(class, roll, &l.shapes)] += 1;
+                parked[parked_shape(class, roll, &l.shapes, Z)] += 1;
             }
         }
         for (k, (file, _)) in vehicles::BUILTIN_SHAPES.iter().enumerate() {
@@ -704,12 +748,18 @@ mod tests {
     /// park (the sports cars' two common coupes added). The ceiling is ~1.2x the four
     /// (`docs/PERFORMANCE.md`).
     const PARKED_MESH_BYTES_MAX: usize = 27_000_000;
+    /// The same in the 2001 world (the coast's place until the basin's lands): the 1980s
+    /// cars and the 2001 traffic cars, nineteen shapes parked and 21 driving, 36.3 MB
+    /// (33.0 parked, 3.3 for the traffic's own, most of it the two trucks); the ceiling is
+    /// ~1.2x that.
+    const PARKED_MESH_BYTES_MAX_2001: usize = 44_000_000;
 
-    #[test]
-    fn parked_car_meshes_stay_within_budget() {
+    /// Parked- and traffic-car meshes of scenario `scenario`'s world on the coast at seed 1:
+    /// counts asserted against the paint caps, and the bytes.
+    fn parked_and_traffic_bytes(scenario: usize) -> usize {
         let place =
             crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
-        let era = &crate::scenario::lineup(0).shapes;
+        let era = &crate::scenario::lineup(scenario).shapes;
         let mut props = PropInstances::new(&place, &Palette::socal_1985(), era, |_| [0, 0])
             .unwrap()
             .unwrap();
@@ -726,10 +776,12 @@ mod tests {
             .sum();
         let tris: usize = cars.iter().map(|m| m.indices.len() / 3).sum();
         eprintln!(
-            "parked cars: {} meshes, {tris} triangles, {bytes} bytes",
+            "world {scenario}: parked cars: {} meshes, {tris} triangles, {bytes} bytes",
             cars.len()
         );
-        let parking = vehicles::BUILTIN_SHAPES.len() - UNPARKED.len();
+        let parking = (0..vehicles::BUILTIN_SHAPES.len())
+            .filter(|&k| era[k] > 0 && !UNPARKED.contains(&shape_id(k)))
+            .count();
         assert!(cars.len() <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
         // The traffic takes the parked cars' era paints, sharing their meshes; it builds
         // only the (shape, paint) pairs the place does not park, inside the same budget.
@@ -743,15 +795,113 @@ mod tests {
         let npc = npcs.built_bytes();
         // The pedestrian figures' meshes have their own budget (`peds`).
         let built = built - crate::peds::VARIANTS * traffic::figure::PARTS;
-        eprintln!("traffic: {built} more meshes, {npc} bytes");
-        // Plus each traffic shape's brake lamp overlay at both levels.
+        let driving = usize::from(npcs.budget_shapes());
+        eprintln!("world {scenario}: traffic: {driving} shapes, {built} more meshes, {npc} bytes");
+        // Plus each traffic shape's brake lamp overlay at both levels, and the meshes of the
+        // shapes that drive and never park.
+        let unparked_drivers = (0..vehicles::BUILTIN_SHAPES.len())
+            .filter(|&k| era[k] > 0 && vehicles::TRAFFIC_SHAPES.contains(&k))
+            .filter(|&k| UNPARKED.contains(&shape_id(k)))
+            .count();
         assert!(
             cars.len() + built
-                <= parking * (OWN_PAINTS + ERA_PAINTS) * 2 + vehicles::TRAFFIC_SHAPES * 2
+                <= parking * (OWN_PAINTS + ERA_PAINTS) * 2
+                    + driving * 2
+                    + unparked_drivers * ERA_PAINTS * 2
         );
+        bytes + npc
+    }
+
+    fn shape_id(k: usize) -> &'static str {
+        vehicles::BUILTIN_SHAPES[k]
+            .0
+            .strip_suffix(".shape.ron")
+            .unwrap()
+    }
+
+    #[test]
+    fn parked_car_meshes_stay_within_budget() {
+        let bytes = parked_and_traffic_bytes(0);
+        assert!(bytes <= PARKED_MESH_BYTES_MAX, "{bytes} bytes");
+        let bytes = parked_and_traffic_bytes(1);
+        assert!(bytes <= PARKED_MESH_BYTES_MAX_2001, "{bytes} bytes in 2001");
+    }
+
+    /// Every parked car on the coast (seed 1) in scenario `scenario`'s world: its shape
+    /// and zone, as [`PropInstances::new`] picks them.
+    fn parked_census(scenario: usize) -> Vec<(usize, place::ZoneId)> {
+        let place =
+            crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+        let era = &crate::scenario::lineup(scenario).shapes;
+        let seed = place.header.seed;
+        place
+            .props
+            .items
+            .iter()
+            .filter_map(|p| match p.kind {
+                PropKind::ParkedCar { vehicle_class, .. } => {
+                    let h = skywave_core::hash64(
+                        seed,
+                        &[u64::from(p.pos[0].to_bits()), u64::from(p.pos[2].to_bits())],
+                    );
+                    let zone = world::zone_at(&place, world::math::V2::new(p.pos[0], p.pos[2]));
+                    Some((parked_at(&place, p.pos, vehicle_class, h, era), zone))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_2001_traffic_cars_park_in_2001_by_zone_and_never_in_1984() {
+        let ids = [
+            "plover_sedan",
+            "sorrel_utility",
+            "wren_minivan",
+            "percheron_pickup",
+            "linnet_hatch",
+        ];
+        let index = |id: &str| {
+            vehicles::BUILTIN_SHAPES
+                .iter()
+                .position(|b| b.0.strip_suffix(".shape.ron") == Some(id))
+                .unwrap()
+        };
+        let c84 = parked_census(0);
+        let c01 = parked_census(1);
+        assert!(c84.len() > 100 && c84.len() == c01.len());
+        for id in ids.iter().chain(&["sledge_box_truck", "anvil_semi"]) {
+            assert!(c84.iter().all(|c| c.0 != index(id)), "{id} parks in 1984");
+        }
+        for id in ids {
+            let n = c01.iter().filter(|c| c.0 == index(id)).count();
+            eprintln!("{id}: {n} of {} parked", c01.len());
+            assert!(n > 0, "{id} never parks in 2001");
+        }
+        for id in ["sledge_box_truck", "anvil_semi"] {
+            assert!(c01.iter().all(|c| c.0 != index(id)), "{id} parks");
+        }
+        // The 2001 cars outnumber the old ones, which still park at their age weight.
+        let new = c01.iter().filter(|c| c.0 >= 25).count();
         assert!(
-            bytes + npc <= PARKED_MESH_BYTES_MAX,
-            "{bytes} bytes of parked cars and {npc} of traffic"
+            new * 2 > c01.len() && new < c01.len(),
+            "{new} of {}",
+            c01.len()
         );
+        // By zone: the pickup's weight is 5 in industrial zones and 2 in residential ones,
+        // the minivan's 1 and 4, against the old cars' 2 everywhere.
+        let w = |id: &str, z: place::ZoneId| vehicles::zone_weights(id)[z as usize];
+        use place::ZoneId::{Industrial, Residential};
+        assert!(w("percheron_pickup", Industrial) > w("percheron_pickup", Residential));
+        assert!(w("wren_minivan", Residential) > w("wren_minivan", Industrial));
+        let picks = |id: &str, z: place::ZoneId| {
+            let era = &crate::scenario::lineup(1).shapes;
+            // Rolls spread over the weights' whole range.
+            (0..20_000u32)
+                .filter(|&r| parked_shape(1, r * 7919, era, z) == index(id))
+                .count()
+        };
+        assert!(picks("percheron_pickup", Industrial) > 2 * picks("percheron_pickup", Residential));
+        assert!(picks("wren_minivan", Residential) > 2 * picks("wren_minivan", Industrial));
     }
 }

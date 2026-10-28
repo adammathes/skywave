@@ -2047,7 +2047,7 @@ mod tests {
         let used = play(&mut app);
         assert!(used.used > 0 && used.used <= used.slots, "{used:?}");
         let mut seen = vec![first];
-        for world in [1, 0] {
+        for world in [1, 0, 1] {
             app.switch_world(&base, world).unwrap();
             assert_eq!(app.scenario(), world);
             seen.push(footprint(&app));
@@ -2057,27 +2057,15 @@ mod tests {
                 "{stats:?}"
             );
         }
-        // Back in the first world it holds what it held at the start: nothing carried over.
+        // Back in either world it holds what it held there before: nothing carried over.
         assert_eq!(seen[2], seen[0]);
-        // The stub shares the coast's place, so the second world holds the same too, but
-        // for the meshes of the car it starts in.
-        let car_meshes = |id: &str| {
-            let spec = vehicles::builtin_spec(id).unwrap();
-            let shape = vehicles::builtin_shape(&spec).unwrap();
-            let mut n = 0;
-            car::CarModel::build(&spec, &shape).unwrap().register(|_| {
-                n += 1;
-                render::MeshId(n)
-            });
-            n as usize
-        };
-        let (coast, basin) = (scenario::get(0), scenario::get(1));
-        let starts = car_meshes(&basin.default_vehicle) as isize
-            - car_meshes(&coast.default_vehicle) as isize;
-        assert_eq!(seen[1].0 as isize - seen[0].0 as isize, starts);
-        let rest =
-            |f: &(usize, usize, usize, ChunkPoolConfig, usize, usize)| (f.1, f.2, f.3, f.4, f.5);
+        assert_eq!(seen[3], seen[1]);
+        // The stub shares the coast's place, so the second world asks for the same room;
+        // it holds more meshes, for the car it starts in and the 2001 cars it parks and
+        // drives.
+        let rest = |f: &(usize, usize, usize, ChunkPoolConfig, usize, usize)| (f.1, f.2, f.3, f.5);
         assert_eq!(rest(&seen[1]), rest(&seen[0]));
+        assert!(seen[1].0 > seen[0].0 && seen[1].4 > seen[0].4);
     }
 
     #[test]

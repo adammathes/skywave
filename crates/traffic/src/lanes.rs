@@ -37,7 +37,7 @@
 
 use alloc::vec::Vec;
 
-use place::{Place, RoadClass, StopLine};
+use place::{Place, RoadClass, StopLine, ZoneId};
 use skywave_core::hash64;
 
 use crate::math::{atan2, dir, dist2, dot, lerp3, right, turn_angle, unit2};
@@ -139,6 +139,10 @@ pub struct Lane {
     /// Turns leaving the lane: `turns[first_turn..first_turn + turn_count]`.
     pub first_turn: u32,
     pub turn_count: u32,
+    /// The zone under the middle of its centerline, `ZoneId::Highway` on a freeway lane.
+    pub zone: ZoneId,
+    /// On a freeway (a `RoadClass::Highway` road).
+    pub freeway: bool,
 }
 
 /// A movement through junction `node` from the end of lane `from` to the start of lane
@@ -680,6 +684,7 @@ impl LaneGraph {
                     end_lanes[e0 as usize][usize::from(r0)][0] = (id, u32::from(n));
                     end_lanes[e1 as usize][usize::from(!r1)][1] = (id, u32::from(n));
                 }
+                let freeway = first.class == RoadClass::Highway;
                 for slot in 0..n {
                     let pts = offset(line, lane_offset(first, slot, n));
                     let a = arcs(&pts);
@@ -698,6 +703,13 @@ impl LaneGraph {
                         stop_line: NONE,
                         first_turn: 0,
                         turn_count: 0,
+                        zone: if freeway {
+                            ZoneId::Highway
+                        } else {
+                            let m = pts[pts.len() / 2];
+                            crate::walks::zone_at(place, [m[0], m[2]])
+                        },
+                        freeway,
                     });
                     g.points.extend_from_slice(&pts);
                     g.arc.extend_from_slice(&a);

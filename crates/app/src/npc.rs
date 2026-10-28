@@ -4,7 +4,7 @@
 //!
 //! - **Setup.** [`Npcs::new`] builds the lane graph and the pool (sized for
 //!   [`Density::Busy`]) at scene setup. The first time traffic is on, [`Npcs::build_meshes`]
-//!   finds the meshes: every traffic shape (`vehicles::TRAFFIC_SHAPES`) in the place's four
+//!   finds the meshes: every traffic shape the world has ([`world_shapes`]) in the place's four
 //!   era street colors for it (`propinst::place_paints`, the parked cars' own) at levels
 //!   of detail 1 and 2, the
 //!   parked cars' meshes where the place parks that shape and paint, built
@@ -163,6 +163,33 @@ impl CarBody {
     }
 }
 
+/// The traffic shapes of a world whose era weights per built-in shape are `era`
+/// ([`crate::scenario::Lineup::shapes`]): the [`vehicles::TRAFFIC_SHAPES`] it has, in that
+/// order. The 1984 coast's are the first fourteen built-in shapes, as before there were
+/// other worlds.
+pub fn world_shapes(era: &[u32]) -> Vec<usize> {
+    vehicles::TRAFFIC_SHAPES
+        .iter()
+        .copied()
+        .filter(|&k| era.get(k).is_some_and(|&w| w > 0))
+        .collect()
+}
+
+/// How traffic drives built-in shape `sh`: its zone weights ([`vehicles::zone_weights`]),
+/// and its own length and width when it is longer than [`vehicles::LONG_BODY_M`] (the rest
+/// are spaced as every car always was).
+pub fn shape_rule(sh: &shape::ShapeSpec) -> traffic::ShapeRule {
+    let mut rule = traffic::ShapeRule {
+        zones: vehicles::zone_weights(&sh.id),
+        ..traffic::ShapeRule::default()
+    };
+    if sh.length() > vehicles::LONG_BODY_M {
+        rule.len_m = sh.length();
+        rule.half_w_m = sh.plan.iter().fold(0.0f32, |m, p| m.max(p.1));
+    }
+    rule
+}
+
 /// Height of an NPC car's underside above the ground, m (the player's car's body box
 /// starts as high).
 const BODY_CLEARANCE_M: f32 = 0.25;
@@ -180,6 +207,8 @@ pub struct Npcs {
     pub(crate) graph: LaneGraph,
     /// The place's seed, which picks its parked-car paints.
     place_seed: u64,
+    /// The [`vehicles::BUILTIN_SHAPES`] index of each traffic shape (`traffic::Car::shape`).
+    shapes: Vec<usize>,
     traffic: Traffic,
     /// A pool with no car, to start over from when traffic is switched off.
     empty: Traffic,
@@ -226,24 +255,33 @@ impl Npcs {
     /// reduced, so a world whose cars all weigh alike picks as an unweighted pool).
     pub fn new(place: &Place, seed: Seed, era: &[u32]) -> Npcs {
         let graph = LaneGraph::new(place);
+        let shapes = world_shapes(era);
         let budget = TrafficBudget {
-            shapes: vehicles::TRAFFIC_SHAPES as u8,
+            shapes: shapes.len() as u8,
             ..TrafficBudget::default()
         };
         let mut traffic = Traffic::new(&graph, budget, seed);
-        let mut weights = era.to_vec();
+        let mut weights: Vec<u32> = shapes.iter().map(|&k| era[k]).collect();
         crate::scenario::reduced(&mut weights);
         traffic.set_shape_weights(&weights);
+        let specs: Vec<shape::ShapeSpec> = shapes
+            .iter()
+            .map(|&k| vehicles::load_shape(vehicles::BUILTIN_SHAPES[k].1))
+            .collect::<Result<_, _>>()
+            .expect("the built-in traffic shapes load");
+        let rules: Vec<traffic::ShapeRule> = specs.iter().map(shape_rule).collect();
+        traffic.set_shape_rules(&rules);
         let cap = budget.cars;
         let crowd = peds::Crowd::new(place, &graph, seed);
-        let bodies = vehicles::BUILTIN_SHAPES[..vehicles::TRAFFIC_SHAPES]
+        let bodies = specs
             .iter()
-            .map(|(_, text)| vehicles::load_shape(text).and_then(|sh| CarBody::of(&sh)))
+            .map(CarBody::of)
             .collect::<Result<_, _>>()
             .expect("the built-in traffic shapes load");
         Npcs {
             graph,
             place_seed: place.header.seed,
+            shapes,
             empty: traffic.clone(),
             traffic,
             signals: SignalClock::default(),
@@ -277,9 +315,10 @@ impl Npcs {
         parked: Option<&crate::propinst::PropInstances>,
         mut register: impl FnMut(Mesh) -> MeshId,
     ) -> Result<(), String> {
-        let shapes: Vec<shape::ShapeSpec> = vehicles::BUILTIN_SHAPES[..vehicles::TRAFFIC_SHAPES]
+        let shapes: Vec<shape::ShapeSpec> = self
+            .shapes
             .iter()
-            .map(|(_, text)| vehicles::load_shape(text))
+            .map(|&k| vehicles::load_shape(vehicles::BUILTIN_SHAPES[k].1))
             .collect::<Result<_, _>>()?;
         let mut ids = Vec::with_capacity(shapes.len() * PAINTS * 2);
         let mut heads = Vec::with_capacity(shapes.len());
@@ -289,7 +328,7 @@ impl Npcs {
             m.vertices.len() * core::mem::size_of::<render::Vertex>()
                 + m.indices.len() * core::mem::size_of::<u32>()
         };
-        for (k, sh) in shapes.iter().enumerate() {
+        for (&k, sh) in self.shapes.iter().zip(&shapes) {
             heads.push(car::parked_headlamps(sh)?);
             for lod in [1, 2] {
                 let m = car::brake_overlay_mesh(sh, lod)?;
@@ -315,6 +354,11 @@ impl Npcs {
         self.built_bytes = bytes;
         self.crowd.build_meshes(register);
         Ok(())
+    }
+
+    /// How many traffic shapes the world drives (`traffic::Car::shape` is below it).
+    pub fn budget_shapes(&self) -> u8 {
+        self.shapes.len() as u8
     }
 
     /// Bytes of mesh built for the traffic alone (the rest are the parked cars').
@@ -908,7 +952,7 @@ mod tests {
             npcs.step(&inputs);
             all += npcs.cars().len();
             for c in npcs.cars() {
-                per[usize::from(c.shape)] += 1;
+                per[npcs.shapes[usize::from(c.shape)]] += 1;
             }
         }
         (per, all, npcs.traffic.hash())
@@ -921,7 +965,7 @@ mod tests {
         let l = crate::scenario::lineup_with(0, Some((1979, 1983)), |_| None);
         let (per, all, _) = census_all(&l.shapes);
         for (k, (file, _)) in vehicles::BUILTIN_SHAPES.iter().enumerate() {
-            let drives = k < vehicles::TRAFFIC_SHAPES && l.shapes[k] > 0;
+            let drives = vehicles::TRAFFIC_SHAPES.contains(&k) && l.shapes[k] > 0;
             assert_eq!(per[k] > 0, drives, "{file}: {} of {all}", per[k]);
         }
     }
@@ -932,9 +976,13 @@ mod tests {
             .iter()
             .position(|b| b.0 == "halcyon_turbo.shape.ron")
             .unwrap();
-        // The 1984 world's weights are all alike: the same traffic as an unweighted pool.
+        // The 1984 world's weights are all alike: the same traffic as an unweighted pool of
+        // the 1980s traffic shapes.
         let (n84, all, hash84) = census(&crate::scenario::lineup(0).shapes, k);
-        let (n, _, unweighted) = census(&[], k);
+        let ones: Vec<u32> = (0..vehicles::BUILTIN_SHAPES.len())
+            .map(|s| u32::from(s < 14))
+            .collect();
+        let (n, _, unweighted) = census(&ones, k);
         assert_eq!((hash84, n84), (unweighted, n));
         assert!(n84 > 0 && all > 1000);
         // The Halcyon dated 2001 never drives in 1984, and does in 2001.
@@ -948,6 +996,91 @@ mod tests {
             k,
         );
         assert!(n > 0);
+    }
+
+    /// Pinned hash of the 2001 world's traffic after 30 s of busy traffic on the coast
+    /// (seed 1, the basin's stub place) round the player at the start. Moves when the 2001
+    /// cars, their weights or the traffic sim change; update it in its own commit with the
+    /// reason.
+    const COAST_2001_TRAFFIC_HASH: u64 = 0x430d_08fe_597e_b020;
+
+    /// Thirty seconds of busy 2001 traffic on the coast at seed 1 after the warm-up: cars
+    /// seen of each built-in shape (counted once per car), whether every semi started on a
+    /// freeway lane, how many freeway lanes there are, and the pool's hash.
+    fn coast_2001() -> (Vec<usize>, bool, usize, u64) {
+        let app = app("place=coast&t=12:00&still=1&stream=0");
+        let place =
+            crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+        let mut npcs = Npcs::new(&place, Seed(1), &crate::scenario::lineup(1).shapes);
+        let semi = vehicles::BUILTIN_SHAPES
+            .iter()
+            .position(|b| b.0 == "anvil_semi.shape.ron")
+            .unwrap();
+        npcs.set_density(Density::Busy);
+        // The player stands beside the middle of the longest freeway lane, so the spawn
+        // ring takes in both the freeway and the streets round it.
+        let mut inputs = app.traffic_inputs();
+        let lane = (0..npcs.graph.lanes.len() as u32)
+            .filter(|&l| npcs.graph.lanes[l as usize].freeway)
+            .max_by(|&a, &b| {
+                let len = |l: u32| npcs.graph.lanes[l as usize].length_m;
+                len(a).total_cmp(&len(b))
+            })
+            .expect("the coast has a freeway");
+        let mid = npcs
+            .graph
+            .pose(lane, 0.5 * npcs.graph.lanes[lane as usize].length_m);
+        inputs.player.pos = [mid.pos[0] + 30.0, mid.pos[1], mid.pos[2] + 30.0];
+        inputs.view.pos = inputs.player.pos;
+        let mut per = vec![0; vehicles::BUILTIN_SHAPES.len()];
+        let mut seen = std::collections::BTreeSet::new();
+        let mut on_freeway = true;
+        let mut note = |npcs: &Npcs| {
+            for c in npcs.cars() {
+                if seen.insert(c.id) {
+                    let k = npcs.shapes[usize::from(c.shape)];
+                    per[k] += 1;
+                    if k == semi {
+                        let lanes = npcs.graph.lanes.len() as u32;
+                        on_freeway &= c.seg < lanes && npcs.graph.lanes[c.seg as usize].freeway;
+                    }
+                }
+            }
+        };
+        // Cars first seen in the warm-up spawned there too, out of view.
+        while npcs.warm > 0 {
+            npcs.run_warm_up(&inputs, 1, inputs.view);
+            note(&npcs);
+        }
+        for _ in 0..30 * skywave_core::SIM_HZ {
+            npcs.step(&inputs);
+            note(&npcs);
+        }
+        let freeway = npcs.graph.lanes.iter().filter(|l| l.freeway).count();
+        (per, on_freeway, freeway, npcs.traffic.hash())
+    }
+
+    #[test]
+    fn the_2001_world_drives_its_traffic_cars_and_the_semi_on_the_freeway() {
+        let (per, on_freeway, freeway, hash) = coast_2001();
+        eprintln!("2001 traffic hash {hash:#018x}, {freeway} freeway lanes");
+        for (k, (file, _)) in vehicles::BUILTIN_SHAPES.iter().enumerate() {
+            eprintln!("  {file}: {}", per[k]);
+        }
+        assert!(freeway > 0, "the coast has a freeway");
+        for &k in &vehicles::TRAFFIC_SHAPES[14..] {
+            assert!(
+                per[k] > 0,
+                "{} never drives in 2001",
+                vehicles::BUILTIN_SHAPES[k].0
+            );
+        }
+        assert!(on_freeway, "a semi started off the freeway");
+        // The 1980s cars still drive, at their age weight: fewer than the 2001 cars.
+        let old: usize = per[..14].iter().sum();
+        let new: usize = per[25..].iter().sum();
+        assert!(old > 0 && old < new, "{old} old, {new} new");
+        assert_eq!(hash, COAST_2001_TRAFFIC_HASH);
     }
 
     #[test]
@@ -1113,12 +1246,9 @@ mod tests {
         assert!(braking > 0, "someone waits at the light");
         let brakes = app.npcs.brakes.clone();
         // Every traffic shape has its overlay at both levels, and it has lenses.
-        assert_eq!(brakes.len(), crate::vehicles::TRAFFIC_SHAPES * 2);
-        for (k, (_, text)) in crate::vehicles::BUILTIN_SHAPES[..crate::vehicles::TRAFFIC_SHAPES]
-            .iter()
-            .enumerate()
-        {
-            let sh = crate::vehicles::load_shape(text).unwrap();
+        assert_eq!(brakes.len(), app.npcs.shapes.len() * 2);
+        for &k in &crate::vehicles::TRAFFIC_SHAPES {
+            let sh = crate::vehicles::load_shape(crate::vehicles::BUILTIN_SHAPES[k].1).unwrap();
             for lod in [1, 2] {
                 let m = car::brake_overlay_mesh(&sh, lod).unwrap();
                 assert!(

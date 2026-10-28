@@ -15,8 +15,8 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
 
 /// The vehicle specs compiled into the game, as `(id, RON text)`, in the order the Vehicle
 /// page lists them: the 1980s roster (the everyday cars, then the sports cars), then the
-/// 2001 hero cars.
-pub const BUILTIN: [(&str, &str); 25] = [
+/// 2001 hero cars, then the 2001 traffic cars (the semi last: traffic only, never listed).
+pub const BUILTIN: [(&str, &str); 32] = [
     (
         "gannet_gt",
         include_str!("../../../assets/vehicles/gannet_gt.ron"),
@@ -117,6 +117,34 @@ pub const BUILTIN: [(&str, &str); 25] = [
         "siskin_coupe",
         include_str!("../../../assets/vehicles/siskin_coupe.ron"),
     ),
+    (
+        "plover_sedan",
+        include_str!("../../../assets/vehicles/plover_sedan.ron"),
+    ),
+    (
+        "sorrel_utility",
+        include_str!("../../../assets/vehicles/sorrel_utility.ron"),
+    ),
+    (
+        "wren_minivan",
+        include_str!("../../../assets/vehicles/wren_minivan.ron"),
+    ),
+    (
+        "percheron_pickup",
+        include_str!("../../../assets/vehicles/percheron_pickup.ron"),
+    ),
+    (
+        "linnet_hatch",
+        include_str!("../../../assets/vehicles/linnet_hatch.ron"),
+    ),
+    (
+        "sledge_box_truck",
+        include_str!("../../../assets/vehicles/sledge_box_truck.ron"),
+    ),
+    (
+        "anvil_semi",
+        include_str!("../../../assets/vehicles/anvil_semi.ron"),
+    ),
 ];
 
 /// Built-in vehicle ids that were renamed, `(old, new)`: a saved setting or a scene URL
@@ -153,10 +181,10 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 }
 
 /// The car body shapes compiled into the game, as `(file name, RON text)`; a
-/// `VehicleSpec::shape` names one. The first [`TRAFFIC_SHAPES`] are the everyday cars NPC
-/// traffic drives; new shapes go at the end, so the place's parked-car paints (seeded by
-/// index) keep theirs.
-pub const BUILTIN_SHAPES: [(&str, &str); 25] = [
+/// `VehicleSpec::shape` names one. [`TRAFFIC_SHAPES`] are the everyday cars NPC traffic
+/// drives; new shapes go at the end, so the place's parked-car paints (seeded by index)
+/// keep theirs.
+pub const BUILTIN_SHAPES: [(&str, &str); 32] = [
     (
         "gannet_gt.shape.ron",
         include_str!("../../../assets/vehicles/gannet_gt.shape.ron"),
@@ -257,12 +285,75 @@ pub const BUILTIN_SHAPES: [(&str, &str); 25] = [
         "siskin_coupe.shape.ron",
         include_str!("../../../assets/vehicles/siskin_coupe.shape.ron"),
     ),
+    (
+        "plover_sedan.shape.ron",
+        include_str!("../../../assets/vehicles/plover_sedan.shape.ron"),
+    ),
+    (
+        "sorrel_utility.shape.ron",
+        include_str!("../../../assets/vehicles/sorrel_utility.shape.ron"),
+    ),
+    (
+        "wren_minivan.shape.ron",
+        include_str!("../../../assets/vehicles/wren_minivan.shape.ron"),
+    ),
+    (
+        "percheron_pickup.shape.ron",
+        include_str!("../../../assets/vehicles/percheron_pickup.shape.ron"),
+    ),
+    (
+        "linnet_hatch.shape.ron",
+        include_str!("../../../assets/vehicles/linnet_hatch.shape.ron"),
+    ),
+    (
+        "sledge_box_truck.shape.ron",
+        include_str!("../../../assets/vehicles/sledge_box_truck.shape.ron"),
+    ),
+    (
+        "anvil_semi.shape.ron",
+        include_str!("../../../assets/vehicles/anvil_semi.shape.ron"),
+    ),
 ];
 
-/// How many of [`BUILTIN_SHAPES`], from the first, NPC traffic draws from: the twelve
-/// everyday cars and the two common sports cars. The exotics, the new convertibles and the
-/// 2001 hero cars are the player's to drive.
-pub const TRAFFIC_SHAPES: usize = 14;
+/// The [`BUILTIN_SHAPES`] NPC traffic draws from, by index: the twelve everyday cars of the
+/// 1980s and their two common sports cars, then the seven 2001 traffic cars. A world drives
+/// those of its cars ([`crate::scenario::Lineup::shapes`]), so the 1984 coast drives the
+/// first fourteen alone. The exotics, the new convertibles and the 2001 hero cars are the
+/// player's to drive.
+pub const TRAFFIC_SHAPES: [usize; 21] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 25, 26, 27, 28, 29, 30, 31,
+];
+
+/// Where each traffic shape is seen, as weights per zone (`place::ZoneId` order: downtown,
+/// strip, residential, suburb, industrial, commercial, park, beach, farmland, hills,
+/// highway (the freeway lanes), water), for traffic (`traffic::ShapeRule::zones`) and parked
+/// cars alike. A shape not listed weighs [`ZONES_ALIKE`]: the 1980s cars weigh by their
+/// age alone. SUVs and minivans in the residential and strip zones, pickups and box trucks
+/// in the industrial ones, the semi on the freeway alone.
+pub const ZONE_WEIGHTS: [(&str, [u8; 12]); 7] = [
+    ("plover_sedan", [3, 3, 3, 3, 2, 3, 2, 2, 2, 2, 3, 2]),
+    ("sorrel_utility", [2, 4, 4, 4, 1, 2, 2, 2, 2, 3, 2, 2]),
+    ("wren_minivan", [1, 4, 4, 4, 1, 2, 2, 2, 1, 2, 2, 1]),
+    ("percheron_pickup", [1, 1, 2, 2, 5, 1, 1, 1, 4, 3, 2, 1]),
+    ("linnet_hatch", [3, 3, 2, 2, 1, 3, 2, 2, 1, 1, 2, 2]),
+    ("sledge_box_truck", [2, 1, 1, 1, 5, 2, 1, 1, 1, 1, 1, 1]),
+    ("anvil_semi", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0]),
+];
+
+/// The zone weights of a shape [`ZONE_WEIGHTS`] does not list.
+pub const ZONES_ALIKE: [u8; 12] = [2; 12];
+
+/// The zone weights of built-in shape `id` (its `ShapeSpec::id`).
+pub fn zone_weights(id: &str) -> [u8; 12] {
+    ZONE_WEIGHTS
+        .iter()
+        .find(|(s, _)| *s == id)
+        .map_or(ZONES_ALIKE, |(_, z)| *z)
+}
+
+/// Bodies longer than this keep their own length in traffic; the rest are spaced as
+/// `traffic::cars::CAR_LEN_M` (the 1980s cars always were), m.
+pub const LONG_BODY_M: f32 = 6.0;
 
 /// Loads the built-in shape `spec.shape` names.
 pub fn builtin_shape(spec: &VehicleSpec) -> Result<ShapeSpec, String> {
@@ -412,7 +503,7 @@ mod tests {
             .iter()
             .map(|(id, _)| builtin_spec(id).unwrap())
             .collect();
-        assert_eq!(specs.len(), 25);
+        assert_eq!(specs.len(), 32);
         for class in [
             Sports,
             Coupe,
@@ -427,7 +518,7 @@ mod tests {
             assert!(specs.iter().any(|s| s.class == class), "{class:?}");
         }
         for (k, s) in specs.iter().enumerate() {
-            // The 1980s roster, then the 2001 heroes.
+            // The 1980s roster, then the 2001 heroes and traffic cars.
             let eighties = k < 20;
             assert_eq!(s.era == Era::Eighties, eighties, "{}", s.id);
             assert!(specs[k + 1..]

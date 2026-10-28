@@ -894,7 +894,7 @@ fn the_measured_room_keeps_every_shove_on_the_roadway() {
     let app = app("place=coast&car=gannet_gt&cam=chase-mid&t=12:00&traffic=busy");
     let g = &app.npcs.graph;
     let template = app.npcs.cars()[0];
-    let shape = (0..crate::vehicles::TRAFFIC_SHAPES as u8)
+    let shape = (0..app.npcs.budget_shapes())
         .max_by(|&a, &b| {
             let len = |k: u8| {
                 app.npcs

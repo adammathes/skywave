@@ -234,8 +234,17 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
     let w = &spec.wheels;
     let wheel = wheel::build(w, &spec.parts, lod, &mats).finish();
     let (x, y, wb) = (w.track * 0.5, w.radius, w.rear_x - w.front_x);
+    let mut body = shell.finish();
+    if !spec.axles.is_empty() {
+        let fixed = wheel::fixed(w, &spec.parts, lod, &mats).finish();
+        for &ax in &spec.axles {
+            for side in [-1.0f32, 1.0] {
+                append_wheel(&mut body, &fixed, [side * x, y, ax - w.front_x], side < 0.0);
+            }
+        }
+    }
     Ok(CarMesh {
-        body: shell.finish(),
+        body,
         wheels: [wheel.clone(), wheel.clone(), wheel.clone(), wheel],
         glass: glass.finish(),
         lights: p.lights.finish(),
@@ -246,6 +255,23 @@ pub fn build_with(spec: &ShapeSpec, opts: &BuildOptions) -> Result<CarMesh, Shap
         wheel_radius: w.radius,
         cockpit: int.cockpit,
     })
+}
+
+/// Appends right-side, hub-local wheel `w` to `body` at hub `at`, turned 180° about `y`
+/// for a `left` wheel.
+fn append_wheel(body: &mut MeshData, w: &MeshData, at: [f32; 3], left: bool) {
+    let base = body.positions.len() as u32;
+    let turn = |v: [f32; 3]| if left { [-v[0], v[1], -v[2]] } else { v };
+    for (p, n) in w.positions.iter().zip(&w.normals) {
+        let p = turn(*p);
+        body.positions
+            .push([p[0] + at[0], p[1] + at[1], p[2] + at[2]]);
+        body.normals.push(turn(*n));
+    }
+    body.uvs.extend_from_slice(&w.uvs);
+    body.colors.extend_from_slice(&w.colors);
+    body.emissive.extend_from_slice(&w.emissive);
+    body.indices.extend(w.indices.iter().map(|i| i + base));
 }
 
 /// sRGB byte to linear byte (polynomial fit of the sRGB curve, deterministic).
