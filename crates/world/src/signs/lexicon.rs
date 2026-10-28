@@ -432,6 +432,14 @@ mod tests {
     }
 
     #[test]
+    fn no_descriptor_names_a_chain_with_its_trade() {
+        // The coast leaves out three listed pairs; the basin leaves out ten
+        // (their names are keys on the blocklist, never spelled here).
+        assert_eq!(chains_left_out_in(coast_80s()), 3);
+        assert_eq!(chains_left_out_in(basin_01()), 10);
+    }
+
+    #[test]
     fn no_sign_says_placeholder_words_or_repeats_itself() {
         no_sign_says_placeholder_words_or_repeats_itself_in(coast_80s());
         no_sign_says_placeholder_words_or_repeats_itself_in(basin_01());
@@ -507,6 +515,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Whether `t`, or `t` with the `S` of a plural trade dropped, is on the blocklist.
+    fn listed(block: &[u64], t: &[u8]) -> bool {
+        block.contains(&key(t))
+            || t.strip_suffix(b"S")
+                .is_some_and(|t| block.contains(&key(t)))
+    }
+
+    /// Every descriptor-and-trade pair of `g0` whose words, singular or plural, name a
+    /// listed chain is left out of the trade's descriptors, and no sign drawn spells one;
+    /// returns how many pairs that leaves out.
+    fn chains_left_out_in(g0: crate::grammar::Grammar) -> usize {
+        let block = blocklist();
+        let mut out = 0;
+        for t in &g0.signs.trades {
+            for d in &g0.lexicon.descriptors {
+                let pair = [d.as_bytes(), t.trade.as_bytes()].concat();
+                if listed(&block, &pair) {
+                    assert!(
+                        t.descriptors_out.contains(d),
+                        "{d} {} names a chain",
+                        t.trade
+                    );
+                    out += 1;
+                }
+            }
+        }
+        let (g, signs) = signs(g0);
+        for s in &signs {
+            let t = s.text(&g.lexicon);
+            assert!(!listed(&block, &t), "{:?}", core::str::from_utf8(&t));
+        }
+        out
     }
 
     fn no_sign_says_placeholder_words_or_repeats_itself_in(g0: crate::grammar::Grammar) {

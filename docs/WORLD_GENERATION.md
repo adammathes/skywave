@@ -185,7 +185,7 @@ ByUse<T>    { residential, office, other }   other: commercial, industrial, civi
 SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], lit_box_256,
               shop_lit_256, lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
               wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius,
-              banner_256 (optional, 0) }
+              banner_256 (optional, 0), fascia_words (optional, false) }
 StreetDress { bus_stop_m (0: none), faces: [(Ad | Blank | Pictogram, weight)] (empty: Ad) }
 Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
 TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
@@ -306,7 +306,11 @@ aluminum awnings, little canvas; lots busy late into the night. Its signs draw f
 `lexicon_2001.ron` (`us_basin`: the coast's invented names, the period's descriptors and trades: taquerias
 and taco stands, wheels, tint, smog checks, car audio, pagers and phones, nails), which `app::places`
 attaches by the id the grammar names; the coast's `lexicon.ron` is untouched, so the coast's signs never
-change. Its `street` puts a bus stop (`PropKind::BusShelter`: posts, a flat roof, a glazed back screen, a
+change. The buildings' fascia sign boxes letter from it too (`fascia_words`: a box's words are a shop
+sign's main line drawn from it, or its trade alone when that is too long; without the flag, as on the coast,
+they keep the older syllable names of `signs::business_name`). Its trades leave out every descriptor whose
+pair would read as a real chain, singular or plural (`descriptors_out`; their keys are on the test
+blocklist and `no_descriptor_names_a_chain_with_its_trade` checks every descriptor and trade). Its `street` puts a bus stop (`PropKind::BusShelter`: posts, a flat roof, a glazed back screen, a
 bench and a lit ad box across the downstream end) on an arterial's walk about every 320 m in commercial,
 residential, downtown and suburban zones (a block's piece of arterial gets one with the chance of its share
 of the spacing), and gives billboards and the shelters' ad boxes faces blank or one big pictogram

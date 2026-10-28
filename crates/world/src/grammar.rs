@@ -444,6 +444,10 @@ pub struct SignRules {
     /// letters (0 when the file says nothing).
     #[cfg_attr(feature = "serde", serde(default))]
     pub banner_256: u32,
+    /// The buildings' fascia signs are lettered from the lexicon too, as the blade signs
+    /// are, rather than with the older syllable names (false when the file says nothing).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fascia_words: bool,
 }
 
 /// Street furniture a grammar sets beside the template's props (`Grammar::street`).

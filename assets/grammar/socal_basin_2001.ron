@@ -932,33 +932,36 @@ Grammar(
         lit_box_256: 190,
         shop_lit_256: 150,
 
+        // Their words from the basin's own lexicon. `descriptors_out` skips a descriptor whose
+        // pair with the trade would read as a real chain (the blocklist holds their keys;
+        // `no_descriptor_names_a_chain_with_its_trade` checks every pair).
         lexicon: "us_basin",
         trades: [
             TradeRule(trade: "DONUTS", weight: 3, pictograms: [(Donut, 3), (CoffeeCup, 1)], lines: [(Word("OPEN"), 2)]),
             TradeRule(trade: "TACOS", weight: 4, pictograms: [(Taco, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "TAQUERIA", weight: 3, pictograms: [(Taco, 2), (Star, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "BURGERS", weight: 3, pictograms: [(Burger, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "PIZZA", weight: 2, pictograms: [(PizzaSlice, 1)], lines: []),
+            TradeRule(trade: "PIZZA", weight: 2, pictograms: [(PizzaSlice, 1)], lines: [], descriptors_out: ["WESTSIDE"]),
             TradeRule(trade: "TERIYAKI", weight: 2, pictograms: [(Fish, 1), (Star, 1)], lines: []),
             TradeRule(trade: "BOBA", weight: 1, pictograms: [(CoffeeCup, 1)], lines: []),
-            TradeRule(trade: "LIQUOR", weight: 3, pictograms: [(BeerMug, 1), (MartiniGlass, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "VIDEO", weight: 2, pictograms: [(FilmReel, 2), (TvSet, 1)], lines: []),
+            TradeRule(trade: "LIQUOR", weight: 3, pictograms: [(BeerMug, 1), (MartiniGlass, 1)], lines: [(Word("OPEN"), 1)], descriptors_out: ["DISCOUNT"]),
+            TradeRule(trade: "VIDEO", weight: 2, pictograms: [(FilmReel, 2), (TvSet, 1)], lines: [], descriptors_out: ["FAMILY"]),
             TradeRule(trade: "PAGERS", weight: 2, pictograms: [(Star, 1), (Arrow, 1)], lines: [(Word("SALE"), 1)]),
             TradeRule(trade: "PHONES", weight: 2, pictograms: [(Star, 1), (Arrow, 1)], lines: [(Word("SALE"), 1)]),
             TradeRule(trade: "NAILS", weight: 2, pictograms: [(Flower, 1), (Star, 1)], lines: [(Word("WELCOME"), 1)]),
             TradeRule(trade: "LAUNDRY", weight: 2, pictograms: [(ShirtHanger, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "CLEANERS", weight: 1, pictograms: [(ShirtHanger, 1)], lines: []),
             TradeRule(trade: "BARBER", weight: 1, pictograms: [(ScissorsComb, 1)], lines: []),
-            TradeRule(trade: "DENTAL", weight: 1, pictograms: [(Tooth, 1)], lines: []),
-            TradeRule(trade: "DRUGS", weight: 1, pictograms: [(MortarPestle, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "TIRES", weight: 3, pictograms: [(Tire, 2), (Wrench, 1)], lines: []),
-            TradeRule(trade: "WHEELS", weight: 3, pictograms: [(Tire, 2), (Star, 1)], lines: [(Word("SALE"), 1)]),
-            TradeRule(trade: "AUTO PARTS", weight: 2, pictograms: [(Wrench, 2), (Tire, 1)], lines: []),
+            TradeRule(trade: "DENTAL", weight: 1, pictograms: [(Tooth, 1)], lines: [], descriptors_out: ["FAMILY"]),
+            TradeRule(trade: "DRUGS", weight: 1, pictograms: [(MortarPestle, 1)], lines: [(Word("OPEN"), 1)], descriptors_out: ["DISCOUNT", "FAMILY"]),
+            TradeRule(trade: "TIRES", weight: 3, pictograms: [(Tire, 2), (Wrench, 1)], lines: [], descriptors_out: ["DISCOUNT"]),
+            TradeRule(trade: "WHEELS", weight: 3, pictograms: [(Tire, 2), (Star, 1)], lines: [(Word("SALE"), 1)], descriptors_out: ["DISCOUNT"]),
+            TradeRule(trade: "AUTO PARTS", weight: 2, pictograms: [(Wrench, 2), (Tire, 1)], lines: [], descriptors_out: ["DISCOUNT"]),
             TradeRule(trade: "BODYWORK", weight: 2, pictograms: [(Wrench, 1)], lines: []),
             TradeRule(trade: "CAR AUDIO", weight: 2, pictograms: [(Record, 1), (Star, 1)], lines: []),
             TradeRule(trade: "TINT", weight: 1, pictograms: [(Sun, 1)], lines: []),
             TradeRule(trade: "SMOG CHECK", weight: 2, pictograms: [(Wrench, 1)], lines: []),
-            TradeRule(trade: "MUFFLERS", weight: 1, pictograms: [(Wrench, 1)], lines: [(Since, 1)]),
+            TradeRule(trade: "MUFFLERS", weight: 1, pictograms: [(Wrench, 1)], lines: [(Since, 1)], descriptors_out: ["DISCOUNT"]),
             TradeRule(trade: "GARAGE", weight: 1, pictograms: [(Wrench, 2), (Tire, 1)], lines: []),
             TradeRule(trade: "MOTEL", weight: 2, pictograms: [(Arrow, 2), (Palm, 1), (Star, 1)], lines: [(Word("VACANCY"), 1)]),
             TradeRule(trade: "LOUNGE", weight: 1, pictograms: [(MartiniGlass, 1)], lines: [(Word("COCKTAILS"), 1)]),
@@ -971,6 +974,8 @@ Grammar(
         name_radius: 400,
         // The vinyl banners on the mini-malls' fascias.
         banner_256: 110,
+        // The buildings' fascia signs lettered from the lexicon too.
+        fascia_words: true,
     ),
 
     // Bus stops every 320 m along the arterials; billboards and the shelters' ad boxes
