@@ -1,11 +1,13 @@
 //! The user's radio settings: volume, power and last station (restored next session),
-//! stations switched off, streams the user added, and the preset chosen per scenario. The
-//! app stores them as the `radio` section of its settings document.
+//! stations switched off, streams the user added, the preset chosen per scenario, and the
+//! deck's source, mode and place ([`DeckSettings`]). The app stores them as the `radio`
+//! section of its settings document.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::deck::{Mode, Source};
 use crate::radio::Channel;
 use crate::station::{stream_url_ok, RadioPreset, MAX_NAME};
 
@@ -15,6 +17,20 @@ pub const MAX_CUSTOM: usize = 16;
 const MAX_DISABLED: usize = 256;
 /// Longest id kept (station or preset), bytes.
 const MAX_ID: usize = 64;
+/// Longest track key kept, bytes.
+const MAX_KEY: usize = 1024;
+
+/// What the car played last session and where the deck was: source, mode, the track
+/// loaded (its key) and the second into it, and the Shuffle pass.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeckSettings {
+    pub source: Source,
+    pub mode: Mode,
+    pub track: Option<String>,
+    pub at_s: f32,
+    pub pass: u32,
+}
 
 /// A stream the user added by URL.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +57,7 @@ pub struct RadioSettings {
     pub custom: Vec<CustomStream>,
     /// Scenario id to the id of the preset the user picked for it.
     pub presets: BTreeMap<String, String>,
+    pub deck: DeckSettings,
 }
 
 impl Default for RadioSettings {
@@ -52,6 +69,7 @@ impl Default for RadioSettings {
             disabled: Vec::new(),
             custom: Vec::new(),
             presets: BTreeMap::new(),
+            deck: DeckSettings::default(),
         }
     }
 }
@@ -87,6 +105,19 @@ impl RadioSettings {
         custom.truncate(MAX_CUSTOM);
         self.custom = custom;
         self.presets.retain(|k, v| k.len() <= MAX_ID && ok_id(v));
+        let d = &mut self.deck;
+        if !d
+            .track
+            .as_ref()
+            .is_some_and(|k| !k.is_empty() && k.len() <= MAX_KEY)
+        {
+            d.track = None;
+        }
+        d.at_s = if d.at_s.is_finite() {
+            d.at_s.max(0.0)
+        } else {
+            0.0
+        };
         self
     }
 
@@ -108,21 +139,19 @@ impl RadioSettings {
     }
 
     /// The dial: `preset`'s enabled stream stations in file order, then the user's
-    /// enabled streams, then their enabled music folders (`files`, in the order given).
-    pub fn channels(&self, preset: &RadioPreset, files: &[Channel]) -> Vec<Channel> {
+    /// enabled streams.
+    pub fn channels(&self, preset: &RadioPreset) -> Vec<Channel> {
         let custom = self.custom.iter().map(|c| Channel {
             id: c.id.clone(),
             name: c.name.clone(),
             format: "added stream".to_string(),
             urls: vec![c.url.clone()],
-            tracks: Vec::new(),
         });
         preset
             .stations
             .iter()
             .filter_map(Channel::from_station)
             .chain(custom)
-            .chain(files.iter().cloned())
             .filter(|c| self.is_enabled(&c.id))
             .collect()
     }
@@ -206,6 +235,13 @@ mod tests {
         s.add_custom("https://radio.example.org/live.mp3").unwrap();
         s.presets
             .insert("socal_beach_1984".into(), "1986_north_shore".into());
+        s.deck = DeckSettings {
+            source: Source::Deck,
+            mode: Mode::Continuous,
+            track: Some("h1/Artist/Album/01 Song.mp3".into()),
+            at_s: 61.0,
+            pass: 2,
+        };
         let text = ron::to_string(&s).unwrap();
         let back: RadioSettings = ron::from_str(&text).unwrap();
         assert_eq!(back, s);
@@ -225,10 +261,7 @@ mod tests {
     fn the_dial_is_enabled_streams_then_added_ones() {
         let mut s = RadioSettings::default();
         let ids = |s: &RadioSettings| -> Vec<String> {
-            s.channels(&preset(), &[])
-                .into_iter()
-                .map(|c| c.id)
-                .collect()
+            s.channels(&preset()).into_iter().map(|c| c.id).collect()
         };
         assert_eq!(
             ids(&s),
@@ -289,6 +322,17 @@ mod tests {
         .sanitized();
         assert_eq!(s.volume, 0.8);
         assert_eq!(s.last_station, None);
+        let deck = RadioSettings {
+            deck: DeckSettings {
+                track: Some(String::new()),
+                at_s: f32::NAN,
+                ..DeckSettings::default()
+            },
+            ..RadioSettings::default()
+        }
+        .sanitized()
+        .deck;
+        assert_eq!((deck.track, deck.at_s), (None, 0.0));
         assert_eq!(s.disabled, ["a", "b"]);
         assert_eq!(s.custom.len(), 1);
         assert_eq!(

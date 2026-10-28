@@ -186,6 +186,8 @@ impl Sound {
             // Set by the app from the car radio (`App::frame`).
             tunes: 0,
             tune_volume: 0.0,
+            deck_clicks: 0,
+            deck_kind: 0,
         }
     }
 
