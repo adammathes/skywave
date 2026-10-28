@@ -55,7 +55,8 @@ pub struct Scenario {
 }
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
-/// lists them. The first is the world a scene is in unless it names another.
+/// lists them. The first is the world a scene is in unless it names another (a bare start
+/// is in [`DEFAULT`]).
 pub const BUILTIN: [(&str, &str); 2] = [
     (
         "socal_beach_1984",
@@ -66,6 +67,10 @@ pub const BUILTIN: [(&str, &str); 2] = [
         include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
     ),
 ];
+
+/// The world a bare start opens (a scene with no keys and no world saved from the World
+/// page; `SceneSetup::with_saved_world`): the one the game is judged in.
+pub const DEFAULT: &str = "mirage_valley_2001";
 
 impl Scenario {
     /// Checks the fields against each other and against what the game has built in.
