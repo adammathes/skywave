@@ -3,8 +3,8 @@
 //! Terrain is built in the *canonical frame* of [`super::Frame`]: `u` runs inland from the
 //! water edge of the place, `v` along the coast. Height is a profile of the distance inland
 //! from the shoreline (sloping sea floor, beach, rising plain) plus hills: ridges roughly
-//! parallel to the coast, domain-warped and broken up by ridged noise, lowered into a
-//! saddle where the highway crosses, with flat valley floors cut into them. Smooth parts are
+//! parallel to the coast, domain-warped and broken up by ridged noise, with flat valley
+//! floors cut into them. Smooth parts are
 //! evaluated on a 16 m lattice and interpolated; only the profile and fine relief are
 //! evaluated per 4 m sample.
 
@@ -281,10 +281,6 @@ pub struct TerrainParams<'a> {
     pub warp: f32,
     pub ridges: &'a [Ridge],
     pub valleys: &'a [Valley],
-    /// Highway centerline `v` per `u` sample, for the pass saddle; empty for none.
-    pub highway_v: &'a [f32],
-    pub pass_depth: f32,
-    pub pass_half_width: f32,
     pub bounds: (f32, f32),
 }
 
@@ -406,10 +402,6 @@ fn lattice(seed: Seed, nu: usize, nv: usize, p: &TerrainParams<'_>) -> Lattice {
                 }
                 let detail = 0.6 + 0.4 * (0.5 + 0.5 * crest.at(wu, wv));
                 hills = base(dh) + ridge * detail;
-                if !p.highway_v.is_empty() {
-                    let hv = p.highway_v[(i * 4).min(p.highway_v.len() - 1)];
-                    hills *= 1.0 - p.pass_depth * bump((wv - hv) / p.pass_half_width);
-                }
             }
             let mut valley = 0.0f32;
             let mut floor = 0.0;
@@ -442,14 +434,6 @@ pub const CORRIDOR_HALF_M: f32 = 15.0;
 pub const CORRIDOR_BLEND_M: f32 = 60.0;
 /// Rise over run of the corridor's cut and fill slopes (1:2).
 pub const CORRIDOR_SLOPE: f32 = 0.5;
-/// The pass valley: the hills along the highway are cut down to this far above the bed...
-pub const VALLEY_DEPTH_M: f32 = 20.0;
-/// ...across a floor this wide each side of the centerline...
-pub const VALLEY_FLOOR_M: f32 = CORRIDOR_HALF_M + CORRIDOR_BLEND_M;
-/// ...rising at this grade beyond it, and blended into the hills over this height.
-pub const VALLEY_WALL: f32 = 0.35;
-const VALLEY_SOFT_M: f32 = 14.0;
-
 /// Bilinear height of a `w × h` grid of samples [`CELL_M`] apart at world `(x, z)`,
 /// clamped to the grid.
 pub fn grid_height(heights: &[f32], w: usize, h: usize, x: f32, z: f32) -> f32 {
@@ -467,8 +451,7 @@ pub fn grid_height(heights: &[f32], w: usize, h: usize, x: f32, z: f32) -> f32 {
 /// highway from the coast inland): the largest profile under the (smoothed) terrain that
 /// starts on the ground at the coast and never climbs or falls faster than
 /// [`CORRIDOR_GRADE`], with rounded vertical curves. Never above the terrain by more than
-/// the rounding, so the highway runs in cuts, not on embankments; where the hills rise
-/// faster than the grade, [`valley`] lowers them to meet it.
+/// the rounding, so the highway runs in cuts, not on embankments.
 pub fn corridor_bed(heights: &[f32], w: usize, h: usize, line: &[[f32; 2]], wl: f32) -> Vec<f32> {
     let n = line.len();
     if n == 0 {
@@ -514,49 +497,6 @@ pub fn corridor_bed(heights: &[f32], w: usize, h: usize, line: &[[f32; 2]], wl: 
         *b = b.max(wl + 1.0);
     }
     bed
-}
-
-/// Smooth minimum of `a` and `b` over a blend of `k` (polynomial; exact `min` once they
-/// differ by more than `k`).
-fn smooth_min(a: f32, b: f32, k: f32) -> f32 {
-    let t = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-    lerp(b, a, t) - k * t * (1.0 - t)
-}
-
-/// The pass: cuts the hills along the highway down to a valley whose floor runs
-/// [`VALLEY_DEPTH_M`] above the corridor bed for [`VALLEY_FLOOR_M`] each side of the
-/// centerline and whose walls rise at [`VALLEY_WALL`] beyond, blended into the hills.
-/// Works in the canonical frame: `line` is the highway there (`u` increasing inland),
-/// `bed` its [`corridor_bed`]; distance across is measured along `v`, corrected for the
-/// line's heading. Nothing changes seaward of the line's first point.
-pub fn valley(heights: &mut [f32], frame: &Frame, line: &[(f32, f32)], bed: &[f32]) {
-    if line.len() < 2 || bed.len() != line.len() {
-        return;
-    }
-    let nu = frame.n_u() as usize;
-    let nv = frame.n_v() as usize;
-    let hv = super::macro_map::v_per_u(line, nu);
-    let ub: Vec<(f32, f32)> = line.iter().zip(bed).map(|(p, &b)| (p.0, b)).collect();
-    let bu = super::macro_map::v_per_u(&ub, nu);
-    let u0 = line[0].0;
-    for iu in 0..nu {
-        let u = iu as f32 * CELL_M;
-        if u < u0 {
-            continue;
-        }
-        let (a, b) = (iu.saturating_sub(1), (iu + 1).min(nu - 1));
-        let dv = (hv[b] - hv[a]) / ((b - a).max(1) as f32 * CELL_M);
-        let k = 1.0 / sqrt(1.0 + dv * dv);
-        for iv in 0..nv {
-            let v = iv as f32 * CELL_M;
-            let d = abs_f(v - hv[iu]) * k;
-            let cap = bu[iu] + VALLEY_DEPTH_M + VALLEY_WALL * (d - VALLEY_FLOOR_M).max(0.0);
-            let i = frame.index(iu as u32, iv as u32);
-            if heights[i] > cap - VALLEY_SOFT_M {
-                heights[i] = smooth_min(heights[i], cap, VALLEY_SOFT_M);
-            }
-        }
-    }
 }
 
 /// Carves the corridor into `heights` (world sample order, `w × h`): flat at the bed within

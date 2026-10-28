@@ -89,6 +89,8 @@ const LAMP_ARM_M: f32 = 2.175;
 const LAMP_LIGHT_Y: f32 = 7.26;
 /// Lateral offset of curbside furniture from the curb face, m.
 const LAMP_IN_M: f32 = 0.45;
+/// How much shorter than the road a straight line from a junction to its sign may be.
+const BENT_M: f32 = 0.5;
 /// Gap from the gutter line to a parallel-parked car's center, m.
 const PARK_IN_M: f32 = 1.35;
 /// Grid of the scattered trees, m.
@@ -554,6 +556,21 @@ impl<'a> Detailer<'a> {
         }
     }
 
+    /// Whether the road of end `slot` of junction `ji` bends before `s` along it (from the
+    /// junction) by enough that its centerline there is more than [`BENT_M`] short of `s`
+    /// in a straight line: a sign there would not line up with the stop bar painted along
+    /// the bend for traffic reading it along the way out, so none stands.
+    fn bent(&self, ji: usize, slot: usize, s: f32) -> bool {
+        let j = &self.net.junctions[ji];
+        let e = &j.ends[slot];
+        let path = &self.net.paths[e.edge];
+        let len = path.len();
+        let from_a = self.net.edge_ends[e.edge][0] == (ji, slot);
+        let sp = if from_a { s } else { len - s };
+        let q = path.xz(sp.clamp(0.0, len), 0.0);
+        s - (q - j.pos).length() > BENT_M
+    }
+
     /// The point `s` along the road of end `slot` of junction `ji` (from the junction) and
     /// `t` to the left of the way out of it, on the road's own centerline (so it follows a
     /// curve); its surface height and the way out there. `None` past the road's middle.
@@ -978,6 +995,9 @@ impl<'a> Detailer<'a> {
                 let lat = if has_walk { e.hw + 0.8 } else { e.hw + 1.2 };
                 if signals {
                     let s = (e.trim + 1.2).max(e.s_left + 0.6);
+                    if self.bent(ji, k, s) {
+                        continue;
+                    }
                     if let Some((q, y, out)) = self.along_end(ji, k, s, lat) {
                         let arm_dm = ((e.hw * 0.85) * 10.0).min(255.0) as u8;
                         let arm = out.right();
@@ -985,7 +1005,7 @@ impl<'a> Detailer<'a> {
                     }
                 } else {
                     let stops = rank(e.class) < top || (equal && (n == 4 || k == stem));
-                    if stops {
+                    if stops && !self.bent(ji, k, (e.trim + 1.0).max(e.s_left + 0.5)) {
                         let s = (e.trim + 1.0).max(e.s_left + 0.5);
                         if let Some((q, y, out)) = self.along_end(ji, k, s, lat - 0.2) {
                             self.add(prop(q, y, out, PropKind::StopSign), 0.15, 0.3);

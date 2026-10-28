@@ -187,9 +187,13 @@ fn along(g: &LaneGraph, lane: u32, p: [f32; 3]) -> f32 {
     g.lanes[lane as usize].length_m - 10.0 + dot([p[0] - a.pos[0], p[2] - a.pos[2]], a.dir)
 }
 
-/// The end of the approach the junction scenario runs: a straight two-lane arterial
-/// (14 m/s) into a signalized four-way junction on the coast's north side.
-const APPROACH_END: [f32; 2] = [807.95, 1760.15];
+/// The end of the approach the junction scenario runs: a two-lane arterial (14 m/s, one
+/// 319 m lane bending gently) into a signalized four-way junction on the coast's north
+/// side. Moved with the map edges (the old point is off every lane there): of the
+/// signalized four-way approaches with 200 m or more of run-up, the one with the most
+/// cross traffic at its junction at busy density (7.5 NPC cars on the other phases within
+/// 40 m on average over 60 s at noon; the next has 6.9).
+const APPROACH_END: [f32; 2] = [952.21, 347.89];
 
 /// The signalized lane whose end lies at `end`.
 fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
@@ -203,11 +207,25 @@ fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
 }
 
 /// Drives `app` from a standstill along `lane` at full throttle up to 60 mph and on,
-/// `ticks` steps, calling `each` after every step.
+/// `ticks` steps, calling `each` after every step: on the lane's centerline where the car
+/// is beside it (the lane may bend gently), on its [`end_line`] past its end.
 fn run_up(app: &mut App, lane: u32, ticks: u32, mut each: impl FnMut(&App)) {
     let g = &coast().lanes;
-    let a = g.pose(lane, 0.0);
+    let len = g.lanes[lane as usize].length_m;
+    let d2 = |a: [f32; 3], b: [f32; 3]| (a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2);
+    let mut s = 0.0f32;
     for _ in 0..ticks {
+        let p = app.traffic_player().pos;
+        // The nearest point of the lane, searched just round the last one.
+        s = (0..=28)
+            .map(|k| (s - 2.0 + 0.25 * k as f32).clamp(0.0, len))
+            .min_by(|a, b| d2(g.pose(lane, *a).pos, p).total_cmp(&d2(g.pose(lane, *b).pos, p)))
+            .unwrap();
+        let a = if s < len - 10.0 {
+            g.pose(lane, s)
+        } else {
+            end_line(g, lane)
+        };
         let input = follow(app, a.pos, a.dir, MPH_60);
         step(app, &input);
         each(app);
@@ -224,7 +242,8 @@ fn sixty_through_a_red_light_touches_no_car() {
     let g = &coast().lanes;
     let lane = lane_ending_at(g, APPROACH_END);
     let len = g.lanes[lane as usize].length_m;
-    let start = g.pose(lane, 6.0);
+    // 200 m before the stop line: the run-up reaches 60 mph by it within 12 s.
+    let start = g.pose(lane, (len - 200.0).max(6.0));
     // How long the run-up takes to the stop line, alone on the road.
     let mut alone = app_at(start.pos, start.heading, "t=12:00&traffic=off");
     let half_len = alone.traffic_player().half_len;
@@ -307,7 +326,9 @@ fn sixty_through_a_red_light_touches_no_car() {
         }
         for c in app.npcs.cars() {
             let r = Rect::car(app, c);
-            if me.overlaps(&r) {
+            // On the same level: the approach runs under the highway, whose cars pass
+            // over the player's footprint far above it.
+            if me.overlaps(&r) && (c.pos[1] - p.pos[1]).abs() < 4.0 {
                 overlaps += 1;
                 first_overlap.get_or_insert((tick, c.id, c.speed, c.pos));
             }
@@ -351,9 +372,11 @@ fn sixty_through_a_red_light_touches_no_car() {
     assert!(app.drive.state.upset_s == 0.0);
 }
 
-/// The end of a signalized approach downtown whose crosswalk people use the most (ten
-/// people in two minutes at busy density with the player waiting at its stop line).
-const DOWNTOWN_END: [f32; 2] = [695.43, 981.20];
+/// The end of a signalized approach downtown whose crosswalk people use the most. Moved
+/// with the map edges: of the signalized four-way approaches, the one with the most people
+/// about at busy density (91 after the warm-up, 10.1 within 30 m of the junction on
+/// average over 30 s at noon).
+const DOWNTOWN_END: [f32; 2] = [855.18, 826.82];
 
 /// A pedestrian sim beside the app (seeded like the place), fed the app's player and
 /// camera at busy density.
@@ -665,8 +688,9 @@ fn reversing_into_a_queue_stops_against_it() {
 #[test]
 fn rams_never_push_an_npc_onto_the_sidewalk() {
     // The busiest block of the strip at seed 1 (`peds::tests::STRIP`).
-    let mut app =
-        app("place=coast&car=gannet_gt&cam=chase-mid&pos=872.0,942.5&yaw=1&t=12:00&traffic=busy");
+    let mut app = app(
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5&t=12:00&traffic=busy",
+    );
     let me = app.traffic_player();
     let hold = InputState::default();
     // A car standing in the outermost lane (curb side) nearest a point 15 m up the road.
@@ -976,13 +1000,18 @@ impl Lcg {
     }
 }
 
-/// A minute of driving at busy traffic round a coast junction, every half second steering
-/// at the nearest NPC car with a random pedal (forward or reverse): many bumps, never a
-/// non-finite number, never a launch, and no hit leaves the player's car faster than it
-/// was going the step before by more than the rebound.
+/// A minute of driving at busy traffic round the coast's busiest block, every half second
+/// steering at the nearest NPC car with a random pedal (forward or reverse): many bumps,
+/// never a non-finite number, never a launch, and no hit leaves the player's car faster
+/// than it was going the step before by more than the rebound. (On flat streets: round the
+/// junction of the traffic goldens the car can drive off a 6 m fill bank beside the road,
+/// a fall at up to 6.5 m/s that is not a launch.)
 #[test]
 fn a_minute_of_random_bumping_stays_finite_and_grounded() {
-    let mut app = app(&format!("{}&t=12:00&traffic=busy", super::tests::JUNCTION));
+    // The busiest block of the coast at seed 1 (`peds::tests::STRIP`).
+    let mut app = app(
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5&t=12:00&traffic=busy",
+    );
     let mut rng = Lcg(7);
     let (mut throttle, mut reverse) = (0.5f32, false);
     let y0 = app.drive.state.pos[1];

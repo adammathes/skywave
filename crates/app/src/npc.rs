@@ -11,8 +11,9 @@
 //!   ([`car::parked_mesh`]) only where it does not; a session with traffic off never
 //!   builds any. Lamps are built lit so the instance's glow switches them.
 //! - **Warm-up.** Whenever traffic is switched on, [`WARMUP_S`] of it runs with the player
-//!   and the view held still, so the streets round the car already have cars: all at once
-//!   while the scene loads, else [`WARMUP_BATCH`] steps a frame until done.
+//!   and the view held still, so the streets round the car already have cars (then up to
+//!   [`WARMUP_EXTRA_S`] more while they are thin): all at once while the scene loads, else
+//!   [`WARMUP_BATCH`] steps a frame until done.
 //! - **Step.** Each sim step feeds the player's car (the obstacle every NPC car sees), the
 //!   camera's view cone, the clock and the density, then steps and populates. The pose of
 //!   every car before the step is kept, so drawing interpolates like the player's car.
@@ -78,6 +79,13 @@ pub const PAINTS: usize = crate::propinst::ERA_PAINTS;
 /// Seconds of traffic run when it is switched on...
 pub const WARMUP_S: f32 = 20.0;
 const WARMUP_STEPS: u32 = (WARMUP_S as u32) * skywave_core::SIM_HZ;
+/// ...and then up to this much more, a second at a time, while fewer than
+/// [`WARM_FULL`] of the density's cars are live (a start with few lanes out of view fills
+/// slowly).
+pub const WARMUP_EXTRA_S: f32 = 10.0;
+const WARMUP_EXTRA_STEPS: u32 = (WARMUP_EXTRA_S as u32) * skywave_core::SIM_HZ;
+/// The share of the density's cars that ends the warm-up's extra seconds.
+pub const WARM_FULL: f32 = 0.9;
 /// Seconds the pedestrians alone walk before that while a scene loads, so people have
 /// spread from where they appear (40–120 m out) toward the camera before the first frame.
 pub const PEDS_PREROLL_S: f32 = 40.0;
@@ -225,6 +233,8 @@ pub struct Npcs {
     /// loads.
     warm: u32,
     preroll: u32,
+    /// Extra warm-up steps still allowed while the streets are thin.
+    extra: u32,
     /// The car id each traffic voice follows ([`traffic::cars::Car::id`]), or `u32::MAX`.
     voice_ids: [u32; TRAFFIC_VOICES],
     /// The place's pedestrians, at the same density.
@@ -287,6 +297,7 @@ impl Npcs {
             step_ms: 0.0,
             warm: 0,
             preroll: 0,
+            extra: 0,
             voice_ids: [u32::MAX; TRAFFIC_VOICES],
             crowd,
         }
@@ -389,11 +400,18 @@ impl Npcs {
             self.prev.clear();
             self.warm = 0;
             self.preroll = 0;
+            self.extra = 0;
         } else if density != Density::Off && self.density == Density::Off {
             self.warm = WARMUP_STEPS;
             self.preroll = PEDS_PREROLL_STEPS;
+            self.extra = WARMUP_EXTRA_STEPS;
         }
         self.density = density;
+    }
+
+    /// Starts the junction lights at signal tick `tick` (a scene's `phase=`).
+    pub fn set_signal_tick(&mut self, tick: u64) {
+        self.signals.tick = tick;
     }
 
     /// Whether the traffic runs: on, or cars still to clear.
@@ -530,17 +548,31 @@ impl Npcs {
     }
 
     fn run_warm_up(&mut self, inp: &StepInputs, max: u32, peds_view: View) -> u32 {
-        let n = self.warm.min(max);
         let peds = StepInputs {
             view: peds_view,
             ..*inp
         };
-        for _ in 0..n {
-            self.step(inp);
-            self.step_peds(&peds);
+        let mut ran = 0;
+        while ran < max {
+            if self.warm == 0 {
+                // Past the warm-up proper: a second more while the streets are thin.
+                let target = self.density.target(self.traffic.budget.cars);
+                if self.extra == 0 || self.count() as f32 >= WARM_FULL * target as f32 {
+                    self.extra = 0;
+                    break;
+                }
+                self.warm = skywave_core::SIM_HZ.min(self.extra);
+                self.extra -= self.warm;
+            }
+            let n = self.warm.min(max - ran);
+            for _ in 0..n {
+                self.step(inp);
+                self.step_peds(&peds);
+            }
+            self.warm -= n;
+            ran += n;
         }
-        self.warm -= n;
-        n
+        ran
     }
 
     /// Notes `ms` of traffic sim for `steps` steps, for the overlay.
@@ -877,9 +909,13 @@ mod tests {
     use super::*;
     use crate::{App, InputState, SceneSetup};
 
-    /// The coast junction of the `coast-traffic-noon` golden, waiting at the stop line.
+    /// The coast junction of the `coast-traffic-noon` golden, 35 m back from its stop line:
+    /// of the signalized four-way approaches within the junction draw budget
+    /// (`platform-native`'s `JUNCTION_BUDGET`), the one whose frame shows the most NPC cars
+    /// stopped at the lights (at `phase=1440`; busy, noon). Back from the line the queue
+    /// stands beside and ahead of the player, not on the chase camera.
     pub(crate) const JUNCTION: &str =
-        "place=coast&car=gannet_gt&cam=chase-mid&pos=477.5,1001.2&yaw=347";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=747.7,493.9&yaw=-20.5";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
@@ -966,7 +1002,7 @@ mod tests {
     /// (seed 1, the basin's stub place) round the player at the start. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const COAST_2001_TRAFFIC_HASH: u64 = 0x430d_08fe_597e_b020;
+    const COAST_2001_TRAFFIC_HASH: u64 = 0x0c98_5f2d_fa40_968b;
 
     /// Thirty seconds of busy 2001 traffic on the coast at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a

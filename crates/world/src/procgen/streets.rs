@@ -98,7 +98,7 @@ pub const SPLINE_STEP_M: f32 = 8.0;
 const RASTER_M: f32 = 8.0;
 /// Sampling step along lattice lines.
 const SAMPLE_M: f32 = 4.0;
-/// Streets keep this far from the place edge.
+/// Streets keep this far from the playable rectangle's edge.
 const MARGIN_M: f32 = 8.0;
 /// Terrain steeper than this over 16 m breaks a lattice line.
 const STEEP_GRADE: f32 = 0.15;
@@ -123,6 +123,9 @@ const T_CHANCE: f32 = 0.1;
 /// Lattice runs stay within 36 m of their component's cells and alleys within 70 m: a
 /// chunk lays the lattices of the components this close.
 const LATTICE_REACH_M: f32 = 80.0;
+/// A run's feature reaches this far past the run's ends (onto the centerline of the road it
+/// snaps to), so a chunk takes the runs that end this close to it.
+const RUN_REACH_M: f32 = 20.0;
 /// Most consecutive lattice samples on arterial cells a run may cross.
 const MAX_BARRIER_SAMPLES: usize = 6;
 /// Suburb pod loops: half-width range of the stadium, room kept to the component's edge,
@@ -1039,8 +1042,9 @@ impl<'a> StreetPlan<'a> {
         self.pat[self.m.zone_at(p.x, p.y) as usize]
     }
 
+    /// Within the playable rectangle (the place less its edge bands), `margin` in.
     fn inside(&self, p: V2, margin: f32) -> bool {
-        p.x >= margin && p.y >= margin && p.x <= self.ext[0] - margin && p.y <= self.ext[1] - margin
+        self.m.in_playable(p.x, p.y, margin)
     }
 
     /// Dry ground a street may use.
@@ -1291,11 +1295,12 @@ impl<'a> StreetPlan<'a> {
         }
         let lat = *self.lattice(id.0);
         let (base, dir) = Self::line_geo(&lat, id.1, id.2);
+        let play = self.m.playable();
         let place = Bx {
-            x0: MARGIN_M,
-            z0: MARGIN_M,
-            x1: self.ext[0] - MARGIN_M,
-            z1: self.ext[1] - MARGIN_M,
+            x0: play[0] + MARGIN_M,
+            z0: play[1] + MARGIN_M,
+            x1: play[2] - MARGIN_M,
+            z1: play[3] - MARGIN_M,
         };
         let mut bounds: Vec<(f32, Bound)> = Vec::new();
         if let Some((tmin, tmax)) = clip_line(base, dir, &place) {
@@ -1540,11 +1545,11 @@ impl<'a> StreetPlan<'a> {
         let mut out = Vec::new();
         for i in 0..nb.saturating_sub(1) {
             let (b0, b1) = (cache.lines[li].bounds[i].0, cache.lines[li].bounds[i + 1].0);
-            if b1 < ta - 1.0 || b0 > tb + 1.0 {
+            if b1 < ta - RUN_REACH_M || b0 > tb + RUN_REACH_M {
                 continue;
             }
             for r in self.interval(cache, li, i) {
-                if r.t1 < ta || r.t0 > tb {
+                if r.t1 < ta - RUN_REACH_M || r.t0 > tb + RUN_REACH_M {
                     continue;
                 }
                 let mut pieces = vec![r];
@@ -3138,11 +3143,29 @@ impl<'a> StreetPlan<'a> {
                         {
                             continue;
                         }
+                        // The heights the border ends of both streets allow here (each a
+                        // fixed height some way along its street).
+                        let (mut lo, mut hi) = (f32::NEG_INFINITY, f32::INFINITY);
+                        for (e, seg, f) in [(&edges[i], si, t), (&edges[j], sj, u)] {
+                            let arc = arc_to(&e.pts, seg, f);
+                            let total = polyline_length(&e.pts);
+                            for (end, d) in [(e.a, arc), (e.b, total - arc)] {
+                                let nd = &nodes[end as usize];
+                                if matches!(nd.pin, Pin::Border(_)) {
+                                    lo = lo.max(nd.y - RELAX_GRADE * d);
+                                    hi = hi.min(nd.y + RELAX_GRADE * d);
+                                }
+                            }
+                        }
+                        // None does: they pass each other.
+                        if lo > hi {
+                            continue;
+                        }
                         found.push(x);
                         let id = nodes.len() as u32;
                         nodes.push(BNode {
                             pos: x,
-                            y: 0.5 * (yi + yj),
+                            y: clamp(0.5 * (yi + yj), lo, hi),
                             pin: Pin::Inner,
                         });
                         splits[i].push((si as u32, t, id));
@@ -3616,7 +3639,7 @@ impl<'a> StreetPlan<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Bound {
-    /// The place edge.
+    /// The playable rectangle's edge (the foot of an edge wall, or the place edge on water).
     Edge,
     /// An arterial the street may not join.
     Hard,
@@ -3734,6 +3757,15 @@ struct BEdge {
     kind: Kind,
     pts: Vec<V2>,
     ys: Vec<f32>,
+}
+
+/// Arc length along `pts` to fraction `t` of segment `seg`.
+fn arc_to(pts: &[V2], seg: usize, t: f32) -> f32 {
+    let mut acc = 0.0;
+    for k in 0..seg {
+        acc += (pts[k + 1] - pts[k]).length();
+    }
+    acc + t * (pts[seg + 1] - pts[seg]).length()
 }
 
 /// The node for a piece end: border nodes by key, arterial points by position on the

@@ -25,6 +25,10 @@ RegionTemplate(
         canals: Some(Canals(chance: 0.8, fingers: (3, 4), spacing_m: 64, length_m: (180, 260), width_m: 16)),
     ),
 
+    // Edges: open ocean to the horizon west, mountains east; north and south the highway loops
+    // back along a ridge (crates/world/src/edges.rs).
+    edges: Edges(north: HighwayLoop, east: Mountains, south: HighwayLoop, west: Ocean),
+
     elevation: Elevation(
         water_level_m: 0,
         shelf_depth_m: 14,
@@ -46,7 +50,7 @@ RegionTemplate(
     layout: Layout(
         strip: StripRule(length_m: (800, 1500), inland_m: (60, 110), width_m: (70, 96)),
         downtown_inland_m: (260, 400),
-        highway: HighwayRule(corridor_m: 44, pass_depth: 0.62, pass_width_m: 200),
+        highway: HighwayRule(corridor_m: 44),
         parks: ParkRule(count: (2, 4), radius_m: (60, 110)),
         pier: true,
         overlooks: (1, 2),
