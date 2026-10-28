@@ -227,7 +227,9 @@ zones with an `occupancy` curve get lots (the coast: strip, commercial, downtown
   its curb dropped along them.
 - **Beach lots** along the beach zone's alleys: a row of stalls each side opening onto the
   alley, wherever a stall's ground is clear of every other road, junction, building,
-  parcel (parks and empty lots too) and the water. Where the alley bends, a run whose stall or island comes out
+  parcel (parks and empty lots too) and the water. The beach zone's own lot parcels, the
+  strips of sand between its alleys and roads, are where these lots go, so only they may
+  be paved. Where the alley bends, a run whose stall or island comes out
   more than 0.3 m narrower than its width (the inside of the bend) is dropped.
 - Every row is cut into runs of at most `run_max` stalls with a 1.8 m island between runs
   and at both ends, planted (`islands`) with a palm, a shrub or nothing. Light poles (the

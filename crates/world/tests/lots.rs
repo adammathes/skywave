@@ -107,6 +107,7 @@ fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
         let parcels: Vec<(Vec<V2>, (V2, V2))> = place
             .parcels
             .iter()
+            .filter(|p| !(p.lot_kind == place::LotKind::Lot && p.zone == ZoneId::Beach))
             .map(|p| {
                 let poly: Vec<V2> = p.polygon.iter().map(|&q| V2::from_array(q)).collect();
                 let bb = bounds(&poly);
@@ -127,7 +128,8 @@ fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
                 );
             }
         }
-        // Beach lots stay off every parcel; a parcel's lot stays within its own.
+        // Beach lots stay off every parcel but the beach's own lots; a parcel's lot stays
+        // within its own.
         for l in &lots {
             for st in &l.stalls {
                 let q = shrink(&st.q, 0.05);

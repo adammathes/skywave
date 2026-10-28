@@ -240,6 +240,12 @@ fn wide(q: &[V2; 4], along: V2, min: f32) -> bool {
     (q[1] - q[0]).dot(along) >= min && (q[2] - q[3]).dot(along) >= min
 }
 
+/// Quad `q` drawn 5 cm in toward its middle, so neighbours that only touch do not overlap.
+fn inset(q: &[V2; 4]) -> [V2; 4] {
+    let c = (q[0] + q[1] + q[2] + q[3]) * 0.25;
+    q.map(|p| p + (c - p).normalize() * 0.05)
+}
+
 /// Distance from `p` to polygon `poly`'s boundary, 0 inside.
 fn polygon_distance(p: V2, poly: &[V2]) -> f32 {
     if point_in_polygon(p, poly) {
@@ -259,7 +265,8 @@ struct Ctx<'a> {
     seed: u64,
     /// Building footprints with their bounds and vertex means.
     fps: Vec<(Vec<V2>, (V2, V2), V2)>,
-    /// Every parcel (lots, parks, empty lots) with its bounds.
+    /// Every parcel (lots, parks, empty lots) with its bounds, but the beach's own lots:
+    /// the strips of sand between its alleys and roads, where its parking lots go.
     parcels: Vec<(Vec<V2>, (V2, V2))>,
     /// Junction fans and corner walks with their bounds.
     junctions: Vec<(Vec<V2>, (V2, V2))>,
@@ -287,6 +294,7 @@ pub fn plan(place: &Place, net: &Network, rules: &LotRules) -> Vec<ParkingLot> {
     let parcels = place
         .parcels
         .iter()
+        .filter(|p| !(p.lot_kind == LotKind::Lot && p.zone == ZoneId::Beach))
         .map(|p| {
             let poly: Vec<V2> = p.polygon.iter().map(|&q| V2::from_array(q)).collect();
             let bb = bounds(&poly);
@@ -780,10 +788,7 @@ impl Ctx<'_> {
                 while s <= g1 - 1.0 {
                     let next = s + r.stall_w;
                     let q = [at(s, 0.0), at(next, 0.0), at(next, depth), at(s, depth)];
-                    let along = path.left((s + next) * 0.5).right();
-                    let clear = next <= g1 - 1.0
-                        && wide(&q, along, r.stall_w - SQUEEZE_M)
-                        && self.clear(&q, i);
+                    let clear = next <= g1 - 1.0 && self.clear(&q, i);
                     match (clear, run) {
                         (true, None) => run = Some(s),
                         (false, Some(a)) => {
@@ -827,26 +832,64 @@ impl Ctx<'_> {
         let first = lot.stalls.len();
         let mark = (lot.islands.len(), lot.stripes.len(), lot.stops.len());
         let quads = self.row(lot, rng, row, at, stops);
-        // Where the alley bends, the inside of the bend squeezes stalls and islands: a run
-        // with one too narrow across the car (or folded over its neighbour) is dropped.
-        let ok = lot.stalls[first..]
-            .iter()
-            .all(|st| wide(&st.q, st.nose.right() * sigma, r.stall_w - SQUEEZE_M))
-            && lot.islands[mark.0..]
+        // Where the alley bends, the inside of the bend squeezes stalls and islands: one
+        // too narrow across the car (or folded over a neighbour) is dropped, the rest of
+        // the run kept. Its paving stays wherever it does not fold over.
+        let islands: Vec<Island> = lot.islands.drain(mark.0..).collect();
+        for i in islands {
+            let wide_enough = wide(&i.q, -i.pole_facing.right() * sigma, ISLAND_M - SQUEEZE_M);
+            let free = lot.islands[mark.0..]
                 .iter()
-                .all(|i| wide(&i.q, -i.pole_facing.right() * sigma, ISLAND_M - SQUEEZE_M));
-        if !ok {
-            lot.stalls.truncate(first);
-            lot.islands.truncate(mark.0);
-            lot.stripes.truncate(mark.1);
-            lot.stops.truncate(mark.2);
-            return;
+                .all(|k| !overlap(&inset(&i.q), &inset(&k.q)));
+            if wide_enough && free {
+                lot.islands.push(i);
+            }
+        }
+        let stalls: Vec<Stall> = lot.stalls.drain(first..).collect();
+        let stops_all: Vec<[V2; 2]> = lot.stops.drain(mark.2..).collect();
+        lot.stripes.truncate(mark.1);
+        let own = &self.net.paths[edge];
+        let t0 = self.net.ends(edge).0.hw + CURB_TOP_M;
+        let on_curb = |p: V2| {
+            let (s, _) = own.project(p);
+            abs((p - own.xz(s, 0.0)).length() - t0) < 0.5
+        };
+        for (k, st) in stalls.into_iter().enumerate() {
+            let q = inset(&st.q);
+            let keep = wide(&st.q, st.nose.right() * sigma, r.stall_w - SQUEEZE_M)
+                && on_curb(st.q[0])
+                && on_curb(st.q[1])
+                && lot.stalls[first..]
+                    .iter()
+                    .all(|o| !overlap(&q, &inset(&o.q)))
+                && lot.islands[mark.0..]
+                    .iter()
+                    .all(|i| !overlap(&q, &inset(&i.q)));
+            if !keep {
+                continue;
+            }
+            // Its side stripes, the one it shares with the stall before laid once.
+            let (a, b) = ([st.q[0], st.q[3]], [st.q[1], st.q[2]]);
+            if lot.stripes.len() == mark.1 || lot.stripes[lot.stripes.len() - 1] != a {
+                lot.stripes.push(a);
+            }
+            lot.stripes.push(b);
+            if stops {
+                lot.stops.push(stops_all[k]);
+            }
+            lot.stalls.push(st);
         }
         if lot.stalls.len() == first {
+            lot.islands.truncate(mark.0);
             return;
         }
-        lot.pave.extend_from_slice(&quads);
-        lot.entries.extend_from_slice(&quads);
+        let pave: Vec<[V2; 4]> = quads
+            .into_iter()
+            .filter(|q| wide(q, (q[1] - q[0]).normalize(), 0.0))
+            .collect();
+        lot.pave.extend_from_slice(&pave);
+        lot.entries
+            .extend(lot.stalls[first..].iter().map(|st| st.q));
         lot.cuts.push(CurbCut {
             edge: edge as u32,
             left: sigma > 0.0,
@@ -893,7 +936,8 @@ impl Ctx<'_> {
         if self.fps.iter().any(|(fp, bb, _)| near(fp, *bb, 0.5)) {
             return false;
         }
-        // Off every parcel, parks and empty lots too: a lot stops at the property line.
+        // Off every parcel but the beach's own lots (buildings are kept clear above), parks
+        // and empty lots too: a lot stops at the property line.
         !self
             .parcels
             .iter()
