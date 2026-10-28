@@ -1024,7 +1024,7 @@ fn a_minute_of_random_bumping_stays_finite_and_grounded() {
         for car in app.npcs.cars() {
             assert!(car.pos.iter().all(|v| v.is_finite()) && car.heading.is_finite());
         }
-        max_up = max_up.max(s.vel[1].abs());
+        max_up = max_up.max(s.vel[1]);
         max_rise = max_rise.max(s.pos[1] - y0);
         let impact = app.drive.impact;
         if impact.hit.speed > 0.0 {
@@ -1040,7 +1040,8 @@ fn a_minute_of_random_bumping_stays_finite_and_grounded() {
     );
     assert!(new_hits >= 5, "{new_hits} hits");
     assert!(worst <= 1.0, "{worst} m/s gained in a hit");
-    // About twice what is measured (0.81 m/s, 0.18 m).
+    // Upward only: a downhill run is not a bounce. Well over what is measured (0.49 m/s,
+    // 0.18 m).
     assert!(max_up < 1.6 && max_rise < 0.4, "{max_up} m/s, {max_rise} m");
 }
 
