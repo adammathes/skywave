@@ -2524,7 +2524,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         "Pacific Shore",
         "Beach town, 1984",
         "20 cars",
-        "Inland Basin",
+        "Mirage Valley",
         "coming",
         "here",
     ] {
@@ -2552,7 +2552,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     let saved = store.0.borrow().clone().expect("saved");
     assert_eq!(
         Settings::from_json(&saved).0.scenario,
-        Some("inland_basin_2001")
+        Some("mirage_valley_2001")
     );
 
     // The platform's load: the same settings in the other world, its place, the radio off,
@@ -2577,7 +2577,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert!(h.ui().items().iter().any(|i| i.id == ItemId::AddMusic));
     h.pad(PadButton::Start);
     assert!(
-        h.hud_text().contains("Inland Basin, 2001"),
+        h.hud_text().contains("Mirage Valley, 2001"),
         "{}",
         h.hud_text()
     );
@@ -2585,7 +2585,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert_eq!(
         h.app.settings(),
         &Settings {
-            scenario: Some("inland_basin_2001"),
+            scenario: Some("mirage_valley_2001"),
             radio: audio::RadioSettings {
                 // The deck's place: the library's first track, loaded, not playing.
                 deck: audio::DeckSettings {
@@ -2621,7 +2621,7 @@ fn the_world_page_pages_one_card_at_a_tv_scale() {
     assert!(h.hud_text().contains("Pacific Shore"));
     h.pad(PadButton::DpadRight);
     assert!(h.hud_text().contains("< 2 / 2 >"));
-    assert!(h.hud_text().contains("Inland Basin") && !h.hud_text().contains("Pacific Shore"));
+    assert!(h.hud_text().contains("Mirage Valley") && !h.hud_text().contains("Pacific Shore"));
     assert_eq!(
         images(&mut h, render::HudTexture::Still)[0].uv,
         crate::scenario::still_uv(1)

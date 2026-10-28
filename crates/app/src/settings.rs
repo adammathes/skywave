@@ -608,8 +608,10 @@ impl Default for World {
     }
 }
 
-/// The [`crate::scenario::BUILTIN`] id equal to `id`, if there is one.
+/// The [`crate::scenario::BUILTIN`] id equal to `id` (or to the id it was renamed to), if
+/// there is one.
 pub fn builtin_scenario(id: &str) -> Option<&'static str> {
+    let id = crate::scenario::current_id(id);
     crate::scenario::BUILTIN
         .iter()
         .map(|(s, _)| *s)
@@ -769,8 +771,14 @@ impl Settings {
         let hud: HudSection = serde_json::from_value(section(&mut root, "hud")).unwrap_or_default();
         let world: World = serde_json::from_value(section(&mut root, "world")).unwrap_or_default();
         let audio: Audio = serde_json::from_value(section(&mut root, "audio")).unwrap_or_default();
-        let radio: RadioSettings =
+        let mut radio: RadioSettings =
             serde_json::from_value(section(&mut root, "radio")).unwrap_or_default();
+        // A preset picked for a world under its old id is its pick under the new one.
+        for (old, new) in crate::scenario::RENAMED {
+            if let Some(p) = radio.presets.remove(old) {
+                radio.presets.entry(new.to_owned()).or_insert(p);
+            }
+        }
         let bindings = match section(&mut root, "input") {
             v @ Value::Object(_) => Bindings::from_json(&v.to_string()).ok(),
             _ => None,
@@ -843,7 +851,7 @@ mod tests {
             overlay: Overlay::Fps,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
-            scenario: Some("inland_basin_2001"),
+            scenario: Some("mirage_valley_2001"),
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 250.0,
@@ -876,6 +884,23 @@ mod tests {
         let (s2, b2) = Settings::from_json(&text);
         assert_eq!(s2, s);
         assert_eq!(b2, Some(b));
+    }
+
+    #[test]
+    fn a_world_saved_under_its_old_id_loads_under_its_new_one() {
+        let (s, _) = Settings::from_json(
+            r#"{ "world": { "scenario": "inland_basin_2001" },
+                 "radio": { "presets": { "inland_basin_2001": "1977_chicago" } } }"#,
+        );
+        assert_eq!(s.scenario, Some("mirage_valley_2001"));
+        assert_eq!(
+            s.radio
+                .presets
+                .get("mirage_valley_2001")
+                .map(String::as_str),
+            Some("1977_chicago")
+        );
+        assert!(!s.radio.presets.contains_key("inland_basin_2001"));
     }
 
     #[test]

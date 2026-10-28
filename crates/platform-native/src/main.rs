@@ -1237,8 +1237,10 @@ mod tests {
         assert!(args(&["--seed"]).is_err());
         assert!(args(&["--car"]).is_err());
         assert!(args(&["--scenario"]).is_err());
-        let world = args(&["--scenario", "inland_basin_2001"]).unwrap().scene;
+        let world = args(&["--scenario", "mirage_valley_2001"]).unwrap().scene;
         assert_eq!((world.scenario, world.place), (1, app::PlaceKey::Coast));
+        let old = args(&["--scenario", "inland_basin_2001"]).unwrap().scene;
+        assert_eq!((old.scenario, old.unknown_scenario), (1, false));
         let unknown = args(&["--scenario", "atlantis"]).unwrap().scene;
         assert!(unknown.unknown_scenario && unknown.scenario == 0);
         assert!(args(&["--seed", "x"]).is_err());
