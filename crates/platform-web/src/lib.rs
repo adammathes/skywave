@@ -26,20 +26,23 @@
 //! (`window.skywaveSfx`), which starts on the first key, click or touch.
 //!
 //! The car radio: every frame the app's `audio::RadioCommand`s go to the page's player
-//! glue, `window.skywaveRadio` (the radio block of `web/index.html`, an `<audio>` element):
+//! glue (and the deck's: they share the one player), `window.skywaveRadio` (the radio block
+//! of `web/index.html`, an `<audio>` element):
 //! `command(kind, url, token, value, name)` with kind `play`, `file` (a music file by its
 //! key, `value` the second to start at), `stop` or `volume` (the dial sweep between
 //! stations is synthesized in the mixer, so it plays through `sfx`); its reports come back
 //! from `takeEvent()` as `"<started|failed|blocked|ended> <token>"`
-//! ([`parse_player_event`]), and the radio's state goes to `report(text)` whenever it
-//! changes ([`radio_state_text`]). Without the glue the radio stays silent. The page may
+//! ([`parse_player_event`]), and the radio's state goes to `report(text, readout)`
+//! whenever it or the deck changes ([`radio_state_text`], and the corner readout's text:
+//! badge and status, then artist, album and song). Without the glue the radio stays silent. The page may
 //! ask for a stream URL with `window.prompt` (Settings, Audio, "Add stream URL").
 //!
 //! The player's own music: `window.skywaveMusic` (the music block) holds the folders the
-//! user picked or dropped, one station each. The game calls `pick()` for "Add music folder"
+//! user picked or dropped, the deck's library. The game calls `pick()` for "Music library"
 //! (false: no user activation to open a picker from, as after a gamepad press), takes each
-//! folder read with `takeFolder()` (`{path, name, announce, kept, files: [{key, name,
-//! size, head, audio}]}`: `path` the folder's stable id, `head` the file's first
+//! folder read with `takeFolder()` (`{path, name, announce, kept, mixtape, files: [{key,
+//! rel, size, head, audio}]}`: `path` the folder's stable id, `mixtape` for loose dropped
+//! files, `rel` the file's path in the folder, `head` the file's first
 //! `audio::music::HEAD_BYTES`, `audio` a few KiB where its audio starts when a large tag
 //! hides it), calls `forget(path)` for a folder the user removed (`"*"`: all), and reads
 //! `again` (the folders of last session must be picked again). Files never leave the page.
@@ -514,7 +517,6 @@ mod tests {
             name: "A".into(),
             format: "f".into(),
             urls: vec!["https://a/1".into()],
-            tracks: Vec::new(),
         };
         let mut r = audio::Radio::new(vec![channel]);
         assert_eq!(radio_state_text(&r), "off");

@@ -2,7 +2,7 @@
 //! fixed blocks of [`BLOCK_FRAMES`].
 //!
 //! Each block the synths fill three buses: [`Bus::Engine`], [`Bus::World`] (tires, road,
-//! wind, knocks, ambience) and [`Bus::Ui`] (the horn, the radio's tune burst, and later menu
+//! wind, knocks, ambience) and [`Bus::Ui`] (the horn, the radio's tune burst, the deck's click, and later menu
 //! sounds). Every bus has
 //! a gain (the engine and world volumes, ducked under the radio by [`duck_gain`] and faded
 //! out while paused; the ui bus is fixed), then the master volume and a DC blocker, then a
@@ -15,7 +15,7 @@
 //! allocates nothing: blocks are rendered into fixed arrays and copied out.
 
 use crate::synth::dsp::{exp, tau_coef, unit, DcBlock};
-use crate::synth::{AudioParams, EngineSynth, TuneSynth, WorldSynth};
+use crate::synth::{AudioParams, DeckSynth, EngineSynth, TuneSynth, WorldSynth};
 
 /// Frames per second.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -78,6 +78,7 @@ pub struct Mixer {
     engine: EngineSynth,
     world: WorldSynth,
     tune: TuneSynth,
+    deck: DeckSynth,
     buses: [[f32; BLOCK_SAMPLES]; BUS_COUNT],
     mono: [f32; BLOCK_FRAMES],
     gains: [f32; BUS_COUNT],
@@ -104,6 +105,7 @@ impl Mixer {
             engine: EngineSynth::new(),
             world: WorldSynth::new(),
             tune: TuneSynth::new(),
+            deck: DeckSynth::new(),
             buses: [[0.0; BLOCK_SAMPLES]; BUS_COUNT],
             mono: [0.0; BLOCK_FRAMES],
             gains: [0.0; BUS_COUNT],
@@ -123,6 +125,8 @@ impl Mixer {
         self.engine.set_params(&p.engine);
         self.world.set_params(&p);
         self.tune.set_params(p.tunes, p.tune_volume);
+        self.deck
+            .set_params(p.deck_clicks, p.deck_kind, p.tune_volume);
         self.params = p;
     }
 
@@ -174,6 +178,9 @@ impl Mixer {
         self.world.render(world, ui);
         if self.tune.active() {
             self.tune.render(ui);
+        }
+        if self.deck.active() {
+            self.deck.render(ui);
         }
     }
 
@@ -576,6 +583,36 @@ mod tests {
         }
         let hash = fnv(&bytes);
         assert_eq!(hash, PINNED, "tune hash changed: {hash:#018x}");
+    }
+
+    /// The deck's three mechanisms one after another at the default mix (tape, CD, MP3)
+    /// render bit-identically everywhere. `SKYWAVE_DECK_WAV=path` writes them.
+    ///
+    /// Re-pin deliberately, in its own commit, when the deck synth changes.
+    #[test]
+    fn deck_clicks_render_deterministically() {
+        const PINNED: u64 = 0xcc56_36ef_d9b6_4e55;
+        let mut p = AudioParams {
+            engine_volume: 0.0,
+            world_volume: 0.0,
+            ..default_mix()
+        };
+        let mut m = Mixer::new();
+        render_for(&mut m, &p, 0.2);
+        let mut out = Vec::new();
+        for kind in 0..3 {
+            p.deck_clicks += 1;
+            p.deck_kind = kind;
+            let part = render_for(&mut m, &p, crate::synth::deck::LONGEST_S);
+            assert!(rms(&part) > 1e-3, "kind {kind} is audible");
+            out.extend(part);
+        }
+        let bytes = wav(&out);
+        if let Ok(path) = std::env::var("SKYWAVE_DECK_WAV") {
+            std::fs::write(&path, &bytes).expect("write the WAV");
+        }
+        let hash = fnv(&bytes);
+        assert_eq!(hash, PINNED, "deck hash changed: {hash:#018x}");
     }
 
     /// The scripted drive (12 s per engine profile, all five) renders bit-identically

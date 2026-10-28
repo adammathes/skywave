@@ -368,6 +368,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
     use Sign::{Full, Negative as Neg, Positive as Pos};
     let key = |k: Key, s: Sign| Binding::new(RawInput::Key(k), s);
     let btn = |b: PadButton| Binding::new(RawInput::PadButton(b), Pos);
+    let select_chord = |b: PadButton| btn(b).while_held(RawInput::PadButton(PadButton::Select));
     let axis = |a: PadAxis, s: Sign| Binding::new(RawInput::PadAxis(a), s);
     let mouse_look = |a: MouseAxis| {
         Binding::new(RawInput::MouseAxis(a), Full).while_held(RawInput::MouseButton(MOUSE_RIGHT))
@@ -390,6 +391,10 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioNext => vec![key(Key::BracketRight, Pos)],
             Action::RadioPrev => vec![key(Key::BracketLeft, Pos)],
             Action::RadioOff => vec![key(Key::Backslash, Pos)],
+            Action::DeckSource => vec![key(Key::Quote, Pos)],
+            Action::DeckMode => vec![key(Key::Semicolon, Pos)],
+            Action::AlbumNext => vec![key(Key::KeyP, Pos)],
+            Action::AlbumPrev => vec![key(Key::KeyO, Pos)],
             Action::Headlights => vec![key(Key::KeyL, Pos)],
             Action::HighBeams => vec![key(Key::KeyK, Pos)],
             Action::Underglow => vec![key(Key::KeyU, Pos)],
@@ -430,6 +435,12 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::RadioNext => vec![btn(PadButton::DpadRight)],
             Action::RadioPrev => vec![btn(PadButton::DpadLeft)],
             Action::RadioOff => vec![btn(PadButton::DpadDown)],
+            // Select held with the d-pad (Select is the map and time scrub's already): the
+            // deck's source, albums and mode.
+            Action::DeckSource => vec![select_chord(PadButton::DpadDown)],
+            Action::DeckMode => vec![select_chord(PadButton::DpadUp)],
+            Action::AlbumNext => vec![select_chord(PadButton::DpadRight)],
+            Action::AlbumPrev => vec![select_chord(PadButton::DpadLeft)],
             Action::Headlights => vec![btn(PadButton::DpadUp)],
             // Held, so a tap stays the headlights.
             Action::HighBeams => vec![btn(PadButton::DpadUp).held_long()],
@@ -506,7 +517,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 23] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 27] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -562,6 +573,26 @@ mod tests {
                 Action::RadioOff,
                 vec![K(Key::Backslash)],
                 vec![B(PadButton::DpadDown)],
+            ),
+            (
+                Action::DeckSource,
+                vec![K(Key::Quote)],
+                vec![B(PadButton::DpadDown)],
+            ),
+            (
+                Action::DeckMode,
+                vec![K(Key::Semicolon)],
+                vec![B(PadButton::DpadUp)],
+            ),
+            (
+                Action::AlbumNext,
+                vec![K(Key::KeyP)],
+                vec![B(PadButton::DpadRight)],
+            ),
+            (
+                Action::AlbumPrev,
+                vec![K(Key::KeyO)],
+                vec![B(PadButton::DpadLeft)],
             ),
             (
                 Action::Headlights,
