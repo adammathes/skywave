@@ -1,9 +1,9 @@
 //! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster", the 2001
 //! hero cars and traffic cars), driven with the real specs from `assets/vehicles/`: every
-//! car's 0–60 mph time in its band, all of them distinct in 0–60, top speed and skidpad grip, the class
-//! orderings, the mid-engined exotics ahead of everything and the pony car behind the other
-//! sports cars, the 2001 heroes' launches, and nothing rolls at full lock or needs more than
-//! 60 m to stop. Run with `--nocapture` for
+//! car's 0–60 mph time in its band, all of them distinct in 0–60, top speed and skidpad
+//! grip, the class orderings, the mid-engined exotics ahead of everything and the pony car
+//! behind the other sports cars, the 2001 heroes' launches and the rotary's redline, and
+//! nothing rolls at full lock or needs more than 60 m to stop. Run with `--nocapture` for
 //! the table: `cargo test -p vehicle --test roster -- --nocapture`.
 #![cfg(feature = "serde")]
 
@@ -30,7 +30,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 31] = [
+const ROSTER: [Entry; 35] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -57,6 +57,10 @@ const ROSTER: [Entry; 31] = [
     (car!("tanager_awd"), (5.0, 5.8)),
     (car!("destrier_coupe"), (5.9, 6.5)),
     (car!("siskin_coupe"), (6.1, 6.5)),
+    (car!("glaive_turbo"), (5.1, 5.7)),
+    (car!("shrike_coupe"), (5.4, 6.0)),
+    (car!("falchion_sedan"), (5.9, 6.5)),
+    (car!("courser_v8"), (6.0, 6.5)),
     // The 2001 traffic cars (the semi, which only traffic drives, is not driven here).
     (car!("plover_sedan"), (9.3, 10.3)),
     (car!("sorrel_utility"), (9.9, 10.9)),
@@ -360,10 +364,11 @@ fn launch_slip(spec: &VehicleSpec, assists: &Assists, secs: f32) -> f32 {
 }
 
 /// The 2001 heroes' launches: the blown muscle coupe lights up its rear tires off the line
-/// whatever the assists (more than any other car), the all-wheel-drive coupe leaves without
-/// a chirp even with every assist off.
+/// whatever the assists (more than any other car), and so does the V8 sports car, a little
+/// less; the all-wheel-drive coupe and rally sedan leave without a chirp even with every
+/// assist off.
 #[test]
-fn the_muscle_coupe_wheelspins_and_the_awd_coupe_launches() {
+fn the_muscle_cars_wheelspin_and_the_awd_cars_launch() {
     let presets = [Assists::OFF, Assists::LIGHT, Assists::ARCADE];
     let slips: Vec<(&str, [f32; 3])> = ROSTER
         .iter()
@@ -378,14 +383,31 @@ fn the_muscle_coupe_wheelspins_and_the_awd_coupe_launches() {
         })
         .collect();
     let of = |id: &str| slips.iter().find(|c| c.0 == id).unwrap().1;
-    let (muscle, awd) = (of("destrier_coupe"), of("tanager_awd"));
+    let (muscle, v8) = (of("destrier_coupe"), of("courser_v8"));
+    let (awd, rally) = (of("tanager_awd"), of("glaive_turbo"));
     for k in 0..presets.len() {
         assert!(muscle[k] > 0.5, "the muscle coupe hooks up: {muscle:?}");
+        assert!(v8[k] > 0.5, "the V8 sports car hooks up: {v8:?}");
         assert!(awd[k] < 0.1, "the AWD coupe spins its tires: {awd:?}");
+        assert!(rally[k] < 0.1, "the rally sedan spins its tires: {rally:?}");
         for (id, s) in &slips {
             if *id != "destrier_coupe" {
                 assert!(muscle[k] > s[k], "{id} spins more than the muscle coupe");
             }
+        }
+    }
+}
+
+/// The rotary revs past every other engine on the roster.
+#[test]
+fn the_rotary_revs_highest() {
+    let rotary = load(car!("shrike_coupe").1);
+    for &((id, text), _) in &ROSTER {
+        if id != "shrike_coupe" {
+            assert!(
+                load(text).engine.redline_rpm < rotary.engine.redline_rpm,
+                "{id}"
+            );
         }
     }
 }

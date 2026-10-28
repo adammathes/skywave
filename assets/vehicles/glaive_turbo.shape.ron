@@ -1,0 +1,60 @@
+// Glaive Turbo body: a late-90s all-wheel-drive turbo rally sedan for the street.
+//
+// Intent: a plain, upright compact four-door made fierce. A blunt nose with slim lamps
+// and a slot over a big lower intake, a scoop on the hood feeding the intercooler, a tall
+// square cabin, a short deck under a tall wing on uprights, mud flaps behind every wheel,
+// five-spoke alloys. Front engine, all four wheels driven. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "glaive_turbo",
+    side: [
+        (0.00, 0.52), (0.04, 0.62), (0.15, 0.72), (1.20, 0.92), (1.28, 0.94),
+        (1.80, 1.38), (1.92, 1.43), (2.95, 1.42), (3.50, 1.08), (3.60, 1.06),
+        (4.30, 1.04), (4.40, 0.96),
+        (4.40, 0.34), (4.26, 0.24), (3.80, 0.18), (0.70, 0.17), (0.14, 0.21), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.70), (0.08, 0.80), (0.30, 0.855), (1.00, 0.865), (3.90, 0.865), (4.25, 0.85),
+        (4.40, 0.80),
+    ],
+    belt: [(1.28, 0.93), (2.40, 0.97), (3.55, 1.04)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 18, greenhouse_frac: 0.80, crown: 0.05, tuck: 0.06),
+    glass: Glass(
+        windshield: (1.30, 1.86),
+        backlight: (3.00, 3.52),
+        side: [(1.50, 2.40), (2.50, 3.10)],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.22, arch_clearance: 0.05, front_x: 0.86, rear_x: 3.38, track: 1.48),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.24, 0.42)),
+    rear: Rear(lights: Dual, spoiler: TallWing, bumper: Body, bumper_y: (0.32, 0.48)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.80, creases: [(0.25, 0.64, 4.34, 0.70)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Single, antenna: None, rims: Mesh, hubcaps: false),
+    details: [HoodScoop, MudFlaps, BlackTrim, Badge(Diamond)],
+    // Rally blue, white, black, silver, red, dark green.
+    palette: ["#1e3f9a", "#efeee9", "#141518", "#b6babf", "#a3141c", "#1f3b2b"],
+    accent: "#18191b",
+    interior: InteriorShape(
+        dash_height: 0.86,
+        dash_x: 1.60,
+        wheel_pos: (2.04, 0.70),
+        wheel_radius: 0.18,
+        column_angle_deg: 24,
+        mirror_pos: (1.90, 1.30),
+        seat: (2.52, 0.46),
+        driver_offset: 0.37,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: charcoal plastic, black buckets
+        // with blue cloth inserts and piping, charcoal carpet, a plain band, red needles
+        // on white-lit dials.
+        colors: ["#2a2c30", "#222326", "#2c2e32", "#9a9ca0", "#3a3c40", "#2f5ad0"],
+        display: "#f0f2ff",
+        insert: "#2a4a9a",
+        piping: "#3a62c8",
+        dash_top: "#303236",
+        applique: None,
+        manual: true,
+    ),
+)

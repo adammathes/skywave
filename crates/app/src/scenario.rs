@@ -563,10 +563,10 @@ mod tests {
         assert_eq!(w, [0, 0]);
     }
 
-    /// The 1980s roster: the first twenty built-in cars; then the five 2001 heroes and the
+    /// The 1980s roster: the first twenty built-in cars; then the nine 2001 heroes and the
     /// seven 2001 traffic cars.
     const EIGHTIES: usize = 20;
-    const HEROES: usize = 5;
+    const HEROES: usize = 9;
     const TRAFFIC_2001: [&str; 7] = [
         "plover_sedan",
         "sorrel_utility",

@@ -16,6 +16,9 @@ Scenario(
     default_time: (22, 30),
     default_vehicle: "halberd_coupe",
     years: (1995, 2001),
-    heroes: ["halberd_coupe", "halberd_targa", "tanager_awd", "destrier_coupe", "siskin_coupe"],
+    heroes: [
+        "halberd_coupe", "halberd_targa", "tanager_awd", "destrier_coupe", "siskin_coupe",
+        "shrike_coupe", "glaive_turbo", "falchion_sedan", "courser_v8",
+    ],
     stub: true,
 )

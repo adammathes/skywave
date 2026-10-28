@@ -16,7 +16,7 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
 /// The vehicle specs compiled into the game, as `(id, RON text)`, in the order the Vehicle
 /// page lists them: the 1980s roster (the everyday cars, then the sports cars), then the
 /// 2001 hero cars, then the 2001 traffic cars (the semi last: traffic only, never listed).
-pub const BUILTIN: [(&str, &str); 32] = [
+pub const BUILTIN: [(&str, &str); 36] = [
     (
         "gannet_gt",
         include_str!("../../../assets/vehicles/gannet_gt.ron"),
@@ -118,6 +118,22 @@ pub const BUILTIN: [(&str, &str); 32] = [
         include_str!("../../../assets/vehicles/siskin_coupe.ron"),
     ),
     (
+        "shrike_coupe",
+        include_str!("../../../assets/vehicles/shrike_coupe.ron"),
+    ),
+    (
+        "glaive_turbo",
+        include_str!("../../../assets/vehicles/glaive_turbo.ron"),
+    ),
+    (
+        "falchion_sedan",
+        include_str!("../../../assets/vehicles/falchion_sedan.ron"),
+    ),
+    (
+        "courser_v8",
+        include_str!("../../../assets/vehicles/courser_v8.ron"),
+    ),
+    (
         "plover_sedan",
         include_str!("../../../assets/vehicles/plover_sedan.ron"),
     ),
@@ -184,7 +200,7 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 /// `VehicleSpec::shape` names one. [`TRAFFIC_SHAPES`] are the everyday cars NPC traffic
 /// drives; new shapes go at the end, so the place's parked-car paints (seeded by index)
 /// keep theirs.
-pub const BUILTIN_SHAPES: [(&str, &str); 32] = [
+pub const BUILTIN_SHAPES: [(&str, &str); 36] = [
     (
         "gannet_gt.shape.ron",
         include_str!("../../../assets/vehicles/gannet_gt.shape.ron"),
@@ -312,6 +328,22 @@ pub const BUILTIN_SHAPES: [(&str, &str); 32] = [
     (
         "anvil_semi.shape.ron",
         include_str!("../../../assets/vehicles/anvil_semi.shape.ron"),
+    ),
+    (
+        "shrike_coupe.shape.ron",
+        include_str!("../../../assets/vehicles/shrike_coupe.shape.ron"),
+    ),
+    (
+        "glaive_turbo.shape.ron",
+        include_str!("../../../assets/vehicles/glaive_turbo.shape.ron"),
+    ),
+    (
+        "falchion_sedan.shape.ron",
+        include_str!("../../../assets/vehicles/falchion_sedan.shape.ron"),
+    ),
+    (
+        "courser_v8.shape.ron",
+        include_str!("../../../assets/vehicles/courser_v8.shape.ron"),
     ),
 ];
 
@@ -503,7 +535,7 @@ mod tests {
             .iter()
             .map(|(id, _)| builtin_spec(id).unwrap())
             .collect();
-        assert_eq!(specs.len(), 32);
+        assert_eq!(specs.len(), 36);
         for class in [
             Sports,
             Coupe,

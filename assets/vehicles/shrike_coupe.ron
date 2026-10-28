@@ -1,0 +1,47 @@
+// Shrike Coupe: a mid-90s twin-rotor sequential-turbo sports coupe.
+//
+// Intent: small, light and balanced, the engine set back behind the front axle. The
+// rotary is flat and eager and revs past every other engine on the roster; the second
+// turbo comes in high, so it pulls hardest near the top. Sharp, quick steering, a tail
+// that follows the nose, light enough to dance on a lift.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "shrike_coupe",
+    name: "Shrike Coupe",
+    era: Nineties,
+    year: 1995,
+    class: Coupe,
+
+    mass_kg: 1290,
+    dims_m: (4.30, 1.76, 1.23),    // length, width, height
+    wheelbase_m: 2.43,
+    track_m: 1.46,
+    cg_height_m: 0.45,
+    cg_fore_aft: 0.50,             // 50% front
+
+    engine: Engine(
+        idle_rpm: 900,
+        redline_rpm: 8500,
+        torque_nm: [(1000, 122), (2500, 188), (4000, 225), (5500, 234), (7000, 225), (8500, 179)],
+    ),
+    gears: [3.30, 2.10, 1.52, 1.17, 0.96],
+    final_drive: 4.55,
+    reverse: 3.2,
+    shift_ms: 170,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.15, grip_long: 1.2, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 36000, damper: 3400, travel_m: 0.13, antiroll: 0.45),
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 12.5),
+    brakes: Brakes(max_nm: 3400, bias_front: 0.6, abs: true, handbrake_nm: 2800),
+    aero: Aero(cd: 0.33, frontal_m2: 1.85, downforce_coef: 0.04),
+    feel: Feel(oversteer_bias: 0.08, body_roll: 0.25, engine_sound: "i4", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 180, mph), Tach(0, 10000)],
+        radio: "amber_seek",
+    ),
+    shape: "shrike_coupe.shape.ron",
+)

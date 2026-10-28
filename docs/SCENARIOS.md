@@ -25,7 +25,7 @@ default car no newer than the years (nor built up later, `VehicleSpec::built`), 
 cars. Mirage Valley (`mirage_valley_2001`; it was `inland_basin_2001` until it was renamed, and a saved
 world choice, a saved radio pick or a `?scenario=` / `--scenario` naming the old id still finds it,
 `scenario::RENAMED`) is `years: (1995, 2001)` and starts in the Halberd Coupe; its
-`heroes` are the five 2001 hero cars (`docs/VEHICLES.md`), which no earlier world shows. The era filter and its weights are in
+`heroes` are the nine 2001 hero cars (`docs/VEHICLES.md`), which no earlier world shows. The era filter and its weights are in
 `docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
 64,768 bytes, committed; rendered with `tools/screenshot`, cropped clear of the HUD and quantized, see
 `assets/stills/README.md`), laid out in an atlas four to a row for the World page.
@@ -79,6 +79,8 @@ truck and semis on the freeway.
 As built (M8 #4): the grand tourer is the Halberd Coupe and its Halberd Targa, the AWD coupe the
 Tanager AWD, the muscle coupe the Destrier Coupe (a 1969 car `built` up in 2001, so the 1984 world never
 shows it) and the tuner the Siskin Coupe (body kit, tall wing, aftermarket rims, underglow).
+Part 2 (M8 #5): the rotary coupe is the Shrike Coupe, the rally sedan the Glaive Turbo (hood scoop, tall
+wing, mud flaps), the compact sedan the Falchion Sedan (body kit) and the V8 sports car the Courser V8 (T-top).
 The traffic cars (M8 #6) are the Plover Sedan, Sorrel Utility, Wren Minivan, Percheron Crew Cab, Linnet
 Hatch, Sledge Box Truck and the Anvil Semi, which only traffic drives, on the freeway.
 

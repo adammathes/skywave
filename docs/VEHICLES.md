@@ -52,7 +52,8 @@ or golden.
 | Longbow Coupe | 1984 | Appaloosa GT | 1985 | Basilisk Roadster | 1986 |
 | Longbow Convertible | 1986 | Appaloosa Convertible | 1987 | | |
 | Halberd Coupe | 1997 | Halberd Targa | 1997 | Tanager AWD | 1999 |
-| Destrier Coupe | 1969, built 2001 | Siskin Coupe | 2000 | | |
+| Destrier Coupe | 1969, built 2001 | Siskin Coupe | 2000 | Shrike Coupe | 1995 |
+| Courser V8 | 1996 | Falchion Sedan | 1998 | Glaive Turbo | 1999 |
 | Sledge Box Truck | 1996 | Plover Sedan | 1997 | Sorrel Utility | 1998 |
 | Wren Minivan | 1999 | Percheron Crew Cab | 2000 | Anvil Semi | 2000 |
 | Linnet Hatch | 2001 | | | | |
@@ -190,6 +191,10 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Linnet Hatch | 11,202 | 7,196 | 3,402 | 2,214 |
 | Sledge Box Truck | 11,832 | 6,792 | 3,584 | 2,184 |
 | Anvil Semi | 12,930 | 6,460 | 4,052 | 2,416 |
+| Shrike Coupe | 11,378 | 6,456 | 3,162 | 2,022 |
+| Glaive Turbo | 12,270 | 7,128 | 3,268 | 2,272 |
+| Falchion Sedan | 13,036 | 7,132 | 3,594 | 2,358 |
+| Courser V8 | 11,620 | 7,100 | 3,386 | 2,150 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
@@ -236,6 +241,10 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `halberd_targa` | the Halberd with its roof panel lifted out | Convertible | 1,580 kg, same six, softer, more drag; 6.0 s, 71 m/s, 1.11 g |
 | `destrier_coupe` | late-60s big-block muscle notchback with a blower through the hood, chrome bumpers, deep-dish rims, rally stripes on some | Muscle | 1,660 kg, ~315 kW blown V8, 4-speed, RWD; lights up its rear tires off the line under any assists, leans, wags its tail; 6.2 s, 59 m/s, 0.90 g |
 | `siskin_coupe` | 2000 front-drive compact coupe built up as a tuner: body kit, tall wing, twin-spoke rims, blue underglow | Coupe | 1,180 kg, ~140 kW turbo four, 5-speed, FWD; sharp, high-revving, tucks its nose on a lift; 6.5 s, 62 m/s, 1.06 g |
+| `glaive_turbo` | late-90s all-wheel-drive turbo four rally sedan: plain upright four-door, hood scoop, tall wing, mud flaps, mesh rims | Sports | 1,400 kg, ~200 kW turbo four, 5-speed, AWD; short gears that run out at 151 mph, leaves the line clean; 5.4 s, 67.6 m/s, 1.00 g |
+| `shrike_coupe` | mid-90s twin-rotor sequential-turbo coupe: low rounded nose with pop-ups, bubble cabin, swollen hips, full-width tail strip, fixed wing | Coupe | 1,290 kg, ~165 kW rotary to 8,500 rpm (the roster's highest), 5-speed, RWD; light, balanced, quick steering; 5.7 s, 64 m/s, 1.04 g |
+| `falchion_sedan` | late-90s rear-drive compact sports sedan with an aftermarket body kit, twin round lamps a side, lip on the deck | Sedan | 1,420 kg, ~170 kW inline six, 5-speed, RWD; composed, a little tail on the gas; 6.2 s, 58 m/s, 0.89 g |
+| `courser_v8` | mid-90s American front-engined V8 sports car: very long hood, slim lamp strip, steep windshield, T-top, long fastback glass | Muscle | 1,560 kg, ~225 kW pushrod V8, 5-speed, RWD; lights its rear tires under every assist (less than the Destrier), leans, pushes; 6.3 s, 62 m/s, 0.85 g |
 
 The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
 Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
@@ -279,7 +288,7 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Gannet, Longbow) beats both Appaloosas.
 - 2001 traffic cars: each in its band and its class's orderings like the rest (the semi, traffic only, is not driven).
-- 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s), the Tanager under 0.1 with every assist off.
+- 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s) and the Courser over 0.5 too, the Tanager and the Glaive under 0.1 with every assist off; the Shrike has the highest redline. The part 2 heroes fill the gaps the roster left: the Glaive is the only Sports car that fits between the Longbow Convertible and the Longbow in top speed (0.7 m/s either side, so its gearing is set to the hundredth), the Shrike sits under every Sports car as a Coupe, the Falchion under every Coupe and Hatch as a Sedan, the Courser (Muscle, outside the orderings) in the gaps left.
 - Distinct: all of them differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Determinism: scripted 10 s input replay produces identical state hashes.
@@ -294,7 +303,7 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
   sits at 2.8×, and any trim to its bias puts its skidpad on the Halberd coupe's); with
   traction control the launch is a little wheelspin, never a spin; the handbrake slides the rear past 1.5×
   its peak in every preset, 2× in Arcade. With no assists the sports and muscle cars (the 2001 Halberds,
-  Tanager and Destrier among them) may still spin a quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
+  Tanager, Destrier, Shrike and Courser among them, and the rear-drive Falchion sedan) may still spin a quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
   stay lively there on purpose. The tuning that set these (stability gain 12 from 8, Arcade stability 1.0
   from 0.8, Light 0.5/0.7 from 0.3/0.5, the handbrake times `grip_boost`, `oversteer_bias` halved on the
   Basilisks, Avocets, Appaloosas, Halcyon and Tanager, the Destrier's 0.2 to −0.2 so it wags its tail without
