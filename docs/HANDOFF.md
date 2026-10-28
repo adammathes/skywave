@@ -35,41 +35,47 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## The owner's board
-A live board of every task (needs the owner / in review / building / queued / merged) lives at
-https://claude.ai/artifact/17baWQ1hwt3R194YbzjpWS (private to the owner). Its `items` collection
-is the queue of record: the owner reorders the Queued column and leaves notes on cards; the
-coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered by `order`) before
-dispatching the next session, and updates statuses as PRs open and merge.
+A live board of every task lives at https://claude.ai/artifact/17baWQ1hwt3R194YbzjpWS (private to
+the owner); its `items` collection is the queue of record. **Proposed** cards are ideas and
+follow-ups: nothing in Proposed is worked. **Queued** means the owner pressed Approve: work those
+top first, without asking again. Only the owner moves a card from Proposed to Queued. New ideas,
+follow-ups and review leftovers go in as Proposed. Read `items` where status is `queued`, ordered
+by `order`, before dispatching; update status as sessions start, PRs open and merge.
+
+## Work queue (how approved work runs now)
+Open a Claude Code session on the repo and say "run the work queue" (or "do all the approved items
+in the work queue in new subagents", "just do <card>", "stop at PRs", "land what's open", "what's
+queued?"). The `work-queue` skill (`.claude/skills/work-queue/SKILL.md`) turns that into a run of
+the saved workflow `.claude/workflows/work-queue.js`, which:
+1. reads the Queued cards (never Proposed) and any queue PRs left open by an earlier run;
+2. lands those PRs (merge on green, one fix attempt on red);
+3. builds up to 3 Queued cards in parallel subagents, each in its own worktree on `q/<card id>`;
+4. has each reviewed by an independent read-only reviewer (its own probes for sim, world
+   generation, traffic or pedestrians) for up to 3 fix rounds, then moves stuck cards to Needs you;
+5. opens the PR, waits for CI, merges on green, and updates the card at every step.
+Screenshots run under `flock /tmp/skywave-screenshots.lock` so builders never render two at once.
+Out-of-scope ideas from reviews become new Proposed cards. Scheduling it (a timed session that
+says "run the work queue") is a later step if the owner wants it.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 12:47 UTC, coordinator handed off to save quota)
-The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
-(parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars part 2), #47 (the #44
-revert), #48 and #49 (Mirage Valley) and #50 (set pieces part 1, 12:47,
-c15b314) merged; one builder session is running; each
-reports its state in its PR body and expects nothing but a merge. Keep at most two or three
-threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
-and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
-the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
-sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
-- **Set pieces** (`m8/set-pieces`, session_0121vThAAG7g9BZqHcrxmCTx, M8 #7, dispatched 09:41 on
-  the owner's word): three PRs in turn: static places (channel ramps, tunnel, overlook, crew
-  garage, taco lot, drag strip); the grade crossing and train (`m8/set-pieces-crossing`); the
-  race line and truck convoy (`m8/set-pieces-race`). Zero violence: NPC cars do not see people in
-  general yet, so each moving piece guarantees it itself; probe-review each moving PR (a person-
-  steps-inside-bodies count at zero over a long seeded run) before merging. Messages the
-  coordinator when each PR is green. Part 1 merged as #50 (12:47, c15b314); part 2 building.
-- **Handling:** #44 reverted by #47 (05:02, edba67d) on the owner's word (the tail snapped); the
-  Falchion's `grip_lat` trimmed to 0.883 to keep its skidpad slot. The owner drives it next and
-  decides on feel pass 3 (board `feel-3`): fix causes, not a stronger yaw hand — keyboard
-  steering ramp and speed-sensitive lock, a more progressive tire tail in the assisted presets,
-  gentler stability that does not fight the counter-steer assist.
-- **Queued by the owner (board `mac-music`, order 35):** music folders in the Mac app. The web
-  build already takes folders in every Mac browser; the native app only scans `~/Music` or
-  `--music` at start, plays MP3 only (nanomp3), and has no picker. Wanted: a folder dialog from
-  Audio › Music library, drag-and-drop on the window (winit `DroppedFile`), picks remembered,
-  the Apple Music media layout; MP3 only, other files ignored (the owner: no AAC). Touches `platform-native` and `app/src/ui`.
+### Resume here (2026-10-28 22:40 UTC: stopping point on the owner's word)
+Nothing is running. Since the previous coordinator stopped: #42 (the Deck), #44 (handling) and
+#47 (its revert), #37 (parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars
+part 2), #48 and #49 (Mirage Valley), #50 and #52 (set pieces parts 1 and 2: static places, grade
+crossings and a freight train), #53 (music folders in the native app) merged.
+- **How work runs now:** the owner approves cards on the board (Proposed → Queued); a session told
+  "run the work queue" works them (see "Work queue" above). No standing coordinator.
+- **Queued (approved 22:10):** seven "game feel" cards: the landmark gallery first, then pilot
+  landmarks, vista siting, quiet the filler, the roadside set, downtown anchors, dusk moments.
+- **Needs the owner:** drive the reverted handling (then decide feel pass 3, board `feel-3`);
+  try the native music folders on a Mac (PR #53's body has the steps); the Deck `--stats` runs.
+- **Handling:** #44 reverted by #47 on the owner's word (the tail snapped). Feel pass 3, if
+  approved, fixes causes rather than adding a stronger yaw hand: keyboard steering ramp and
+  speed-sensitive lock, a more progressive tire tail in the assisted presets, gentler stability
+  that does not fight the counter-steer assist.
+- **Set pieces part 3** (race line, truck convoy) is Proposed. Moving set pieces must guarantee
+  zero violence themselves (NPC cars do not see people in general); review them with probes.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
