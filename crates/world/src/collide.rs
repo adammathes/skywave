@@ -37,7 +37,7 @@
 
 use alloc::vec::Vec;
 
-use place::Place;
+use place::{Place, ALL_HOURS};
 use vehicle::sim::{self, DT, WHEEL_RADIUS_M};
 use vehicle::{Ground, Hit, Rock, VehicleSpec, VehicleState};
 
@@ -132,11 +132,16 @@ pub struct Patch {
 
 /// [`Patch::edge`] of a patch that does not follow a road profile.
 pub const NO_EDGE: u32 = u32::MAX;
+/// [`Patch::edge`] of a patch that lies `y` above a terrain place's graded terrain (a
+/// parking lot's pieces).
+pub const TERRAIN_EDGE: u32 = u32::MAX - 1;
 
 /// How a patch's height varies, while building.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Height {
     Flat(f32),
+    /// Offset above the terrain.
+    Terrain(f32),
     /// Offset above edge `.0`'s profile.
     Edge(u32, f32),
     /// The plane through three points.
@@ -188,7 +193,34 @@ pub struct BoxSolid {
     pub y0: f32,
     pub y1: f32,
     pub kind: PropKind,
+    /// A parking lot's car: its index into [`WorldCollider::lot_cars`] (it is there only
+    /// while that says so); [`NO_LOT`] for everything else.
+    pub lot: u32,
 }
+
+/// [`BoxSolid::lot`] of every box but a lot's car.
+pub const NO_LOT: u32 = u32::MAX;
+
+/// A parking lot's car (a `place::PropKind::ParkedCar` whose hours are not
+/// [`ALL_HOURS`]): where it stands, its hours, its box and whether it is there now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LotCar {
+    pub at: [f32; 3],
+    pub hours: u32,
+    /// Index into [`WorldCollider::boxes`].
+    pub solid: u32,
+    pub present: bool,
+}
+
+/// A lot car within this distance of the eye keeps whether it is there, whichever way the
+/// eye looks, m.
+pub const HOLD_M: f32 = 60.0;
+/// Out to this distance a lot car keeps it while inside [`SEEN_COS`] of the way the eye
+/// looks, m...
+pub const SEEN_M: f32 = 150.0;
+/// ...the cosine of the half-angle of that cone (90°: the half-plane ahead, wider than any
+/// camera's view).
+pub const SEEN_COS: f32 = 0.0;
 
 /// The ground under a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -230,6 +262,11 @@ pub struct WorldCollider {
     pub walls: Vec<Wall>,
     pub posts: Vec<Post>,
     pub boxes: Vec<BoxSolid>,
+    /// The parking lots' cars, in `Props` order: which are there now
+    /// ([`WorldCollider::advance_lot_cars`]).
+    pub lot_cars: Vec<LotCar>,
+    /// Whether the lot cars have been put where the clock says, once, unseen.
+    lots_settled: bool,
     patch_bins: Bins,
     step_bins: Bins,
     wall_bins: Bins,
@@ -314,6 +351,7 @@ impl Shapes {
         }
         let (y, edge, grad, at) = match height {
             Height::Flat(y) => (y, NO_EDGE, [0.0; 2], [0.0; 2]),
+            Height::Terrain(y) => (y, TERRAIN_EDGE, [0.0; 2], [0.0; 2]),
             Height::Edge(e, y) => (y, e, [0.0; 2], [0.0; 2]),
             Height::Plane(a, b, c) => {
                 let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -362,14 +400,22 @@ const MAX_STEP_UP_M: f32 = 0.5;
 impl WorldCollider {
     /// Collision shapes of `place`, consistent with what [`crate::build_chunk_meshes`] draws.
     pub fn build(place: &Place, grammar: &Grammar) -> WorldCollider {
-        let net = Network::new(place);
+        let mut net = Network::new(place);
+        let lots = crate::lots::plan(place, &net, &grammar.lots);
+        net.cuts = crate::lots::cuts(&lots);
         let mut shapes = Shapes {
             points: Vec::new(),
             patches: Vec::new(),
         };
-        // Patches in priority order: asphalt, then sidewalks, then lot pads.
+        // Patches in priority order: asphalt, then dropped curbs and sidewalks, then
+        // parking lots (their raised pieces first), then lot pads.
         road_patches(place, &net, &mut shapes);
         let terrain_place = crate::is_terrain_place(place);
+        let terrain = terrain_place.then(|| TerrainGrid::new(place, &net));
+        let mut lot_walls = Vec::new();
+        if let Some(g) = &terrain {
+            lot_patches(&lots, &net, g, &mut shapes, &mut lot_walls);
+        }
         let blocks = if terrain_place {
             Vec::new()
         } else {
@@ -384,11 +430,13 @@ impl WorldCollider {
         }
 
         let walls = building_walls(place);
-        let (posts, boxes) = if terrain_place {
+        let (posts, mut boxes, lot_cars) = if terrain_place {
             place_prop_solids(place)
         } else {
-            prop_solids(&props_of(place, grammar, &net, &blocks))
+            let (posts, boxes) = prop_solids(&props_of(place, grammar, &net, &blocks));
+            (posts, boxes, Vec::new())
         };
+        boxes.extend(lot_walls);
 
         // Grid over everything, with a cell of margin.
         let mut lo = [f32::MAX, f32::MAX];
@@ -431,7 +479,7 @@ impl WorldCollider {
             origin,
             cells,
             apron_y: TERRAIN_Y,
-            terrain: terrain_place.then(|| TerrainGrid::new(place, &net)),
+            terrain,
             profile_xz: Vec::new(),
             profile_y: Vec::new(),
             profile_range: Vec::new(),
@@ -441,6 +489,8 @@ impl WorldCollider {
             walls,
             posts,
             boxes,
+            lot_cars,
+            lots_settled: false,
             patch_bins: Bins::default(),
             step_bins: Bins::default(),
             wall_bins: Bins::default(),
@@ -550,6 +600,9 @@ impl WorldCollider {
 
     /// Height of `patch` at `p` (also outside its polygon: the same surface extended).
     fn patch_height(&self, patch: &Patch, p: [f32; 2]) -> f32 {
+        if patch.edge == TERRAIN_EDGE {
+            return self.open_height(p) + patch.y;
+        }
         if patch.edge != NO_EDGE {
             let [a, b] = self.profile_range[patch.edge as usize];
             let (a, b) = (a as usize, b as usize);
@@ -561,6 +614,49 @@ impl WorldCollider {
             return patch.y;
         }
         patch.y + patch.grad[0] * (p[0] - patch.at[0]) + patch.grad[1] * (p[1] - patch.at[1])
+    }
+
+    /// Whether box `b` is there now (a lot's car only while [`LotCar::present`]).
+    pub fn present(&self, b: &BoxSolid) -> bool {
+        b.lot == NO_LOT || self.lot_cars[b.lot as usize].present
+    }
+
+    /// Brings the lots' cars toward where the clock says they are at `seconds_of_day`
+    /// ([`props::parked_now`]), without anyone seeing one come or go: a car within
+    /// [`HOLD_M`] of `eye`, or within [`SEEN_M`] inside the cone round `forward`, stays as
+    /// it is, and none arrives
+    /// where the car `state` (of `spec`) stands. The first call puts them all where the
+    /// clock says (but for the car's place). Allocates nothing.
+    pub fn advance_lot_cars(
+        &mut self,
+        seconds_of_day: f32,
+        eye: [f32; 3],
+        forward: [f32; 3],
+        state: &VehicleState,
+        spec: &VehicleSpec,
+    ) {
+        let first = !self.lots_settled;
+        self.lots_settled = true;
+        let fp = Footprint::new(state, spec);
+        let f = [forward[0], forward[2]];
+        let fl = sqrt(dot2(f, f));
+        let boxes = &self.boxes;
+        for car in &mut self.lot_cars {
+            let want = props::parked_now(car.hours, car.at, seconds_of_day);
+            if want == car.present {
+                continue;
+            }
+            let d = [car.at[0] - eye[0], car.at[2] - eye[2]];
+            let dl = sqrt(dot2(d, d));
+            let seen = dl < HOLD_M || (dl < SEEN_M && dot2(d, f) > SEEN_COS * dl * fl);
+            if !first && seen {
+                continue;
+            }
+            if want && box_contact(&fp, &boxes[car.solid as usize]).is_some() {
+                continue;
+            }
+            car.present = want;
+        }
     }
 
     /// Height of the ground where no patch is.
@@ -877,6 +973,29 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
             }
         }
     }
+    // Dropped curbs: the apron halfway up to the walk (level with the road where there is
+    // no walk), ahead of the walks.
+    for c in &net.cuts {
+        let i = c.edge as usize;
+        let path = &net.paths[i];
+        let (ea, _) = net.ends(i);
+        let sigma = if c.left { 1.0 } else { -1.0 };
+        let (hw, walk) = (ea.hw, ea.sw > 0.0);
+        let (t1, lift) = if walk {
+            (hw + 0.2 + crate::roads::APRON_M, CURB_M * 0.5)
+        } else {
+            (hw + 0.2, 0.0)
+        };
+        path.pieces(c.s0, c.s1, |a, b| {
+            let q = [
+                path.xz(a, sigma * hw),
+                path.xz(b, sigma * hw),
+                path.xz(b, sigma * t1),
+                path.xz(a, sigma * t1),
+            ];
+            out.patch_with(&q, height(i, lift), Surface::Concrete);
+        });
+    }
     for i in 0..place.roads.edges.len() {
         let path = &net.paths[i];
         let (ea, _) = net.ends(i);
@@ -906,6 +1025,78 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
     for j in &net.junctions {
         for i in 0..j.corners.len() {
             fan(out, &net.corner_walk(j, i), Surface::Concrete);
+        }
+    }
+}
+
+/// The parking lots' ground as patches on the terrain: islands, wheel stops and walks at
+/// their heights above it, ramps from their walk down to the lot, then the asphalt at the
+/// meshes' height above it. Their low walls go to
+/// `walls` as boxes.
+fn lot_patches(
+    lots: &[crate::lots::ParkingLot],
+    net: &Network,
+    grid: &TerrainGrid,
+    out: &mut Shapes,
+    walls: &mut Vec<BoxSolid>,
+) {
+    use crate::lots::{ISLAND_H_M, LOT_LIFT_M, STOP_H_M, WALL_H_M};
+    for lot in lots {
+        for i in &lot.islands {
+            out.patch_with(&i.q, Height::Terrain(ISLAND_H_M), Surface::Grass);
+        }
+        for s in &lot.stops {
+            let half = (s[1] - s[0]).normalize().left() * 0.075;
+            let q = [s[0] - half, s[0] + half, s[1] + half, s[1] - half];
+            out.patch_with(&q, Height::Terrain(STOP_H_M), Surface::Concrete);
+        }
+        for q in &lot.walks {
+            out.patch_with(q, Height::Terrain(CURB_M), Surface::Concrete);
+        }
+    }
+    for lot in lots {
+        for r in &lot.ramps {
+            // From the walk's top at its back edge down to the lot: two planes, reaching
+            // 1 cm over the walk so no sliver of open ground lies between them.
+            let path = &net.paths[r.edge as usize];
+            let top = |p: V2| [p.x, path.y_at(p) + CURB_M, p.y];
+            let low = |p: V2| [p.x, grid.height_at(p.x, p.y) + LOT_LIFT_M, p.y];
+            let mut q = r.q;
+            q[0] = q[0] + (q[0] - q[3]).normalize() * 0.01;
+            q[1] = q[1] + (q[1] - q[2]).normalize() * 0.01;
+            let (a, b, c, d) = (top(q[0]), top(q[1]), low(q[2]), low(q[3]));
+            out.patch_with(
+                &[q[0], q[1], q[2]],
+                Height::Plane(a, b, c),
+                Surface::Concrete,
+            );
+            out.patch_with(
+                &[q[0], q[2], q[3]],
+                Height::Plane(a, c, d),
+                Surface::Concrete,
+            );
+        }
+        for q in &lot.pave {
+            out.patch_with(q, Height::Terrain(LOT_LIFT_M), Surface::Asphalt);
+        }
+        for s in &lot.walls {
+            let d = s[1] - s[0];
+            let c = (s[0] + s[1]) * 0.5;
+            let (ya, yb) = (
+                grid.height_at(s[0].x, s[0].y),
+                grid.height_at(s[1].x, s[1].y),
+            );
+            walls.push(BoxSolid {
+                c: arr(c),
+                u: arr(d.normalize()),
+                half: [d.length() * 0.5, 0.13],
+                y0: ya.min(yb) - 0.3,
+                y1: ya.max(yb) + WALL_H_M,
+                kind: PropKind::Fence {
+                    len_dm: (d.length() * 10.0) as u16,
+                },
+                lot: NO_LOT,
+            });
         }
     }
 }
@@ -1034,6 +1225,7 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                 y0: p.y,
                 y1: p.y + 0.86,
                 kind: p.kind,
+                lot: NO_LOT,
             }),
             PropKind::ParkedCar { .. } => boxes.push(BoxSolid {
                 c: arr(p.pos),
@@ -1042,6 +1234,7 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                 y0: p.y + 0.1,
                 y1: p.y + 1.42,
                 kind: p.kind,
+                lot: NO_LOT,
             }),
             PropKind::Eucalyptus => posts.push(post(0.32, 12.0)),
             PropKind::PowerPole => posts.push(post(0.15, 10.4)),
@@ -1064,6 +1257,7 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                 y0: p.y - 0.5,
                 y1: p.y + 1.6,
                 kind: p.kind,
+                lot: NO_LOT,
             }),
             PropKind::Pier { len_m } => {
                 // The deck from its land end out, to the head's far end.
@@ -1075,6 +1269,7 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                     y0: p.y - 9.0,
                     y1: p.y + 1.1,
                     kind: p.kind,
+                    lot: NO_LOT,
                 })
             }
             // Above the sidewalk, out of the car's way.
@@ -1086,7 +1281,8 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
 
 /// Collision shapes of a terrain place's props, from its `Props` table: [`prop_solids`]
 /// for all but the parked cars, which take their shape's size.
-fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>) {
+/// The lots' cars ([`LotCar`]) come with their boxes, none there yet.
+fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>, Vec<LotCar>) {
     let seed = place.header.seed;
     let items = &place.props.items;
     let props: Vec<Prop> = items
@@ -1095,10 +1291,26 @@ fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>) {
         .map(|p| props::from_place(p, seed))
         .collect();
     let (posts, mut boxes) = prop_solids(&props);
+    let mut lots = Vec::new();
     for p in items {
-        if let place::PropKind::ParkedCar { vehicle_class } = p.kind {
+        if let place::PropKind::ParkedCar {
+            vehicle_class,
+            hours,
+        } = p.kind
+        {
             let w = props::from_place(p, seed);
             let [len, width, height] = props::parked_car_size(vehicle_class);
+            let lot = if hours == ALL_HOURS {
+                NO_LOT
+            } else {
+                lots.push(LotCar {
+                    at: p.pos,
+                    hours,
+                    solid: boxes.len() as u32,
+                    present: false,
+                });
+                lots.len() as u32 - 1
+            };
             boxes.push(BoxSolid {
                 c: arr(w.pos),
                 u: arr(w.dir),
@@ -1106,10 +1318,11 @@ fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>) {
                 y0: w.y + 0.1,
                 y1: w.y + height,
                 kind: w.kind,
+                lot,
             });
         }
     }
-    (posts, boxes)
+    (posts, boxes, lots)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1809,6 +2022,9 @@ fn resolve_cell(
     for &i in bin_slice(&collider.box_bins, cell) {
         let fp = Footprint::new(state, spec);
         let b = &collider.boxes[i as usize];
+        if !collider.present(b) {
+            continue;
+        }
         if let Some(c) = box_contact(&fp, b) {
             let parked = matches!(b.kind, PropKind::ParkedCar { .. }).then_some(i);
             on(respond(state, spec, &c), parked);

@@ -64,7 +64,14 @@ pub fn build_place(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> 
     let roads = streets_all(seed, template, &m, &arterials);
     let mut place = assemble(&m, template, roads, start);
     place.parcels = parcels_all(seed, template, &m, &place.roads);
-    place.buildings = buildings_all(seed, template, &m, &place.parcels, &place.roads);
+    place.buildings = buildings_all(
+        seed,
+        template,
+        &grammar.lots,
+        &m,
+        &place.parcels,
+        &place.roads,
+    );
     // Stage 7 reads the buildings where the meshes will find them.
     place.sort_by_chunk();
     detail(seed, template, grammar, &m, &mut place);

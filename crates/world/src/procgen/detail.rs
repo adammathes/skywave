@@ -18,14 +18,18 @@
 //! - At junctions: **signal** poles where major roads cross, **stop signs** on the minor
 //!   approaches (every approach of a four-way between equals), a **street-name post**.
 //! - **Neon blade signs** on the zone's share of storefront buildings; **parked cars** along
-//!   local curbs (parallel) for the zone's share of curb length, nose-in on strip-mall
-//!   aprons and along beach parking aisles, and in driveways, at most [`MAX_CARS_PER_CHUNK`]
-//!   a chunk; the **pier** at the pier point, with lamps and benches.
+//!   local curbs (parallel) for the zone's share of curb length (never across a curb cut),
+//!   in driveways, and in the parking lots' stalls ([`crate::lots`]: with their light
+//!   poles, island palms and frontage hedges), each lot car parked through the
+//!   hours its zone's occupancy gives; at most [`MAX_CARS_PER_CHUNK`] at the curbs and in
+//!   driveways a chunk and [`MAX_LOT_CARS_PER_CHUNK`] in its lots at any hour;
+//!   the **pier** at the pier point, with lamps and benches.
 //!
 //! Every prop stands on the ground under it (a sidewalk's top, the graded terrain, the
 //! asphalt for a parked car, the pier's deck), never on a road (but parked cars in their
-//! lane), clear of buildings; trees keep 1 m clear of buildings and of the walks but for
-//! those planted in parkways and sidewalk wells.
+//! lane), clear of buildings and, but for the lots' own, off the parking lots; trees keep
+//! 1 m clear of buildings and of the walks but for those planted in parkways and sidewalk
+//! wells.
 //!
 //! **Lights**: a sodium `Street` light in each street lamp's head, a `Neon` light at each
 //! neon sign (the buildings' sign bands, found in their meshes, and the blade signs), a
@@ -38,14 +42,15 @@ use alloc::vec::Vec;
 
 use place::{
     BuildingUse, Light, LightKind, LotKind, Place, Prop, PropKind, RoadClass, StyleTag, ZoneId,
-    SIDEWALK_WIDTH_M,
+    ALL_HOURS, SIDEWALK_WIDTH_M,
 };
 use skywave_core::{Rng, Seed};
 
 use super::macro_map::{MacroMap, MacroPoiKind};
 use super::stage;
 use crate::buildings::{self, BuildingPlan, FacadeEnv};
-use crate::grammar::{Grammar, LotRules};
+use crate::grammar::{Grammar, LotRules, Planting};
+use crate::lots::{self, ParkingLot};
 use crate::math::{floor, point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
 use crate::mesh::{Glow, WorldMesh};
@@ -58,8 +63,10 @@ use crate::roads::{EdgePath, Network};
 use crate::template::{RegionTemplate, Tree};
 use crate::{ChunkPlan, CURB_M};
 
-/// Parked cars a chunk holds at most.
+/// Parked cars at the curbs and in driveways a chunk holds at most...
 pub const MAX_CARS_PER_CHUNK: usize = 24;
+/// ...and parked cars in its lots at any hour.
+pub const MAX_LOT_CARS_PER_CHUNK: usize = 16;
 /// Length of a pier, m.
 pub const PIER_M: f32 = 150.0;
 
@@ -74,6 +81,8 @@ const PART_SCATTER: u64 = 7;
 const PART_BILLBOARD: u64 = 8;
 const PART_PIER: u64 = 9;
 const PART_CAP: u64 = 10;
+/// Key of the order the lots' cars are capped in.
+const KEY_LOT_CAR: u64 = 0x4C4F_5443;
 
 /// Lamp head: along the arm and up from the base to the light (just above the lens).
 const LAMP_ARM_M: f32 = 2.175;
@@ -85,7 +94,9 @@ const PARK_IN_M: f32 = 1.35;
 /// Grid of the scattered trees, m.
 const SCATTER_M: f32 = 18.0;
 /// Longest run of hedge or fence one prop holds, m: a run stands at one height.
-const RUN_M: f32 = 7.0;
+const RUN_M: f32 = lots::HEDGE_RUN_M;
+/// How far street furniture keeps from a curb cut along the curb, m.
+const CUT_CLEAR_M: f32 = 1.5;
 
 /// Light radii, m.
 const STREET_RADIUS_M: f32 = 22.0;
@@ -152,7 +163,10 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::Billboard => (9, 0),
             PropKind::PowerPole => (10, 0),
             PropKind::Fence { len_dm } => (11, u64::from(len_dm)),
-            PropKind::ParkedCar { vehicle_class } => (12, u64::from(vehicle_class)),
+            PropKind::ParkedCar {
+                vehicle_class,
+                hours,
+            } => (12, u64::from(vehicle_class) | u64::from(hours) << 8),
             PropKind::Eucalyptus => (13, 0),
             PropKind::TrashCan => (14, 0),
             PropKind::StopSign => (15, 0),
@@ -249,6 +263,10 @@ struct Detailer<'a> {
     grid: &'a TerrainGrid,
     template: &'a RegionTemplate,
     lots: &'a LotRules,
+    lot_plan: &'a [ParkingLot],
+    /// The lots' ground (asphalt, walks, ramps, islands) with bounds, binned.
+    lot_quads: Vec<([V2; 4], V2, V2)>,
+    lot_bins: Bins,
     seed: u64,
     segs: Vec<Seg>,
     seg_bins: Bins,
@@ -374,6 +392,24 @@ impl<'a> Detailer<'a> {
             fan_bins.insert(lo - r, hi + r, fans.len() as u32);
             fans.push((ring, lo, hi));
         }
+        let mut lot_quads = Vec::new();
+        let mut lot_bins = Bins::new(origin, extent, cell);
+        for lot in plan.lots() {
+            let ramps = lot.ramps.iter().map(|r| &r.q);
+            let islands = lot.islands.iter().map(|i| &i.q);
+            for q in lot
+                .pave
+                .iter()
+                .chain(&lot.walks)
+                .chain(ramps)
+                .chain(islands)
+            {
+                let (lo, hi) = bounds(q);
+                let r = V2::new(MAX_REACH_M, MAX_REACH_M);
+                lot_bins.insert(lo - r, hi + r, lot_quads.len() as u32);
+                lot_quads.push((*q, lo, hi));
+            }
+        }
         let mut footprints = Vec::new();
         let mut fp_bins = Bins::new(origin, extent, cell);
         for b in &place.buildings {
@@ -392,6 +428,9 @@ impl<'a> Detailer<'a> {
             grid,
             template,
             lots,
+            lot_plan: plan.lots(),
+            lot_quads,
+            lot_bins,
             seed: seed.0,
             segs,
             seg_bins,
@@ -541,11 +580,31 @@ impl<'a> Detailer<'a> {
         Some((q, self.side_height(e.edge, path, q, t), out))
     }
 
-    /// Adds a prop that stands off the asphalt (by `r`) and clear of buildings (by
-    /// `clear`); returns whether it was added.
+    /// Whether a disc of radius `r` at `p` touches a parking lot's ground.
+    fn in_lot(&self, p: V2, r: f32) -> bool {
+        self.lot_bins.at(p).iter().any(|&k| {
+            let (q, lo, hi) = &self.lot_quads[k as usize];
+            p.x >= lo.x - r
+                && p.x <= hi.x + r
+                && p.y >= lo.y - r
+                && p.y <= hi.y + r
+                && polygon_distance(p, q) < r
+        })
+    }
+
+    /// Whether `s` along edge `edge`'s `left` (else right) side lies within `margin` of a
+    /// curb cut.
+    fn in_cut(&self, edge: usize, left: bool, s: f32, margin: f32) -> bool {
+        self.net.cuts.iter().any(|c| {
+            c.edge as usize == edge && c.left == left && s > c.s0 - margin && s < c.s1 + margin
+        })
+    }
+
+    /// Adds a prop that stands off the asphalt (by `r`), clear of buildings (by `clear`)
+    /// and off the parking lots; returns whether it was added.
     fn add(&mut self, p: Prop, r: f32, clear: f32) -> bool {
         let q = V2::new(p.pos[0], p.pos[2]);
-        if self.on_asphalt(q, r) || self.near_building(q, clear) {
+        if self.on_asphalt(q, r) || self.near_building(q, clear) || self.in_lot(q, r) {
             return false;
         }
         self.props.push(p);
@@ -681,7 +740,8 @@ impl<'a> Detailer<'a> {
                 let q = at(s, t);
                 let y = self.side_height(i, path, q, t);
                 let p = prop(q, y, toward_road(s), PropKind::StreetLight);
-                if !self.on_other_walk(q, i, 0.3) && self.add(p, 0.2, 0.3) {
+                let cut = self.in_cut(i, left, s, CUT_CLEAR_M);
+                if !cut && !self.on_other_walk(q, i, 0.3) && self.add(p, 0.2, 0.3) {
                     taken.push((s, t, 1.0));
                 }
             }
@@ -694,7 +754,7 @@ impl<'a> Detailer<'a> {
             let t = if walk { hw + 0.35 } else { hw + 1.0 };
             let mut s = s0 + 3.5;
             while s < s1 - 3.0 {
-                if free(&taken, s, t, 0.6) {
+                if free(&taken, s, t, 0.6) && !self.in_cut(i, left, s, CUT_CLEAR_M) {
                     let q = at(s, t);
                     let y = self.side_height(i, path, q, t);
                     let p = prop(q, y, toward_road(s), PropKind::Hydrant);
@@ -719,6 +779,7 @@ impl<'a> Detailer<'a> {
                 if roll < p_bench
                     && free(&taken, s, tb, 1.2)
                     && free(&taken, s + 1.6, hw + 0.6, 0.5)
+                    && !self.in_cut(i, left, s, CUT_CLEAR_M + 1.0)
                 {
                     let q = at(s, tb);
                     let y = self.side_height(i, path, q, tb);
@@ -730,7 +791,7 @@ impl<'a> Detailer<'a> {
                 if roll < p_bench || (busy && roll < p_bench + 0.25) {
                     let tc = hw + 0.6;
                     let sc = s + 1.6;
-                    if free(&taken, sc, tc, 0.5) {
+                    if free(&taken, sc, tc, 0.5) && !self.in_cut(i, left, sc, CUT_CLEAR_M) {
                         let q = at(sc, tc);
                         let y = self.side_height(i, path, q, tc);
                         let p = prop(q, y, toward_road(sc), PropKind::TrashCan);
@@ -758,7 +819,8 @@ impl<'a> Detailer<'a> {
             let mut s = s0 + rng.range_f32(4.0, rule.street_tree_m.max(5.0));
             while s < s1 - 4.0 {
                 if let Some(kind) = self.species(zone, rng) {
-                    if free(&taken, s, t, if planted { 2.5 } else { 1.0 }) {
+                    let r = if planted { 2.5 } else { 1.0 };
+                    if free(&taken, s, t, r) && !self.in_cut(i, left, s, CUT_CLEAR_M + 1.0) {
                         let q = at(s, t);
                         let y = self.side_height(i, path, q, t);
                         if self.add_tree(q, y, kind, planted.then_some(i)) {
@@ -781,7 +843,7 @@ impl<'a> Detailer<'a> {
             let t = back + if walk { 0.6 } else { 2.3 };
             let mut s = s0 + rng.range_f32(3.0, 12.0);
             while s < s1 - 3.0 {
-                if free(&taken, s, t, 1.0) {
+                if free(&taken, s, t, 1.0) && !self.in_cut(i, left, s, CUT_CLEAR_M) {
                     let q = at(s, t);
                     let y = self.ground(q);
                     let clear = !self.wet(q) && !self.near_walk(q, 0.2);
@@ -827,9 +889,10 @@ impl<'a> Detailer<'a> {
                         .iter()
                         .any(|&(ts, tt, _)| (ts - c).abs() < 4.0 && tt < hw + 0.5);
                     let q = at(c, t);
-                    if !near_hydrant && !self.on_other_road(q, i, 1.2) {
+                    let cut = self.in_cut(i, left, c, 2.5 + CUT_CLEAR_M);
+                    if !near_hydrant && !cut && !self.on_other_road(q, i, 1.2) {
                         let facing = path.left(c).right() * facing_sign;
-                        self.car(q, path.y_at(q), facing, class_roll, rng);
+                        self.car(q, path.y_at(q), facing, ALL_HOURS, class_roll, rng);
                     }
                     s += 5.0 + rng.range_f32(1.0, 3.0);
                 } else {
@@ -839,9 +902,10 @@ impl<'a> Detailer<'a> {
         }
     }
 
-    /// A parked car candidate at `q` facing `facing`, its body picked by `class_roll`
-    /// (0..100) and its paint by `rng`.
-    fn car(&mut self, q: V2, y: f32, facing: V2, class_roll: u32, rng: &mut Rng) {
+    /// A parked car candidate at `q` facing `facing`, parked through the hours of
+    /// `hours`, its body picked by `class_roll` (0..100) and its paint by `rng`.
+    #[allow(clippy::too_many_arguments)]
+    fn car(&mut self, q: V2, y: f32, facing: V2, hours: u32, class_roll: u32, rng: &mut Rng) {
         // Mostly sedans and wagons (the long body), a third sporty coupes.
         let class: u8 = match class_roll {
             0..=19 => 0,  // Sports
@@ -857,6 +921,7 @@ impl<'a> Detailer<'a> {
             facing,
             PropKind::ParkedCar {
                 vehicle_class: class | paint << 4,
+                hours,
             },
         ));
     }
@@ -986,7 +1051,7 @@ impl<'a> Detailer<'a> {
                         let roll = rng.range(0, 100);
                         let q = p.pos;
                         if !self.near_building(q, 0.3) && !self.on_asphalt(q, 1.0) {
-                            self.car(q, y, p.dir, roll, &mut rng);
+                            self.car(q, y, p.dir, ALL_HOURS, roll, &mut rng);
                         }
                     }
                     props::PropKind::PalmTree | props::PropKind::Oak => {
@@ -1148,79 +1213,43 @@ impl<'a> Detailer<'a> {
         }
     }
 
-    /// Nose-in cars on strip-mall aprons and along beach parking aisles.
+    /// The parking lots' props: light poles, island palms, frontage hedges, and
+    /// the cars in their stalls, each parked through the hours its lot's occupancy and its
+    /// stall's threshold give ([`lots::stall_hours`]), nosed in, a few backed in.
     fn lots(&mut self) {
-        let (place, net, plans) = (self.place, self.net, self.plans);
-        for (i, b) in place.buildings.iter().enumerate() {
-            if b.style != StyleTag::StripMall {
-                continue;
+        let plan = self.lot_plan;
+        for (li, lot) in plan.iter().enumerate() {
+            let mut rng = self.rng(PART_LOTS, li as u64);
+            for &(p, facing) in &lot.poles {
+                let y = self.ground(p) + lots::ISLAND_H_M;
+                self.props.push(prop(p, y, facing, PropKind::StreetLight));
             }
-            let (env, plan) = &plans[i];
-            let fi = plan.frontage;
-            let yard = env[fi].yard;
-            if yard < self.lots.front_min_yard {
-                continue;
+            for isl in &lot.islands {
+                let y = self.ground(isl.plant_at) + lots::ISLAND_H_M;
+                // Shrubs are the lot's ground mesh.
+                if isl.plant == Planting::Palm {
+                    let up = V2::new(0.0, -1.0);
+                    self.props
+                        .push(prop(isl.plant_at, y, up, PropKind::PalmTree));
+                }
             }
-            let mut rng = self.rng(PART_LOTS, i as u64);
-            let fp = &b.footprint;
-            let n = fp.len();
-            let a = V2::from_array(fp[fi]);
-            let c = V2::from_array(fp[(fi + 1) % n]);
-            let len = (c - a).length();
-            let along = (c - a) * (1.0 / len);
-            let out = along.right();
-            // Nose to the canopy: the car's center 3.2 m (canopy) + 0.7 m + half a car out.
-            let stall = self.lots.stall_w;
-            let stalls = ((len - 2.0) / stall) as u32;
-            let (lo, hi) = self.lots.front_fill;
-            let fill = rng.range_f32(lo, hi);
-            for k in 0..stalls {
-                if rng.next_f32() >= fill {
+            for h in &lot.hedges {
+                let (c, d) = ((h[0] + h[1]) * 0.5, h[1] - h[0]);
+                let len_dm = (d.length() * 10.0) as u16;
+                let y = self.ground(c);
+                self.props
+                    .push(prop(c, y, d.normalize(), PropKind::Hedge { len_dm }));
+            }
+            for st in &lot.stalls {
+                let hours = lots::stall_hours(self.lots, lot.zone, self.seed, st.c);
+                let roll = rng.range(0, 100);
+                let backed = rng.range(0, 256) < self.lots.backed_in_256;
+                if hours == 0 {
                     continue;
                 }
-                let roll = rng.range(0, 100);
-                let half = props::parked_car_size(if roll < 34 { 0 } else { 2 })[0] * 0.5;
-                let q = a + along * (1.0 + stall * 0.5 + stall * k as f32) + out * (3.9 + half);
-                let y = self.ground(q);
-                if !self.on_asphalt(q, 2.8) && !self.near_building(q, 0.5) {
-                    self.car(q, y, -out, roll, &mut rng);
-                }
-            }
-        }
-        // Beach parking aisles: nose-in stalls along both sides of beach-zone alleys.
-        let edges = &place.roads.edges;
-        for (i, e) in edges.iter().enumerate() {
-            if e.class != RoadClass::Alley {
-                continue;
-            }
-            let path = &net.paths[i];
-            if self.zone_at(path.xz(path.len() * 0.5, 0.0)) != ZoneId::Beach {
-                continue;
-            }
-            let (ea, eb) = net.ends(i);
-            let mut rng = self.rng(PART_LOTS, 0x10_0000 + i as u64);
-            for sigma in [1.0f32, -1.0] {
-                let mut s = ea.trim + 4.0;
-                while s < path.len() - eb.trim - 4.0 {
-                    if rng.next_f32() < self.lots.aisle_fill {
-                        let roll = rng.range(0, 100);
-                        let half = props::parked_car_size(if roll < 34 { 0 } else { 2 })[0] * 0.5;
-                        let t = ea.hw + 0.6 + half;
-                        let q = path.xz(s, sigma * t);
-                        let facing = path.left(s) * sigma;
-                        let y = self.ground(q);
-                        let clear = !self.near_building(q, 0.5) && !self.wet(q);
-                        // Off every other road's asphalt (its own lies beside it).
-                        let off = !self.seg_bins.at(q).iter().any(|&k| {
-                            let sg = &self.segs[k as usize];
-                            sg.edge as usize != i && segment_distance(q, sg.a, sg.b).0 < sg.hw + 2.6
-                        });
-                        if clear && off {
-                            self.car(q, y, facing, roll, &mut rng);
-                        }
-                    }
-                    s += self.lots.stall_w;
-                }
+                let facing = if backed { -st.nose } else { st.nose };
+                let y = self.ground(st.c) + lots::LOT_LIFT_M;
+                self.car(st.c, y, facing, hours, roll, &mut rng);
             }
         }
     }
@@ -1321,7 +1350,10 @@ impl<'a> Detailer<'a> {
                 let span = facing.left() * 5.4;
                 let pts = [q, q + span, q - span];
                 let clear = pts.iter().all(|&p| {
-                    !self.near_walk(p, 2.0) && !self.near_building(p, 3.0) && !self.wet(p)
+                    !self.near_walk(p, 2.0)
+                        && !self.near_building(p, 3.0)
+                        && !self.wet(p)
+                        && !self.in_lot(p, 2.0)
                 });
                 if clear {
                     let y = self.ground(q);
@@ -1365,26 +1397,52 @@ impl<'a> Detailer<'a> {
         }
     }
 
-    /// Keeps at most [`MAX_CARS_PER_CHUNK`] parked cars a chunk: where there are more, each
-    /// stays with an even chance, then the first ones up to the cap.
+    /// Keeps at most [`MAX_CARS_PER_CHUNK`] parked cars at the curbs and in driveways a
+    /// chunk (where a chunk has more, each stays with an even chance, then the first ones
+    /// up to the cap), and [`MAX_LOT_CARS_PER_CHUNK`] in its lots at any hour (in an order
+    /// drawn from where they stand, while every hour they are parked has room).
     fn cap_cars(&mut self) {
         let h = &self.place.header;
         let slot = |p: &Prop| h.chunk_at([p.pos[0], p.pos[2]]).map(|c| h.chunk_slot(c));
+        let hours = |p: &Prop| match p.kind {
+            PropKind::ParkedCar { hours, .. } => hours,
+            _ => 0,
+        };
+        let cars = core::mem::take(&mut self.cars);
+        let (always, mut lots): (Vec<Prop>, Vec<Prop>) =
+            cars.into_iter().partition(|p| hours(p) == ALL_HOURS);
         let mut count = alloc::vec![0usize; h.chunk_count()];
-        for p in &self.cars {
+        for p in &always {
             if let Some(k) = slot(p) {
                 count[k] += 1;
             }
         }
         let mut kept = alloc::vec![0usize; h.chunk_count()];
         let mut rng = self.rng(PART_CAP, 0);
-        let cars = core::mem::take(&mut self.cars);
-        for p in cars {
+        for p in always {
             let Some(k) = slot(&p) else { continue };
             let keep = count[k] <= MAX_CARS_PER_CHUNK
                 || rng.range(0, count[k] as u32) < MAX_CARS_PER_CHUNK as u32;
             if keep && kept[k] < MAX_CARS_PER_CHUNK {
                 kept[k] += 1;
+                self.props.push(p);
+            }
+        }
+        let mut kept = alloc::vec![[0usize; 24]; h.chunk_count()];
+        let key = |p: &Prop| {
+            let bits = [u64::from(p.pos[0].to_bits()), u64::from(p.pos[2].to_bits())];
+            skywave_core::hash64(self.seed ^ KEY_LOT_CAR, &bits)
+        };
+        lots.sort_by_key(key);
+        for p in lots {
+            let Some(k) = slot(&p) else { continue };
+            let mask = hours(&p);
+            let room =
+                (0..24).all(|hr| mask >> hr & 1 == 0 || kept[k][hr] < MAX_LOT_CARS_PER_CHUNK);
+            if room {
+                for (hr, c) in kept[k].iter_mut().enumerate() {
+                    *c += (mask >> hr & 1) as usize;
+                }
                 self.props.push(p);
             }
         }
