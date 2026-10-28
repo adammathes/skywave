@@ -93,6 +93,8 @@ const NEON_CORONA: Corona = Corona {
 };
 /// A lit storefront's fill on the sidewalk in front of it, kcd at its brightest channel.
 const STOREFRONT_KCD: f32 = 0.4;
+/// A set piece's flood and tube lights (a tunnel's ceiling lamps, a garage's tubes).
+const FLOOD_KCD: f32 = 0.9;
 /// When more static lights are on than the frame holds, the farthest kept ones fade out
 /// over this share of the distance to the first one left out, so none pops as the camera
 /// moves.
@@ -239,6 +241,10 @@ pub fn place_light(l: &place::Light) -> Option<PointLight> {
         }),
         place::LightKind::Window => Some(omni(STOREFRONT_KCD)),
         place::LightKind::Headlight => None,
+        place::LightKind::Flood => Some(PointLight {
+            color: (Vec3::from(l.color).max(Vec3::ZERO) * FLOOD_KCD).to_array(),
+            ..PointLight::omni(l.pos, [0.0; 3], l.radius.max(0.0))
+        }),
     }
 }
 

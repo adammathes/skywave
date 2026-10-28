@@ -43,10 +43,11 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 09:41 UTC, coordinator handed off to save quota)
+### Resume here (2026-10-28 12:47 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
 (parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars part 2), #47 (the #44
-revert), #48 and #49 (Mirage Valley, 09:41, d3b40c8) merged; one builder session is running; each
+revert), #48 and #49 (Mirage Valley) and #50 (set pieces part 1, 12:47,
+c15b314) merged; one builder session is running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
@@ -58,7 +59,7 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   race line and truck convoy (`m8/set-pieces-race`). Zero violence: NPC cars do not see people in
   general yet, so each moving piece guarantees it itself; probe-review each moving PR (a person-
   steps-inside-bodies count at zero over a long seeded run) before merging. Messages the
-  coordinator when each PR is green.
+  coordinator when each PR is green. Part 1 merged as #50 (12:47, c15b314); part 2 building.
 - **Handling:** #44 reverted by #47 (05:02, edba67d) on the owner's word (the tail snapped); the
   Falchion's `grip_lat` trimmed to 0.883 to keep its skidpad slot. The owner drives it next and
   decides on feel pass 3 (board `feel-3`): fix causes, not a stronger yaw hand — keyboard

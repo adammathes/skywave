@@ -53,6 +53,16 @@ fn name(k: PropKind) -> &'static str {
         PropKind::Crossbuck => "crossbuck",
         PropKind::FaceBillboard { .. } => "face billboard",
         PropKind::BusShelter { .. } => "bus shelter",
+        PropKind::TunnelPiece { .. } => "tunnel",
+        PropKind::StartTree => "start tree",
+        PropKind::TimingBoard => "timing board",
+        PropKind::StripLine { .. } => "strip line",
+        PropKind::GuardRail { .. } => "guard rail",
+        PropKind::ChainLink { .. } => "chain-link",
+        PropKind::CrewGarage { .. } => "crew garage",
+        PropKind::TacoStand { .. } => "taco stand",
+        PropKind::HeroCar { .. } => "hero car",
+        PropKind::PicnicTable => "picnic table",
     }
 }
 
@@ -413,6 +423,7 @@ fn lights_are_the_lamps_signs_and_shops() {
             }
             LightKind::Street => {}
             LightKind::Headlight => panic!("headlights belong to cars"),
+            LightKind::Flood => panic!("the coast has no set pieces"),
         }
     }
     println!("{} lamps, {neon} neon, {window} shop lights", street.len());

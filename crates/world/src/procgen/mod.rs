@@ -18,6 +18,7 @@ pub mod buildings;
 pub mod detail;
 pub mod macro_map;
 pub mod parcels;
+pub mod setpieces;
 pub mod streets;
 pub mod terrain;
 pub mod zones;
@@ -33,6 +34,7 @@ pub use parcels::{
     hash_parcels, parcels, parcels_all, Block, Face, FaceKind, FaceParcels, FaceStats, ParcelChunk,
     ParcelPlan,
 };
+pub use setpieces::SetPieces;
 pub use streets::{hash_chunk, streets, streets_all, GridCell, NodeRef, StreetChunk, StreetPlan};
 
 /// Stage ids, the first word of every stage's hash key.

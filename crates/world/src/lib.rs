@@ -29,6 +29,7 @@ pub mod palette;
 pub mod procgen;
 pub mod props;
 pub mod roads;
+pub mod setpieces;
 pub mod signs;
 pub mod template;
 
@@ -552,6 +553,9 @@ impl ChunkPlan {
                         let m = out.at(p.pos, MeshKind::Prop);
                         match &self.shop_signs[i] {
                             Some(s) => props::shop_sign(m, p, palette, s, &self.grammar.lexicon),
+                            None if setpieces::is_set_piece(p.kind) => {
+                                setpieces::build(m, p, palette, &self.grammar.lexicon)
+                            }
                             None => props::build(m, p, palette, &self.kit),
                         }
                         if out.kept_vertices() >= max_vertices {
