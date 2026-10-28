@@ -90,5 +90,9 @@
   "basin-crossing-train": {
     "about": "Mirage Valley's grade crossing on an arterial at dusk with the freight train across it (90 s into a run), from the mid chase camera stopped on the approach: both gates' arms down in red and white bands, the near mast's lamp lit, the train's boxcars, tank cars and hoppers on the track.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-mid", "lights": "1", "t": "18:25", "pos": "611.5,628", "yaw": "180", "train": "90", "still": "1", "stream": "1" }
+  },
+  "basin-race-start": {
+    "about": "Mirage Valley's race start on a boulevard at night (20 s after the racers are called) from the far chase camera, the player's car stopped on the line in the middle lane: two racers in hero cars standing at the checkered line either side of it, cones along both gutters, the crowd on the sidewalks and the spectators' hero cars parked at an angle in the lot on the right.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "21:30", "pos": "856,1238.9", "yaw": "270", "traffic": "normal", "race": "20", "still": "1", "stream": "1" }
   }
 }

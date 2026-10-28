@@ -110,6 +110,9 @@ pub struct SceneSetup {
     /// Seconds into a run of the place's train at the start: it starts warning at its
     /// first end, runs that long, and the scene opens there (`None`: it rests a while).
     pub train_s: Option<f32>,
+    /// Seconds into a run of the place's racers at the start: they are called, and the
+    /// scene opens that long after (`None`: they keep their own time; needs traffic on).
+    pub race_s: Option<f32>,
 }
 
 impl Default for SceneSetup {
@@ -137,6 +140,7 @@ impl Default for SceneSetup {
             traffic: None,
             phase: None,
             train_s: None,
+            race_s: None,
         }
     }
 }
@@ -162,9 +166,9 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 19] = [
+    pub const KEYS: [&'static str; 20] = [
         "seed", "place", "scenario", "car", "paint", "cam", "t", "pos", "yaw", "lights", "glow",
-        "fly", "still", "map", "ui", "stream", "traffic", "phase", "train",
+        "fly", "still", "map", "ui", "stream", "traffic", "phase", "train", "race",
     ];
 
     /// World `scenario` and its procedural place; its own car unless the scene named one.
@@ -263,6 +267,13 @@ impl SceneSetup {
                     return Err(bad());
                 }
                 self.train_s = Some(s);
+            }
+            "race" => {
+                let s: f32 = value.parse().map_err(|_| bad())?;
+                if !(0.0..=600.0).contains(&s) {
+                    return Err(bad());
+                }
+                self.race_s = Some(s);
             }
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;

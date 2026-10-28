@@ -521,6 +521,16 @@ impl App {
             app.apply_traffic(d);
             app.finish_warm_up();
         }
+        if let Some(secs) = setup.race_s {
+            if let Some(r) = app.npcs.drivers.race.as_mut() {
+                r.call();
+            }
+            let inputs = app.traffic_inputs();
+            for _ in 0..(secs * skywave_core::SIM_HZ as f32) as u32 {
+                app.npcs.step(&inputs);
+                app.npcs.step_peds(&inputs);
+            }
+        }
         if let (Some(secs), Some(r)) = (setup.train_s, app.rail.as_mut()) {
             r.railway.train.phase = traffic::train::Phase::Announcing { t: 0.0 };
             let player = npc::player(

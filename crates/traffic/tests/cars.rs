@@ -1401,9 +1401,7 @@ fn a_scripted_car_stands_till_released_drives_its_route_and_stops_for_people() {
         stand_seg: 0,
         stand_s: 40.0,
     };
-    let id = t
-        .spawn_scripted(&g, 0, 10.0, 0.0, 0, script)
-        .expect("room");
+    let id = t.spawn_scripted(&g, 0, 10.0, 0.0, 0, script).expect("room");
     let car = |t: &Traffic| *t.cars().iter().find(|c| c.id == id).expect("kept");
     // Off: every ordinary car would go; this one stays, and stands at 40 m.
     let mut tick = 0u64;
@@ -1422,10 +1420,7 @@ fn a_scripted_car_stands_till_released_drives_its_route_and_stops_for_people() {
     run(&mut t, 40, true);
     let c = car(&t);
     assert_eq!(c.seg, 0);
-    assert!(
-        c.speed < 0.05 && c.s <= 40.0 && c.s > 35.0,
-        "stood: {c:?}"
-    );
+    assert!(c.speed < 0.05 && c.s <= 40.0 && c.s > 35.0, "stood: {c:?}");
     // Released: down its lane at its own 20 m/s, through the signal (it waits for green).
     t.script_mut(id).expect("kept").stand_seg = NONE;
     let mut top = 0.0f32;

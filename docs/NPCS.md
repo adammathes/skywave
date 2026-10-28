@@ -168,3 +168,39 @@ crossing with and without the train: never more with it (16 against 113 person-s
 `app::crossing`'s tests: a full-throttle car stops at a lowered arm, a car driven into the train's side square or
 at ±40° while it runs stays outside it, is not launched and stops it, the train stands short of a car stopped on
 the track, and a reset beside the standing train puts the car clear of it.
+
+## The racers and the convoy (`traffic::race`)
+The 2001 basin's set pieces that drive (`docs/WORLD_GENERATION.md`, "Set pieces"): three street racers at the race
+start and a truck convoy at dawn. Both are scripted traffic cars (`traffic::Script`, `Traffic::spawn_scripted`):
+in the traffic pool like any NPC car, so among other cars they keep every rule one keeps (signals, claims at
+junctions, following, never moving into the player's car), and a script gives each a route of turns, its own
+speed, a point to stand at until released, no lane changes and no despawning while it holds. Nothing is timed
+against the player, scored or chased, and nothing can be hurt:
+- **They see people.** Ordinary NPC cars do not yet; a scripted car (and a racer or truck after its script) stops
+  short of anyone within 0.8 m of its body's side ahead of it or beside it and never moves on into them (someone
+  stepping out right in front of it stops it dead), and at a stop line it stands its front 2.2 m short of the
+  crosswalk before the line (`Traffic::set_crosswalks`), not on it.
+- **The racers** are called when the player's car stops on the line, or every 4 minutes while it is within
+  500 m. They come up from 140 m behind the line, out of view where they can be, and stand at the line one to a
+  lane; with the player's car on the line, the racer of its lane sits the run out. Once all stand and nobody at
+  all is on the course (within 1.8 m of a course lane's middle), they count 3 s and go at 24 m/s straight on
+  through the junctions for 800 m, stopping at red like anyone; a course ends short of a junction with the other
+  boulevard (a few meters of lane between two signals, which ordinary traffic can gridlock), and after it they
+  are ordinary cars. The crowd watches from the sidewalk at the line, behind the cones, never on the course.
+  Their cars are the world's hero cars; the traffic never picks them otherwise. Scene key `race=<s>` opens that
+  many seconds after a call.
+- **The convoy**: five semis roll in one at a time on the freeway's slow lane at its desert end once each dawn
+  (from 15 minutes before to 40 after) while the player is within 2.5 km, each once the one before is 34 m on
+  and the lane is clear, never within 150 m of the player and out of view where they can be; they drive the
+  desert leg into the basin at 22 m/s and are ordinary traffic after 3 km.
+
+The probes (`traffic/tests/race.rs`): busy traffic and busy people with the player stopped on the line, the racers
+called again and again (6 minutes, seeds 1 and 2), counting person-steps inside a racer and runs let go with
+anyone on the course, all zero, with thousands of person-steps within 10 m of a running racer; the convoy's dawn
+(seeds 1 and 2), all five trucks in and nobody inside one. The ignored sweep runs seeds 1–4 for a quarter hour of
+racing and a convoy's dawn each (all zero). `traffic/tests/cars.rs`: a scripted car stands till released, drives
+its route at its speed and stops short of someone in its lane, and someone stepping out 3 m in front of it at
+25 m/s stops it dead. `app::npc::racers`: a player stopped on the line is never touched or moved while the racers
+stand beside it and go; a car driven at full throttle into a standing racer's side square or at 40°, or into a
+standing truck's side, stops at it without a lift over 0.3 m/s or a shove of 1 m/s in a frame, and a truck
+coming up behind the player's car stopped in its lane stops short of it.

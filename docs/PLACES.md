@@ -28,7 +28,7 @@ Buildings    { Vec<Building { footprint: Vec<[f32;2]>, height_m f32, floors u8, 
                               Glass, Warehouse, Barn, Motel, StripMall), built_year: Option<u16>,
                               use: Residential|Commercial|Office|Industrial|Civic|Hotel|Parking }> }
 POIs         { Vec<Poi { pos, kind: Pier|Lighthouse|Overlook|Diner|Gas|Marina|Stadium|DragStrip|ChannelRamp|Tunnel|
-                         CrewGarage|TacoStand|GradeCrossing, name_seed u64 }> }
+                         CrewGarage|TacoStand|GradeCrossing|RaceStart|Convoy, name_seed u64 }> }
 Spawns       { Vec<Spawn { pos, heading, kind: PlayerStart|Garage }> }
 ```
 
@@ -42,7 +42,8 @@ Props        { Vec<Prop { pos, yaw, kind: StreetLight|PalmTree|Oak|Hedge{len_dm}
                          Eucalyptus|TrashCan|StopSign|Signal{arm_dm}|Pier{len_m}|Track{len_dm, bed}|Crossbuck|
                          FaceBillboard{face}|BusShelter{face}|TunnelPiece{len_dm, width_dm, portals}|StartTree|
                          TimingBoard|StripLine{len_dm}|GuardRail{len_dm}|ChainLink{len_dm}|CrewGarage{name_seed}|
-                         TacoStand{name_seed}|HeroCar{slot}|PicnicTable|CrossingGate{arm_dm} }> }
+                         TacoStand{name_seed}|HeroCar{slot}|PicnicTable|CrossingGate{arm_dm}|
+                         StartLine{width_dm}|Cone }> }
 Lights       { Vec<Light { pos, color, radius, kind: Street|Neon|Window|Headlight|Flood }> }
 Chunk index  { per chunk: byte ranges into every table above, plus bounds and a content hash }
 ```
@@ -59,7 +60,9 @@ facing; a `StripLine` is painted across its facing; `GuardRail` and `ChainLink` 
 it; a `CrewGarage`'s bays and a `TacoStand`'s window open along it, their signs lettered from the grammar's
 lexicon by `name_seed`; a `HeroCar` is one of the world's hero cars by `slot` (the app picks it), standing as a
 parked car; a `CrossingGate` faces the drivers it stops, its arm `arm_dm` long swinging down across the
-approach to the facing's right. A `Flood` light is white in its own color, on with the street lamps. A prop's `pos` is where it stands (a hedge's or fence's run is centered on it, a pier starts there) and its `yaw` gives its facing `(-sin yaw, -cos yaw)` in `(x, z)`, a spawn's heading convention. `ParkedCar::vehicle_class` packs the vehicle crate's `VehicleClass` (low 4 bits) and the paint, an index into the car shape's palette (high 4 bits). `ParkedCar::hours` has bit `h` (0..24) set when the car is there through hour `h` of the day (`ALL_HOURS`, the low 24 bits, for a car always there; a parking lot's cars also set bit 24, so they are never `ALL_HOURS`): a parking lot's cars come and go with its zone's occupancy (`docs/WORLD_GENERATION.md`, "Parking lots").
+approach to the facing's right; a `StartLine` is a checkered band painted across a carriageway `width_dm` curb
+to curb, facing down the course; a `Cone` is a traffic cone (paint and cones never stop a car). A `RaceStart` is
+at the curb by its line's middle, a `Convoy` at the freeway's desert end. A `Flood` light is white in its own color, on with the street lamps. A prop's `pos` is where it stands (a hedge's or fence's run is centered on it, a pier starts there) and its `yaw` gives its facing `(-sin yaw, -cos yaw)` in `(x, z)`, a spawn's heading convention. `ParkedCar::vehicle_class` packs the vehicle crate's `VehicleClass` (low 4 bits) and the paint, an index into the car shape's palette (high 4 bits). `ParkedCar::hours` has bit `h` (0..24) set when the car is there through hour `h` of the day (`ALL_HOURS`, the low 24 bits, for a car always there; a parking lot's cars also set bit 24, so they are never `ALL_HOURS`): a parking lot's cars come and go with its zone's occupancy (`docs/WORLD_GENERATION.md`, "Parking lots").
 
 Chunking: every object table is sorted by chunk; the chunk index holds byte ranges into the 14 object tables, a per-chunk hash (which also covers the chunk's height samples and zone cells) and bounds. The terrain grid, zones and water bodies are read once for the whole place (a height grid cannot be sliced per chunk as a byte range); only object tables stream per chunk. Objects straddling chunks belong to the chunk of their centroid; roads are split at chunk borders by the producer.
 

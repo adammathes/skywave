@@ -448,6 +448,14 @@ impl Race {
         })
     }
 
+    /// Calls a run now if none is under way (a scene that opens on one).
+    pub fn call(&mut self) {
+        if self.phase == RacePhase::Idle {
+            self.phase = RacePhase::Calling;
+            self.t = 0.0;
+        }
+    }
+
     /// Whether the player's car stands on the line.
     pub fn player_on_line(&self, player: &Player) -> bool {
         let c = &self.course;

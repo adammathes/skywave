@@ -185,11 +185,22 @@ coast's Place is unchanged.
   one-way road, which gets the gate on its one approach only); they replace the crossing signs. The spurs' track
   pieces carry `TRACK_SPUR`, so the main line is the pieces without it. The train and the gates run in the game
   (`docs/NPCS.md`, "The train").
+- **The race start.** A site 30 m wide and 12 m deep over commercial, strip or industrial lots behind the walk of
+  a boulevard carriageway, on the outer curb, at least 40 m from either end of its edge, 150 m from a grade
+  crossing and 60 m from the garage and the stand, where the carriageway runs on at least 500 m before it meets
+  the other boulevard; the one nearest the garage. Across the carriageway before it a `StartLine` (two rows of
+  0.9 m checkers), six `Cone`s along each gutter from 12 m before the line to 12 m past it, and five
+  `HeroCar`s (slots 3–7) parked at an angle nose out in the lot, which loses its buildings. A `RaceStart`
+  landmark at the curb by the line's middle; the walk there gets a row of five crowd spots 4 m apart facing the
+  road (`traffic::walks`). The racers run in the game (`docs/NPCS.md`, "The racers and the convoy").
+- **The convoy's way in.** The freeway's end out in the desert (the end with the desert's `Farmland` round it): a
+  `Convoy` landmark there, where the dawn convoy rolls in.
 - **The channel ramps.** Chain-link along both lips of the flood channel, 0.6 m outside them, open within 4 m
   of any road (the bridges) and round each ramp: along a ramp's outer edge from 12 m below its top, and across
   its foot. A `ChannelRamp` landmark marks each ramp's top.
 
-Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
+Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings (the race start's
+spectators too), the tunnel's
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay), the meshes'
 and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 

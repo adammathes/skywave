@@ -83,13 +83,34 @@ fn every_basin_has_its_set_pieces_clear_of_roads_and_buildings() {
             PoiKind::CrewGarage,
             PoiKind::TacoStand,
             PoiKind::DragStrip,
+            PoiKind::RaceStart,
+            PoiKind::Convoy,
         ] {
             assert_eq!(pois(&p, kind), 1, "seed {seed}: {kind:?}");
         }
         assert!(pois(&p, PoiKind::Overlook) >= 1, "seed {seed}");
         assert!(pois(&p, PoiKind::ChannelRamp) >= 1, "seed {seed}");
         assert_eq!(count(&p, |k| matches!(k, PropKind::TunnelPiece { .. })), 8);
-        assert_eq!(count(&p, |k| matches!(k, PropKind::HeroCar { .. })), 3);
+        // The garage's three and the race start's five spectators.
+        assert_eq!(count(&p, |k| matches!(k, PropKind::HeroCar { .. })), 8);
+        assert_eq!(count(&p, |k| matches!(k, PropKind::StartLine { .. })), 1);
+        assert_eq!(count(&p, |k| k == PropKind::Cone), 12);
+        // The spectators' cars stand off every road.
+        for q in &p.props.items {
+            if !matches!(q.kind, PropKind::HeroCar { slot } if slot >= 3) {
+                continue;
+            }
+            for e in &p.roads.edges {
+                for s in e.profile.windows(2) {
+                    let (a, b) = (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2]));
+                    let d = segment_distance(at(q), a, b).0;
+                    assert!(
+                        d > 0.5 * e.width_m + 2.0,
+                        "seed {seed}: a spectator on a road"
+                    );
+                }
+            }
+        }
         assert_eq!(count(&p, |k| k == PropKind::StartTree), 1);
         assert_eq!(count(&p, |k| k == PropKind::TimingBoard), 1);
         assert_eq!(count(&p, |k| matches!(k, PropKind::StripLine { .. })), 2);
