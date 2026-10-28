@@ -468,16 +468,17 @@ pub enum Line {
 impl SignRules {
     /// The awning `r` (any number; reduced modulo the total weight) picks.
     pub fn awning(&self, r: u64) -> Awning {
-        draw(&self.awnings, r)
+        draw(&self.awnings, r, Awning::None)
     }
 
     /// The strip-mall canopy `r` picks.
     pub fn mall_canopy(&self, r: u64) -> Awning {
-        draw(&self.mall_canopies, r)
+        draw(&self.mall_canopies, r, Awning::None)
     }
 }
 
-fn draw(list: &[(Awning, u32)], r: u64) -> Awning {
+/// The entry of weighted `list` that `r` (any number) picks, `none` when it weighs nothing.
+fn draw<T: Copy>(list: &[(T, u32)], r: u64, none: T) -> T {
     let total: u64 = list.iter().map(|&(_, w)| u64::from(w)).sum();
     let mut r = r % total.max(1);
     for &(a, w) in list {
@@ -486,22 +487,90 @@ fn draw(list: &[(Awning, u32)], r: u64) -> Awning {
         }
         r -= u64::from(w);
     }
-    Awning::None
+    none
 }
 
-/// Parked cars in front lots and beach aisles.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Parking lots (`world::lots`): how they are laid out, what stands in them and how full
+/// they are hour by hour.
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct LotRules {
-    /// Strip malls with less open ground in front than this get no front lot, m.
-    pub front_min_yard: f32,
-    /// Stall width, m.
+    /// Stall width, m (the test town's strip-mall stalls too).
     pub stall_w: f32,
-    /// Share of a front lot's stalls taken, drawn per lot.
-    pub front_fill: Range,
-    /// Chance a beach-aisle stall is taken.
-    pub aisle_fill: f32,
+    /// Stall length, m.
+    pub stall_d: f32,
+    /// Two-way aisle between 90° stalls, m.
+    pub aisle_w: f32,
+    /// One-way aisle between 60° stalls, m.
+    pub aisle_w_60: f32,
+    /// Share of lots striped at 60° (one way through: in at one curb cut, out at the other).
+    pub angled_256: u32,
+    /// The covered walk along a strip mall's shops, m.
+    pub walkway: f32,
+    /// The planted strip along a lot's street frontage, m.
+    pub buffer: f32,
+    /// What stands on that strip, weights in listed order.
+    pub frontage: Vec<(Frontage, u32)>,
+    /// A street frontage at least this long gets a second curb cut, m (an angled lot always
+    /// has two).
+    pub second_cut_m: f32,
+    /// Share of lots with a concrete wheel stop in every stall (drawn per lot).
+    pub wheel_stop_256: u32,
+    /// Light poles along a lot, m apart.
+    pub pole_m: Range,
+    /// Most stalls in a row between two islands.
+    pub run_max: u8,
+    /// What an island at a row's end holds, weights in listed order.
+    pub islands: Vec<(Planting, u32)>,
+    /// Share of lots striped in yellow (the rest white).
+    pub yellow_256: u32,
+    /// Share of parked cars backed into their stall.
+    pub backed_in_256: u32,
+    /// Share of the shops, offices and civic buildings backing onto an alley in a zone with
+    /// lots that leave a rear lot on it.
+    pub rear_lot_256: u32,
+    /// Per zone, hour by hour (0: midnight to 1 am), the share of its stalls taken, %. Only
+    /// zones listed here get lots.
+    pub occupancy: Vec<(ZoneId, [u8; 24])>,
+}
+
+/// What lines a lot's street frontage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Frontage {
+    Hedge,
+    /// A low block wall.
+    Wall,
+    /// Nothing but the planted strip.
+    Open,
+}
+
+/// What an island holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Planting {
+    Palm,
+    Shrub,
+    /// Bare ground.
+    Bare,
+}
+
+impl LotRules {
+    /// Hour by hour occupancy of zone `z`'s lots, `None` where it has none.
+    pub fn occupancy(&self, z: ZoneId) -> Option<&[u8; 24]> {
+        self.occupancy.iter().find(|o| o.0 == z).map(|o| &o.1)
+    }
+
+    /// The frontage `r` (any number) picks.
+    pub fn frontage(&self, r: u64) -> Frontage {
+        draw(&self.frontage, r, Frontage::Open)
+    }
+
+    /// The planting `r` picks.
+    pub fn island(&self, r: u64) -> Planting {
+        draw(&self.islands, r, Planting::Bare)
+    }
 }
 
 /// Why [`Grammar::validate`] rejected a grammar. `field` names are dotted RON paths.
@@ -648,17 +717,34 @@ impl Grammar {
             return Err(bad("signs.name_radius"));
         }
         let l = &self.lots;
-        if !positive(l.front_min_yard) {
-            return Err(bad("lots.front_min_yard"));
-        }
-        if !positive(l.stall_w) || l.stall_w < 2.0 {
-            return Err(bad("lots.stall_w"));
-        }
-        if !range(l.front_fill) || l.front_fill.1 > 1.0 {
-            return Err(bad("lots.front_fill"));
-        }
-        if !(0.0..=1.0).contains(&l.aisle_fill) {
-            return Err(bad("lots.aisle_fill"));
+        for (ok, field) in [
+            (positive(l.stall_w) && l.stall_w >= 2.0, "lots.stall_w"),
+            (positive(l.stall_d) && l.stall_d >= 4.0, "lots.stall_d"),
+            (positive(l.aisle_w) && l.aisle_w >= 3.0, "lots.aisle_w"),
+            (
+                positive(l.aisle_w_60) && l.aisle_w_60 >= 3.0,
+                "lots.aisle_w_60",
+            ),
+            (l.angled_256 <= 256, "lots.angled_256"),
+            (positive(l.walkway), "lots.walkway"),
+            (positive(l.buffer), "lots.buffer"),
+            (l.frontage.iter().any(|f| f.1 > 0), "lots.frontage"),
+            (positive(l.second_cut_m), "lots.second_cut_m"),
+            (l.wheel_stop_256 <= 256, "lots.wheel_stop_256"),
+            (range(l.pole_m) && l.pole_m.0 >= 10.0, "lots.pole_m"),
+            (l.run_max >= 2, "lots.run_max"),
+            (l.islands.iter().any(|f| f.1 > 0), "lots.islands"),
+            (l.yellow_256 <= 256, "lots.yellow_256"),
+            (l.backed_in_256 <= 256, "lots.backed_in_256"),
+            (l.rear_lot_256 <= 256, "lots.rear_lot_256"),
+            (
+                l.occupancy.iter().all(|o| o.1.iter().all(|&p| p <= 100)),
+                "lots.occupancy",
+            ),
+        ] {
+            if !ok {
+                return Err(bad(field));
+            }
         }
         Ok(())
     }
@@ -1045,15 +1131,8 @@ mod tests {
         assert_eq!(awnings, want);
         assert_eq!(g.signs.mall_canopy(0), A::Mansard);
         assert_eq!(g.signs.mall_canopy(4), A::Canopy);
-        assert_eq!(
-            g.lots,
-            LotRules {
-                front_min_yard: 9.5,
-                stall_w: 2.8,
-                front_fill: (0.25, 0.75),
-                aisle_fill: 0.4,
-            }
-        );
+        // The test town's strip-mall stalls (B10's lots keep the width).
+        assert_eq!(g.lots.stall_w, 2.8);
     }
 
     #[test]
@@ -1183,7 +1262,10 @@ mod tests {
         g.styles[0].addenda.skylights.other = (2.0, 1.0);
         assert!(g.validate().is_err());
         let mut g = coast_80s();
-        g.lots.front_fill = (0.8, 0.2);
+        g.lots.pole_m = (40.0, 30.0);
+        assert!(g.validate().is_err());
+        let mut g = coast_80s();
+        g.lots.occupancy[0].1[12] = 101;
         assert!(g.validate().is_err());
         let mut g = coast_80s();
         g.signs.trades[0].trade = "WIDGETS".into();

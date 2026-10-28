@@ -42,6 +42,7 @@ fn area(poly: &[[f32; 2]]) -> f64 {
 
 /// Every lot of `place` with the buildings `lot_buildings` gives it.
 fn per_lot(t: &RegionTemplate, m: &MacroMap, place: &Place) -> Vec<(usize, Vec<Building>)> {
+    let lots = grammar().lots;
     place
         .parcels
         .iter()
@@ -49,7 +50,7 @@ fn per_lot(t: &RegionTemplate, m: &MacroMap, place: &Place) -> Vec<(usize, Vec<B
         .map(|(i, p)| {
             (
                 i,
-                lot_buildings(Seed(place.header.seed), t, m, p, &place.roads),
+                lot_buildings(Seed(place.header.seed), t, &lots, m, p, &place.roads),
             )
         })
         .collect()
@@ -221,10 +222,10 @@ fn check_footprint(b: &Building, p: &Parcel) {
 /// `tools/screenshot` captures of the coast before and after, and commit the new values in
 /// their own commit whose message says why they moved.
 const GOLDEN: [u64; 4] = [
-    0x196E_9329_1C52_F93D,
-    0xFD2E_C00E_8BCA_CD04,
-    0x3332_F271_1FAC_CCB1,
-    0xA93C_7D7C_A819_A3B9,
+    0x307D_5F35_206A_02A5,
+    0xB180_7CDE_C9BA_5D67,
+    0x46DF_E4EF_5FFD_AB1F,
+    0x9D64_2977_A385_5653,
 ];
 
 #[test]
@@ -274,14 +275,15 @@ fn chunks_build_their_slice() {
     let plan = ParcelPlan::new(seed, &t, &m, &g);
     let chunks = plan.all();
     let all_parcels = parcels_all(seed, &t, &m, &g);
-    let all = buildings_all(seed, &t, &m, &all_parcels, &g);
+    let lots = grammar().lots;
+    let all = buildings_all(seed, &t, &lots, &m, &all_parcels, &g);
     let mut joined: Vec<Building> = Vec::new();
     for c in &chunks {
         let alone = plan.chunk(c.chunk);
-        let bs = buildings(seed, &t, &m, &alone.parcels, &g);
+        let bs = buildings(seed, &t, &lots, &m, &alone.parcels, &g);
         assert_eq!(
             bs,
-            buildings(seed, &t, &m, &c.parcels, &g),
+            buildings(seed, &t, &lots, &m, &c.parcels, &g),
             "chunk {:?}",
             c.chunk
         );
@@ -302,7 +304,7 @@ fn chunks_build_their_slice() {
     // Deterministic.
     assert_eq!(
         hash_buildings(&all),
-        hash_buildings(&buildings_all(seed, &t, &m, &all_parcels, &g))
+        hash_buildings(&buildings_all(seed, &t, &lots, &m, &all_parcels, &g))
     );
 }
 
