@@ -313,6 +313,7 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                     w.extend_from_slice(&len_dm.to_le_bytes());
                     w.push(bed);
                 }
+                PropKind::FaceBillboard { face } | PropKind::BusShelter { face } => w.push(face),
                 _ => {}
             }
         }
@@ -348,6 +349,8 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::Pier { .. } => 17,
         PropKind::Track { .. } => 18,
         PropKind::Crossbuck => 19,
+        PropKind::FaceBillboard { .. } => 20,
+        PropKind::BusShelter { .. } => 21,
     }
 }
 
@@ -1016,6 +1019,8 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                     bed: r.u8()?,
                 },
                 19 => PropKind::Crossbuck,
+                20 => PropKind::FaceBillboard { face: r.u8()? },
+                21 => PropKind::BusShelter { face: r.u8()? },
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1502,6 +1507,8 @@ mod tests {
                 bed: crate::TRACK_BRIDGE,
             },
             PropKind::Crossbuck,
+            PropKind::FaceBillboard { face: 4 },
+            PropKind::BusShelter { face: 0 },
         ];
         let props = kinds
             .iter()

@@ -15,11 +15,15 @@ use world::math::{segment_distance, V2};
 use world::procgen::{arterials, build_place, hash_graph, MacroMap, PLACE_CHUNKS};
 use world::template::RegionTemplate;
 
-const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 
 fn grammar() -> world::Grammar {
-    ron::from_str(GRAMMAR).expect("parse grammar")
+    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
+    g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
+    g.validate().expect("validate grammar");
+    g
 }
 
 fn template() -> RegionTemplate {
@@ -311,6 +315,15 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
                 "seed {seed}: a tree on the airfield at {q:?}"
             );
         }
+        // The grammar's street dressing: bus stops, and billboards blank or pictured, never
+        // the coast's lettered ads.
+        let count =
+            |f: &dyn Fn(&PropKind) -> bool| p.props.items.iter().filter(|x| f(&x.kind)).count();
+        let shelters = count(&|k| matches!(k, PropKind::BusShelter { .. }));
+        let faces = count(&|k| matches!(k, PropKind::FaceBillboard { .. }));
+        assert!(shelters >= 10, "seed {seed}: {shelters} bus shelters");
+        assert!(faces >= 3, "seed {seed}: {faces} billboards");
+        assert_eq!(count(&|k| *k == PropKind::Billboard), 0, "seed {seed}");
         // The hills: an overlook with a road to it.
         let overlooks: Vec<V2> = m
             .pois
@@ -335,7 +348,7 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
             .count();
         assert!(hills * 10 > p.zones.cells.len(), "seed {seed}");
         println!(
-            "seed {seed}: {overpasses} overpasses, {} ramps, {blvd} boulevard pieces, {bridges} channel bridges, {} ramps into it, {crossings} grade crossings, {} spurs, {} overlooks",
+            "seed {seed}: {overpasses} overpasses, {} ramps, {blvd} boulevard pieces, {bridges} channel bridges, {} ramps into it, {crossings} grade crossings, {} spurs, {} overlooks, {shelters} bus shelters, {faces} billboards",
             ramps.len(),
             b.ramps.len(),
             b.spurs.len(),

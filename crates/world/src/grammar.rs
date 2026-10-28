@@ -53,6 +53,10 @@ pub struct Grammar {
     pub styles: Vec<StyleRules>,
     pub signs: SignRules,
     pub lots: LotRules,
+    /// What stands along the streets besides the template's props: bus stops and the faces
+    /// of the billboards (none and the old ad faces when the file says nothing).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub street: StreetDress,
     /// The words `signs.lexicon` names (`assets/grammar/lexicon.ron`), parsed beside the
     /// grammar and attached by its loader; not part of the grammar file.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -436,6 +440,42 @@ pub struct SignRules {
     pub line_256: u32,
     /// No two signs closer than this share a wordmark or a name, m.
     pub name_radius: f32,
+    /// Strip-mall tenants with a vinyl banner hung on the canopy's fascia beside their
+    /// letters (0 when the file says nothing).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub banner_256: u32,
+}
+
+/// Street furniture a grammar sets beside the template's props (`Grammar::street`).
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct StreetDress {
+    /// A bus stop (a shelter with a lit ad box) every this far along an arterial's curb in
+    /// zones with sidewalks and shops or homes, m; 0: none.
+    pub bus_stop_m: f32,
+    /// What a billboard or a shelter's ad box shows, by weight; empty: the invented ad
+    /// (`Ad`) every time.
+    pub faces: Vec<(Face, u32)>,
+}
+
+/// The face of a billboard or a shelter's ad box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Face {
+    /// The invented ad: a ground, a band and a syllable name.
+    Ad,
+    /// Lit and blank: a space for rent.
+    Blank,
+    /// One big pictogram on a plain ground.
+    Pictogram,
+}
+
+impl StreetDress {
+    /// The face `r` (any number) picks.
+    pub fn face(&self, r: u64) -> Face {
+        draw(&self.faces, r, Face::Ad)
+    }
 }
 
 /// One trade a sign may advertise.
@@ -668,6 +708,16 @@ impl Grammar {
         if s.shop_lit_256 > 256 {
             return Err(bad("signs.shop_lit_256"));
         }
+        if s.banner_256 > 256 {
+            return Err(bad("signs.banner_256"));
+        }
+        let st = &self.street;
+        if !(st.bus_stop_m.is_finite() && (st.bus_stop_m == 0.0 || st.bus_stop_m >= 60.0)) {
+            return Err(bad("street.bus_stop_m"));
+        }
+        if !st.faces.is_empty() && st.faces.iter().map(|&(_, w)| u64::from(w)).sum::<u64>() == 0 {
+            return Err(bad("street.faces"));
+        }
         self.lexicon.validate().map_err(GrammarError::Lexicon)?;
         let word = |field, word: &str| GrammarError::Word {
             field,
@@ -844,6 +894,16 @@ fn range(r: Range) -> bool {
     r.0.is_finite() && r.1.is_finite() && r.0 >= 0.0 && r.0 <= r.1
 }
 
+/// The shipped 2001 basin grammar with its lexicon, for this crate's tests.
+#[cfg(test)]
+pub(crate) fn basin_01() -> Grammar {
+    let text = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+    let mut g: Grammar = ron::from_str(text).expect("parse");
+    let lexicon = include_str!("../../../assets/grammar/lexicon_2001.ron");
+    g.lexicon = ron::from_str(lexicon).expect("parse lexicon");
+    g
+}
+
 /// The shipped coast grammar with its lexicon, for this crate's tests.
 #[cfg(test)]
 pub(crate) fn coast_80s() -> Grammar {
@@ -858,6 +918,35 @@ pub(crate) fn coast_80s() -> Grammar {
 mod tests {
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn the_basin_grammar_validates_and_dresses_the_2001_basin() {
+        let g = basin_01();
+        assert_eq!(g.validate(), Ok(()));
+        assert_eq!((g.era, g.template.as_str()), (Era::Aughts, "socal_basin"));
+        assert_eq!(g.signs.lexicon, "us_basin");
+        assert!(
+            g.signs.lit_box_256 > coast_80s().signs.lit_box_256,
+            "backlit boxes lead"
+        );
+        assert!(g.signs.banner_256 > 0 && g.street.bus_stop_m > 0.0);
+        assert!(
+            !g.street.faces.iter().any(|&(f, _)| f == Face::Ad),
+            "no lettered ads"
+        );
+        // The coast's says nothing of either, so it keeps what it had.
+        let c = coast_80s();
+        assert_eq!(
+            (c.signs.banner_256, c.street.clone()),
+            (0, StreetDress::default())
+        );
+        let mut bad = g.clone();
+        bad.street.bus_stop_m = 10.0;
+        assert!(bad.validate().is_err());
+        let mut bad = g.clone();
+        bad.signs.banner_256 = 300;
+        assert!(bad.validate().is_err());
+    }
 
     /// The rules the planner had in code before they moved into the grammar, written the
     /// way the code wrote them, plus the three-band facade's starting values (B4, from

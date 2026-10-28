@@ -117,7 +117,8 @@ lies under all ground. The macro stage, in the frame of the hills' side:
   every `ramp_every_m` along it a ramp 8 m wide runs down one wall (alternating) at `ramp_grade`, from 16 m
   off the bridge. Its right of way (`row_m`) is `Highway` zone, so streets, lots and buildings stop at its
   banks; the Place carries its concrete as `WaterKind::Channel` bodies (lip to lip, and the ramps), which
-  the ground mesh paints concrete and the map grey.
+  the ground mesh paints concrete (paler bed, darker walls) with a darker low-flow strip down the middle
+  of the bed and expansion joints across it every 6 m (flat marks 2 cm over the ground), and the map grey.
 - **Rail.** Between the first two cross lines, edge to edge (into the bands' walls), at grade with every road
   it crosses; `rail.spurs` sidings 4.5 m beside it (off a 30 m turnout, ending at a bumper) between the out
   lines in industrial land; its right of way (`row_m`) is `Highway` zone. The detailing lays it as
@@ -150,15 +151,17 @@ the numbers and weights the building planner and the detailing read, one file pe
 template and era (`docs/backlog/BUILDINGS.md`). `app::places::grammar()` parses and
 validates it once; `build_place`, `ChunkPlan::new`, `build_chunk_meshes` and
 `WorldCollider::build` take it beside the palette. The geometry builders stay in
-`world::buildings`; a grammar says how big, how many and how often. Today one grammar,
-`california_coast_80s.ron`, dresses every place (the test town too). Its B2 values are the
+`world::buildings`; a grammar says how big, how many and how often. Two grammars ship:
+`california_coast_80s.ron` dresses the coast (and the test town), `socal_basin_2001.ron` the 2001
+basin (below). Its B2 values are the
 planner's former code constants (`shipped_grammar_keeps_the_former_constants` in
 `crates/world/src/grammar.rs`); the three-band facade's (B4) are starting values from
 `docs/backlog/BUILDINGS.md`.
 
 As built (B2, B4, B8, B9):
 ```
-Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules }
+Grammar     { era: Era, template: String, styles: [StyleRules], signs: SignRules, lots: LotRules,
+              street: StreetDress }  (street optional: none, and the lettered ad billboards)
             (+ lexicon: Lexicon, attached by the loader from assets/grammar/lexicon.ron)
 StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addenda }
   zones:    All | Only([ZoneId, ...])
@@ -181,7 +184,9 @@ StyleRules  { style: StyleTag, zones: ZoneMask, massing, base, body, top, addend
 ByUse<T>    { residential, office, other }   other: commercial, industrial, civic, hotel, parking
 SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], lit_box_256,
               shop_lit_256, lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
-              wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius }
+              wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius,
+              banner_256 (optional, 0) }
+StreetDress { bus_stop_m (0: none), faces: [(Ad | Blank | Pictogram, weight)] (empty: Ad) }
 Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
 TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
               lines: [(Word(String) | Since, weight)], descriptors_out: [String] }
@@ -290,6 +295,26 @@ building, from an `Rng` keyed by the building's door pick):
   capitals until B7 moves the band carriers onto the shop signs.
 - **Lots** (B10, terrain places; see "Parking lots" below). The test town's strip-mall lots
   use `stall_w` too.
+
+## The 2001 basin's grammar
+`socal_basin_2001.ron` (`Aughts`, `socal_basin`) started from the coast's and changes what the turn of the
+century changed: stucco boxes with plain parapets (no false fronts, hardly a cornice); auto shops in the
+industrial stucco (roll-up bays and a shop front for its sign); mini-malls under flat canopies whose tenants
+sign in backlit boxes (`lit_box_256` 190) and hang vinyl banners from the canopy's front edge
+(`banner_256`: a tenant in three or so of a banner mall, a colored panel with a band on it); vinyl and
+aluminum awnings, little canvas; lots busy late into the night. Its signs draw from their own closed lexicon,
+`lexicon_2001.ron` (`us_basin`: the coast's invented names, the period's descriptors and trades: taquerias
+and taco stands, wheels, tint, smog checks, car audio, pagers and phones, nails), which `app::places`
+attaches by the id the grammar names; the coast's `lexicon.ron` is untouched, so the coast's signs never
+change. Its `street` puts a bus stop (`PropKind::BusShelter`: posts, a flat roof, a glazed back screen, a
+bench and a lit ad box across the downstream end) on an arterial's walk about every 320 m in commercial,
+residential, downtown and suburban zones (a block's piece of arterial gets one with the chance of its share
+of the spacing), and gives billboards and the shelters' ad boxes faces blank or one big pictogram
+(`PropKind::FaceBillboard`), never the coast's lettered ads. The tilt-up warehouses, dingbats, the tract
+houses' tile roofs and the downtown towers come from their styles as on the coast. The `sodium_night`
+palette (the template's and the scenario's) paints it: beige and tan stucco, terracotta tiles, deep
+sodium-orange lamps (the detailing reads a template's palette by name for its lights, `Palette::named`; the
+coast's names none and keeps the 1985 one), purple, blue and green neon.
 
 ## Parking lots
 `world::lots::plan` lays a terrain place's parking lots from its parcels, buildings and

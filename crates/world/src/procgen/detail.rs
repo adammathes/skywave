@@ -49,7 +49,7 @@ use skywave_core::{Rng, Seed};
 use super::macro_map::{BasinPlan, MacroMap, MacroPoiKind};
 use super::stage;
 use crate::buildings::{self, BuildingPlan, FacadeEnv};
-use crate::grammar::{Grammar, LotRules, Planting};
+use crate::grammar::{Face, Grammar, LotRules, Planting, StreetDress};
 use crate::lots::{self, ParkingLot};
 use crate::math::{floor, point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
@@ -60,6 +60,7 @@ use crate::props::{
     PIER_HEAD_M,
 };
 use crate::roads::{EdgePath, Network};
+use crate::signs::pictogram::Pictogram;
 use crate::template::{RegionTemplate, Tree};
 use crate::{ChunkPlan, CURB_M};
 
@@ -81,6 +82,8 @@ const PART_SCATTER: u64 = 7;
 const PART_BILLBOARD: u64 = 8;
 const PART_PIER: u64 = 9;
 const PART_CAP: u64 = 10;
+const PART_BUS: u64 = 11;
+const PART_FACE: u64 = 12;
 /// A point along a basin's track as it is laid: where, which way, on which bed, at what
 /// height, and the road it crosses there (edge, heading).
 type TrackSample = (V2, V2, u8, f32, Option<(usize, V2)>);
@@ -130,10 +133,12 @@ pub fn detail(
     m: &MacroMap,
     place: &mut Place,
 ) {
-    let pal = Palette::socal_1985();
+    // The template's own palette where it names a built-in one (the coast's names none).
+    let pal = Palette::named(&template.era.palette).unwrap_or_else(Palette::socal_1985);
     let plan = ChunkPlan::new(place, &pal, grammar);
     let (props, lights) = {
         let mut d = Detailer::new(place, &plan, template, &grammar.lots, seed);
+        d.street = grammar.street.clone();
         if let Some(b) = &m.basin {
             d.keep_basin_clear(b);
         }
@@ -197,6 +202,8 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::Pier { len_m } => (17, u64::from(len_m)),
             PropKind::Track { len_dm, bed } => (18, u64::from(len_dm) | u64::from(bed) << 16),
             PropKind::Crossbuck => (19, 0),
+            PropKind::FaceBillboard { face } => (20, u64::from(face)),
+            PropKind::BusShelter { face } => (21, u64::from(face)),
         };
         words.push(tag);
         words.push(payload);
@@ -309,6 +316,8 @@ struct Detailer<'a> {
     /// width they keep clear) and its airfield (polygons). Empty on the coast.
     keep_out: Vec<(V2, V2, f32)>,
     keep_out_areas: Vec<Vec<V2>>,
+    /// The grammar's street dressing (bus stops, billboard faces).
+    street: StreetDress,
 }
 
 /// Bounds of a point set.
@@ -473,6 +482,7 @@ impl<'a> Detailer<'a> {
             cars: Vec::new(),
             keep_out: Vec::new(),
             keep_out_areas: Vec::new(),
+            street: StreetDress::default(),
         }
     }
 
@@ -790,6 +800,48 @@ impl<'a> Detailer<'a> {
                 if !cut && !self.on_other_walk(q, i, 0.3) && self.add(p, 0.2, 0.3) {
                     taken.push((s, t, 1.0));
                 }
+            }
+        }
+
+        // Bus stops along arterials with walks past shops and homes, at the grammar's
+        // spacing (drawn from the edge, not the side's stream: a grammar without them
+        // places what it did), facing the road, clear of the lamps and the curb cuts.
+        let stops = self.street.bus_stop_m;
+        let k_side = u64::from(left);
+        let served = matches!(
+            zone,
+            ZoneId::Commercial | ZoneId::Residential | ZoneId::Downtown | ZoneId::Suburb
+        );
+        // An arterial is cut into a piece per block, so a shorter piece than the spacing
+        // gets its stop with a chance of its share of it.
+        let h = skywave_core::hash64(self.seed, &[stage::DETAIL, PART_BUS, i as u64, k_side]);
+        let chance = ((s1 - s0) / stops.max(1.0)).min(1.0);
+        let lucky = ((h >> 40) % 1000) as f32 / 1000.0 < chance;
+        if stops > 0.0 && class == RoadClass::Arterial && walk && served && s1 - s0 > 40.0 && lucky
+        {
+            let phase = (h % 1000) as f32 / 1000.0 * stops;
+            let t = hw + 0.95;
+            let face = self.face(h >> 16);
+            let mut s = s0 + 20.0 + phase.min(s1 - s0 - 40.0);
+            while s <= s1 - 20.0 {
+                for ds in [0.0f32, 6.0, -6.0, 12.0] {
+                    let sc = s + ds;
+                    if sc < s0 + 15.0 || sc > s1 - 15.0 || !free(&taken, sc, t, 2.4) {
+                        continue;
+                    }
+                    if self.in_cut(i, left, sc, 2.5) {
+                        continue;
+                    }
+                    let q = at(sc, t + 0.75);
+                    let y = self.side_height(i, path, at(sc, t), t);
+                    let kind = PropKind::BusShelter { face };
+                    let p = prop(at(sc, t), y, toward_road(sc), kind);
+                    if !self.on_other_walk(q, i, 0.3) && self.add(p, 0.3, 0.5) {
+                        taken.push((sc, t + 0.75, 2.2));
+                        break;
+                    }
+                }
+                s += stops;
             }
         }
 
@@ -1406,7 +1458,20 @@ impl<'a> Detailer<'a> {
                 });
                 if clear {
                     let y = self.ground(q);
-                    self.props.push(prop(q, y, facing, PropKind::Billboard));
+                    let kind = if self.street.faces.is_empty() {
+                        PropKind::Billboard
+                    } else {
+                        let h = skywave_core::hash64(
+                            self.seed,
+                            &[stage::DETAIL, PART_FACE, i as u64, here.to_bits() as u64],
+                        );
+                        match self.face(h) {
+                            // The invented ad is the old billboard.
+                            0xFF => PropKind::Billboard,
+                            face => PropKind::FaceBillboard { face },
+                        }
+                    };
+                    self.props.push(prop(q, y, facing, kind));
                 }
             }
         }
@@ -1443,6 +1508,16 @@ impl<'a> Detailer<'a> {
             }
             s += 24.0;
             k += 1;
+        }
+    }
+
+    /// The face `h` picks from the grammar's (`PropKind::FaceBillboard`'s: 0 blank, else a
+    /// pictogram index + 1), or 0xFF for the invented ad.
+    fn face(&self, h: u64) -> u8 {
+        match self.street.face(h) {
+            Face::Ad => 0xFF,
+            Face::Blank => 0,
+            Face::Pictogram => 1 + ((h >> 24) % Pictogram::ALL.len() as u64) as u8,
         }
     }
 

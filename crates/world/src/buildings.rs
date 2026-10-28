@@ -290,6 +290,9 @@ pub struct Signage {
     /// glass is not emissive: a big pane at a lit window's brightness reads as a white
     /// wall).
     pub shop_lit: bool,
+    /// A strip mall's tenants may hang vinyl banners from its canopy (some of them, by the
+    /// name seed).
+    pub banner: bool,
 }
 
 /// Rng key for signage.
@@ -304,6 +307,7 @@ pub fn signage(seed: u64, index: u32, rules: &SignRules) -> Signage {
         canopy: rules.mall_canopy(h >> 40) as u8,
         lit_box: (h >> 16) & 255 < u64::from(rules.lit_box_256),
         shop_lit: (h >> 24) & 255 < u64::from(rules.shop_lit_256),
+        banner: (h >> 32) & 255 < u64::from(rules.banner_256),
     }
 }
 
@@ -3185,6 +3189,42 @@ fn strip_mall_front(
         );
         boxf(m, f, lo, hi, face::NEG_Y, underside(look, look.trim));
     }
+    // Vinyl banners hung from the canopy's front edge, one tenant in three or so.
+    if let Some(s) = look.signage.filter(|s| s.banner) {
+        for u in 0..units {
+            let bits = skywave_core::mix64(s.name_seed ^ u64::from(u));
+            if bits % 3 != 0 || unit < 5.0 {
+                continue;
+            }
+            let colors = [pal.hydrant_red, pal.paint_yellow, pal.teal, pal.navy];
+            let ground = colors[((bits >> 8) % 4) as usize];
+            let band = if ground == pal.paint_yellow {
+                pal.hydrant_red
+            } else {
+                pal.paint_white
+            };
+            let mid = unit * (u as f32 + 0.5);
+            let half = (0.3 * unit).min(2.2);
+            let (y0, y1) = (canopy_y - 0.95, canopy_y - 0.05);
+            let z = depth + 0.04;
+            let vinyl = Paint::new(ground, Pattern::Paint);
+            let ink = Paint::new(band, Pattern::Paint);
+            rect(m, f, mid - half, y0, mid + half, y1, z, false, vinyl);
+            rect(m, f, mid - half, y0, mid + half, y1, z - 0.01, true, vinyl);
+            let (b0, b1) = (y0 + 0.3, y1 - 0.3);
+            rect(
+                m,
+                f,
+                mid - 0.8 * half,
+                b0,
+                mid + 0.8 * half,
+                b1,
+                z + 0.01,
+                false,
+                ink,
+            );
+        }
+    }
     // Square posts.
     for u in 0..=units {
         let x = (unit * u as f32).clamp(0.3, len - 0.3);
@@ -4312,6 +4352,7 @@ mod tests {
             canopy: canopy as u8,
             lit_box: false,
             shop_lit: true,
+            banner: false,
         }
     }
 

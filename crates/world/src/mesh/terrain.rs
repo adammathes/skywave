@@ -564,10 +564,101 @@ pub fn build(
             if wet {
                 surf(place, grid, pal, [cx, cz], res, seed, &mut m);
             }
+            if !channels.is_empty() {
+                let o = grid.pos(cx * res, cz * res);
+                let size = grid.cell * res as f32;
+                let bounds = [o.x, o.y, o.x + size, o.y + size];
+                for (poly, _, _) in &channels {
+                    channel_marks(poly, bounds, grid, pal, &mut m);
+                }
+            }
             let dst = out.at(center, MeshKind::Ground);
             let base = dst.vertices.len() as u32;
             dst.vertices.extend_from_slice(&m.vertices);
             dst.indices.extend(m.indices.iter().map(|i| i + base));
+        }
+    }
+}
+
+/// A channel's bed marks this long or longer (its ramps are shorter): the low-flow strip
+/// and the joints.
+const CHANNEL_MARKS_MIN_M: f32 = 200.0;
+/// Width of the darker low-flow strip down the middle of a channel's bed, m...
+const LOW_FLOW_M: f32 = 1.8;
+/// ...the joints across the bed, every this far, this wide, over this share of the
+/// channel's width (inside its bed), m...
+const JOINT_STEP_M: f32 = 6.0;
+const JOINT_W_M: f32 = 0.14;
+const JOINT_SPAN: f32 = 0.42;
+/// ...lying this far above the ground.
+const MARK_LIFT_M: f32 = 0.02;
+
+/// The marks on a long channel's bed (a four-cornered `poly`, lip to lip) inside chunk
+/// `bounds` (`[x0, z0, x1, z1]`): a darker, wet-looking low-flow strip along its middle and
+/// dark expansion joints across the bed, as flat quads a hair over the ground.
+fn channel_marks(
+    poly: &[V2],
+    bounds: [f32; 4],
+    grid: &TerrainGrid,
+    pal: &Palette,
+    m: &mut WorldMesh,
+) {
+    if poly.len() != 4 {
+        return;
+    }
+    // The axis runs between the middles of the two short sides.
+    let side = |k: usize| (poly[(k + 1) % 4] - poly[k]).length();
+    let k = if side(0) < side(1) { 0 } else { 1 };
+    let a = poly[k].lerp(poly[k + 1], 0.5);
+    let b = poly[k + 2].lerp(poly[(k + 3) % 4], 0.5);
+    let (len, width) = ((b - a).length(), side(k));
+    if len < CHANNEL_MARKS_MIN_M {
+        return;
+    }
+    let d = (b - a).normalize();
+    let n = d.left();
+    let inside = |q: V2| q.x >= bounds[0] && q.y >= bounds[1] && q.x < bounds[2] && q.y < bounds[3];
+    let at = |q: V2| q.at(grid.height_at(q.x, q.y) + MARK_LIFT_M);
+    let up = V3::new(0.0, 1.0, 0.0);
+    let flow = Paint::new(
+        shade(mix(pal.concrete_dark, pal.water, 60), 170),
+        Pattern::Concrete,
+    );
+    let joint = Paint::new(shade(pal.concrete_dark, 150), Pattern::Concrete);
+    let steps = (len / JOINT_STEP_M) as usize;
+    for i in 0..steps {
+        let (s0, s1) = (i as f32 * JOINT_STEP_M, (i + 1) as f32 * JOINT_STEP_M);
+        let mid = a + d * (0.5 * (s0 + s1));
+        if !inside(mid) {
+            continue;
+        }
+        let (p0, p1) = (a + d * s0, a + d * s1);
+        let h = 0.5 * LOW_FLOW_M;
+        quad(
+            m,
+            [
+                at(p0 - n * h),
+                at(p1 - n * h),
+                at(p1 + n * h),
+                at(p0 + n * h),
+            ],
+            up,
+            flow,
+        );
+        let j = width * JOINT_SPAN;
+        let (q0, q1) = (p0 - d * (0.5 * JOINT_W_M), p0 + d * (0.5 * JOINT_W_M));
+        for (lo, hi) in [(-j, -h), (h, j)] {
+            quad(
+                m,
+                [
+                    at(q0 + n * lo),
+                    at(q1 + n * lo),
+                    at(q1 + n * hi),
+                    at(q0 + n * hi),
+                ],
+                up,
+                joint,
+            );
         }
     }
 }

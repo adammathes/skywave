@@ -1,0 +1,44 @@
+// The words the 2001 basin's shop signs may carry (`socal_basin_2001.ron`): a closed list,
+// reviewed by a person, never extended by code, beside the coast's (`lexicon.ron`, which
+// stays as it is so the coast's signs never change). Format and rules for reviewers as
+// there: no real brand, chain, station or street name; no real person's name; nothing
+// that reads as placeholder text. The names are the coast's invented ones; the
+// descriptors, trades and lines are the turn of the century's: mini-mall tenants, auto
+// shops, taco stands, pagers and phones.
+Lexicon(
+    id: "us_basin",
+
+    syllables: Syllables(
+        onsets: ["B", "BR", "C", "D", "DR", "F", "G", "H", "J", "K", "L", "M", "N", "P",
+                 "PR", "QU", "R", "S", "SK", "ST", "T", "TR", "V", "W"],
+        nuclei: ["A", "E", "I", "O", "U", "Y", "EY", "IE", "OW"],
+        codas: ["CK", "D", "K", "L", "LL", "N", "NT", "R", "RD", "RS", "S", "SH", "T", "TT",
+                "V"],
+    ),
+
+    given: [
+        "VORNIE", "DELVA", "RENNA", "KESTA", "LORNIE", "BRELLA", "SOVIE", "DORVAN", "GILVA",
+        "HOLVIS", "IVELLA", "JORVEN", "KALDER", "LISSET", "DRELVA", "NELVA", "OTTAL",
+        "PERVIS", "RAVELLE", "SELVIN", "TERVA", "VELDO", "WILVER", "ARDELL", "BEVRO",
+        "CORLIE", "DESVIE", "FENLO", "HARVIE", "MIRELL",
+    ],
+    surnames: [
+        "HOLDREK", "KESSICK", "TORVELL", "HADLEN", "TESKOW", "CORVEY", "PELLARD", "WESKIN",
+        "MORVANE", "LINVER", "GASKEN", "RUDLOW", "SORVIK", "TAVERLY", "BELVANE", "HOLLEN",
+        "DRESKY", "FALVEN", "KILDER", "MARSKY", "NOLVIN", "PADVEN", "QUILLAN", "RASKELL",
+        "STARVEY", "TOLVERY", "VARLOCK", "WENDRIK", "ABERNY", "OSMERE", "ELVANT", "GORVETT",
+        "HESKIN", "LARKEN", "MELVICK", "PRESKIL", "TRAVISH", "BRODLEY", "KERVAN", "DUNVIK",
+    ],
+    descriptors: [
+        "VALLEY", "SUNSET", "GOLDEN", "CORNER", "AVENUE", "PALM", "HILLTOP", "DESERT",
+        "WESTSIDE", "EASTSIDE", "FAMILY", "MIDWAY", "CENTRAL", "DISCOUNT", "BOULEVARD",
+        "NIGHT",
+    ],
+    trades: [
+        "DONUTS", "TACOS", "TAQUERIA", "BURGERS", "PIZZA", "TERIYAKI", "BOBA", "LIQUOR",
+        "VIDEO", "PAGERS", "PHONES", "NAILS", "LAUNDRY", "CLEANERS", "BARBER", "DENTAL",
+        "DRUGS", "TIRES", "WHEELS", "AUTO PARTS", "BODYWORK", "CAR AUDIO", "TINT",
+        "SMOG CHECK", "MUFFLERS", "GARAGE", "MOTEL", "LOUNGE", "COCKTAILS", "BOWL",
+    ],
+    lines: ["OPEN", "SINCE", "VACANCY", "COCKTAILS", "SALE", "WELCOME"],
+)

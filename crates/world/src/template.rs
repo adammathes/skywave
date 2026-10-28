@@ -1045,7 +1045,8 @@ impl RegionTemplate {
             .fold(0.0f32, |a, w| a.max(w.height_m.1));
         let Some(e) = &self.elevation else {
             let b = self.basin.as_ref().expect("a coast or a basin");
-            // The floor tilts up across the whole place toward the hills.
+            // The floor tilts up across the whole place toward the hills: 4096 m covers places
+            // up to 32 chunks a side (v1 places are 16).
             let hi = b.floor_m.1
                 + b.tilt * 4096.0
                 + 2.0 * b.relief_m
