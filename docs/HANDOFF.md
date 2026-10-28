@@ -43,18 +43,14 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 00:40 UTC, coordinator handed off to save quota)
-The previous coordinator stopped mid-wave. #42 (the Deck) merged at 00:18 (cf4e662); four builder
-sessions are still finishing; each
+### Resume here (2026-10-28 00:26 UTC, coordinator handed off to save quota)
+The previous coordinator stopped mid-wave. #42 (the Deck) merged at 00:18 and #44 (handling)
+at 00:26 (88c6c68); three builder sessions are still finishing; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
 the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
 sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
-- **#44 handling feel** (`vehicle/handling-feel`, session_0121vThANMtZPyLXazaRBJXm): review
-  done; last ask: tune the Destrier into the Arcade and Light bands instead of widening its band,
-  put the two Halberds in `LIVELY` for the no-assist launch, document the 2.9× Light band; merge
-  on green. The owner should drive this one first.
 - **#37 parking lots** (`bldg/parking-lots`, session_0121vThBfSpYpVxsB7L5B2nD): fixes pushed
   (3fe9cf8) but CI red on a clash with #38: `BoxSolid` gained `lot`, and #38's initializers in
   `app/src/npc.rs` and `world/tests/collide.rs` miss it; told to merge main and fix. Last asks: the hold covers cars beside a parked player within 60 m in any
@@ -127,9 +123,11 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   Destrier Coupe, Siskin Coupe; body kit, blower, targa, tall wing, twin rims; underglow on U;
   `VehicleSpec::built`; the basin is years 1995–2001 with these as heroes); the Deck (#42: one
   library from the folder layout and tags, TAPE / CD / MP3 by the world's year, Normal / Shuffle /
-  Continuous, readout top right, Back held + d-pad on the pad, resumes next session); the Deck's "Skywave
+  Continuous, readout top right, Back held + d-pad on the pad, resumes next session); handling feel (#44, NOTES 17: stronger yaw damping in Arcade and Light,
+  exotics' oversteer bias halved, no spins in Arcade or Light on any car, Off stays lively, the
+  Destrier tuned into the bands, the Halberds lively with no assists); the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: natural map edges (#20), parking lots (#37), handling feel (#44); building: 2001
+- Open PRs: natural map edges (#20), parking lots (#37); building: 2001
   traffic cars (`m8/traffic-2001`). State of each is in "Resume here" above. Paused: NPC cars see
   pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
   comes next.
@@ -139,7 +137,7 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #44, #37, #20, then the 2001 traffic cars; NPC cars see pedestrians (board order 15, after #38); M8 waves
+- Next: merge #37, #20, then the 2001 traffic cars; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
