@@ -107,6 +107,9 @@ pub struct SceneSetup {
     pub traffic: Option<traffic::Density>,
     /// Signal tick the junction lights start at, or `None` for 0.
     pub phase: Option<u64>,
+    /// Seconds into a run of the place's train at the start: it starts warning at its
+    /// first end, runs that long, and the scene opens there (`None`: it rests a while).
+    pub train_s: Option<f32>,
 }
 
 impl Default for SceneSetup {
@@ -133,6 +136,7 @@ impl Default for SceneSetup {
             stream: true,
             traffic: None,
             phase: None,
+            train_s: None,
         }
     }
 }
@@ -158,9 +162,9 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 18] = [
+    pub const KEYS: [&'static str; 19] = [
         "seed", "place", "scenario", "car", "paint", "cam", "t", "pos", "yaw", "lights", "glow",
-        "fly", "still", "map", "ui", "stream", "traffic", "phase",
+        "fly", "still", "map", "ui", "stream", "traffic", "phase", "train",
     ];
 
     /// World `scenario` and its procedural place; its own car unless the scene named one.
@@ -253,6 +257,13 @@ impl SceneSetup {
             "stream" => self.stream = parse_switch(value).ok_or_else(bad)?,
             "traffic" => self.traffic = Some(crate::npc::density_from_name(value).ok_or_else(bad)?),
             "phase" => self.phase = Some(value.parse().map_err(|_| bad())?),
+            "train" => {
+                let s: f32 = value.parse().map_err(|_| bad())?;
+                if !(0.0..=3600.0).contains(&s) {
+                    return Err(bad());
+                }
+                self.train_s = Some(s);
+            }
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;
                 if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {

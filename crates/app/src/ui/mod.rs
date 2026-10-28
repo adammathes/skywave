@@ -1409,6 +1409,7 @@ impl App {
             (pose.eye, pose.forward())
         };
         self.audio.traffic = self.npcs.voices(steps.alpha, eye, forward, velocity);
+        self.audio.bell = self.rail.as_ref().map_or(0.0, |r| r.bell(eye));
         self.ui.traffic = (self.npcs.count(), self.npcs.step_ms());
         self.ui.peds = (self.npcs.crowd.count(), self.npcs.crowd.step_ms());
         steps

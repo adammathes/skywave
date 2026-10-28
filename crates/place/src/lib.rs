@@ -496,6 +496,8 @@ pub enum PoiKind {
     CrewGarage = 10,
     /// A taco stand and its lot.
     TacoStand = 11,
+    /// Where a rail line crosses a road at grade, on the track's middle.
+    GradeCrossing = 12,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.
@@ -752,6 +754,13 @@ pub enum PropKind {
     },
     /// A picnic table with its benches; facing: along the table.
     PicnicTable,
+    /// A railroad crossing's gate (a mast with the crossed blades, twin lamps, a bell and
+    /// the arm's pivot) beside a road's approach to the track; facing: toward the drivers it
+    /// stops. Its arm, `arm_dm` decimeters long, swings down across the approach to the
+    /// left of the facing (the app draws it and its lamps as a train comes).
+    CrossingGate {
+        arm_dm: u8,
+    },
 }
 
 /// [`PropKind::Track`] beds: on a ballast embankment over the ground...
@@ -762,6 +771,9 @@ pub const TRACK_CROSSING: u8 = 1;
 pub const TRACK_BRIDGE: u8 = 2;
 /// ...or on ballast, ending at a bumper at its far end along the facing (a spur's end).
 pub const TRACK_END: u8 = 3;
+/// Set on the bed of a spur's pieces (beside the main line, off its turnout): what is left
+/// is one of the beds above. The main line's pieces are the ones without it.
+pub const TRACK_SPUR: u8 = 0x10;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

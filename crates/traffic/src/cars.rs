@@ -476,6 +476,23 @@ pub struct Traffic {
     /// longest body of them.
     rules: Vec<ShapeRule>,
     max_len: f32,
+    /// The lines the cars must not cross now ([`Traffic::set_barriers`]).
+    barriers: Vec<Barrier>,
+}
+
+/// Most [`Barrier`]s at once.
+pub const MAX_BARRIERS: usize = 64;
+/// No car spawns within this of a barrier, m.
+const BARRIER_SPAWN_CLEAR_M: f32 = 40.0;
+
+/// A line across a road the cars stop at while it holds: a closed railroad crossing's gate
+/// line across an approach (`a` to `b`), holding the cars heading against `facing` (toward
+/// the track); a car already past it, or leaving the track, drives on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Barrier {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    pub facing: [f32; 2],
 }
 
 impl Clone for Traffic {
@@ -511,6 +528,11 @@ impl Clone for Traffic {
             shape_weights: self.shape_weights.clone(),
             rules: self.rules.clone(),
             max_len: self.max_len,
+            barriers: {
+                let mut b = Vec::with_capacity(MAX_BARRIERS);
+                b.extend_from_slice(&self.barriers);
+                b
+            },
         }
     }
 }
@@ -540,6 +562,20 @@ fn seg_dist(a0: [f32; 2], a1: [f32; 2], b0: [f32; 2], b1: [f32; 2]) -> f32 {
 }
 
 /// Distance from `p` to segment `a`-`b`, and where along it `p` projects (0..1).
+/// Where segment `p..q` crosses segment `a..b`, as a fraction along `p..q`.
+fn cross_at(p: [f32; 2], q: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Option<f32> {
+    let r = [q[0] - p[0], q[1] - p[1]];
+    let s = [b[0] - a[0], b[1] - a[1]];
+    let den = r[0] * s[1] - r[1] * s[0];
+    if den == 0.0 {
+        return None;
+    }
+    let w = [a[0] - p[0], a[1] - p[1]];
+    let t = (w[0] * s[1] - w[1] * s[0]) / den;
+    let u = (w[0] * r[1] - w[1] * r[0]) / den;
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some(t)
+}
+
 fn point_seg(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
     let ab = [b[0] - a[0], b[1] - a[1]];
     let ap = [p[0] - a[0], p[1] - a[1]];
@@ -839,6 +875,7 @@ impl Traffic {
             shape_weights: Vec::new(),
             rules: alloc::vec![ShapeRule::default(); usize::from(budget.shapes)],
             max_len: CAR_LEN_M,
+            barriers: Vec::with_capacity(MAX_BARRIERS),
         }
     }
 
@@ -888,6 +925,81 @@ impl Traffic {
 
     /// Each shape's [`ShapeRule`] (below [`TrafficBudget::shapes`]; the rest keep the
     /// default).
+    /// The lines the cars must not cross from now on (at most [`MAX_BARRIERS`]; the rest
+    /// are dropped): closed railroad crossings. Allocates nothing.
+    pub fn set_barriers(&mut self, barriers: &[Barrier]) {
+        self.barriers.clear();
+        let n = barriers.len().min(MAX_BARRIERS);
+        self.barriers.extend_from_slice(&barriers[..n]);
+    }
+
+    /// Gap from car `c`'s front along its path to the nearest barrier it is heading into,
+    /// when one crosses its path within `look`.
+    fn barrier_gap(&self, g: &LaneGraph, c: &Car, path: &Path, look: f32) -> Option<f32> {
+        let mut best: Option<f32> = None;
+        for bar in &self.barriers {
+            if dot(c.dir, bar.facing) >= 0.0 {
+                continue;
+            }
+            let mid = [0.5 * (bar.a[0] + bar.b[0]), 0.5 * (bar.a[1] + bar.b[1])];
+            if len2([mid[0] - c.pos[0], mid[1] - c.pos[2]]) > look + 40.0 {
+                continue;
+            }
+            let mut test = |p: [f32; 2], q: [f32; 2], start: f32, len: f32| {
+                if let Some(t) = cross_at(p, q, bar.a, bar.b) {
+                    let along = start + len * t;
+                    // A car whose front is past the line already drives on.
+                    if along > 0.0 && along < look {
+                        best = Some(best.map_or(along, |b: f32| b.min(along)));
+                    }
+                }
+            };
+            self.walk_path(g, path, look, &mut test);
+        }
+        best
+    }
+
+    /// Calls `f(a, b, start, len)` for each piece of `path` up to `look` ahead: its ends,
+    /// the distance from the car's front to its start and its length.
+    fn walk_path(
+        &self,
+        g: &LaneGraph,
+        path: &Path,
+        look: f32,
+        f: &mut impl FnMut([f32; 2], [f32; 2], f32, f32),
+    ) {
+        for &(seg, start) in path {
+            if seg == NONE || start > look {
+                break;
+            }
+            if seg < self.lanes {
+                let l = &g.lanes[seg as usize];
+                let r = l.first_point as usize..(l.first_point + l.point_count) as usize;
+                let (pts, arc) = (&g.points[r.clone()], &g.arc[r]);
+                let from = (-start).max(0.0);
+                let k0 = arc[1..].partition_point(|&v| v < from).min(pts.len() - 2);
+                for k in k0..pts.len() - 1 {
+                    let s = start + arc[k];
+                    if s > look {
+                        break;
+                    }
+                    f(xz(pts[k]), xz(pts[k + 1]), s, arc[k + 1] - arc[k]);
+                }
+            } else {
+                let curve = &g.turns[(seg - self.lanes) as usize].curve;
+                let mut prev = curve[0];
+                let mut acc = start;
+                for k in 1..=CURVE_STEPS {
+                    let p = bezier(curve, k as f32 / CURVE_STEPS as f32);
+                    let len = dist2(prev, p);
+                    f(xz(prev), xz(p), acc, len);
+                    acc += len;
+                    prev = p;
+                }
+            }
+        }
+    }
+
     pub fn set_shape_rules(&mut self, rules: &[ShapeRule]) {
         for (k, r) in self.rules.iter_mut().enumerate() {
             *r = rules.get(k).copied().unwrap_or_default();
@@ -1470,6 +1582,10 @@ impl Traffic {
             a = a.min(idm(v, v0, c.headway, gap, v - vp, PLAYER_S0));
             max_ds = max_ds.min(gap - PLAYER_GAP);
         }
+        if let Some(gap) = self.barrier_gap(g, &c, &path, look) {
+            a = a.min(idm(v, v0, c.headway, gap, v, LINE_S0));
+            max_ds = max_ds.min(gap);
+        }
         let player = player.unwrap_or(f32::INFINITY);
         if c.hold > 0 {
             a = -B_MAX;
@@ -1901,10 +2017,15 @@ impl Traffic {
             let p = g.pose(lane, s);
             let rel = [pp[0] - p.pos[0], pp[2] - p.pos[2]];
             let d = len2(rel);
+            let near_barrier = self.barriers.iter().any(|bar| {
+                let mid = [0.5 * (bar.a[0] + bar.b[0]), 0.5 * (bar.a[1] + bar.b[1])];
+                len2([mid[0] - p.pos[0], mid[1] - p.pos[2]]) < BARRIER_SPAWN_CLEAR_M
+            });
             if d < b.spawn_min_m
                 || d > b.spawn_max_m
                 || dot(rel, p.dir) <= 0.0
                 || inp.view.sees(p.pos, self.max_len + 2.0)
+                || near_barrier
             {
                 continue;
             }

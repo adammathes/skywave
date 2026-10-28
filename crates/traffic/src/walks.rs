@@ -1421,8 +1421,13 @@ fn spots(place: &Place, g: &WalkGraph) -> Vec<Spot> {
         }
     }
     // Landmarks and piers at their nearest walk.
-    let mut landmarks: Vec<([f32; 2], [f32; 2])> =
-        place.pois.iter().map(|p| (p.pos, [0.0; 2])).collect();
+    // (Not a grade crossing, whose nearest walk crosses the track.)
+    let mut landmarks: Vec<([f32; 2], [f32; 2])> = place
+        .pois
+        .iter()
+        .filter(|p| p.kind != place::PoiKind::GradeCrossing)
+        .map(|p| (p.pos, [0.0; 2]))
+        .collect();
     for p in &place.props.items {
         if let PropKind::Pier { .. } = p.kind {
             let (sn, cs) = sin_cos(p.yaw);
