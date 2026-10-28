@@ -2165,11 +2165,13 @@ mod tests {
         // Back in either world it holds what it held there before: nothing carried over.
         assert_eq!(seen[2], seen[0]);
         assert_eq!(seen[3], seen[1]);
-        // The stub shares the coast's place, so the second world asks for the same room;
-        // it holds more meshes, for the car it starts in and the 2001 cars it parks and
-        // drives.
-        let rest = |f: &(usize, usize, usize, ChunkPoolConfig, usize, usize)| (f.1, f.2, f.3, f.5);
+        // The second world asks for the same chunk pool and traffic room; it holds more
+        // meshes, for the car it starts in and the 2001 cars it parks and drives, and room
+        // for its railway's instances (its train's bodies and its gates' arms and lamps).
+        let rest = |f: &(usize, usize, usize, ChunkPoolConfig, usize, usize)| (f.3, f.5);
         assert_eq!(rest(&seen[1]), rest(&seen[0]));
+        let rail = app.rail.as_ref().map_or(0, |r| r.capacity());
+        assert!(rail > 0 && seen[1].1 == seen[0].1 + rail && seen[1].2 == seen[0].2 + rail);
         assert!(seen[1].0 > seen[0].0 && seen[1].4 > seen[0].4);
     }
 

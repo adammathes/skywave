@@ -490,22 +490,26 @@ impl Train {
         g.closed || g.arm < 1.0
     }
 
-    /// Fingerprint of the train and its gates.
+    /// Fingerprint of the train and its gates. Allocates nothing.
     pub fn hash(&self) -> u64 {
-        let mut words = alloc::vec![
-            u64::from(self.head.to_bits()),
-            u64::from(self.speed.to_bits()),
-            u64::from(self.forward),
-            match self.phase {
-                Phase::Resting { t } => u64::from(t.to_bits()),
-                Phase::Announcing { t } => 1 << 40 | u64::from(t.to_bits()),
-                Phase::Running => 2 << 40,
-            },
-        ];
+        let phase = match self.phase {
+            Phase::Resting { t } => u64::from(t.to_bits()),
+            Phase::Announcing { t } => 1 << 40 | u64::from(t.to_bits()),
+            Phase::Running => 2 << 40,
+        };
+        let mut h = skywave_core::hash64(
+            0x0054_5241_494E,
+            &[
+                u64::from(self.head.to_bits()),
+                u64::from(self.speed.to_bits()),
+                u64::from(self.forward),
+                phase,
+            ],
+        );
         for g in &self.gates {
-            words.push(u64::from(g.arm.to_bits()) | u64::from(g.closed) << 32);
+            h = skywave_core::hash64(h, &[u64::from(g.arm.to_bits()) | u64::from(g.closed) << 32]);
         }
-        skywave_core::hash64(0x5452_4149_4E, &words)
+        h
     }
 }
 

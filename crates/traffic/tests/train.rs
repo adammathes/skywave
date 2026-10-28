@@ -194,8 +194,9 @@ fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
 
 #[test]
 fn nobody_is_ever_inside_the_train_and_nobody_crosses_a_closed_crossing() {
+    // Long enough for the train to warn, run the whole line and clear its last crossing.
     for (seed, k) in [(1u64, 3usize), (2, 3)] {
-        let c = run(seed, k, 4.0, 5.0);
+        let c = run(seed, k, 3.1, 0.0);
         println!("seed {seed} crossing {k}: {c:?}");
         assert_eq!(c.people_in_train, 0, "seed {seed}: {c:?}");
         assert_eq!(c.cars_in_train, 0, "seed {seed}: {c:?}");
