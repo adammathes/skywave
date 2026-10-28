@@ -1,0 +1,46 @@
+// Wren Minivan: a late-90s front-drive minivan with a V6 and a sliding side door.
+//
+// Intent: roomy, soft and steady. A smooth V6 through a four-speed automatic moves it far
+// better than the 80s minivans, but it is still tall and heavy on its springs, leans in
+// every corner, understeers kindly and never asks for anything.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "wren_minivan",
+    name: "Wren Minivan",
+    era: Nineties,
+    year: 1999,
+    class: Van,
+
+    mass_kg: 1760,
+    dims_m: (5.00, 1.92, 1.73),    // length, width, height
+    wheelbase_m: 3.00,
+    track_m: 1.62,
+    cg_height_m: 0.66,
+    cg_fore_aft: 0.42,
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 5800,
+        torque_nm: [(800, 194), (2000, 243), (3200, 267), (4400, 254), (5800, 209)],
+    ),
+    gears: [2.84, 1.57, 1.0, 0.69],
+    final_drive: 3.62,
+    reverse: 2.3,
+    shift_ms: 420,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 0.872, grip_long: 0.88, load_sens: 0.12, slip_peak_deg: 9.0),
+    suspension: Susp(spring_n_m: 26000, damper: 2100, travel_m: 0.19, antiroll: 0.16),
+    steering: Steer(max_deg: 33, speed_sens: 0.5, return_rate: 5.5),
+    brakes: Brakes(max_nm: 4000, bias_front: 0.68, abs: true, handbrake_nm: 2400),
+    aero: Aero(cd: 0.56, frontal_m2: 2.8, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.25, body_roll: 0.8, engine_sound: "v6", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 110, mph), Tach(0, 6000)],
+        radio: "digital_green",
+    ),
+    shape: "wren_minivan.shape.ron",
+)

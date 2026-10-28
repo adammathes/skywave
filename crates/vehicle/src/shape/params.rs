@@ -427,6 +427,11 @@ pub struct ShapeSpec {
     /// Hardtop (the default when left out) or convertible.
     #[cfg_attr(feature = "serde", serde(default))]
     pub roof: Roof,
+    /// More axles, `x` m from the nose, each a pair of the road wheels at the track drawn
+    /// fixed into the body at level of detail 1 or coarser (a truck's tandems): at most 4,
+    /// clear of the body's underside, of each other and of the two road axles. Optional.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub axles: Vec<f32>,
     /// Era body colors `#rrggbb` (sRGB), or `#upper/#lower` for two-tone paint split at the
     /// first crease (or halfway up the side) with a pinstripe in `accent`; one is chosen per
     /// instance.
@@ -731,6 +736,21 @@ impl ShapeSpec {
             && w.rear_x - w.front_x > 2.0 * ra + 0.3)
         {
             return Err(ShapeError::WheelPlacement);
+        }
+        if self.axles.len() > 4 {
+            return Err(ShapeError::WheelPlacement);
+        }
+        for (k, &x) in self.axles.iter().enumerate() {
+            let clear = |o: f32| (x - o).abs() > 2.0 * w.radius + 0.05;
+            let under = super::math::polyline_at(&bottom, x);
+            if !(x - ra > 0.0 && x + ra < length)
+                || !clear(w.front_x)
+                || !clear(w.rear_x)
+                || !self.axles[..k].iter().all(|&o| clear(o))
+                || under < 2.0 * w.radius
+            {
+                return Err(ShapeError::WheelPlacement);
+            }
         }
         let max_half = plan.iter().fold(0.0f32, |m, p| m.max(p.1));
         if w.track <= 0.5 || w.track * 0.5 + w.width * 0.5 > max_half + 0.05 {

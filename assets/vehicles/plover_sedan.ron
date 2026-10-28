@@ -1,0 +1,46 @@
+// Plover Sedan: a late-90s front-drive mid-size family sedan with a 2.2 L four.
+//
+// Intent: the car everyone's parents drove. Quiet, soft and forgiving: a smooth four through
+// a four-speed automatic, light steering, comfortable springs, mild safe understeer, ABS.
+// Quicker and grippier than the 80s sedans it replaced, never sporty.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "plover_sedan",
+    name: "Plover Sedan",
+    era: Nineties,
+    year: 1997,
+    class: Sedan,
+
+    mass_kg: 1340,
+    dims_m: (4.85, 1.80, 1.43),    // length, width, height
+    wheelbase_m: 2.75,
+    track_m: 1.55,
+    cg_height_m: 0.52,
+    cg_fore_aft: 0.40,
+
+    engine: Engine(
+        idle_rpm: 750,
+        redline_rpm: 6200,
+        torque_nm: [(1000, 150), (2500, 190), (4000, 205), (5200, 196), (6200, 170)],
+    ),
+    gears: [2.74, 1.54, 1.0, 0.72],
+    final_drive: 3.9,
+    reverse: 2.4,
+    shift_ms: 380,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 0.99, grip_long: 0.98, load_sens: 0.1, slip_peak_deg: 8.0),
+    suspension: Susp(spring_n_m: 26000, damper: 2400, travel_m: 0.17, antiroll: 0.28),
+    steering: Steer(max_deg: 34, speed_sens: 0.55, return_rate: 7.0),
+    brakes: Brakes(max_nm: 3200, bias_front: 0.68, abs: true, handbrake_nm: 2200),
+    aero: Aero(cd: 0.325, frontal_m2: 2.1, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.15, body_roll: 0.55, engine_sound: "i4", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 120, mph), Tach(0, 7000)],
+        radio: "digital_green",
+    ),
+    shape: "plover_sedan.shape.ron",
+)

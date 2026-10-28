@@ -1,6 +1,6 @@
-//! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster" and the 2001
-//! hero cars), driven with the real specs from `assets/vehicles/`: every car's 0–60 mph time
-//! in its band, all of them distinct in 0–60, top speed and skidpad grip, the class
+//! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster", the 2001
+//! hero cars and traffic cars), driven with the real specs from `assets/vehicles/`: every
+//! car's 0–60 mph time in its band, all of them distinct in 0–60, top speed and skidpad grip, the class
 //! orderings, the mid-engined exotics ahead of everything and the pony car behind the other
 //! sports cars, the 2001 heroes' launches, and nothing rolls at full lock or needs more than
 //! 60 m to stop. Run with `--nocapture` for
@@ -30,7 +30,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 25] = [
+const ROSTER: [Entry; 31] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -57,6 +57,13 @@ const ROSTER: [Entry; 25] = [
     (car!("tanager_awd"), (5.0, 5.8)),
     (car!("destrier_coupe"), (5.9, 6.5)),
     (car!("siskin_coupe"), (6.1, 6.5)),
+    // The 2001 traffic cars (the semi, which only traffic drives, is not driven here).
+    (car!("plover_sedan"), (9.3, 10.3)),
+    (car!("sorrel_utility"), (9.9, 10.9)),
+    (car!("wren_minivan"), (10.5, 11.6)),
+    (car!("percheron_pickup"), (7.9, 8.9)),
+    (car!("linnet_hatch"), (9.1, 10.1)),
+    (car!("sledge_box_truck"), (16.0, 19.0)),
 ];
 
 /// The mid-engined exotics, which out-accelerate and outrun every other car, and the pony

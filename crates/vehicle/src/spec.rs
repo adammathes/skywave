@@ -185,6 +185,10 @@ pub struct VehicleSpec {
     #[cfg_attr(feature = "serde", serde(default))]
     pub built: u16,
     pub class: VehicleClass,
+    /// Only NPC traffic drives it (the semi): it is not on the Vehicle page and the player
+    /// never drives it. Optional; false by default.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub traffic_only: bool,
     pub mass_kg: f32,
     /// Body box `(length, width, height)`, m.
     pub dims_m: [f32; 3],
@@ -579,6 +583,7 @@ mod tests {
             era: Era::Eighties,
             year: 1984,
             built: 0,
+            traffic_only: false,
             class: VehicleClass::Sports,
             mass_kg: 1250.0,
             dims_m: [4.3, 1.75, 1.15],

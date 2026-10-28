@@ -1,0 +1,57 @@
+// Percheron Crew Cab body: a 2000 full-size pickup, four-door crew cab, long bed.
+//
+// Intent: big and square-shouldered but rounded at the edges, the new decade's truck. A
+// tall face with a wide chrome-barred grille between big rectangular lamps, a long hood
+// that rises a little at the cowl, a raked windshield, a long cab with four doors and two
+// windows a side, then a long open bed with a tailgate. Chrome bumpers front and back,
+// mud flaps, five-spoke alloys on tall tires. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "percheron_pickup",
+    side: [
+        (0.00, 0.96), (0.04, 1.06), (0.20, 1.12), (1.40, 1.18), (1.50, 1.20), (1.94, 1.80),
+        (2.04, 1.86), (3.40, 1.86), (3.46, 1.83), (3.52, 1.24), (3.56, 1.22), (5.66, 1.22),
+        (5.72, 1.18),
+        (5.72, 0.52), (5.56, 0.46), (5.10, 0.44), (1.10, 0.42), (0.14, 0.46), (0.00, 0.56),
+    ],
+    plan: [
+        (0.00, 0.90), (0.06, 0.96), (0.30, 0.985), (0.80, 0.99), (5.60, 0.99), (5.72, 0.97),
+    ],
+    belt: [(1.50, 1.20), (5.72, 1.22)],
+    section: Section(shoulder: 0.95, tumblehome_deg: 8, greenhouse_frac: 0.88, crown: 0.03, tuck: 0.04),
+    glass: Glass(
+        windshield: (1.52, 1.96),
+        backlight: (3.46, 3.52),
+        side: [(2.04, 2.70), (2.80, 3.38)],
+    ),
+    wheels: Wheels(radius: 0.39, width: 0.25, arch_clearance: 0.05, front_x: 1.02, rear_x: 4.90, track: 1.68),
+    front: Front(lights: Rect, grille: Wide, bumper: Chrome, bumper_y: (0.44, 0.64)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Chrome, bumper_y: (0.46, 0.62)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.86, creases: [(0.10, 0.88, 5.68, 0.90)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [PickupBed, ChromeTrim, MudFlaps, Badge(Bar)],
+    // White, black, dark red, silver, forest green, navy, pewter over silver.
+    palette: ["#eeede8", "#18191c", "#7a1a20", "#b8bcc0", "#243f30", "#1e2a46", "#6e7176/#b8bcc0"],
+    accent: "#2a2b2e",
+    interior: InteriorShape(
+        dash_height: 1.16,
+        dash_x: 1.76,
+        wheel_pos: (2.20, 1.02),
+        wheel_radius: 0.21,
+        column_angle_deg: 32,
+        mirror_pos: (2.06, 1.70),
+        seat: (2.68, 0.80),
+        driver_offset: 0.44,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: dark gray plastic, gray cloth with
+        // a darker insert, a gray floor, amber-lit dials.
+        colors: ["#2e3034", "#5a5c60", "#3a3c40", "#b8b6b0", "#45474b", "#8a8c90"],
+        display: "#ffb040",
+        insert: "#45474b",
+        piping: "#6a6c70",
+        dash_top: "#26282b",
+    ),
+)

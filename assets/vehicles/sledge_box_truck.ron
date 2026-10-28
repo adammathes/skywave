@@ -1,0 +1,46 @@
+// Sledge Box Truck: a late-90s medium-duty box truck with a big gas V8, the box empty.
+//
+// Intent: slow, tall and patient. Six tonnes on stiff springs, a big low-revving V8 through
+// a four-speed automatic, a long slow climb to highway speed, heavy slow steering and big
+// brakes. It leans and it pushes; it gets there.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "sledge_box_truck",
+    name: "Sledge Box Truck",
+    era: Nineties,
+    year: 1996,
+    class: Van,
+
+    mass_kg: 5600,
+    dims_m: (7.40, 2.44, 3.30),    // length, width, height
+    wheelbase_m: 4.60,
+    track_m: 1.92,
+    cg_height_m: 1.05,
+    cg_fore_aft: 0.48,
+
+    engine: Engine(
+        idle_rpm: 600,
+        redline_rpm: 4400,
+        torque_nm: [(800, 520), (1800, 620), (2800, 640), (3600, 600), (4400, 500)],
+    ),
+    gears: [2.6, 1.6, 1.25, 1.0],
+    final_drive: 4.88,
+    reverse: 3.0,
+    shift_ms: 500,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.78, grip_long: 0.85, load_sens: 0.14, slip_peak_deg: 10.0),
+    suspension: Susp(spring_n_m: 120000, damper: 9000, travel_m: 0.18, antiroll: 0.3),
+    steering: Steer(max_deg: 34, speed_sens: 0.4, return_rate: 4.0),
+    brakes: Brakes(max_nm: 14000, bias_front: 0.6, abs: true, handbrake_nm: 8000),
+    aero: Aero(cd: 0.70, frontal_m2: 7.6, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.3, body_roll: 0.7, engine_sound: "v8_lazy", shift_jerk: 0.2),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 90, mph), Tach(0, 5000)],
+        radio: "amber_seek",
+    ),
+    shape: "sledge_box_truck.shape.ron",
+)
