@@ -23,7 +23,7 @@ macro_rules! car {
     };
 }
 
-const ROSTER: [&str; 25] = [
+const ROSTER: [&str; 29] = [
     car!("basilisk_v12"),
     car!("basilisk_roadster"),
     car!("avocet_v8"),
@@ -49,6 +49,10 @@ const ROSTER: [&str; 25] = [
     car!("tanager_awd"),
     car!("destrier_coupe"),
     car!("siskin_coupe"),
+    car!("shrike_coupe"),
+    car!("glaive_turbo"),
+    car!("falchion_sedan"),
+    car!("courser_v8"),
 ];
 
 const PRESETS: [(&str, Assists); 3] = [
@@ -250,9 +254,9 @@ fn measure() -> Vec<(String, &'static str, Probe, Feel, f32)> {
     out
 }
 
-/// The sports and muscle cars, which may stay lively with no assists (a choice: the
-/// "driver" preset is for drivers).
-const LIVELY: [&str; 14] = [
+/// The sports and muscle cars and the rear-drive sports sedan, which may stay lively with
+/// no assists (a choice: the "driver" preset is for drivers).
+const LIVELY: [&str; 17] = [
     "basilisk_v12",
     "basilisk_roadster",
     "avocet_v8",
@@ -267,6 +271,9 @@ const LIVELY: [&str; 14] = [
     "halberd_targa",
     "tanager_awd",
     "destrier_coupe",
+    "shrike_coupe",
+    "falchion_sedan",
+    "courser_v8",
 ];
 
 #[test]

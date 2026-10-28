@@ -24,7 +24,8 @@ fn load(text: &str) -> ShapeSpec {
     s
 }
 
-/// The rest of the roster (the 1980s cars, the 2001 heroes, then the 2001 traffic cars), as `(shape, spec)` texts.
+/// The rest of the roster (the 1980s cars, the 2001 heroes, the 2001 traffic cars, then the
+/// second four 2001 heroes), as `(shape, spec)` texts.
 macro_rules! car {
     ($id:literal) => {
         (
@@ -33,7 +34,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 28] = [
+const ROSTER: [(&str, &str); 32] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -62,6 +63,10 @@ const ROSTER: [(&str, &str); 28] = [
     car!("linnet_hatch"),
     car!("sledge_box_truck"),
     car!("anvil_semi"),
+    car!("shrike_coupe"),
+    car!("glaive_turbo"),
+    car!("falchion_sedan"),
+    car!("courser_v8"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -517,7 +522,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 32] = [
+    let expected: [u64; 36] = [
         0xd8c8_d201_ca40_efe2,
         0xedbe_0c75_ff0b_96c9,
         0x0cc6_c3d4_6210_49af,
@@ -550,8 +555,12 @@ fn builds_are_deterministic() {
         0xfb0c_e7e9_b101_0876,
         0x634c_e91b_6187_9c07,
         0x6a64_3802_bc7c_7342,
+        0x4025_26ef_64cb_d9cf,
+        0x851b_cacc_1a69_2452,
+        0x5946_40bf_f2b9_7d5f,
+        0x994c_8253_2080_7566,
     ];
-    let mut got = [0u64; 32];
+    let mut got = [0u64; 36];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();

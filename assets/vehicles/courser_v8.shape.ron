@@ -1,0 +1,60 @@
+// Courser V8 body: a mid-90s American front-engined V8 sports car with a T-top.
+//
+// Intent: long, low and wide. A very long sloping hood to a sharp, low nose with slim
+// lamps in a strip, a steeply raked windshield, a short roof with two tinted glass panels,
+// a long curved fastback glass over a hatch and a wide tail with three lamps a side under
+// a lip. Black trim, turbine-style alloys, dual exhausts. Front engine, rear drive.
+// Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "courser_v8",
+    side: [
+        (0.00, 0.46), (0.06, 0.57), (0.40, 0.69), (1.95, 0.86), (2.02, 0.88),
+        (2.70, 1.29), (2.80, 1.32), (3.10, 1.31), (4.10, 1.00), (4.20, 0.98),
+        (4.82, 0.96), (4.92, 0.88),
+        (4.92, 0.32), (4.72, 0.22), (4.20, 0.17), (0.80, 0.15), (0.16, 0.18), (0.00, 0.26),
+    ],
+    plan: [
+        (0.00, 0.66), (0.18, 0.82), (0.70, 0.92), (1.20, 0.945), (4.30, 0.945), (4.70, 0.92),
+        (4.92, 0.86),
+    ],
+    belt: [(2.02, 0.87), (3.06, 0.90), (4.10, 0.97)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 26, greenhouse_frac: 0.70, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (2.04, 2.72),
+        backlight: (3.14, 4.08),
+        side: [(2.12, 3.06), (3.12, 3.50)],
+    ),
+    wheels: Wheels(radius: 0.33, width: 0.25, arch_clearance: 0.05, front_x: 1.15, rear_x: 3.72, track: 1.54),
+    front: Front(lights: Hidden, grille: Slot, bumper: Body, bumper_y: (0.22, 0.36)),
+    rear: Rear(lights: Triple, spoiler: Lip, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: false, doors: 2, hood_width: 0.95, creases: [(0.20, 0.50, 4.86, 0.56)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Turbine, hubcaps: false),
+    details: [TTop, BlackTrim, Badge(Chevron)],
+    // Bright red, black, white, dark green, teal, silver, purple.
+    palette: ["#b0141c", "#121316", "#efeee9", "#1c3a2a", "#1f6a6e", "#b8bcc1", "#4a2a5a"],
+    accent: "#161618",
+    interior: InteriorShape(
+        dash_height: 0.84,
+        dash_x: 2.20,
+        wheel_pos: (2.58, 0.64),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (2.48, 1.20),
+        seat: (2.96, 0.36),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: graphite dash, gray cloth buckets
+        // with darker inserts, graphite carpet, a plain band, green-lit dials.
+        colors: ["#2a2c30", "#55585e", "#2e3034", "#7a7c80", "#36383c", "#3ad07a"],
+        display: "#7affb0",
+        insert: "#3a3c42",
+        piping: "#2c2e32",
+        dash_top: "#303236",
+        applique: None,
+        manual: true,
+    ),
+)

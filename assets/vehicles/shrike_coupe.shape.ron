@@ -1,0 +1,60 @@
+// Shrike Coupe body: a mid-90s twin-rotor sports coupe.
+//
+// Intent: small, low and all curves. A short rounded nose with pop-up lamps over a small
+// mouth, a bubble cabin set well back, a long curved rear window over a hatch, hips that
+// swell over the rear wheels, a full-width tail lamp strip and a fixed wing on the deck.
+// Five-spoke alloys, black trim. Front engine set back, rear drive. Generic period cues
+// only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "shrike_coupe",
+    side: [
+        (0.00, 0.48), (0.05, 0.58), (0.30, 0.66), (1.40, 0.84), (1.48, 0.86),
+        (2.06, 1.20), (2.14, 1.23), (2.62, 1.22), (3.60, 0.98), (3.70, 0.97),
+        (4.18, 0.96), (4.30, 0.88),
+        (4.30, 0.30), (4.16, 0.22), (3.70, 0.16), (0.70, 0.15), (0.14, 0.19), (0.00, 0.27),
+    ],
+    plan: [
+        (0.00, 0.66), (0.15, 0.80), (0.55, 0.87), (1.00, 0.88), (3.60, 0.88), (4.10, 0.86),
+        (4.30, 0.80),
+    ],
+    belt: [(1.48, 0.85), (2.62, 0.90), (3.60, 0.96)],
+    section: Section(shoulder: 0.88, tumblehome_deg: 28, greenhouse_frac: 0.70, crown: 0.06, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.50, 2.06),
+        backlight: (2.68, 3.56),
+        side: [(1.58, 2.56), (2.62, 3.00)],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.23, arch_clearance: 0.05, front_x: 0.86, rear_x: 3.29, track: 1.46),
+    front: Front(lights: PopUp, grille: Slot, bumper: Body, bumper_y: (0.22, 0.38)),
+    rear: Rear(lights: FullWidth, spoiler: Wing, bumper: Body, bumper_y: (0.30, 0.44)),
+    seams: Seams(hood: true, trunk: false, doors: 2, hood_width: 0.80, creases: [(0.20, 0.52, 4.24, 0.58)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, Badge(Circle)],
+    // Deep red, bright yellow, black, white, medium blue, silver, dark green.
+    palette: ["#a8121c", "#e8c21a", "#131417", "#efeee9", "#2c4f8c", "#b9bdc2", "#1e3a2a"],
+    accent: "#151517",
+    interior: InteriorShape(
+        dash_height: 0.82,
+        dash_x: 1.68,
+        wheel_pos: (2.06, 0.63),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (1.96, 1.11),
+        seat: (2.46, 0.35),
+        driver_offset: 0.37,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, black cloth buckets
+        // with gray patterned inserts, black carpet, a plain band, red-lit dials.
+        colors: ["#1e1f22", "#26272b", "#202124", "#5a5c60", "#2c2d31", "#d03a2a"],
+        display: "#ff5a3a",
+        insert: "#4a4c52",
+        piping: "#2a2b2f",
+        dash_top: "#24252a",
+        applique: None,
+        manual: true,
+    ),
+)
