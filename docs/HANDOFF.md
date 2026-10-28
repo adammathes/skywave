@@ -42,6 +42,40 @@ coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered 
 dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
+
+### Resume here (2026-10-28 00:15 UTC, coordinator handed off to save quota)
+The previous coordinator stopped mid-wave. Five builder sessions are still finishing; each
+reports its state in its PR body and expects nothing but a merge. Keep at most two or three
+threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
+and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
+the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
+sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
+- **#44 handling feel** (`vehicle/handling-feel`, session_0121vThANMtZPyLXazaRBJXm): review
+  done; last ask: tune the Destrier into the Arcade and Light bands instead of widening its band,
+  put the two Halberds in `LIVELY` for the no-assist launch, document the 2.9× Light band; merge
+  on green. The owner should drive this one first.
+- **#37 parking lots** (`bldg/parking-lots`, session_0121vThBfSpYpVxsB7L5B2nD): fixes pushed
+  (3fe9cf8, verifying); last asks: the hold covers cars beside a parked player within 60 m in any
+  direction and 150 m / 90° beyond; beach stalls off park and empty parcels; only the failing
+  stalls dropped at the golden's bend (look at the regenerated golden: both rows must be there);
+  merge on green. It re-pins place hashes and a golden, so #20 refreshes after it.
+- **#42 the Deck** (`m3/deck`, session_0121vThB5ZsVvpTV5D5q8345): fixes pushed (fe2b6aa,
+  verifying): partly tagged albums, one library rebuild per batch, album keys no longer silence
+  the radio, duplicate picks; merging #40/#41/#43 with controls-card rows for the Deck actions;
+  merge on green after a look at the diff.
+- **#20 map edges** (`m2/map-edges`, session_0121vThBxy2WQvcKQzuoJpnE, open since 04:38, $88):
+  goldens accepted; the native junction gate is being made to hold the world still while
+  streaming, gates re-measured in their own commit, junction goldens re-sited to 737.1,464.8
+  phase=1440 (fallback 945.7,375.6); merge on green after a look at the two junction goldens.
+  It unblocks the basin region template (board `m8-basin`).
+- **2001 traffic cars** (`m8/traffic-2001`, session_0121vThDbC8noH1ttGK4FL3c, M8 #6): seven
+  shapes built, tuning; opens a PR; a short review (names, era filter, budgets) then merge.
+- **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
+  person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
+  remain. Resume from the board when the owner says.
+- Everything else is deferred on the board. Costs so far: coordinator $1,035 (the expensive
+  part: a 400k-token context woken 100+ times a day), builders $10–90 each.
+
 - Done on `main` (2026-10-27 23:50 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
   pass 2; convertibles; WebGPU→WebGL2 fallback and the Safari shader fix; GPU performance pass;
