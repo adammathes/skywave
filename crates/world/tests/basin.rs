@@ -35,7 +35,28 @@ fn template() -> RegionTemplate {
 /// basin runs through changes. Regenerate with `cargo test -p world --release --test basin
 /// -- --nocapture` (it prints the table), look at the basin's screenshots, and commit the
 /// new values in their own commit whose message says why they moved.
-const GOLDEN: [(u64, u64, u64); 4] = [(0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)];
+const GOLDEN: [(u64, u64, u64); 4] = [
+    (
+        0x39A1_C053_F7A8_0B31,
+        0xA2D7_B9A0_3D09_A4FE,
+        0x9C12_2767_C582_1C90,
+    ),
+    (
+        0xA3F4_A281_380E_596B,
+        0x7AD4_5617_94BE_609B,
+        0xB4F4_4CEC_5229_558F,
+    ),
+    (
+        0x82B6_07FD_D1FD_CF4F,
+        0xB348_0BC3_E55C_8454,
+        0xC993_A653_C5C9_D9CF,
+    ),
+    (
+        0x6DBB_5CB8_4DBB_0036,
+        0x68EB_95E2_5702_79E7,
+        0xD49F_5126_B633_3AA5,
+    ),
+];
 
 #[test]
 fn the_template_loads_and_is_a_basin() {
@@ -320,61 +341,5 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
             b.spurs.len(),
             overlooks.len()
         );
-    }
-}
-
-#[test]
-#[ignore]
-fn dbg_points() {
-    let t = template();
-    let m = MacroMap::generate(Seed(1), &t, PLACE_CHUNKS);
-    let b = m.basin.as_ref().unwrap();
-    for (k, l) in b.lines.iter().enumerate() {
-        println!("line {k} {:?} -> {:?} blvd {}", l.a, l.b, l.boulevard);
-    }
-    println!(
-        "channel {:?} -> {:?}",
-        b.channel[0],
-        b.channel[b.channel.len() - 1]
-    );
-    println!("rail {:?} -> {:?}", b.rail[0], b.rail[b.rail.len() - 1]);
-    println!("ramps {:?}", b.ramps);
-    println!("runway {:?}", b.runway);
-    println!(
-        "highway {:?} .. {:?}",
-        m.highway[0],
-        m.highway[m.highway.len() - 1]
-    );
-    for p in &m.pois {
-        println!("poi {:?} {:?}", p.kind, p.pos);
-    }
-}
-
-#[test]
-#[ignore]
-fn dbg_profile() {
-    let t = template();
-    let seed: u64 = std::env::var("SEED")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(2);
-    let p = build_place(Seed(seed), &t, &grammar());
-    println!("seed {seed}: {:?}", p.validate());
-    for (i, e) in p.roads.edges.iter().enumerate() {
-        for q in &e.profile {
-            let g = p.terrain.height_at(&p.header, [q[0], q[2]]).unwrap();
-            if (q[1] - g).abs() > 8.0 {
-                println!(
-                    "edge {i} {:?} oneway {} at ({:.0},{:.0}) y {:.2} ground {:.2} zone {:?}",
-                    e.class,
-                    e.oneway,
-                    q[0],
-                    q[2],
-                    q[1],
-                    g,
-                    p.zones.cells[(q[2] / 4.0) as usize * 512 + (q[0] / 4.0) as usize]
-                );
-            }
-        }
     }
 }
