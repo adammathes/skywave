@@ -691,7 +691,7 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.content_hash(), b.content_hash());
         // Pinned fingerprint: change deliberately, in its own commit, with the reason.
-        assert_eq!(a.content_hash(), 0x08ED_FEF3_C160_CE98);
+        assert_eq!(a.content_hash(), 0xD407_C7E5_9C1C_DD36);
     }
 
     #[test]

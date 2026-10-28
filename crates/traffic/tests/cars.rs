@@ -711,6 +711,7 @@ fn rear_ending_a_queue_at_twenty_shoves_the_last_car() {
                     y0: 0.25,
                     y1: 1.35,
                     kind: world::props::PropKind::ParkedCar { color: 0 },
+                    lot: world::collide::NO_LOT,
                 },
                 vel: [
                     c.dir[0] * c.speed + c.slide[0],

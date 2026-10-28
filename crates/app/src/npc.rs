@@ -150,6 +150,7 @@ impl CarBody {
             y0: c.pos[1] + BODY_CLEARANCE_M,
             y1: c.pos[1] + self.height,
             kind: world::props::PropKind::ParkedCar { color: 0 },
+            lot: world::collide::NO_LOT,
         }
     }
 }

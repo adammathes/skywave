@@ -54,6 +54,8 @@ pub mod stage {
     pub const BUILDINGS: u64 = 9;
     /// Detailing: props and lights (chunk stage).
     pub const DETAIL: u64 = 10;
+    /// Parking lots (`crate::lots`).
+    pub const LOTS: u64 = 11;
 }
 
 /// Edge length of a streaming chunk.

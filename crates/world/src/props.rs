@@ -25,6 +25,7 @@ use crate::{CURB_M, LOT_Y};
 const KEY_STREET: u64 = 0x5354_5245;
 const KEY_PARK: u64 = 0x5041_524B;
 const KEY_PROP: u64 = 0x5052_4F50;
+const KEY_PARKED_HOUR: u64 = 0x484F_5552;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PropKind {
@@ -1031,6 +1032,23 @@ pub fn parked_car_size(vehicle_class: u8) -> [f32; 3] {
     ][parked_car_shape(vehicle_class)]
 }
 
+/// Whether a parked car with hour mask `hours` (`place::PropKind::ParkedCar`) standing at
+/// `pos` is there at `seconds_of_day`: each car comes or goes at its own minute past the
+/// hour (from where it stands), so a lot fills and empties a car at a time.
+pub fn parked_now(hours: u32, pos: [f32; 3], seconds_of_day: f32) -> bool {
+    if hours == place::ALL_HOURS {
+        return true;
+    }
+    let bits = [u64::from(pos[0].to_bits()), u64::from(pos[2].to_bits())];
+    let shift = (skywave_core::hash64(KEY_PARKED_HOUR, &bits) % 3600) as f32;
+    let mut t = seconds_of_day - shift;
+    while t < 0.0 {
+        t += 86_400.0;
+    }
+    let hour = (t / 3600.0) as u32 % 24;
+    hours >> hour & 1 == 1
+}
+
 /// A Place prop as a world prop: its facing from its yaw and its variation seed from the
 /// place's `seed` and its position (a street sign's from its text seed).
 pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
@@ -1050,7 +1068,7 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::NeonSign { palette } => PropKind::NeonSign { palette },
         P::Billboard => PropKind::Billboard,
         P::PowerPole => PropKind::PowerPole,
-        P::ParkedCar { vehicle_class } => PropKind::ParkedCar {
+        P::ParkedCar { vehicle_class, .. } => PropKind::ParkedCar {
             color: vehicle_class >> 4,
         },
         P::StopSign => PropKind::StopSign,

@@ -21,6 +21,7 @@ pub mod collide;
 pub mod grammar;
 pub mod ground;
 pub mod lanes;
+pub mod lots;
 pub mod math;
 pub mod mesh;
 pub mod palette;
@@ -225,12 +226,14 @@ pub struct ChunkPlan {
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
     chunk_range: [[i32; 2]; 2],
+    /// A terrain place's parking lots (their curb cuts are in `net`).
+    lots: Vec<lots::ParkingLot>,
 }
 
 impl ChunkPlan {
     pub fn new(place: &Place, palette: &Palette, grammar: &Grammar) -> ChunkPlan {
         let seed = place.header.seed;
-        let net = roads::Network::new(place);
+        let mut net = roads::Network::new(place);
         let side_zone = side_zones(place, &net);
         let blocks = if is_terrain_place(place) {
             Vec::new()
@@ -258,6 +261,8 @@ impl ChunkPlan {
             })
             .collect();
         let fronts: Vec<usize> = plans.iter().map(|(_, p)| p.frontage).collect();
+        let lots = lots::plan(place, &net, &grammar.lots);
+        net.cuts = lots::cuts(&lots);
         let stall_w = grammar.lots.stall_w;
         let centroids = place
             .buildings
@@ -371,7 +376,13 @@ impl ChunkPlan {
             lexicon: grammar.lexicon.clone(),
             kit: props::PropKit::new(),
             chunk_range: [lo, hi],
+            lots,
         }
+    }
+
+    /// The place's parking lots.
+    pub fn lots(&self) -> &[lots::ParkingLot] {
+        &self.lots
     }
 
     /// Every prop of the place, in build order.
@@ -474,7 +485,10 @@ impl ChunkPlan {
                     let (blocks, fronts) = (&self.blocks, &self.fronts);
                     ground::build(place, blocks, fronts, palette, self.stall_w, seed, out);
                 }
-                Some((g, colors)) => mesh::terrain::build(place, g, colors, palette, seed, out),
+                Some((g, colors)) => {
+                    mesh::terrain::build(place, g, colors, palette, seed, out);
+                    lots::mesh(&self.lots, g, &self.net, palette, out);
+                }
             },
             Stage::Roads => {
                 let terrain = self.terrain.as_ref().map(|(g, _)| g);
