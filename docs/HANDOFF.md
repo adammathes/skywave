@@ -35,15 +35,16 @@ purpose, in their own commit, with the reason; `cargo test -p app -- --ignored w
 rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
 
 ## The owner's board
-A live board of every task (needs the owner / in review / building / queued / merged) lives at
-https://claude.ai/artifact/17baWQ1hwt3R194YbzjpWS (private to the owner). Its `items` collection
-is the queue of record: the owner reorders the Queued column and leaves notes on cards; the
-coordinator reads it (`ArtifactData` query on `items`, status `queued`, ordered by `order`) before
-dispatching the next session, and updates statuses as PRs open and merge.
+A live board of every task lives at https://claude.ai/artifact/17baWQ1hwt3R194YbzjpWS (private to
+the owner); its `items` collection is the queue of record. **Proposed** cards are ideas and
+follow-ups: nothing in Proposed is worked. **Queued** means the owner pressed Approve: work those
+top first, without asking again. Only the owner moves a card from Proposed to Queued. New ideas,
+follow-ups and review leftovers go in as Proposed. Read `items` where status is `queued`, ordered
+by `order`, before dispatching; update status as sessions start, PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 12:47 UTC, coordinator handed off to save quota)
+### Resume here (2026-10-28 21:55 UTC: stopping point on the owner's word; Proposed/Queued board above. 2026-10-28 12:47 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
 (parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars part 2), #47 (the #44
 revert), #48 and #49 (Mirage Valley) and #50 (set pieces part 1, 12:47,
