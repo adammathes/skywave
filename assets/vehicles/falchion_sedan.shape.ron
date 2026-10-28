@@ -1,0 +1,60 @@
+// Falchion Sedan body: a late-90s rear-drive compact sports sedan built up with a body kit.
+//
+// Intent: tight, low and taut. A short nose with twin lamps either side of a slim slot, a
+// long hood over the rear-drive six, a tidy four-door cabin with a short, high deck and a
+// lip on its edge. An aftermarket kit in the paint (a deep air dam with a splitter, side
+// skirts, a valance over a dark diffuser), multi-spoke wheels, black trim. Front engine,
+// rear drive. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "falchion_sedan",
+    side: [
+        (0.00, 0.50), (0.04, 0.60), (0.12, 0.70), (1.10, 0.88), (1.18, 0.90),
+        (1.78, 1.33), (1.90, 1.37), (2.90, 1.36), (3.48, 1.06), (3.56, 1.04),
+        (4.32, 1.02), (4.43, 0.94),
+        (4.43, 0.32), (4.28, 0.22), (3.80, 0.17), (0.70, 0.16), (0.12, 0.20), (0.00, 0.30),
+    ],
+    plan: [
+        (0.00, 0.68), (0.08, 0.79), (0.30, 0.845), (1.00, 0.855), (3.90, 0.855), (4.25, 0.84),
+        (4.43, 0.79),
+    ],
+    belt: [(1.18, 0.89), (2.40, 0.93), (3.52, 1.02)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 20, greenhouse_frac: 0.78, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.20, 1.84),
+        backlight: (2.96, 3.50),
+        side: [(1.40, 2.40), (2.50, 3.08)],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.22, arch_clearance: 0.04, front_x: 0.74, rear_x: 3.44, track: 1.44),
+    front: Front(lights: Quad, grille: Slot, bumper: Body, bumper_y: (0.24, 0.40)),
+    rear: Rear(lights: Dual, spoiler: Lip, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.80, creases: [(0.20, 0.64, 4.38, 0.70)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Mesh, hubcaps: false),
+    details: [BodyKit, BlackTrim, Badge(Circle)],
+    // Silver, deep blue, black, white, dark red, steel gray.
+    palette: ["#bfc3c8", "#23367a", "#121316", "#eeede8", "#6a1420", "#5d6168"],
+    accent: "#141416",
+    interior: InteriorShape(
+        dash_height: 0.86,
+        dash_x: 1.52,
+        wheel_pos: (1.96, 0.70),
+        wheel_radius: 0.18,
+        column_angle_deg: 24,
+        mirror_pos: (1.82, 1.25),
+        seat: (2.46, 0.42),
+        driver_offset: 0.37,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, black cloth sport
+        // seats with gray inserts, black carpet, a brushed band, orange-lit dials.
+        colors: ["#1d1e21", "#26272b", "#1f2023", "#8e9094", "#2b2c30", "#e07a2a"],
+        display: "#ff9a3a",
+        insert: "#55585e",
+        piping: "#2a2b2f",
+        dash_top: "#232428",
+        applique: Brushed,
+        manual: true,
+    ),
+)

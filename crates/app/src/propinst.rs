@@ -572,7 +572,7 @@ mod tests {
     /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
     /// the 2001 hero cars, which only the player drives, and the two trucks too long for a
     /// stall, which only traffic drives.
-    const UNPARKED: [&str; 13] = [
+    const UNPARKED: [&str; 17] = [
         "basilisk_v12",
         "basilisk_roadster",
         "avocet_v8",
@@ -586,6 +586,10 @@ mod tests {
         "siskin_coupe",
         "sledge_box_truck",
         "anvil_semi",
+        "shrike_coupe",
+        "glaive_turbo",
+        "falchion_sedan",
+        "courser_v8",
     ];
 
     #[test]
