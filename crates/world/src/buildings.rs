@@ -3193,7 +3193,7 @@ fn strip_mall_front(
     if let Some(s) = look.signage.filter(|s| s.banner) {
         for u in 0..units {
             let bits = skywave_core::mix64(s.name_seed ^ u64::from(u));
-            if bits % 3 != 0 || unit < 5.0 {
+            if !bits.is_multiple_of(3) || unit < 5.0 {
                 continue;
             }
             let colors = [pal.hydrant_red, pal.paint_yellow, pal.teal, pal.navy];
