@@ -1,9 +1,7 @@
 // Mirage Valley, 2001 (docs/SCENARIOS.md, docs/backlog/MIRAGE2001.md): the `socal_basin` region
-// template, the `socal_basin_2001` grammar and the `sodium_night` palette. STUB: the radio
-// preset is the coast's until the `2001_basin` preset lands (MIRAGE2001 item 8); the World
-// page marks it "coming". Its years
-// already filter the roster: the 2001 hero cars are its own and start it, the 1980s cars are
-// old here and weigh less by their age.
+// template, the `socal_basin_2001` grammar, the `sodium_night` palette and the `2001_basin`
+// radio preset. Its years filter the roster: the 2001 hero cars are its own and start it, the
+// 1980s cars are old here and weigh less by their age.
 Scenario(
     id: "mirage_valley_2001",
     title: "Mirage Valley",
@@ -11,7 +9,7 @@ Scenario(
     kind: "Inland grid",
     region: "socal_basin",
     grammar: "socal_basin_2001.ron",
-    radio: "1984_socal",
+    radio: "2001_basin",
     palette: "sodium_night",
     default_time: (22, 30),
     default_vehicle: "halberd_coupe",
@@ -20,5 +18,4 @@ Scenario(
         "halberd_coupe", "halberd_targa", "tanager_awd", "destrier_coupe", "siskin_coupe",
         "shrike_coupe", "glaive_turbo", "falchion_sedan", "courser_v8",
     ],
-    stub: true,
 )

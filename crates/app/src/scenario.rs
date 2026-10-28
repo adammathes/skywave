@@ -503,7 +503,7 @@ mod tests {
         let basin = &all[1];
         assert_eq!(
             (basin.id.as_str(), basin.years, basin.stub),
-            ("mirage_valley_2001", (1995, 2001), true)
+            ("mirage_valley_2001", (1995, 2001), false)
         );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");
@@ -796,10 +796,6 @@ mod tests {
     fn station_counts_come_from_the_preset() {
         assert_eq!(station_counts()[0], station_count(get(0)));
         assert!(station_count(get(0)) > 0);
-        assert_eq!(
-            station_count(get(1)),
-            station_count(get(0)),
-            "the stub's radio"
-        );
+        assert_eq!(station_count(get(1)), 5, "the basin's own preset");
     }
 }

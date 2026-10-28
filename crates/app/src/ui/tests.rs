@@ -2542,15 +2542,19 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         "Beach town, 1984",
         "20 cars",
         "Mirage Valley",
-        "coming",
+        "5 stations",
         "here",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
+    assert!(!text.contains("coming"), "every world is built: {text}");
     let stills = images(&mut h, render::HudTexture::Still);
     assert_eq!(stills.len(), 2);
     assert_eq!((stills[0].uv[0], stills[1].uv[0]), (0.0, 0.5));
-    assert!(stills[1].color[0] < 200, "the stub's still is greyed");
+    assert!(
+        stills.iter().all(|s| s.color[0] == 255),
+        "no still is greyed"
+    );
     h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 1);
     h.pad(PadButton::DpadRight);
