@@ -45,8 +45,8 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ### Resume here (2026-10-28 02:28 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. #42 (the Deck) merged at 00:18, #44 (handling) at
-00:26, #37 (parking lots) at 00:49 and #45 (2001 traffic cars) at 02:28 (fc812b9); one builder
-session is still finishing; each
+00:26, #37 (parking lots) at 00:49 and #45 (2001 traffic cars) at 02:28 (fc812b9); two builder
+sessions are running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
@@ -59,6 +59,12 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   streaming, gates re-measured in their own commit, junction goldens re-sited to 737.1,464.8
   phase=1440 (fallback 945.7,375.6); merge on green after a look at the two junction goldens.
   It unblocks the basin region template (board `m8-basin`).
+- **Hero cars part 2** (`m8/heroes-2`, session_0121vThDUECPkM7tAPwhVPKP, M8 #5, dispatched
+  02:42 on the owner's word): four cars after #43's pattern; it messages the coordinator when its
+  PR is green; a short review (names, era filter, budgets, handling bands) then merge.
+- **Owner's queue after #20:** the region template and grammar (board `m8-basin`, M8 #2 and #3),
+  which also renames the 2001 world from "Inland Basin" to **Mirage Valley** (title, scenario id
+  with a migration of the saved choice, docs); then set pieces (M8 #7, needs #2, #3 and #4).
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
