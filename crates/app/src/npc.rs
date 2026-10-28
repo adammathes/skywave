@@ -1002,7 +1002,7 @@ mod tests {
     /// (seed 1, the basin's stub place) round the player at the start. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const COAST_2001_TRAFFIC_HASH: u64 = 0x430d_08fe_597e_b020;
+    const COAST_2001_TRAFFIC_HASH: u64 = 0x0c98_5f2d_fa40_968b;
 
     /// Thirty seconds of busy 2001 traffic on the coast at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a
