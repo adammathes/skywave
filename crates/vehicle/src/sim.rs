@@ -117,7 +117,7 @@ const TRACTION_GAIN: f32 = 2.0;
 const TRACTION_RATE: f32 = 30.0;
 /// ABS releases a wheel whose braking slip passes this multiple of the peak slip ratio.
 const ABS_SLIP: f32 = 1.1;
-/// Stability assist yaw-rate correction gain at full strength, 1/s (was 8).
+/// Stability assist yaw-rate correction gain at full strength, 1/s.
 const STABILITY_GAIN: f32 = 12.0;
 /// Stability assist slide damping at full strength, 1/s: the share per second of the
 /// sideways speed at the center of mass beyond the tires' peak slip angle that it takes
@@ -186,7 +186,8 @@ pub struct Assists {
     /// Tire grip multiplier, lateral and longitudinal (1 = the spec's tires). The handbrake
     /// scales with it, so it still locks the boosted rears.
     pub grip_boost: f32,
-    /// Service-brake torque multiplier (1 = the spec's brakes; the handbrake is not boosted).
+    /// Service-brake torque multiplier (1 = the spec's brakes; the handbrake is not boosted
+    /// by it).
     pub brake_boost: f32,
 }
 
@@ -199,8 +200,8 @@ impl Assists {
         grip_boost: 1.0,
         brake_boost: 1.0,
     };
-    /// Stability 0.5 and traction 0.7 (were 0.3 and 0.5, which let a sports car's inside
-    /// rear spin at twice its peak slip out of a junction and the tail swing 30° wide).
+    /// Firm enough stability and traction that a sports car floored out of a junction does
+    /// not spin its inside rear far past its peak and swing the tail wide.
     pub const LIGHT: Assists = Assists {
         stability: 0.5,
         traction: 0.7,
@@ -209,9 +210,8 @@ impl Assists {
         grip_boost: 1.0,
         brake_boost: 1.0,
     };
-    /// After the first play on real hardware ("too slippy, braking too slow"): full
-    /// stability (0.8 until the sports cars fishtailed under throttle), strong traction
-    /// control, ABS, grip-limited steering, a fifth more grip and 40% more brake.
+    /// Tight and forgiving: full stability, strong traction control, ABS, grip-limited
+    /// steering, a fifth more grip and 40% more brake.
     pub const ARCADE: Assists = Assists {
         stability: 1.0,
         traction: 0.8,

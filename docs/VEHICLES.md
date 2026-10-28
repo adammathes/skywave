@@ -215,7 +215,7 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `tanager_awd` | late-90s all-wheel-drive twin-turbo V6 coupe: short hood with a scoop, fastback hatch, low wing, four round tail lamps | Sports | 1,700 kg, ~205 kW, 5-speed, AWD; heavy, unflustered, leaves the line without a chirp; 5.5 s, 66 m/s, 1.17 g |
 | `halberd_coupe` | mid-90s inline-six twin-turbo grand tourer, 2+2: very long hood, set-back cabin, long fastback glass, small wing | Sports | 1,520 kg, ~180 kW, 6-speed, RWD; one long turbo surge, planted; 5.8 s, 72 m/s, 1.13 g |
 | `halberd_targa` | the Halberd with its roof panel lifted out | Convertible | 1,580 kg, same six, softer, more drag; 6.0 s, 71 m/s, 1.11 g |
-| `destrier_coupe` | late-60s big-block muscle notchback with a blower through the hood, chrome bumpers, deep-dish rims, rally stripes on some | Muscle | 1,660 kg, ~315 kW blown V8, 4-speed, RWD; lights up its rear tires off the line under any assists, leans, wags its tail; 6.2 s, 59 m/s, 0.89 g |
+| `destrier_coupe` | late-60s big-block muscle notchback with a blower through the hood, chrome bumpers, deep-dish rims, rally stripes on some | Muscle | 1,660 kg, ~315 kW blown V8, 4-speed, RWD; lights up its rear tires off the line under any assists, leans, wags its tail; 6.2 s, 59 m/s, 0.90 g |
 | `siskin_coupe` | 2000 front-drive compact coupe built up as a tuner: body kit, tall wing, twin-spoke rims, blue underglow | Coupe | 1,180 kg, ~140 kW turbo four, 5-speed, FWD; sharp, high-revving, tucks its nose on a lift; 6.5 s, 62 m/s, 1.06 g |
 
 Every automatic for now (manual mode comes later). The four sports cars (the Basilisk, the Avocet, the Longbow and the Appaloosa) each have an open version on the same chassis and engine, a little heavier and draggier, so a little slower everywhere. Each car has its own cabin palette (`interior.colors`, insert, piping, applique and dial glow) and its own body palette, which a third of its parked instances wear.
@@ -238,18 +238,21 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
   full stick, then full throttle (the keyboard case, where the owner's fishtail reproduced); a quarter-stick
   launch from rest to 30 mph (at most 6 s); and a 30 mph quarter-stick handbrake turn. Bands: in Arcade the
   rear stays within 1.1× its tires' peak slip angle in the lane change and the corner, the lane change
-  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.9× out of the junction (4× for
-  the Destrier, built to wag its tail out of slow corners); with
+  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.9× out of the junction; with
   traction control the launch is a little wheelspin, never a spin; the handbrake slides the rear past 1.5×
-  its peak in every preset, 2× in Arcade. With no assists the sports and muscle cars may still spin a
-  quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
+  its peak in every preset, 2× in Arcade. With no assists the sports and muscle cars (the 2001 Halberds,
+  Tanager and Destrier among them) may still spin a quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
   stay lively there on purpose. The tuning that set these (stability gain 12 from 8, Arcade stability 1.0
   from 0.8, Light 0.5/0.7 from 0.3/0.5, the handbrake times `grip_boost`, `oversteer_bias` halved on the
-  Basilisks, Avocets, Appaloosas, Halcyon, Tanager and Destrier; the Halberds keep 0.16, their skidpad has no room; the
-  Tanager's handbrake 3400 N·m so it locks its rears) took the sports cars' Arcade lane-change overshoot from
+  Basilisks, Avocets, Appaloosas, Halcyon and Tanager, the Destrier's 0.2 to −0.2 so it wags its tail without
+  sliding wide; the Halberds keep 0.16, their skidpad has no room; the Tanager's handbrake 3400 N·m so it locks
+  its rears) took the sports cars' Arcade lane-change overshoot from
   32 to 22°/s, their Light junction rear slip from 36° to 18° (the inside rear had been spinning at twice its
   peak under Light's traction control), and made the six cars that did not slide on Arcade's handbrake slide
   31–50°. A softer tire tail (85% for 70%) was measured and left out: it gives overdriven front tires more bite
-  with no assists, so more cars spin there.
+  with no assists, so more cars spin there. The bands hold for the probes' timing (a second at speed, then a
+  second of stick before the throttle); the junction step-out grows if the car settles longer into the turn before
+  the throttle (the Gannet reaches 3.5× its peak in Light after a 2 s hold), so they bound these scripts, not
+  every way of driving.
 - Mesh: every shape builds, is manifold enough (no NaN normals), exterior 8k–14k triangles, interior 4k–8k, LOD1 exterior 3k–5k, wheels fit arches, LOD1 ≤ 40% of LOD0; two-tone paint splits low/high with a pinstripe; whitewalls only on the outer sidewall; era paints parse, are weighted as listed and change only the paint; a pickup bed is open over its whole length at every LOD with its floor well under the rail; a spare tire hangs behind the tail; a T-top puts glass in the roof. Convertibles: no body or glass triangle over the cabin between the header and the boot, above the belt (top down), a framed windshield and a boot, a raised top that covers the cabin, and much more sky from the seat than a hardtop.
 - Visual: `tools/shape-preview` PNGs attached to the PR introducing or changing a car.
