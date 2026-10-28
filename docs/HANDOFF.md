@@ -61,6 +61,12 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   the grammar on `m8/mirage-valley-grammar`. World generation: probe-review determinism and the
   new goldens before merging. Messages the coordinator when each PR is green.
 - **Next on the owner's word:** set pieces (M8 #7), once #2, #3 and #4 are on main.
+- **Queued by the owner (board `mac-music`, order 35):** music folders in the Mac app. The web
+  build already takes folders in every Mac browser; the native app only scans `~/Music` or
+  `--music` at start, plays MP3 only (nanomp3), and has no picker. Wanted: a folder dialog from
+  Audio › Music library, drag-and-drop on the window (winit `DroppedFile`), picks remembered,
+  the Apple Music media layout, AAC `.m4a` played or reported. AAC decoding is a new dependency
+  question (ADR if over ~5k lines). Touches `platform-native` and `app/src/ui`.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
