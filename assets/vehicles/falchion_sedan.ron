@@ -32,7 +32,7 @@ VehicleSpec(
     auto: true,
     drive: Rear,
 
-    tires: Tires(grip_lat: 0.973, grip_long: 1.12, load_sens: 0.08, slip_peak_deg: 7.0),
+    tires: Tires(grip_lat: 0.883, grip_long: 1.12, load_sens: 0.08, slip_peak_deg: 7.0),
     suspension: Susp(spring_n_m: 33000, damper: 3300, travel_m: 0.14, antiroll: 0.45),
     steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 11.0),
     brakes: Brakes(max_nm: 3500, bias_front: 0.62, abs: true, handbrake_nm: 2900),
