@@ -998,19 +998,23 @@ mod tests {
         assert!(n > 0);
     }
 
-    /// Pinned hash of the 2001 world's traffic after 30 s of busy traffic on the coast
-    /// (seed 1, the basin's stub place) round the player at the start. Moves when the 2001
+    /// Pinned hash of the 2001 world's traffic after 30 s of busy traffic in its basin
+    /// (seed 1) round the player beside the freeway. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const COAST_2001_TRAFFIC_HASH: u64 = 0x0c98_5f2d_fa40_968b;
+    const BASIN_2001_TRAFFIC_HASH: u64 = 0x0c98_5f2d_fa40_968b;
 
-    /// Thirty seconds of busy 2001 traffic on the coast at seed 1 after the warm-up: cars
+    /// Thirty seconds of busy 2001 traffic in the basin at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a
     /// freeway lane, how many freeway lanes there are, and the pool's hash.
-    fn coast_2001() -> (Vec<usize>, bool, usize, u64) {
-        let app = app("place=coast&t=12:00&still=1&stream=0");
-        let place =
-            crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
+    fn basin_2001() -> (Vec<usize>, bool, usize, u64) {
+        let app = app("scenario=mirage_valley_2001&t=12:00&still=1&stream=0");
+        let place = crate::places::build_in(
+            crate::scene::PlaceKey::Coast,
+            skywave_core::Seed(1),
+            crate::scenario::get(1),
+        )
+        .unwrap();
         let mut npcs = Npcs::new(&place, Seed(1), &crate::scenario::lineup(1).shapes);
         let semi = vehicles::BUILTIN_SHAPES
             .iter()
@@ -1026,7 +1030,7 @@ mod tests {
                 let len = |l: u32| npcs.graph.lanes[l as usize].length_m;
                 len(a).total_cmp(&len(b))
             })
-            .expect("the coast has a freeway");
+            .expect("the basin has a freeway");
         let mid = npcs
             .graph
             .pose(lane, 0.5 * npcs.graph.lanes[lane as usize].length_m);
@@ -1062,7 +1066,7 @@ mod tests {
 
     #[test]
     fn the_2001_world_drives_its_traffic_cars_and_the_semi_on_the_freeway() {
-        let (per, on_freeway, freeway, hash) = coast_2001();
+        let (per, on_freeway, freeway, hash) = basin_2001();
         eprintln!("2001 traffic hash {hash:#018x}, {freeway} freeway lanes");
         for (k, (file, _)) in vehicles::BUILTIN_SHAPES.iter().enumerate() {
             eprintln!("  {file}: {}", per[k]);
@@ -1080,7 +1084,7 @@ mod tests {
         let old: usize = per[..14].iter().sum();
         let new: usize = per[25..].iter().sum();
         assert!(old > 0 && old < new, "{old} old, {new} new");
-        assert_eq!(hash, COAST_2001_TRAFFIC_HASH);
+        assert_eq!(hash, BASIN_2001_TRAFFIC_HASH);
     }
 
     #[test]

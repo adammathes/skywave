@@ -127,7 +127,10 @@ mod tests {
         for s in crate::scenario::all() {
             assert!(region_text(&s.region).is_some());
             assert!(core::ptr::eq(grammar_of(s), grammar_of(s)), "parsed once");
-            assert_eq!(grammar_of(s).template, s.region);
+            // A world still being built may dress in another's grammar.
+            if !s.stub {
+                assert_eq!(grammar_of(s).template, s.region);
+            }
             assert!(palette(&s.palette).is_some());
         }
         // The first scenario's grammar is the coast's.
