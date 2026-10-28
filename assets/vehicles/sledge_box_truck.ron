@@ -17,7 +17,7 @@ VehicleSpec(
     wheelbase_m: 4.60,
     track_m: 1.92,
     cg_height_m: 1.05,
-    cg_fore_aft: 0.40,
+    cg_fore_aft: 0.48,
 
     engine: Engine(
         idle_rpm: 600,

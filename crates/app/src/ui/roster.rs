@@ -18,7 +18,7 @@ pub const MAX_PAINTS: usize = 12;
 
 /// `(id, seconds from rest to 60 mph, top speed in mph)` of every built-in car, as the sim
 /// measures them (see the module docs).
-const MEASURED: [(&str, f32, f32); 25] = [
+const MEASURED: [(&str, f32, f32); 32] = [
     ("gannet_gt", 5.60, 155.0),
     ("homestead_wagon", 12.60, 110.0),
     ("seabreeze_convertible", 12.51, 106.0),
@@ -44,6 +44,13 @@ const MEASURED: [(&str, f32, f32); 25] = [
     ("tanager_awd", 5.48, 148.0),
     ("destrier_coupe", 6.22, 133.0),
     ("siskin_coupe", 6.45, 137.0),
+    ("plover_sedan", 9.83, 125.0),
+    ("sorrel_utility", 10.37, 95.0),
+    ("wren_minivan", 11.07, 102.0),
+    ("percheron_pickup", 8.40, 113.0),
+    ("linnet_hatch", 9.59, 120.0),
+    ("sledge_box_truck", 17.15, 67.0),
+    ("anvil_semi", 32.28, 71.0),
 ];
 
 /// One row of the Vehicle page.
@@ -307,18 +314,29 @@ mod tests {
     fn the_spec_summary_matches_the_tuned_roster() {
         let r = roster();
         for car in r {
+            // The semi, which only traffic drives, is not on the page.
+            if car.id == "anvil_semi" {
+                continue;
+            }
             assert!((4.0..20.0).contains(&car.zero_to_60_s), "{}", car.id);
-            assert!((70.0..190.0).contains(&car.top_mph), "{}", car.id);
+            // The box truck is the slowest at 67 mph.
+            assert!((65.0..190.0).contains(&car.top_mph), "{}", car.id);
             assert!(
                 !car.paints.is_empty() && car.paints.len() <= MAX_PAINTS,
                 "{}",
                 car.id
             );
         }
-        // The 1980s roster, then the 2001 heroes of their own decades.
+        // The 1980s roster, then the 2001 heroes and traffic cars of their own decades.
         let eras: Vec<&str> = r.iter().map(|c| c.era).collect();
         assert!(eras[..20].iter().all(|&e| e == "1980s"));
-        assert_eq!(eras[20..], ["1990s", "1990s", "1990s", "1960s", "2000s"]);
+        assert_eq!(
+            eras[20..],
+            [
+                "1990s", "1990s", "1990s", "1960s", "2000s", "1990s", "1990s", "1990s", "2000s",
+                "2000s", "1990s", "2000s"
+            ]
+        );
         // docs/VEHICLES.md: the Gannet 5.6 s and 70 m/s, the Regent 9.9 s and 55 m/s.
         let gannet = &r[index_of("gannet_gt").unwrap()];
         assert!(
