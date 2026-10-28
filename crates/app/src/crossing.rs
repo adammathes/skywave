@@ -9,7 +9,7 @@
 use glam::{Mat4, Quat, Vec3};
 use place::Place;
 use render::{Mesh, MeshId, MeshInstance};
-use traffic::train::{Railway, CARS, CAR_M, HALF_W_M, LOCO_M};
+use traffic::train::{Phase, Railway, CARS, CAR_M, HALF_W_M, LOCO_M};
 use world::setpieces::{TRAIN_BOXCAR, TRAIN_HOPPER, TRAIN_LOCO, TRAIN_TANK};
 use world::{MeshKind, Palette, WorldMesh};
 
@@ -24,6 +24,8 @@ const CONTACT_REACH_M: f32 = 30.0;
 const HEAVY_KG: f32 = 1.0e7;
 /// An arm holds the player's car out once it is this far down (1 up, 0 down).
 const ARM_BLOCKS_BELOW: f32 = 0.5;
+/// How far beyond the train's side a reset keeps a car, m.
+const SWEEP_CLEAR_M: f32 = 1.5;
 /// The gate lamps alternate this many times a second.
 const FLASH_HZ: f32 = 1.0;
 /// How far the bells carry, m.
@@ -136,6 +138,16 @@ impl Rail {
         self.railway.closed()
     }
 
+    /// Whether something reaching `reach` from `p` is clear of the train and of the track
+    /// it runs on (and its swept margin), while the train is out on the line.
+    pub fn clear_of_track(&self, p: [f32; 2], reach: f32) -> bool {
+        let t = &self.railway.train;
+        if matches!(t.phase, Phase::Resting { .. }) {
+            return true;
+        }
+        t.line.project(p).1 > HALF_W_M + SWEEP_CLEAR_M + reach
+    }
+
     /// Each train body `alpha` of the way through the step: its middle on the rail top,
     /// its yaw, its length and kind.
     fn bodies(&self, alpha: f32) -> impl Iterator<Item = (Vec3, f32, f32, u8)> + '_ {
@@ -189,19 +201,20 @@ impl Rail {
     ) -> Option<world::Bump> {
         let at = Vec3::from(state.pos);
         let mut hardest: Option<world::Bump> = None;
-        let mut hit = |body: world::collide::BoxSolid, state: &mut vehicle::VehicleState| {
-            let other = world::collide::OtherCar {
-                body,
-                vel: [0.0; 2],
-                spin: 0.0,
-                mass_kg: HEAVY_KG,
-            };
-            if let Some(h) = world::collide::hit_car(state, spec, &other) {
-                if hardest.is_none_or(|b| h.bump.speed > b.speed) {
-                    hardest = Some(h.bump);
+        let mut hit =
+            |body: world::collide::BoxSolid, vel: [f32; 2], state: &mut vehicle::VehicleState| {
+                let other = world::collide::OtherCar {
+                    body,
+                    vel,
+                    spin: 0.0,
+                    mass_kg: HEAVY_KG,
+                };
+                if let Some(h) = world::collide::hit_car(state, spec, &other) {
+                    if hardest.is_none_or(|b| h.bump.speed > b.speed) {
+                        hardest = Some(h.bump);
+                    }
                 }
-            }
-        };
+            };
         let solid =
             |c: [f32; 2], u: [f32; 2], half: [f32; 2], y0: f32, y1: f32| world::collide::BoxSolid {
                 c,
@@ -212,6 +225,8 @@ impl Rail {
                 kind: world::props::PropKind::ParkedCar { color: 0 },
                 lot: world::collide::NO_LOT,
             };
+        // The train hits with its own motion, as it moves.
+        let v = self.railway.train.speed;
         for (p, yaw, len, _) in self.bodies(1.0) {
             if p.distance(at) > CONTACT_REACH_M + 0.5 * len {
                 continue;
@@ -219,6 +234,7 @@ impl Rail {
             let d = [-yaw.sin(), -yaw.cos()];
             hit(
                 solid([p.x, p.z], d, [0.5 * len, HALF_W_M], p.y + 0.3, p.y + 4.5),
+                [d[0] * v, d[1] * v],
                 state,
             );
         }
@@ -236,6 +252,7 @@ impl Rail {
             let y = g.pos[1];
             hit(
                 solid(c, [u[0] / n, u[1] / n], [0.5 * n, 0.12], y + 0.7, y + 1.3),
+                [0.0; 2],
                 state,
             );
         }
@@ -322,7 +339,7 @@ mod tests {
     use crate::drive::Drive;
     use crate::input::{Action, InputState};
     use crate::{App, SceneSetup};
-    use traffic::train::Phase;
+    use traffic::train::{Phase, HALF_W_M as HALF_W};
 
     /// The 2001 world, seed 1, its train held resting far off.
     fn basin() -> App {
@@ -429,6 +446,71 @@ mod tests {
         assert!(up < 2.5, "launched: {up:.2} m/s up");
         assert!(s.speed_mps.abs() < 4.0, "bounced: {:.1} m/s", s.speed_mps);
         assert_eq!(app.rail.as_ref().unwrap().railway.train.speed, 0.0);
+    }
+
+    #[test]
+    fn a_glancing_hit_on_the_running_train_stops_it_and_never_launches_the_car() {
+        for sigma in [-1.0f32, 1.0] {
+            let mut app = basin();
+            let (_, dir, c) = approach(&app, 0);
+            let line = app.rail.as_ref().unwrap().railway.train.line.clone();
+            let (x, _) = line.at(line.crossings[c]);
+            // The train running across the crossing at its cruise, its arms lifted.
+            running(&mut app, c, -60.0, traffic::train::CRUISE_MPS);
+            for g in &mut app.rail.as_mut().unwrap().railway.train.gates {
+                g.arm = 1.0;
+                g.closed_s = 0.0;
+            }
+            // At 40 degrees to the road, at full throttle into its side.
+            let (sn, cs) = (40.0f32.to_radians() * sigma).sin_cos();
+            let aim = [dir[0] * cs - dir[1] * sn, dir[0] * sn + dir[1] * cs];
+            put(&mut app, [x[0] - aim[0] * 12.0, x[2] - aim[1] * 12.0], aim);
+            let up = run(&mut app, 4.0, true);
+            let r = app.rail.as_ref().unwrap();
+            assert_eq!(r.railway.train.speed, 0.0, "{sigma}: it stopped");
+            assert!(up <= 0.3, "{sigma}: launched: {up:.2} m/s up");
+            let s = &app.drive.state;
+            let (_, off) = line.project([s.pos[0], s.pos[2]]);
+            assert!(off > traffic::train::HALF_W_M, "{sigma}: into it: {off:.2}");
+        }
+    }
+
+    #[test]
+    fn a_reset_by_the_standing_train_puts_the_car_clear_of_it() {
+        let mut app = basin();
+        let (mid, dir, c) = approach(&app, 0);
+        // The train standing across the crossing, its nose 60 m past it.
+        running(&mut app, c, -60.0, 0.0);
+        let line = app.rail.as_ref().unwrap().railway.train.line.clone();
+        let (x, _) = line.at(line.crossings[c]);
+        // From on the crossing, from its approach and from just past it.
+        for at in [
+            [x[0], x[2]],
+            mid,
+            [x[0] + dir[0] * 4.0, x[2] + dir[1] * 4.0],
+        ] {
+            put(&mut app, at, dir);
+            app.reset_car();
+            let s = &app.drive.state;
+            let r = app.rail.as_ref().unwrap();
+            let (_, off) = line.project([s.pos[0], s.pos[2]]);
+            assert!(off > HALF_W + 2.0, "reset {off:.1} m off the track");
+            let [len, wid, _] = app.drive.spec.dims_m;
+            let o = traffic::train::Obstacle::car(
+                [s.pos[0], s.pos[2]],
+                {
+                    let f = s.forward();
+                    let n = (f[0] * f[0] + f[2] * f[2]).sqrt();
+                    [f[0] / n, f[2] / n]
+                },
+                0.5 * len,
+                0.5 * wid,
+            );
+            assert!(!r.railway.train.overlaps(&o, 1.0));
+            // And it drives off: nothing holds it.
+            run(&mut app, 1.0, false);
+            assert!(app.drive.state.speed_mps.abs() < 0.5);
+        }
     }
 
     #[test]

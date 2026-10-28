@@ -561,7 +561,6 @@ fn seg_dist(a0: [f32; 2], a1: [f32; 2], b0: [f32; 2], b1: [f32; 2]) -> f32 {
         .min(point_seg(b1, a0, a1).0)
 }
 
-/// Distance from `p` to segment `a`-`b`, and where along it `p` projects (0..1).
 /// Where segment `p..q` crosses segment `a..b`, as a fraction along `p..q`.
 fn cross_at(p: [f32; 2], q: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Option<f32> {
     let r = [q[0] - p[0], q[1] - p[1]];
@@ -576,6 +575,7 @@ fn cross_at(p: [f32; 2], q: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Option<f32> {
     ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some(t)
 }
 
+/// Distance from `p` to segment `a`-`b`, and where along it `p` projects (0..1).
 fn point_seg(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
     let ab = [b[0] - a[0], b[1] - a[1]];
     let ap = [p[0] - a[0], p[1] - a[1]];
@@ -923,8 +923,6 @@ impl Traffic {
             .extend((0..n).map(|k| weights.get(k).copied().unwrap_or(0)));
     }
 
-    /// Each shape's [`ShapeRule`] (below [`TrafficBudget::shapes`]; the rest keep the
-    /// default).
     /// The lines the cars must not cross from now on (at most [`MAX_BARRIERS`]; the rest
     /// are dropped): closed railroad crossings. Allocates nothing.
     pub fn set_barriers(&mut self, barriers: &[Barrier]) {
@@ -1000,6 +998,8 @@ impl Traffic {
         }
     }
 
+    /// Each shape's [`ShapeRule`] (below [`TrafficBudget::shapes`]; the rest keep the
+    /// default).
     pub fn set_shape_rules(&mut self, rules: &[ShapeRule]) {
         for (k, r) in self.rules.iter_mut().enumerate() {
             *r = rules.get(k).copied().unwrap_or_default();

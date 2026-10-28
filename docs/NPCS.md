@@ -129,22 +129,32 @@ Nothing it does can hurt anyone, by construction:
   is *closed* from the moment the train's head comes within 260 m until its tail is 20 m past: its bells ring (a
   synthesized ding, `audio::synth`) and lamps flash at once, its arms start down 4 s later and are down 8 s after
   that, so they are down at least 11 s before the train can arrive; a crossing whose arms are not down yet is in
-  the train's way and it brakes for it.
+  the train's way and it brakes for it. Once the tail is by, the arms rise over 8 s, and the crossing holds the
+  traffic and the people until they are all the way up.
 - **The traffic and the people keep off a closed crossing.** Each closed crossing's gate lines are barriers
   (`traffic::Barrier`): an NPC car heading for one stops at it like a red light (a car already past it drives on
   off the track), and no car spawns within 40 m of one. People never step onto the walk over the track of a closed
   crossing: they wait 1 m short of it (a walk counts as over the track within 3.5 m of the rail line's middle), and
   whoever was already on it walks on off it; nobody spawns or stays at a spot within 12 m of one.
 - **It stops for anything in its way.** Each step it looks ahead its braking distance plus 30 m for the player's
-  car, the NPC cars and the people within its swept width and brakes to stand 8 m short of the nearest; something
-  closer than it can brake for (a car pulled onto the track right in front of it), or touching its side, stops it
-  dead where it stands. It is a wall that moves and never moves into anyone.
-- **Against the player's car** each train body and each arm that is more than half down is a box at rest of
-  10,000 t (`world::collide::hit_car` with no velocity): a thud with at most a 1 m/s rebound, never a launch.
+  car, the NPC cars (each as its real box, corners and all) and the people within its swept width and brakes to
+  stand 8 m short of the nearest; something closer than it can brake for (a car pulled onto the track right in
+  front of it), or any touch on its side (a box overlap with 0.1 m to spare), stops it dead where it stands. It is
+  a wall that moves and never moves into anyone.
+- **Against the player's car** each train body is a 10,000 t box moving at the train's own velocity, and each arm
+  that is more than half down a box at rest (`world::collide::hit_car`): a thud, never a launch, even glancing off
+  its side at 40° while it runs (and the touch stops it). A reset (`Drive::reset`) while the train is out on the
+  line never puts the car on the track: it takes the nearest spot along the lane at least 1.5 m clear of the
+  train's sides.
 
 The probe (`traffic/tests/train.rs`): busy traffic and busy pedestrians round a crossing while the train runs the
 whole line, counting person-steps and car-steps inside a train body, people and cars on the track at a crossing
-whose arms are down (cars only with the train within 200 m), and the train's dead stops; all zero, with people and
-cars near the train for thousands of steps. The ignored sweep runs every crossing of seeds 1–4 (20 crossings, all
-zero). `app::crossing`'s tests: a full-throttle car stops at a lowered arm, a car driven into the train's side
-stays outside it and is not launched (and the train stops), the train stands short of a car stopped on the track.
+whose arms are down (cars only with the train within 200 m), and the train's dead stops; all zero. So that every
+crossing is tested busy, while it is closed the probe sends a car down each lane into it every 5 s and, where a
+walk crosses the track, a person at it from each side; it asserts at least 20 s of car-steps within 80 m and of
+person-steps within 40 m of the closed crossing. The ignored sweep runs every crossing of seeds 1–4 (20
+crossings, all zero). A second ignored probe counts people inside NPC cars (which do not see people yet) near a
+crossing with and without the train: never more with it (16 against 113 person-steps at seed 2's first crossing).
+`app::crossing`'s tests: a full-throttle car stops at a lowered arm, a car driven into the train's side square or
+at ±40° while it runs stays outside it, is not launched and stops it, the train stands short of a car stopped on
+the track, and a reset beside the standing train puts the car clear of it.

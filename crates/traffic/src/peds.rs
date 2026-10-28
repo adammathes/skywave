@@ -1313,6 +1313,34 @@ impl Pedestrians {
         self.rail_closed.resize(crossings.len(), false);
     }
 
+    /// One person of fresh seeded looks on `link`, `s` meters along it from the end it
+    /// starts at (its `a` end when `fwd`), heading for the ground point `goal`: for
+    /// scripted scenes and probes that want people somewhere. `false` when the pool is
+    /// full. Does not check for room or for being seen, as [`Pedestrians::step`] does.
+    pub fn send(
+        &mut self,
+        walks: &WalkGraph,
+        link: u32,
+        s: f32,
+        fwd: bool,
+        goal: [f32; 2],
+    ) -> bool {
+        let Some(slot) = self.walkers.iter().position(|x| !x.alive) else {
+            return false;
+        };
+        if self.alive >= self.peds.len() {
+            return false;
+        }
+        self.make_walker(walks, slot, 1, link, fwd, s);
+        self.walkers[slot].goal = goal;
+        self.walkers[slot].give_up = self.tick + (GIVE_UP_S * SIM_HZ as f32) as u64;
+        let p = self.walk_slot(walks, slot, 0);
+        let ped = &mut self.peds[usize::from(self.walkers[slot].members[0])];
+        ped.base = p;
+        ped.pos = p;
+        true
+    }
+
     /// Which of the rail line's crossings are closed now (in [`Pedestrians::set_rail`]'s
     /// order). Allocates nothing.
     pub fn set_rail_closed(&mut self, closed: &[bool]) {

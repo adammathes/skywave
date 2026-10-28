@@ -663,7 +663,12 @@ impl App {
         if self.fly {
             return;
         }
-        self.drive.reset(&self.lanes, &self.ground);
+        let rail = self.rail.as_ref();
+        let [len, wid, _] = self.drive.spec.dims_m;
+        let reach = 0.5 * (len * len + wid * wid).sqrt();
+        self.drive.reset(&self.lanes, &self.ground, |p| {
+            rail.is_none_or(|r| r.clear_of_track(p, reach))
+        });
         self.settle_camera();
         self.ui.car_reset();
     }

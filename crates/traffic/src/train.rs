@@ -61,12 +61,74 @@ pub const CARS: usize = 9;
 pub const HALF_W_M: f32 = 1.6;
 /// Anything this close to its side (beyond the body) is in its way when ahead, m.
 const SWEEP_MARGIN_M: f32 = 1.0;
+/// Anything this close to a body touches it, m.
+const CONTACT_M: f32 = 0.1;
 
 /// The train's whole length, m.
 pub const TRAIN_M: f32 = LOCO_M + CARS as f32 * (CAR_M + COUPLER_M);
 
-/// Something the train must not move into: a disc on the ground, `[x, z, radius]`.
-pub type Obstacle = [f32; 3];
+/// Something the train must not move into: a box on the ground, its middle `c`, the way
+/// it faces `u` (unit), its half length along `u` and half width across.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Obstacle {
+    pub c: [f32; 2],
+    pub u: [f32; 2],
+    pub half: [f32; 2],
+}
+
+impl Obstacle {
+    /// A car: its middle, the way it faces, half its length and half its width.
+    pub fn car(c: [f32; 2], u: [f32; 2], half_len: f32, half_w: f32) -> Obstacle {
+        Obstacle {
+            c,
+            u,
+            half: [half_len, half_w],
+        }
+    }
+
+    /// A person standing at `c`.
+    pub fn person(c: [f32; 2]) -> Obstacle {
+        Obstacle {
+            c,
+            u: [1.0, 0.0],
+            half: [PERSON_R_M, PERSON_R_M],
+        }
+    }
+
+    /// Its four corners.
+    pub fn corners(&self) -> [[f32; 2]; 4] {
+        let (u, v) = (self.u, [-self.u[1], self.u[0]]);
+        let mut out = [[0.0; 2]; 4];
+        for (k, (a, b)) in [(1.0f32, 1.0f32), (1.0, -1.0), (-1.0, -1.0), (-1.0, 1.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let (a, b) = (a * self.half[0], b * self.half[1]);
+            out[k] = [
+                self.c[0] + u[0] * a + v[0] * b,
+                self.c[1] + u[1] * a + v[1] * b,
+            ];
+        }
+        out
+    }
+
+    /// Whether it overlaps the box at `c` facing `u` with half sizes `half`, grown by
+    /// `margin` (separating axes).
+    pub fn overlaps(&self, c: [f32; 2], u: [f32; 2], half: [f32; 2], margin: f32) -> bool {
+        let d = [self.c[0] - c[0], self.c[1] - c[1]];
+        let axes = [u, [-u[1], u[0]], self.u, [-self.u[1], self.u[0]]];
+        for ax in axes {
+            let dot = |a: [f32; 2], b: [f32; 2]| a[0] * b[0] + a[1] * b[1];
+            let ra = half[0] * dot(u, ax).abs() + half[1] * dot([-u[1], u[0]], ax).abs();
+            let rb = self.half[0] * dot(self.u, ax).abs()
+                + self.half[1] * dot([-self.u[1], self.u[0]], ax).abs();
+            if dot(d, ax).abs() > ra + rb + margin {
+                return false;
+            }
+        }
+        true
+    }
+}
 
 /// The rail line the train runs: its centerline (top of rail), its length along it, and
 /// where it crosses roads.
@@ -106,7 +168,14 @@ impl TrainLine {
 
     /// Where `p` lies along the line (clamped to it) and how far from it.
     pub fn project(&self, p: [f32; 2]) -> (f32, f32) {
-        let mut best = (0.0, f32::INFINITY);
+        let (s, off) = self.project_signed(p);
+        (s, off.abs())
+    }
+
+    /// Where `p` lies along the line (clamped to it) and how far from it, left of the line
+    /// positive.
+    pub fn project_signed(&self, p: [f32; 2]) -> (f32, f32) {
+        let mut best = (0.0, f32::INFINITY, 0.0);
         for k in 0..self.pts.len().saturating_sub(1) {
             let (a, b) = (self.pts[k], self.pts[k + 1]);
             let d = [b[0] - a[0], b[2] - a[2]];
@@ -118,10 +187,12 @@ impl TrainLine {
             let q = [a[0] + d[0] * t, a[2] + d[1] * t];
             let dist = sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]));
             if dist < best.1 {
-                best = (self.arc[k] + t * (self.arc[k + 1] - self.arc[k]), dist);
+                let side = d[0] * (p[1] - q[1]) - d[1] * (p[0] - q[0]);
+                let off = if side < 0.0 { -dist } else { dist };
+                best = (self.arc[k] + t * (self.arc[k + 1] - self.arc[k]), dist, off);
             }
         }
-        best
+        (best.0, best.2)
     }
 
     /// The point at `s` along the line and the unit direction along it there; past either
@@ -362,20 +433,44 @@ impl Train {
         })
     }
 
-    /// Where `p` lies in travel distance from the start, and how far off the track.
+    /// Where `p` lies in travel distance from the start, and how far off the track (signed).
     fn locate(&self, p: [f32; 2]) -> (f32, f32) {
-        let (s, off) = self.line.project(p);
+        let (s, off) = self.line.project_signed(p);
         // Past the line's ends the projection clamps; such points are not on the track.
         (self.u_of(s), off)
     }
 
-    /// Whether anything in `obs` stands inside the train's bodies (for tests and probes).
+    /// Where `o` lies along and across the track: its least and greatest travel distance
+    /// and signed offset over its corners.
+    fn extent(&self, o: &Obstacle) -> ([f32; 2], [f32; 2]) {
+        let (mut u, mut off) = (
+            [f32::INFINITY, f32::NEG_INFINITY],
+            [f32::INFINITY, f32::NEG_INFINITY],
+        );
+        for p in o.corners() {
+            let (a, b) = self.locate(p);
+            u = [u[0].min(a), u[1].max(a)];
+            off = [off[0].min(b), off[1].max(b)];
+        }
+        (u, off)
+    }
+
+    /// Whether the disc at `p` of radius `r` reaches into the train (for tests and probes).
     pub fn touches(&self, p: [f32; 2], r: f32) -> bool {
         if self.phase != Phase::Running && self.head <= 0.0 {
             return false;
         }
         let (u, off) = self.locate(p);
-        off < HALF_W_M + r && u <= self.head + r && u >= self.tail() - r
+        off.abs() < HALF_W_M + r && u <= self.head + r && u >= self.tail() - r
+    }
+
+    /// Whether `o`, grown by `margin`, overlaps any of the train's bodies.
+    pub fn overlaps(&self, o: &Obstacle, margin: f32) -> bool {
+        if self.phase != Phase::Running && self.head <= 0.0 {
+            return false;
+        }
+        self.bodies()
+            .any(|(p, d, len)| o.overlaps([p[0], p[2]], d, [0.5 * len, HALF_W_M], margin))
     }
 
     /// One step of `dt` seconds: the schedule, the crossings, and the train's speed
@@ -415,20 +510,21 @@ impl Train {
         let mut room = f32::INFINITY;
         let mut inside = false;
         for o in obs {
-            // Cheap reject: nowhere near the train or the track ahead of it.
-            let (u, off) = self.locate([o[0], o[1]]);
-            if off > HALF_W_M + o[2] + SWEEP_MARGIN_M {
+            // Its corners along and across the track: nowhere near the train or the track
+            // ahead of it is no matter.
+            let (u, off) = self.extent(o);
+            let band = HALF_W_M + SWEEP_MARGIN_M;
+            if off[0] > band || off[1] < -band || u[1] < self.tail() - 1.0 {
                 continue;
             }
-            let ahead = u - o[2] - self.head;
+            let ahead = u[0] - self.head;
             if ahead > look {
                 continue;
             }
             if ahead <= 0.5 {
-                // At or under its nose, or against its side: never move into it.
-                if u + o[2] >= self.tail() && off < HALF_W_M + o[2] + 0.1 {
-                    inside = true;
-                }
+                // At or under its nose, or against its side: any touch and it never moves
+                // on into it.
+                inside |= self.overlaps(o, CONTACT_M);
                 continue;
             }
             room = room.min(ahead - STOP_GAP_M);
@@ -553,7 +649,8 @@ impl Railway {
         &self.barriers
     }
 
-    /// Which crossings are closed now, in [`TrainLine::crossings`] order.
+    /// Which crossings are closed now (warning, or their arms not yet back up), in
+    /// [`TrainLine::crossings`] order.
     pub fn closed(&self) -> &[bool] {
         &self.closed
     }
@@ -566,7 +663,9 @@ impl Railway {
         // Only what could be near the train or the track ahead of it.
         let (head, _) = t.line.at(t.s_of(t.head + t.stopping_m()));
         let (tail, _) = t.line.at(t.s_of(t.tail()));
-        let near = |p: [f32; 2], r: f32| {
+        let near = |o: &Obstacle| {
+            let r = o.half[0].max(o.half[1]);
+            let p = o.c;
             let d = [head[0] - tail[0], head[2] - tail[2]];
             let l2 = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
             let k = (((p[0] - tail[0]) * d[0] + (p[1] - tail[2]) * d[1]) / l2).clamp(0.0, 1.0);
@@ -574,45 +673,34 @@ impl Railway {
             let e = [p[0] - q[0], p[1] - q[1]];
             e[0] * e[0] + e[1] * e[1] < (HALF_W_M + r + 4.0) * (HALF_W_M + r + 4.0)
         };
-        let push = |o: Obstacle, obs: &mut Vec<Obstacle>| {
-            if obs.len() < MAX_OBSTACLES && near([o[0], o[1]], o[2]) {
-                obs.push(o);
+        let mut push = |o: Obstacle| {
+            if self.obs.len() < MAX_OBSTACLES && near(&o) {
+                self.obs.push(o);
             }
         };
-        // A car as three discs along it.
-        let car =
-            |pos: [f32; 3], dir: [f32; 2], half_len: f32, half_w: f32, obs: &mut Vec<Obstacle>| {
-                let k = (half_len - half_w).max(0.0);
-                for f in [-1.0f32, 0.0, 1.0] {
-                    push(
-                        [pos[0] + dir[0] * k * f, pos[2] + dir[1] * k * f, half_w],
-                        obs,
-                    );
-                }
-            };
         let (sn, cs) = sin_cos(player.heading);
-        car(
-            player.pos,
+        push(Obstacle::car(
+            [player.pos[0], player.pos[2]],
             [-sn, -cs],
             player.half_len,
             player.half_w,
-            &mut self.obs,
-        );
+        ));
         for c in cars {
-            car(c.pos, c.dir, 0.5 * c.len, c.half_w, &mut self.obs);
+            push(Obstacle::car(
+                [c.pos[0], c.pos[2]],
+                c.dir,
+                0.5 * c.len,
+                c.half_w,
+            ));
         }
         for p in peds.iter() {
-            if self.obs.len() >= MAX_OBSTACLES {
-                break;
-            }
-            let o = [p.pos[0], p.pos[2], PERSON_R_M];
-            if near([o[0], o[1]], o[2]) {
-                self.obs.push(o);
-            }
+            push(Obstacle::person([p.pos[0], p.pos[2]]));
         }
         self.train.step(&self.obs, dt);
         for (k, c) in self.closed.iter_mut().enumerate() {
-            *c = self.train.gates[k].closed;
+            // Held until its arms are all the way up again, not just until the train is by.
+            let g = &self.train.gates[k];
+            *c = g.closed || g.arm < 1.0;
         }
         self.barriers.clear();
         for g in &self.gates {
@@ -672,15 +760,15 @@ mod tests {
     fn it_stops_short_of_anyone_on_the_track_and_goes_on_when_they_leave() {
         let mut t = train(0.0);
         // A car standing on the track at 1,000 m.
-        let mut obs = alloc::vec![[1000.0, 0.5, 2.3]];
+        let mut obs = alloc::vec![Obstacle::car([1000.0, 0.5], [0.0, 1.0], 2.3, 0.9)];
         let mut s = 0.0;
         while s < 300.0 {
             t.step(&obs, DT);
             s += DT;
-            assert!(!t.touches([obs[0][0], obs[0][1]], obs[0][2]));
+            assert!(!t.overlaps(&obs[0], 0.0));
         }
         assert_eq!(t.speed, 0.0);
-        let gap = 1000.0 - 2.3 - t.head;
+        let gap = 1000.0 - 0.9 - t.head;
         assert!(gap > 0.0 && gap <= STOP_GAP_M + 1.0, "{gap}");
         assert_eq!(t.hard_stops, 0);
         // Gone: it pulls away.
@@ -698,16 +786,42 @@ mod tests {
             t.step(&[], DT);
         }
         // Beside the track, 5 m off: no reason to stop.
-        let beside = [[t.head + 20.0, 5.0, 0.4]];
+        let beside = [Obstacle::person([t.head + 20.0, 5.0])];
         let v = t.speed;
         t.step(&beside, DT);
         assert!(t.speed >= v - 0.01);
         // A car pulled on right in front of its nose: it stops on the spot.
         let head = t.head;
-        let cut = [[head + 3.0, 0.0, 2.3]];
+        let cut = [Obstacle::car([head + 3.0, 0.0], [0.0, 1.0], 2.3, 0.9)];
         t.step(&cut, DT);
         assert_eq!(t.speed, 0.0);
         assert!(t.head <= head + 0.1);
-        assert!(!t.touches([cut[0][0], cut[0][1]], 2.3) || t.head <= head + 0.1);
+    }
+
+    #[test]
+    fn a_glancing_touch_on_its_side_stops_it() {
+        let mut t = train(0.0);
+        while t.head < 600.0 {
+            t.step(&[], DT);
+        }
+        assert!(t.speed > 5.0);
+        // A car at 40 degrees whose front corner just reaches the side of the third car
+        // back: no disc along its middle would reach the train, its corner does.
+        let a = 40.0f32.to_radians();
+        let u = [a.sin(), -a.cos()];
+        let (hl, hw) = (2.2, 0.9);
+        let reach = hl * a.cos() + hw * a.sin();
+        let mid = t.head - 60.0;
+        let c = [mid, HALF_W_M + reach - 0.05];
+        let o = Obstacle::car(c, u, hl, hw);
+        assert!(!t.touches(c, hw));
+        t.step(&[o], DT);
+        assert_eq!(t.speed, 0.0, "it stopped");
+        // And one just clear of it does not.
+        let mut t2 = t.clone();
+        t2.speed = 5.0;
+        let o = Obstacle::car([mid, HALF_W_M + reach + 0.3], u, hl, hw);
+        t2.step(&[o], DT);
+        assert!(t2.speed > 0.0);
     }
 }

@@ -7,7 +7,7 @@
 use place::Place;
 use skywave_core::Seed;
 use traffic::peds::{PedInput, PedestrianBudget, Pedestrians};
-use traffic::train::{Railway, HALF_W_M};
+use traffic::train::{Obstacle, Railway, HALF_W_M};
 use traffic::walks::WalkGraph;
 use traffic::{Clock, Density, Inputs, LaneGraph, Player, Traffic, TrafficBudget, View};
 use world::procgen::build_place;
@@ -43,6 +43,16 @@ struct Counts {
     /// cars close to it.
     people_near: u32,
     cars_near: u32,
+    /// Person-steps within 40 m and car-steps within 80 m of the crossing the camera is at,
+    /// while it is closed: the holds were tested there.
+    people_at_closed: u32,
+    cars_at_closed: u32,
+    /// Whether a walk crosses the track at the crossing (else nobody can be there).
+    walkable: bool,
+    /// Person-steps inside an NPC car's body.
+    people_in_cars: u32,
+    /// Of those, within 60 m of the crossing.
+    people_in_cars_at: u32,
     /// Crossings the train's head went past.
     passed: usize,
     hard_stops: u32,
@@ -51,6 +61,19 @@ struct Counts {
 /// `minutes` of busy traffic and people round crossing `k` of seed `seed`'s railway, the
 /// train coming first after `rest_s`.
 fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
+    run_with(seed, k_pick, minutes, rest_s, true, true)
+}
+
+/// [`run`], with the train or without it (the world as it was before the train, for
+/// comparison), sending cars to the closed crossing or not.
+fn run_with(
+    seed: u64,
+    k_pick: usize,
+    minutes: f32,
+    rest_s: f32,
+    train: bool,
+    send: bool,
+) -> Counts {
     let place = basin(seed);
     let graph = LaneGraph::new(&place);
     let walks = WalkGraph::new(&place, &graph);
@@ -103,7 +126,69 @@ fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
         dusk_s: 19.0 * 3600.0,
         dawn_s: 6.0 * 3600.0,
     };
-    let mut c = Counts::default();
+    // The lanes into the crossing, and where on each a car starts 45 m short of it: while
+    // the crossing is closed the probe sends cars there, so every crossing is tested with
+    // cars waiting at it however quiet its road.
+    let mut approaches = Vec::new();
+    for (i, lane) in graph.lanes.iter().enumerate() {
+        let k0 = lane.first_point as usize;
+        let pts = &graph.points[k0..k0 + lane.point_count as usize];
+        let arc = &graph.arc[k0..k0 + lane.point_count as usize];
+        for j in 0..pts.len().saturating_sub(1) {
+            let (a, b) = (pts[j], pts[j + 1]);
+            let d = [b[0] - a[0], b[2] - a[2]];
+            let l2 = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
+            let t = (((at[0] - a[0]) * d[0] + (at[2] - a[2]) * d[1]) / l2).clamp(0.0, 1.0);
+            let q = [a[0] + d[0] * t - at[0], a[2] + d[1] * t - at[2]];
+            let s = arc[j] + t * (arc[j + 1] - arc[j]);
+            if q[0] * q[0] + q[1] * q[1] < 8.0 * 8.0 && s >= 45.0 {
+                approaches.push((i as u32, s - 45.0));
+                break;
+            }
+        }
+    }
+    // The walks over the track within 30 m of the crossing.
+    let cs = line.crossings[k];
+    let over: Vec<u32> = (0..walks.links.len() as u32)
+        .filter(|&i| {
+            let l = &walks.links[i as usize];
+            let (a, b) = (walks.nodes[l.a as usize].pos, walks.nodes[l.b as usize].pos);
+            let (_, oa) = line.project_signed([a[0], a[2]]);
+            let (_, ob) = line.project_signed([b[0], b[2]]);
+            if oa * ob >= 0.0 {
+                return false;
+            }
+            let t = oa / (oa - ob);
+            let x = [a[0] + (b[0] - a[0]) * t, a[2] + (b[2] - a[2]) * t];
+            let (sx, ox) = line.project(x);
+            ox < 1.0 && (sx - cs).abs() < 30.0
+        })
+        .collect();
+    let walkable = !over.is_empty();
+    // While the crossing is closed the probe sends people at it too: every 5 s someone
+    // starts 25 m short of a walk over the track, headed 15 m past it.
+    let mut senders = Vec::new();
+    for &l in &over {
+        let lk = &walks.links[l as usize];
+        for (from, to) in [(lk.a, lk.b), (lk.b, lk.a)] {
+            let (p, q) = (walks.nodes[from as usize].pos, walks.nodes[to as usize].pos);
+            let d = [q[0] - p[0], q[2] - p[2]];
+            let n = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-3);
+            let goal = [q[0] + d[0] / n * 15.0, q[2] + d[1] / n * 15.0];
+            let Some(&l0) = walks.links_at(from).iter().find(|&&m| m != l) else {
+                continue;
+            };
+            let m = &walks.links[l0 as usize];
+            // Walking toward `from`: forward when that is its `b` end.
+            let fwd = m.b == from;
+            senders.push((l0, (m.length_m - 25.0).max(0.0), fwd, goal));
+        }
+    }
+    let mut want = vec![false; approaches.len()];
+    let mut c = Counts {
+        walkable,
+        ..Counts::default()
+    };
     let mut passed = vec![false; line.crossings.len()];
     let steps = (minutes * 60.0 * 120.0) as u64;
     for tick in 0..steps {
@@ -116,7 +201,27 @@ fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
             clock,
             density: Density::Busy,
         };
+        // Every 5 s a car wanted at each approach; it takes the first free slot in the pool
+        // (busy traffic keeps it full), ahead of the ordinary top-up.
+        if send && rail.closed()[k] {
+            for (j, &(lane, s)) in approaches.iter().enumerate() {
+                want[j] |= tick % 600 == 0;
+                let p = graph.pose(lane, s).pos;
+                let free = cars
+                    .cars()
+                    .iter()
+                    .all(|q| (q.pos[0] - p[0]).powi(2) + (q.pos[2] - p[2]).powi(2) > 12.0 * 12.0);
+                if want[j] && free && cars.spawn_at(&graph, lane, s, 8.0).is_some() {
+                    want[j] = false;
+                }
+            }
+        }
         cars.populate(&graph, &inp);
+        if send && rail.closed()[k] && tick % 600 == 300 {
+            for &(l, s, fwd, goal) in &senders {
+                peds.send(&walks, l, s, fwd, goal);
+            }
+        }
         cars.step(&graph, &inp);
         peds.step(
             &walks,
@@ -128,7 +233,9 @@ fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
                 player,
             },
         );
-        rail.step(&player, cars.cars(), &peds, DT);
+        if train {
+            rail.step(&player, cars.cars(), &peds, DT);
+        }
         let t = &rail.train;
         for p in peds.iter() {
             if t.touches([p.pos[0], p.pos[2]], 0.3) {
@@ -139,20 +246,29 @@ fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
             }
         }
         for car in cars.cars() {
-            let k = (0.5 * car.len - car.half_w).max(0.0);
-            for f in [-1.0f32, 0.0, 1.0] {
-                let q = [
-                    car.pos[0] + car.dir[0] * k * f,
-                    car.pos[2] + car.dir[1] * k * f,
-                ];
-                if t.touches(q, car.half_w) {
-                    c.cars_in_train += 1;
-                    break;
-                }
-                if f == 0.0 && t.touches(q, 15.0) {
-                    c.cars_near += 1;
+            let q = [car.pos[0], car.pos[2]];
+            let body = Obstacle::car(q, car.dir, 0.5 * car.len, car.half_w);
+            for p in peds.iter() {
+                if body.overlaps([p.pos[0], p.pos[2]], [1.0, 0.0], [0.3, 0.3], 0.0) {
+                    c.people_in_cars += 1;
+                    let d = [p.pos[0] - at[0], p.pos[2] - at[2]];
+                    c.people_in_cars_at += u32::from(d[0] * d[0] + d[1] * d[1] < 60.0 * 60.0);
                 }
             }
+            if t.overlaps(&Obstacle::car(q, car.dir, 0.5 * car.len, car.half_w), 0.0) {
+                c.cars_in_train += 1;
+            }
+            if t.touches(q, 15.0) {
+                c.cars_near += 1;
+            }
+        }
+        if t.gates[k].closed {
+            let within = |p: [f32; 3], r: f32| {
+                let d = [p[0] - at[0], p[2] - at[2]];
+                d[0] * d[0] + d[1] * d[1] < r * r
+            };
+            c.people_at_closed += peds.iter().filter(|p| within(p.pos, 40.0)).count() as u32;
+            c.cars_at_closed += cars.cars().iter().filter(|q| within(q.pos, 80.0)).count() as u32;
         }
         // On the track at a crossing whose arms are down.
         for (j, &cs) in t.line.crossings.iter().enumerate() {
@@ -208,10 +324,33 @@ fn nobody_is_ever_inside_the_train_and_nobody_crosses_a_closed_crossing() {
             c.people_near > 0 && c.cars_near > 0,
             "seed {seed}: nobody came near: {c:?}"
         );
+        busy_while_closed(&c);
+    }
+}
+
+/// The crossing was tested busy: cars waited at it while it was closed, and people too
+/// where a walk crosses it (a person-step or car-step is 1/120 s).
+fn busy_while_closed(c: &Counts) {
+    assert!(c.cars_at_closed >= 120 * 20, "no cars at it: {c:?}");
+    if c.walkable {
+        assert!(c.people_at_closed >= 120 * 20, "no people at it: {c:?}");
     }
 }
 
 /// The long sweep: every crossing of seeds 1-4, each with the camera and the crowd at it.
+/// People inside NPC cars (they do not see people yet, `docs/NPCS.md`) round a crossing,
+/// with and without the train: never more with it.
+#[test]
+#[ignore]
+fn people_in_cars_with_and_without_the_train() {
+    for (seed, k) in [(2u64, 0usize), (1, 3), (2, 3), (3, 1)] {
+        let without = run_with(seed, k, 3.1, 0.0, false, false);
+        let with = run_with(seed, k, 3.1, 0.0, true, false);
+        println!("seed {seed} crossing {k}: without {without:?}\n    with {with:?}");
+        assert!(with.people_in_cars_at <= without.people_in_cars_at);
+    }
+}
+
 #[test]
 #[ignore]
 fn every_crossing_of_four_seeds() {
@@ -231,6 +370,7 @@ fn every_crossing_of_four_seeds() {
                 0,
                 "{c:?}"
             );
+            busy_while_closed(&c);
         }
     }
 }
