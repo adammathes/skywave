@@ -1274,6 +1274,10 @@ impl Display for ToastText<'_> {
             Toast::MusicNeedsKeyboard => {
                 f.write_str("Use the keyboard or mouse, or drop a folder on the page")
             }
+            Toast::MusicNoMp3s => write!(f, "No MP3s in {}", self.1),
+            Toast::MusicNoDialog => {
+                f.write_str("No folder dialog: use --music DIR or drop a folder")
+            }
             Toast::MusicRemoved => f.write_str("Music folder removed"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
             Toast::World(i) => {

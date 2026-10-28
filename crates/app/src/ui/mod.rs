@@ -106,6 +106,10 @@ pub enum Toast {
     MusicEmpty,
     /// The folder picker needs a key or a click (a pad press cannot open it).
     MusicNeedsKeyboard,
+    /// The folder picked (`Ui::music_name`) had no MP3 (natively, where only MP3 plays).
+    MusicNoMp3s,
+    /// The platform has no folder dialog to open.
+    MusicNoDialog,
     MusicRemoved,
     /// The text given for a stream was not an `https://` URL (or there are too many).
     StreamRejected,
@@ -1609,6 +1613,35 @@ impl App {
             self.ui.deck.add_folders(folders);
             self.ui.music_again = false;
         }
+    }
+
+    /// Puts the scan of a music folder the user picked or dropped (`name`) in the library
+    /// at once, as [`App::add_music_folders`] does, and says so: `tracks` of its files were
+    /// found, or it had no MP3s. Natively, where a scan makes one folder per sub-folder.
+    pub fn add_picked_music(
+        &mut self,
+        name: &str,
+        tracks: usize,
+        folders: Vec<audio::deck::Folder>,
+    ) {
+        self.add_music_folders(folders);
+        let ui = &mut self.ui;
+        ui.music_name = audio::music::ascii(name);
+        if ui.music_name.is_empty() {
+            ui.music_name = "My music".to_string();
+        }
+        ui.show(match tracks {
+            0 => Toast::MusicNoMp3s,
+            n => Toast::MusicAdded {
+                tracks: n.min(audio::music::MAX_TRACKS),
+                kept: true,
+            },
+        });
+    }
+
+    /// The platform has no folder dialog: say how else to add music.
+    pub fn music_dialog_missing(&mut self) {
+        self.ui.show(Toast::MusicNoDialog);
     }
 
     /// The platform could not open its folder picker (no key or click to open it from: a
