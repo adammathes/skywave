@@ -121,6 +121,9 @@ pub const DEEP_M: f32 = 0.6;
 /// A reset looks this far for a lane; with none that close the car goes back to its
 /// start, m.
 pub const RESET_RANGE_M: f32 = 200.0;
+/// How far along the lane a reset looks for a clear spot, in steps of this many meters.
+const RESET_STEP_M: f32 = 2.0;
+const RESET_STEPS: usize = 40;
 
 /// A rigid transform: body origin (the center of mass) and body-to-world rotation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -369,14 +372,34 @@ impl Drive {
 
     /// The `Reset` action: at rest and upright on the centerline of the nearest of `lanes`
     /// (on the ground under it, the deck it is on), heading along it the way it drives; at
-    /// the start when no lane is within [`RESET_RANGE_M`]. The odometer, headlights and
-    /// assists stay.
-    pub fn reset(&mut self, lanes: &world::lanes::LaneLines, ground: &DriveGround) {
+    /// the start when no lane is within [`RESET_RANGE_M`]. A spot that is not `clear` (on
+    /// the track before a train) gives way to the nearest clear one along the lane, a few
+    /// meters at a time either way. The odometer, headlights and assists stay.
+    pub fn reset(
+        &mut self,
+        lanes: &world::lanes::LaneLines,
+        ground: &DriveGround,
+        clear: impl Fn([f32; 2]) -> bool,
+    ) {
         let odometer = self.state.odometer_m;
         let p = self.state.pos;
         // The ground point under the body, for which level of a bridge it is on.
         let foot = [p[0], p[1] - self.spec.cg_height_m, p[2]];
-        match lanes.nearest(foot, RESET_RANGE_M) {
+        let spot = lanes.nearest(foot, RESET_RANGE_M).and_then(|h| {
+            if clear([h.pos[0], h.pos[2]]) {
+                return Some(h);
+            }
+            (1..=RESET_STEPS).find_map(|k| {
+                [-1.0f32, 1.0].into_iter().find_map(|sign| {
+                    let d = sign * RESET_STEP_M * k as f32;
+                    let q = [h.pos[0] + h.dir[0] * d, h.pos[1], h.pos[2] + h.dir[1] * d];
+                    lanes
+                        .nearest(q, RESET_STEP_M)
+                        .filter(|g| clear([g.pos[0], g.pos[2]]))
+                })
+            })
+        });
+        match spot {
             Some(h) => {
                 let [x, y, z] = h.pos;
                 let (y, _) = ground.level_from([x, z], y + 0.5);

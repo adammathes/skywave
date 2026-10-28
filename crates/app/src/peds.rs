@@ -223,6 +223,23 @@ impl Crowd {
         self.peds.hash()
     }
 
+    /// The people, for the train to keep clear of.
+    pub fn pool(&self) -> &Pedestrians {
+        &self.peds
+    }
+
+    /// The rail line the people cross at `crossings` (`traffic::peds::Pedestrians::set_rail`),
+    /// kept across density switches.
+    pub fn set_rail(&mut self, line: &[[f32; 2]], crossings: &[[f32; 2]]) {
+        self.peds.set_rail(&self.walks, line, crossings);
+        self.empty.set_rail(&self.walks, line, crossings);
+    }
+
+    /// Which rail crossings are closed now.
+    pub fn set_rail_closed(&mut self, closed: &[bool]) {
+        self.peds.set_rail_closed(closed);
+    }
+
     /// Slot `i`'s person `alpha` of the way through the last step: ground point, heading
     /// and pose.
     fn pose(&self, i: usize, alpha: f32) -> (Vec3, f32, PedPose) {
