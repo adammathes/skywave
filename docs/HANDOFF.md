@@ -45,7 +45,7 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ### Resume here (2026-10-28 03:16 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
-(parking lots), #45 (2001 traffic cars) and #20 (map edges, 03:16, 33cfd2b) merged; two builder
+(parking lots), #45 (2001 traffic cars) and #20 (map edges, 03:16, 33cfd2b) merged; three builder
 sessions are running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
@@ -60,13 +60,19 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   Valley (id `mirage_valley_2001`, old id migrated) with the region template `socal_basin`, then
   the grammar on `m8/mirage-valley-grammar`. World generation: probe-review determinism and the
   new goldens before merging. Messages the coordinator when each PR is green.
+- **Revert of #44** (`vehicle/revert-handling-feel`, session_0121vThD8ZGJQTqmTnPNLTCn,
+  dispatched 03:45 on the owner's word: #44's tuning felt worse, the tail snaps). Back to pre-#44
+  stability (Arcade 0.8 × gain 8), Light 0.3/0.5, the handbrake unscaled, the per-car
+  `oversteer_bias` values; `vehicle/tests/handling.rs` goes. Merge on green after a look at the
+  diff. Then the owner drives it and decides on feel pass 3 (board `feel-3`): fix causes, not a
+  stronger yaw hand — keyboard steering ramp and speed-sensitive lock, a more progressive tire
+  tail in the assisted presets, gentler stability that does not fight the counter-steer assist.
 - **Next on the owner's word:** set pieces (M8 #7), once #2, #3 and #4 are on main.
 - **Queued by the owner (board `mac-music`, order 35):** music folders in the Mac app. The web
   build already takes folders in every Mac browser; the native app only scans `~/Music` or
   `--music` at start, plays MP3 only (nanomp3), and has no picker. Wanted: a folder dialog from
   Audio › Music library, drag-and-drop on the window (winit `DroppedFile`), picks remembered,
-  the Apple Music media layout, AAC `.m4a` played or reported. AAC decoding is a new dependency
-  question (ADR if over ~5k lines). Touches `platform-native` and `app/src/ui`.
+  the Apple Music media layout; MP3 only, other files ignored (the owner: no AAC). Touches `platform-native` and `app/src/ui`.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
