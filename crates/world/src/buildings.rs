@@ -39,6 +39,7 @@ use crate::mesh::{
 };
 use crate::palette::{mix, shade, Palette, Rgb};
 use crate::props::{Prop, PropKind};
+use crate::signs::lexicon::ShopSign;
 use crate::LOT_Y;
 
 /// Depth of window insets.
@@ -290,6 +291,9 @@ pub struct Signage {
     /// glass is not emissive: a big pane at a lit window's brightness reads as a white
     /// wall).
     pub shop_lit: bool,
+    /// A strip mall's tenants may hang vinyl banners from its canopy (some of them, by the
+    /// name seed).
+    pub banner: bool,
 }
 
 /// Rng key for signage.
@@ -304,6 +308,7 @@ pub fn signage(seed: u64, index: u32, rules: &SignRules) -> Signage {
         canopy: rules.mall_canopy(h >> 40) as u8,
         lit_box: (h >> 16) & 255 < u64::from(rules.lit_box_256),
         shop_lit: (h >> 24) & 255 < u64::from(rules.shop_lit_256),
+        banner: (h >> 32) & 255 < u64::from(rules.banner_256),
     }
 }
 
@@ -889,7 +894,7 @@ fn plan_one(
 
 /// Colors of one building.
 #[derive(Clone, Copy)]
-struct Look {
+struct Look<'a> {
     roof_tile: Paint,
     shop_glass: Paint,
     wall: Paint,
@@ -911,13 +916,16 @@ struct Look {
     upper: Paint,
     /// The building's signage, if the detailing gave it any.
     signage: Option<Signage>,
+    /// The grammar its fascia signs take their words from, when it letters them from its
+    /// lexicon ([`SignRules::fascia_words`]).
+    words: Option<&'a Grammar>,
 }
 
 fn choose<T: Copy>(rng: &mut Rng, items: &[T]) -> T {
     items[rng.range(0, items.len() as u32) as usize]
 }
 
-fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
+fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look<'static> {
     let (wall_rgb, pattern, trim_rgb) = match b.style {
         StyleTag::Craftsman => (
             choose(
@@ -1081,14 +1089,15 @@ fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
         sky: pal.sky_blue,
         upper: Paint::new(wall_rgb, pattern),
         signage: None,
+        words: None,
     }
     .styled(b, pal, rng)
 }
 
-impl Look {
+impl Look<'_> {
     /// The touches of the styles that have their own (drawn after the shared colors so
     /// the older styles keep theirs).
-    fn styled(mut self, b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
+    fn styled(mut self, b: &Building, pal: &Palette, rng: &mut Rng) -> Self {
         match b.style {
             StyleTag::Craftsman | StyleTag::Ranch | StyleTag::Tract70s => {
                 let roof = choose(
@@ -1149,7 +1158,7 @@ pub fn build(
     seed: u64,
     index: u32,
 ) -> BuildingStats {
-    build_on(m, b, plan, pal, seed, index, 0.0)
+    build_on(m, b, plan, pal, seed, index, 0.0, None)
 }
 
 /// Where a building stands on uneven ground (`height_at(x, z)`): the ground height its
@@ -1173,7 +1182,7 @@ pub fn footing(fp: &[[f32; 2]], height_at: impl Fn(f32, f32) -> f32) -> (f32, f3
 }
 
 /// [`build`] for a building whose ground falls up to `drop` below its floor: the plinth
-/// reaches down that far.
+/// reaches down that far. `words` is the grammar its fascia signs may be lettered by.
 #[allow(clippy::too_many_arguments)]
 pub fn build_on(
     m: &mut WorldMesh,
@@ -1183,11 +1192,13 @@ pub fn build_on(
     seed: u64,
     index: u32,
     drop: f32,
+    words: Option<&Grammar>,
 ) -> BuildingStats {
     let start = m.indices.len();
     let mut rng = Rng::new(Seed(seed), &[KEY_BUILDING, u64::from(index)]);
     let mut look = look(b, pal, &mut rng);
     look.signage = plan.signage;
+    look.words = words.filter(|g| g.signs.fascia_words);
     let fp: Vec<V2> = b.footprint.iter().map(|&p| V2::from_array(p)).collect();
     let n = fp.len();
     let mut stats = BuildingStats::default();
@@ -3003,6 +3014,23 @@ fn sign_band(
     }
 }
 
+/// A fascia sign's words from grammar `g`'s lexicon, drawn from the hash `h`: its shop
+/// sign's main line, or its trade alone, whichever fits in `max_len` characters first
+/// (empty when neither does).
+fn fascia_words(g: &Grammar, h: u64, max_len: usize) -> Vec<u8> {
+    let s = ShopSign::draw(&g.signs, &g.lexicon, g.era, h);
+    let text = s.text(&g.lexicon);
+    if text.len() <= max_len {
+        return text;
+    }
+    let trade = g.lexicon.trades[usize::from(s.trade)].as_bytes();
+    if trade.len() <= max_len {
+        trade.to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 /// A sign box lettered with an invented name: neon letters on a dark box, or dark letters
 /// on a backlit one. False (nothing drawn) when no name fits.
 #[allow(clippy::too_many_arguments)]
@@ -3022,7 +3050,10 @@ fn named_sign(
     let max = ((x1 - x0 - 0.3) / (4.0 * px)) as usize;
     // Each sign of a building its own name, keyed by where it starts along the wall.
     let key = skywave_core::mix64(s.name_seed ^ u64::from(x0.to_bits()));
-    let name = crate::signs::business_name(key, max.min(18));
+    let name = match look.words {
+        Some(g) => fascia_words(g, key, max.min(18)),
+        None => crate::signs::business_name(key, max.min(18)),
+    };
     if name.is_empty() {
         return false;
     }
@@ -3184,6 +3215,42 @@ fn strip_mall_front(
             look.trim,
         );
         boxf(m, f, lo, hi, face::NEG_Y, underside(look, look.trim));
+    }
+    // Vinyl banners hung from the canopy's front edge, one tenant in three or so.
+    if let Some(s) = look.signage.filter(|s| s.banner) {
+        for u in 0..units {
+            let bits = skywave_core::mix64(s.name_seed ^ u64::from(u));
+            if !bits.is_multiple_of(3) || unit < 5.0 {
+                continue;
+            }
+            let colors = [pal.hydrant_red, pal.paint_yellow, pal.teal, pal.navy];
+            let ground = colors[((bits >> 8) % 4) as usize];
+            let band = if ground == pal.paint_yellow {
+                pal.hydrant_red
+            } else {
+                pal.paint_white
+            };
+            let mid = unit * (u as f32 + 0.5);
+            let half = (0.3 * unit).min(2.2);
+            let (y0, y1) = (canopy_y - 0.95, canopy_y - 0.05);
+            let z = depth + 0.04;
+            let vinyl = Paint::new(ground, Pattern::Paint);
+            let ink = Paint::new(band, Pattern::Paint);
+            rect(m, f, mid - half, y0, mid + half, y1, z, false, vinyl);
+            rect(m, f, mid - half, y0, mid + half, y1, z - 0.01, true, vinyl);
+            let (b0, b1) = (y0 + 0.3, y1 - 0.3);
+            rect(
+                m,
+                f,
+                mid - 0.8 * half,
+                b0,
+                mid + 0.8 * half,
+                b1,
+                z + 0.01,
+                false,
+                ink,
+            );
+        }
     }
     // Square posts.
     for u in 0..=units {
@@ -3988,6 +4055,26 @@ pub fn house_site(
 mod tests {
     use super::*;
 
+    #[test]
+    fn fascia_signs_take_the_lexicon_s_words_when_the_grammar_asks() {
+        let g = crate::grammar::basin_01();
+        assert!(g.signs.fascia_words && !crate::grammar::coast_80s().signs.fascia_words);
+        let trades = &g.lexicon.trades;
+        for h in 0..2000u64 {
+            let t = fascia_words(&g, skywave_core::mix64(h), 18);
+            assert!(!t.is_empty() && t.len() <= 18);
+            let t = core::str::from_utf8(&t).unwrap();
+            assert!(
+                trades.iter().any(|w| t.contains(w.as_str())) || t.ends_with("'S"),
+                "{t}"
+            );
+            // A short box falls back to the trade alone, or to nothing.
+            let short = fascia_words(&g, skywave_core::mix64(h), 6);
+            assert!(short.len() <= 6);
+        }
+        assert!(fascia_words(&g, 1, 2).is_empty());
+    }
+
     fn env(n: usize) -> Vec<FacadeEnv> {
         (0..n)
             .map(|i| FacadeEnv {
@@ -4312,6 +4399,7 @@ mod tests {
             canopy: canopy as u8,
             lit_box: false,
             shop_lit: true,
+            banner: false,
         }
     }
 

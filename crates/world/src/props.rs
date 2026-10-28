@@ -81,6 +81,14 @@ pub enum PropKind {
     },
     /// A railroad crossing sign on a post, facing `dir`.
     Crossbuck,
+    /// A billboard with a blank (0) or pictogram (pictogram index + 1) face, facing `dir`.
+    FaceBillboard {
+        face: u8,
+    },
+    /// A bus shelter open toward `dir`, its ad box's face as a [`PropKind::FaceBillboard`]'s.
+    BusShelter {
+        face: u8,
+    },
 }
 
 /// One placed prop.
@@ -421,7 +429,184 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         PropKind::Pier { len_m } => pier(m, base, p.dir, f32::from(len_m), pal, &mut rng),
         PropKind::Track { len_dm, bed } => track(m, base, p.dir, f32::from(len_dm) * 0.1, bed, pal),
         PropKind::Crossbuck => crossbuck(m, base, p.dir, pal),
+        PropKind::FaceBillboard { face } => face_billboard(m, base, p.dir, face, pal, p.seed),
+        PropKind::BusShelter { face } => bus_shelter(m, base, p.dir, face, pal, p.seed),
     }
+}
+
+/// The lit face of a billboard or an ad box, `w` × `h` centered on `(cx, cy)` at depth `z`
+/// in frame `f`: a backlit white panel, or a plain ground with one big pictogram on it.
+#[allow(clippy::too_many_arguments)]
+fn ad_face(
+    m: &mut WorldMesh,
+    f: &Frame,
+    cx: f32,
+    cy: f32,
+    w: f32,
+    h: f32,
+    z: f32,
+    face: u8,
+    pal: &Palette,
+    seed: u32,
+) {
+    let (x0, x1, y0, y1) = (cx - 0.5 * w, cx + 0.5 * w, cy - 0.5 * h, cy + 0.5 * h);
+    let Some(pic) = face
+        .checked_sub(1)
+        .and_then(|k| Pictogram::ALL.get(usize::from(k)).copied())
+    else {
+        let blank =
+            Paint::new(pal.stucco_white, Pattern::Paint).glowing(pal.window_warm, Glow::Neon);
+        rect(m, f, x0, y0, x1, y1, z, false, blank);
+        return;
+    };
+    let grounds = [
+        pal.navy,
+        pal.teal,
+        pal.hydrant_red,
+        pal.paint_yellow,
+        pal.stucco_white,
+    ];
+    let h2 = mix64(u64::from(seed) ^ 0x4641_4345);
+    let ground = grounds[(h2 % grounds.len() as u64) as usize];
+    rect(
+        m,
+        f,
+        x0,
+        y0,
+        x1,
+        y1,
+        z,
+        false,
+        Paint::new(ground, Pattern::Paint),
+    );
+    let light = if ground == pal.paint_yellow || ground == pal.stucco_white {
+        shade(pal.navy, 160)
+    } else {
+        pal.stucco_white
+    };
+    let tints = Tints {
+        body: Paint::new(light, Pattern::Paint),
+        accent: Paint::new(pal.salmon, Pattern::Paint),
+        dark: Paint::new(shade(pal.navy, 90), Pattern::Paint),
+        light: Paint::new(pal.stucco_white, Pattern::Paint),
+    };
+    let parts = pictogram::parts(pic);
+    let size = 0.85 * h.min(w);
+    pictogram::extrude(m, f, &parts, cx, cy, size, z, z + 0.04, false, &tints);
+}
+
+/// A billboard on two posts with a catwalk and flood lamps (as [`billboard`]), its face
+/// blank or one pictogram.
+fn face_billboard(m: &mut WorldMesh, base: V3, facing: V2, face: u8, pal: &Palette, seed: u32) {
+    let steel = Paint::new(shade(pal.metal_dark, 260), Pattern::Metal);
+    let f = Frame::upright(base, facing.left());
+    for x in [-3.2, 3.2] {
+        let (lo, hi) = ([x - 0.16, 0.0, -0.55], [x + 0.16, 9.2, -0.25]);
+        boxf(m, &f, lo, hi, face::NO_BOTTOM, steel);
+    }
+    let (w, y0, y1) = (5.2, 5.6, 9.2);
+    boxf(
+        m,
+        &f,
+        [-w, y0, -0.25],
+        [w, y1, 0.0],
+        face::ALL & !face::POS_Z,
+        steel,
+    );
+    boxf(
+        m,
+        &f,
+        [-w, y0 - 0.25, 0.0],
+        [w, y0 - 0.15, 0.9],
+        face::ALL,
+        steel,
+    );
+    ad_face(
+        m,
+        &f,
+        0.0,
+        0.5 * (y0 + y1),
+        2.0 * w,
+        y1 - y0,
+        0.0,
+        face,
+        pal,
+        seed,
+    );
+    let lens = Paint::new(pal.window_warm, Pattern::Glass).glowing(pal.sodium, Glow::Lamp);
+    for x in [-3.4, 0.0, 3.4] {
+        let (lo, hi) = ([x - 0.2, y0 - 0.2, 1.2], [x + 0.2, y0 + 0.05, 1.45]);
+        boxf(m, &f, lo, hi, face::ALL & !face::POS_Y, steel);
+        quad(
+            m,
+            [
+                f.p(x - 0.16, y0 + 0.051, 1.24),
+                f.p(x + 0.16, y0 + 0.051, 1.24),
+                f.p(x + 0.16, y0 + 0.051, 1.41),
+                f.p(x - 0.16, y0 + 0.051, 1.41),
+            ],
+            f.y,
+            lens,
+        );
+    }
+}
+
+/// Size of a bus shelter: length along the curb, depth, roof height, m.
+pub const SHELTER_M: (f32, f32, f32) = (3.6, 1.5, 2.5);
+
+/// A bus shelter: posts, a flat roof, a glazed back screen, a bench, and at one end a lit
+/// ad box facing the oncoming traffic, open toward `facing`.
+fn bus_shelter(m: &mut WorldMesh, base: V3, facing: V2, face: u8, pal: &Palette, seed: u32) {
+    let (len, depth, h) = SHELTER_M;
+    let steel = Paint::new(pal.metal_light, Pattern::Metal);
+    let glass = Paint::new(mix(pal.glass, pal.sky_blue, 90), Pattern::Glass);
+    // X along the curb, +Z out of the open side.
+    let f = Frame::upright(base, facing.left());
+    let (x0, x1, zb) = (-0.5 * len, 0.5 * len, -depth);
+    for x in [x0 + 0.05, x1 - 0.05] {
+        for z in [zb + 0.05, -0.05] {
+            boxf(
+                m,
+                &f,
+                [x - 0.04, 0.0, z - 0.04],
+                [x + 0.04, h, z + 0.04],
+                face::NO_BOTTOM,
+                steel,
+            );
+        }
+    }
+    boxf(
+        m,
+        &f,
+        [x0 - 0.1, h, zb - 0.1],
+        [x1 + 0.1, h + 0.12, 0.2],
+        face::ALL,
+        steel,
+    );
+    rect(m, &f, x0, 0.3, x1, h - 0.1, zb, false, glass);
+    rect(m, &f, x0, 0.3, x1, h - 0.1, zb, true, glass);
+    let seat = Paint::new(shade(pal.metal_dark, 300), Pattern::Metal);
+    boxf(
+        m,
+        &f,
+        [x0 + 0.4, 0.42, zb + 0.05],
+        [x1 - 1.4, 0.48, zb + 0.45],
+        face::ALL,
+        seat,
+    );
+    // The ad box at the downstream end, its face toward the street end of the shelter.
+    let g = Frame::upright(f.p(x1 - 0.5, 0.0, 0.5 * zb), facing);
+    boxf(
+        m,
+        &g,
+        [-0.6, 0.15, -0.1],
+        [0.6, 2.0, 0.1],
+        face::NO_BOTTOM,
+        steel,
+    );
+    ad_face(m, &g, 0.0, 1.1, 1.05, 1.65, 0.105, face, pal, seed);
+    let back = Frame::upright(g.o, -facing);
+    ad_face(m, &back, 0.0, 1.1, 1.05, 1.65, 0.105, face, pal, seed ^ 1);
 }
 
 /// Distance between a track's rails (standard gauge) and between its ties.
@@ -1248,6 +1433,8 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::Pier { len_m } => PropKind::Pier { len_m },
         P::Track { len_dm, bed } => PropKind::Track { len_dm, bed },
         P::Crossbuck => PropKind::Crossbuck,
+        P::FaceBillboard { face } => PropKind::FaceBillboard { face },
+        P::BusShelter { face } => PropKind::BusShelter { face },
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

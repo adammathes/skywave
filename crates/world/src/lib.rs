@@ -222,8 +222,8 @@ pub struct ChunkPlan {
     props: Vec<props::Prop>,
     /// Per prop, the shop sign a blade sign is lettered with (`None` for every other kind).
     shop_signs: Vec<Option<signs::lexicon::ShopSign>>,
-    /// The words the shop signs are lettered from.
-    lexicon: signs::lexicon::Lexicon,
+    /// The grammar the shop signs and the buildings' fascia signs are lettered by.
+    grammar: Grammar,
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
     chunk_range: [[i32; 2]; 2],
@@ -374,7 +374,7 @@ impl ChunkPlan {
             stall_w,
             props,
             shop_signs,
-            lexicon: grammar.lexicon.clone(),
+            grammar: grammar.clone(),
             kit: props::PropKit::new(),
             chunk_range: [lo, hi],
             lots,
@@ -525,7 +525,8 @@ impl ChunkPlan {
                     let m = out.at(c, MeshKind::Building);
                     let (base, drop) = self.footings[i];
                     let mark = m.vertices.len();
-                    let s = buildings::build_on(m, b, plan, palette, seed, i as u32, drop);
+                    let g = Some(&self.grammar);
+                    let s = buildings::build_on(m, b, plan, palette, seed, i as u32, drop, g);
                     // Its props are in `props` already.
                     buildings::house_site(m, b, plan, env, palette, seed, i as u32);
                     if base != 0.0 {
@@ -550,7 +551,7 @@ impl ChunkPlan {
                     if out.wants(p.pos) {
                         let m = out.at(p.pos, MeshKind::Prop);
                         match &self.shop_signs[i] {
-                            Some(s) => props::shop_sign(m, p, palette, s, &self.lexicon),
+                            Some(s) => props::shop_sign(m, p, palette, s, &self.grammar.lexicon),
                             None => props::build(m, p, palette, &self.kit),
                         }
                         if out.kept_vertices() >= max_vertices {

@@ -51,6 +51,8 @@ fn name(k: PropKind) -> &'static str {
         PropKind::Pier { .. } => "pier",
         PropKind::Track { .. } => "track",
         PropKind::Crossbuck => "crossbuck",
+        PropKind::FaceBillboard { .. } => "face billboard",
+        PropKind::BusShelter { .. } => "bus shelter",
     }
 }
 

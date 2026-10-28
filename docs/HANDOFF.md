@@ -43,27 +43,27 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 06:35 UTC, coordinator handed off to save quota)
+### Resume here (2026-10-28 09:41 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
 (parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars part 2), #47 (the #44
-revert) and #48 (Mirage Valley part 1, 06:35, 5e6da9c) merged; one builder session is running; each
+revert), #48 and #49 (Mirage Valley, 09:41, d3b40c8) merged; one builder session is running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
 the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
 sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
-- **Mirage Valley** (session_0121vThCxCfDJvhSt6h7cdhk, M8 #2 and #3): part 1 merged as #48
-  (06:35, 5e6da9c): the rename (id `mirage_valley_2001`, the old id migrated on every path) and
-  the region template `socal_basin`, four basin goldens; reviewed independently, seeds 1–80 build,
-  debug and release hashes match. Part 2, the grammar, building on `m8/mirage-valley-grammar`;
-  asked also to make the flood channel read as concrete (the dusk golden is a blue haze). Merge
-  on green after a look at the goldens.
+- **Set pieces** (`m8/set-pieces`, session_0121vThAAG7g9BZqHcrxmCTx, M8 #7, dispatched 09:41 on
+  the owner's word): three PRs in turn: static places (channel ramps, tunnel, overlook, crew
+  garage, taco lot, drag strip); the grade crossing and train (`m8/set-pieces-crossing`); the
+  race line and truck convoy (`m8/set-pieces-race`). Zero violence: NPC cars do not see people in
+  general yet, so each moving piece guarantees it itself; probe-review each moving PR (a person-
+  steps-inside-bodies count at zero over a long seeded run) before merging. Messages the
+  coordinator when each PR is green.
 - **Handling:** #44 reverted by #47 (05:02, edba67d) on the owner's word (the tail snapped); the
   Falchion's `grip_lat` trimmed to 0.883 to keep its skidpad slot. The owner drives it next and
   decides on feel pass 3 (board `feel-3`): fix causes, not a stronger yaw hand — keyboard
   steering ramp and speed-sensitive lock, a more progressive tire tail in the assisted presets,
   gentler stability that does not fight the counter-steer assist.
-- **Next on the owner's word:** set pieces (M8 #7), once #3 (the grammar) is on main.
 - **Queued by the owner (board `mac-music`, order 35):** music folders in the Mac app. The web
   build already takes folders in every Mac browser; the native app only scans `~/Music` or
   `--music` at start, plays MP3 only (nanomp3), and has no picker. Wanted: a folder dialog from
@@ -138,10 +138,13 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   Wren minivan, Percheron crew cab, Linnet hatch, Sledge box truck, Anvil semi; weights by zone
   for traffic and parking; the box truck and semi never park, the semi keeps to freeways; per-car
   length in following and junction room; none in 1984; fixed extra axles in the shape DSL); the 2001 hero cars part 2 (#46, M8 #5: Shrike Coupe,
-  Glaive Turbo, Falchion Sedan, Courser V8, the basin's heroes); Mirage Valley part 1 (#48,
-  M8 #2: the 2001 world renamed, the `socal_basin` region template); the Deck's "Skywave
+  Glaive Turbo, Falchion Sedan, Courser V8, the basin's heroes); Mirage Valley (#48 and
+  #49, M8 #2 and #3: the 2001 world renamed from Inland Basin, the `socal_basin` region template,
+  the 2001 grammar, lexicon and `sodium_night` palette; descriptor + trade pairs that name real
+  chains blocked by a hashed list; storefront fascia signs lettered from the grammar's lexicon);
+  the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: none; building: Mirage Valley (see "Resume here"). Paused: NPC cars see
+- Open PRs: none; building: set pieces (see "Resume here"). Paused: NPC cars see
   pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
   comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
@@ -150,9 +153,9 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: the owner's drive of the reverted handling; Mirage Valley's grammar and `sodium_night`
-  palette (`m8/mirage-valley-grammar`, M8 #3); set pieces (M8 #7); NPC cars see pedestrians;
-  M8 waves (the 2001 preset); B7 facade sign bands on the
+- Mirage Valley's world shows "coming" on the World page until its radio preset (M8 #8) lands.
+- Next: the owner's drive of the reverted handling; set pieces (M8 #7, three PRs); NPC cars see
+  pedestrians; music folders in the Mac app; M8 #8 (the 2001 radio preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code

@@ -684,6 +684,17 @@ pub enum PropKind {
     /// A railroad crossing sign (the crossed blades and the twin lamps) on a post; facing:
     /// toward the drivers it warns.
     Crossbuck,
+    /// A billboard whose lit face is blank (`face` 0) or one big pictogram (`face` - 1, a
+    /// `world` pictogram index); facing: the way the panel faces.
+    FaceBillboard {
+        face: u8,
+    },
+    /// A bus stop shelter (roof, back screen, bench) with a lit ad box at one end, its
+    /// face as a [`PropKind::FaceBillboard`]'s; facing: out of its open side, toward the
+    /// road.
+    BusShelter {
+        face: u8,
+    },
 }
 
 /// [`PropKind::Track`] beds: on a ballast embankment over the ground...

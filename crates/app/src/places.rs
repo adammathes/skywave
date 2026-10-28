@@ -16,7 +16,13 @@ use crate::scene::PlaceKey;
 const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
 const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
+const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
+
+/// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
+/// `signs.lexicon` names its own.
+const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
 const REGIONS: [(&str, &str); 2] = [
@@ -24,7 +30,10 @@ const REGIONS: [(&str, &str); 2] = [
     ("socal_basin", SOCAL_BASIN),
 ];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
-const GRAMMARS: [(&str, &str); 1] = [("california_coast_80s.ron", CALIFORNIA_COAST_80S)];
+const GRAMMARS: [(&str, &str); 2] = [
+    ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
+    ("socal_basin_2001.ron", SOCAL_BASIN_2001),
+];
 
 /// The text of the built-in region template `id`.
 pub fn region_text(id: &str) -> Option<&'static str> {
@@ -38,10 +47,7 @@ pub fn grammar_text(file: &str) -> Option<&'static str> {
 
 /// The palette named `id`.
 pub fn palette(id: &str) -> Option<Palette> {
-    match id {
-        "socal_1985" => Some(Palette::socal_1985()),
-        _ => None,
-    }
+    Palette::named(id)
 }
 
 /// The palette scenario `s` paints its place with.
@@ -56,6 +62,17 @@ pub fn load_grammar(text: &str, lexicon: &str) -> Result<Grammar, String> {
     g.lexicon = ron::from_str(lexicon).map_err(|e| format!("lexicon: {e}"))?;
     g.validate().map_err(|e| format!("grammar: {e}"))?;
     Ok(g)
+}
+
+/// [`load_grammar`] with the built-in lexicon the grammar names (the coast's when it names
+/// none that is built in, which validation then refuses).
+pub fn load_builtin_grammar(text: &str) -> Result<Grammar, String> {
+    let g: Grammar = ron::from_str(text).map_err(|e| format!("grammar: {e}"))?;
+    let lexicon = LEXICONS
+        .iter()
+        .find(|(id, _)| *id == g.signs.lexicon)
+        .map_or(LEXICON, |(_, t)| *t);
+    load_grammar(text, lexicon)
 }
 
 /// The facade grammar the coast's buildings are planned by, parsed once. It is built in
@@ -73,7 +90,7 @@ pub fn grammar_of(s: &Scenario) -> &'static Grammar {
     let all = GRAMMARS_PARSED.get_or_init(|| {
         GRAMMARS
             .iter()
-            .map(|(_, text)| load_grammar(text, LEXICON).expect("the built-in grammars"))
+            .map(|(_, text)| load_builtin_grammar(text).expect("the built-in grammars"))
             .collect()
     });
     GRAMMARS
@@ -120,6 +137,23 @@ mod tests {
         assert_eq!(&g, grammar());
         let text = ron::ser::to_string(&g).unwrap();
         assert_eq!(load_grammar(&text, LEXICON).unwrap(), g);
+    }
+
+    #[test]
+    fn the_basin_grammar_loads_with_its_own_lexicon() {
+        let g = load_builtin_grammar(SOCAL_BASIN_2001).unwrap();
+        assert_eq!(g.template, "socal_basin");
+        assert_eq!(g.era, place::Era::Aughts);
+        assert_eq!(g.lexicon.id, "us_basin");
+        assert!(g.street.bus_stop_m > 0.0 && g.signs.banner_256 > 0);
+        // The coast's lexicon is not the basin's: it lacks its trades.
+        assert!(load_grammar(SOCAL_BASIN_2001, LEXICON).is_err());
+        let text = ron::ser::to_string(&g).unwrap();
+        assert_eq!(load_builtin_grammar(&text).unwrap(), g);
+        assert_eq!(
+            load_builtin_grammar(CALIFORNIA_COAST_80S).unwrap(),
+            *grammar()
+        );
     }
 
     #[test]

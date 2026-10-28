@@ -1353,6 +1353,38 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
             // road) and a car rolls over it.
             PropKind::NeonSign { .. } | PropKind::Track { .. } => {}
             PropKind::Crossbuck => posts.push(post(0.08, 3.9)),
+            PropKind::FaceBillboard { .. } => {
+                let along = p.dir.left();
+                for x in [-3.2f32, 3.2] {
+                    let c = p.pos + along * x - p.dir * 0.4;
+                    posts.push(Post {
+                        c: arr(c),
+                        ..post(0.22, 9.2)
+                    });
+                }
+            }
+            // The posts and the ad box; a person may sit inside.
+            PropKind::BusShelter { .. } => {
+                let (len, depth, h) = props::SHELTER_M;
+                let along = p.dir.left();
+                for x in [-0.5 * len + 0.05, 0.5 * len - 0.05] {
+                    for z in [-depth + 0.05, -0.05] {
+                        posts.push(Post {
+                            c: arr(p.pos + along * x + p.dir * z),
+                            ..post(0.06, h)
+                        });
+                    }
+                }
+                boxes.push(BoxSolid {
+                    c: arr(p.pos + along * (0.5 * len - 0.5) - p.dir * (0.5 * depth)),
+                    u: arr(along),
+                    half: [0.12, 0.6],
+                    y0: p.y,
+                    y1: p.y + 2.0,
+                    kind: p.kind,
+                    lot: NO_LOT,
+                });
+            }
         }
     }
     (posts, boxes)
