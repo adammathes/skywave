@@ -504,7 +504,7 @@ impl MacroMap {
                 }
                 if zone[i] != ZoneId::Beach
                     && inputs.highway[i] <= corridor + ZONE_CELL_M * 2.0
-                    && polyline_distance(&highway, [x, z]) <= corridor
+                    && near_polyline(&highway, [x, z], corridor)
                 {
                     zone[i] = ZoneId::Highway;
                 }
@@ -817,16 +817,36 @@ fn raise_walls(
     let reach = sides.map(|k| edges::wall(k).map_or(0.0, |x| x.ramp_m + edges::CREST_WANDER_M));
     let foot_at = sides.map(|k| ((edges::band_m(k) / CELL_M) as usize).min(w.min(h) - 1));
     let base = heights.to_vec();
-    for iz in 0..h {
-        for ix in 0..w {
-            let p = [ix as f32 * CELL_M, iz as f32 * CELL_M];
-            let d = edges::inside(p, ext);
-            let mut top = f32::NEG_INFINITY;
-            for k in 0..4 {
-                if d[k] >= reach[k] {
+    // Each wall's height and crest along its side, once per column (north, south) or row
+    // (east, west): they depend only on the position along it.
+    let profiles: [Vec<(f32, f32)>; 4] = core::array::from_fn(|k| {
+        let n = if k == NORTH || k == SOUTH { w } else { h };
+        (0..n)
+            .map(|i| edges::profile(seed.0, k, sides[k], i as f32 * CELL_M).unwrap_or((0.0, 0.0)))
+            .collect()
+    });
+    // The highest wall over each cell, side by side over just the strip each can reach.
+    let mut top = vec![f32::NEG_INFINITY; w * h];
+    for k in 0..4 {
+        if reach[k] <= 0.0 {
+            continue;
+        }
+        let n = (reach[k] / CELL_M) as usize + 2;
+        let (zs, xs) = match k {
+            NORTH => (0..n.min(h), 0..w),
+            SOUTH => (h.saturating_sub(n)..h, 0..w),
+            WEST => (0..h, 0..n.min(w)),
+            _ => (0..h, w.saturating_sub(n)..w),
+        };
+        for iz in zs {
+            for ix in xs.clone() {
+                let p = [ix as f32 * CELL_M, iz as f32 * CELL_M];
+                let d = edges::inside(p, ext)[k];
+                if d >= reach[k] {
                     continue;
                 }
-                let rise = edges::rise(seed.0, k, sides[k], edges::along(k, p), d[k]);
+                let at = if k == NORTH || k == SOUTH { ix } else { iz };
+                let rise = edges::rise_at(sides[k], profiles[k][at], d);
                 let (tx, tz) = match k {
                     NORTH => (ix, foot_at[k]),
                     SOUTH => (ix, h - 1 - foot_at[k]),
@@ -834,12 +854,14 @@ fn raise_walls(
                     _ => (w - 1 - foot_at[k], iz),
                 };
                 let foot = base[iz * w + ix].max(base[tz * w + tx]);
-                top = top.max(foot + rise);
+                let t = &mut top[iz * w + ix];
+                *t = t.max(foot + rise);
             }
-            let hp = &mut heights[iz * w + ix];
-            if top > *hp {
-                *hp = clamp(top, bounds.0, bounds.1);
-            }
+        }
+    }
+    for (hp, &t) in heights.iter_mut().zip(&top) {
+        if t > *hp {
+            *hp = clamp(t, bounds.0, bounds.1);
         }
     }
 }
@@ -1050,14 +1072,18 @@ fn zone_inputs(
     }
 }
 
-fn polyline_distance(line: &[[f32; 2]], p: [f32; 2]) -> f32 {
-    let p = V2::from_array(p);
-    let mut best = f32::INFINITY;
-    for s in line.windows(2) {
-        let (d, _) = segment_distance(p, V2::from_array(s[0]), V2::from_array(s[1]));
-        best = best.min(d);
-    }
-    best
+/// Whether `p` lies within `r` of `line`: segments whose box, grown by `r`, misses `p`
+/// are passed over without measuring.
+fn near_polyline(line: &[[f32; 2]], p: [f32; 2], r: f32) -> bool {
+    let q = V2::from_array(p);
+    line.windows(2).any(|s| {
+        let (a, b) = (s[0], s[1]);
+        let out = p[0] < a[0].min(b[0]) - r
+            || p[0] > a[0].max(b[0]) + r
+            || p[1] < a[1].min(b[1]) - r
+            || p[1] > a[1].max(b[1]) + r;
+        !out && segment_distance(q, V2::from_array(a), V2::from_array(b)).0 <= r
+    })
 }
 
 fn ccw(mut poly: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
@@ -1215,7 +1241,10 @@ fn overlooks(seed: Seed, t: &RegionTemplate, map: &MacroMap) -> Vec<[f32; 2]> {
         .zones
         .iter()
         .enumerate()
-        .filter(|(_, &z)| z == ZoneId::Hills)
+        .filter(|&(i, &z)| {
+            let (x, zc) = cell_center(i % zw, i / zw);
+            z == ZoneId::Hills && map.in_playable(x, zc, 40.0)
+        })
         .map(|(i, _)| {
             let (x, z) = cell_center(i % zw, i / zw);
             (map.height_at(x, z), i)
@@ -1233,9 +1262,6 @@ fn overlooks(seed: Seed, t: &RegionTemplate, map: &MacroMap) -> Vec<[f32; 2]> {
         }
         let (x, z) = cell_center(i % zw, i / zw);
         let p = [x, z];
-        if !map.in_playable(x, z, 40.0) {
-            continue;
-        }
         if map.pass.is_some_and(|q| !far(p, q, 250.0)) || out.iter().any(|&q| !far(p, q, 400.0)) {
             continue;
         }

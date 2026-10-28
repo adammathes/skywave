@@ -91,18 +91,31 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Height the wall of `side` adds `inside` meters in from it, `along` meters along it: 0
-/// past the toe, the full (noisy) height at the crest and beyond.
-pub fn rise(seed: u64, side: usize, kind: EdgeKind, along: f32, inside: f32) -> f32 {
-    let Some(w) = wall(kind) else {
-        return 0.0;
-    };
+/// The wall of `side` at `along`: its height above the toe there and how far in from the
+/// side its crest wanders (both depend only on `along`); `None` for water and open sides.
+pub fn profile(seed: u64, side: usize, kind: EdgeKind, along: f32) -> Option<(f32, f32)> {
+    let w = wall(kind)?;
     let k = key(seed, side);
     let n = 0.65 * value_noise(k, along, 0.0, 280.0) + 0.35 * value_noise(k ^ 1, along, 0.0, 70.0);
     let height = lerp(w.height_m.0, w.height_m.1, n);
     let crest = CREST_WANDER_M * value_noise(k ^ 2, along, 0.0, 160.0);
+    Some((height, crest))
+}
+
+/// Height a wall of `kind` with `profile` (height, crest) adds `inside` meters in from its
+/// side: 0 past the toe, the full height at the crest and beyond.
+pub fn rise_at(kind: EdgeKind, (height, crest): (f32, f32), inside: f32) -> f32 {
+    let Some(w) = wall(kind) else {
+        return 0.0;
+    };
     let t = 1.0 - (inside - crest) / w.ramp_m;
     height * smoothstep(FACE.0, FACE.1, t)
+}
+
+/// Height the wall of `side` adds `inside` meters in from it, `along` meters along it: 0
+/// past the toe, the full (noisy) height at the crest and beyond.
+pub fn rise(seed: u64, side: usize, kind: EdgeKind, along: f32, inside: f32) -> f32 {
+    profile(seed, side, kind, along).map_or(0.0, |p| rise_at(kind, p, inside))
 }
 
 /// How far in from `side` the face of its wall stands at `along`, a few meters up from its
