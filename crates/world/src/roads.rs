@@ -32,6 +32,8 @@ pub(crate) const GUTTER_M: f32 = 0.45;
 const CURB_TOP_M: f32 = 0.2;
 /// Grass parkway between curb and walk on residential streets.
 const PARKWAY_M: f32 = 1.0;
+/// How far into a walk without a parkway a dropped curb's apron rises, m.
+pub const APRON_M: f32 = 0.6;
 /// Sidewalk slab length (seam spacing).
 const SLAB_M: f32 = 1.5;
 /// Width of the seam between slabs.
@@ -201,6 +203,21 @@ impl EdgePath {
             n0.lerp(n1, ds / (self.s[k + 1] - self.s[k]))
         };
         c + n * t
+    }
+
+    /// The centerline point nearest ground point `p`: its distance along, and how far `p`
+    /// lies to its left (negative: to its right).
+    pub fn project(&self, p: V2) -> (f32, f32) {
+        let (mut best, mut s, mut t) = (f32::INFINITY, 0.0, 0.0);
+        for (k, w) in self.pts.windows(2).enumerate() {
+            let (d, f) = segment_distance(p, w[0], w[1]);
+            if d < best {
+                best = d;
+                s = self.s[k] + f * (self.s[k + 1] - self.s[k]);
+                t = (p - w[0].lerp(w[1], f)).dot(self.d[k].left());
+            }
+        }
+        (s, t)
     }
 
     /// Left normal of the centerline at `s` (for facing).
@@ -399,6 +416,21 @@ pub struct Network {
     pub edge_ends: Vec<[(usize, usize); 2]>,
     /// For each edge, its layout centerline and profile.
     pub paths: Vec<EdgePath>,
+    /// Where a parking lot's drive crosses a curb ([`crate::lots`]): none until the lots
+    /// are planned.
+    pub cuts: Vec<CurbCut>,
+}
+
+/// A dropped curb on one side of an edge, `[s0, s1]` along its layout centerline: the
+/// curb gives way to a concrete apron rising from the gutter to the walk (to the lot
+/// where the road has no walk).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurbCut {
+    pub edge: u32,
+    /// The edge's left side (seen from `a` toward `b`), else its right.
+    pub left: bool,
+    pub s0: f32,
+    pub s1: f32,
 }
 
 impl Network {
@@ -505,7 +537,22 @@ impl Network {
             junctions,
             edge_ends,
             paths,
+            cuts: Vec::new(),
         }
+    }
+
+    /// The curb cuts on edge `e`'s `left` (else right) side, clipped to `s0..s1`, in order
+    /// along it, as `[from, to]`.
+    pub fn cuts_on(&self, e: usize, left: bool, s0: f32, s1: f32) -> Vec<[f32; 2]> {
+        let mut out: Vec<[f32; 2]> = self
+            .cuts
+            .iter()
+            .filter(|c| c.edge as usize == e && c.left == left)
+            .map(|c| [c.s0.max(s0), c.s1.min(s1)])
+            .filter(|c| c[1] > c[0])
+            .collect();
+        out.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        out
     }
 
     /// The two ends of edge `e`: at node `a` and at node `b`.
@@ -1044,7 +1091,29 @@ pub fn build_from(
                         parkway,
                         skirt,
                     };
-                    side_strip(m, path, &side, &paints, seed ^ i as u64);
+                    // The curb, dropped where a lot's drive crosses it.
+                    let mut s = s0;
+                    for c in net.cuts_on(i, k == 0, s0, s1) {
+                        let before = Side {
+                            s0: s,
+                            s1: c[0],
+                            ..side
+                        };
+                        side_strip(m, path, &before, &paints, seed ^ i as u64);
+                        cut_strip(
+                            m,
+                            path,
+                            &Side {
+                                s0: c[0],
+                                s1: c[1],
+                                ..side
+                            },
+                            &paints,
+                        );
+                        s = c[1];
+                    }
+                    let rest = Side { s0: s, ..side };
+                    side_strip(m, path, &rest, &paints, seed ^ i as u64);
                 }
             }
             if e.class == RoadClass::Highway {
@@ -1290,6 +1359,93 @@ fn side_strip(m: &mut WorldMesh, path: &EdgePath, side: &Side, p: &RoadPaints, s
         );
     }
     wall(m, path, s0, s1, t(walk1), skirt, CURB_M, sigma, p.curb);
+}
+
+/// A dropped curb along `side`: the gutter, then a concrete apron from the gutter up to the
+/// walk's top (with no walk, the curb top laid flat onto the lot), the rest of the walk
+/// and its back skirt, the full curb's ends closed by wings.
+fn cut_strip(m: &mut WorldMesh, path: &EdgePath, side: &Side, p: &RoadPaints) {
+    let Side {
+        sigma,
+        s0,
+        s1,
+        hw,
+        sw,
+        parkway,
+        skirt,
+    } = *side;
+    if s1 <= s0 {
+        return;
+    }
+    let t = |off: f32| sigma * off;
+    flat(
+        m,
+        path,
+        s0,
+        s1,
+        t(hw - GUTTER_M),
+        t(hw),
+        PAINT_LIFT * 0.8,
+        p.gutter,
+    );
+    let lip = PAINT_LIFT * 2.0;
+    let apron = if sw <= 0.0 {
+        flat(m, path, s0, s1, t(hw), t(hw + CURB_TOP_M), lip, p.walk);
+        hw + CURB_TOP_M
+    } else {
+        let top = hw + CURB_TOP_M + if parkway { PARKWAY_M } else { APRON_M };
+        slope(m, path, s0, s1, t(hw), lip, t(top), CURB_M, p.walk);
+        flat(m, path, s0, s1, t(top), t(hw + sw), CURB_M, p.walk);
+        wall(m, path, s0, s1, t(hw + sw), skirt, CURB_M, sigma, p.curb);
+        top
+    };
+    // The full curb's ends: from the gutter up to its top, back to where the apron meets it.
+    for (s, facing) in [(s0, 1.0), (s1, -1.0)] {
+        let along = path.left(s).right() * facing;
+        let (a, b) = (t(hw), t(apron));
+        let top = if sw <= 0.0 { t(hw + CURB_TOP_M) } else { b };
+        let pts = [
+            path.p(s, a, lip),
+            path.p(s, a, CURB_M),
+            path.p(s, top, CURB_M),
+        ];
+        tri(m, pts[0], pts[1], pts[2], along.at(0.0), p.curb);
+        if sw <= 0.0 {
+            tri(
+                m,
+                pts[0],
+                pts[2],
+                path.p(s, top, lip),
+                along.at(0.0),
+                p.curb,
+            );
+        }
+    }
+}
+
+/// Quads covering `s0..s1` along and `t0..t1` across, rising from `lift0` above the road
+/// surface at `t0` to `lift1` at `t1`, cut at the centerline's bends.
+#[allow(clippy::too_many_arguments)]
+fn slope(
+    m: &mut WorldMesh,
+    path: &EdgePath,
+    s0: f32,
+    s1: f32,
+    t0: f32,
+    lift0: f32,
+    t1: f32,
+    lift1: f32,
+    paint: Paint,
+) {
+    path.pieces(s0, s1, |a, b| {
+        let q = [
+            path.p(a, t0, lift0),
+            path.p(b, t0, lift0),
+            path.p(b, t1, lift1),
+            path.p(a, t1, lift1),
+        ];
+        quad(m, q, V3::Y, paint);
+    });
 }
 
 /// The highway's median: a concrete barrier on the centerline (sloped faces, flat top).

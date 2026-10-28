@@ -14,7 +14,9 @@
 //!   (strip malls, motels, bungalows, ranches, dingbats, warehouses) take theirs. Wall
 //!   heights follow from storeys by use. The mesher steps towers back above six floors.
 //! - **Footprint.** A rectangle in the lot frame: the front, side and rear setbacks of the
-//!   zone's [`Lots`] (strip malls keep a parking apron, houses a driveway on one side) give
+//!   zone's [`Lots`] (strip malls keep room for a front parking lot, houses a driveway on
+//!   one side; shops and offices backing onto an alley may keep a row of stalls on it,
+//!   `crate::lots`) give
 //!   the largest rectangle inside the parcel, found exactly from horizontal spans of the
 //!   parcel at its vertex levels. Houses are capped to their style's size and centered;
 //!   shops and offices run lot line to lot line (party walls). Then the footprint shrinks
@@ -36,12 +38,14 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use place::{
-    Building, BuildingUse, LotKind, Parcel, RoadGraph, Roof, StyleTag, ZoneId, SIDEWALK_WIDTH_M,
+    Building, BuildingUse, LotKind, Parcel, RoadClass, RoadGraph, Roof, StyleTag, ZoneId,
+    SIDEWALK_WIDTH_M,
 };
 use skywave_core::{hash_bytes, Rng, Seed};
 
 use super::macro_map::MacroMap;
 use super::{stage, CHUNK_M};
+use crate::grammar::LotRules;
 use crate::math::{abs, floor, segment_distance, V2};
 use crate::template::{BuildingStyle, Lots, Massing, RegionTemplate, ZoneRule};
 
@@ -57,6 +61,10 @@ const MAX_FALL_M: f32 = 6.0;
 pub const MASONRY_FLOORS: u8 = 13;
 /// Range of the per-lot coverage aim, as a multiple of the zone's target.
 const AIM: (f32, f32) = (1.1, 1.5);
+/// Room left beyond an alley lot's stalls, m.
+const ALLEY_LOT_GAP_M: f32 = 0.6;
+/// How far past an alley's curb a lot's rear line may lie for the lot to back onto it, m.
+pub(crate) const ALLEY_REACH_M: f32 = 1.5;
 /// A detached garage: width and depth.
 const GARAGE_M: (f32, f32) = (6.2, 6.6);
 /// Depth of a motel wing: rooms plus the walkway in front of them.
@@ -70,13 +78,14 @@ const SILO_R_M: f32 = 3.8;
 pub fn buildings(
     seed: Seed,
     template: &RegionTemplate,
+    lots: &LotRules,
     macro_map: &MacroMap,
     parcels: &[Parcel],
     roads: &RoadGraph,
 ) -> Vec<Building> {
     let mut out = Vec::new();
     for p in parcels {
-        out.extend(lot_buildings(seed, template, macro_map, p, roads));
+        out.extend(lot_buildings(seed, template, lots, macro_map, p, roads));
     }
     out
 }
@@ -87,11 +96,12 @@ pub fn buildings(
 pub fn buildings_all(
     seed: Seed,
     template: &RegionTemplate,
+    lots: &LotRules,
     macro_map: &MacroMap,
     parcels: &[Parcel],
     roads: &RoadGraph,
 ) -> Vec<Building> {
-    let all = without_overlaps(buildings(seed, template, macro_map, parcels, roads));
+    let all = without_overlaps(buildings(seed, template, lots, macro_map, parcels, roads));
     let sx = i64::from(macro_map.size_chunks[0]);
     let key = |b: &Building| {
         let n = b.footprint.len() as f32;
@@ -205,6 +215,7 @@ fn years(s: StyleTag) -> (u16, u16) {
 pub fn lot_buildings(
     seed: Seed,
     template: &RegionTemplate,
+    lots: &LotRules,
     macro_map: &MacroMap,
     parcel: &Parcel,
     roads: &RoadGraph,
@@ -248,6 +259,9 @@ pub fn lot_buildings(
         mass,
         year: template.era.year,
         m: macro_map,
+        lots,
+        roads,
+        on_alley: road.class == RoadClass::Alley,
     };
     // Farmsteads get a cluster; small lots in farm country a house.
     let mut out = match parcel.zone {
@@ -273,8 +287,15 @@ pub fn lot_buildings(
     kept
 }
 
+/// The open ground a strip mall keeps in front for its lot: the covered walk, two rows of
+/// 90° stalls either side of a two-way aisle and the planted strip along the street, and
+/// a little to spare, m.
+pub(crate) fn front_lot_depth(lots: &LotRules) -> f32 {
+    lots.walkway + 2.0 * lots.stall_d + lots.aisle_w + lots.buffer + 0.5
+}
+
 /// Hash of a polygon quantized to 0.1 m: a parcel's identity whatever chunk built it.
-fn parcel_key(poly: &[[f32; 2]]) -> u64 {
+pub(crate) fn parcel_key(poly: &[[f32; 2]]) -> u64 {
     let mut b: Vec<u8> = Vec::with_capacity(poly.len() * 16);
     for p in poly {
         b.extend_from_slice(&quant(p[0]).to_le_bytes());
@@ -297,7 +318,7 @@ fn quant(x: f32) -> i64 {
 
 /// The parcel side on the frontage road: the longest one within `reach` of its
 /// centerline and running along it; else the side nearest to it.
-fn front_edge(poly: &[V2], line: &[V2], reach: f32) -> usize {
+pub(crate) fn front_edge(poly: &[V2], line: &[V2], reach: f32) -> usize {
     let n = poly.len();
     let (mut best, mut best_len) = (usize::MAX, 0.0f32);
     let (mut near, mut near_d) = (0, f32::MAX);
@@ -334,12 +355,12 @@ fn front_edge(poly: &[V2], line: &[V2], reach: f32) -> usize {
 }
 
 /// A parcel in its own frame: `s` along the front side from its start, `t` inward.
-struct Lot {
-    o: V2,
-    u: V2,
-    v: V2,
+pub(crate) struct Lot {
+    pub(crate) o: V2,
+    pub(crate) u: V2,
+    pub(crate) v: V2,
     /// Middle of the front, along it.
-    mid: f32,
+    pub(crate) mid: f32,
     /// The parcel, in world coordinates.
     poly: Vec<V2>,
     local: Vec<V2>,
@@ -347,7 +368,7 @@ struct Lot {
 }
 
 impl Lot {
-    fn new(poly: &[V2], front: usize, area: f32) -> Lot {
+    pub(crate) fn new(poly: &[V2], front: usize, area: f32) -> Lot {
         let n = poly.len();
         let (a, b) = (poly[front], poly[(front + 1) % n]);
         let u = (b - a).normalize();
@@ -417,7 +438,7 @@ impl Lot {
     }
 
     /// The interval of the polygon's cross-section at `s` along the front holding `t`.
-    fn span_t(&self, s: f32, t: f32) -> Option<(f32, f32)> {
+    pub(crate) fn span_t(&self, s: f32, t: f32) -> Option<(f32, f32)> {
         let mut ys: Vec<f32> = Vec::new();
         let n = self.local.len();
         for i in 0..n {
@@ -433,7 +454,7 @@ impl Lot {
     /// inside the polygon: the intersection of its cross-sections at both ends and just
     /// either side of every vertex level in between (the section's ends move linearly
     /// between vertex levels).
-    fn band(&self, s: f32, t0: f32, t1: f32) -> Option<(f32, f32)> {
+    pub(crate) fn band(&self, s: f32, t0: f32, t1: f32) -> Option<(f32, f32)> {
         const EPS: f32 = 1e-3;
         let (mut lo, mut hi) = (f32::MIN, f32::MAX);
         let mut cut = |t: f32| -> Option<()> {
@@ -532,6 +553,17 @@ struct Ctx<'a> {
     mass: &'a Massing,
     year: u16,
     m: &'a MacroMap,
+    lots: &'a LotRules,
+    roads: &'a RoadGraph,
+    /// The lot fronts an alley.
+    on_alley: bool,
+}
+
+/// The side of a lot an alley lot is left on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AlleySide {
+    Front,
+    Rear,
 }
 
 impl Ctx<'_> {
@@ -603,6 +635,15 @@ impl Ctx<'_> {
             house: true,
         };
         match style {
+            // Room for a front lot: the covered walk, two rows of stalls either side of an
+            // aisle and the planted strip along the street (squeezed on shallow lots).
+            StyleTag::StripMall if self.lots.occupancy(self.zone).is_some() => Fit {
+                front: f.max(front_lot_depth(self.lots)),
+                side: s.max(1.5),
+                w: (20.0, 999.0),
+                d: (12.0, 22.0),
+                ..block
+            },
             StyleTag::StripMall => Fit {
                 front: f.max(12.0),
                 side: s.max(1.5),
@@ -795,6 +836,55 @@ impl Ctx<'_> {
         n.clamp(i64::from(lo), i64::from(hi)) as u8
     }
 
+    /// Which side of the lot a building of `style` leaves room for an alley lot on (a draw
+    /// from `rng` for those that may): shops, offices and civic buildings in a zone with
+    /// lots and alleys, with chance `rear_lot_256`, on the alley the lot fronts or else the
+    /// one along its rear line.
+    fn alley_lot(&self, style: StyleTag, rng: &mut Rng) -> Option<AlleySide> {
+        let may = self.rule.alleys
+            && !self.residential_zone()
+            && self.lots.occupancy(self.zone).is_some()
+            && !matches!(
+                style,
+                StyleTag::StripMall
+                    | StyleTag::Motel
+                    | StyleTag::Dingbat
+                    | StyleTag::Warehouse
+                    | StyleTag::Barn
+            );
+        if !may {
+            return None;
+        }
+        let side = if self.on_alley {
+            AlleySide::Front
+        } else if self.alley_behind() {
+            AlleySide::Rear
+        } else {
+            return None;
+        };
+        (rng.range(0, 256) < self.lots.rear_lot_256).then_some(side)
+    }
+
+    /// Whether an alley runs along the lot's rear line (at its middle).
+    fn alley_behind(&self) -> bool {
+        let lot = self.lot;
+        let Some((_, t1)) = lot.span_t(lot.mid, 0.25) else {
+            return false;
+        };
+        let w = lot.world(lot.mid, t1);
+        let q = V2::new(w[0], w[1]);
+        self.roads.edges.iter().any(|e| {
+            if e.class != RoadClass::Alley {
+                return false;
+            }
+            let reach = e.width_m * 0.5 + ALLEY_REACH_M;
+            e.profile.windows(2).any(|p| {
+                let (a, b) = (V2::new(p[0][0], p[0][2]), V2::new(p[1][0], p[1][2]));
+                segment_distance(q, a, b).0 < reach
+            })
+        })
+    }
+
     fn built_year(&self, style: StyleTag, rng: &mut Rng) -> Option<u16> {
         let (a, b) = years(style);
         let b = b.min(self.year).max(a);
@@ -824,6 +914,12 @@ impl Ctx<'_> {
         let drive_left = rng.range(0, 2) == 0;
         let mut floors = self.floors(rng);
         let mut fit = self.fit(style);
+        let room = self.lots.stall_d + ALLEY_LOT_GAP_M;
+        match self.alley_lot(style, rng) {
+            Some(AlleySide::Front) => fit.front = fit.front.max(room),
+            Some(AlleySide::Rear) => fit.rear = fit.rear.max(room),
+            None => {}
+        }
         let mut rect = self.place(&fit, target, drive_left);
         if rect.is_none() && fit.drive > 0.0 {
             // A narrow lot: the driveway runs in the side yard instead.
@@ -1293,7 +1389,7 @@ fn clip_depth(poly: &[V2], lot: &Lot, t: f32) -> Vec<V2> {
 
 /// The part of counter-clockwise `poly` inside the place rectangle `[0, extent]`
 /// (Sutherland-Hodgman against its four sides); `poly` itself when it lies inside.
-fn clip_to_place(poly: Vec<V2>, extent: [f32; 2]) -> Vec<V2> {
+pub(crate) fn clip_to_place(poly: Vec<V2>, extent: [f32; 2]) -> Vec<V2> {
     let inside = |p: &V2| p.x >= 0.0 && p.y >= 0.0 && p.x <= extent[0] && p.y <= extent[1];
     if poly.iter().all(inside) {
         return poly;

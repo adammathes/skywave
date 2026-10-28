@@ -1172,6 +1172,7 @@ impl Npc {
                 y0: 0.25,
                 y1: 1.35,
                 kind: PropKind::ParkedCar { color: 0 },
+                lot: world::collide::NO_LOT,
             },
             vel: self.vel(),
             spin: self.spin,

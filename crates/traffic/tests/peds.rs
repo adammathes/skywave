@@ -72,7 +72,7 @@ const REGIONS: [(&str, &str); 3] = [
 /// The sim is a pure function of the place and its inputs, so this moves when pedestrian
 /// behaviour, the sidewalk graph, the lane graph or the place change; update it in its own
 /// commit with the reason.
-const COAST_SEED1_30S_HASH: u64 = 0x08e6_7ad2_61bd_0746;
+const COAST_SEED1_30S_HASH: u64 = 0x6194_6509_e22a_b1e6;
 
 /// Size ceiling for a place's sidewalk graph (16×16 chunks), about 1.3 times the largest
 /// region's at seed 1 (2.9 MiB; the coast's 2.2 MiB, 0.55 MiB of it the turn curves).

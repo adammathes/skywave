@@ -48,7 +48,7 @@
 //!               u8 sign_slots, list of u8 lit
 //!   Props       f32 x 3 pos, f32 yaw, u8 kind tag (PropKind declaration order) then its
 //!               payload: Hedge u16 len_dm, Sign u64 text_seed, NeonSign u8 palette, Fence
-//!               u16 len_dm, ParkedCar u8 class, Signal u8 arm_dm, Pier u8 len_m
+//!               u16 len_dm, ParkedCar u8 class u32 hours, Signal u8 arm_dm, Pier u8 len_m
 //!   Lights      f32 x 3 pos, f32 x 3 color, f32 radius, u8 kind
 //!
 //! Chunk index, at index_offset, to the end of the file
@@ -300,7 +300,13 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                 }
                 PropKind::Sign { text_seed } => w.extend_from_slice(&text_seed.to_le_bytes()),
                 PropKind::NeonSign { palette } => w.push(palette),
-                PropKind::ParkedCar { vehicle_class } => w.push(vehicle_class),
+                PropKind::ParkedCar {
+                    vehicle_class,
+                    hours,
+                } => {
+                    w.push(vehicle_class);
+                    w.extend_from_slice(&hours.to_le_bytes());
+                }
                 PropKind::Signal { arm_dm } => w.push(arm_dm),
                 PropKind::Pier { len_m } => w.push(len_m),
                 _ => {}
@@ -989,6 +995,7 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 11 => PropKind::Fence { len_dm: r.u16()? },
                 12 => PropKind::ParkedCar {
                     vehicle_class: r.u8()?,
+                    hours: r.u32()?,
                 },
                 13 => PropKind::Eucalyptus,
                 14 => PropKind::TrashCan,
@@ -1469,6 +1476,7 @@ mod tests {
             PropKind::Fence { len_dm: 612 },
             PropKind::ParkedCar {
                 vehicle_class: 0x32,
+                hours: 0x00F0_0F0F,
             },
             PropKind::Eucalyptus,
             PropKind::TrashCan,

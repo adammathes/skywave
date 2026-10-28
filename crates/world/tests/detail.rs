@@ -8,7 +8,7 @@ use std::time::Instant;
 use place::{LightKind, Place, PropKind, RoadClass, ZoneId};
 use skywave_core::Seed;
 use world::math::{point_in_polygon, segment_distance, V2};
-use world::procgen::detail::MAX_CARS_PER_CHUNK;
+use world::procgen::detail::{MAX_CARS_PER_CHUNK, MAX_LOT_CARS_PER_CHUNK};
 use world::procgen::{build_place, hash_detail};
 use world::props::{dir_of_yaw, PIER_HEAD_HALF_WIDTH_M, PIER_HEAD_M};
 use world::roads::Network;
@@ -301,30 +301,47 @@ fn props_stand_on_the_ground_clear_of_roads_and_buildings() {
     }
 }
 
-/// At most [`MAX_CARS_PER_CHUNK`] parked cars in any chunk.
+/// At most [`MAX_CARS_PER_CHUNK`] parked cars at the curbs and in driveways in any chunk,
+/// and [`MAX_LOT_CARS_PER_CHUNK`] in its lots at any hour.
 #[test]
 fn parked_cars_keep_to_the_chunk_cap() {
     let t = template();
     for seed in 1..=4u64 {
         let p = build_place(Seed(seed), &t, &grammar());
-        let mut per: BTreeMap<[u16; 2], usize> = BTreeMap::new();
+        let mut per: BTreeMap<[u16; 2], (usize, [usize; 24])> = BTreeMap::new();
         for x in &p.props.items {
-            if matches!(x.kind, PropKind::ParkedCar { .. }) {
+            if let PropKind::ParkedCar { hours, .. } = x.kind {
                 let c = p
                     .header
                     .chunk_at([x.pos[0], x.pos[2]])
                     .expect("in the place");
-                *per.entry(c).or_default() += 1;
+                let e = per.entry(c).or_default();
+                if hours == place::ALL_HOURS {
+                    e.0 += 1;
+                } else {
+                    for (h, n) in e.1.iter_mut().enumerate() {
+                        *n += (hours >> h & 1) as usize;
+                    }
+                }
             }
         }
-        let most = per.values().copied().max().unwrap_or(0);
+        let most = per.values().map(|e| e.0).max().unwrap_or(0);
+        let most_lot = per
+            .values()
+            .map(|e| e.1.iter().copied().max().unwrap_or(0))
+            .max()
+            .unwrap_or(0);
         println!(
-            "seed {seed}: {} chunks with cars, at most {most}",
+            "seed {seed}: {} chunks with cars, at most {most} at the curbs, {most_lot} in lots",
             per.len()
         );
         assert!(
             most <= MAX_CARS_PER_CHUNK && most > 0,
             "seed {seed}: {most}"
+        );
+        assert!(
+            most_lot <= MAX_LOT_CARS_PER_CHUNK,
+            "seed {seed}: {most_lot}"
         );
     }
 }
@@ -404,10 +421,10 @@ fn lights_are_the_lamps_signs_and_shops() {
 /// with `cargo test -p world --test detail -- --nocapture` (it prints the table), check the
 /// coast screenshots, and commit the new values in their own commit saying why they moved.
 const GOLDEN: [u64; 4] = [
-    0x769D_A2A8_0695_5E39,
-    0x95EE_8440_F19A_FA03,
-    0x2452_C43B_9738_3B36,
-    0xF832_EC70_7793_CA21,
+    0xE000_0EB5_1B6E_CE69,
+    0xEA72_5A81_0140_22D9,
+    0x6E3A_22DB_B20F_ABED,
+    0x34E5_883D_007D_E0AF,
 ];
 
 /// The detail is deterministic, valid and pinned.

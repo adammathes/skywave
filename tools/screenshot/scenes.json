@@ -35,6 +35,10 @@
     "about": "Busy pedestrians on the coast's busiest block at noon, from the mid chase camera on the road: people walking, standing about and in groups on both walks (the crowd warmed up 60 s before the frame).",
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-mid", "t": "12:00", "pos": "1056.7,1055.3", "yaw": "102.5", "traffic": "busy", "still": "1", "stream": "1" }
   },
+  "coast-beach-lot-noon": {
+    "about": "A beach lot on the coast at noon, near its fullest, from the far chase camera on the beach alley: stalls along both sides, islands with palms, light poles, wheel stops and painted stripes.",
+    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "12:00", "pos": "477,852", "yaw": "0", "still": "1", "stream": "1" }
+  },
   "coast-night-golden": {
     "about": "The procedural coast's strip at night from the near chase camera, headlights on: sodium lamps with coronas, neon sign bands and blade signs, shop fills on the walks.",
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-near", "t": "22:30", "lights": "1", "pos": "608.6,1049.8", "yaw": "-72.3", "still": "1", "stream": "1" }

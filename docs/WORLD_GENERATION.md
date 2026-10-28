@@ -128,7 +128,11 @@ TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
               lines: [(Word(String) | Since, weight)], descriptors_out: [String] }
 Lexicon     { id, syllables: { onsets, nuclei, codas }, given, surnames, descriptors, trades,
               lines }
-LotRules    { front_min_yard, stall_w, front_fill: (min, max), aisle_fill }
+LotRules    { stall_w, stall_d, aisle_w, aisle_w_60, angled_256, walkway, buffer,
+              frontage: [(Hedge | Wall | Open, weight)], second_cut_m, wheel_stop_256,
+              pole_m: (min, max), run_max, islands: [(Palm | Shrub | Bare, weight)],
+              yellow_256, backed_in_256, rear_lot_256,
+              occupancy: [(ZoneId, (24 hourly %))] }
 ```
 **Which rules.** A style may have several entries. A building takes the first entry, in file
 order, whose `style` is its style and whose `zones` hold its zone (the zone under its
@@ -225,9 +229,69 @@ building, from an `Rng` keyed by the building's door pick):
   dark strokes on a backlit box, extruded channel letters or flat paint. The sign bands and
   billboards letter their (still syllable-built, `signs::business_name`) names in the block
   capitals until B7 moves the band carriers onto the shop signs.
-- **Lots.** Strip malls with at least `front_min_yard` of open ground in front get nose-in
-  stalls `stall_w` wide, a `front_fill` share of them taken; beach aisles take a stall with
-  chance `aisle_fill` (terrain places). The test town's strip-mall lots use `stall_w` too.
+- **Lots** (B10, terrain places; see "Parking lots" below). The test town's strip-mall lots
+  use `stall_w` too.
+
+## Parking lots
+`world::lots::plan` lays a terrain place's parking lots from its parcels, buildings and
+roads and the grammar's `LotRules`, once; the ground meshes (`lots::mesh`, in the ground
+stage), the road meshes (the curb cuts, `Network::cuts`), the detailing (poles, island
+plants, frontage hedges, the parked cars) and the collider all read that one plan. Only
+zones with an `occupancy` curve get lots (the coast: strip, commercial, downtown, beach).
+- **Front lots** before strip malls. The building planner keeps the open ground for one:
+  the strip mall's front setback is `walkway + 2 stall_d + aisle_w + buffer` (and 0.5 m),
+  squeezed on shallow lots. The lot, from the shops out: the covered walk (`walkway`, at
+  curb height), then two rows of stalls either side of an aisle, or one row and the aisle,
+  whichever fits the yard, 90° (`stall_w` × `stall_d`, two-way `aisle_w`) or, with chance
+  `angled_256`, 60° (one way through, `aisle_w_60`); then the planted strip along the
+  street (`buffer`) with a hedge, a low wall or nothing (`frontage`). A curb cut at one end
+  of the frontage, at both ends when it is at least `second_cut_m` long or the lot is
+  angled (in upstream, out downstream); each cut's drive climbs a concrete ramp from the
+  walk's back down to the lot and crosses the street-side row to the aisle. Painted arrows
+  point in at the entries (out at an angled lot's exit, and along its aisle).
+- **Alley lots** behind shops, offices and civic buildings that back onto an alley (or
+  whose parcel fronts one): with chance `rear_lot_256` the planner keeps `stall_d` and
+  0.6 m on the alley side, and the lot is one row of 90° stalls opening onto the alley,
+  its curb dropped along them.
+- **Beach lots** along the beach zone's alleys: a row of stalls each side opening onto the
+  alley, wherever a stall's ground is clear of every other road, junction, building,
+  parcel (parks and empty lots too) and the water. The beach zone's own lot parcels, the
+  strips of sand between its alleys and roads, are where these lots go, so only they may
+  be paved. Where the alley bends, a run whose stall or island comes out
+  more than 0.3 m narrower than its width (the inside of the bend) is dropped.
+- Every row is cut into runs of at most `run_max` stalls with a 1.8 m island between runs
+  and at both ends, planted (`islands`) with a palm, a shrub or nothing. Light poles (the
+  street light) stand in islands `pole_m` apart; a lot has wheel stops in every stall
+  with chance `wheel_stop_256`; its stripes are yellow with chance `yellow_256`, else
+  white. A lot is dropped whole if any stall or island would touch another road or a
+  junction.
+- **Ground.** The concrete ramp runs from the walk's back edge; the asphalt lies 5 cm above
+  the graded terrain, cut to the terrain's own
+  triangles (each piece in its triangle's plane), so it neither pokes through nor floats
+  and never meets the road or walk meshes (lots stop at the property line); stripes and
+  arrows lie a centimeter above it; islands (15 cm), wheel stops (12 cm), the walk and the
+  low wall stand on it. A curb cut drops the road's curb: the gutter stays, a concrete apron
+  rises from it to the walk's top (to the lot where there is no walk), and wings close the
+  full curb at its ends.
+- **Parked cars** on the stalls, centered, nosed in (backed in with chance
+  `backed_in_256`), in the built-in parked-car shapes and paints. Each stall has its own
+  threshold (a hash of where it is) and is taken through each hour whose `occupancy` for
+  the lot's zone is above it: the car's `hours` mask in the Place
+  (`place::PropKind::ParkedCar`; a lot's car also sets bit 24, `lots::LOT_CAR`). The
+  clock says where each car should be (`props::parked_now`, each coming or going at its
+  own minute past the hour); `WorldCollider::advance_lot_cars` moves it there only out of
+  sight (never within `HOLD_M`, 60 m, whichever way the camera looks, nor within `SEEN_M`,
+  150 m, in the half-plane ahead of it) and never
+  onto the player's car, and the app draws, and the collider stops the car on, only the
+  cars that are there. A chunk keeps at most `MAX_CARS_PER_CHUNK` (24) cars at its curbs
+  and in its driveways, as before, and `MAX_LOT_CARS_PER_CHUNK` (16) in its lots at any
+  hour. That second cap is a choice for the draw cost: a long beach alley's lot never
+  looks full.
+- **Collision.** Islands and wheel stops are raised patches (the wheels climb them like
+  curbs), the walk a patch at curb height, the ramps planes, the asphalt a patch 5 cm over
+  the terrain like the mesh; poles and plants are props; the low walls boxes; paint has none.
+- Determinism: a parcel's lot draws from `Rng::new(seed, [LOTS, parcel key])`, a beach
+  alley's from `Rng::new(seed, [LOTS, ALLEY | edge])`, in a fixed order.
 
 Still in code, to move with the tasks that change them: the palette (`world::Palette` and
 `buildings::look`), which styles get carports, walkways and step-backs, the step-back floors
