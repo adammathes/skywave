@@ -79,13 +79,13 @@ web-sys = "=0.3.106"
 console_error_panic_hook = "=0.1.7"
 console_log = "=1.1.0"
 
-# Generation runs at start-up and in most tests; unoptimized it is ~5x slower. Debug
-# assertions and debug info stay on.
-[profile.dev.package.world]
+# Tests are mostly long seeded simulations; unoptimized they took 21 of CI's 26 minutes.
+# Optimize every crate a little and dependencies fully. Debug assertions, overflow checks
+# and debug info stay on.
+[profile.dev]
 opt-level = 1
 
-# The macro map samples ~1M noise values; unoptimized noise alone would take ~0.2 s.
-[profile.dev.package.fastnoise-lite]
+[profile.dev.package."*"]
 opt-level = 3
 
 [profile.release]
