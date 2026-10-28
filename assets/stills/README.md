@@ -12,5 +12,4 @@ python3 -c "from PIL import Image; im = Image.open('/tmp/<id>.png').convert('RGB
 ```
 
 `mirage_valley_2001`'s still is its boulevard at its default time (22:30), headlights on: the query above
-with `&pos=800,1256&yaw=90&lights=1`. It still wears the coast's grammar and palette, so it is shot again
-when its own land (`docs/backlog/MIRAGE2001.md` item 3).
+with `&pos=800,1256&yaw=90&lights=1`, in its own grammar and palette.

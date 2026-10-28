@@ -15,11 +15,15 @@ use world::math::{segment_distance, V2};
 use world::procgen::{arterials, build_place, hash_graph, MacroMap, PLACE_CHUNKS};
 use world::template::RegionTemplate;
 
-const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
+const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 
 fn grammar() -> world::Grammar {
-    ron::from_str(GRAMMAR).expect("parse grammar")
+    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
+    g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
+    g.validate().expect("validate grammar");
+    g
 }
 
 fn template() -> RegionTemplate {
@@ -39,22 +43,22 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0x39A1_C053_F7A8_0B31,
         0xA2D7_B9A0_3D09_A4FE,
-        0x9C12_2767_C582_1C90,
+        0xE55D_4EEC_42A0_4F70,
     ),
     (
         0xA3F4_A281_380E_596B,
         0x7AD4_5617_94BE_609B,
-        0xB4F4_4CEC_5229_558F,
+        0xB984_1F40_4C01_1645,
     ),
     (
         0x82B6_07FD_D1FD_CF4F,
         0xB348_0BC3_E55C_8454,
-        0xC993_A653_C5C9_D9CF,
+        0x9595_79BC_FF11_CD4C,
     ),
     (
         0x6DBB_5CB8_4DBB_0036,
         0x68EB_95E2_5702_79E7,
-        0xD49F_5126_B633_3AA5,
+        0xAD5F_6466_8F46_B5D3,
     ),
 ];
 
@@ -311,6 +315,15 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
                 "seed {seed}: a tree on the airfield at {q:?}"
             );
         }
+        // The grammar's street dressing: bus stops, and billboards blank or pictured, never
+        // the coast's lettered ads.
+        let count =
+            |f: &dyn Fn(&PropKind) -> bool| p.props.items.iter().filter(|x| f(&x.kind)).count();
+        let shelters = count(&|k| matches!(k, PropKind::BusShelter { .. }));
+        let faces = count(&|k| matches!(k, PropKind::FaceBillboard { .. }));
+        assert!(shelters >= 10, "seed {seed}: {shelters} bus shelters");
+        assert!(faces >= 3, "seed {seed}: {faces} billboards");
+        assert_eq!(count(&|k| *k == PropKind::Billboard), 0, "seed {seed}");
         // The hills: an overlook with a road to it.
         let overlooks: Vec<V2> = m
             .pois
@@ -335,7 +348,7 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
             .count();
         assert!(hills * 10 > p.zones.cells.len(), "seed {seed}");
         println!(
-            "seed {seed}: {overpasses} overpasses, {} ramps, {blvd} boulevard pieces, {bridges} channel bridges, {} ramps into it, {crossings} grade crossings, {} spurs, {} overlooks",
+            "seed {seed}: {overpasses} overpasses, {} ramps, {blvd} boulevard pieces, {bridges} channel bridges, {} ramps into it, {crossings} grade crossings, {} spurs, {} overlooks, {shelters} bus shelters, {faces} billboards",
             ramps.len(),
             b.ramps.len(),
             b.spurs.len(),

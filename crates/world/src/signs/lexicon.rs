@@ -416,21 +416,51 @@ pub fn assign(rules: &SignRules, lex: &Lexicon, era: Era, seed: u64, at: &[V2]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grammar::coast_80s;
+    use crate::grammar::{basin_01, coast_80s};
     use crate::signs::testing::{blocklist, key};
 
+    #[test]
+    fn shipped_lexicon_validates() {
+        shipped_lexicon_validates_in(coast_80s());
+        shipped_lexicon_validates_in(basin_01());
+    }
+
+    #[test]
+    fn no_word_is_a_known_brand() {
+        no_word_is_a_known_brand_in(coast_80s());
+        no_word_is_a_known_brand_in(basin_01());
+    }
+
+    #[test]
+    fn no_descriptor_names_a_chain_with_its_trade() {
+        // The coast leaves out three listed pairs; the basin leaves out ten
+        // (their names are keys on the blocklist, never spelled here).
+        assert_eq!(chains_left_out_in(coast_80s()), 3);
+        assert_eq!(chains_left_out_in(basin_01()), 10);
+    }
+
+    #[test]
+    fn no_sign_says_placeholder_words_or_repeats_itself() {
+        no_sign_says_placeholder_words_or_repeats_itself_in(coast_80s());
+        no_sign_says_placeholder_words_or_repeats_itself_in(basin_01());
+    }
+
+    #[test]
+    fn every_weighted_choice_is_reached() {
+        every_weighted_choice_is_reached_in(coast_80s());
+        every_weighted_choice_is_reached_in(basin_01());
+    }
+
     /// Every sign the coast grammar can draw, over enough hashes to meet every word.
-    fn signs() -> (crate::grammar::Grammar, Vec<ShopSign>) {
-        let g = coast_80s();
+    fn signs(g: crate::grammar::Grammar) -> (crate::grammar::Grammar, Vec<ShopSign>) {
         let v = (0..6000u64)
             .map(|h| ShopSign::draw(&g.signs, &g.lexicon, g.era, mix64(h)))
             .collect();
         (g, v)
     }
 
-    #[test]
-    fn shipped_lexicon_validates() {
-        let g = coast_80s();
+    fn shipped_lexicon_validates_in(g0: crate::grammar::Grammar) {
+        let g = g0.clone();
         g.lexicon.validate().expect("lexicon");
         assert!(g.lexicon.phonotactic("HOLDREK"));
         assert!(!g.lexicon.phonotactic("XQZZT"));
@@ -442,13 +472,12 @@ mod tests {
         assert!(matches!(bad.validate(), Err(LexiconError::Duplicate(_))));
     }
 
-    #[test]
-    fn no_word_is_a_known_brand() {
+    fn no_word_is_a_known_brand_in(g0: crate::grammar::Grammar) {
         let block = blocklist();
         assert!(block.len() >= 150, "{} entries", block.len());
         // The key folds case, spaces and punctuation.
         assert_eq!(key(b"Ab'c d"), key(b"ABCD"));
-        let lex = coast_80s().lexicon;
+        let lex = g0.lexicon.clone();
         let all = lex
             .given
             .iter()
@@ -465,7 +494,7 @@ mod tests {
             s.push(b'S');
             assert!(!block.contains(&key(&s)), "{w}S is on the blocklist");
         }
-        let (g, signs) = signs();
+        let (g, signs) = signs(g0.clone());
         for s in &signs {
             let t = s.text(&g.lexicon);
             assert!(!block.contains(&key(&t)), "{:?}", core::str::from_utf8(&t));
@@ -488,8 +517,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn no_sign_says_placeholder_words_or_repeats_itself() {
+    /// Whether `t`, or `t` with the `S` of a plural trade dropped, is on the blocklist.
+    fn listed(block: &[u64], t: &[u8]) -> bool {
+        block.contains(&key(t))
+            || t.strip_suffix(b"S")
+                .is_some_and(|t| block.contains(&key(t)))
+    }
+
+    /// Every descriptor-and-trade pair of `g0` whose words, singular or plural, name a
+    /// listed chain is left out of the trade's descriptors, and no sign drawn spells one;
+    /// returns how many pairs that leaves out.
+    fn chains_left_out_in(g0: crate::grammar::Grammar) -> usize {
+        let block = blocklist();
+        let mut out = 0;
+        for t in &g0.signs.trades {
+            for d in &g0.lexicon.descriptors {
+                let pair = [d.as_bytes(), t.trade.as_bytes()].concat();
+                if listed(&block, &pair) {
+                    assert!(
+                        t.descriptors_out.contains(d),
+                        "{d} {} names a chain",
+                        t.trade
+                    );
+                    out += 1;
+                }
+            }
+        }
+        let (g, signs) = signs(g0);
+        for s in &signs {
+            let t = s.text(&g.lexicon);
+            assert!(!listed(&block, &t), "{:?}", core::str::from_utf8(&t));
+        }
+        out
+    }
+
+    fn no_sign_says_placeholder_words_or_repeats_itself_in(g0: crate::grammar::Grammar) {
         const PLACEHOLDERS: [&str; 10] = [
             "SHOP",
             "STORE",
@@ -502,7 +564,7 @@ mod tests {
             "TODO",
             "PLACEHOLDER",
         ];
-        let (g, signs) = signs();
+        let (g, signs) = signs(g0.clone());
         let mut seen = alloc::collections::BTreeSet::new();
         for s in &signs {
             let t = s.text(&g.lexicon);
@@ -550,9 +612,8 @@ mod tests {
         assert!(seen.len() > 1500, "{} distinct wordmarks", seen.len());
     }
 
-    #[test]
-    fn every_weighted_choice_is_reached() {
-        let (g, signs) = signs();
+    fn every_weighted_choice_is_reached_in(g0: crate::grammar::Grammar) {
+        let (g, signs) = signs(g0.clone());
         for t in &g.signs.trades {
             let i = g.lexicon.trades.iter().position(|w| *w == t.trade).unwrap();
             assert!(

@@ -109,6 +109,63 @@ impl Palette {
         }
     }
 
+    /// The 2001 inland basin at night (Mirage Valley): stucco in beiges, tans and dusty
+    /// whites rather than pastels, terracotta tile roofs, sun-baked concrete and dry lawns,
+    /// deep sodium-orange lamps, and neon in the period's colors (purple, blue, green).
+    pub const fn sodium_night() -> Palette {
+        Palette {
+            stucco_cream: srgb(0xE4D3B2),
+            stucco_white: srgb(0xE6E1D6),
+            salmon: srgb(0xD49A7C),
+            pastel_pink: srgb(0xD8B4A6),
+            peach: srgb(0xDDBE96),
+            mint: srgb(0xB9C6AE),
+            sky_blue: srgb(0xA9B9C2),
+            lavender: srgb(0xB2A7B6),
+            sand: srgb(0xCDB68E),
+            brick_red: srgb(0x8E4636),
+            brick_brown: srgb(0x6E4C3C),
+            teal: srgb(0x2D6E80),
+            terracotta: srgb(0xB45A3A),
+            navy: srgb(0x26304C),
+            concrete: srgb(0xBDB8AD),
+            concrete_dark: srgb(0x8A8780),
+            asphalt: srgb(0x3E3E40),
+            asphalt_worn: srgb(0x56544F),
+            paint_white: srgb(0xE4E4DA),
+            paint_yellow: srgb(0xE2B02A),
+            roof_gravel: srgb(0x77736A),
+            lawn: srgb(0x7A8C44),
+            lawn_dry: srgb(0xA49A62),
+            scrub: srgb(0x8E825C),
+            soil: srgb(0x9A7650),
+            water: srgb(0x2A6070),
+            palm_green: srgb(0x48703A),
+            leaf_green: srgb(0x3E602E),
+            leaf_light: srgb(0x6A8C40),
+            bark: srgb(0x66503C),
+            glass: srgb(0x2C3E4E),
+            metal_dark: srgb(0x383A3E),
+            metal_light: srgb(0x9A9DA2),
+            hydrant_red: srgb(0xC42820),
+            sodium: srgb(0xFF8E2E),
+            window_warm: srgb(0xFFD08E),
+            neon_pink: srgb(0xC84CFF),
+            neon_cyan: srgb(0x3C9CFF),
+            neon_red: srgb(0xFF3428),
+            neon_green: srgb(0x4CFF8A),
+        }
+    }
+
+    /// The built-in palette called `name` (a scenario's or a template's `era.palette`).
+    pub fn named(name: &str) -> Option<Palette> {
+        match name {
+            "socal_1985" => Some(Palette::socal_1985()),
+            "sodium_night" => Some(Palette::sodium_night()),
+            _ => None,
+        }
+    }
+
     /// Exterior wall colors for stucco buildings.
     pub fn stucco_walls(&self) -> [Rgb; 9] {
         [
