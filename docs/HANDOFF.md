@@ -43,18 +43,15 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 03:16 UTC, coordinator handed off to save quota)
+### Resume here (2026-10-28 04:19 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
-(parking lots), #45 (2001 traffic cars) and #20 (map edges, 03:16, 33cfd2b) merged; three builder
-sessions are running; each
+(parking lots), #45 (2001 traffic cars), #20 (map edges) and #46 (hero cars part 2, 04:19,
+3342dd1) merged; two builder sessions are running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
 the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
 sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
-- **Hero cars part 2** (`m8/heroes-2`, session_0121vThDUECPkM7tAPwhVPKP, M8 #5, dispatched
-  02:42 on the owner's word): four cars after #43's pattern; it messages the coordinator when its
-  PR is green; a short review (names, era filter, budgets, handling bands) then merge.
 - **Mirage Valley** (`m8/mirage-valley`, session_0121vThCxCfDJvhSt6h7cdhk, M8 #2 and #3,
   dispatched 03:16): two PRs, first the rename of the 2001 world from "Inland Basin" to Mirage
   Valley (id `mirage_valley_2001`, old id migrated) with the region template `socal_basin`, then
@@ -64,10 +61,11 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   dispatched 03:45 on the owner's word: #44's tuning felt worse, the tail snaps). Back to pre-#44
   stability (Arcade 0.8 × gain 8), Light 0.3/0.5, the handbrake unscaled, the per-car
   `oversteer_bias` values; `vehicle/tests/handling.rs` goes. Merge on green after a look at the
-  diff. Then the owner drives it and decides on feel pass 3 (board `feel-3`): fix causes, not a
+  diff. It also drops #46's four handling.rs entries and re-checks those cars on the old sim.
+  Then the owner drives it and decides on feel pass 3 (board `feel-3`): fix causes, not a
   stronger yaw hand — keyboard steering ramp and speed-sensitive lock, a more progressive tire
   tail in the assisted presets, gentler stability that does not fight the counter-steer assist.
-- **Next on the owner's word:** set pieces (M8 #7), once #2, #3 and #4 are on main.
+- **Next on the owner's word:** set pieces (M8 #7), once #2 and #3 are on main (#4 and #5 are).
 - **Queued by the owner (board `mac-music`, order 35):** music folders in the Mac app. The web
   build already takes folders in every Mac browser; the native app only scans `~/Music` or
   `--music` at start, plays MP3 only (nanomp3), and has no picker. Wanted: a folder dialog from
@@ -135,15 +133,16 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   library from the folder layout and tags, TAPE / CD / MP3 by the world's year, Normal / Shuffle /
   Continuous, readout top right, Back held + d-pad on the pad, resumes next session); handling feel (#44, NOTES 17: stronger yaw damping in Arcade and Light,
   exotics' oversteer bias halved, no spins in Arcade or Light on any car, Off stays lively, the
-  Destrier tuned into the bands, the Halberds lively with no assists); parking lots (#37, B10: front, alley and beach lots from the
+  Destrier tuned into the bands, the Halberds lively with no assists; being reverted, see above); parking lots (#37, B10: front, alley and beach lots from the
   grammar, parked cars by the hour and held near the player, golden `coast-beach-lot-noon`); natural map edges (#20: a sea horizon, walls of hills and
   mountains, a highway that loops back; every coast fixture re-sited; the edge pass kept inside
   the macro-map budget); the 2001 traffic cars (#45, M8 #6: Plover sedan, Sorrel utility,
   Wren minivan, Percheron crew cab, Linnet hatch, Sledge box truck, Anvil semi; weights by zone
   for traffic and parking; the box truck and semi never park, the semi keeps to freeways; per-car
-  length in following and junction room; none in 1984; fixed extra axles in the shape DSL); the Deck's "Skywave
+  length in following and junction room; none in 1984; fixed extra axles in the shape DSL); the 2001 hero cars part 2 (#46, M8 #5: Shrike Coupe,
+  Glaive Turbo, Falchion Sedan, Courser V8, the basin's heroes); the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: none; building: hero cars part 2 and Mirage Valley (see "Resume here"). Paused: NPC cars see
+- Open PRs: none; building: the #44 revert and Mirage Valley (see "Resume here"). Paused: NPC cars see
   pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
   comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
@@ -152,7 +151,7 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: hero cars part 2, Mirage Valley (template, then grammar), set pieces; NPC cars see pedestrians (board order 15, after #38); M8 waves
+- Next: the #44 revert, Mirage Valley (template, then grammar), set pieces; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
