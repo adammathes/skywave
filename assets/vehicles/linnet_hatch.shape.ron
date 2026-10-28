@@ -1,0 +1,59 @@
+// Linnet Hatch body: a 2001 five-door compact hatchback.
+//
+// Intent: short, tall and all glass. A stubby rounded nose with big swept lamps and a
+// thin grille, a steep windshield running almost straight on from the hood, a high roof
+// held level to the back, big side glass with a little window in the rear pillar, an
+// upright hatch with tall lamps up its sides. Body-colored bumpers, black trim, steel
+// wheels under covers. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "linnet_hatch",
+    side: [
+        (0.00, 0.56), (0.04, 0.66), (0.16, 0.74), (0.50, 0.84), (0.80, 0.90), (0.88, 0.92),
+        (1.30, 1.28), (1.66, 1.48), (1.90, 1.52), (3.50, 1.51), (3.78, 1.46), (3.92, 1.30),
+        (4.02, 0.98), (4.05, 0.94),
+        (4.05, 0.34), (3.92, 0.24), (3.40, 0.20), (0.70, 0.19), (0.12, 0.23), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.68), (0.06, 0.77), (0.20, 0.83), (0.50, 0.85), (3.70, 0.85), (3.94, 0.83),
+        (4.05, 0.79),
+    ],
+    belt: [(0.88, 0.92), (3.96, 1.00)],
+    section: Section(shoulder: 0.91, tumblehome_deg: 12, greenhouse_frac: 0.84, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (0.90, 1.70),
+        backlight: (3.82, 4.00),
+        side: [(1.72, 2.54), (2.62, 3.32), (3.40, 3.72)],
+    ),
+    wheels: Wheels(radius: 0.30, width: 0.19, arch_clearance: 0.04, front_x: 0.80, rear_x: 3.34, track: 1.47),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.26, 0.42)),
+    rear: Rear(lights: Dual, spoiler: Lip, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.82, creases: [(0.20, 0.62, 3.98, 0.70)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 1, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true),
+    details: [BlackTrim, Badge(Circle)],
+    // Silver, bright yellow, red, white, black, blue, lime green.
+    palette: ["#b8bcc0", "#e8c21e", "#b8181e", "#eeede8", "#18191c", "#2a58a8", "#8ab838"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 0.94,
+        dash_x: 1.30,
+        wheel_pos: (1.74, 0.80),
+        wheel_radius: 0.18,
+        column_angle_deg: 28,
+        mirror_pos: (1.62, 1.38),
+        seat: (2.24, 0.54),
+        driver_offset: 0.37,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: charcoal plastic, charcoal cloth
+        // with a bright patterned insert, a charcoal carpet, orange-lit dials.
+        colors: ["#2c2d30", "#3a3b3e", "#2e2f32", "#a8a8a6", "#3e3f42", "#c86a2a"],
+        display: "#ff8a30",
+        insert: "#2a58a8",
+        piping: "#3e3f42",
+        dash_top: "#232427",
+        manual: true,
+    ),
+)

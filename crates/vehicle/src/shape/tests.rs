@@ -24,7 +24,7 @@ fn load(text: &str) -> ShapeSpec {
     s
 }
 
-/// The rest of the roster (the 1980s cars, then the 2001 heroes), as `(shape, spec)` texts.
+/// The rest of the roster (the 1980s cars, the 2001 heroes, then the 2001 traffic cars), as `(shape, spec)` texts.
 macro_rules! car {
     ($id:literal) => {
         (
@@ -33,7 +33,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 21] = [
+const ROSTER: [(&str, &str); 28] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -55,6 +55,13 @@ const ROSTER: [(&str, &str); 21] = [
     car!("tanager_awd"),
     car!("destrier_coupe"),
     car!("siskin_coupe"),
+    car!("plover_sedan"),
+    car!("sorrel_utility"),
+    car!("wren_minivan"),
+    car!("percheron_pickup"),
+    car!("linnet_hatch"),
+    car!("sledge_box_truck"),
+    car!("anvil_semi"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -63,6 +70,7 @@ const GT: &str = ROSTER[16].0;
 const TARGA: &str = ROSTER[17].0;
 const MUSCLE: &str = ROSTER[19].0;
 const TUNER: &str = ROSTER[20].0;
+const SEMI: &str = ROSTER[27].0;
 
 /// Every built-in shape with its vehicle spec: the first four cars, then the roster.
 fn pairs() -> Vec<(&'static str, &'static str)> {
@@ -509,7 +517,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 25] = [
+    let expected: [u64; 32] = [
         0xd8c8_d201_ca40_efe2,
         0xedbe_0c75_ff0b_96c9,
         0x0cc6_c3d4_6210_49af,
@@ -535,8 +543,15 @@ fn builds_are_deterministic() {
         0xd65d_5358_f319_7f93,
         0x2c3c_378d_c6d4_94ab,
         0x46fb_2007_975f_096b,
+        0x2a9c_2664_25c5_7df8,
+        0xbdf5_7a08_6840_4738,
+        0x4bb2_6c0d_d774_18fe,
+        0x1a7e_4ef0_99ca_b68e,
+        0xfb0c_e7e9_b101_0876,
+        0x634c_e91b_6187_9c07,
+        0x6a64_3802_bc7c_7342,
     ];
-    let mut got = [0u64; 25];
+    let mut got = [0u64; 32];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -866,6 +881,52 @@ fn validate_rejects_bad_curves() {
         ShapeError::BeltNotIncreasing { index: 2 },
     );
     rejects(GANNET, |s| s.side[4].1 = f32::NAN, ShapeError::NonFinite);
+}
+
+/// Body vertices within a tire's radius of hub `c` (model space) and its width, on its side.
+fn on_the_hub(m: &MeshData, c: [f32; 3], w: &Wheels) -> usize {
+    m.positions
+        .iter()
+        .filter(|p| {
+            let (dy, dz) = (p[1] - c[1], p[2] - c[2]);
+            p[0] * c[0] > 0.0
+                && (p[0].abs() - c[0].abs()).abs() <= w.width * 0.5 + 0.01
+                && dy * dy + dz * dz <= w.radius * w.radius * 1.01
+        })
+        .count()
+}
+
+#[test]
+fn fixed_axles_stand_wheels_under_the_body() {
+    let semi = load(SEMI);
+    assert_eq!(semi.axles.len(), 3);
+    let w = semi.wheels;
+    for lod in 0..3 {
+        let car = build_lod(&semi, 0, lod).unwrap();
+        for &ax in &semi.axles {
+            for side in [-1.0, 1.0] {
+                let hub = [side * w.track * 0.5, w.radius, ax - w.front_x];
+                assert!(
+                    on_the_hub(&car.body, hub, &w) >= 12,
+                    "lod{lod}: no wheel at {hub:?}"
+                );
+            }
+        }
+        // The road wheels stay four, at the two road axles.
+        assert_eq!(car.wheel_centers[2][2], w.rear_x - w.front_x);
+    }
+    // A car without fixed axles builds as before (the mesh hashes above).
+    assert!(shapes().iter().filter(|s| !s.axles.is_empty()).count() == 1);
+    // An axle in a low body, on a road axle, past the tail or one of five is refused.
+    for bad in [
+        alloc::vec![2.5],
+        alloc::vec![1.5],
+        alloc::vec![17.4],
+        alloc::vec![5.3, 5.9],
+        alloc::vec![5.3, 6.45, 7.6, 14.1, 15.25],
+    ] {
+        rejects(SEMI, |s| s.axles = bad, ShapeError::WheelPlacement);
+    }
 }
 
 #[test]

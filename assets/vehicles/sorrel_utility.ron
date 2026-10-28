@@ -1,0 +1,47 @@
+// Sorrel Utility: a late-90s mid-size four-door sport utility, V6, part-time four-wheel drive
+// left in two.
+//
+// Intent: tall, heavy and soft, the decade's new family car. A torquey V6 through a
+// four-speed automatic, rear drive on the street, a high center of gravity on long-travel
+// springs that lean and nod, slow steering, plain understeer. Commanding, unhurried.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "sorrel_utility",
+    name: "Sorrel Utility",
+    era: Nineties,
+    year: 1998,
+    class: Utility,
+
+    mass_kg: 1820,
+    dims_m: (4.78, 1.86, 1.75),    // length, width, height
+    wheelbase_m: 2.80,
+    track_m: 1.56,
+    cg_height_m: 0.70,
+    cg_fore_aft: 0.45,
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 5600,
+        torque_nm: [(800, 240), (2000, 288), (3000, 302), (4200, 288), (5600, 240)],
+    ),
+    gears: [2.80, 1.55, 1.0, 0.70],
+    final_drive: 3.73,
+    reverse: 2.3,
+    shift_ms: 420,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.89, grip_long: 0.9, load_sens: 0.12, slip_peak_deg: 9.0),
+    suspension: Susp(spring_n_m: 30000, damper: 2400, travel_m: 0.22, antiroll: 0.2),
+    steering: Steer(max_deg: 33, speed_sens: 0.5, return_rate: 5.5),
+    brakes: Brakes(max_nm: 4200, bias_front: 0.66, abs: true, handbrake_nm: 2600),
+    aero: Aero(cd: 0.76, frontal_m2: 2.8, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.2, body_roll: 0.8, engine_sound: "v6", shift_jerk: 0.12),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 110, mph), Tach(0, 6000)],
+        radio: "digital_blue",
+    ),
+    shape: "sorrel_utility.shape.ron",
+)

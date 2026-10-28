@@ -1,0 +1,47 @@
+// Anvil Semi: a late-90s highway tractor and its loaded dry-van trailer, drawn and simulated
+// as one vehicle. Traffic only: it drives the freeway lanes, never parks and is not on the
+// Vehicle page; this spec gives NPC traffic its mass for collisions.
+//
+// Intent: a wall that moves. Heavy, slow to speed and slow to stop, held to the freeway.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "anvil_semi",
+    name: "Anvil Semi",
+    era: Aughts,
+    year: 2000,
+    class: Van,
+    traffic_only: true,
+
+    mass_kg: 24000,
+    dims_m: (17.50, 2.60, 4.02),    // length, width, height
+    wheelbase_m: 15.15,
+    track_m: 1.96,
+    cg_height_m: 1.60,
+    cg_fore_aft: 0.50,
+
+    engine: Engine(
+        idle_rpm: 600,
+        redline_rpm: 2100,
+        torque_nm: [(800, 2000), (1200, 2400), (1600, 2300), (2100, 1900)],
+    ),
+    gears: [12.0, 8.0, 5.6, 4.0, 2.9, 2.1, 1.5, 1.0],
+    final_drive: 3.55,
+    reverse: 12.0,
+    shift_ms: 700,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.75, grip_long: 0.78, load_sens: 0.12, slip_peak_deg: 10.0),
+    suspension: Susp(spring_n_m: 600000, damper: 40000, travel_m: 0.16, antiroll: 0.4),
+    steering: Steer(max_deg: 30, speed_sens: 0.5, return_rate: 3.0),
+    brakes: Brakes(max_nm: 60000, bias_front: 0.4, abs: true, handbrake_nm: 30000),
+    aero: Aero(cd: 0.75, frontal_m2: 10.0, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.3, body_roll: 0.5, engine_sound: "default", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 80, mph), Tach(0, 3000)],
+        radio: "amber_seek",
+    ),
+    shape: "anvil_semi.shape.ron",
+)

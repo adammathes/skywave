@@ -19,6 +19,28 @@ pub fn rim_radius(r: f32, rims: Rims) -> f32 {
     }
 }
 
+/// A wheel of a fixed axle ([`super::ShapeSpec::axles`]), hub-local and right-side like
+/// [`build`]'s: a tire's tread and outer wall and a flat rim face, twelve-sided (eight at
+/// level of detail 2). A truck's tandems are many wheels seen from afar.
+pub fn fixed(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
+    let mut s = Soup::new(40.0);
+    let hw = w.width * 0.5;
+    let segs = if lod > 1 { 8 } else { 12 };
+    s.cylinder(
+        [-hw, 0.0, 0.0],
+        [hw, 0.0, 0.0],
+        w.radius,
+        segs,
+        false,
+        false,
+        m.tire,
+    );
+    let rr = rim_radius(w.radius, parts.rims);
+    s.disc([hw, 0.0, 0.0], AXIS, w.radius, segs, m.tire);
+    s.disc([hw + 0.002, 0.0, 0.0], AXIS, rr, segs, m.rim);
+    s
+}
+
 pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
     let (rims, hubcaps) = (parts.rims, parts.hubcaps);
     let mut s = Soup::new(40.0);
