@@ -238,7 +238,8 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
   full stick, then full throttle (the keyboard case, where the owner's fishtail reproduced); a quarter-stick
   launch from rest to 30 mph (at most 6 s); and a 30 mph quarter-stick handbrake turn. Bands: in Arcade the
   rear stays within 1.1× its tires' peak slip angle in the lane change and the corner, the lane change
-  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.9× out of the junction; with
+  overshoots by under 25°/s, and nothing spins; in Light, 1.25×, 32°/s, and 2.9× out of the junction (the Halberd Targa
+  sits at 2.8×, and any trim to its bias puts its skidpad on the Halberd coupe's); with
   traction control the launch is a little wheelspin, never a spin; the handbrake slides the rear past 1.5×
   its peak in every preset, 2× in Arcade. With no assists the sports and muscle cars (the 2001 Halberds,
   Tanager and Destrier among them) may still spin a quarter-lock launch, and full stick at 60 mph spins most cars: that preset is for drivers, and the exotics
