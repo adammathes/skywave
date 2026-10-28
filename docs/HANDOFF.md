@@ -42,6 +42,21 @@ top first, without asking again. Only the owner moves a card from Proposed to Qu
 follow-ups and review leftovers go in as Proposed. Read `items` where status is `queued`, ordered
 by `order`, before dispatching; update status as sessions start, PRs open and merge.
 
+## Work queue (how approved work runs now)
+Open a Claude Code session on the repo and say "run the work queue" (or "do all the approved items
+in the work queue in new subagents", "just do <card>", "stop at PRs", "land what's open", "what's
+queued?"). The `work-queue` skill (`.claude/skills/work-queue/SKILL.md`) turns that into a run of
+the saved workflow `.claude/workflows/work-queue.js`, which:
+1. reads the Queued cards (never Proposed) and any queue PRs left open by an earlier run;
+2. lands those PRs (merge on green, one fix attempt on red);
+3. builds up to 3 Queued cards in parallel subagents, each in its own worktree on `q/<card id>`;
+4. has each reviewed by an independent read-only reviewer (its own probes for sim, world
+   generation, traffic or pedestrians) for up to 3 fix rounds, then moves stuck cards to Needs you;
+5. opens the PR, waits for CI, merges on green, and updates the card at every step.
+Screenshots run under `flock /tmp/skywave-screenshots.lock` so builders never render two at once.
+Out-of-scope ideas from reviews become new Proposed cards. Scheduling it (a timed session that
+says "run the work queue") is a later step if the owner wants it.
+
 ## Where things stand (keep current)
 
 ### Resume here (2026-10-28 21:55 UTC: stopping point on the owner's word; Proposed/Queued board above. 2026-10-28 12:47 UTC, coordinator handed off to save quota)
