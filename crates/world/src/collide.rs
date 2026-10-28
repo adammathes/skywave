@@ -1396,7 +1396,8 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                     });
                 }
             }
-            PropKind::StripLine { .. } => {}
+            // Paint, and cones a car goes through rather than stopping dead at.
+            PropKind::StripLine { .. } | PropKind::StartLine { .. } | PropKind::Cone => {}
             PropKind::CrossingGate { .. } => posts.push(post(0.15, 4.2)),
             PropKind::TunnelPiece { .. }
             | PropKind::GuardRail { .. }

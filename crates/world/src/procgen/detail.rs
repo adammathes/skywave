@@ -233,6 +233,8 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::HeroCar { slot } => (30, u64::from(slot)),
             PropKind::PicnicTable => (31, 0),
             PropKind::CrossingGate { arm_dm } => (32, u64::from(arm_dm)),
+            PropKind::StartLine { width_dm } => (33, u64::from(width_dm)),
+            PropKind::Cone => (34, 0),
         };
         words.push(tag);
         words.push(payload);

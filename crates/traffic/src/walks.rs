@@ -78,6 +78,8 @@ const WALL_REACH_M: f32 = 4.5;
 const BENCH_REACH_M: f32 = 1.6;
 /// A landmark counts for a walk within this distance.
 const LANDMARK_REACH_M: f32 = 60.0;
+/// A race start's crowd stands in a row along the walk this far apart, m.
+const CROWD_STEP_M: f32 = 4.0;
 /// Beach spots along a walk backed by beach, about this far apart.
 const BEACH_STEP_M: f32 = 40.0;
 /// Hash key of the per-link spot jitter.
@@ -977,6 +979,20 @@ impl WalkGraph {
         &self.cell_spots[a as usize..b as usize]
     }
 
+    /// Each crossing link's line (its ends on the ground): where people cross a road.
+    pub fn crosswalks(&self) -> Vec<[[f32; 2]; 2]> {
+        self.links
+            .iter()
+            .filter(|l| l.kind == LinkKind::Crossing)
+            .map(|l| {
+                [
+                    xz(self.nodes[l.a as usize].pos),
+                    xz(self.nodes[l.b as usize].pos),
+                ]
+            })
+            .collect()
+    }
+
     /// The links at node `n`.
     pub fn links_at(&self, n: u32) -> &[u32] {
         let n = &self.nodes[n as usize];
@@ -1422,26 +1438,35 @@ fn spots(place: &Place, g: &WalkGraph) -> Vec<Spot> {
     }
     // Landmarks and piers at their nearest walk.
     // (Not a grade crossing, whose nearest walk crosses the track.)
-    let mut landmarks: Vec<([f32; 2], [f32; 2])> = place
+    // (A race start's crowd: a row of them along the walk at its line, facing the road.)
+    let mut landmarks: Vec<([f32; 2], [f32; 2], bool)> = place
         .pois
         .iter()
         .filter(|p| p.kind != place::PoiKind::GradeCrossing)
-        .map(|p| (p.pos, [0.0; 2]))
+        .map(|p| (p.pos, [0.0; 2], p.kind == place::PoiKind::RaceStart))
         .collect();
     for p in &place.props.items {
         if let PropKind::Pier { .. } = p.kind {
             let (sn, cs) = sin_cos(p.yaw);
-            landmarks.push(([p.pos[0], p.pos[2]], [-sn, -cs]));
+            landmarks.push(([p.pos[0], p.pos[2]], [-sn, -cs], false));
         }
     }
-    for (at, facing) in landmarks {
+    for (at, facing, crowd) in landmarks {
         let Some((l, s, _)) = nearest_walk(g, at, LANDMARK_REACH_M) else {
             continue;
         };
         let foot = xz(g.point(l, s, 0.0));
         let toward = unit2(sub2(at, foot));
         let facing = if len2(facing) > 0.0 { facing } else { toward };
-        out.push(spot_at(g, SpotKind::Landmark, l, s, 0.0, facing));
+        if crowd {
+            let len = g.links[l as usize].length_m;
+            for k in -2..=2 {
+                let sk = (s + CROWD_STEP_M * k as f32).clamp(0.0, len);
+                out.push(spot_at(g, SpotKind::Landmark, l, sk, 0.0, facing));
+            }
+        } else {
+            out.push(spot_at(g, SpotKind::Landmark, l, s, 0.0, facing));
+        }
     }
     // Beach behind a walk.
     let mut run = 0.0f32;

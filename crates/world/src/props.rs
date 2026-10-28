@@ -117,6 +117,10 @@ pub enum PropKind {
     CrossingGate {
         arm_dm: u8,
     },
+    StartLine {
+        width_dm: u16,
+    },
+    Cone,
 }
 
 /// One placed prop.
@@ -468,7 +472,9 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         | PropKind::CrewGarage { .. }
         | PropKind::TacoStand { .. }
         | PropKind::PicnicTable
-        | PropKind::CrossingGate { .. } => crate::setpieces::build(m, p, pal, &Lexicon::default()),
+        | PropKind::CrossingGate { .. }
+        | PropKind::StartLine { .. }
+        | PropKind::Cone => crate::setpieces::build(m, p, pal, &Lexicon::default()),
     }
 }
 
@@ -1495,6 +1501,8 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::HeroCar { slot } => PropKind::ParkedCar { color: slot },
         P::PicnicTable => PropKind::PicnicTable,
         P::CrossingGate { arm_dm } => PropKind::CrossingGate { arm_dm },
+        P::StartLine { width_dm } => PropKind::StartLine { width_dm },
+        P::Cone => PropKind::Cone,
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

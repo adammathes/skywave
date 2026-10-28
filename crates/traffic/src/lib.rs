@@ -36,6 +36,7 @@ pub mod figure;
 pub mod lanes;
 pub mod math;
 pub mod peds;
+pub mod race;
 pub mod signal;
 pub mod train;
 pub mod walks;

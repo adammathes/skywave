@@ -115,8 +115,10 @@ pub fn poi_color(kind: PoiKind) -> Rgb {
         PoiKind::Diner => [222, 84, 60],
         PoiKind::Gas => [232, 160, 30],
         PoiKind::Stadium => [60, 150, 80],
-        PoiKind::DragStrip | PoiKind::CrewGarage => [214, 60, 160],
-        PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing => [120, 130, 140],
+        PoiKind::DragStrip | PoiKind::CrewGarage | PoiKind::RaceStart => [214, 60, 160],
+        PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing | PoiKind::Convoy => {
+            [120, 130, 140]
+        }
         PoiKind::TacoStand => [222, 84, 60],
     }
 }

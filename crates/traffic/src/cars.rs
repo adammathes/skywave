@@ -522,6 +522,7 @@ pub struct Traffic {
     routes: Vec<Vec<u32>>,
     turn_from: Vec<u32>,
     people: Vec<[f32; 2]>,
+    crosswalks: Vec<[[f32; 2]; 2]>,
 }
 
 /// Most people the scripted cars weigh at once.
@@ -531,6 +532,9 @@ pub const MAX_PEOPLE: usize = 512;
 pub const PERSON_CLEAR_M: f32 = 0.8;
 /// A person's half width, m.
 const PERSON_R_M: f32 = 0.45;
+/// A scripted car stops its front this far short of a crosswalk's line: the half width
+/// people walk it in, theirs, and a margin, m.
+const CROSSWALK_CLEAR_M: f32 = 2.2;
 
 /// Most [`Barrier`]s at once.
 pub const MAX_BARRIERS: usize = 64;
@@ -592,6 +596,7 @@ impl Clone for Traffic {
                 p.extend_from_slice(&self.people);
                 p
             },
+            crosswalks: self.crosswalks.clone(),
         }
     }
 }
@@ -938,6 +943,7 @@ impl Traffic {
             routes: Vec::new(),
             turn_from: graph.turns.iter().map(|t| t.from).collect(),
             people: Vec::with_capacity(MAX_PEOPLE),
+            crosswalks: Vec::new(),
         }
     }
 
@@ -1166,8 +1172,8 @@ impl Traffic {
 
     /// A car of shape `shape` (below [`TrafficBudget::shapes`]) on `script`, its front `s`
     /// meters along `lane` at `speed`; its id, or `None` when the pool is full of cars on
-    /// scripts or seen by the camera. With the pool full, the ordinary car hidden the
-    /// longest makes room. Does not check for room on the lane.
+    /// scripts or in view. With the pool full, the ordinary car out of view the longest
+    /// makes room. Does not check for room on the lane.
     pub fn spawn_scripted(
         &mut self,
         g: &LaneGraph,
@@ -1176,13 +1182,12 @@ impl Traffic {
         speed: f32,
         shape: u8,
         script: Script,
-        view: &View,
     ) -> Option<u32> {
         if self.cars.len() >= self.budget.cars {
             let gone = (0..self.cars.len())
                 .filter(|&i| {
                     let c = &self.cars[i];
-                    c.script.tag == 0 && !view.sees(c.pos, c.len)
+                    c.script.tag == 0 && c.hidden > 0
                 })
                 .max_by_key(|&i| (self.cars[i].hidden, core::cmp::Reverse(i)))?;
             self.remove(gone);
@@ -1222,6 +1227,31 @@ impl Traffic {
             .iter_mut()
             .find(|c| c.id == id)
             .map(|c| &mut c.script)
+    }
+
+    /// The crosswalks' lines, each from curb to curb ([`crate::walks::WalkGraph::crosswalks`]):
+    /// a scripted car stopping for a line stands clear of them. Call once.
+    pub fn set_crosswalks(&mut self, lines: Vec<[[f32; 2]; 2]>) {
+        self.crosswalks = lines;
+    }
+
+    /// Where along `path` a car stopping `d` ahead stands clear of every crosswalk before
+    /// that: short of the nearest one crossing its path there, if any.
+    fn crosswalk_short(&self, g: &LaneGraph, path: &Path, d: f32) -> Option<f32> {
+        let mut best: Option<f32> = None;
+        let look = d + CROSSWALK_CLEAR_M;
+        let mut test = |p: [f32; 2], q: [f32; 2], start: f32, len: f32| {
+            for w in &self.crosswalks {
+                if let Some(t) = cross_at(p, q, w[0], w[1]) {
+                    let along = start + len * t;
+                    if along > 0.0 && along <= look {
+                        best = Some(best.map_or(along, |b: f32| b.min(along)));
+                    }
+                }
+            }
+        };
+        self.walk_path(g, path, look, &mut test);
+        best.map(|x| (x - CROSSWALK_CLEAR_M).clamp(0.0, d))
     }
 
     /// Where the people are now (at most [`MAX_PEOPLE`]; the rest are dropped), for the
@@ -1675,7 +1705,8 @@ impl Traffic {
             let to = g.turns[t as usize].to;
             (c.v0 * g.lanes[to as usize].speed_mps).min(turn_speed(g, t))
         };
-        if c.script.v0_mps > 0.0 {
+        // Its own speed only on its route.
+        if c.script.v0_mps > 0.0 && c.script.route != NONE {
             v0 = if c.seg < nl {
                 c.script.v0_mps
             } else {
@@ -1733,6 +1764,12 @@ impl Traffic {
                 Self::future_gate(g, seg, c.next_turn, inp.tick)
             };
             if !open {
+                // A set piece's car stands clear of the crosswalk before the line.
+                let d = if c.script.tag != 0 {
+                    self.crosswalk_short(g, &path, d).unwrap_or(d)
+                } else {
+                    d
+                };
                 a = a.min(idm(v, v0, c.headway, d, v, LINE_S0));
                 max_ds = max_ds.min(d);
                 break;

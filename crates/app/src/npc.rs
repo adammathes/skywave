@@ -239,6 +239,10 @@ pub struct Npcs {
     voice_ids: [u32; TRAFFIC_VOICES],
     /// The place's pedestrians, at the same density.
     pub(crate) crowd: peds::Crowd,
+    /// The set pieces that drive (`traffic::race`), and where everyone stands for them
+    /// and the traffic's scripted cars.
+    pub(crate) drivers: traffic::race::Drivers,
+    people: Vec<[f32; 2]>,
 }
 
 /// What a step needs from the game.
@@ -253,16 +257,25 @@ impl Npcs {
     /// The lane graph and an empty pool for `place`, seeded by `seed`, its cars picked by
     /// the world's era weights `era` (per built-in shape: [`crate::scenario::Lineup::shapes`];
     /// reduced, so a world whose cars all weigh alike picks as an unweighted pool).
-    pub fn new(place: &Place, seed: Seed, era: &[u32]) -> Npcs {
+    /// `heroes` are the built-in shapes of the world's hero cars ([`crate::scenario::Lineup::heroes`]):
+    /// its race start's racers drive them; traffic never picks them.
+    pub fn new(place: &Place, seed: Seed, era: &[u32], heroes: &[usize]) -> Npcs {
         let graph = LaneGraph::new(place);
-        let shapes = world_shapes(era);
+        let mut shapes = world_shapes(era);
+        let traffic_shapes = shapes.len();
+        for &h in heroes {
+            if !shapes.contains(&h) {
+                shapes.push(h);
+            }
+        }
         let budget = TrafficBudget {
             shapes: shapes.len() as u8,
             ..TrafficBudget::default()
         };
         let mut traffic = Traffic::new(&graph, budget, seed);
-        let mut weights: Vec<u32> = shapes.iter().map(|&k| era[k]).collect();
+        let mut weights: Vec<u32> = shapes[..traffic_shapes].iter().map(|&k| era[k]).collect();
         crate::scenario::reduced(&mut weights);
+        weights.resize(shapes.len(), 0);
         traffic.set_shape_weights(&weights);
         let specs: Vec<shape::ShapeSpec> = shapes
             .iter()
@@ -271,8 +284,23 @@ impl Npcs {
             .expect("the built-in traffic shapes load");
         let rules: Vec<traffic::ShapeRule> = specs.iter().map(shape_rule).collect();
         traffic.set_shape_rules(&rules);
+        // The set pieces that drive: the racers in the hero cars, the convoy in semis.
+        let racers: Vec<u8> = heroes
+            .iter()
+            .filter_map(|h| shapes.iter().position(|k| k == h))
+            .map(|k| k as u8)
+            .collect();
+        let truck = shapes
+            .iter()
+            .position(|&k| vehicles::BUILTIN_SHAPES[k].0 == "anvil_semi.shape.ron")
+            .map(|k| k as u8);
+        let (drivers, routes) = traffic::race::Drivers::of(place, &graph, &racers, truck);
+        traffic.set_routes(routes);
         let cap = budget.cars;
         let crowd = peds::Crowd::new(place, &graph, seed);
+        if drivers.race.is_some() || drivers.convoy.is_some() {
+            traffic.set_crosswalks(crowd.walks().crosswalks());
+        }
         let bodies = specs
             .iter()
             .map(CarBody::of)
@@ -300,6 +328,8 @@ impl Npcs {
             extra: 0,
             voice_ids: [u32::MAX; TRAFFIC_VOICES],
             crowd,
+            drivers,
+            people: Vec::with_capacity(traffic::cars::MAX_PEOPLE),
         }
     }
 
@@ -438,8 +468,23 @@ impl Npcs {
             clock: inp.clock,
             density: self.density,
         };
+        self.people.clear();
+        let pool = self.crowd.pool();
+        let n = traffic::cars::MAX_PEOPLE;
+        self.people
+            .extend(pool.iter().take(n).map(|p| [p.pos[0], p.pos[2]]));
+        self.traffic.set_people(self.people.iter().copied());
         self.traffic.step(&self.graph, &inputs);
         self.traffic.populate(&self.graph, &inputs);
+        self.drivers.step(
+            &mut self.traffic,
+            &self.graph,
+            &inp.player,
+            &inp.view,
+            &inp.clock,
+            &self.people,
+            1.0 / skywave_core::SIM_HZ as f32,
+        );
     }
 
     /// The gate lines the cars must not cross from the next step on (closed railroad
@@ -592,7 +637,13 @@ impl Npcs {
 
     /// Fingerprint of the traffic and the pedestrians, for determinism checks.
     pub fn hash(&self) -> u64 {
-        hash64(self.traffic.hash(), &[self.signals.tick, self.crowd.hash()])
+        let h = hash64(self.traffic.hash(), &[self.signals.tick, self.crowd.hash()]);
+        // Only a place with set pieces that drive hashes them, so the rest hash as before.
+        if self.drivers.race.is_some() || self.drivers.convoy.is_some() {
+            hash64(h, &[self.drivers.hash()])
+        } else {
+            h
+        }
     }
 
     /// Car `i`'s ground point and heading `alpha` of the way through the last step.
@@ -910,6 +961,8 @@ pub fn view(eye: Vec3, forward: Vec3, fov_y_rad: f32, aspect: f32) -> View {
 
 #[cfg(test)]
 mod gate;
+#[cfg(test)]
+mod racers;
 
 #[cfg(test)]
 mod tests {
@@ -950,7 +1003,7 @@ mod tests {
     fn census_all(era: &[u32]) -> (Vec<usize>, usize, u64) {
         let app = app("place=town&t=12:00&still=1&stream=0");
         let place = place::Place::test_grid();
-        let mut npcs = Npcs::new(&place, Seed(1), era);
+        let mut npcs = Npcs::new(&place, Seed(1), era, &[]);
         npcs.set_density(Density::Busy);
         let inputs = app.traffic_inputs();
         npcs.warm_up_unseen(&inputs);
@@ -1022,7 +1075,7 @@ mod tests {
             crate::scenario::get(1),
         )
         .unwrap();
-        let mut npcs = Npcs::new(&place, Seed(1), &crate::scenario::lineup(1).shapes);
+        let mut npcs = Npcs::new(&place, Seed(1), &crate::scenario::lineup(1).shapes, &[]);
         let semi = vehicles::BUILTIN_SHAPES
             .iter()
             .position(|b| b.0 == "anvil_semi.shape.ron")

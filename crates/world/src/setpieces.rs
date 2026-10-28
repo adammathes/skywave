@@ -33,6 +33,8 @@ const BAY_W_M: f32 = 5.6;
 const BAY_H_M: f32 = 3.9;
 /// A taco stand's width, depth and height, m.
 pub const STAND_M: (f32, f32, f32) = (5.0, 3.2, 3.0);
+/// A start line's squares are about this big, m.
+const START_SQUARE_M: f32 = 0.9;
 
 /// Whether props of `kind` are a set piece's (built by [`build`]).
 pub fn is_set_piece(kind: PropKind) -> bool {
@@ -48,6 +50,8 @@ pub fn is_set_piece(kind: PropKind) -> bool {
             | PropKind::TacoStand { .. }
             | PropKind::PicnicTable
             | PropKind::CrossingGate { .. }
+            | PropKind::StartLine { .. }
+            | PropKind::Cone
     )
 }
 
@@ -78,6 +82,10 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, lex: &Lexicon) {
         PropKind::TacoStand { name_seed } => taco_stand(m, base, p.dir, name_seed, pal, lex),
         PropKind::PicnicTable => picnic_table(m, base, p.dir, pal),
         PropKind::CrossingGate { .. } => crossing_gate(m, base, p.dir, pal),
+        PropKind::StartLine { width_dm } => {
+            start_line(m, base, p.dir, f32::from(width_dm) * 0.1, pal)
+        }
+        PropKind::Cone => cone(m, base, pal),
         _ => {}
     }
 }
@@ -489,6 +497,62 @@ fn strip_line(m: &mut WorldMesh, base: V3, along: V2, len: f32, pal: &Palette) {
         f.y,
         white,
     );
+}
+
+/// A start line's checkered band, `width` across the road and two squares deep (the
+/// asphalt between the painted squares), facing `along` down the course.
+fn start_line(m: &mut WorldMesh, base: V3, along: V2, width: f32, pal: &Palette) {
+    let f = Frame::upright(base, along);
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let n = ((width / START_SQUARE_M) as i32).max(2);
+    let side = width / n as f32;
+    let y = 0.03;
+    for row in 0..2 {
+        for k in 0..n {
+            if (k + row) % 2 != 0 {
+                continue;
+            }
+            // The frame's x runs down the course, z across it.
+            let z0 = -0.5 * width + side * k as f32;
+            let x0 = -side + side * row as f32;
+            quad(
+                m,
+                [
+                    f.p(x0, y, z0),
+                    f.p(x0 + side, y, z0),
+                    f.p(x0 + side, y, z0 + side),
+                    f.p(x0, y, z0 + side),
+                ],
+                f.y,
+                white,
+            );
+        }
+    }
+}
+
+/// A traffic cone: an orange cone in tiers on a square foot, a white band round it.
+fn cone(m: &mut WorldMesh, base: V3, pal: &Palette) {
+    let f = Frame::upright(base, V2::new(0.0, 1.0));
+    let orange = Paint::new(mix(pal.hydrant_red, pal.sodium, 140), Pattern::Plain);
+    let white = Paint::new(pal.paint_white, Pattern::Plain);
+    boxf(
+        m,
+        &f,
+        [-0.19, 0.0, -0.19],
+        [0.19, 0.04, 0.19],
+        face::NO_BOTTOM,
+        orange,
+    );
+    let tiers = [
+        (0.13, 0.04, 0.24),
+        (0.1, 0.24, 0.38),
+        (0.075, 0.38, 0.52),
+        (0.045, 0.52, 0.7),
+    ];
+    for (k, &(r, y0, y1)) in tiers.iter().enumerate() {
+        let paint = if k == 2 { white } else { orange };
+        boxf(m, &f, [-r, y0, -r], [r, y1, r], face::NO_BOTTOM, paint);
+    }
 }
 
 /// Steel beam on wood posts every 2 m, along `along`.
@@ -1199,7 +1263,7 @@ mod tests {
         }
     }
 
-    const KINDS: [PropKind; 10] = [
+    const KINDS: [PropKind; 12] = [
         PropKind::TunnelPiece {
             len_dm: 160,
             width_dm: 250,
@@ -1214,6 +1278,8 @@ mod tests {
         PropKind::TacoStand { name_seed: 12 },
         PropKind::PicnicTable,
         PropKind::CrossingGate { arm_dm: 80 },
+        PropKind::StartLine { width_dm: 112 },
+        PropKind::Cone,
     ];
 
     #[test]

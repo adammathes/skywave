@@ -324,7 +324,7 @@ impl App {
         let mut strip = dragstrip::DragStrip::of(&place);
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let sound = sound::Sound::new(&place, &drive);
-        let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
+        let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes, &lineup.heroes);
         if let Some(r) = &rail {
             let line = &r.railway.train.line;
             let pts: Vec<[f32; 2]> = line.pts.iter().map(|p| [p[0], p[2]]).collect();

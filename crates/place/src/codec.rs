@@ -331,6 +331,7 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                 }
                 PropKind::HeroCar { slot } => w.push(slot),
                 PropKind::CrossingGate { arm_dm } => w.push(arm_dm),
+                PropKind::StartLine { width_dm } => w.extend_from_slice(&width_dm.to_le_bytes()),
                 _ => {}
             }
         }
@@ -379,6 +380,8 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::HeroCar { .. } => 30,
         PropKind::PicnicTable => 31,
         PropKind::CrossingGate { .. } => 32,
+        PropKind::StartLine { .. } => 33,
+        PropKind::Cone => 34,
     }
 }
 
@@ -770,6 +773,8 @@ fn poi_kind(v: u8) -> Option<PoiKind> {
         10 => PoiKind::CrewGarage,
         11 => PoiKind::TacoStand,
         12 => PoiKind::GradeCrossing,
+        13 => PoiKind::RaceStart,
+        14 => PoiKind::Convoy,
         _ => return None,
     })
 }
@@ -1075,6 +1080,8 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 30 => PropKind::HeroCar { slot: r.u8()? },
                 31 => PropKind::PicnicTable,
                 32 => PropKind::CrossingGate { arm_dm: r.u8()? },
+                33 => PropKind::StartLine { width_dm: r.u16()? },
+                34 => PropKind::Cone,
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1582,6 +1589,8 @@ mod tests {
             PropKind::HeroCar { slot: 3 },
             PropKind::PicnicTable,
             PropKind::CrossingGate { arm_dm: 74 },
+            PropKind::StartLine { width_dm: 112 },
+            PropKind::Cone,
         ];
         let props = kinds
             .iter()

@@ -815,7 +815,7 @@ mod tests {
         assert!(cars.len() <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
         // The traffic takes the parked cars' era paints, sharing their meshes; it builds
         // only the (shape, paint) pairs the place does not park, inside the same budget.
-        let mut npcs = crate::npc::Npcs::new(&place, skywave_core::Seed(1), era);
+        let mut npcs = crate::npc::Npcs::new(&place, skywave_core::Seed(1), era, &[]);
         let mut built = 0;
         npcs.build_meshes(Some(&props), |_| {
             built += 1;

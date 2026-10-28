@@ -498,6 +498,12 @@ pub enum PoiKind {
     TacoStand = 11,
     /// Where a rail line crosses a road at grade, on the track's middle.
     GradeCrossing = 12,
+    /// A street race's start line, at the curb by its middle; racers run the road on from
+    /// it.
+    RaceStart = 13,
+    /// Where a freeway comes in from the desert, at its end; a truck convoy rolls in there
+    /// at dawn.
+    Convoy = 14,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.
@@ -761,6 +767,13 @@ pub enum PropKind {
     CrossingGate {
         arm_dm: u8,
     },
+    /// A street race's start line painted across a carriageway, `width_dm` decimeters
+    /// curb to curb (`pos` on the road at its middle); facing: down the course.
+    StartLine {
+        width_dm: u16,
+    },
+    /// A traffic cone; facing: any way.
+    Cone,
 }
 
 /// [`PropKind::Track`] beds: on a ballast embankment over the ground...

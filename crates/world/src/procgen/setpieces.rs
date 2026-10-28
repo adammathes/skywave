@@ -55,6 +55,16 @@ const GARAGE_LOT_M: (f32, f32) = (24.0, 25.0);
 const APRON_M: f32 = 9.0;
 /// A taco stand's lot.
 const STAND_LOT_M: (f32, f32) = (22.0, 20.0);
+/// The race start's spectator lot (frontage, depth), how far its line keeps from either
+/// end of its carriageway's edge and from a grade crossing, m.
+const RACE_LOT_M: (f32, f32) = (30.0, 12.0);
+const RACE_END_CLEAR_M: f32 = 40.0;
+/// The carriageway runs at least this far on from the line before it meets another
+/// boulevard, m.
+const RACE_COURSE_M: f32 = 500.0;
+const RACE_RAIL_CLEAR_M: f32 = 150.0;
+/// Its cones' places along each curb from the line, m.
+const RACE_CONES_M: [f32; 6] = [-12.0, -8.0, -4.0, 4.0, 8.0, 12.0];
 /// The garage and the stand stand at least this far apart, m.
 pub const APART_M: f32 = 300.0;
 /// The drag strip's start line lies this far down the runway from its taxiway end; its
@@ -122,6 +132,11 @@ pub struct SetPieces {
     pub channel: Option<(V2, V2, f32)>,
     /// Where the rail line crosses a road at grade, in order along it.
     pub crossings: Vec<V2>,
+    /// The race start: its spectators' lot, its line's middle on a boulevard carriageway,
+    /// the way down the course and the carriageway's width curb to curb.
+    pub race: Option<(Lot, V2, V2, f32)>,
+    /// The freeway's desert end, where the dawn convoy comes in, and the way in.
+    pub convoy: Option<(V2, V2)>,
 }
 
 impl SetPieces {
@@ -157,6 +172,13 @@ impl SetPieces {
         for &c in &self.crossings {
             push(c, PoiKind::GradeCrossing);
         }
+        if let Some((l, line, _, width)) = &self.race {
+            // At the curb on the lot's side, where the crowd gathers.
+            push(*line + l.inward * (0.5 * width + 1.0), PoiKind::RaceStart);
+        }
+        if let Some((at, _)) = self.convoy {
+            push(at, PoiKind::Convoy);
+        }
         out
     }
 
@@ -174,6 +196,14 @@ impl SetPieces {
         }
         if let Some(l) = &self.stand {
             out.push(l.rect(STAND_LOT_M.0, STAND_LOT_M.1));
+        }
+        if let Some((l, _, _, _)) = &self.race {
+            // The lot and the sidewalk before it.
+            let back = l.front - l.inward * SIDEWALK_WIDTH_M;
+            let rect = l.rect(RACE_LOT_M.0, RACE_LOT_M.1);
+            let a = back - l.along * (0.5 * RACE_LOT_M.0);
+            let b = back + l.along * (0.5 * RACE_LOT_M.0);
+            out.push(vec![a, b, rect[2], rect[3]]);
         }
         if let Some((start, dir, run, width)) = self.strip {
             let r = dir.right() * (0.5 * width + 3.0);
@@ -211,6 +241,38 @@ fn segments_distance(a: V2, b: V2, c: V2, d: V2) -> f32 {
     ]
     .into_iter()
     .fold(f32::INFINITY, f32::min)
+}
+
+/// Whether edge `e` is one carriageway of a boulevard: a one-way arterial of three lanes.
+fn is_carriageway(e: &place::Edge) -> bool {
+    e.class == RoadClass::Arterial && e.oneway && e.lanes_fwd == 3
+}
+
+/// How far along the polyline `pts` its point nearest `p` is, and its whole length.
+fn arc_on(pts: &[V2], p: V2) -> (f32, f32) {
+    let mut best = (f32::INFINITY, 0.0);
+    let mut arc = 0.0;
+    for w in pts.windows(2) {
+        let (d, t) = segment_distance(p, w[0], w[1]);
+        let len = (w[1] - w[0]).length();
+        if d < best.0 {
+            best = (d, arc + t * len);
+        }
+        arc += len;
+    }
+    (best.1, arc)
+}
+
+/// The way along the polyline `pts` at its point nearest `p`.
+fn road_dir(pts: &[V2], p: V2) -> V2 {
+    let mut best = (f32::INFINITY, V2::new(1.0, 0.0));
+    for w in pts.windows(2) {
+        let d = segment_distance(p, w[0], w[1]).0;
+        if d < best.0 && (w[1] - w[0]).length() > 1e-3 {
+            best = (d, (w[1] - w[0]).normalize());
+        }
+    }
+    best.1
 }
 
 /// Whether edge `e` is the freeway itself (not a ramp, overpass or street).
@@ -305,6 +367,37 @@ pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
     if let Some((_, t)) = best {
         s.tunnel = Some(t);
         s.tunnel_width_m = width;
+    }
+    // The convoy's way in: the freeway's end out in the desert (its fringe is `Farmland`).
+    if hwy.len() >= 2 {
+        let n = hwy.len();
+        let desert = |p: V2| {
+            let h = core::f32::consts::FRAC_1_SQRT_2;
+            [
+                (1.0, 0.0),
+                (h, h),
+                (0.0, 1.0),
+                (-h, h),
+                (-1.0, 0.0),
+                (-h, -h),
+                (0.0, -1.0),
+                (h, -h),
+            ]
+            .iter()
+            .filter(|&&(x, z)| {
+                let q = p + V2::new(x, z) * 80.0;
+                m.zone_at(q.x, q.y) == ZoneId::Farmland
+            })
+            .count()
+        };
+        let (end, next) = if desert(hwy[n - 1]) >= desert(hwy[0]) {
+            (hwy[n - 1], hwy[n - 2])
+        } else {
+            (hwy[0], hwy[1])
+        };
+        if desert(end) > 0 && place.header.chunk_at([end.x, end.y]).is_some() {
+            s.convoy = Some((end, (next - end).normalize()));
+        }
     }
 
     // The lots, nearest the boulevard first.
@@ -410,6 +503,83 @@ pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
         .iter()
         .map(|r| [V2::from_array(r[0]), V2::from_array(r[1])])
         .collect();
+
+    // The race start: a lot fronting a boulevard carriageway mid-block, its line across
+    // the carriageway before it, nearest the crew garage.
+    let taken = s.footprints();
+    let near = s.garage.map_or(downtown, |g| g.front);
+    s.race = lots(place, RACE_LOT_M, &zones, &[RoadClass::Arterial])
+        .into_iter()
+        .filter_map(|l| {
+            let e = &place.roads.edges[(l.key >> 24) as usize];
+            if !is_carriageway(e) {
+                return None;
+            }
+            let hw = 0.5 * e.width_m + SIDEWALK_WIDTH_M;
+            let line = l.front - l.inward * (hw + 0.5);
+            // Driving `along`, the lot on the right: the outer curb, not the median's.
+            let road: Vec<V2> = e.profile.iter().map(|q| V2::new(q[0], q[2])).collect();
+            let (arc, total) = arc_on(&road, line);
+            let dir = road_dir(&road, line);
+            // The course: the carriageway on from the line, at least RACE_COURSE_M of it
+            // before it meets a crossing boulevard (the racers' course ends there).
+            let way = |o: &place::Edge| {
+                let (p, q) = (o.profile[0], o.profile[o.profile.len() - 1]);
+                V2::new(q[0] - p[0], q[2] - p[2]).normalize()
+            };
+            let (mut node, mut run) = (e.b, total - arc);
+            while run < RACE_COURSE_M {
+                let at = |o: &&place::Edge| o.a == node || o.b == node;
+                let crossed = place
+                    .roads
+                    .edges
+                    .iter()
+                    .filter(at)
+                    .any(|o| is_carriageway(o) && way(o).dot(dir).abs() < 0.9);
+                let next = place
+                    .roads
+                    .edges
+                    .iter()
+                    .filter(at)
+                    .find(|o| o.a == node && is_carriageway(o) && way(o).dot(dir) > 0.9);
+                match next {
+                    Some(o) if !crossed => {
+                        run += o
+                            .profile
+                            .windows(2)
+                            .map(|w| V2::new(w[1][0] - w[0][0], w[1][2] - w[0][2]).length())
+                            .sum::<f32>();
+                        node = o.b;
+                    }
+                    _ => break,
+                }
+            }
+            if run < RACE_COURSE_M
+                || dir.dot(l.along) < 0.9
+                || dir.right().dot(l.inward) < 0.9
+                || arc < RACE_END_CLEAR_M
+                || total - arc < RACE_END_CLEAR_M
+                || s.crossings
+                    .iter()
+                    .any(|&c| (c - line).length() < RACE_RAIL_CLEAR_M)
+                || taken.iter().any(|f| {
+                    l.rect(RACE_LOT_M.0, RACE_LOT_M.1)
+                        .iter()
+                        .any(|&q| point_in_polygon(q, f))
+                })
+                || [s.garage, s.stand]
+                    .iter()
+                    .flatten()
+                    .any(|o| (o.front - l.front).length() < 60.0)
+            {
+                return None;
+            }
+            Some((l, line, dir, e.width_m))
+        })
+        .min_by(|x, y| {
+            let d = |r: &(Lot, V2, V2, f32)| (r.0.front - near).length();
+            d(x).total_cmp(&d(y)).then(x.0.key.cmp(&y.0.key))
+        });
     s
 }
 
@@ -602,7 +772,12 @@ const SITE_STEP_M: f32 = 6.0;
 pub fn clear(place: &mut Place, s: &SetPieces) {
     let parcels = Parcels::new(place);
     let mut taken: Vec<usize> = Vec::new();
-    let sites = [(&s.garage, GARAGE_LOT_M), (&s.stand, STAND_LOT_M)];
+    let race = s.race.map(|r| r.0);
+    let sites = [
+        (&s.garage, GARAGE_LOT_M),
+        (&s.stand, STAND_LOT_M),
+        (&race, RACE_LOT_M),
+    ];
     for (l, (w, d)) in sites {
         if let Some(l) = l {
             taken.extend(samples(l, w, d).filter_map(|q| parcels.under(q)));
@@ -793,6 +968,37 @@ pub fn dress(
                 props.push(prop(q, ground(q), across * -sigma, PropKind::StreetLight));
             }
             t += STRIP_LAMP_STEP_M;
+        }
+    }
+
+    if let Some((l, line, dir, width)) = &s.race {
+        let (line, dir, width) = (*line, *dir, *width);
+        let y_at = |q: V2| road_y(place, q, is_carriageway).unwrap_or_else(|| ground(q));
+        props.push(prop(
+            line,
+            y_at(line),
+            dir,
+            PropKind::StartLine {
+                width_dm: (width * 10.0 + 0.5) as u16,
+            },
+        ));
+        // Cones along both gutters either side of the line.
+        for sigma in [-1.0f32, 1.0] {
+            for &x in &RACE_CONES_M {
+                let q = line + dir * x + dir.right() * (sigma * (0.5 * width - 0.35));
+                props.push(prop(q, y_at(q), dir, PropKind::Cone));
+            }
+        }
+        // The spectators' cars, nose out toward the road at an angle.
+        let out = (-l.inward + l.along * 0.8).normalize();
+        for k in 0..5 {
+            let q = l.at(-12.0 + 6.0 * k as f32, 4.5);
+            props.push(prop(
+                q,
+                ground(q),
+                out,
+                PropKind::HeroCar { slot: 3 + k as u8 },
+            ));
         }
     }
 

@@ -228,6 +228,11 @@ impl Crowd {
         &self.peds
     }
 
+    /// The sidewalk graph.
+    pub fn walks(&self) -> &WalkGraph {
+        &self.walks
+    }
+
     /// The rail line the people cross at `crossings` (`traffic::peds::Pedestrians::set_rail`),
     /// kept across density switches.
     pub fn set_rail(&mut self, line: &[[f32; 2]], crossings: &[[f32; 2]]) {
@@ -383,11 +388,6 @@ impl Crowd {
     /// The live people.
     pub fn people(&self) -> impl Iterator<Item = &traffic::peds::Pedestrian> {
         self.peds.iter()
-    }
-
-    /// The sidewalk graph.
-    pub fn walks(&self) -> &WalkGraph {
-        &self.walks
     }
 
     pub fn density(&self) -> Density {
