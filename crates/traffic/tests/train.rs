@@ -59,16 +59,26 @@ struct Counts {
     /// Crossings the train's head went past.
     passed: usize,
     hard_stops: u32,
+    /// When the train turned back at the line's far end, and when it would have with
+    /// nobody about, s from the start (infinite if it did not within the run).
+    turned_s: f32,
+    free_s: f32,
+    /// Whether every crossing was open again at the end.
+    open_at_end: bool,
+    /// With people planted on the track as the crossing closed: how long until the last
+    /// of them was off it, s.
+    clear_s: f32,
 }
 
 /// `minutes` of busy traffic and people round crossing `k` of seed `seed`'s railway, the
 /// train coming first after `rest_s`.
 fn run(seed: u64, k_pick: usize, minutes: f32, rest_s: f32) -> Counts {
-    run_with(seed, k_pick, minutes, rest_s, true, true)
+    run_with(seed, k_pick, minutes, rest_s, true, true, false)
 }
 
 /// [`run`], with the train or without it (the world as it was before the train, for
-/// comparison), sending cars to the closed crossing or not.
+/// comparison), sending cars and people to the closed crossing or not, and with people
+/// planted on the walks over the track at the moment it closes or not.
 fn run_with(
     seed: u64,
     k_pick: usize,
@@ -76,6 +86,7 @@ fn run_with(
     rest_s: f32,
     train: bool,
     send: bool,
+    plant: bool,
 ) -> Counts {
     let place = basin(seed);
     let graph = LaneGraph::new(&place);
@@ -188,9 +199,56 @@ fn run_with(
             senders.push((l0, (m.length_m - 25.0).max(0.0), fwd, goal));
         }
     }
+    // Where to plant people the moment the crossing closes: on each walk over the track,
+    // every 0.5 m from 0 to 4 m off the track's middle on each side, walking either way.
+    let mut plants = Vec::new();
+    for &l in &over {
+        let lk = &walks.links[l as usize];
+        let (a, b) = (
+            walks.nodes[lk.a as usize].pos,
+            walks.nodes[lk.b as usize].pos,
+        );
+        let n = (lk.length_m / 0.05) as usize;
+        for side in [-1.0f32, 1.0] {
+            for d in 0..=8 {
+                let want_off = 0.5 * d as f32;
+                let at = (0..=n)
+                    .map(|i| i as f32 / n.max(1) as f32)
+                    .map(|t| {
+                        let q = [a[0] + (b[0] - a[0]) * t, a[2] + (b[2] - a[2]) * t];
+                        let (_, o) = line.project_signed(q);
+                        (t * lk.length_m, (o - side * want_off).abs())
+                    })
+                    .min_by(|x, y| x.1.total_cmp(&y.1));
+                if let Some((s, err)) = at {
+                    if err < 0.1 {
+                        for fwd in [true, false] {
+                            let along = if fwd { s } else { lk.length_m - s };
+                            let goal = if fwd { [b[0], b[2]] } else { [a[0], a[2]] };
+                            plants.push((l, along, fwd, goal));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut planted: Option<u64> = None;
+    let mut last_on = 0u64;
+    // When the train would turn back with nobody about.
+    let free_s = {
+        let mut t = rail.train.clone();
+        let mut s = 0.0;
+        while t.forward && s < 3600.0 {
+            t.step(&[], DT);
+            s += DT;
+        }
+        s
+    };
     let mut want = vec![false; approaches.len()];
     let mut c = Counts {
         walkable,
+        turned_s: f32::INFINITY,
+        free_s,
         ..Counts::default()
     };
     let mut passed = vec![false; line.crossings.len()];
@@ -221,6 +279,12 @@ fn run_with(
             }
         }
         cars.populate(&graph, &inp);
+        if plant && planted.is_none() && rail.closed()[k] {
+            planted = Some(tick);
+            for &(l, s, fwd, goal) in &plants {
+                peds.send(&walks, l, s, fwd, goal);
+            }
+        }
         if send && rail.closed()[k] && tick % 600 == 300 {
             for &(l, s, fwd, goal) in &senders {
                 peds.send(&walks, l, s, fwd, goal);
@@ -284,7 +348,11 @@ fn run_with(
                 let (s, off) = t.line.project(q);
                 (s - cs).abs() < 60.0 && off < HALF_W_M + PERSON_CLEAR_M
             };
-            c.people_on_closed += peds.iter().filter(|p| on([p.pos[0], p.pos[2]])).count() as u32;
+            let n = peds.iter().filter(|p| on([p.pos[0], p.pos[2]])).count() as u32;
+            c.people_on_closed += n;
+            if n > 0 {
+                last_on = tick;
+            }
         }
         // Cars on the track at a crossing whose arms are down, the train near.
         for (j, &cs) in t.line.crossings.iter().enumerate() {
@@ -314,6 +382,13 @@ fn run_with(
             let cu = if t.forward { cs } else { t.line.len - cs };
             passed[j] |= t.head > cu + 5.0 && t.head > 0.0;
         }
+        if !t.forward && c.turned_s.is_infinite() {
+            c.turned_s = (tick + 1) as f32 * DT;
+        }
+    }
+    c.open_at_end = rail.closed().iter().all(|&x| !x);
+    if let Some(t0) = planted {
+        c.clear_s = last_on.saturating_sub(t0) as f32 * DT;
     }
     c.passed = passed.iter().filter(|&&p| p).count();
     c.hard_stops = rail.train.hard_stops;
@@ -356,8 +431,8 @@ fn busy_while_closed(c: &Counts) {
 #[ignore]
 fn people_in_cars_with_and_without_the_train() {
     for (seed, k) in [(2u64, 0usize), (1, 3), (2, 3), (3, 1)] {
-        let without = run_with(seed, k, 3.1, 0.0, false, false);
-        let with = run_with(seed, k, 3.1, 0.0, true, false);
+        let without = run_with(seed, k, 3.1, 0.0, false, false, false);
+        let with = run_with(seed, k, 3.1, 0.0, true, false, false);
         println!("seed {seed} crossing {k}: without {without:?}\n    with {with:?}");
         assert!(with.people_in_cars_at <= without.people_in_cars_at);
     }
@@ -383,6 +458,30 @@ fn every_crossing_of_four_seeds() {
                 "{c:?}"
             );
             busy_while_closed(&c);
+            on_time(&c);
         }
+    }
+}
+
+/// The train ran the line no more than a minute behind its time with nobody about, and
+/// every crossing opened again.
+fn on_time(c: &Counts) {
+    assert!(c.turned_s <= c.free_s + 60.0, "held up: {c:?}");
+    assert!(c.open_at_end, "a crossing left closed: {c:?}");
+}
+
+/// People at every distance from the track's middle, either side, walking either way,
+/// the moment a crossing closes: nobody stands within the train's reach, so it is never
+/// held up for long and never stands for anyone for good.
+#[test]
+#[ignore]
+fn people_on_the_track_as_it_closes_never_stall_the_train() {
+    for (seed, k) in [(1u64, 0usize), (2, 2), (3, 1), (4, 3)] {
+        let c = run_with(seed, k, 5.5, 5.0, true, false, true);
+        println!("seed {seed} crossing {k}: {c:?}");
+        assert_eq!(c.people_in_train, 0, "{c:?}");
+        assert!(c.clear_s < 6.0, "slow off the track: {c:?}");
+        assert_eq!(c.passed, 5, "{c:?}");
+        on_time(&c);
     }
 }

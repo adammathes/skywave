@@ -617,6 +617,8 @@ pub const PEOPLE_LEAD_M: f32 = 110.0;
 const MAX_OBSTACLES: usize = 512;
 /// A person as an obstacle, m.
 const PERSON_R_M: f32 = 0.45;
+/// How far from the track's middle the train stops for someone standing there, m.
+pub const PERSON_SWEEP_M: f32 = HALF_W_M + SWEEP_MARGIN_M + PERSON_R_M;
 
 /// A place's railway: its train, its crossing gates, and what they tell the traffic and
 /// the people each step.

@@ -135,10 +135,12 @@ Nothing it does can hurt anyone, by construction:
   (`traffic::Barrier`): an NPC car heading for one stops at it like a red light (a car already past it drives on
   off the track), and no car spawns within 40 m of one. People are held off the track from 110 m (10 s of the
   train) before the bells, so nobody is on it once a crossing closes, until its arms are all the way up again. A
-  walk counts as over the track within 3.5 m of the rail line's middle and on it within 2.5 m (the train's half
-  width and 0.9 m), and is held while any crossing within 60 m of it is (two crossings close together both hold
-  it): people wait 1 m short of it; someone already over it but not yet on the track stops where they stand; only
-  someone already on the track walks on off it. Nobody spawns or stays at a spot within 12 m of one.
+  walk counts as over the track within 3.5 m of the rail line's middle (the 3.05 m at which the train stops for
+  someone, and a gap), and is held while any crossing within 60 m of it is (two crossings close together both hold
+  it): people wait 1 m short of it, outside the train's reach; someone already over it turns back the way they
+  came while still heading for the track's middle, and walks on off it once past the middle. Nobody stands within
+  the train's reach, so it is never held up by someone waiting for it. Nobody spawns or stays at a spot within
+  12 m of one.
 - **It stops for anything in its way.** Each step it looks ahead its braking distance plus 30 m for the player's
   car, the NPC cars (each as its real box, corners and all) and the people within its swept width and brakes to
   stand 8 m short of the nearest; something closer than it can brake for (a car pulled onto the track right in
@@ -157,7 +159,11 @@ crossing whose arms are down (with the train within 200 m), and the train's dead
 crossing is tested busy, while it is closed the probe sends a car down each lane into it every 5 s and a person
 at each walk over the track from each side; it asserts at least 20 s of car-steps within 80 m and of person-steps
 within 40 m of the closed crossing (every crossing of seeds 1–4 has a walk over the track). The ignored sweep runs every crossing of seeds 1–4 (20
-crossings, all zero). A second ignored probe counts people inside NPC cars (which do not see people yet) near a
+crossings, all zero, each run no more than a minute behind the train's time with nobody about, every crossing
+open again after). The ignored liveness probe plants people on every walk over the track at a crossing, every
+0.5 m from 0 to 4 m off the track's middle either side, walking either way, the moment it closes (seeds 1–4):
+nobody is ever inside the train, all are off the track within 2 s, and the train runs on time. A second ignored
+probe counts people inside NPC cars (which do not see people yet) near a
 crossing with and without the train: never more with it (16 against 113 person-steps at seed 2's first crossing).
 `app::crossing`'s tests: a full-throttle car stops at a lowered arm, a car driven into the train's side square or
 at ±40° while it runs stays outside it, is not launched and stops it, the train stands short of a car stopped on
