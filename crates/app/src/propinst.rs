@@ -302,11 +302,13 @@ pub struct PropInstances {
 impl PropInstances {
     /// The instanced props of `place`, each filed under the chunk `chunk_of` gives for its
     /// ground point, its parked cars picked by the world's era weights `era` (per built-in
-    /// shape; see [`parked_shape`]). `None` when it has none.
+    /// shape; see [`parked_shape`]), its hero cars from `heroes` (built-in shape indices,
+    /// the world's heroes it has). `None` when it has none.
     pub fn new(
         place: &Place,
         palette: &Palette,
         era: &[u32],
+        heroes: &[usize],
         chunk_of: impl Fn([f32; 2]) -> [i32; 2],
     ) -> Result<Option<PropInstances>, String> {
         let items: Vec<&place::Prop> = place
@@ -368,21 +370,39 @@ impl PropInstances {
                 &[u64::from(p.pos[0].to_bits()), u64::from(p.pos[2].to_bits())],
             );
             let chunk = chunk_of([p.pos[0], p.pos[2]]);
-            let car = matches!(p.kind, PropKind::ParkedCar { .. });
+            let car = matches!(
+                p.kind,
+                PropKind::ParkedCar { .. } | PropKind::HeroCar { .. }
+            );
             let mut tint = [1.0; 4];
             let mut far = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
-                PropKind::ParkedCar { vehicle_class, .. } => {
-                    let s = parked_at(place, p.pos, vehicle_class, h, era) % shapes.len();
-                    // A third in the car's own palette, the rest in the era's street colors.
-                    let n_own = shapes[s].palette.len();
-                    let nibble = usize::from(vehicle_class >> 4);
-                    let (own, era_set) = &paints[s];
-                    let (paint, era) = if nibble < OWN_PAINT_NIBBLES {
-                        (own[nibble % own.len()], None)
-                    } else {
-                        let k = era_set[((h >> 32) as usize) % era_set.len()];
-                        (n_own + k, Some(shape::ERA_1980S_PAINT[k].0))
+                PropKind::ParkedCar { .. } | PropKind::HeroCar { .. } => {
+                    let (s, paint, era) = match p.kind {
+                        PropKind::HeroCar { slot } if !heroes.is_empty() => {
+                            // A hero car in one of its own colors, kept clean.
+                            let s = heroes[usize::from(slot) % heroes.len()] % shapes.len();
+                            let n_own = shapes[s].palette.len();
+                            (s, (h >> 32) as usize % n_own, None)
+                        }
+                        kind => {
+                            let vehicle_class = match kind {
+                                PropKind::ParkedCar { vehicle_class, .. } => vehicle_class,
+                                _ => 0,
+                            };
+                            let s = parked_at(place, p.pos, vehicle_class, h, era) % shapes.len();
+                            // A third in the car's own palette, the rest in the era's street
+                            // colors.
+                            let n_own = shapes[s].palette.len();
+                            let nibble = usize::from(vehicle_class >> 4);
+                            let (own, era_set) = &paints[s];
+                            if nibble < OWN_PAINT_NIBBLES {
+                                (s, own[nibble % own.len()], None)
+                            } else {
+                                let k = era_set[((h >> 32) as usize) % era_set.len()];
+                                (s, n_own + k, Some(shape::ERA_1980S_PAINT[k].0))
+                            }
+                        }
                     };
                     let id = match car_mesh[s][paint] {
                         Some(id) => id,
@@ -400,8 +420,14 @@ impl PropInstances {
                     far = id + 1;
                     let m = Mat4::from_rotation_translation(Quat::from_rotation_y(p.yaw), pos);
                     let b = Bounds::cube(pos + Vec3::Y, 2.8);
-                    // Road dust and sun wear: a little darker and warmer, up to 14%.
-                    let d = ((h >> 12) & 255) as f32 / 255.0 * MAX_WEAR;
+                    // Road dust and sun wear: a little darker and warmer, up to 14%; a hero
+                    // car is kept clean.
+                    let wear = if matches!(p.kind, PropKind::HeroCar { .. }) {
+                        0.0
+                    } else {
+                        MAX_WEAR
+                    };
+                    let d = ((h >> 12) & 255) as f32 / 255.0 * wear;
                     tint = [1.0 - d, 1.0 - d * 1.06, 1.0 - d * 1.2, 1.0];
                     (id, m, b, CAR_DRAW_RADIUS_M)
                 }
@@ -764,7 +790,7 @@ mod tests {
         let place =
             crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
         let era = &crate::scenario::lineup(scenario).shapes;
-        let mut props = PropInstances::new(&place, &Palette::socal_1985(), era, |_| [0, 0])
+        let mut props = PropInstances::new(&place, &Palette::socal_1985(), era, &[], |_| [0, 0])
             .unwrap()
             .unwrap();
         let ids = (0..props.meshes().len() as u32).map(MeshId).collect();

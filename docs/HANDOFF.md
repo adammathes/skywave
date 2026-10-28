@@ -70,6 +70,10 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   It unblocks the basin region template (board `m8-basin`).
 - **2001 traffic cars** (`m8/traffic-2001`, session_0121vThDbC8noH1ttGK4FL3c, M8 #6): seven
   shapes built, tuning; opens a PR; a short review (names, era filter, budgets) then merge.
+- **Set pieces** (`m8/set-pieces`, M8 #7, three PRs one after another): part 1, the static places
+  (tunnel, crew garage, taco stand, drag strip with its timing, overlook turnouts, channel chain-link),
+  in review; part 2 the grade crossing and train (`m8/set-pieces-crossing`), part 3 the race start and
+  the convoy (`m8/set-pieces-race`) follow from main.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says.

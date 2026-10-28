@@ -124,13 +124,14 @@ const NEON_RADIUS_M: f32 = 8.0;
 const WINDOW_RADIUS_M: f32 = 7.0;
 
 /// Fills `place.props` and `place.lights` (see the module docs). `m` is the macro map the
-/// place was built from (for the pier). Leaves the tables unsorted; the caller sorts the
+/// place was built from (for the pier), `sites` where its set pieces go. Leaves the tables unsorted; the caller sorts the
 /// place by chunk.
 pub fn detail(
     seed: Seed,
     template: &RegionTemplate,
     grammar: &Grammar,
     m: &MacroMap,
+    sites: &super::setpieces::SetPieces,
     place: &mut Place,
 ) {
     // The template's own palette where it names a built-in one (the coast's names none).
@@ -159,12 +160,20 @@ pub fn detail(
         if let Some(b) = &m.basin {
             d.rail(b);
         }
+        // Nothing else stands on a set piece's ground; then its own props.
+        let kept = super::setpieces::kept(sites);
+        let clear = |p: &Prop| !kept(V2::new(p.pos[0], p.pos[2]));
+        d.props.retain(clear);
+        d.cars.retain(clear);
+        let (own, own_lights) = super::setpieces::dress(Seed(d.seed), place, d.grid, sites);
+        d.props.extend(own);
         d.cap_cars();
         // Whatever stands outside the place has no chunk to belong to.
         let h = &place.header;
         d.props
             .retain(|p| h.chunk_at([p.pos[0], p.pos[2]]).is_some());
         let mut lights = d.lights(&pal);
+        lights.extend(own_lights);
         lights.retain(|l| h.chunk_at([l.pos[0], l.pos[2]]).is_some());
         (d.props, lights)
     };
@@ -204,6 +213,23 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::Crossbuck => (19, 0),
             PropKind::FaceBillboard { face } => (20, u64::from(face)),
             PropKind::BusShelter { face } => (21, u64::from(face)),
+            PropKind::TunnelPiece {
+                len_dm,
+                width_dm,
+                portals,
+            } => (
+                22,
+                u64::from(len_dm) | u64::from(width_dm) << 16 | u64::from(portals) << 32,
+            ),
+            PropKind::StartTree => (23, 0),
+            PropKind::TimingBoard => (24, 0),
+            PropKind::StripLine { len_dm } => (25, u64::from(len_dm)),
+            PropKind::GuardRail { len_dm } => (26, u64::from(len_dm)),
+            PropKind::ChainLink { len_dm } => (27, u64::from(len_dm)),
+            PropKind::CrewGarage { name_seed } => (28, name_seed),
+            PropKind::TacoStand { name_seed } => (29, name_seed),
+            PropKind::HeroCar { slot } => (30, u64::from(slot)),
+            PropKind::PicnicTable => (31, 0),
         };
         words.push(tag);
         words.push(payload);

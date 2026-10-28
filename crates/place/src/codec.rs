@@ -314,6 +314,22 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                     w.push(bed);
                 }
                 PropKind::FaceBillboard { face } | PropKind::BusShelter { face } => w.push(face),
+                PropKind::TunnelPiece {
+                    len_dm,
+                    width_dm,
+                    portals,
+                } => {
+                    w.extend_from_slice(&len_dm.to_le_bytes());
+                    w.extend_from_slice(&width_dm.to_le_bytes());
+                    w.push(portals);
+                }
+                PropKind::StripLine { len_dm }
+                | PropKind::GuardRail { len_dm }
+                | PropKind::ChainLink { len_dm } => w.extend_from_slice(&len_dm.to_le_bytes()),
+                PropKind::CrewGarage { name_seed } | PropKind::TacoStand { name_seed } => {
+                    w.extend_from_slice(&name_seed.to_le_bytes())
+                }
+                PropKind::HeroCar { slot } => w.push(slot),
                 _ => {}
             }
         }
@@ -351,6 +367,16 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::Crossbuck => 19,
         PropKind::FaceBillboard { .. } => 20,
         PropKind::BusShelter { .. } => 21,
+        PropKind::TunnelPiece { .. } => 22,
+        PropKind::StartTree => 23,
+        PropKind::TimingBoard => 24,
+        PropKind::StripLine { .. } => 25,
+        PropKind::GuardRail { .. } => 26,
+        PropKind::ChainLink { .. } => 27,
+        PropKind::CrewGarage { .. } => 28,
+        PropKind::TacoStand { .. } => 29,
+        PropKind::HeroCar { .. } => 30,
+        PropKind::PicnicTable => 31,
     }
 }
 
@@ -736,6 +762,11 @@ fn poi_kind(v: u8) -> Option<PoiKind> {
         4 => PoiKind::Gas,
         5 => PoiKind::Marina,
         6 => PoiKind::Stadium,
+        7 => PoiKind::DragStrip,
+        8 => PoiKind::ChannelRamp,
+        9 => PoiKind::Tunnel,
+        10 => PoiKind::CrewGarage,
+        11 => PoiKind::TacoStand,
         _ => return None,
     })
 }
@@ -765,6 +796,7 @@ fn light_kind(v: u8) -> Option<LightKind> {
         1 => LightKind::Neon,
         2 => LightKind::Window,
         3 => LightKind::Headlight,
+        4 => LightKind::Flood,
         _ => return None,
     })
 }
@@ -1021,6 +1053,24 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 19 => PropKind::Crossbuck,
                 20 => PropKind::FaceBillboard { face: r.u8()? },
                 21 => PropKind::BusShelter { face: r.u8()? },
+                22 => PropKind::TunnelPiece {
+                    len_dm: r.u16()?,
+                    width_dm: r.u16()?,
+                    portals: r.u8()?,
+                },
+                23 => PropKind::StartTree,
+                24 => PropKind::TimingBoard,
+                25 => PropKind::StripLine { len_dm: r.u16()? },
+                26 => PropKind::GuardRail { len_dm: r.u16()? },
+                27 => PropKind::ChainLink { len_dm: r.u16()? },
+                28 => PropKind::CrewGarage {
+                    name_seed: r.u64()?,
+                },
+                29 => PropKind::TacoStand {
+                    name_seed: r.u64()?,
+                },
+                30 => PropKind::HeroCar { slot: r.u8()? },
+                31 => PropKind::PicnicTable,
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1509,6 +1559,24 @@ mod tests {
             PropKind::Crossbuck,
             PropKind::FaceBillboard { face: 4 },
             PropKind::BusShelter { face: 0 },
+            PropKind::TunnelPiece {
+                len_dm: 160,
+                width_dm: 250,
+                portals: 2,
+            },
+            PropKind::StartTree,
+            PropKind::TimingBoard,
+            PropKind::StripLine { len_dm: 300 },
+            PropKind::GuardRail { len_dm: 80 },
+            PropKind::ChainLink { len_dm: 120 },
+            PropKind::CrewGarage {
+                name_seed: wide(&mut rng),
+            },
+            PropKind::TacoStand {
+                name_seed: wide(&mut rng),
+            },
+            PropKind::HeroCar { slot: 3 },
+            PropKind::PicnicTable,
         ];
         let props = kinds
             .iter()
@@ -1518,7 +1586,7 @@ mod tests {
                 kind,
             })
             .collect();
-        let lights = (0..4)
+        let lights = (0..5)
             .map(|k| Light {
                 pos: at(&mut rng),
                 color: [1.0, 0.8, 0.5],
