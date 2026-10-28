@@ -37,7 +37,7 @@
   },
   "coast-beach-lot-noon": {
     "about": "A beach lot on the coast at noon, near its fullest, from the far chase camera on the beach alley: stalls along both sides, islands with palms, light poles, wheel stops and painted stripes.",
-    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "12:00", "pos": "477,852", "yaw": "0", "still": "1", "stream": "1" }
+    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "12:00", "pos": "442.7,640.7", "yaw": "155.9", "still": "1", "stream": "1" }
   },
   "coast-night-golden": {
     "about": "The procedural coast's strip at night from the near chase camera, headlights on: sodium lamps with coronas, neon sign bands and blade signs, shop fills on the walks.",
