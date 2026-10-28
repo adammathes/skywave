@@ -43,24 +43,26 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 00:49 UTC, coordinator handed off to save quota)
+### Resume here (2026-10-28 02:28 UTC, coordinator handed off to save quota)
 The previous coordinator stopped mid-wave. #42 (the Deck) merged at 00:18, #44 (handling) at
-00:26 and #37 (parking lots) at 00:49 (e315d0f); two builder sessions are still finishing; each
+00:26, #37 (parking lots) at 00:49 and #45 (2001 traffic cars) at 02:28 (fc812b9); one builder
+session is still finishing; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
 the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
 sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
 - **#20 map edges** (`m2/map-edges`, session_0121vThBxy2WQvcKQzuoJpnE, open since 04:38, $88):
-  refreshing after #37 (its place hashes and goldens); goldens accepted; the native junction gate is being made to hold the world still while
+  refreshed onto #37, then CI red on `macro_map::generation_fits_the_budget` (159.5 ms vs the
+  150 ms ceiling): a real slowdown from the edge pass, ~65 → ~89 ms locally on main vs the
+  branch; told to make it cheaper or re-measure the ceiling in its own commit. Goldens accepted; the native junction gate is being made to hold the world still while
   streaming, gates re-measured in their own commit, junction goldens re-sited to 737.1,464.8
   phase=1440 (fallback 945.7,375.6); merge on green after a look at the two junction goldens.
   It unblocks the basin region template (board `m8-basin`).
-- **2001 traffic cars** (`m8/traffic-2001`, session_0121vThDbC8noH1ttGK4FL3c, M8 #6): seven
-  shapes built, tuning; opens a PR; a short review (names, era filter, budgets) then merge.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
-  remain. Resume from the board when the owner says.
+  remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
+  17.5 m semi, a 7.4 m box truck), so seeing people must use each car's length, not 4.6 m.
 - Everything else is deferred on the board. Costs so far: coordinator $1,035 (the expensive
   part: a 400k-token context woken 100+ times a day), builders $10–90 each.
 
@@ -120,10 +122,12 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   Continuous, readout top right, Back held + d-pad on the pad, resumes next session); handling feel (#44, NOTES 17: stronger yaw damping in Arcade and Light,
   exotics' oversteer bias halved, no spins in Arcade or Light on any car, Off stays lively, the
   Destrier tuned into the bands, the Halberds lively with no assists); parking lots (#37, B10: front, alley and beach lots from the
-  grammar, parked cars by the hour and held near the player, golden `coast-beach-lot-noon`); the Deck's "Skywave
+  grammar, parked cars by the hour and held near the player, golden `coast-beach-lot-noon`); the 2001 traffic cars (#45, M8 #6: Plover sedan, Sorrel utility,
+  Wren minivan, Percheron crew cab, Linnet hatch, Sledge box truck, Anvil semi; weights by zone
+  for traffic and parking; the box truck and semi never park, the semi keeps to freeways; per-car
+  length in following and junction room; none in 1984; fixed extra axles in the shape DSL); the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: natural map edges (#20); building: 2001
-  traffic cars (`m8/traffic-2001`). State of each is in "Resume here" above. Paused: NPC cars see
+- Open PRs: natural map edges (#20). Its state is in "Resume here" above. Paused: NPC cars see
   pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
   comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
@@ -132,8 +136,8 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #20, then the 2001 traffic cars; NPC cars see pedestrians (board order 15, after #38); M8 waves
-  (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
+- Next: merge #20; NPC cars see pedestrians (board order 15, after #38); M8 waves
+  (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
