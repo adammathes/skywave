@@ -1,0 +1,47 @@
+// Glaive Turbo: a late-90s all-wheel-drive turbo four rally sedan for the street.
+//
+// Intent: a plain four-door made fierce. A turbo four with lag and then a shove,
+// short gears that run out of revs before the big coupes run out of road, all four wheels
+// pulling so it leaves the line clean and claws out of a corner. Firm, a little nervous,
+// always catchable.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "glaive_turbo",
+    name: "Glaive Turbo",
+    era: Nineties,
+    year: 1999,
+    class: Sports,
+
+    mass_kg: 1400,
+    dims_m: (4.40, 1.73, 1.43),    // length, width, height
+    wheelbase_m: 2.52,
+    track_m: 1.48,
+    cg_height_m: 0.50,
+    cg_fore_aft: 0.42,             // 58% front
+
+    engine: Engine(
+        idle_rpm: 850,
+        redline_rpm: 7200,
+        torque_nm: [(1000, 141), (2500, 216), (3500, 311), (4500, 318), (6000, 282), (7200, 265)],
+    ),
+    gears: [3.45, 1.97, 1.40, 1.07, 0.87],
+    final_drive: 4.067,
+    reverse: 3.3,
+    shift_ms: 180,
+    auto: true,
+    drive: All,
+
+    tires: Tires(grip_lat: 1.105, grip_long: 1.22, load_sens: 0.08, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 34000, damper: 3400, travel_m: 0.16, antiroll: 0.42),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 11.5),
+    brakes: Brakes(max_nm: 3600, bias_front: 0.63, abs: true, handbrake_nm: 3200),
+    aero: Aero(cd: 0.36, frontal_m2: 2.05, downforce_coef: 0.04),
+    feel: Feel(oversteer_bias: 0.04, body_roll: 0.35, engine_sound: "i4", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 9000)],
+        radio: "amber_seek",
+    ),
+    shape: "glaive_turbo.shape.ron",
+)

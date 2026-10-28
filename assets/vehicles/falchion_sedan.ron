@@ -1,0 +1,47 @@
+// Falchion Sedan: a late-90s rear-drive compact sports sedan from a precise European
+// school, wearing an aftermarket body kit.
+//
+// Intent: tight, solid and balanced. A smooth inline six that sings to its redline, a
+// rear axle that pushes it out of a corner, steering that talks. Not the quickest car on
+// the boulevard, the most composed: four doors, near fifty-fifty, a little tail on the gas.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "falchion_sedan",
+    name: "Falchion Sedan",
+    era: Nineties,
+    year: 1998,
+    class: Sedan,
+
+    mass_kg: 1420,
+    dims_m: (4.43, 1.71, 1.37),    // length, width, height
+    wheelbase_m: 2.70,
+    track_m: 1.44,
+    cg_height_m: 0.50,
+    cg_fore_aft: 0.48,             // 52% front
+
+    engine: Engine(
+        idle_rpm: 750,
+        redline_rpm: 7000,
+        torque_nm: [(1000, 180), (2500, 245), (3800, 285), (5000, 280), (6200, 261), (7000, 224)],
+    ),
+    gears: [3.72, 2.40, 1.77, 1.26, 1.0],
+    final_drive: 4.0,
+    reverse: 3.5,
+    shift_ms: 200,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.973, grip_long: 1.12, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 33000, damper: 3300, travel_m: 0.14, antiroll: 0.45),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 11.0),
+    brakes: Brakes(max_nm: 3500, bias_front: 0.62, abs: true, handbrake_nm: 2900),
+    aero: Aero(cd: 0.34, frontal_m2: 2.05, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: -0.05, body_roll: 0.3, engine_sound: "default", shift_jerk: 0.2),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "falchion_sedan.shape.ron",
+)
