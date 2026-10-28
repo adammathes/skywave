@@ -43,8 +43,9 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 00:15 UTC, coordinator handed off to save quota)
-The previous coordinator stopped mid-wave. Five builder sessions are still finishing; each
+### Resume here (2026-10-28 00:40 UTC, coordinator handed off to save quota)
+The previous coordinator stopped mid-wave. #42 (the Deck) merged at 00:18 (cf4e662); four builder
+sessions are still finishing; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
@@ -55,14 +56,11 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   put the two Halberds in `LIVELY` for the no-assist launch, document the 2.9× Light band; merge
   on green. The owner should drive this one first.
 - **#37 parking lots** (`bldg/parking-lots`, session_0121vThBfSpYpVxsB7L5B2nD): fixes pushed
-  (3fe9cf8, verifying); last asks: the hold covers cars beside a parked player within 60 m in any
+  (3fe9cf8) but CI red on a clash with #38: `BoxSolid` gained `lot`, and #38's initializers in
+  `app/src/npc.rs` and `world/tests/collide.rs` miss it; told to merge main and fix. Last asks: the hold covers cars beside a parked player within 60 m in any
   direction and 150 m / 90° beyond; beach stalls off park and empty parcels; only the failing
   stalls dropped at the golden's bend (look at the regenerated golden: both rows must be there);
   merge on green. It re-pins place hashes and a golden, so #20 refreshes after it.
-- **#42 the Deck** (`m3/deck`, session_0121vThB5ZsVvpTV5D5q8345): fixes pushed (fe2b6aa,
-  verifying): partly tagged albums, one library rebuild per batch, album keys no longer silence
-  the radio, duplicate picks; merging #40/#41/#43 with controls-card rows for the Deck actions;
-  merge on green after a look at the diff.
 - **#20 map edges** (`m2/map-edges`, session_0121vThBxy2WQvcKQzuoJpnE, open since 04:38, $88):
   goldens accepted; the native junction gate is being made to hold the world still while
   streaming, gates re-measured in their own commit, junction goldens re-sited to 737.1,464.8
@@ -127,25 +125,21 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   1.5 m back; head-on stops both; hits on grades stay level; probes at zero sidewalk reach and
   zero people inside); the 2001 hero cars part 1 (#43: Halberd Coupe and Targa, Tanager AWD,
   Destrier Coupe, Siskin Coupe; body kit, blower, targa, tall wing, twin rims; underglow on U;
-  `VehicleSpec::built`; the basin is years 1995–2001 with these as heroes); the Deck's "Skywave
+  `VehicleSpec::built`; the basin is years 1995–2001 with these as heroes); the Deck (#42: one
+  library from the folder layout and tags, TAPE / CD / MP3 by the world's year, Normal / Shuffle /
+  Continuous, readout top right, Back held + d-pad on the pad, resumes next session); the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: natural map edges (#20; goldens re-sited and accepted; the native junction draw gate
-  measured runner speed, so the session holds the world still while streaming, re-measures the
-  gates and sites the junction goldens in budget; merges on green after a look); parking lots
-  (#37; fixes verified except the hold for cars beside a parked player, beach stalls on park and
-  empty parcels, and a bend fix that removed a whole row at the golden's bend); the Deck (#42;
-  review sent: a partly tagged album splits, native rebuilds the library per folder, album keys
-  silence the radio, duplicate picks on Firefox/Safari; plus controls-card rows after #41).
-  Sessions building: handling feel (`vehicle/handling-feel`, NOTES 17); NPC cars see
-  pedestrians (`m4/npc-sees-peds`, the next zero-violence item). The owner's board (above) is
-  the queue of record for what comes next.
+- Open PRs: natural map edges (#20), parking lots (#37), handling feel (#44); building: 2001
+  traffic cars (`m8/traffic-2001`). State of each is in "Resume here" above. Paused: NPC cars see
+  pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
+  comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B10-B15.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #20, #37, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
+- Next: merge #44, #37, #20, then the 2001 traffic cars; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
