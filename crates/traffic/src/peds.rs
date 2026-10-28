@@ -45,7 +45,7 @@ use alloc::vec::Vec;
 
 use skywave_core::{hash64, Rng, Seed, SIM_HZ};
 
-use crate::cars::{Density, Player, View};
+use crate::cars::{Car, Density, People, Player, View, XING_ON, XING_WAITING};
 use crate::figure::{
     aside_offset, hop_offset, look_yaw, phase_rate, sit_reach, Era, FigureSpec, Joints, Skeleton,
     ASIDE_M, HOP_M,
@@ -183,6 +183,17 @@ const STAND_S: f32 = 1.0;
 /// Seats along a bench from its middle (to the sitter's left).
 const BENCH_SEATS: [f32; 2] = [-0.45, 0.45];
 /// Blend weight rates, per second.
+/// Most other cars (NPC cars) the people keep clear of in a step, and how many of the
+/// nearest matter to one walker at once.
+const OTHERS_MAX: usize = 128;
+const NEAR_CARS: usize = 4;
+/// A car matters to a walker within its watch zone's reach of it plus this (a crossing's
+/// far curb, the group's spread).
+const NEAR_SLACK_M: f32 = 8.0;
+/// A crossing counts as occupied for the cars this long after its last person leaves its
+/// road, and someone at its curb this close to stepping out counts as about to (ticks).
+const XING_HOLD: u64 = SIM_HZ as u64 / 2;
+const STEP_OUT_TICKS: u64 = SIM_HZ as u64 / 4;
 const BLEND_IN: f32 = 8.0;
 const BLEND_OUT: f32 = 4.0;
 
@@ -210,6 +221,41 @@ pub struct PedInput {
     pub view: View,
     /// The player's car ([`Player::ABSENT`] for none): an obstacle at any speed.
     pub player: Player,
+}
+
+/// Another car the people keep clear of as they do the player's: an NPC car
+/// ([`OtherCar::npc`]), for [`Pedestrians::see_cars`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OtherCar {
+    /// Its body's box (its middle on the ground, heading, half length and width) and its
+    /// speed along its heading, m/s.
+    pub body: Player,
+    /// Yaw rate, rad/s (positive left).
+    pub yaw_rate: f32,
+    /// Steps it has stood still for.
+    pub still: u32,
+}
+
+impl OtherCar {
+    /// NPC car `c` as a box of half length and half width `half` whose middle sits `back`
+    /// behind the car's ground point.
+    pub fn npc(c: &Car, back: f32, half: [f32; 2]) -> OtherCar {
+        OtherCar {
+            body: Player {
+                pos: [
+                    c.pos[0] - c.dir[0] * back,
+                    c.pos[1],
+                    c.pos[2] - c.dir[1] * back,
+                ],
+                heading: c.heading,
+                speed: c.speed,
+                half_len: half[0],
+                half_w: half[1],
+            },
+            yaw_rate: c.yaw_rate,
+            still: if c.speed > MOVING_MPS { 0 } else { c.stuck },
+        }
+    }
 }
 
 /// Multiplier on the zones' people per 100 m of walk for a density setting.
@@ -473,7 +519,7 @@ impl Walker {
 }
 
 /// The car as seen by pedestrians.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct CarFrame {
     c: [f32; 2],
     /// Forward along its motion, and its right.
@@ -484,9 +530,25 @@ struct CarFrame {
     v: f32,
     /// Path curvature, 1/m, positive turning left (0 going straight).
     k: f32,
+    /// Steps it has stood still for.
+    still: u32,
+    /// An NPC car: it yields, and says when it is on a crossing or committed to one.
+    npc: bool,
 }
 
 impl CarFrame {
+    const NONE: CarFrame = CarFrame {
+        c: [1.0e7; 2],
+        f: [0.0, -1.0],
+        r: [1.0, 0.0],
+        hw: 0.9,
+        hl: 2.3,
+        v: 0.0,
+        k: 0.0,
+        still: 0,
+        npc: true,
+    };
+
     /// The car `car`, turning at `yaw_rate` rad/s (positive left).
     fn new(car: &Player, yaw_rate: f32) -> CarFrame {
         let (sn, cs) = sin_cos(car.heading);
@@ -506,6 +568,8 @@ impl CarFrame {
             } else {
                 0.0
             },
+            still: 0,
+            npc: false,
         }
     }
 
@@ -831,6 +895,21 @@ pub struct Pedestrians {
     car_prev: [f32; 4],
     /// Steps the car has stood still for.
     car_still: u32,
+    /// The other cars for the next step ([`Pedestrians::see_cars`]), and per crossing
+    /// whether one is on it or too close to stop for it.
+    others: [CarFrame; OTHERS_MAX],
+    n_others: usize,
+    taken: Vec<u8>,
+    /// Per walker, the cars that matter to it this step, nearest first: 0 the player's car,
+    /// `k` the other `k - 1`.
+    near: Vec<([u16; NEAR_CARS], u8)>,
+    /// What the cars see ([`Pedestrians::seen`]): per crossing its [`People::crossings`]
+    /// flags and the tick someone was last on its road; where everyone off the sidewalks
+    /// is.
+    seen_xing: Vec<u8>,
+    xing_tick: Vec<u64>,
+    on_road: Vec<[f32; 3]>,
+    n_on_road: usize,
 }
 
 fn left(d: [f32; 2]) -> [f32; 2] {
@@ -933,6 +1012,14 @@ impl Pedestrians {
             alive: 0,
             car_prev: [0.0; 4],
             car_still: 0,
+            others: [CarFrame::NONE; OTHERS_MAX],
+            n_others: 0,
+            taken: alloc::vec![0; walks.crossings.len()],
+            near: alloc::vec![([0; NEAR_CARS], 1); n],
+            seen_xing: alloc::vec![0; walks.crossings.len()],
+            xing_tick: alloc::vec![u64::MAX; walks.crossings.len()],
+            on_road: alloc::vec![[0.0; 3]; n],
+            n_on_road: 0,
         }
     }
 
@@ -989,6 +1076,37 @@ impl Pedestrians {
         &w.members[..usize::from(w.count)]
     }
 
+    /// The other cars for the next [`Pedestrians::step`] (it forgets them): the NPC cars,
+    /// kept clear of as the player's car is (the first [`OTHERS_MAX`]); and per crossing of
+    /// the walk graph whether one is on it or too close to stop for it
+    /// ([`crate::Traffic::crossings_taken`]), so nobody steps out in front of it.
+    pub fn see_cars(&mut self, cars: &[OtherCar], taken: &[u8]) {
+        self.n_others = 0;
+        for o in cars.iter().take(OTHERS_MAX) {
+            self.others[self.n_others] = CarFrame {
+                still: o.still,
+                npc: true,
+                ..CarFrame::new(&o.body, o.yaw_rate)
+            };
+            self.n_others += 1;
+        }
+        if taken.len() == self.taken.len() {
+            self.taken.copy_from_slice(taken);
+        } else {
+            self.taken.fill(0);
+        }
+    }
+
+    /// What the cars see of the people after the last step ([`crate::Traffic::see_people`]):
+    /// the crossings someone is on (or left a moment ago) or is about to step onto, and
+    /// where everyone off the sidewalks is.
+    pub fn seen(&self) -> People<'_> {
+        People {
+            crossings: &self.seen_xing,
+            on_road: &self.on_road[..self.n_on_road],
+        }
+    }
+
     /// Hash of every live person's id, position, heading and pose.
     pub fn hash(&self) -> u64 {
         let mut h = hash64(self.tick, &[self.alive as u64]);
@@ -1032,12 +1150,24 @@ impl Pedestrians {
             0.0
         };
         self.car_prev = [pl.pos[0], pl.pos[2], pl.heading, 1.0];
-        let car = CarFrame::new(pl, yaw_rate);
+        let mut car = CarFrame::new(pl, yaw_rate);
         self.car_still = if !car.moving() {
             self.car_still.saturating_add(1)
         } else {
             0
         };
+        car.still = self.car_still;
+        // Other cars far from the eye matter to nobody.
+        let eye = xz(input.view.pos);
+        let mut n = 0;
+        for k in 0..self.n_others {
+            let o = self.others[k];
+            if len2([o.c[0] - eye[0], o.c[1] - eye[1]]) < DESPAWN_M + NEAR_SLACK_M * 4.0 {
+                self.others[n] = o;
+                n += 1;
+            }
+        }
+        self.n_others = n;
         if self.tick % TARGET_TICKS == 1 {
             self.update_target(walks, input);
         }
@@ -1047,12 +1177,110 @@ impl Pedestrians {
         }
         for w in 0..self.walkers.len() {
             if self.walkers[w].alive {
-                self.step_walker(walks, lanes, input, &car, w);
+                let at = self.peds[usize::from(self.walkers[w].members[0])].pos;
+                self.near[w] = self.near_cars(&car, at);
+                let (cars, n) = self.frames(&car, self.near[w]);
+                self.step_walker(walks, lanes, input, &cars[..n], w);
             }
         }
         for i in 0..self.peds.len() {
             if self.peds[i].alive {
-                self.step_person(walks, &car, i);
+                let (cars, n) = self.frames(&car, self.near[usize::from(self.peds[i].walker)]);
+                self.step_person(walks, &cars[..n], i);
+            }
+        }
+        self.n_others = 0;
+        self.note_seen(walks, lanes, input.tick);
+    }
+
+    /// The cars that matter to a walker at `p`, nearest the edge of their watch zone first:
+    /// the player's car alone when no other is near (however far it is).
+    fn near_cars(&self, car: &CarFrame, p: [f32; 3]) -> ([u16; NEAR_CARS], u8) {
+        let mut ids = [0u16; NEAR_CARS];
+        let mut score = [f32::MAX; NEAR_CARS];
+        let mut n = 0usize;
+        for k in 0..=self.n_others {
+            let f = if k == 0 { car } else { &self.others[k - 1] };
+            let r = f.hl + WATCH_BASE_M + WATCH_S * f.v + WATCH_SIDE_M + NEAR_SLACK_M;
+            let d = [p[0] - f.c[0], p[2] - f.c[1]];
+            if d[0].abs() > r || d[1].abs() > r {
+                continue;
+            }
+            let d = len2(d) - r;
+            if d >= 0.0 || (n == NEAR_CARS && d >= score[n - 1]) {
+                continue;
+            }
+            let mut j = n.min(NEAR_CARS - 1);
+            while j > 0 && score[j - 1] > d {
+                score[j] = score[j - 1];
+                ids[j] = ids[j - 1];
+                j -= 1;
+            }
+            score[j] = d;
+            ids[j] = k as u16;
+            n = (n + 1).min(NEAR_CARS);
+        }
+        if n == 0 {
+            return ([0; NEAR_CARS], 1);
+        }
+        (ids, n as u8)
+    }
+
+    /// The cars of a [`Self::near_cars`] set.
+    fn frames(
+        &self,
+        car: &CarFrame,
+        near: ([u16; NEAR_CARS], u8),
+    ) -> ([CarFrame; NEAR_CARS], usize) {
+        let mut out = [CarFrame::NONE; NEAR_CARS];
+        let n = usize::from(near.1);
+        for (o, &k) in out.iter_mut().zip(&near.0[..n]) {
+            *o = if k == 0 {
+                *car
+            } else {
+                self.others[usize::from(k) - 1]
+            };
+        }
+        (out, n)
+    }
+
+    /// What the cars see of the people now ([`Self::seen`]).
+    fn note_seen(&mut self, walks: &WalkGraph, lanes: &LaneGraph, tick: u64) {
+        self.n_on_road = 0;
+        self.seen_xing.fill(0);
+        for i in 0..self.peds.len() {
+            let p = &self.peds[i];
+            if !p.alive || p.sit != Sit::No {
+                continue;
+            }
+            let wk = &self.walkers[usize::from(p.walker)];
+            let link = &walks.links[wk.link as usize];
+            // On its road, or off the curb onto it.
+            let crossing = link.kind == LinkKind::Crossing
+                || (link.crossing != NONE && wk.doing == Doing::Cross);
+            if crossing {
+                self.xing_tick[link.crossing as usize] = self.tick;
+            }
+            if let Doing::Wait {
+                crossing: x,
+                since,
+                look,
+            } = wk.doing
+            {
+                let len = walks.crossings[x as usize].length_m;
+                let clear = ((len / PACE_MIN + 2.0) * SIM_HZ as f32) as u64;
+                if self.tick + STEP_OUT_TICKS >= since + look && walks.walk(lanes, x, tick, clear) {
+                    self.seen_xing[x as usize] |= XING_WAITING;
+                }
+            }
+            if (crossing || walks.in_lane_or_turn(p.pos)) && self.n_on_road < self.on_road.len() {
+                self.on_road[self.n_on_road] = p.pos;
+                self.n_on_road += 1;
+            }
+        }
+        for (f, &t) in self.seen_xing.iter_mut().zip(&self.xing_tick) {
+            if t != u64::MAX && self.tick - t <= XING_HOLD {
+                *f |= XING_ON;
             }
         }
     }
@@ -1154,12 +1382,14 @@ impl Pedestrians {
         if self.alive + usize::from(n) > self.peds.len() {
             return;
         }
+        let others = &self.others[..self.n_others];
         let ok = |p: [f32; 3]| {
             let d = dist(p, input.view.pos);
             (SPAWN_NEAR_M..=SPAWN_FAR_M).contains(&d)
                 && !input.view.sees(p, SPAWN_VIEW_R_M)
-                && car.danger(p).is_none()
-                && !car.inside(p, 3.0)
+                && core::iter::once(car)
+                    .chain(others)
+                    .all(|c| c.danger(p).is_none() && !c.inside(p, 3.0))
         };
         if self.rng.next_f32() < SPAWN_AT_SPOT {
             let spots = walks.cell_spots(cell);
@@ -1491,7 +1721,7 @@ impl Pedestrians {
         walks: &WalkGraph,
         lanes: &LaneGraph,
         input: &PedInput,
-        car: &CarFrame,
+        cars: &[CarFrame],
         w: usize,
     ) {
         let wk = self.walkers[w];
@@ -1499,41 +1729,49 @@ impl Pedestrians {
         let t = travel(walks, &wk);
         let on_road = link.kind == LinkKind::Crossing;
 
-        // The car, moving or not: on the road, anyone it threatens or a car in the way
+        // The cars, moving or not: on the road, anyone one threatens or a car in the way
         // ahead sends the walker off the crossing; off the road, a car in the way ahead or
-        // anyone walking toward its path holds the walker, and anyone with no room across
-        // the walk to step aside sends it off along the walk.
-        let c = car;
+        // anyone walking toward the player's car's path holds the walker (an NPC car yields
+        // to people in the road, so its path holds nobody back), and anyone with no room
+        // across the walk to step aside sends it off along the walk. The nearest car last,
+        // so its way out wins.
         let mut escape: Option<[f32; 2]> = None;
         let mut hold = false;
-        for &m in &wk.members[..usize::from(wk.count)] {
-            let p = &self.peds[usize::from(m)];
-            if p.sit != Sit::No {
-                continue;
-            }
-            let at = |k: f32| [p.pos[0] + t[0] * k, p.pos[1], p.pos[2] + t[1] * k];
-            let blocked = c.danger(at(1.0)).is_some() || c.danger(at(2.0)).is_some();
-            // Moving off along the path only helps if it leads out of the car's way (not
-            // when the car comes along the path itself: then people step aside instead).
-            let e = c.away(p.pos, back_dir(walks, &wk));
-            let along = dot(e, t).abs() >= ALONG_MIN;
-            if along && ((on_road && (blocked || c.danger(p.pos).is_some())) || p.dodge.stuck) {
-                escape = Some(e);
-            }
-            let ahead = at(1.0);
-            if blocked || (c.watch(ahead) && c.path(ahead).1.abs() < c.path(p.pos).1.abs() - 0.2) {
-                hold = true;
+        for c in cars.iter().rev() {
+            for &m in &wk.members[..usize::from(wk.count)] {
+                let p = &self.peds[usize::from(m)];
+                if p.sit != Sit::No {
+                    continue;
+                }
+                let at = |k: f32| [p.pos[0] + t[0] * k, p.pos[1], p.pos[2] + t[1] * k];
+                let blocked = c.danger(at(1.0)).is_some() || c.danger(at(2.0)).is_some();
+                // Moving off along the path only helps if it leads out of the car's way
+                // (not when the car comes along the path itself: then people step aside
+                // instead).
+                let e = c.away(p.pos, back_dir(walks, &wk));
+                let along = dot(e, t).abs() >= ALONG_MIN;
+                if along && ((on_road && (blocked || c.danger(p.pos).is_some())) || p.dodge.stuck) {
+                    escape = Some(e);
+                }
+                let ahead = at(1.0);
+                let toward =
+                    !c.npc && c.watch(ahead) && c.path(ahead).1.abs() < c.path(p.pos).1.abs() - 0.2;
+                if blocked || toward {
+                    hold = true;
+                }
             }
         }
-        // The car standing still on the crossing by someone: they walk on off it along
-        // the crossing, past the car (back to the curb when it is in the way ahead), with
+        // A car standing still on the crossing by someone: they walk on off it along the
+        // crossing, past the car (back to the curb when it is in the way ahead), with
         // nobody holding or waiting for the rest.
-        let still = self.car_still as f32 > STILL_CLEAR_S * SIM_HZ as f32;
-        let by_car = wk.members[..usize::from(wk.count)].iter().any(|&m| {
-            let p = &self.peds[usize::from(m)];
-            c.danger_within(p.pos, STILL_CLEAR_M + 0.5).is_some()
-        });
-        let clearing = on_road && still && by_car;
+        let clearing = on_road
+            && cars.iter().any(|c| {
+                c.still as f32 > STILL_CLEAR_S * SIM_HZ as f32
+                    && wk.members[..usize::from(wk.count)].iter().any(|&m| {
+                        let p = &self.peds[usize::from(m)];
+                        c.danger_within(p.pos, STILL_CLEAR_M + 0.5).is_some()
+                    })
+            });
         let dodging = wk.members[..usize::from(wk.count)]
             .iter()
             .any(|&m| self.peds[usize::from(m)].dodge.action != Action::None);
@@ -1619,15 +1857,18 @@ impl Pedestrians {
                 }
                 let x = &walks.crossings[crossing as usize];
                 let clear = ((x.length_m / PACE_MIN + 2.0) * SIM_HZ as f32) as u64;
-                // The car neither on the crossing nor coming at it.
+                // No car on the crossing, nor the player's coming at it, nor an NPC car too
+                // close to stop for it.
                 let (a, b) = (
                     walks.nodes[x.curbs[0] as usize].pos,
                     walks.nodes[x.curbs[1] as usize].pos,
                 );
-                let car_clear = (0..=8).all(|k| {
-                    let q = crate::math::lerp3(a, b, k as f32 / 8.0);
-                    !c.watch(q) && !c.inside(q, CLEAR_M + 1.0)
-                });
+                let car_clear = self.taken[crossing as usize] == 0
+                    && (0..=8).all(|k| {
+                        let q = crate::math::lerp3(a, b, k as f32 / 8.0);
+                        cars.iter()
+                            .all(|c| (c.npc || !c.watch(q)) && !c.inside(q, CLEAR_M + 1.0))
+                    });
                 if self.tick >= since + look
                     && walks.walk(lanes, crossing, input.tick, clear)
                     && car_clear
@@ -1646,7 +1887,7 @@ impl Pedestrians {
                     wk.doing = if on_road { Doing::Cross } else { Doing::Walk };
                 } else if hold
                     && self.tick > since + (HOLD_TURN_S * SIM_HZ as f32) as u64
-                    && (c.v <= CREEP_MPS
+                    && (cars.iter().all(|c| c.v <= CREEP_MPS)
                         || self.tick > since + 3 * (HOLD_TURN_S * SIM_HZ as f32) as u64)
                 {
                     reverse(walks, &mut wk);
@@ -1828,15 +2069,31 @@ impl Pedestrians {
         best.1
     }
 
-    fn step_person(&mut self, walks: &WalkGraph, car: &CarFrame, i: usize) {
+    fn step_person(&mut self, walks: &WalkGraph, cars: &[CarFrame], i: usize) {
         let mut p = self.peds[i];
+        // The car this person keeps out of the way of: the one threatening them most (the
+        // nearest of the walker's when none does); the others only bar the way.
+        let mut cs = [CarFrame::NONE; NEAR_CARS];
+        cs[..cars.len()].copy_from_slice(cars);
+        let mut worst: Option<(usize, f32)> = None;
+        for (k, c) in cars.iter().enumerate() {
+            if c.danger_within(p.pos, c.spot_clear()).is_some() {
+                let g = c.gap(p.pos);
+                if worst.is_none_or(|w| g < w.1) {
+                    worst = Some((k, g));
+                }
+            }
+        }
+        cs.swap(0, worst.map_or(0, |w| w.0));
+        let cs = &cs[..cars.len()];
+        let (car, others) = (&cs[0], &cs[1..]);
         let wk = self.walkers[usize::from(p.walker)];
         let k = usize::from(p.slot);
         let staying = matches!(wk.doing, Doing::Stay { .. });
 
         // Sitting down, seated, getting up (at once if the car comes at the bench).
         if let Sit::On { seat, t, up } = p.sit {
-            let up = up || car.danger(seat).is_some();
+            let up = up || cs.iter().any(|c| c.danger(seat).is_some());
             if t > 0.0 || p.pose.action == Action::Sit {
                 let t = if up {
                     t - DT / STAND_S
@@ -1925,8 +2182,11 @@ impl Pedestrians {
         };
         let clear = car.spot_clear();
         let into = |q: [f32; 3]| {
-            car.danger_within(q, clear).is_some()
-                && (car.danger_within(p.base, clear).is_none() || car.gap(q) < car.gap(p.base))
+            cs.iter().any(|c| {
+                let clear = c.spot_clear();
+                c.danger_within(q, clear).is_some()
+                    && (c.danger_within(p.base, clear).is_none() || c.gap(q) < c.gap(p.base))
+            })
         };
         let into_car = into(next);
         // Beside a car standing still, along its side instead (around it to the group;
@@ -1997,6 +2257,7 @@ impl Pedestrians {
                     };
                     let seek = Seek {
                         car,
+                        others,
                         p: here,
                         // (Someone left out on a crosswalk steps along it too.)
                         on_road: on_road
@@ -2172,6 +2433,8 @@ fn dodge_target(walks: &WalkGraph, seek: &Seek) -> Option<[f32; 3]> {
 #[derive(Clone, Copy)]
 struct Seek<'a> {
     car: &'a CarFrame,
+    /// Other cars near: no spot in their way either.
+    others: &'a [CarFrame],
     p: [f32; 3],
     on_road: bool,
     limit: Option<[f32; 3]>,
@@ -2294,7 +2557,9 @@ fn dodge_search(
                             continue;
                         }
                         let cost = if pass == Pass::LeastBad {
-                            if !car.reachable(p, q, None) {
+                            if !car.reachable(p, q, None)
+                                || seek.others.iter().any(|o| o.inside(q, SPOT_CLEAR_M))
+                            {
                                 continue;
                             }
                             // A way that keeps the body clear of where the car will be
@@ -2321,6 +2586,7 @@ fn dodge_search(
                                 + d
                         } else {
                             if car.blocks(q, car.spot_clear())
+                                || seek.others.iter().any(|o| o.blocks(q, o.spot_clear()))
                                 || !car.reachable(p, q, Some(CROSS_SPARE_S))
                                 || (on_road
                                     && link.kind != LinkKind::Crossing
