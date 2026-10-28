@@ -838,22 +838,28 @@ pub struct Pedestrians {
 }
 
 /// A stretch of a walk link over a rail line: along the link from `a0` to `a1` (link
-/// coordinates), at the line's grade crossing `crossing`.
+/// coordinates), the part of it on the track itself from `i0` to `i1` (none when `i0 >
+/// i1`), held while any of the line's grade crossings `first..=last` is closed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct RailSpan {
     link: u32,
     a0: f32,
     a1: f32,
-    crossing: u16,
+    i0: f32,
+    i1: f32,
+    first: u16,
+    last: u16,
 }
 
 /// A walk counts as over the track from this far either side of the rail line's middle...
 const RAIL_SPAN_M: f32 = 3.5;
+/// ...and as on the track itself (the train's half width and a margin) from this far...
+const RAIL_ON_M: f32 = 2.5;
+/// ...and is held while any crossing this near it is closed, m.
+const RAIL_TIE_M: f32 = 60.0;
 /// ...and people wait this far short of that while its crossing is closed, m.
 const RAIL_HOLD_M: f32 = 1.0;
-/// Walks this far (beyond half their length) from a crossing are not looked at, and walks
-/// are sampled this often for their stretch over the track, m.
-const RAIL_NEAR_M: f32 = 30.0;
+/// Walks are sampled this often for their stretch over the track, m.
 const RAIL_SAMPLE_M: f32 = 0.25;
 /// Nobody spawns within this of a walk over the track, m.
 const RAIL_SPAWN_CLEAR_M: f32 = 12.0;
@@ -1254,8 +1260,9 @@ impl Pedestrians {
     }
 
     /// The walks over the rail line through `line` (ground points in order) and which of
-    /// its `crossings` each is at; people keep off them while [`Pedestrians::set_rail_closed`]
-    /// says that crossing is closed, and nobody ever spawns near them. Call once.
+    /// its `crossings` are near each (within 60 m, the nearest at least); people keep off
+    /// one while [`Pedestrians::set_rail_closed`] says any of those is closed, and nobody
+    /// ever spawns near them. Call once.
     pub fn set_rail(&mut self, walks: &WalkGraph, line: &[[f32; 2]], crossings: &[[f32; 2]]) {
         self.rail.clear();
         // Distance from `q` to the line.
@@ -1276,38 +1283,64 @@ impl Pedestrians {
                 walks.nodes[link.b as usize].pos,
             );
             let (pa, pb) = ([pa[0], pa[2]], [pb[0], pb[2]]);
-            // Only walks at a crossing: the nearest crossing to the link's middle.
+            // Cheap reject: no point of the link comes near the line.
             let mid = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
-            let Some((crossing, d)) = crossings
-                .iter()
-                .enumerate()
-                .map(|(k, c)| (k, len2([c[0] - mid[0], c[1] - mid[1]])))
-                .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
-            else {
-                continue;
-            };
-            if d > 0.5 * link.length_m + RAIL_NEAR_M {
+            if off(mid) > 0.5 * link.length_m + RAIL_SPAN_M {
                 continue;
             }
-            // The stretch of the link within reach of the track, sampled.
+            // The stretch of the link within reach of the track, and on it, sampled.
             let n = ((link.length_m / RAIL_SAMPLE_M) as usize).max(1);
             let mut span: Option<(f32, f32)> = None;
+            let mut on: Option<(f32, f32)> = None;
+            let grow = |r: Option<(f32, f32)>, s: f32| {
+                Some(r.map_or((s, s), |(a, b)| (a.min(s), b.max(s))))
+            };
             for k in 0..=n {
                 let t = k as f32 / n as f32;
                 let q = [pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t];
-                if off(q) < RAIL_SPAN_M {
-                    let s = t * link.length_m;
-                    span = Some(span.map_or((s, s), |(a, b)| (a.min(s), b.max(s))));
+                let d = off(q);
+                let s = t * link.length_m;
+                if d < RAIL_SPAN_M {
+                    span = grow(span, s);
+                }
+                if d < RAIL_ON_M {
+                    on = grow(on, s);
                 }
             }
-            if let Some((a0, a1)) = span {
-                self.rail.push(RailSpan {
-                    link: li as u32,
-                    a0: a0 - RAIL_SAMPLE_M,
-                    a1: a1 + RAIL_SAMPLE_M,
-                    crossing: crossing as u16,
-                });
+            let Some((a0, a1)) = span else {
+                continue;
+            };
+            // The crossings near its middle (the nearest at least): it is held while any of
+            // them is closed, so two crossings close together both hold it.
+            let at = [
+                pa[0] + (pb[0] - pa[0]) * (0.5 * (a0 + a1) / link.length_m.max(1e-3)),
+                pa[1] + (pb[1] - pa[1]) * (0.5 * (a0 + a1) / link.length_m.max(1e-3)),
+            ];
+            let d2 = |c: &[f32; 2]| len2([c[0] - at[0], c[1] - at[1]]);
+            let Some(nearest) = (0..crossings.len()).min_by(|&a, &b| {
+                d2(&crossings[a])
+                    .total_cmp(&d2(&crossings[b]))
+                    .then(a.cmp(&b))
+            }) else {
+                continue;
+            };
+            let (mut first, mut last) = (nearest, nearest);
+            for (k, c) in crossings.iter().enumerate() {
+                if d2(c) < RAIL_TIE_M {
+                    first = first.min(k);
+                    last = last.max(k);
+                }
             }
+            let (i0, i1) = on.map_or((1.0, 0.0), |(a, b)| (a - RAIL_SAMPLE_M, b + RAIL_SAMPLE_M));
+            self.rail.push(RailSpan {
+                link: li as u32,
+                a0: a0 - RAIL_SAMPLE_M,
+                a1: a1 + RAIL_SAMPLE_M,
+                i0,
+                i1,
+                first: first as u16,
+                last: last as u16,
+            });
         }
         self.rail_closed.clear();
         self.rail_closed.resize(crossings.len(), false);
@@ -1355,25 +1388,31 @@ impl Pedestrians {
         let len = walks.links[link as usize].length_m;
         let mut best: Option<f32> = None;
         for r in &self.rail {
-            if r.link != link
-                || !self
-                    .rail_closed
-                    .get(usize::from(r.crossing))
+            let held = (r.first..=r.last).any(|c| {
+                self.rail_closed
+                    .get(usize::from(c))
                     .copied()
                     .unwrap_or(false)
-            {
+            });
+            if r.link != link || !held {
                 continue;
             }
-            let (t0, t1) = if fwd {
-                (r.a0, r.a1)
+            let (t0, t1, on) = if fwd {
+                (r.a0, r.a1, r.i0)
             } else {
-                (len - r.a1, len - r.a0)
+                (len - r.a1, len - r.a0, len - r.i1)
             };
-            // Already on it (or past it): walk on off it.
-            if s > t0 - RAIL_HOLD_M + 0.01 && s <= t1 || s > t1 {
+            let stop = if s <= t0 - RAIL_HOLD_M + 0.01 {
+                // Short of it: wait short of it.
+                t0 - RAIL_HOLD_M
+            } else if s > t1 || r.i0 > r.i1 || s >= on {
+                // Past it, on a stretch that never reaches the track, or on the track
+                // already: walk on off it.
                 continue;
-            }
-            let stop = t0 - RAIL_HOLD_M;
+            } else {
+                // Beside the track, not on it yet: stop where you stand.
+                s
+            };
             best = Some(best.map_or(stop, |b: f32| b.min(stop)));
         }
         best

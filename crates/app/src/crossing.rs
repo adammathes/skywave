@@ -138,6 +138,11 @@ impl Rail {
         self.railway.closed()
     }
 
+    /// Which crossings people keep off now (`traffic::train::Railway::held`).
+    pub fn held(&self) -> &[bool] {
+        self.railway.held()
+    }
+
     /// Whether something reaching `reach` from `p` is clear of the train and of the track
     /// it runs on (and its swept margin), while the train is out on the line.
     pub fn clear_of_track(&self, p: [f32; 2], reach: f32) -> bool {

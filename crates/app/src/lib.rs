@@ -844,7 +844,7 @@ impl App {
                     self.drive.note_car_hit(hit);
                 }
                 self.npcs.set_barriers(r.barriers());
-                self.npcs.crowd.set_rail_closed(r.closed());
+                self.npcs.crowd.set_rail_closed(r.held());
             }
             self.sound.note_step(&self.drive.impact);
             if self.npcs.active() {

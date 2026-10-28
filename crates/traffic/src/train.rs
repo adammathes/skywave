@@ -609,6 +609,10 @@ impl Train {
     }
 }
 
+/// How far beyond [`WARN_M`] from the train people start keeping off a crossing: ten
+/// seconds at its cruise, longer than anyone takes to walk off the track, m.
+pub const PEOPLE_LEAD_M: f32 = 110.0;
+
 /// Most obstacles the train weighs in a step.
 const MAX_OBSTACLES: usize = 512;
 /// A person as an obstacle, m.
@@ -622,6 +626,7 @@ pub struct Railway {
     pub gates: Vec<GateSite>,
     barriers: Vec<Barrier>,
     closed: Vec<bool>,
+    held: Vec<bool>,
     obs: Vec<Obstacle>,
 }
 
@@ -640,6 +645,7 @@ impl Railway {
             barriers: Vec::with_capacity(gates.len()),
             gates,
             closed: alloc::vec![false; n],
+            held: alloc::vec![false; n],
             obs: Vec::with_capacity(MAX_OBSTACLES),
         })
     }
@@ -647,6 +653,12 @@ impl Railway {
     /// The gate lines the cars must not cross now: every gate of a closed crossing.
     pub fn barriers(&self) -> &[Barrier] {
         &self.barriers
+    }
+
+    /// Which crossings people keep off now: closed, or the train within
+    /// [`PEOPLE_LEAD_M`] of closing them, in [`TrainLine::crossings`] order.
+    pub fn held(&self) -> &[bool] {
+        &self.held
     }
 
     /// Which crossings are closed now (warning, or their arms not yet back up), in
@@ -701,6 +713,15 @@ impl Railway {
             // Held until its arms are all the way up again, not just until the train is by.
             let g = &self.train.gates[k];
             *c = g.closed || g.arm < 1.0;
+        }
+        // People are held a little before the bells, so whoever is on the track then is
+        // off it by the time the crossing closes.
+        let t = &self.train;
+        let live = !matches!(t.phase, Phase::Resting { .. });
+        for (k, h) in self.held.iter_mut().enumerate() {
+            let cu = t.u_of(t.line.crossings[k]);
+            let near = live && cu <= t.head + WARN_M + PEOPLE_LEAD_M && cu >= t.tail() - CLEAR_M;
+            *h = self.closed[k] || near;
         }
         self.barriers.clear();
         for g in &self.gates {

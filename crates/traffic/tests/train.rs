@@ -26,6 +26,8 @@ fn basin(seed: u64) -> Place {
 }
 
 const DT: f32 = 1.0 / 120.0;
+/// How far beyond the train's side people keep while a crossing is not fully open, m.
+const PERSON_CLEAR_M: f32 = 0.8;
 
 /// Counts over a run.
 #[derive(Debug, Default)]
@@ -34,7 +36,8 @@ struct Counts {
     people_in_train: u32,
     /// Car-steps of an NPC car overlapping a train body.
     cars_in_train: u32,
-    /// Person-steps on the track at a crossing whose arms are down.
+    /// Person-steps within [`PERSON_CLEAR_M`] of the train's swept width, within 60 m of a
+    /// crossing that is closed or whose arms are not yet all the way up.
     people_on_closed: u32,
     /// Car-steps of an NPC car on the track at a crossing whose arms are down, the
     /// train within 200 m of it.
@@ -147,7 +150,7 @@ fn run_with(
             }
         }
     }
-    // The walks over the track within 30 m of the crossing.
+    // The walks over the track within 60 m of the crossing.
     let cs = line.crossings[k];
     let over: Vec<u32> = (0..walks.links.len() as u32)
         .filter(|&i| {
@@ -155,13 +158,14 @@ fn run_with(
             let (a, b) = (walks.nodes[l.a as usize].pos, walks.nodes[l.b as usize].pos);
             let (_, oa) = line.project_signed([a[0], a[2]]);
             let (_, ob) = line.project_signed([b[0], b[2]]);
-            if oa * ob >= 0.0 {
+            // Over the track, or ending on its middle.
+            if oa * ob > 0.0 || oa == ob {
                 return false;
             }
             let t = oa / (oa - ob);
             let x = [a[0] + (b[0] - a[0]) * t, a[2] + (b[2] - a[2]) * t];
             let (sx, ox) = line.project(x);
-            ox < 1.0 && (sx - cs).abs() < 30.0
+            ox < 1.0 && (sx - cs).abs() < 60.0
         })
         .collect();
     let walkable = !over.is_empty();
@@ -193,7 +197,7 @@ fn run_with(
     let steps = (minutes * 60.0 * 120.0) as u64;
     for tick in 0..steps {
         cars.set_barriers(rail.barriers());
-        peds.set_rail_closed(rail.closed());
+        peds.set_rail_closed(rail.held());
         let inp = Inputs {
             tick,
             player,
@@ -270,7 +274,19 @@ fn run_with(
             c.people_at_closed += peds.iter().filter(|p| within(p.pos, 40.0)).count() as u32;
             c.cars_at_closed += cars.cars().iter().filter(|q| within(q.pos, 80.0)).count() as u32;
         }
-        // On the track at a crossing whose arms are down.
+        // People on the track near a crossing from the moment it closes until its arms are
+        // all the way up again, anywhere along the track within 60 m of it.
+        for (j, &cs) in t.line.crossings.iter().enumerate() {
+            if !rail.closed()[j] {
+                continue;
+            }
+            let on = |q: [f32; 2]| {
+                let (s, off) = t.line.project(q);
+                (s - cs).abs() < 60.0 && off < HALF_W_M + PERSON_CLEAR_M
+            };
+            c.people_on_closed += peds.iter().filter(|p| on([p.pos[0], p.pos[2]])).count() as u32;
+        }
+        // Cars on the track at a crossing whose arms are down, the train near.
         for (j, &cs) in t.line.crossings.iter().enumerate() {
             if t.gates[j].arm > 0.0 {
                 continue;
@@ -279,10 +295,6 @@ fn run_with(
                 let (s, off) = t.line.project(q);
                 (s - cs).abs() < 20.0 && off < HALF_W_M + r + 0.5
             };
-            c.people_on_closed += peds
-                .iter()
-                .filter(|p| on([p.pos[0], p.pos[2]], 0.3))
-                .count() as u32;
             let (h, _) = t.line.at(if t.forward {
                 t.head
             } else {
