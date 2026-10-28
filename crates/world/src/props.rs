@@ -113,6 +113,10 @@ pub enum PropKind {
         name_seed: u64,
     },
     PicnicTable,
+    /// A railroad crossing gate's mast (its arm is the app's), facing the drivers it stops.
+    CrossingGate {
+        arm_dm: u8,
+    },
 }
 
 /// One placed prop.
@@ -463,7 +467,8 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         | PropKind::ChainLink { .. }
         | PropKind::CrewGarage { .. }
         | PropKind::TacoStand { .. }
-        | PropKind::PicnicTable => crate::setpieces::build(m, p, pal, &Lexicon::default()),
+        | PropKind::PicnicTable
+        | PropKind::CrossingGate { .. } => crate::setpieces::build(m, p, pal, &Lexicon::default()),
     }
 }
 
@@ -649,6 +654,7 @@ const TIE_STEP_M: f32 = 1.2;
 /// Two rails on ties, on a ballast prism (its foot under the ground), a crossing's flush
 /// panels or a steel deck of two plate girders; a spur's end gets a bumper.
 fn track(m: &mut WorldMesh, base: V3, along: V2, len: f32, bed: u8, pal: &Palette) {
+    let bed = bed & !place::TRACK_SPUR;
     let f = Frame::upright(base, along);
     let half = len * 0.5;
     let steel = Paint::new(shade(pal.metal_dark, 200), Pattern::Metal);
@@ -1488,6 +1494,7 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         // A hero car stands and collides as a parked car; the app draws it.
         P::HeroCar { slot } => PropKind::ParkedCar { color: slot },
         P::PicnicTable => PropKind::PicnicTable,
+        P::CrossingGate { arm_dm } => PropKind::CrossingGate { arm_dm },
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

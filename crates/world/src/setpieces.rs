@@ -47,6 +47,7 @@ pub fn is_set_piece(kind: PropKind) -> bool {
             | PropKind::CrewGarage { .. }
             | PropKind::TacoStand { .. }
             | PropKind::PicnicTable
+            | PropKind::CrossingGate { .. }
     )
 }
 
@@ -76,6 +77,7 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, lex: &Lexicon) {
         PropKind::CrewGarage { name_seed } => garage(m, base, p.dir, name_seed, pal, lex),
         PropKind::TacoStand { name_seed } => taco_stand(m, base, p.dir, name_seed, pal, lex),
         PropKind::PicnicTable => picnic_table(m, base, p.dir, pal),
+        PropKind::CrossingGate { .. } => crossing_gate(m, base, p.dir, pal),
         _ => {}
     }
 }
@@ -894,6 +896,294 @@ fn picnic_table(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette) {
     }
 }
 
+/// A crossing gate's frame: x across the road (its middle toward -x), z toward the drivers
+/// it stops.
+fn gate_frame(base: V3, facing: V2) -> Frame {
+    Frame::upright(base, facing.left())
+}
+
+/// Where a gate's arm pivots in its frame, and the height of a lowered arm.
+const GATE_PIVOT: [f32; 3] = [-0.35, 1.05, 0.25];
+/// A gate's two flashing lamps in its frame (their middles), both facing the drivers.
+const GATE_LAMPS: [[f32; 3]; 2] = [[-0.42, 2.6, 0.12], [0.42, 2.6, 0.12]];
+
+/// Where a gate at the origin facing yaw 0 pivots its arm: the app turns [`gate_arm`]
+/// about the frame's z (the way the gate faces) there, up from lowered.
+pub fn gate_pivot() -> V3 {
+    let f = gate_frame(V3::ZERO, crate::props::dir_of_yaw(0.0));
+    f.p(GATE_PIVOT[0], GATE_PIVOT[1], GATE_PIVOT[2])
+}
+
+/// The way a lowered arm points for a gate facing yaw 0 (across the road), and the axis it
+/// turns up about (the way the gate faces).
+pub fn gate_axes() -> (V3, V3) {
+    let f = gate_frame(V3::ZERO, crate::props::dir_of_yaw(0.0));
+    (-f.x, f.z)
+}
+
+/// A crossing gate's mast: a post on a base, the crossed white blades, the twin lamps on
+/// their crossarm (dark: the app lights them), a bell on top, and the arm's pivot box with
+/// its counterweight. The arm itself is [`gate_arm`].
+fn crossing_gate(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
+    let f = gate_frame(base, facing);
+    let post = Paint::new(pal.metal_light, Pattern::Metal);
+    let dark = Paint::new(shade(pal.metal_dark, 120), Pattern::Metal);
+    let concrete = Paint::new(pal.concrete, Pattern::Concrete);
+    boxf(
+        m,
+        &f,
+        [-0.3, -0.3, -0.3],
+        [0.3, 0.12, 0.3],
+        face::NO_BOTTOM,
+        concrete,
+    );
+    boxf(
+        m,
+        &f,
+        [-0.07, 0.12, -0.07],
+        [0.07, 4.1, 0.07],
+        face::NO_BOTTOM,
+        post,
+    );
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let c = f.p(0.0, 3.55, 0.08);
+    for (dx, dy) in [(0.69f32, 0.72f32), (0.69, -0.72)] {
+        let (u, v) = (f.x * dx + f.y * dy, f.x * -dy + f.y * dx);
+        let (u, v) = (u * 0.8, v * 0.1);
+        quad(m, [c - u - v, c + u - v, c + u + v, c - u + v], f.z, white);
+        quad(m, [c - u - v, c - u + v, c + u + v, c + u - v], -f.z, post);
+    }
+    boxf(m, &f, [-0.6, 2.55, 0.0], [0.6, 2.65, 0.08], face::ALL, post);
+    let lens = Paint::new(shade(pal.neon_red, 90), Pattern::Glass);
+    for l in GATE_LAMPS {
+        boxf(
+            m,
+            &f,
+            [l[0] - 0.17, l[1] - 0.17, 0.0],
+            [l[0] + 0.17, l[1] + 0.17, 0.1],
+            face::NO_BOTTOM,
+            dark,
+        );
+        let q = f.p(l[0], l[1], l[2] + 0.0);
+        let (u, v) = (f.x * 0.12, f.y * 0.12);
+        quad(m, [q - u - v, q + u - v, q + u + v, q - u + v], f.z, lens);
+    }
+    // The bell on top.
+    let bell = Paint::new(shade(pal.metal_dark, 200), Pattern::Metal);
+    boxf(
+        m,
+        &f,
+        [-0.14, 4.1, -0.14],
+        [0.14, 4.3, 0.14],
+        face::NO_BOTTOM,
+        bell,
+    );
+    // The pivot's box and the counterweight behind the post.
+    let [px, py, pz] = GATE_PIVOT;
+    boxf(
+        m,
+        &f,
+        [px - 0.18, py - 0.25, pz - 0.15],
+        [px + 0.18, py + 0.25, pz + 0.15],
+        face::ALL,
+        dark,
+    );
+    boxf(
+        m,
+        &f,
+        [px + 0.15, py - 0.12, pz - 0.08],
+        [px + 0.95, py + 0.12, pz + 0.08],
+        face::ALL,
+        dark,
+    );
+}
+
+/// A gate's arm `len` long for a gate at the origin facing yaw 0, lowered: from its pivot
+/// ([`gate_pivot`] is the app's to add) out along [`gate_axes`]'s first axis, in red and
+/// white bands with three lamps along its top.
+pub fn gate_arm(m: &mut WorldMesh, len: f32, pal: &Palette) {
+    let f = gate_frame(V3::ZERO, crate::props::dir_of_yaw(0.0));
+    let red = Paint::new(pal.neon_red, Pattern::Paint);
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let bands = ((len / 0.6) as usize).max(1);
+    let step = len / bands as f32;
+    for k in 0..bands {
+        let (x0, x1) = (-(k as f32) * step, -((k + 1) as f32) * step);
+        let paint = if k % 2 == 0 { red } else { white };
+        boxf(
+            m,
+            &f,
+            [x1, -0.05, -0.04],
+            [x0, 0.05, 0.04],
+            face::ALL,
+            paint,
+        );
+    }
+    let lamp = Paint::new(shade(pal.neon_red, 90), Pattern::Glass);
+    for t in [0.33f32, 0.66, 0.97] {
+        let x = -t * len;
+        boxf(
+            m,
+            &f,
+            [x - 0.06, 0.05, -0.05],
+            [x + 0.06, 0.15, 0.05],
+            face::NO_BOTTOM,
+            lamp,
+        );
+    }
+}
+
+/// Gate lamp `k` (0 or 1) lit, for a gate at the origin facing yaw 0.
+pub fn gate_lamp(m: &mut WorldMesh, k: usize) {
+    let f = gate_frame(V3::ZERO, crate::props::dir_of_yaw(0.0));
+    let red: Rgb = [255, 40, 30];
+    let lit = Paint::new(red, Pattern::Plain).glowing(red, Glow::Signal);
+    let l = GATE_LAMPS[k % 2];
+    let q = f.p(l[0], l[1], l[2] + 0.01);
+    let (u, v) = (f.x * 0.13, f.y * 0.13);
+    quad(m, [q - u - v, q + u - v, q + u + v, q - u + v], f.z, lit);
+}
+
+/// The train's body kinds: the locomotive, then the freight cars behind it.
+pub const TRAIN_LOCO: u8 = 0;
+pub const TRAIN_BOXCAR: u8 = 1;
+pub const TRAIN_TANK: u8 = 2;
+pub const TRAIN_HOPPER: u8 = 3;
+
+/// A train body of `kind`, `len` long, standing on the rail top at the origin with its
+/// front toward yaw 0's facing (`-z`): a hood-and-cab locomotive with its headlight lit, a
+/// boxcar, a tank car or a covered hopper, each on two trucks; in freight colors.
+pub fn train_body(m: &mut WorldMesh, kind: u8, len: f32, pal: &Palette) {
+    let f = Frame::upright(V3::ZERO, crate::props::dir_of_yaw(0.0));
+    let hl = 0.5 * len;
+    let truck = Paint::new(shade(pal.metal_dark, 110), Pattern::Metal);
+    let frame = Paint::new(shade(pal.metal_dark, 150), Pattern::Metal);
+    // Trucks and wheels' shadow boxes, the frame over them.
+    for x in [hl - 3.0, -hl + 3.0] {
+        boxf(
+            m,
+            &f,
+            [x - 1.4, 0.0, -1.2],
+            [x + 1.4, 0.9, 1.2],
+            face::NO_BOTTOM,
+            truck,
+        );
+    }
+    boxf(m, &f, [-hl, 0.9, -1.45], [hl, 1.25, 1.45], face::ALL, frame);
+    let w = 1.55;
+    match kind {
+        TRAIN_LOCO => {
+            let body = Paint::new([196, 120, 40], Pattern::Paint);
+            let stripe = Paint::new(pal.paint_yellow, Pattern::Paint);
+            let glass = Paint::new(pal.glass, Pattern::Glass);
+            // The cab at the front, the long hood behind it.
+            boxf(
+                m,
+                &f,
+                [hl - 5.0, 1.25, -w],
+                [hl - 0.6, 4.4, w],
+                face::NO_BOTTOM,
+                body,
+            );
+            boxf(
+                m,
+                &f,
+                [-hl + 0.6, 1.25, -1.2],
+                [hl - 5.0, 4.0, 1.2],
+                face::NO_BOTTOM,
+                body,
+            );
+            boxf(
+                m,
+                &f,
+                [hl - 0.6, 1.25, -w],
+                [hl, 2.6, w],
+                face::NO_BOTTOM,
+                body,
+            );
+            for z in [-w - 0.01, w + 0.01] {
+                rect(m, &f, -hl + 0.6, 1.6, hl - 0.6, 1.8, z, z < 0.0, stripe);
+            }
+            let fx = hl - 0.6 + 0.01;
+            let q = |y: f32, z: f32| f.p(fx, y, z);
+            quad(
+                m,
+                [q(3.3, -1.3), q(3.3, 1.3), q(4.1, 1.3), q(4.1, -1.3)],
+                f.x,
+                glass,
+            );
+            let lamp: Rgb = [255, 244, 210];
+            let lit = Paint::new(lamp, Pattern::Plain).glowing(lamp, Glow::Signal);
+            let fx = hl + 0.01;
+            let q = |y: f32, z: f32| f.p(fx, y, z);
+            quad(
+                m,
+                [q(2.0, -0.25), q(2.0, 0.25), q(2.4, 0.25), q(2.4, -0.25)],
+                f.x,
+                lit,
+            );
+        }
+        TRAIN_TANK => {
+            let body = Paint::new([74, 76, 82], Pattern::Metal);
+            crate::mesh::frustum(
+                m,
+                &Frame {
+                    o: f.p(-hl + 0.6, 2.6, 0.0),
+                    x: f.y,
+                    y: f.x,
+                    z: -f.z,
+                },
+                1.4,
+                1.4,
+                len - 1.2,
+                10,
+                true,
+                true,
+                body,
+            );
+        }
+        TRAIN_HOPPER => {
+            let body = Paint::new([150, 146, 136], Pattern::Metal);
+            boxf(
+                m,
+                &f,
+                [-hl + 0.4, 1.25, -w],
+                [hl - 0.4, 4.2, w],
+                face::NO_BOTTOM,
+                body,
+            );
+            let rib = body.with_rgb(shade(body.rgb(), 200));
+            let ribs = ((len / 2.0) as usize).max(1);
+            for k in 1..ribs {
+                let x = -hl + 0.4 + k as f32 * (len - 0.8) / ribs as f32;
+                boxf(
+                    m,
+                    &f,
+                    [x - 0.06, 1.25, -w - 0.06],
+                    [x + 0.06, 4.2, w + 0.06],
+                    face::NEG_Z | face::POS_Z,
+                    rib,
+                );
+            }
+        }
+        _ => {
+            let body = Paint::new([150, 78, 48], Pattern::Metal);
+            boxf(
+                m,
+                &f,
+                [-hl + 0.3, 1.25, -w],
+                [hl - 0.3, 4.3, w],
+                face::NO_BOTTOM,
+                body,
+            );
+            let door = body.with_rgb(shade(body.rgb(), 170));
+            for z in [-w - 0.02, w + 0.02] {
+                rect(m, &f, -1.5, 1.4, 1.5, 3.9, z, z < 0.0, door);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,7 +1199,7 @@ mod tests {
         }
     }
 
-    const KINDS: [PropKind; 9] = [
+    const KINDS: [PropKind; 10] = [
         PropKind::TunnelPiece {
             len_dm: 160,
             width_dm: 250,
@@ -923,6 +1213,7 @@ mod tests {
         PropKind::CrewGarage { name_seed: 11 },
         PropKind::TacoStand { name_seed: 12 },
         PropKind::PicnicTable,
+        PropKind::CrossingGate { arm_dm: 80 },
     ];
 
     #[test]
@@ -946,6 +1237,35 @@ mod tests {
             digit(&mut m, d);
             assert!(m.triangle_count() >= 4);
         }
+        for kind in [TRAIN_LOCO, TRAIN_BOXCAR, TRAIN_TANK, TRAIN_HOPPER] {
+            let mut m = WorldMesh::default();
+            train_body(&mut m, kind, 16.5, &pal);
+            assert!(m.triangle_count() > 20);
+            // Its surfaces face out: away from its middle line.
+            for v in &m.vertices {
+                let out = [v.pos[0], v.pos[1] - 2.6, 0.0];
+                let dot = out[0] * v.normal[0] + out[1] * v.normal[1];
+                if kind == TRAIN_TANK && v.pos[1] > 1.3 && v.normal[2].abs() < 0.5 {
+                    assert!(dot > 0.0, "an inward face at {:?} {:?}", v.pos, v.normal);
+                }
+            }
+            // Within its length and the loading gauge.
+            for v in &m.vertices {
+                assert!(v.pos[2].abs() <= 8.26 && v.pos[0].abs() <= 1.62 && v.pos[1] <= 4.41);
+            }
+        }
+        let mut m = WorldMesh::default();
+        gate_arm(&mut m, 7.4, &pal);
+        assert_well_formed(&m, 0.99);
+        for k in 0..2 {
+            let mut m = WorldMesh::default();
+            gate_lamp(&mut m, k);
+            assert_eq!(m.triangle_count(), 2);
+        }
+        // A lowered arm runs level across the road from its pivot, a meter up.
+        let (along, up_axis) = gate_axes();
+        assert!(along.y.abs() < 1e-6 && (up_axis.length() - 1.0).abs() < 1e-5);
+        assert!((gate_pivot().y - 1.05).abs() < 1e-6);
     }
 
     #[test]

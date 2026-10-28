@@ -1397,6 +1397,7 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                 }
             }
             PropKind::StripLine { .. } => {}
+            PropKind::CrossingGate { .. } => posts.push(post(0.15, 4.2)),
             PropKind::TunnelPiece { .. }
             | PropKind::GuardRail { .. }
             | PropKind::ChainLink { .. }

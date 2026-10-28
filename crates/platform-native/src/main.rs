@@ -45,9 +45,9 @@
 //! Sound plays through the default output device at 48 kHz (`sfx`); without one the game
 //! runs silent. The car radio's internet stations play through it too (`radio`); the
 //! window title shows the station and what it says is playing. The player's own MP3s are
-//! stations as well: each folder in the music folder (`--music DIR`, else `music` beside
-//! the executable, else `~/Music`) is one, scanned at start (`music`). `--radio-off` leaves
-//! out both.
+//! the deck's library: the music folder (`--music DIR`, else `music` beside the executable,
+//! else `~/Music`) and the folders picked on the Audio page or dropped on the window,
+//! scanned at start (`music`). `--radio-off` leaves out both.
 
 mod music;
 mod pad;
@@ -56,7 +56,9 @@ mod settings;
 mod sfx;
 
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -804,18 +806,155 @@ struct Shell {
     sfx: Option<sfx::Sfx>,
     /// The car radio's player, when there is a sink to play it and it is not turned off.
     radio: Option<radio::Player>,
-    /// The music folder's stations, once the scan is done.
-    music: Option<std::sync::mpsc::Receiver<audio::deck::Folder>>,
-    /// The folders put on the dial this session.
+    /// Music folder scans under way.
+    music: Vec<MusicScan>,
+    /// The folders scanned whole: the music folder, then the picked ones.
+    music_roots: Vec<PathBuf>,
+    /// The folders put in the library this session.
     music_paths: Vec<String>,
+    /// The folder dialog, while it is open.
+    picking: Option<Receiver<music::Picked>>,
+    /// Paths dropped on the window since the last frame.
+    dropped: Vec<PathBuf>,
     /// What the window title last showed: the station playing and the player's title count.
     title: (Option<usize>, u32),
 }
 
+/// A scan of music folders on a background thread, and what it is for.
+struct MusicScan {
+    found: Receiver<Vec<audio::deck::Folder>>,
+    of: ScanOf,
+}
+
+enum ScanOf {
+    /// The folders at start: kept quiet.
+    Start,
+    /// A folder the player just picked or dropped: announced.
+    Picked(PathBuf),
+    /// Loose files dropped on the window: a mixtape.
+    Drop,
+}
+
 impl Shell {
+    /// The music library's side of the frame: the folder dialog, drops, finished scans, and
+    /// removals written down. Nothing here waits on a dialog or a disk.
+    fn pump_music(&mut self) {
+        if self.app.take_music_request() && self.picking.is_none() {
+            self.picking = Some(music::pick_in_background());
+        }
+        if let Some(answer) = &self.picking {
+            match answer.try_recv() {
+                Ok(music::Picked::Folder(dir)) => {
+                    self.picking = None;
+                    self.add_music_dir(dir);
+                }
+                Ok(music::Picked::NoDialog) => {
+                    self.picking = None;
+                    self.app.music_dialog_missing();
+                }
+                Ok(music::Picked::Cancelled) | Err(TryRecvError::Disconnected) => {
+                    self.picking = None;
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        // Folders dropped join as if picked; loose MP3s make one mixtape a drop.
+        let (dirs, files): (Vec<PathBuf>, Vec<PathBuf>) = std::mem::take(&mut self.dropped)
+            .into_iter()
+            .partition(|p| p.is_dir());
+        for dir in dirs {
+            self.add_music_dir(dir);
+        }
+        if !files.is_empty() {
+            self.music.push(MusicScan {
+                found: music::mixtape_in_background(files),
+                of: ScanOf::Drop,
+            });
+        }
+        let mut scans = std::mem::take(&mut self.music);
+        scans.retain(|scan| match scan.found.try_recv() {
+            Ok(folders) => {
+                self.music_paths
+                    .extend(folders.iter().filter(|f| !f.mixtape).map(|f| f.id.clone()));
+                match &scan.of {
+                    ScanOf::Start => self.app.add_music_folders(folders),
+                    ScanOf::Drop => {
+                        for tape in folders {
+                            self.app.add_music_folder(tape, true, false);
+                        }
+                    }
+                    ScanOf::Picked(dir) => {
+                        let tracks = folders
+                            .iter()
+                            .flat_map(|f| &f.files)
+                            .filter(|f| Path::new(&f.key).starts_with(dir))
+                            .count();
+                        let name = dir.file_name().unwrap_or(dir.as_os_str());
+                        self.app
+                            .add_picked_music(&name.to_string_lossy(), tracks, folders);
+                    }
+                }
+                false
+            }
+            Err(TryRecvError::Empty) => true,
+            Err(TryRecvError::Disconnected) => false,
+        });
+        scans.append(&mut self.music);
+        self.music = scans;
+        let forgotten = self.app.take_forgotten_music();
+        if !forgotten.is_empty() {
+            // Removed on the Audio page: the scan leaves them out from now on, and "Remove
+            // music folders" forgets the picked folders too.
+            let all = forgotten.iter().any(|p| p == "*");
+            let paths: Vec<String> = if all {
+                self.music_paths.clone()
+            } else {
+                forgotten
+            };
+            let paths: Vec<String> = paths
+                .into_iter()
+                .filter(|p| !p.starts_with(music::MIXTAPE_ID))
+                .collect();
+            if let Some(file) = music::ignore_file() {
+                music::add_to_list(&file, &paths);
+            }
+            if let (true, Some(file)) = (all, music::folders_file()) {
+                music::remove_from_list(&file, None);
+            }
+        }
+    }
+
+    /// Puts the folder the player picked or dropped in the library: off the ignore list
+    /// (with everything in it), remembered for next session, and scanned, as part of the
+    /// folder it is in if that one is scanned already (so its folders keep their ids).
+    fn add_music_dir(&mut self, dir: PathBuf) {
+        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+        if let Some(file) = music::ignore_file() {
+            music::remove_from_list(&file, Some(&dir));
+        }
+        if let Some(file) = music::folders_file() {
+            music::add_to_list(&file, &[dir.to_string_lossy().into_owned()]);
+        }
+        let root = match self.music_roots.iter().find(|r| dir.starts_with(r)) {
+            Some(root) => root.clone(),
+            None => {
+                self.music_roots.push(dir.clone());
+                dir.clone()
+            }
+        };
+        let ignored = music::ignore_file().map_or(Vec::new(), |f| music::load_list(&f));
+        self.music.push(MusicScan {
+            found: music::scan_in_background(vec![root], ignored),
+            of: ScanOf::Picked(dir),
+        });
+    }
+
     /// The radio's side of the frame: the player's reports in, this frame's commands out,
     /// and the station with its now-playing title in the window title.
     fn pump_radio(&mut self) {
+        if self.radio.is_some() {
+            self.pump_music();
+        }
         let Some(player) = &mut self.radio else {
             // Nobody plays: drop the commands.
             self.app.radio_commands().for_each(drop);
@@ -823,28 +962,6 @@ impl Shell {
         };
         while let Some(event) = player.poll() {
             self.app.radio_event(event);
-        }
-        if let Some(found) = &self.music {
-            // The scan arrives at once: the library is indexed once. Kept: the same folder
-            // is scanned again next session.
-            let folders: Vec<audio::deck::Folder> = found.try_iter().collect();
-            if !folders.is_empty() {
-                self.music_paths
-                    .extend(folders.iter().map(|f| f.id.clone()));
-                self.app.add_music_folders(folders);
-            }
-        }
-        let forgotten = self.app.take_forgotten_music();
-        if !forgotten.is_empty() {
-            // Removed on the Audio page: the scan leaves them out from now on.
-            let paths = if forgotten.iter().any(|p| p == "*") {
-                self.music_paths.clone()
-            } else {
-                forgotten
-            };
-            if let Some(file) = music::ignore_file() {
-                music::ignore(&file, &paths);
-            }
         }
         if player.titles() != self.title.1 {
             self.app.set_now_playing(player.title());
@@ -959,6 +1076,11 @@ impl ApplicationHandler for Shell {
                     if b == MOUSE_RIGHT {
                         self.set_grab(down);
                     }
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                if self.radio.is_some() {
+                    self.dropped.push(path);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -1146,13 +1268,27 @@ fn main() -> ExitCode {
     let radio_out = (!opts.radio_off).then(|| Arc::new(radio::Output::new()));
     let sfx = sfx::Sfx::start(radio_out.clone());
     let radio = radio_out.filter(|_| sfx.is_some()).map(radio::Player::new);
-    let music = radio
-        .as_ref()
-        .and_then(|_| music::default_dir(opts.music.as_deref()))
-        .map(|dir| {
-            let ignored = music::ignore_file().map_or(Vec::new(), |f| music::load_ignored(&f));
-            music::scan_in_background(dir, ignored)
-        });
+    // The music folder and the folders picked in earlier sessions, scanned at once.
+    let music_roots = radio.as_ref().map_or(Vec::new(), |_| {
+        let picked = music::folders_file().map_or(Vec::new(), |f| music::load_list(&f));
+        let roots = music::default_dir(opts.music.as_deref())
+            .into_iter()
+            .chain(picked.into_iter().map(PathBuf::from))
+            .collect();
+        music::roots(roots)
+    });
+    let music: Vec<MusicScan> = (!music_roots.is_empty())
+        .then(|| {
+            let ignored = music::ignore_file().map_or(Vec::new(), |f| music::load_list(&f));
+            MusicScan {
+                found: music::scan_in_background(music_roots.clone(), ignored),
+                of: ScanOf::Start,
+            }
+        })
+        .into_iter()
+        .collect();
+    // The Audio page offers "Music library" wherever music plays.
+    app.set_music_picker(radio.is_some(), false);
     let mut shell = Shell {
         app,
         opts,
@@ -1172,7 +1308,10 @@ fn main() -> ExitCode {
         sfx,
         radio,
         music,
+        music_roots,
         music_paths: Vec::new(),
+        picking: None,
+        dropped: Vec::new(),
         title: (None, 0),
     };
     if let Err(e) = event_loop.run_app(&mut shell) {

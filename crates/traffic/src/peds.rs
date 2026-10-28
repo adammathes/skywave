@@ -831,7 +831,36 @@ pub struct Pedestrians {
     car_prev: [f32; 4],
     /// Steps the car has stood still for.
     car_still: u32,
+    /// Where walks cross a rail line ([`Pedestrians::set_rail`]), and which of its crossings
+    /// are closed now.
+    rail: Vec<RailSpan>,
+    rail_closed: Vec<bool>,
 }
+
+/// A stretch of a walk link over a rail line: along the link from `a0` to `a1` (link
+/// coordinates), nearest the track's middle at `mid`, held while any of the line's grade
+/// crossings `first..=last` is closed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RailSpan {
+    link: u32,
+    a0: f32,
+    a1: f32,
+    mid: f32,
+    first: u16,
+    last: u16,
+}
+
+/// A walk counts as over the track from this far either side of the rail line's middle:
+/// the reach at which the train stops for someone, and a gap. Nobody held stands nearer...
+const RAIL_SPAN_M: f32 = crate::train::PERSON_SWEEP_M + 0.45;
+/// ...and is held while any crossing this near it is closed, m.
+const RAIL_TIE_M: f32 = 60.0;
+/// ...and people wait this far short of that while its crossing is closed, m.
+const RAIL_HOLD_M: f32 = 1.0;
+/// Walks are sampled this often for their stretch over the track, m.
+const RAIL_SAMPLE_M: f32 = 0.25;
+/// Nobody spawns within this of a walk over the track, m.
+const RAIL_SPAWN_CLEAR_M: f32 = 12.0;
 
 fn left(d: [f32; 2]) -> [f32; 2] {
     [d[1], -d[0]]
@@ -933,6 +962,8 @@ impl Pedestrians {
             alive: 0,
             car_prev: [0.0; 4],
             car_still: 0,
+            rail: Vec::new(),
+            rail_closed: Vec::new(),
         }
     }
 
@@ -1168,7 +1199,7 @@ impl Pedestrians {
             }
             let sp = spots[self.rng.range(0, spots.len() as u32) as usize];
             let spot = &walks.spots[sp as usize];
-            if !ok(spot.pos) || !self.spot_free(walks, sp, n) {
+            if !ok(spot.pos) || self.near_rail(walks, spot.pos) || !self.spot_free(walks, sp, n) {
                 return;
             }
             let link = &walks.links[spot.link as usize];
@@ -1208,7 +1239,7 @@ impl Pedestrians {
         }
         let s = self.rng.next_f32() * link.length_m;
         let p = walks.point(l, s, 0.0);
-        if !ok(p) {
+        if !ok(p) || self.near_rail(walks, p) {
             return;
         }
         let fwd = self.rng.next_u32() & 1 == 0;
@@ -1224,6 +1255,178 @@ impl Pedestrians {
             let wk = &self.walkers[slot];
             ped.heading = heading(travel(walks, wk));
         }
+    }
+
+    /// The walks over the rail line through `line` (ground points in order) and which of
+    /// its `crossings` are near each (within 60 m, the nearest at least); people keep off
+    /// one while [`Pedestrians::set_rail_closed`] says any of those is closed, and nobody
+    /// ever spawns near them. Call once.
+    pub fn set_rail(&mut self, walks: &WalkGraph, line: &[[f32; 2]], crossings: &[[f32; 2]]) {
+        self.rail.clear();
+        // Distance from `q` to the line.
+        let off = |q: [f32; 2]| {
+            line.windows(2)
+                .map(|w| {
+                    let d = [w[1][0] - w[0][0], w[1][1] - w[0][1]];
+                    let l2 = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
+                    let t =
+                        (((q[0] - w[0][0]) * d[0] + (q[1] - w[0][1]) * d[1]) / l2).clamp(0.0, 1.0);
+                    len2([q[0] - w[0][0] - d[0] * t, q[1] - w[0][1] - d[1] * t])
+                })
+                .fold(f32::INFINITY, f32::min)
+        };
+        for (li, link) in walks.links.iter().enumerate() {
+            let (pa, pb) = (
+                walks.nodes[link.a as usize].pos,
+                walks.nodes[link.b as usize].pos,
+            );
+            let (pa, pb) = ([pa[0], pa[2]], [pb[0], pb[2]]);
+            // Cheap reject: no point of the link comes near the line.
+            let mid = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
+            if off(mid) > 0.5 * link.length_m + RAIL_SPAN_M {
+                continue;
+            }
+            // The stretch of the link within reach of the track, sampled.
+            let n = ((link.length_m / RAIL_SAMPLE_M) as usize).max(1);
+            let mut span: Option<(f32, f32)> = None;
+            let mut mid = (f32::INFINITY, 0.0);
+            for k in 0..=n {
+                let t = k as f32 / n as f32;
+                let q = [pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t];
+                let d = off(q);
+                let s = t * link.length_m;
+                if d < RAIL_SPAN_M {
+                    span = Some(span.map_or((s, s), |(a, b)| (a.min(s), b.max(s))));
+                }
+                if d < mid.0 {
+                    mid = (d, s);
+                }
+            }
+            let Some((a0, a1)) = span else {
+                continue;
+            };
+            // The crossings near its middle (the nearest at least): it is held while any of
+            // them is closed, so two crossings close together both hold it.
+            let at = [
+                pa[0] + (pb[0] - pa[0]) * (0.5 * (a0 + a1) / link.length_m.max(1e-3)),
+                pa[1] + (pb[1] - pa[1]) * (0.5 * (a0 + a1) / link.length_m.max(1e-3)),
+            ];
+            let d2 = |c: &[f32; 2]| len2([c[0] - at[0], c[1] - at[1]]);
+            let Some(nearest) = (0..crossings.len()).min_by(|&a, &b| {
+                d2(&crossings[a])
+                    .total_cmp(&d2(&crossings[b]))
+                    .then(a.cmp(&b))
+            }) else {
+                continue;
+            };
+            let (mut first, mut last) = (nearest, nearest);
+            for (k, c) in crossings.iter().enumerate() {
+                if d2(c) < RAIL_TIE_M {
+                    first = first.min(k);
+                    last = last.max(k);
+                }
+            }
+            self.rail.push(RailSpan {
+                link: li as u32,
+                a0: a0 - RAIL_SAMPLE_M,
+                a1: a1 + RAIL_SAMPLE_M,
+                mid: mid.1,
+                first: first as u16,
+                last: last as u16,
+            });
+        }
+        self.rail_closed.clear();
+        self.rail_closed.resize(crossings.len(), false);
+    }
+
+    /// One person of fresh seeded looks on `link`, `s` meters along it from the end it
+    /// starts at (its `a` end when `fwd`), heading for the ground point `goal`: for
+    /// scripted scenes and probes that want people somewhere. `false` when the pool is
+    /// full. Does not check for room or for being seen, as [`Pedestrians::step`] does.
+    pub fn send(
+        &mut self,
+        walks: &WalkGraph,
+        link: u32,
+        s: f32,
+        fwd: bool,
+        goal: [f32; 2],
+    ) -> bool {
+        let Some(slot) = self.walkers.iter().position(|x| !x.alive) else {
+            return false;
+        };
+        if self.alive >= self.peds.len() {
+            return false;
+        }
+        self.make_walker(walks, slot, 1, link, fwd, s);
+        self.walkers[slot].goal = goal;
+        self.walkers[slot].give_up = self.tick + (GIVE_UP_S * SIM_HZ as f32) as u64;
+        let p = self.walk_slot(walks, slot, 0);
+        let ped = &mut self.peds[usize::from(self.walkers[slot].members[0])];
+        ped.base = p;
+        ped.pos = p;
+        true
+    }
+
+    /// Which of the rail line's crossings are closed now (in [`Pedestrians::set_rail`]'s
+    /// order). Allocates nothing.
+    pub fn set_rail_closed(&mut self, closed: &[bool]) {
+        for (c, &x) in self.rail_closed.iter_mut().zip(closed) {
+            *c = x;
+        }
+    }
+
+    /// Where a walker on `link` travelling `fwd`, at `s` from its entry end, must stop
+    /// short of the first closed rail crossing ahead it has not stepped onto yet.
+    fn rail_stop(&self, walks: &WalkGraph, link: u32, fwd: bool, s: f32) -> Option<f32> {
+        let len = walks.links[link as usize].length_m;
+        let mut best: Option<f32> = None;
+        for r in self.held_spans(link) {
+            let t0 = if fwd { r.a0 } else { len - r.a1 };
+            // Short of it: wait short of it. Over it already: back off it or walk on off
+            // it ([`Pedestrians::rail_back`]).
+            if s <= t0 - RAIL_HOLD_M + 0.01 {
+                let stop = t0 - RAIL_HOLD_M;
+                best = Some(best.map_or(stop, |b: f32| b.min(stop)));
+            }
+        }
+        best
+    }
+
+    /// Whether someone at `s` along `link` (walking it forward or not) is over a held walk
+    /// and still heading for the track's middle: they turn back off it the way they
+    /// came, the near side, so nobody stands or lingers within the train's reach. Past
+    /// the middle they walk on off it.
+    fn rail_back(&self, walks: &WalkGraph, link: u32, fwd: bool, s: f32) -> bool {
+        let len = walks.links[link as usize].length_m;
+        self.held_spans(link).any(|r| {
+            let (t0, mid) = if fwd {
+                (r.a0, r.mid)
+            } else {
+                (len - r.a1, len - r.mid)
+            };
+            s > t0 - RAIL_HOLD_M + 0.01 && s < mid
+        })
+    }
+
+    /// The held walks over the track on `link`.
+    fn held_spans(&self, link: u32) -> impl Iterator<Item = &RailSpan> + '_ {
+        self.rail.iter().filter(move |r| {
+            r.link == link
+                && (r.first..=r.last).any(|c| {
+                    self.rail_closed
+                        .get(usize::from(c))
+                        .copied()
+                        .unwrap_or(false)
+                })
+        })
+    }
+
+    /// Whether `p` is near a walk over the rail line.
+    fn near_rail(&self, walks: &WalkGraph, p: [f32; 3]) -> bool {
+        self.rail.iter().any(|r| {
+            let q = walks.point(r.link, 0.5 * (r.a0 + r.a1), 0.0);
+            dist(p, q) < RAIL_SPAWN_CLEAR_M
+        })
     }
 
     fn rand_i(&mut self, r: i32) -> i32 {
@@ -1306,6 +1509,10 @@ impl Pedestrians {
 
     /// Whether `n` more people fit at spot `sp`.
     fn spot_free(&self, walks: &WalkGraph, sp: u32, n: u8) -> bool {
+        // Nobody stays by a rail line's track.
+        if self.near_rail(walks, walks.spots[sp as usize].pos) {
+            return false;
+        }
         let used = self.spot_use[sp as usize];
         match walks.spots[sp as usize].kind {
             SpotKind::Bench | SpotKind::Window | SpotKind::Door => used == 0 && n <= 3,
@@ -1691,7 +1898,20 @@ impl Pedestrians {
             Doing::Walk | Doing::Cross | Doing::Escape { .. } | Doing::Hold { .. }
         );
         if moving {
+            // Over a held walk, nearer where they came from: back off it that way.
+            if self.rail_back(walks, wk.link, wk.fwd, wk.s) {
+                wk.fwd = !wk.fwd;
+                wk.s = link.length_m - wk.s;
+            }
+            let before = wk.s;
             wk.s += wk.v * DT;
+            // Never onto a closed railroad crossing: wait short of the track.
+            if let Some(stop) = self.rail_stop(walks, wk.link, wk.fwd, before) {
+                if wk.s > stop {
+                    wk.s = stop.max(before.min(stop));
+                    wk.v = 0.0;
+                }
+            }
             // The target spot is on this link and we are passing it.
             if wk.spot != NONE && matches!(wk.doing, Doing::Walk) {
                 let spot = &walks.spots[wk.spot as usize];
@@ -1724,6 +1944,22 @@ impl Pedestrians {
                 };
                 let next = self.choose(walks, &wk, at, came);
                 let nl = &walks.links[next as usize];
+                // Onto a link that crosses a closed rail line right away: wait here, unless
+                // already over the track (then walk on off it).
+                let next_fwd = nl.a == at;
+                let end = if wk.fwd { len } else { 0.0 };
+                let over_track = self.rail.iter().any(|r| {
+                    r.link == came && end >= r.a0 - RAIL_HOLD_M && end <= r.a1 + RAIL_HOLD_M
+                });
+                if !over_track
+                    && self
+                        .rail_stop(walks, next, next_fwd, f32::NEG_INFINITY)
+                        .is_some_and(|stop| stop < 0.5)
+                {
+                    wk.s = len;
+                    wk.v = 0.0;
+                    break;
+                }
                 // Stepping off the curb onto a crossing: wait there first.
                 let from_kind = walks.links[came as usize].kind;
                 if nl.kind == LinkKind::Crossing

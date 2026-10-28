@@ -117,3 +117,54 @@ The app builds the lane graph and a `Traffic` (96-car pool over the world's traf
 - **Budgets.** The in-game pedestrian step (busy, the coast's busiest block): median under 0.5 ms a step in a debug build (best of three 600-step windows, asserted under `SKYWAVE_ENFORCE_BUDGETS`; 0.13 ms measured). The junction of the `coast-traffic-noon` golden with busy traffic and people: Deck and Medium within the ceilings in `docs/PERFORMANCE.md`.
 - **Tests** (`crates/app/src/peds.rs`, `crates/app/tests/traffic.rs`): scene setup builds the sidewalk graph, the figures and a warmed-up crowd on the coast, and a vehicle switch keeps it; the Traffic setting sets the pedestrian density at every level and round-trips through the settings file; every live person in reach is drawn as all 13 parts, in mesh order, over 240 steps with no allocation; off draws nobody, empties the pool and idles the sim, and on again everyone is drawn at their own height; driving 2 m/s forward and 5 m/s in reverse for 60 s each up and down 60 m of walk through the thickest crowd on the busiest block, through `App::update` and `App::scene_view`, nobody's origin, pelvis, torso or head is ever inside the car's footprint (hands and feet at most 1 cm, asserted under 5 cm), people step aside and hop, and every part of every figure stays within its bounds (no exploded figures); 10 s of busy traffic and people at night stepped and drawn every frame allocates nothing; the figures' meshes stay within their budget; the step budget above.
 - **Golden.** `coast-peds-noon`: busy people on the coast's busiest block at noon from the mid chase camera.
+
+## The train (`traffic::train`, `app::crossing`)
+The 2001 basin's freight train is a set piece (`docs/WORLD_GENERATION.md`, "Set pieces"): a locomotive and nine
+freight cars (boxcars, tank cars, covered hoppers; 170 m) on the rail line, and the gates at its grade crossings.
+Nothing it does can hurt anyone, by construction:
+- **Schedule.** It rests two minutes hidden in the wall at one end of the line, warns 15 s (the crossings near that
+  end close), runs the line at 11 m/s (about 25 mph) and rests at the other end, then comes back. A world's train
+  first warns 30 s after it loads.
+- **Crossings close well ahead of it.** A crossing (`PoiKind::GradeCrossing`, its gates `PropKind::CrossingGate`)
+  is *closed* from the moment the train's head comes within 260 m until its tail is 20 m past: its bells ring (a
+  synthesized ding, `audio::synth`) and lamps flash at once, its arms start down 4 s later and are down 8 s after
+  that, so they are down at least 11 s before the train can arrive; a crossing whose arms are not down yet is in
+  the train's way and it brakes for it. Once the tail is by, the arms rise over 8 s, and the crossing holds the
+  traffic and the people until they are all the way up.
+- **The traffic and the people keep off a closed crossing.** Each closed crossing's gate lines are barriers
+  (`traffic::Barrier`): an NPC car heading for one stops at it like a red light (a car already past it drives on
+  off the track), and no car spawns within 40 m of one. People are held off the track from 110 m (10 s of the
+  train) before the bells, so nobody is on it once a crossing closes, until its arms are all the way up again. A
+  walk counts as over the track within 3.5 m of the rail line's middle (the 3.05 m at which the train stops for
+  someone, and a gap), and is held while any crossing within 60 m of it is (two crossings close together both hold
+  it): people wait 1 m short of it, outside the train's reach; someone already over it turns back the way they
+  came while still heading for the track's middle, and walks on off it once past the middle. Nobody stands within
+  the train's reach, so it is never held up by someone waiting for it. Nobody spawns or stays at a spot within
+  12 m of one.
+- **It stops for anything in its way.** Each step it looks ahead its braking distance plus 30 m for the player's
+  car, the NPC cars (each as its real box, corners and all) and the people within its swept width and brakes to
+  stand 8 m short of the nearest; something closer than it can brake for (a car pulled onto the track right in
+  front of it), or any touch on its side (a box overlap with 0.1 m to spare), stops it dead where it stands. It is
+  a wall that moves and never moves into anyone.
+- **Against the player's car** each train body is a 10,000 t box moving at the train's own velocity, and each arm
+  that is more than half down a box at rest (`world::collide::hit_car`): a thud, never a launch, even glancing off
+  its side at 40° while it runs (and the touch stops it). A reset (`Drive::reset`) while the train is out on the
+  line never puts the car on the track: it takes the nearest spot along the lane at least 1.5 m clear of the
+  train's sides.
+
+The probe (`traffic/tests/train.rs`): busy traffic and busy pedestrians round a crossing while the train runs the
+whole line, counting person-steps and car-steps inside a train body, people within 2.4 m of the track's middle
+anywhere within 60 m of a crossing from the moment it closes until its arms are up, cars on the track at a
+crossing whose arms are down (with the train within 200 m), and the train's dead stops; all zero. So that every
+crossing is tested busy, while it is closed the probe sends a car down each lane into it every 5 s and a person
+at each walk over the track from each side; it asserts at least 20 s of car-steps within 80 m and of person-steps
+within 40 m of the closed crossing (every crossing of seeds 1–4 has a walk over the track). The ignored sweep runs every crossing of seeds 1–4 (20
+crossings, all zero, each run no more than a minute behind the train's time with nobody about, every crossing
+open again after). The ignored liveness probe plants people on every walk over the track at a crossing, every
+0.5 m from 0 to 4 m off the track's middle either side, walking either way, the moment it closes (seeds 1–4):
+nobody is ever inside the train, all are off the track within 2 s, and the train runs on time. A second ignored
+probe counts people inside NPC cars (which do not see people yet) near a
+crossing with and without the train: never more with it (16 against 113 person-steps at seed 2's first crossing).
+`app::crossing`'s tests: a full-throttle car stops at a lowered arm, a car driven into the train's side square or
+at ±40° while it runs stays outside it, is not launched and stops it, the train stands short of a car stopped on
+the track, and a reset beside the standing train puts the car clear of it.

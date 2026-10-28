@@ -2142,6 +2142,23 @@ fn music_folders_are_picked_from_the_audio_page() {
     assert!(h.app.deck().library().is_empty());
     h.app.music_picker_refused();
     assert_eq!(h.app.ui().toast(), Some(Toast::MusicNeedsKeyboard));
+    // Natively a picked folder's scan comes at once, one folder per sub-folder.
+    h.app.add_picked_music("Café", 0, Vec::new());
+    assert_eq!(h.app.ui().toast(), Some(Toast::MusicNoMp3s));
+    h.frame();
+    assert!(h.hud_text().contains("No MP3s in Cafe"));
+    h.app.add_picked_music("Tunes", 3, vec![library()]);
+    assert_eq!(
+        h.app.ui().toast(),
+        Some(Toast::MusicAdded {
+            tracks: 3,
+            kept: true
+        })
+    );
+    assert_eq!(h.app.deck().library().albums.len(), 2);
+    h.app.music_dialog_missing();
+    h.frame();
+    assert!(h.hud_text().contains("No folder dialog"));
 }
 
 impl Harness {

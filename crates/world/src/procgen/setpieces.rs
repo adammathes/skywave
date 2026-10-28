@@ -120,6 +120,8 @@ pub struct SetPieces {
     /// lips.
     pub ramps: Vec<[V2; 2]>,
     pub channel: Option<(V2, V2, f32)>,
+    /// Where the rail line crosses a road at grade, in order along it.
+    pub crossings: Vec<V2>,
 }
 
 impl SetPieces {
@@ -151,6 +153,9 @@ impl SetPieces {
         }
         for r in &self.ramps {
             push(r[0], PoiKind::ChannelRamp);
+        }
+        for &c in &self.crossings {
+            push(c, PoiKind::GradeCrossing);
         }
         out
     }
@@ -370,6 +375,36 @@ pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
     if let (Some(&c0), Some(&c1)) = (b.channel.first(), b.channel.last()) {
         s.channel = Some((V2::from_array(c0), V2::from_array(c1), b.channel_half_m.1));
     }
+    // The grade crossings: where the main line crosses a road's centerline (every road it
+    // meets crosses at grade), inside the place.
+    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
+    let mut crossings: Vec<(f32, V2)> = Vec::new();
+    let mut arc = 0.0;
+    for w in rail.windows(2) {
+        let (a, c) = (w[0], w[1]);
+        for e in &place.roads.edges {
+            for q in e.profile.windows(2) {
+                let (p0, p1) = (V2::new(q[0][0], q[0][2]), V2::new(q[1][0], q[1][2]));
+                if segments_distance(a, c, p0, p1) > 0.0 {
+                    continue;
+                }
+                // The crossing point: where the road's segment meets the rail's.
+                let d = c - a;
+                let side = |p: V2| d.turn(p - a);
+                let (s0, s1) = (side(p0), side(p1));
+                let x = p0.lerp(p1, s0 / (s0 - s1));
+                let at = arc + (x - a).dot(d.normalize());
+                if place.header.chunk_at([x.x, x.y]).is_some()
+                    && !crossings.iter().any(|&(_, y)| (y - x).length() < 1.0)
+                {
+                    crossings.push((at, x));
+                }
+            }
+        }
+        arc += (c - a).length();
+    }
+    crossings.sort_by(|x, y| x.0.total_cmp(&y.0));
+    s.crossings = crossings.into_iter().map(|c| c.1).collect();
     s.ramps = b
         .ramps
         .iter()
