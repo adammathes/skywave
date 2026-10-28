@@ -13,6 +13,7 @@ VehicleSpec(
   id: "gannet_gt", name: "Gannet GT", era: 1980s, year: 1981,          // the model year its archetype is dated to, 1900–2100
   built: 0,                                                                 // optional: the year an old car was built up with later parts (0: `year`)
   class: Sports,                                                            // Sports|Sedan|Wagon|Coupe|Pickup|Van|Hatch|Convertible|Luxury|Muscle|Utility
+  traffic_only: false,                                                      // optional: only NPC traffic drives it (the semi); never on the Vehicle page
   mass_kg: 1250, dims_m: (4.3, 1.75, 1.15), wheelbase_m: 2.45, track_m: 1.5,
   cg_height_m: 0.45, cg_fore_aft: 0.48,                                     // fraction of wheelbase from front axle
   engine: Engine(idle_rpm: 900, redline_rpm: 7200, torque_nm: [(1000, 180), (3000, 260), (5500, 290), (7000, 230)]),
@@ -52,6 +53,9 @@ or golden.
 | Longbow Convertible | 1986 | Appaloosa Convertible | 1987 | | |
 | Halberd Coupe | 1997 | Halberd Targa | 1997 | Tanager AWD | 1999 |
 | Destrier Coupe | 1969, built 2001 | Siskin Coupe | 2000 | | |
+| Sledge Box Truck | 1996 | Plover Sedan | 1997 | Sorrel Utility | 1998 |
+| Wren Minivan | 1999 | Percheron Crew Cab | 2000 | Anvil Semi | 2000 |
+| Linnet Hatch | 2001 | | | | |
 
 **`built`** (optional) dates an old car carrying later parts: the Destrier Coupe is a 1969 car with a
 2001 blower and wheels, so it weighs by its 1969 age in the 2001 world (0.105, above the hero floor) and
@@ -104,6 +108,7 @@ ShapeSpec(
             BodyKit, Blower, Targa, Underglow(Blue|Violet|Green), Badge(Diamond|Circle|Bar|Chevron)],
   color_details: [(1, WoodApplique)],  // optional: extra details for one palette entry
   roof: Roof(kind: Hardtop),           // optional (default Hardtop) | Convertible(top: Down|Up)
+  axles: [5.30, 6.45],                 // optional: more axles, x m from the nose, fixed wheels (trucks), at most 4
   palette: ["#b9bcc0", "#c4c7cc/#363b43", ...], // era body colors (sRGB), one chosen per instance;
                              // "#upper/#lower" is a two-tone split at the first crease with an accent pinstripe
   accent: "#1c1c1e",         // stripes, vinyl, badge fields
@@ -138,6 +143,13 @@ lays four glowing tubes under the car (one under each sill between the arches, o
 overhang), lit in their color at intensity 3, into `CarMesh::underglow`, not `lights`: it is its own
 lamp group, drawn only while its switch is on, and LOD2 (parked cars, which never light it) has none.
 
+**Fixed axles** (added with the 2001 traffic cars): `axles` lists more axles than the two road axles, each a pair of
+wheels at the track drawn into the body (`CarMesh::body`, not `wheels`), as twelve-sided tires with a
+flat rim face (eight-sided at LOD2), so a semi's tandems stay within the budget. Validation
+(`ShapeError::WheelPlacement`): at most four, inside the body, clear of the road axles and each other
+by a tire's diameter, and under a body at least that high off the ground. The road wheels and the
+sim's four contacts stay at `front_x` and `rear_x`.
+
 `build` / `build_lod` / `build_with(BuildOptions { color_index, lod, popups_up })` return a `CarMesh` of plain arrays (`MeshData`: positions, normals, uvs in meters for atlas-patterned panels, linear colors, emissive in the renderer's encoding, CCW triangles) in model space (`-z` forward, origin on the ground under the front axle; `body_offset(&VehicleSpec)` moves it to the sim's center-of-mass origin): `body` (shell and every opaque part), `wheels` (hub-local, right-side; left wheels turn 180° about `y`), `glass` (single-sided, facing out), `lights` (every lens with its emissive set as if lit), `interior`, `steering_wheel`, `wheel_centers`, `wheel_radius` and a `Cockpit` (eye, steering pivot and axis, radio display quad, up to 3 dials). Loft: 50–70 stations (30–40 at LOD1), a ring per station from `section`, smooth across rounded panels and hard at creases and seams (12 mm deep, 14 mm wide grooves so they catch light), raised 16 mm feature lines along the hood and trunk lid; arches cut with a lip; lights (headlamp and tail-lamp lenses with reflector facets in chrome surrounds with dividers, side markers, a plate lamp), bumper rub strips (chrome bumpers rubber, rubber bumpers gray), a chrome side molding along the crease with `ChromeTrim`, badges sized to read from the chase camera plus a trunk lock and a blank name plate on the tail, grille, bumpers, rounded mirrors, handles with key locks, wipers with arms, exhaust tips with a muffler, drip rails (`ChromeTrim`/`BlackTrim` hardtops), a fuel door and badges as small meshes; tires with a sidewall bulge and tread grooves, whitewalls when asked for, rims with real spokes, hex lug nuts and a brake drum behind. Two-tone paint is split by the crease's ring slots at LOD0 (its groove becomes the pinstripe) and by height at LOD1 and LOD2 (each ring point's height before the arches lift it, so the lower color runs over the arches); body-colored bumpers and arch lips take the lower color. LOD1 drops seams, small parts and interior detail and turns rims into discs.
 
 The cabin (`interior.rs`): a two-tone dash (lighter padded top, `applique` band across the face with grain lines or a brushed sheen and bright edges, a glovebox), a curved brow over the cluster, dials with chrome bezel rings, a dark inner wall, an odometer window and a strip of warning lamps (two square side gauges beside a single dial), louvered vents with vanes at the dash ends and in the stack, a radio with presets, cassette door and knobs, rotary climate knobs, ashtray and lighter; a console with a bright gate, the shifter's boot and knob (a lit P R N D strip unless `manual`), cup wells and a piped armrest lid; a steering wheel with a padded horn pad, bright spoke inserts, a column shroud with the ignition lock and stalks with knobs; bucket seats with an `insert` panel between rolled bolsters, `piping` along the seams, pleats, head restraints on posts, the recliner knob, rails and belts; a pleated, piped rear bench; door cards with an insert panel, an applique strip, a padded armrest, a pull handle, the release lever, a window crank, a speaker grille, a map pocket and the lock knob; floor mats, sill plates, parcel-shelf speakers, a rounded mirror with its day/night tab, padded visors (a vanity mirror on the passenger's), a dome lamp, a grab handle, and pedals on arms with ribbed pads (a clutch when `manual`). Dial faces are backlit in the `display` color and glow with the instruments at night; the app's needles are white with red tips.
@@ -171,10 +183,17 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Tanager AWD | 11,662 | 7,116 | 3,180 | 2,064 |
 | Destrier Coupe | 13,080 | 7,124 | 3,320 | 2,100 |
 | Siskin Coupe | 12,364 | 7,180 | 3,550 | 2,442 |
+| Plover Sedan | 11,772 | 7,212 | 3,294 | 2,190 |
+| Sorrel Utility | 12,062 | 7,120 | 3,466 | 2,234 |
+| Wren Minivan | 12,086 | 7,176 | 3,594 | 2,202 |
+| Percheron Crew Cab | 12,028 | 7,308 | 3,412 | 2,084 |
+| Linnet Hatch | 11,202 | 7,196 | 3,402 | 2,214 |
+| Sledge Box Truck | 11,832 | 6,792 | 3,584 | 2,184 |
+| Anvil Semi | 12,930 | 6,460 | 4,052 | 2,416 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
-Parked cars (`app::propinst`) are LOD1 of the built-in shapes within 80 m and LOD2 beyond, drawn out to 280 m. The Place gives each a `VehicleClass`; `propinst::PARKED` turns it into a weighted pick among shapes within half a meter of that class's collision box (`world::props::parked_car_size`): sporty cars the Gannet, Halcyon, Pipit, Longbow Coupe or Appaloosa GT; sedans the Bancroft, Prescott, Homestead or Buckboard; wagons the Homestead, Meadow, Drayman or Buckboard; coupes the Seabreeze, Halcyon or Burro; luxury cars the Regent or Bancroft (and a list for each other class but `Utility`, which parks as the wagon). The exotics (Basilisk, Avocet), the sports cars' open versions and the 2001 hero cars never park, and NPC traffic draws from the same fourteen shapes (`vehicles::TRAFFIC_SHAPES`, the first fourteen of `BUILTIN_SHAPES`): they are the player's. Each place parks a shape in at most six paints, two from its palette and four era colors drawn by the era's weights from the place seed, which keeps the parked-car meshes at 24.8 MB on the coast (`docs/PERFORMANCE.md`). Their paint is the car's own palette for a third of them and otherwise the era's street colors, `shape::ERA_1980S_PAINT` (weighted: tan, white, silver and burgundy most, then browns, blues, black, red, the two-tones silver over blue and champagne over brown, greens, creams, gold), passed as `BuildOptions::paint`; each instance gets a slight dust and wear tint.
+Parked cars (`app::propinst`) are LOD1 of the built-in shapes within 80 m and LOD2 beyond, drawn out to 280 m. The Place gives each a `VehicleClass`; `propinst::PARKED` turns it into a weighted pick among shapes within half a meter of that class's collision box (`world::props::parked_car_size`): sporty cars the Gannet, Halcyon, Pipit, Longbow Coupe or Appaloosa GT; sedans the Bancroft, Prescott, Homestead or Buckboard; wagons the Homestead, Meadow, Drayman or Buckboard; coupes the Seabreeze, Halcyon or Burro; luxury cars the Regent or Bancroft (and a list for each other class but `Utility`, which parks as the wagon). The exotics (Basilisk, Avocet), the sports cars' open versions and the 2001 hero cars never park: they are the player's. In 2001 the lists also hold, at their ends (so the 1984 coast, which has none of them, picks as before), the 2001 traffic cars that fit a stall: the Linnet with the sporty cars, the Plover, Sorrel, Wren and Percheron with the sedans and wagons, the Plover with the coupes and luxury cars; the box truck and the semi are too long for a stall and never park. Each entry's weight is times the world's era weight of the shape and times its weight in the zone the car stands in (`vehicles::ZONE_WEIGHTS`, below). NPC traffic draws from `vehicles::TRAFFIC_SHAPES`: the fourteen everyday 1980s shapes (the first fourteen of `BUILTIN_SHAPES`) and the seven 2001 traffic cars; a world drives the ones its years allow, so the coast drives its fourteen in their old order. Each place parks a shape in at most six paints, two from its palette and four era colors drawn by the era's weights from the place seed, which keeps the parked-car meshes at 24.8 MB on the coast (`docs/PERFORMANCE.md`). Their paint is the car's own palette for a third of them and otherwise the era's street colors, `shape::ERA_1980S_PAINT` (weighted: tan, white, silver and burgundy most, then browns, blues, black, red, the two-tones silver over blue and champagne over brown, greens, creams, gold), passed as `BuildOptions::paint`; each instance gets a slight dust and wear tint.
 
 In the game (`app::car`): LOD0 and LOD1 are built when a car is first driven (at startup, or on the first switch to it from the pause menu's Vehicle page or `VehicleNext`, see `docs/CONTROLS_INPUT.md`), with pop-ups down and up, and kept for the session: switching back reuses its mesh ids, so a session registers at most one set per built-in car. Another paint
 (the Vehicle page's paint chooser; the `paint` setting and scene key) registers only what the paint changes,
@@ -218,6 +237,38 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `destrier_coupe` | late-60s big-block muscle notchback with a blower through the hood, chrome bumpers, deep-dish rims, rally stripes on some | Muscle | 1,660 kg, ~315 kW blown V8, 4-speed, RWD; lights up its rear tires off the line under any assists, leans, wags its tail; 6.2 s, 59 m/s, 0.89 g |
 | `siskin_coupe` | 2000 front-drive compact coupe built up as a tuner: body kit, tall wing, twin-spoke rims, blue underglow | Coupe | 1,180 kg, ~140 kW turbo four, 5-speed, FWD; sharp, high-revving, tucks its nose on a lift; 6.5 s, 62 m/s, 1.06 g |
 
+The 2001 traffic cars (`docs/backlog/INLAND2001.md` item 6), the basin's everyday cars: they drive and park in
+Inland Basin and never in an earlier world. All but the semi are player-drivable and list at the end of the
+Vehicle page in 2001; the semi is `traffic_only`.
+
+| id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
+|---|---|---|---|
+| `plover_sedan` | late-90s rounded front-drive mid-size family sedan: low oval-lamped nose, arched roof, short tall deck | Sedan | 1,340 kg, ~110 kW four, 4-speed, FWD; quiet, soft, safe understeer; 9.8 s, 56 m/s, 0.88 g |
+| `sorrel_utility` | late-90s mid-size four-door SUV: tall rounded box, roof rails, gray cladding | Utility | 1,820 kg, ~130 kW V6, 4-speed, RWD; tall, leaning, slow steering; 10.4 s, 43 m/s, 0.72 g |
+| `wren_minivan` | late-90s one-box front-drive minivan with a sliding side door | Van | 1,760 kg, ~127 kW V6, 4-speed, FWD; roomy, soft, kind understeer; 11.1 s, 46 m/s, 0.75 g |
+| `percheron_pickup` | 2000 full-size pickup, four-door crew cab, long bed, chrome grille and bumpers | Pickup | 2,280 kg, ~200 kW V8, 4-speed, RWD; strong, heavy, light rear; 8.4 s, 51 m/s, 0.69 g |
+| `linnet_hatch` | 2001 five-door compact hatchback, short and tall-glassed | Hatch | 1,060 kg, ~85 kW four, 5-speed, FWD; light, eager, quick steering; 9.6 s, 54 m/s, 0.91 g |
+| `sledge_box_truck` | late-90s medium-duty box truck: short-hood cab and a tall, wider cargo box | Van | 5,600 kg, ~230 kW V8, 4-speed, RWD; slow, tall, patient; 17.2 s, 30 m/s, 0.61 g |
+| `anvil_semi` | late-90s conventional tractor with a sleeper and a dry-van trailer, as one body on tandems (`axles`) | Van | 24 t; traffic only, on the freeway; 71 mph flat out, never driven |
+
+Traffic (`traffic::ShapeRule`, from `app::npc::shape_rule`) weighs each shape by the zone of the lane a new car
+starts on (freeway lanes count as `Highway`), times its era weight; parked cars use the same table. The 1980s
+cars weigh 2 everywhere (by their age alone); the 2001 cars (`vehicles::ZONE_WEIGHTS`, zones downtown, strip,
+residential, suburb, industrial, commercial, park, beach, farmland, hills, highway, water):
+
+| Car | Weights | Car | Weights |
+|---|---|---|---|
+| Plover | 3 3 3 3 2 3 2 2 2 2 3 2 | Percheron | 1 1 2 2 5 1 1 1 4 3 2 1 |
+| Sorrel | 2 4 4 4 1 2 2 2 2 3 2 2 | Linnet | 3 3 2 2 1 3 2 2 1 1 2 2 |
+| Wren | 1 4 4 4 1 2 2 2 1 2 2 1 | Sledge | 2 1 1 1 5 2 1 1 1 1 1 1 |
+| Anvil (semi) | highway 4, else 0 | | |
+
+A shape weighed only on freeway lanes keeps to them at every turn that allows it. Bodies longer than 6 m (the
+box truck, the semi) are followed and spaced at their own length and width; every other car keeps the old 4.6 m
+(`traffic::cars::CAR_LEN_M`), so the coast's traffic hash does not move. In 2001 the 80s cars still drive at their
+age weight, about two cars in five. The basin's parked- and traffic-car meshes are 36.3 MB on the coast's
+place (the coast's own 24.8 MB).
+
 Every automatic for now (manual mode comes later). The four sports cars (the Basilisk, the Avocet, the Longbow and the Appaloosa) each have an open version on the same chassis and engine, a little heavier and draggier, so a little slower everywhere. Each car has its own cabin palette (`interior.colors`, insert, piping, applique and dial glow) and its own body palette, which a third of its parked instances wear.
 
 Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, tuners; 10s: hybrid wedges; 20s: EVs with instant torque). The 2001 heroes are the first of them.
@@ -227,6 +278,7 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Straight-line: 0–60 mph times within a band per car (`tests/roster.rs`: Sports 4–8 s, Wagon 10–16 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, and a band for each roster car); top speed ordering Sports > Coupe > Sedan > Wagon > Van (every car of a class beats every car of the next).
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Gannet, Longbow) beats both Appaloosas.
+- 2001 traffic cars: each in its band and its class's orderings like the rest (the semi, traffic only, is not driven).
 - 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s), the Tanager under 0.1 with every assist off.
 - Distinct: all of them differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.

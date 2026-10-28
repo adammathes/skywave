@@ -72,6 +72,8 @@ truck and semis on the freeway.
 As built (M8 #4): the grand tourer is the Halberd Coupe and its Halberd Targa, the AWD coupe the
 Tanager AWD, the muscle coupe the Destrier Coupe (a 1969 car `built` up in 2001, so the 1984 world never
 shows it) and the tuner the Siskin Coupe (body kit, tall wing, aftermarket rims, underglow).
+The traffic cars (M8 #6) are the Plover Sedan, Sorrel Utility, Wren Minivan, Percheron Crew Cab, Linnet
+Hatch, Sledge Box Truck and the Anvil Semi, which only traffic drives, on the freeway.
 
 Set pieces (places, not missions; nothing can be hurt): the night street race (a four-wide start
 line painted on an industrial boulevard, spectator cars and a crowd that clears, three opponent
