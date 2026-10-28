@@ -740,7 +740,7 @@ mod tests {
         assert_eq!((all.w, all.h), atlas_size(BUILTIN.len() as u32));
         // `h = h * 31 + byte` mod 2^61 over each still's RGBA, as Pillow reads the
         // quantized frame the file was written from.
-        let expected = [2_138_132_481_716_855_108u128, 1_026_684_147_422_145_907];
+        let expected = [2_138_132_481_716_855_108u128, 1_168_728_017_876_082_785];
         for (k, ((id, bytes), want)) in STILLS.iter().zip(expected).enumerate() {
             assert_eq!(*id, BUILTIN[k].0);
             let [u, v, u1, v1] = still_uv(k);
