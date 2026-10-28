@@ -43,28 +43,24 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 02:28 UTC, coordinator handed off to save quota)
-The previous coordinator stopped mid-wave. #42 (the Deck) merged at 00:18, #44 (handling) at
-00:26, #37 (parking lots) at 00:49 and #45 (2001 traffic cars) at 02:28 (fc812b9); two builder
+### Resume here (2026-10-28 03:16 UTC, coordinator handed off to save quota)
+The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
+(parking lots), #45 (2001 traffic cars) and #20 (map edges, 03:16, 33cfd2b) merged; two builder
 sessions are running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
 the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
 sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
-- **#20 map edges** (`m2/map-edges`, session_0121vThBxy2WQvcKQzuoJpnE, open since 04:38, $88):
-  refreshed onto #37, then CI red on `macro_map::generation_fits_the_budget` (159.5 ms vs the
-  150 ms ceiling): a real slowdown from the edge pass, ~65 → ~89 ms locally on main vs the
-  branch; told to make it cheaper or re-measure the ceiling in its own commit. Goldens accepted; the native junction gate is being made to hold the world still while
-  streaming, gates re-measured in their own commit, junction goldens re-sited to 737.1,464.8
-  phase=1440 (fallback 945.7,375.6); merge on green after a look at the two junction goldens.
-  It unblocks the basin region template (board `m8-basin`).
 - **Hero cars part 2** (`m8/heroes-2`, session_0121vThDUECPkM7tAPwhVPKP, M8 #5, dispatched
   02:42 on the owner's word): four cars after #43's pattern; it messages the coordinator when its
   PR is green; a short review (names, era filter, budgets, handling bands) then merge.
-- **Owner's queue after #20:** the region template and grammar (board `m8-basin`, M8 #2 and #3),
-  which also renames the 2001 world from "Inland Basin" to **Mirage Valley** (title, scenario id
-  with a migration of the saved choice, docs); then set pieces (M8 #7, needs #2, #3 and #4).
+- **Mirage Valley** (`m8/mirage-valley`, session_0121vThCxCfDJvhSt6h7cdhk, M8 #2 and #3,
+  dispatched 03:16): two PRs, first the rename of the 2001 world from "Inland Basin" to Mirage
+  Valley (id `mirage_valley_2001`, old id migrated) with the region template `socal_basin`, then
+  the grammar on `m8/mirage-valley-grammar`. World generation: probe-review determinism and the
+  new goldens before merging. Messages the coordinator when each PR is green.
+- **Next on the owner's word:** set pieces (M8 #7), once #2, #3 and #4 are on main.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
@@ -128,12 +124,14 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   Continuous, readout top right, Back held + d-pad on the pad, resumes next session); handling feel (#44, NOTES 17: stronger yaw damping in Arcade and Light,
   exotics' oversteer bias halved, no spins in Arcade or Light on any car, Off stays lively, the
   Destrier tuned into the bands, the Halberds lively with no assists); parking lots (#37, B10: front, alley and beach lots from the
-  grammar, parked cars by the hour and held near the player, golden `coast-beach-lot-noon`); the 2001 traffic cars (#45, M8 #6: Plover sedan, Sorrel utility,
+  grammar, parked cars by the hour and held near the player, golden `coast-beach-lot-noon`); natural map edges (#20: a sea horizon, walls of hills and
+  mountains, a highway that loops back; every coast fixture re-sited; the edge pass kept inside
+  the macro-map budget); the 2001 traffic cars (#45, M8 #6: Plover sedan, Sorrel utility,
   Wren minivan, Percheron crew cab, Linnet hatch, Sledge box truck, Anvil semi; weights by zone
   for traffic and parking; the box truck and semi never park, the semi keeps to freeways; per-car
   length in following and junction room; none in 1984; fixed extra axles in the shape DSL); the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: natural map edges (#20). Its state is in "Resume here" above. Paused: NPC cars see
+- Open PRs: none; building: hero cars part 2 and Mirage Valley (see "Resume here"). Paused: NPC cars see
   pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
   comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
@@ -142,7 +140,7 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: merge #20; NPC cars see pedestrians (board order 15, after #38); M8 waves
+- Next: hero cars part 2, Mirage Valley (template, then grammar), set pieces; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
