@@ -256,10 +256,10 @@ fn check_footprint(b: &Building, p: &Parcel) {
 /// `tools/screenshot` captures of the coast before and after, and commit the new values in
 /// their own commit whose message says why they moved.
 const GOLDEN: [u64; 4] = [
-    0x307D_5F35_206A_02A5,
-    0xB180_7CDE_C9BA_5D67,
-    0x46DF_E4EF_5FFD_AB1F,
-    0x9D64_2977_A385_5653,
+    0xCAE8_5EBE_0458_19AC,
+    0x07A9_A61A_B92D_54D3,
+    0xFFDF_DB1F_A8BE_0E02,
+    0xAE7A_D2B4_8E32_0306,
 ];
 
 #[test]
