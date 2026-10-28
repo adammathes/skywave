@@ -12,8 +12,11 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Camera cycle | button | C | Y / Triangle |
 | Look (cockpit/chase) | axis pair | Mouse (hold right button) | Right stick |
 | Look back | button | Q | Right stick click |
-| Radio next / prev | buttons | ] / [ | D-pad right / left |
-| Radio off | button | \ | D-pad down |
+| Radio next / prev; deck next / previous track (`RadioNext`, `RadioPrev`) | buttons | ] / [ | D-pad right / left |
+| Radio off; deck play/pause (`RadioOff`) | button | \ | D-pad down (tap) |
+| Radio / deck (`DeckSource`) | button | ' | Back / Share held + D-pad down (also Audio › Source) |
+| Deck next / previous album (`AlbumNext`, `AlbumPrev`) | buttons | P / O | Back / Share held + D-pad right / left |
+| Deck mode (`DeckMode`) | button | ; | Back / Share held + D-pad up (also Audio › Deck mode) |
 | Headlights | button | L | D-pad up (tap) |
 | High beams (`HighBeams`) | button | K | D-pad up held 1 s |
 | Underglow (`Underglow`) | button | U | — |
@@ -89,6 +92,15 @@ between until the next dusk or dawn; Manual leaves them to the switch. Brake lam
 brakes are asked for anything: the brake pedal, or the throttle while reversing (reversing on the brake
 pedal and coasting leave them dark), and whenever the car stands with the brake held, whatever gear
 brake-to-reverse has picked.
+The deck (the player's own music, `docs/AUDIO_RADIO.md`) shares the radio's keys: while it is the source,
+next/previous are tracks (previous within 3 s of a track's start goes back a track, later it restarts it)
+and the power key plays and pauses. The source key (`'`, a free key beside the radio's `[` `]` `\`)
+switches between them: the one playing stops and the other starts. On the pad D-pad down stays the power
+(play/pause) and right/left the tracks; with Back / Share held (already the map's and the time scrub's
+modifier, so it opens no map) the D-pad is the deck's: down the source, right and left the albums, up the
+mode. The d-pad itself stays a plain button, so the menus and the controls card read it on press as
+before. The pause menu's Audio page has Source, Deck mode and Library (every album as "Artist - Album",
+select to play it) too. O and P on the radio put the tape in: the deck becomes the source on that album.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
 

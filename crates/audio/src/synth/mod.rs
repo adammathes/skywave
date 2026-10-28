@@ -1,6 +1,6 @@
 //! The synthesized sounds (`docs/AUDIO_RADIO.md`, "Engine and world sound"): no recorded
 //! audio anywhere. [`engine`] is the car's engine, [`world`] everything else the car and the
-//! place make, [`tune`] the radio's dial between stations. All read one [`AudioParams`], a
+//! place make, [`tune`] the radio's dial between stations, [`deck`] the deck's mechanism. All read one [`AudioParams`], a
 //! plain struct the app fills every frame from the car's sim state, the collider, the place
 //! and the radio.
 //!
@@ -8,11 +8,13 @@
 //! parameter update (the native audio thread reads them without waiting) never loses one,
 //! and one that sees the same update twice never doubles it.
 
+pub mod deck;
 pub mod dsp;
 pub mod engine;
 pub mod tune;
 pub mod world;
 
+pub use deck::DeckSynth;
 pub use engine::{EngineProfile, EngineSynth};
 pub use tune::TuneSynth;
 pub use world::WorldSynth;
@@ -124,8 +126,13 @@ pub struct AudioParams {
     /// Counts every tune of the radio so far ([`crate::Radio::tunes`]): each new one plays
     /// the dial sweep between stations...
     pub tunes: u32,
-    /// ...at this level, `[0, 1]`: the radio volume setting.
+    /// ...at this level, `[0, 1]`: the radio volume setting (the deck's click too).
     pub tune_volume: f32,
+    /// Counts every transport press of the deck that moves its mechanism
+    /// ([`crate::deck::Deck::clicks`]): each new one plays its click...
+    pub deck_clicks: u32,
+    /// ...of this mechanism: 0 a tape deck, 1 a CD player, 2 an MP3 player.
+    pub deck_kind: u8,
 }
 
 impl Default for AudioParams {
@@ -159,6 +166,8 @@ impl Default for AudioParams {
             traffic: [TrafficVoice::default(); TRAFFIC_VOICES],
             tunes: 0,
             tune_volume: 1.0,
+            deck_clicks: 0,
+            deck_kind: 0,
         }
     }
 }

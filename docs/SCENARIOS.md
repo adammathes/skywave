@@ -56,6 +56,11 @@ drag strip at the edge, a hills overlook at night with the city grid lit below, 
 leaving town past truck stops. Night is the default time: sodium-orange street lamps, neon
 underglow on the tuner cars, a lit race start line with a crowd that steps aside.
 
+The deck (the player's own music, `docs/AUDIO_RADIO.md`) is named by the scenario's year:
+**TAPE** for worlds up to 1989 (Pacific Shore 1984, Lake City 1977, the 1986 suburb), **CD** for
+1990–2009 (Inland Basin 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
+worlds renames it and keeps the library.
+
 Era rules: the roster is filtered by year. A scenario has `years: (min, max)`; a car has a
 `year`. Cars newer than the scenario's `max` never appear, in traffic, parked or on the vehicle
 page. Older cars appear with weights that fall off with age (a 1984 coupe is rare but present in

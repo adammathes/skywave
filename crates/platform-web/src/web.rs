@@ -60,16 +60,44 @@ struct State {
     radio: Option<RadioGlue>,
     /// The radio's commands of this frame (reused).
     radio_cmds: Vec<RadioCommand>,
-    /// What the glue was last told the radio's state is: kind, station, live, blocked.
-    radio_reported: (u8, Option<usize>, bool, bool),
+    /// What the glue was last told the radio's state is: kind, station, live, blocked,
+    /// and the deck's: source, track changes, mode, playing, live, blocked.
+    radio_reported: (u8, Option<usize>, bool, bool, DeckKey),
     /// The page's music folder glue, when it has one.
     music: Option<MusicGlue>,
     /// Whether the glue last said the folders must be picked again.
     music_again: bool,
 }
 
+/// What the page is told changed about the deck: source, track changes, mode, playing,
+/// live, blocked.
+type DeckKey = (
+    audio::deck::Source,
+    u32,
+    audio::deck::Mode,
+    bool,
+    bool,
+    bool,
+);
+
+/// A state the page was never told: the next report goes out whatever it is.
+const NOT_REPORTED: (u8, Option<usize>, bool, bool, DeckKey) = (
+    u8::MAX,
+    None,
+    false,
+    false,
+    (
+        audio::deck::Source::Radio,
+        u32::MAX,
+        audio::deck::Mode::Normal,
+        false,
+        false,
+        false,
+    ),
+);
+
 /// `window.skywaveMusic` (web/index.html): the user's music folders, picked or dropped.
-/// The files stay in the page; the game only sees each file's key, name, size and first
+/// The files stay in the page; the game only sees each file's key, path, size and first
 /// bytes (for its tags), and plays a file by its key through the radio player.
 struct MusicGlue {
     this: JsValue,
@@ -105,30 +133,37 @@ impl MusicGlue {
         Self::get(&self.this, "again").as_bool().unwrap_or(false)
     }
 
-    /// The next folder read: its id, name, whether to announce it, whether the page will
-    /// remember it, and its tracks.
-    fn take_folder(&self) -> Option<(String, String, bool, bool, Vec<audio::Track>)> {
+    /// The next folder read, whether to announce it and whether the page will remember
+    /// it.
+    fn take_folder(&self) -> Option<(audio::deck::Folder, bool, bool)> {
         let f = self.take_folder.call0(&self.this).ok()?;
         if f.is_null() || f.is_undefined() {
             return None;
         }
-        let path = Self::get(&f, "path").as_string().unwrap_or_default();
+        let id = Self::get(&f, "path").as_string().unwrap_or_default();
         let name = Self::get(&f, "name").as_string().unwrap_or_default();
         let announce = Self::get(&f, "announce").as_bool().unwrap_or(false);
         let kept = Self::get(&f, "kept").as_bool().unwrap_or(false);
+        let mixtape = Self::get(&f, "mixtape").as_bool().unwrap_or(false);
         let files = js_sys::Array::from(&Self::get(&f, "files"));
-        let tracks = files
+        let files = files
             .iter()
             .map(|file| {
                 let key = Self::get(&file, "key").as_string().unwrap_or_default();
-                let name = Self::get(&file, "name").as_string().unwrap_or_default();
+                let path = Self::get(&file, "rel").as_string().unwrap_or_default();
                 let size = Self::get(&file, "size").as_f64().unwrap_or(0.0) as u64;
                 let bytes = |k| js_sys::Uint8Array::new(&Self::get(&file, k)).to_vec();
                 let probe = audio::music::probe(&bytes("head"), &bytes("audio"), size);
-                audio::Track::new(key, &name, &probe)
+                audio::deck::FileInfo { key, path, probe }
             })
             .collect();
-        Some((path, name, announce, kept, tracks))
+        let folder = audio::deck::Folder {
+            id,
+            name,
+            mixtape,
+            files,
+        };
+        Some((folder, announce, kept))
     }
 }
 
@@ -740,7 +775,7 @@ pub async fn run(
         corona_reported: false,
         radio,
         radio_cmds: Vec::with_capacity(8),
-        radio_reported: (0, None, false, false),
+        radio_reported: NOT_REPORTED,
         music,
         music_again: false,
     }));
@@ -1096,9 +1131,8 @@ impl State {
             for path in self.app.take_forgotten_music() {
                 let _ = music.forget.call1(&music.this, &JsValue::from_str(&path));
             }
-            while let Some((path, name, announce, kept, tracks)) = music.take_folder() {
-                self.app
-                    .add_music_folder(&path, &name, tracks, announce, kept);
+            while let Some((folder, announce, kept)) = music.take_folder() {
+                self.app.add_music_folder(folder, announce, kept);
             }
             let again = music.again();
             if again != self.music_again {
@@ -1115,7 +1149,12 @@ impl State {
             self.app.radio_event(event);
         }
         self.radio_cmds.extend(self.app.radio_commands());
-        let name = self.app.radio().channel().map_or("", |c| c.name.as_str());
+        let name = match self.app.source() {
+            audio::deck::Source::Radio => {
+                self.app.radio().channel().map_or("", |c| c.name.as_str())
+            }
+            audio::deck::Source::Deck => self.app.deck().track().map_or("", |t| t.label.as_str()),
+        };
         for cmd in &self.radio_cmds {
             glue.send(cmd, name);
         }
@@ -1127,10 +1166,24 @@ impl State {
             audio::RadioState::Playing { .. } => 2,
             audio::RadioState::Error { .. } => 3,
         };
-        let key = (kind, r.station(), r.is_live(), r.is_blocked());
+        let d = self.app.deck();
+        let deck = (
+            self.app.source(),
+            d.changes(),
+            d.mode(),
+            d.is_playing(),
+            d.is_live(),
+            d.is_blocked(),
+        );
+        let key = (kind, r.station(), r.is_live(), r.is_blocked(), deck);
         if key != self.radio_reported {
             let text = crate::radio_state_text(r);
-            let _ = glue.report.call1(&glue.this, &JsValue::from_str(&text));
+            let readout = self.app.readout_text();
+            let _ = glue.report.call2(
+                &glue.this,
+                &JsValue::from_str(&text),
+                &JsValue::from_str(&readout),
+            );
             self.radio_reported = key;
         }
     }
@@ -1272,7 +1325,7 @@ impl State {
             Renderer::with_options(&self.device, &self.queue, self.config.format, size, options);
         load_renderer(&mut self.renderer, &self.app);
         self.stream_idle = None;
-        self.radio_reported = (u8::MAX, None, false, false);
+        self.radio_reported = NOT_REPORTED;
     }
 
     /// Reports, once each, how the corona check came out and whatever the device said
