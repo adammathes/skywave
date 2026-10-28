@@ -13,7 +13,7 @@ Scenario(
     grammar: "socal_basin_2001.ron",
     radio: "1984_socal",
     palette: "sodium_night",
-    default_time: (22, 30),
+    default_time: (15, 30),
     default_vehicle: "halberd_coupe",
     years: (1995, 2001),
     heroes: [
