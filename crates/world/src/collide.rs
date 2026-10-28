@@ -1385,6 +1385,36 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                     lot: NO_LOT,
                 });
             }
+            // The tree's post and the board's legs; paint lies flat on the road.
+            PropKind::StartTree => posts.push(post(0.42, 3.25)),
+            PropKind::TimingBoard => {
+                let across = p.dir.left();
+                for x in [-2.2f32, 2.2] {
+                    posts.push(Post {
+                        c: arr(p.pos + across * x),
+                        ..post(0.12, 5.0)
+                    });
+                }
+            }
+            PropKind::StripLine { .. } => {}
+            PropKind::TunnelPiece { .. }
+            | PropKind::GuardRail { .. }
+            | PropKind::ChainLink { .. }
+            | PropKind::CrewGarage { .. }
+            | PropKind::TacoStand { .. }
+            | PropKind::PicnicTable => {
+                let mut slabs = Vec::new();
+                crate::setpieces::slabs(p, &mut slabs);
+                boxes.extend(slabs.iter().map(|s| BoxSolid {
+                    c: arr(s.c),
+                    u: arr(s.u),
+                    half: s.half,
+                    y0: s.y0,
+                    y1: s.y1,
+                    kind: p.kind,
+                    lot: NO_LOT,
+                }));
+            }
         }
     }
     (posts, boxes)

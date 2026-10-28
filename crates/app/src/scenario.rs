@@ -224,13 +224,15 @@ pub struct RosterCar<'a> {
 /// the ones it does not have; a traffic-only car is weighed but never in `cars`), and the
 /// same weights per built-in body shape, in
 /// [`vehicles::BUILTIN_SHAPES`] order (the heaviest car of that shape's; 0 for a shape no
-/// allowed car has), which is what traffic and parked cars index.
+/// allowed car has), which is what traffic and parked cars index; and the built-in shapes
+/// of its hero cars it has, in the order the scenario lists them (a set piece's hero cars).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lineup {
     pub cars: Vec<usize>,
     pub names: Vec<&'static str>,
     pub weights: Vec<u32>,
     pub shapes: Vec<u32>,
+    pub heroes: Vec<usize>,
 }
 
 impl Lineup {
@@ -261,12 +263,24 @@ impl Lineup {
                     .max()
                     .unwrap_or(0)
             })
+            .collect::<Vec<u32>>();
+        let heroes = s
+            .heroes
+            .iter()
+            .filter_map(|h| {
+                let i = roster.iter().position(|c| c.id == h.as_str())?;
+                let k = vehicles::BUILTIN_SHAPES
+                    .iter()
+                    .position(|(file, _)| *file == roster[i].shape)?;
+                (weights[i] > 0 && shapes[k] > 0).then_some(k)
+            })
             .collect();
         Lineup {
             names: cars.iter().map(|&i| roster[i].name).collect(),
             cars,
             weights,
             shapes,
+            heroes,
         }
     }
 

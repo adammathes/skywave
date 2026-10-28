@@ -136,11 +136,56 @@ lies under all ground. The macro stage, in the frame of the hills' side:
 
 A non-freeway lane through a right of way takes the zone at either end of it (else industry's), so a shape
 weighed only for freeway lanes (the semi) never starts on a road across the rail line or the channel.
-Set pieces (`docs/backlog/MIRAGE2001.md` item 7) will be `Landmark` kinds placed on this layout (the
-`BasinPlan`): the race start on the boulevard, the drag strip on the runway, the channel's ramps, the grade
-crossings, the overlooks, the desert leg. Tests: `world/tests/basin.rs` (seeds 1–4 pinned; every road in the
+Set pieces (below) are landmark kinds placed on this layout. Tests: `world/tests/basin.rs` (seeds 1–4 pinned; every road in the
 playable rectangle, the freeway one chain ending at grade, overpasses, a loop, the bridges, the crossings,
 the runway, a road to an overlook).
+
+## Set pieces
+A basin's set pieces (`docs/backlog/MIRAGE2001.md` item 7) are places and NPC behaviour, never missions:
+no scores, no targets, no timers that press the player, and nothing can be hurt. Each is a landmark kind
+(`place::PoiKind`: `DragStrip`, `ChannelRamp`, `Tunnel`, `CrewGarage`, `TacoStand`, and the basin's
+`Overlook`s, now in the Place's points of interest, so the map names them and walkers gather at the ones by a
+walk) sited by `procgen::setpieces::site` on the basin's layout once its buildings stand, with its props and
+lights laid by the detailing (`procgen::setpieces::dress`; meshes and collision boxes in `world::setpieces`).
+Nothing else the detailing places stands on a set piece's ground. A place without a basin has none, so the
+coast's Place is unchanged.
+- **The tunnel.** The straight stretch of the freeway nearest downtown, 128 m long, that no other road (ramp,
+  overpass or street, asphalt and walk) comes within 2 m of and no building within 3 m of its walls: roofed
+  over as a cut-and-cover box (`TunnelPiece`s of 16 m following the road's grade, 25 m between the walls, 6 m
+  clear): glazed white tile over a teal band and a trim line, a lamp strip under the ceiling along each side,
+  always lit, and a `Flood` light every 16 m each side; a portal's headwall at each end. Its walls are collider
+  boxes. On seeds 1–3 it is on the freeway's straight leg east of downtown; on seed 4, whose straight leg has
+  no clear stretch, on the desert leg.
+- **The crew garage.** A site 24 m wide and 25 m deep square to a road, behind its walk, over industrial lots
+  (one or several side by side) and clear of every other road; the one nearest the boulevard. The lots it
+  covers lose their buildings. A three-bay block garage (`CrewGarage`) 9 m back from the property line: bays
+  open, roll-up doors drawn up, a pale lit interior with tubes (`Flood` lights), a backlit box sign over the
+  bays lettered with an invented name and a garage trade from the 2001 lexicon (`GARAGE`, `BODYWORK`, `WHEELS`,
+  `TINT`, `CAR AUDIO`). Three `HeroCar`s: two nosed out in the outer bays, one angled on the apron; the app
+  draws each as one of the world's hero cars it allows (`scenario::Lineup::heroes`, in the scenario's
+  order), in one of its own colors. Its walls, piers and back wall are collider boxes; a car can drive into
+  the middle bay.
+- **The taco stand.** A site 22 by 20 m the same way over commercial, strip or industrial lots on an arterial
+  or collector, the nearest the boulevard at least 300 m from the garage: a walk-up stand (`TacoStand`: a
+  serving window under a striped awning, a lit menu, a lit roof sign with an invented given name and `TACOS`
+  or `TAQUERIA`), three `PicnicTable`s and a row of five parked cars, some all day, some for lunch and
+  supper.
+- **The drag strip.** On the airfield's runway: a painted start line 60 m from its taxiway end, a finish a
+  quarter mile on (an eighth where the runway is short), a `StartTree` a meter past the start on the runway's
+  middle (the two lanes either side of it), the `TimingBoard` beside the strip 30 m on facing back at the
+  line, street lamps every 100 m along both sides. In the app (`app::dragstrip`) a car stopped square on the
+  line in a lane for a second gets the tree: the staging lamps, three ambers half a second apart, the green;
+  the clock runs from the nose leaving the line (a red lamp if before the green, still timed) to the finish
+  line, and the board shows the time and the speed over the line, with a toast. Only the last run is kept.
+- **The overlooks.** At the end of each overlook road: a guard rail 9 m past the end across the view, two
+  benches facing out, a lamp.
+- **The channel ramps.** Chain-link along both lips of the flood channel, 0.6 m outside them, open within 4 m
+  of any road (the bridges) and round each ramp: along a ramp's outer edge from 12 m below its top, and across
+  its foot. A `ChannelRamp` landmark marks each ramp's top.
+
+Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
+walls hold a car to the freeway, a car drives through it and into the garage's middle bay), the meshes'
+and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 
 ## Region templates
 A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above). Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).

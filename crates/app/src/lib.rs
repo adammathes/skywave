@@ -19,6 +19,7 @@ pub mod camera;
 pub mod car;
 pub mod daylight;
 pub mod deck;
+pub mod dragstrip;
 pub mod drive;
 mod input;
 pub mod lighting;
@@ -225,6 +226,8 @@ pub struct App {
     overlay: render::HudBuilder,
     /// The world the World page picked, for the platform to load ([`App::take_world_pick`]).
     world_pick: Option<usize>,
+    /// The place's drag strip, its tree and timing board.
+    strip: Option<dragstrip::DragStrip>,
 }
 
 /// Seconds the deep-water toast stays up.
@@ -305,12 +308,14 @@ impl App {
         let ground = drive::ground_in(&place, grammar);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
-        let mut props = propinst::PropInstances::new(&place, &palette, &lineup.shapes, |p| {
-            [
-                world::math::floor(p[0] / chunk_size) as i32,
-                world::math::floor(p[1] / chunk_size) as i32,
-            ]
-        })?;
+        let mut props =
+            propinst::PropInstances::new(&place, &palette, &lineup.shapes, &lineup.heroes, |p| {
+                [
+                    world::math::floor(p[0] / chunk_size) as i32,
+                    world::math::floor(p[1] / chunk_size) as i32,
+                ]
+            })?;
+        let mut strip = dragstrip::DragStrip::of(&place);
         let sound = sound::Sound::new(&place, &drive);
         let npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         let town = match stream {
@@ -337,7 +342,19 @@ impl App {
                 .collect();
             p.set_ids(ids);
         }
+        if let Some(st) = &mut strip {
+            let ids = st
+                .meshes()
+                .into_iter()
+                .map(|m| {
+                    meshes.push(m);
+                    MeshId(meshes.len() as u32 - 1)
+                })
+                .collect();
+            st.set_ids(ids);
+        }
         let extra = drive::MAX_CAR_INSTANCES
+            + dragstrip::MAX_INSTANCES
             + preview::MAX_INSTANCES
             + prop_capacity(&props)
             + npcs.capacity();
@@ -401,6 +418,7 @@ impl App {
             water_resets_seen: 0,
             overlay: render::HudBuilder::new(),
             world_pick: None,
+            strip,
         })
     }
 
@@ -791,6 +809,19 @@ impl App {
                 self.npcs.step_peds(&inp);
                 peds_s += now() - t;
             }
+            if let Some(st) = &mut self.strip {
+                let pose = self.drive.pose(1.0);
+                let f = pose.forward();
+                st.step(
+                    &dragstrip::Car {
+                        pos: glam::Vec2::new(pose.pos.x, pose.pos.z),
+                        forward: glam::Vec2::new(f.x, f.z).normalize_or_zero(),
+                        half_len: 0.5 * self.drive.spec.dims_m[0],
+                        speed: self.drive.state.speed_mps,
+                    },
+                    dt,
+                );
+            }
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);
@@ -1009,6 +1040,9 @@ impl App {
                 &mut self.instances,
             );
         }
+        if let Some(st) = &self.strip {
+            st.push(eye, &mut self.instances);
+        }
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs
             .push(alpha, eye, &self.lights, npc_glow, &mut self.instances);
@@ -1059,21 +1093,25 @@ impl App {
             sky: self.ui.video_sky(lighting::sky(&daylight)),
             instances: &self.instances,
             lights: self.lights.lights(),
-            hud: if self.water_toast > 0.0 {
-                let hud = self.ui.hud();
-                let o = &mut self.overlay;
-                o.begin(hud.ui_scale);
-                o.extend(&hud);
-                // Centered a third of the way down.
-                let [w, h] = o.size();
-                let scale = 2.0;
-                let x = 0.5 * (w - render::font::text_width(WATER_TOAST) as f32 * scale);
-                let y = h / 3.0;
-                o.text(x + scale, y + scale, scale, TOAST_SHADOW, WATER_TOAST);
-                o.text(x, y, scale, TOAST_RGBA, WATER_TOAST);
-                o.view()
-            } else {
-                self.ui.hud()
+            hud: match (self.water_toast > 0.0)
+                .then_some(WATER_TOAST)
+                .or_else(|| self.strip.as_ref().and_then(|s| s.toast()))
+            {
+                None => self.ui.hud(),
+                Some(text) => {
+                    let hud = self.ui.hud();
+                    let o = &mut self.overlay;
+                    o.begin(hud.ui_scale);
+                    o.extend(&hud);
+                    // Centered a third of the way down.
+                    let [w, h] = o.size();
+                    let scale = 2.0;
+                    let x = 0.5 * (w - render::font::text_width(text) as f32 * scale);
+                    let y = h / 3.0;
+                    o.text(x + scale, y + scale, scale, TOAST_SHADOW, text);
+                    o.text(x, y, scale, TOAST_RGBA, text);
+                    o.view()
+                }
             },
             quality: self.ui.render_quality(),
         }

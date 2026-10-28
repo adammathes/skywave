@@ -28,6 +28,11 @@ pub fn kind_word(kind: PoiKind) -> &'static str {
         PoiKind::Gas => "Gas",
         PoiKind::Marina => "Marina",
         PoiKind::Stadium => "Field",
+        PoiKind::DragStrip => "Strip",
+        PoiKind::ChannelRamp => "Ramp",
+        PoiKind::Tunnel => "Tunnel",
+        PoiKind::CrewGarage => "Garage",
+        PoiKind::TacoStand => "Tacos",
     }
 }
 

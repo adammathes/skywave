@@ -89,6 +89,30 @@ pub enum PropKind {
     BusShelter {
         face: u8,
     },
+    /// The set pieces' props, as `place::PropKind`'s (built by [`crate::setpieces`]).
+    TunnelPiece {
+        len_dm: u16,
+        width_dm: u16,
+        portals: u8,
+    },
+    StartTree,
+    TimingBoard,
+    StripLine {
+        len_dm: u16,
+    },
+    GuardRail {
+        len_dm: u16,
+    },
+    ChainLink {
+        len_dm: u16,
+    },
+    CrewGarage {
+        name_seed: u64,
+    },
+    TacoStand {
+        name_seed: u64,
+    },
+    PicnicTable,
 }
 
 /// One placed prop.
@@ -431,6 +455,15 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         PropKind::Crossbuck => crossbuck(m, base, p.dir, pal),
         PropKind::FaceBillboard { face } => face_billboard(m, base, p.dir, face, pal, p.seed),
         PropKind::BusShelter { face } => bus_shelter(m, base, p.dir, face, pal, p.seed),
+        PropKind::TunnelPiece { .. }
+        | PropKind::StartTree
+        | PropKind::TimingBoard
+        | PropKind::StripLine { .. }
+        | PropKind::GuardRail { .. }
+        | PropKind::ChainLink { .. }
+        | PropKind::CrewGarage { .. }
+        | PropKind::TacoStand { .. }
+        | PropKind::PicnicTable => crate::setpieces::build(m, p, pal, &Lexicon::default()),
     }
 }
 
@@ -1361,6 +1394,7 @@ pub fn instanced(kind: place::PropKind) -> bool {
             | P::Mailbox
             | P::PowerPole
             | P::StopSign
+            | P::HeroCar { .. }
     )
 }
 
@@ -1435,6 +1469,25 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::Crossbuck => PropKind::Crossbuck,
         P::FaceBillboard { face } => PropKind::FaceBillboard { face },
         P::BusShelter { face } => PropKind::BusShelter { face },
+        P::TunnelPiece {
+            len_dm,
+            width_dm,
+            portals,
+        } => PropKind::TunnelPiece {
+            len_dm,
+            width_dm,
+            portals,
+        },
+        P::StartTree => PropKind::StartTree,
+        P::TimingBoard => PropKind::TimingBoard,
+        P::StripLine { len_dm } => PropKind::StripLine { len_dm },
+        P::GuardRail { len_dm } => PropKind::GuardRail { len_dm },
+        P::ChainLink { len_dm } => PropKind::ChainLink { len_dm },
+        P::CrewGarage { name_seed } => PropKind::CrewGarage { name_seed },
+        P::TacoStand { name_seed } => PropKind::TacoStand { name_seed },
+        // A hero car stands and collides as a parked car; the app draws it.
+        P::HeroCar { slot } => PropKind::ParkedCar { color: slot },
+        P::PicnicTable => PropKind::PicnicTable,
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

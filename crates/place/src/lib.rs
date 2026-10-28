@@ -484,6 +484,18 @@ pub enum PoiKind {
     Gas = 4,
     Marina = 5,
     Stadium = 6,
+    /// The landmark kinds below are a basin's set pieces (`docs/WORLD_GENERATION.md`, "Set
+    /// pieces"): places, never missions. The drag strip on the airfield's runway, at its
+    /// start line.
+    DragStrip = 7,
+    /// The top of a ramp down into a flood channel.
+    ChannelRamp = 8,
+    /// The middle of a road tunnel.
+    Tunnel = 9,
+    /// A car crew's garage, at its apron.
+    CrewGarage = 10,
+    /// A taco stand and its lot.
+    TacoStand = 11,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.
@@ -695,6 +707,51 @@ pub enum PropKind {
     BusShelter {
         face: u8,
     },
+    /// A length of a road tunnel's tiled box (walls, roof, the lamps along its ceiling)
+    /// `len_dm` decimeters long centered on `pos` (on the road's surface) along the facing,
+    /// `width_dm` between its walls; `portals` bit 0: a portal at its far end along the
+    /// facing, bit 1: one at its near end.
+    TunnelPiece {
+        len_dm: u16,
+        width_dm: u16,
+        portals: u8,
+    },
+    /// A drag strip's start tree (the staging and countdown lamps on a post) beside its
+    /// start line; facing: down the strip, the way the cars run.
+    StartTree,
+    /// A drag strip's timing display on two legs; facing: the way its face looks.
+    TimingBoard,
+    /// A painted line across a road, `len_dm` decimeters long across the facing.
+    StripLine {
+        len_dm: u16,
+    },
+    /// A run of guard rail (a steel beam on wood posts) `len_dm` decimeters long centered
+    /// on `pos`, along the facing.
+    GuardRail {
+        len_dm: u16,
+    },
+    /// A run of chain-link fence `len_dm` decimeters long centered on `pos`, along the
+    /// facing.
+    ChainLink {
+        len_dm: u16,
+    },
+    /// A car crew's three-bay garage with a lit sign lettered from the lexicon by
+    /// `name_seed`; `pos` at the middle of its front, facing: out of its open bays.
+    CrewGarage {
+        name_seed: u64,
+    },
+    /// A walk-up taco stand with a lit menu and sign lettered from the lexicon by
+    /// `name_seed`; facing: out of its serving window.
+    TacoStand {
+        name_seed: u64,
+    },
+    /// One of the world's hero cars parked (the app picks the car by `slot` from the
+    /// scenario's heroes it allows); facing: the nose.
+    HeroCar {
+        slot: u8,
+    },
+    /// A picnic table with its benches; facing: along the table.
+    PicnicTable,
 }
 
 /// [`PropKind::Track`] beds: on a ballast embankment over the ground...
@@ -730,6 +787,9 @@ pub enum LightKind {
     Neon = 1,
     Window = 2,
     Headlight = 3,
+    /// A white flood or fluorescent light in its own `color`, on whenever the street lamps
+    /// are (a tunnel's ceiling lamps, a garage's tubes, a drag strip's towers).
+    Flood = 4,
 }
 
 #[derive(Clone, Debug, PartialEq)]

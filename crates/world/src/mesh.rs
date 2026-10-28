@@ -755,7 +755,7 @@ fn in_triangle(p: V2, a: V2, b: V2, c: V2) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Every triangle's winding agrees with its vertex normals (or, for smooth meshes,
