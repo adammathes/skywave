@@ -1642,22 +1642,24 @@ mod tests {
     /// warmed up (queued, oncoming and crossing cars and people on the walks in view). Not
     /// `still`: the world runs, so cars and people move between frames.
     const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
-                            &pos=477.5,1001.2&yaw=347";
+                            &pos=747.7,493.9&yaw=-20.5";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
     /// draws in the worst frame and in the median frame after the first, forward and shadow
     /// triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus about 10%.
     const JUNCTION_BUDGET: [(Quality, u32, u32, u64, u64); 2] = [
-        (Quality::Deck, 1250, 750, 470_000, 740_000),
-        (Quality::Medium, 1235, 555, 470_000, 1_325_000),
+        (Quality::Deck, 911, 529, 259_000, 817_000),
+        (Quality::Medium, 939, 477, 259_000, 1_345_000),
     ];
-    // Measured over 8 frames driving at 100 km/h with the world running (release; a debug
-    // build lands within 2%: 1151, 696, 429k, 674k at Deck; 224 car and figure-part instances in the forward pass of 74 cars and 41 people
-    // live): the most draws in a frame (the first draws every cascade; at Deck the depth
-    // pre-pass draws the forward pass's meshes twice), the median frame's after it (no far
-    // cascade), forward triangles and shadow triangles a frame (moving casters redraw the
-    // far cascade on its interval): Deck 1134, 681, 428k, 672k; Medium 1121, 503, 428k,
-    // 1206k. Main's median frame before the pre-pass: Deck 385, Medium 530.
+    // Measured over 8 frames driving at 100 km/h with the world running after it streamed
+    // held still (the same in release and debug; 96 cars and 25 people live, 190 car and
+    // figure-part instances more in the forward pass than with traffic off): the most draws
+    // in a frame (the first draws every cascade; at Deck the depth pre-pass draws the
+    // forward pass's meshes twice), the median frame's after it (no far cascade), forward
+    // triangles and shadow triangles a frame (moving casters redraw the far cascade on its
+    // interval): Deck 828, 481, 235k, 743k; Medium 854, 434, 235k, 1223k. Main's junction
+    // before the map edges (another layout): Deck 1134, 681, 428k, 672k; Medium 1121, 503,
+    // 428k, 1206k.
     /// Instances one pedestrian adds: a figure's parts.
     const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 
@@ -1876,7 +1878,7 @@ mod tests {
             ("coast-strip-golden", "cam=chase-far&t=17:40"),
             (
                 "coast-traffic-noon",
-                "cam=chase-mid&t=12:00&pos=477.5,1001.2&yaw=347&traffic=busy",
+                "cam=chase-mid&t=12:00&pos=747.7,493.9&yaw=-20.5&traffic=busy&phase=1440",
             ),
             ("coast-night-golden", "cam=chase-near&t=22:30&lights=1"),
         ];
@@ -1927,6 +1929,10 @@ mod tests {
         let mut mapper = InputMapper::default();
         let started = Instant::now();
         let clock = || started.elapsed().as_secs_f64();
+        // The world holds still while the place streams: how many frames that takes depends
+        // on the machine, and the traffic measured after must not.
+        let still = app.still();
+        app.set_still(true);
         while !app.stream_idle() {
             app.frame(&mut mapper, 1.0 / 60.0, &clock);
             app.sync_chunks(&mut r);
@@ -1934,6 +1940,7 @@ mod tests {
                 r.add_mesh(&m);
             }
         }
+        app.set_still(still);
         (app, r)
     }
 

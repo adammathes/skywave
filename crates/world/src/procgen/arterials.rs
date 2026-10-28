@@ -61,6 +61,8 @@ pub const SNAP_M: f32 = 40.0;
 pub const SNAP_AHEAD_M: f32 = 160.0;
 /// Nodes closer than this merge.
 pub const MERGE_M: f32 = 12.0;
+/// A split this close to an edge's end is that end.
+const COINCIDENT_M: f32 = 1.0;
 /// Dead ends shorter than this are removed outside `Suburb`/`Hills`.
 pub const STUB_M: f32 = 60.0;
 /// Steepest profile segment of any road but the ramps.
@@ -94,6 +96,9 @@ const STEER_GRADE: f32 = 0.10;
 const FILTER_GRADE: f32 = 0.118;
 /// How far road profiles may leave the terrain; `place::validate` allows 8 m.
 const PROFILE_BAND_M: f32 = 7.8;
+/// Highest an overpass approach's node sits above the ground: a meter under the band, so
+/// the profile between nodes keeps room where the ground dips.
+const DECK_BAND_M: f32 = PROFILE_BAND_M - 1.0;
 /// Road length kept flat at full lift each side of a highway crossing.
 const OVERPASS_FLAT_M: f32 = HIGHWAY_WIDTH_M * 0.5 + 9.0;
 /// Where along a crossing road a ramp meets it, from the highway centerline: the overpass
@@ -103,6 +108,19 @@ const RAMP_FOOT_M: f32 = OVERPASS_FLAT_M + (OVERPASS_LIFT_M - RAMP_RISE_M) / APP
 const OVERPASS_ROOM_M: f32 = 200.0;
 /// No crossings (only dead ends) on the highway's first stretch from the coast.
 const TERMINUS_M: f32 = 300.0;
+/// How far beside the highway an interchange's ramps run, for the bank check.
+const RAMP_BANK_M: f32 = 30.0;
+/// An interchange needs the highway within 25° of its heading at the crossing everywhere
+/// within five of these steps either way (past the ramps' reach).
+const STRAIGHT_COS: f32 = 0.906;
+const STRAIGHT_STEP_M: f32 = 50.0;
+/// Most at-grade junctions on the highway ([`junctions`])...
+const JUNCTIONS: usize = 5;
+/// ...this far apart along it and from interchanges and the terminals...
+const JUNCTION_GAP_M: f32 = 320.0;
+/// ...for road ends within this of it, heading for it within 25°.
+const JUNCTION_REACH_M: f32 = 70.0;
+const SPUR_COS: f32 = 0.906;
 /// Roads stop where the corridor carve moved the terrain by more than this...
 const CUT_BARRIER_M: f32 = 1.0;
 /// ... except that crossing roads bridge highway cuts up to this deep.
@@ -205,11 +223,23 @@ pub fn arterials(seed: Seed, template: &RegionTemplate, macro_map: &MacroMap) ->
         hl.ends = [Stop::Fixed, Stop::Edge];
         lines.push(hl);
         classes.push(vec![RoadClass::Highway; hw.pts.len()]);
-        if let Some((li, param)) = hw.terminal {
-            nodes.push(hw.pts[0]);
-            hw_arc.push(Some(0.0));
-            forced.push((li, param, 0));
-            end_nodes.push((hw_line, 0, 0));
+        for (end, terminal) in hw.terminal.iter().enumerate() {
+            if let Some(li) = *terminal {
+                let id = nodes.len() as u32;
+                let (p, s) = if end == 0 {
+                    (hw.pts[0], 0.0)
+                } else {
+                    (hw.pts[hw.pts.len() - 1], hw.length())
+                };
+                // Where the terminal is on the beachfront line now: joining its ends may
+                // have put points in front of the ones the terminal was found on.
+                let param = param_on(&lines[li].pts, p);
+                nodes.push(p);
+                hw_arc.push(Some(s));
+                forced.push((li, param, id));
+                end_nodes.push((hw_line, end, id));
+                lines[hw_line].ends[end] = Stop::Fixed;
+            }
         }
         let crossings = highway_crossings(&ctx, &lines[..hw_line], &classes);
         let target = rng.range(2, 5) as usize;
@@ -229,6 +259,13 @@ pub fn arterials(seed: Seed, template: &RegionTemplate, macro_map: &MacroMap) ->
                 &mut oneway_rev,
             );
         }
+        let mut hw_nodes = HighwayNodes {
+            nodes: &mut nodes,
+            hw_arc: &mut hw_arc,
+            forced: &mut forced,
+            end_nodes: &mut end_nodes,
+        };
+        junctions(&ctx, &mut lines, &mut classes, hw_line, &mut hw_nodes);
     }
 
     let mut g = build_graph(
@@ -397,13 +434,13 @@ impl Field {
     }
 }
 
-/// The highway: 16 m samples from its coastal terminal, with the graded profile.
+/// The highway: 16 m samples from its first coastal terminal, with the graded profile.
 struct Highway {
     pts: Vec<V2>,
     arc: Vec<f32>,
     y: Vec<f32>,
-    /// The beachfront line and parameter the terminal sits on.
-    terminal: Option<(usize, f32)>,
+    /// The beachfront line each coastal terminal sits on: at its start and at its end.
+    terminal: [Option<usize>; 2],
     /// Segment grid for crossing tests.
     grid: SegGrid,
 }
@@ -451,6 +488,16 @@ impl Highway {
 
     fn y_at(&self, s: f32) -> f32 {
         interp(&self.arc, &self.y, s)
+    }
+
+    /// Unit tangent at arc length `s` (clamped to the line).
+    fn tangent_at(&self, s: f32) -> V2 {
+        let n = self.pts.len();
+        let mut k = 0;
+        while k + 2 < n && self.arc[k + 1] < s {
+            k += 1;
+        }
+        (self.pts[k + 1] - self.pts[k]).normalize()
     }
 
     fn length(&self) -> f32 {
@@ -599,8 +646,9 @@ struct Ctx<'a> {
     t: &'a RegionTemplate,
     /// Extent of the height grid, meters.
     ext: [f32; 2],
-    /// Roads stay inside `[lo, hi]` on both axes.
-    lo: f32,
+    /// Roads stay inside `[lo, hi]`: the playable rectangle, 4 m in (and 4 m in from the
+    /// place edge where it is water).
+    lo: [f32; 2],
     hi: [f32; 2],
     field: Field,
     gx: Grid,
@@ -625,12 +673,13 @@ impl<'a> Ctx<'a> {
         let (_, (_, d1)) = t.zones.farmland.block_m;
         spacing[ZoneId::Farmland as usize] = clamp(0.5 * d1, 250.0, 400.0);
         let field = build_field(m, t, &fx, &fz);
+        let play = m.playable();
         let mut ctx = Ctx {
             m,
             t,
             ext,
-            lo: 4.0,
-            hi: [ext[0] - 4.0, ext[1] - 4.0],
+            lo: [play[0] + 4.0, play[1] + 4.0],
+            hi: [play[2] - 4.0, play[3] - 4.0],
             field,
             gx,
             gz,
@@ -639,7 +688,7 @@ impl<'a> Ctx<'a> {
                 pts: Vec::new(),
                 arc: Vec::new(),
                 y: Vec::new(),
-                terminal: None,
+                terminal: [None; 2],
                 grid: SegGrid::new(ext, 64.0),
             },
             beach: Vec::new(),
@@ -681,7 +730,7 @@ impl<'a> Ctx<'a> {
     }
 
     fn inside(&self, p: V2) -> bool {
-        p.x >= self.lo && p.y >= self.lo && p.x <= self.hi[0] && p.y <= self.hi[1]
+        p.x >= self.lo[0] && p.y >= self.lo[1] && p.x <= self.hi[0] && p.y <= self.hi[1]
     }
 
     /// Dry ground a road may use: not water, not the beach.
@@ -712,7 +761,8 @@ impl<'a> Ctx<'a> {
             return false;
         }
         let (d, s, tan) = self.hwy.nearest(p);
-        (d < 60.0 && abs(dir.dot(tan)) > 0.82) || (d < 30.0 && s < TERMINUS_M)
+        let terminus = s < TERMINUS_M || s > self.hwy.length() - TERMINUS_M;
+        (d < 60.0 && abs(dir.dot(tan)) > 0.82) || (d < 30.0 && terminus)
     }
 
     fn gradient(&self, p: V2) -> V2 {
@@ -1037,8 +1087,8 @@ fn arcs(pts: &[V2]) -> Vec<f32> {
     out
 }
 
-/// The highway polyline from its coastal terminal (on the beachfront road when that runs
-/// within 60 m of the macro highway's start) to the place edge, with its graded profile.
+/// The highway polyline between its coastal terminals (on the beachfront road where that
+/// runs within 60 m of the macro highway's ends), with its graded profile.
 fn highway(ctx: &Ctx<'_>) -> Highway {
     let m = ctx.m;
     let mut pts: Vec<V2> = Vec::new();
@@ -1068,26 +1118,34 @@ fn highway(ctx: &Ctx<'_>) -> Highway {
         pts: Vec::new(),
         arc: Vec::new(),
         y: Vec::new(),
-        terminal: None,
+        terminal: [None; 2],
         grid: SegGrid::new(ctx.ext, 64.0),
     };
     if pts.len() < 2 {
         return out;
     }
-    // The terminal: the beachfront road point nearest the macro highway's start.
+    // The terminals: the beachfront road points nearest the macro highway's ends.
     let beach = &ctx.beach;
-    let mut best: Option<(f32, usize, f32, V2)> = None;
-    for (li, line) in beach.iter().enumerate() {
-        for k in 0..line.len().saturating_sub(1) {
-            let (d, t) = segment_distance(pts[0], line[k], line[k + 1]);
-            if d < 60.0 && best.is_none_or(|b| d < b.0) {
-                best = Some((d, li, k as f32 + t, line[k].lerp(line[k + 1], t)));
+    let nearest = |p: V2| {
+        let mut best: Option<(f32, usize, V2)> = None;
+        for (li, line) in beach.iter().enumerate() {
+            for k in 0..line.len().saturating_sub(1) {
+                let (d, t) = segment_distance(p, line[k], line[k + 1]);
+                if d < 60.0 && best.is_none_or(|b| d < b.0) {
+                    best = Some((d, li, line[k].lerp(line[k + 1], t)));
+                }
             }
         }
-    }
-    if let Some((_, li, param, q)) = best {
+        best
+    };
+    let ends = (nearest(pts[0]), nearest(pts[pts.len() - 1]));
+    if let Some((_, li, q)) = ends.0 {
         pts.insert(0, q);
-        out.terminal = Some((li, param));
+        out.terminal[0] = Some(li);
+    }
+    if let Some((_, li, q)) = ends.1 {
+        pts.push(q);
+        out.terminal[1] = Some(li);
     }
     let pts = resample(&pts, PROFILE_STEP_M);
     let arc = arcs(&pts);
@@ -1936,6 +1994,124 @@ fn join_end(ctx: &Ctx<'_>, lines: &mut [Line], index: &mut Index, li: usize, end
     }
 }
 
+/// Parameter (segment index plus fraction) of the point of `pts` nearest `p`.
+fn param_on(pts: &[V2], p: V2) -> f32 {
+    let mut best = (f32::INFINITY, 0.0);
+    for k in 0..pts.len().saturating_sub(1) {
+        let (d, t) = segment_distance(p, pts[k], pts[k + 1]);
+        if d < best.0 {
+            best = (d, k as f32 + t);
+        }
+    }
+    best.1
+}
+
+/// What a highway node adds to the graph build: its position, its arc along the highway,
+/// the line it splits and the line end it takes.
+struct HighwayNodes<'a> {
+    nodes: &'a mut Vec<V2>,
+    hw_arc: &'a mut Vec<Option<f32>>,
+    forced: &'a mut Vec<(usize, f32, u32)>,
+    end_nodes: &'a mut Vec<(usize, usize, u32)>,
+}
+
+/// Arterial and collector ends that stop within [`JUNCTION_REACH_M`] of the highway,
+/// heading for it, join it at grade (at most [`JUNCTIONS`], [`JUNCTION_GAP_M`] from every
+/// other highway node and off its stretches by the coast), so the bypass is reachable from
+/// the town and the land behind it.
+fn junctions(
+    ctx: &Ctx<'_>,
+    lines: &mut [Line],
+    classes: &mut [Vec<RoadClass>],
+    hw_line: usize,
+    out: &mut HighwayNodes<'_>,
+) {
+    let hw = &ctx.hwy;
+    let total = hw.length();
+    let mut taken: Vec<f32> = out.hw_arc.iter().flatten().copied().collect();
+    let mut made = 0;
+    for li in 0..hw_line {
+        for end in 0..2 {
+            if made >= JUNCTIONS {
+                return;
+            }
+            let line = &lines[li];
+            let n = line.pts.len();
+            if n < 2 || matches!(line.ends[end], Stop::Fixed) {
+                continue;
+            }
+            let (k, e, prev) = if end == 0 {
+                (0, line.pts[0], line.pts[1])
+            } else {
+                (n - 1, line.pts[n - 1], line.pts[n - 2])
+            };
+            if !matches!(classes[li][k], RoadClass::Arterial | RoadClass::Collector) {
+                continue;
+            }
+            // The nearest highway point, as segment and fraction.
+            let mut best = (f32::INFINITY, 0usize, 0.0f32);
+            for j in 0..hw.pts.len() - 1 {
+                let (d, t) = segment_distance(e, hw.pts[j], hw.pts[j + 1]);
+                if d < best.0 {
+                    best = (d, j, t);
+                }
+            }
+            let (d, j, t) = best;
+            let q = hw.pts[j].lerp(hw.pts[j + 1], t);
+            let s = lerp(hw.arc[j], hw.arc[j + 1], t);
+            if !(1.0..=JUNCTION_REACH_M).contains(&d)
+                || !(TERMINUS_M..=total - TERMINUS_M).contains(&s)
+            {
+                continue;
+            }
+            let toward = (q - e).normalize();
+            let tan = (hw.pts[j + 1] - hw.pts[j]).normalize();
+            // The spur carries on the road's heading (no bend by the junction's markings)
+            // and meets the highway square enough.
+            if (e - prev).normalize().dot(toward) < SPUR_COS || abs(tan.turn(toward)) < 0.7 {
+                continue;
+            }
+            if taken.iter().any(|&x| abs(x - s) < JUNCTION_GAP_M) {
+                continue;
+            }
+            let steps = (d / STEP_M) as usize + 1;
+            let ext: Vec<V2> = (1..=steps)
+                .map(|i| e.lerp(q, i as f32 / steps as f32))
+                .collect();
+            // Not through the highway's cut or fill banks, and no steeper than a road.
+            let banks = ext.iter().any(|&p| abs(ctx.cut_at(p)) > CROSS_CUT_M);
+            if banks || abs(ctx.height(e) - hw.y_at(s)) > 0.8 * MAX_GRADE * d {
+                continue;
+            }
+            let (fam, class) = (line.fam[k], classes[li][k]);
+            let line = &mut lines[li];
+            if end == 0 {
+                let mut pts: Vec<V2> = ext.iter().rev().copied().collect();
+                pts.extend_from_slice(&line.pts);
+                line.pts = pts;
+                let mut f = vec![fam; ext.len()];
+                f.extend_from_slice(&line.fam);
+                line.fam = f;
+                let mut c = vec![class; ext.len()];
+                c.extend_from_slice(&classes[li]);
+                classes[li] = c;
+            } else {
+                line.pts.extend_from_slice(&ext);
+                line.fam.extend(core::iter::repeat_n(fam, ext.len()));
+                classes[li].extend(core::iter::repeat_n(class, ext.len()));
+            }
+            line.ends[end] = Stop::Fixed;
+            let id = out.nodes.len() as u32;
+            out.nodes.push(q);
+            out.hw_arc.push(Some(s));
+            out.forced.push((hw_line, j as f32 + t, id));
+            out.end_nodes.push((li, end, id));
+            taken.push(s);
+            made += 1;
+        }
+    }
+}
+
 /// Whether a straight road from `a` to `b` stays on dry land, off the highway's cuts and
 /// within about [`STEER_GRADE`] over every 16 m and end to end.
 fn straight_ok(ctx: &Ctx<'_>, a: V2, b: V2) -> bool {
@@ -2134,10 +2310,18 @@ fn choose_interchanges<'c>(
 ) -> Vec<&'c Crossing> {
     let hw = &ctx.hwy;
     let total = hw.length();
+    // On the ground, between banks the ramps can run on.
     let level = |s: f32| {
         let mut ok = true;
         for (i, &a) in hw.arc.iter().enumerate() {
-            if abs(a - s) <= RAMP_RUN_M + 30.0 && abs(hw.y[i] - ctx.height(hw.pts[i])) > 1.5 {
+            if abs(a - s) > RAMP_RUN_M + 30.0 {
+                continue;
+            }
+            let side = hw.tangent_at(a).left() * RAMP_BANK_M;
+            let banks = [hw.pts[i] + side, hw.pts[i] - side]
+                .iter()
+                .any(|&p| abs(ctx.cut_at(p)) > CROSS_CUT_M);
+            if banks || abs(hw.y[i] - ctx.height(hw.pts[i])) > 1.5 {
                 ok = false;
             }
         }
@@ -2155,7 +2339,12 @@ fn choose_interchanges<'c>(
             .filter(|c| {
                 c.sin >= min_sin
                     && c.s >= TERMINUS_M
-                    && c.s <= total - RAMP_RUN_M - 50.0
+                    && c.s <= total - TERMINUS_M.max(RAMP_RUN_M + 50.0)
+                    // Ramps run beside a straight stretch, not round a bend.
+                    && (-5..=5).all(|k| {
+                        let t = ctx.hwy.tangent_at(c.s + k as f32 * STRAIGHT_STEP_M);
+                        t.dot(ctx.hwy.tangent_at(c.s)) >= STRAIGHT_COS
+                    })
                     && !crossings
                         .iter()
                         .any(|o| !core::ptr::eq(o, *c) && abs(o.s - c.s) < clear)
@@ -2310,6 +2499,12 @@ fn ramp_ok(ctx: &Ctx<'_>, lines: &[Line], index: &Index, pts: &[V2], road: usize
     let n = pts.len();
     for (k, &p) in pts.iter().enumerate() {
         if !ctx.inside(p) || !ctx.land(p) {
+            return false;
+        }
+        // The ramp runs between the highway's level and the deck: the ground must too.
+        let y = ctx.hwy.y_at(ctx.hwy.nearest(p).1);
+        let g = ctx.height(p);
+        if g < y - 5.0 || g > y + OVERPASS_LIFT_M + 3.0 {
             return false;
         }
         if k < 2 || k + 3 >= n {
@@ -3148,6 +3343,13 @@ fn connector_ok(ctx: &Ctx<'_>, g: &Graph, p: V2, q: V2, target: usize) -> bool {
 
 /// Splits live edge `ei` at point `q` on its segment `k`, returning the new node.
 fn split_edge(g: &mut Graph, ei: usize, k: usize, q: V2) -> u32 {
+    // At (or on) one of its ends: that end, not a zero-length piece.
+    let (a, b) = (g.edges[ei].a, g.edges[ei].b);
+    for end in [a, b] {
+        if (g.nodes[end as usize] - q).length() < COINCIDENT_M {
+            return end;
+        }
+    }
     let id = g.nodes.len() as u32;
     g.nodes.push(q);
     g.hw_arc.push(None);
@@ -3325,7 +3527,7 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
     let deck = |d: f32, y: f32, g0: f32| {
         if d.is_finite() {
             let top = y + OVERPASS_LIFT_M - APPROACH_GRADE * (d - OVERPASS_FLAT_M).max(0.0);
-            clamp(top, g0, g0 + PROFILE_BAND_M - 0.1)
+            clamp(top, g0, g0 + DECK_BAND_M)
         } else {
             g0
         }

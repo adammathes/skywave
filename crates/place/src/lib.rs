@@ -153,6 +153,45 @@ pub enum WaterKind {
     Canal = 3,
 }
 
+/// What bounds a place along one side (`docs/WORLD_GENERATION.md`, "Map edges"): what the
+/// terrain does in the band inside that side and how the horizon continues past it.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum EdgeKind {
+    /// Nothing: the ground just ends (the test town's apron).
+    Open = 0,
+    /// Open sea to the horizon.
+    Ocean = 1,
+    /// Open fresh water to the horizon.
+    Lake = 2,
+    /// Water with a far shore of low hills across it.
+    Bay = 3,
+    /// Cliffs rising into high ridges.
+    Mountains = 4,
+    /// A steep ridge with rolling hills behind it.
+    Hills = 5,
+    /// A wooded bluff with forest beyond.
+    Forest = 6,
+    /// A ridge the highway turns back along.
+    HighwayLoop = 7,
+    /// A rail embankment with yards and industry beyond.
+    RailYards = 8,
+}
+
+impl EdgeKind {
+    /// Water to the horizon: the coast side of a place.
+    pub fn is_water(self) -> bool {
+        matches!(self, EdgeKind::Ocean | EdgeKind::Lake | EdgeKind::Bay)
+    }
+}
+
+/// Place sides in [`Terrain::edges`] order. North is `-z`, west is `-x`.
+pub const NORTH: usize = 0;
+pub const EAST: usize = 1;
+pub const SOUTH: usize = 2;
+pub const WEST: usize = 3;
+
 /// A body of water: a counter-clockwise polygon at the terrain's `water_level`.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -173,6 +212,8 @@ pub struct Terrain {
     /// Elevation of the water surface, meters.
     pub water_level: f32,
     pub water: Vec<WaterBody>,
+    /// What bounds the place on each side, `[north, east, south, west]` ([`NORTH`] ..).
+    pub edges: [EdgeKind; 4],
 }
 
 impl Terrain {
@@ -186,6 +227,7 @@ impl Terrain {
             heights,
             water_level: elevation - 2.0,
             water: Vec::new(),
+            edges: [EdgeKind::Open; 4],
         }
     }
 

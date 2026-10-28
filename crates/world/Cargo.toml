@@ -11,7 +11,7 @@ rust-version.workspace = true
 # Region template derives. serde is used without its `std` feature, so the crate stays
 # no_std with this on; parsing RON happens in `app` and the tools.
 default = ["serde"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "place/serde"]
 
 [dependencies]
 serde = { workspace = true, optional = true }

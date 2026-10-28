@@ -385,9 +385,11 @@ mod tests {
     use crate::{App, InputState, SceneSetup};
     use traffic::peds::Action;
 
-    /// The busiest block of the strip on the coast at seed 1 (the walks with the most
-    /// people per 100 m round it), the car on the road facing up it.
-    pub(crate) const STRIP: &str = "place=coast&car=gannet_gt&cam=chase-mid&pos=872.0,942.5&yaw=1";
+    /// The busiest block on the coast at seed 1, the car on the road facing up it: of the
+    /// signalized four-way approaches, the one with the most people about at busy density
+    /// (90 after the warm-up at noon; downtown's crosswalk of the gate scenarios ties it).
+    pub(crate) const STRIP: &str =
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
@@ -423,7 +425,8 @@ mod tests {
         let mut app = app(&format!("{STRIP}&t=12:00&traffic=busy&still=1"));
         let crowd = &app.npcs.crowd;
         assert_eq!(crowd.density(), Density::Busy);
-        assert!(crowd.walks().links.len() > 10_000, "a sidewalk graph");
+        // Over 9000 at seed 1: the edge bands round the coast are roadless.
+        assert!(crowd.walks().links.len() > 8_000, "a sidewalk graph");
         assert_eq!(crowd.variants.len(), VARIANTS, "figures built");
         // Warmed up with the traffic while the scene loaded.
         let n = app.pedestrian_count();

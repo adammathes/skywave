@@ -31,14 +31,14 @@ fn template() -> RegionTemplate {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0x66D0_E382_8B0E_C150,
-    0xF8EA_C0D7_110D_1BB5,
-    0x729A_20E8_3D4D_7239,
-    0x623F_70E7_67C1_526C,
-    0x7C2B_E4D2_7389_2A0D,
-    0x2DEF_D2D9_0E09_4BEF,
-    0xC8E4_1305_57DC_3753,
-    0x6D9E_E568_BBE6_B743,
+    0x3003_CE5E_048E_096D,
+    0xEE3E_B632_7226_FC92,
+    0xF6E1_C4BF_02D0_507C,
+    0x47BE_F027_04B5_434F,
+    0x3EE8_064D_8B18_B18F,
+    0x2CD6_2DF7_D988_6599,
+    0x34BE_135E_5FFC_EC88,
+    0x25BC_2239_5D98_AB34,
 ];
 
 #[test]
@@ -136,6 +136,134 @@ impl Roads<'_> {
             let (d, t) = segment_distance(q, path.raw[k], path.raw[k + 1]);
             d < 20.0 && (arc(k, t) - s_q).abs() > 2.0 * d + 8.0
         })
+    }
+}
+
+/// The coast's edges bound it (`docs/WORLD_GENERATION.md`, "Map edges"), seeds 1-8: every
+/// road stays in the playable rectangle (none runs into an edge band or off the place), so
+/// every dead end is interior (a cul-de-sac at the foot of the hills at most) or on the
+/// beach; the highway is one chain whose two ends are on the beachfront road (it loops
+/// back to the coast, it does not end); and along every land side the wall rises at least
+/// `RISE_M` (`MOUNTAINS_RISE_M` for mountains) from the foot of its band to the side.
+#[test]
+fn edges_bound_the_coast() {
+    use place::{EdgeKind, RoadClass, ZoneId, EAST, NORTH, SOUTH, WEST};
+    use world::edges::{band_m, inside};
+    const RISE_M: f32 = 50.0;
+    const MOUNTAINS_RISE_M: f32 = 85.0;
+    let t = template();
+    for seed in 1..=8u64 {
+        let p = build_place(Seed(seed), &t, &grammar());
+        let edges = p.terrain.edges;
+        assert_eq!(edges, t.edges.sides());
+        let ext = p.header.extent_m();
+        let bands = edges.map(band_m);
+        let in_play = |q: [f32; 2], margin: f32| {
+            let d = inside(q, ext);
+            (0..4).all(|k| d[k] >= bands[k] + margin)
+        };
+        let mut deg = vec![0u32; p.roads.nodes.len()];
+        for e in &p.roads.edges {
+            deg[e.a as usize] += 1;
+            deg[e.b as usize] += 1;
+            for q in &e.profile {
+                assert!(
+                    in_play([q[0], q[2]], 0.0),
+                    "seed {seed}: {:?} road at ({:.0}, {:.0}) is in an edge band",
+                    e.class,
+                    q[0],
+                    q[2]
+                );
+            }
+        }
+        let (mut dead, mut beach) = (0, 0);
+        for (i, n) in p.roads.nodes.iter().enumerate() {
+            if deg[i] != 1 {
+                continue;
+            }
+            dead += 1;
+            let zone = p.zones.cells[{
+                let res = usize::from(p.terrain.res_per_chunk);
+                let cw = usize::from(p.header.size_chunks[0]) * res;
+                let cell = p.header.chunk_size_m / res as f32;
+                (n.pos[1] / cell) as usize * cw + (n.pos[0] / cell) as usize
+            }];
+            beach += usize::from(zone == ZoneId::Beach);
+            assert!(
+                in_play(n.pos, 4.0),
+                "seed {seed}: dead end at {:?} by the place edge",
+                n.pos
+            );
+        }
+        // The highway: one chain, its ends on the beachfront road.
+        let mut hdeg = vec![0u32; p.roads.nodes.len()];
+        for e in p
+            .roads
+            .edges
+            .iter()
+            .filter(|e| e.class == RoadClass::Highway)
+        {
+            hdeg[e.a as usize] += 1;
+            hdeg[e.b as usize] += 1;
+        }
+        let ends: Vec<usize> = (0..hdeg.len()).filter(|&i| hdeg[i] == 1).collect();
+        assert_eq!(ends.len(), 2, "seed {seed}: the highway is not one chain");
+        for &n in &ends {
+            assert!(
+                p.roads
+                    .edges
+                    .iter()
+                    .any(|e| e.class == RoadClass::Beachfront
+                        && (e.a as usize == n || e.b as usize == n)),
+                "seed {seed}: highway end {:?} is not on the beachfront road",
+                p.roads.nodes[n].pos
+            );
+        }
+        // The walls, sampled every 32 m along each land side clear of the corners.
+        let mut least = [f32::INFINITY; 4];
+        for k in [NORTH, EAST, SOUTH, WEST] {
+            if edges[k].is_water() {
+                continue;
+            }
+            let along_len = if k == NORTH || k == SOUTH {
+                ext[0]
+            } else {
+                ext[1]
+            };
+            let (lo, hi) = if k == NORTH || k == SOUTH {
+                (bands[WEST], ext[0] - bands[EAST])
+            } else {
+                (bands[NORTH], ext[1] - bands[SOUTH])
+            };
+            let at = |a: f32, d: f32| match k {
+                NORTH => [a, d],
+                SOUTH => [a, ext[1] - d],
+                WEST => [d, a],
+                _ => [ext[0] - d, a],
+            };
+            let mut a = lo.max(32.0);
+            while a <= hi.min(along_len - 32.0) {
+                let h = |d: f32| p.terrain.height_at(&p.header, at(a, d)).unwrap();
+                let rise = h(1.0) - h(bands[k]);
+                least[k] = least[k].min(rise);
+                a += 32.0;
+            }
+            let need = if edges[k] == EdgeKind::Mountains {
+                MOUNTAINS_RISE_M
+            } else {
+                RISE_M
+            };
+            assert!(
+                least[k] >= need,
+                "seed {seed}: the {:?} wall rises only {:.1} m",
+                edges[k],
+                least[k]
+            );
+        }
+        println!(
+            "seed {seed}: {dead} dead ends ({beach} on the beach), least rise N {:.0} E {:.0} S {:.0} m",
+            least[NORTH], least[EAST], least[SOUTH]
+        );
     }
 }
 
@@ -546,4 +674,69 @@ fn far_terrain_lies_under_the_ground() {
         );
         assert!(checked > 200_000, "{checked}");
     }
+}
+
+/// The coast's horizon: past its land sides ridges climb well above anything in the place
+/// (higher behind the eastern mountains than behind the northern and southern hills), its
+/// triangles all lie outside the place but for the cells along its sides, it meets the far
+/// terrain's samples exactly along the sides, and it leaves the open sea to the water.
+#[test]
+fn horizon_rises_past_the_land_and_leaves_the_sea() {
+    use world::mesh::terrain::HORIZON_RINGS_M;
+    use world::{ChunkPlan, Palette};
+    let pal = Palette::socal_1985();
+    let p = build_place(Seed(1), &template(), &grammar());
+    let plan = ChunkPlan::new(&p, &pal, &grammar());
+    let far = plan.far_terrain(&p, &pal).unwrap();
+    let h = plan.horizon(&p, &pal).unwrap();
+    let ext = p.header.extent_m();
+    let tris = h.indices.len() / 3;
+    let top = |f: &dyn Fn([f32; 3]) -> bool| {
+        h.vertices
+            .iter()
+            .filter(|v| f(v.pos))
+            .map(|v| v.pos[1])
+            .fold(f32::NEG_INFINITY, f32::max)
+    };
+    let inside_top = p
+        .terrain
+        .heights
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let east = top(&|q| q[0] > ext[0] + 600.0 && q[2] > 0.0 && q[2] < ext[1]);
+    let north = top(&|q| q[2] < -600.0 && q[0] > 0.0 && q[0] < ext[0]);
+    println!("horizon: {tris} triangles; tops: place {inside_top:.0}, east {east:.0}, north {north:.0} m");
+    assert!((1000..=8000).contains(&tris), "{tris} triangles");
+    assert!(
+        east > inside_top + 100.0 && east > north,
+        "east {east}, north {north}"
+    );
+    assert!(north > 100.0, "north {north}");
+    let reach = HORIZON_RINGS_M[HORIZON_RINGS_M.len() - 1];
+    for t in h.indices.chunks_exact(3) {
+        let v = [0, 1, 2].map(|k| h.vertices[t[k] as usize].pos);
+        let c = [
+            (v[0][0] + v[1][0] + v[2][0]) / 3.0,
+            (v[0][2] + v[1][2] + v[2][2]) / 3.0,
+        ];
+        let out = c[0] < 0.0 || c[1] < 0.0 || c[0] > ext[0] || c[1] > ext[1];
+        assert!(out, "horizon triangle inside the place at {c:?}");
+        assert!(v
+            .iter()
+            .all(|q| q[0] >= -reach - 1.0 && q[0] <= ext[0] + reach + 1.0));
+        // West of the coast's headlands, open sea only.
+        if c[0] < -100.0 && c[1] > 400.0 && c[1] < ext[1] - 400.0 {
+            panic!("horizon land out at sea at {c:?}");
+        }
+    }
+    // Along the sides the horizon's samples are the far terrain's.
+    let on_side = |q: [f32; 3]| q[0] == 0.0 || q[2] == 0.0 || q[0] == ext[0] || q[2] == ext[1];
+    let mut shared = 0;
+    for v in h.vertices.iter().filter(|v| on_side(v.pos)) {
+        if far.vertices.iter().any(|f| f.pos == v.pos) {
+            shared += 1;
+        }
+    }
+    assert!(shared >= 4 * 64, "{shared} side samples shared");
 }

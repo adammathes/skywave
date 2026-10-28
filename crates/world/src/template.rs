@@ -17,7 +17,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use place::ZoneId;
+use place::{EdgeKind, ZoneId};
 
 /// `(min, max)`, inclusive.
 pub type Range = (f32, f32);
@@ -51,6 +51,25 @@ pub enum CoastSide {
 pub enum CoastWater {
     Ocean,
     Lake,
+}
+
+/// What bounds the place on each side (`docs/WORLD_GENERATION.md`, "Map edges"). The coast
+/// side must be water (`Ocean`, `Lake` or `Bay`), every other side land; none is `Open`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Edges {
+    pub north: EdgeKind,
+    pub east: EdgeKind,
+    pub south: EdgeKind,
+    pub west: EdgeKind,
+}
+
+impl Edges {
+    /// `[north, east, south, west]`, the order of `place::Terrain::edges`.
+    pub fn sides(&self) -> [EdgeKind; 4] {
+        [self.north, self.east, self.south, self.west]
+    }
 }
 
 /// Local street layout of a zone (`docs/WORLD_GENERATION.md` stage 4).
@@ -239,17 +258,14 @@ pub struct StripRule {
     pub width_m: Range,
 }
 
-/// The highway corridor from the coast inland through the pass.
+/// The highway corridor: a bypass from the coast round the town and back
+/// (`docs/WORLD_GENERATION.md` stage 3).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct HighwayRule {
     /// Right-of-way width painted as `Highway`.
     pub corridor_m: f32,
-    /// Fraction in `[0, 1)` by which ridges are lowered at the pass.
-    pub pass_depth: f32,
-    /// Half-width of the saddle the pass cuts across the ridges.
-    pub pass_width_m: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -442,6 +458,7 @@ pub struct RegionTemplate {
     pub sign_language: SignLanguage,
     pub era: EraDefaults,
     pub coast: Coast,
+    pub edges: Edges,
     pub elevation: Elevation,
     pub layout: Layout,
     pub zones: Zones,
@@ -502,6 +519,10 @@ pub enum TemplateError {
         zone: ZoneId,
         field: &'static str,
     },
+    /// The coast side's edge is not water, another side's is, or one is `Open`.
+    BadEdge {
+        field: &'static str,
+    },
 }
 
 impl fmt::Display for TemplateError {
@@ -541,6 +562,10 @@ impl fmt::Display for TemplateError {
             TemplateError::BadMassing { zone, field } => {
                 write!(f, "zones.{zone:?}.massing.{field} is invalid")
             }
+            TemplateError::BadEdge { field } => write!(
+                f,
+                "{field}: the coast side must be water like coast.water, the others land"
+            ),
         }
     }
 }
@@ -660,6 +685,23 @@ impl RegionTemplate {
             positive("coast.canals.length_m", k.length_m)?;
         }
 
+        let coast = match c.side {
+            CoastSide::North => 0,
+            CoastSide::East => 1,
+            CoastSide::South => 2,
+            CoastSide::West => 3,
+        };
+        let names = ["edges.north", "edges.east", "edges.south", "edges.west"];
+        for (i, (kind, field)) in self.edges.sides().into_iter().zip(names).enumerate() {
+            let wrong_water = matches!(
+                (kind, c.water),
+                (EdgeKind::Ocean, CoastWater::Lake) | (EdgeKind::Lake, CoastWater::Ocean)
+            );
+            if kind == EdgeKind::Open || kind.is_water() != (i == coast) || wrong_water {
+                return Err(TemplateError::BadEdge { field });
+            }
+        }
+
         let e = &self.elevation;
         within("elevation.water_level_m", e.water_level_m, -100.0, 1000.0)?;
         within("elevation.shelf_depth_m", e.shelf_depth_m, 0.5, 200.0)?;
@@ -698,13 +740,6 @@ impl RegionTemplate {
             8.0,
             200.0,
         )?;
-        within("layout.highway.pass_depth", l.highway.pass_depth, 0.0, 0.95)?;
-        within(
-            "layout.highway.pass_width_m",
-            l.highway.pass_width_m,
-            20.0,
-            2000.0,
-        )?;
         count("layout.parks.count", l.parks.count)?;
         positive("layout.parks.radius_m", l.parks.radius_m)?;
         count("layout.overlooks", l.overlooks)?;
@@ -725,16 +760,23 @@ impl RegionTemplate {
         Ok(())
     }
 
-    /// The lowest and highest terrain heights this template can produce; generation clamps
-    /// to them.
+    /// The lowest and highest terrain heights this template can produce, the edge walls
+    /// on top of everything else; generation clamps to them.
     pub fn height_bounds(&self) -> (f32, f32) {
         let e = &self.elevation;
         let lo = e.water_level_m - e.shelf_depth_m;
+        let wall = self
+            .edges
+            .sides()
+            .iter()
+            .filter_map(|&k| crate::edges::wall(k))
+            .fold(0.0f32, |a, w| a.max(w.height_m.1));
         let hi = e.water_level_m
             + e.beach_height_m
             + e.plain_rise_m.1
             + e.ridge_height_m.1.max(e.valley_floor_m.1)
             + 2.0 * e.relief_m
+            + wall
             + 4.0;
         (lo, hi)
     }

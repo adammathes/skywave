@@ -559,7 +559,11 @@ impl Ctx<'_> {
                 lot.pave.push(rect(c0, c1, ramp, t_l));
             }
             let reach = if rows == 2 { t_l + sd } else { t_l };
-            lot.entries.push(rect(c0, c1, 0.0, reach + 0.5));
+            // From the curb, like the ramp: a parcel's front may lie back from the walk.
+            let mut e = rect(c0, c1, 0.0, reach + 0.5);
+            e[0] = q[0];
+            e[1] = q[1];
+            lot.entries.push(e);
         }
         lot.pave.push(rect(ls0, ls1, t_l, t_b));
         lot.aisles.push(rect(ls0, ls1, t_b - sd - aw, t_b - sd));

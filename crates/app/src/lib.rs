@@ -218,9 +218,22 @@ pub struct App {
     aspect: f32,
     /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
     target: Option<(u32, u32)>,
+    /// Seconds the deep-water toast has left, and the car's water resets it has shown.
+    water_toast: f32,
+    water_resets_seen: u32,
+    /// The ui's HUD with the deep-water toast over it, on the frames that show it.
+    overlay: render::HudBuilder,
     /// The world the World page picked, for the platform to load ([`App::take_world_pick`]).
     world_pick: Option<usize>,
 }
+
+/// Seconds the deep-water toast stays up.
+const WATER_TOAST_S: f32 = 2.5;
+/// What it says.
+const WATER_TOAST: &str = "Deep water: resetting";
+/// Its color (the ui's accent) and its drop shadow.
+const TOAST_RGBA: [u8; 4] = [255, 178, 62, 255];
+const TOAST_SHADOW: [u8; 4] = [0, 0, 0, 170];
 
 /// A car in one paint whose meshes the renderer has (or will have, once drained).
 #[derive(Clone, Copy, Debug)]
@@ -384,6 +397,9 @@ impl App {
             audio: audio::synth::AudioParams::default(),
             aspect: 16.0 / 9.0,
             target: None,
+            water_toast: 0.0,
+            water_resets_seen: 0,
+            overlay: render::HudBuilder::new(),
             world_pick: None,
         })
     }
@@ -447,6 +463,9 @@ impl App {
         }
         // A scene's density applies now; the setting's once the settings are loaded.
         app.traffic_scene = setup.traffic_density();
+        if let Some(t) = setup.phase {
+            app.npcs.set_signal_tick(t);
+        }
         if let Some(d) = app.traffic_scene {
             app.apply_traffic(d);
             app.finish_warm_up();
@@ -682,6 +701,17 @@ impl App {
         self.ticks
     }
 
+    /// Whether the simulation is held (a scene's `still=1`): frames draw and stream but run
+    /// no steps.
+    pub fn still(&self) -> bool {
+        self.still
+    }
+
+    /// Holds the simulation still, or lets it run again.
+    pub fn set_still(&mut self, still: bool) {
+        self.still = still;
+    }
+
     /// Advances real time by `dt_real` seconds, running as many fixed steps as are due.
     /// Pass the returned `alpha` to [`App::scene_view`].
     pub fn update(&mut self, input: &InputState, dt_real: f64) -> Steps {
@@ -766,6 +796,11 @@ impl App {
             self.time.step(input, SIM_DT);
             self.ticks += 1;
         }
+        if self.drive.water_resets != self.water_resets_seen {
+            self.water_resets_seen = self.drive.water_resets;
+            self.water_toast = WATER_TOAST_S;
+        }
+        self.water_toast = (self.water_toast - dt_real as f32).max(0.0);
         self.npcs.note_time(traffic_s * 1000.0, steps.count);
         self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
         steps
@@ -839,6 +874,11 @@ impl App {
     fn finish_warm_up(&mut self) {
         let inputs = self.traffic_inputs();
         self.npcs.warm_up_unseen(&inputs);
+    }
+
+    /// Whether the deep-water toast is up.
+    pub fn water_toast(&self) -> bool {
+        self.water_toast > 0.0
     }
 
     /// Fingerprint of the simulation state, for determinism checks.
@@ -1019,7 +1059,22 @@ impl App {
             sky: self.ui.video_sky(lighting::sky(&daylight)),
             instances: &self.instances,
             lights: self.lights.lights(),
-            hud: self.ui.hud(),
+            hud: if self.water_toast > 0.0 {
+                let hud = self.ui.hud();
+                let o = &mut self.overlay;
+                o.begin(hud.ui_scale);
+                o.extend(&hud);
+                // Centered a third of the way down.
+                let [w, h] = o.size();
+                let scale = 2.0;
+                let x = 0.5 * (w - render::font::text_width(WATER_TOAST) as f32 * scale);
+                let y = h / 3.0;
+                o.text(x + scale, y + scale, scale, TOAST_SHADOW, WATER_TOAST);
+                o.text(x, y, scale, TOAST_RGBA, WATER_TOAST);
+                o.view()
+            } else {
+                self.ui.hud()
+            },
             quality: self.ui.render_quality(),
         }
     }
@@ -1145,7 +1200,8 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
 }
 
 /// `place` to be streamed within `budget`: nothing built yet but a terrain place's far
-/// terrain (drawn always, under the chunks, out to the horizon), every static light known
+/// terrain and horizon (drawn always, under the chunks, out to the horizon), every static
+/// light known
 /// (and off until its chunk is drawn), room for every part the resident chunks can have.
 fn streamed_town(
     place: Place,
@@ -1159,7 +1215,11 @@ fn streamed_town(
     let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());
     lights.set_active(|_| false);
     let light_chunks = statics.iter().map(|s| s.chunk).collect();
-    let meshes: Vec<Mesh> = source.far_terrain().cloned().into_iter().collect();
+    let meshes: Vec<Mesh> = [source.far_terrain(), source.horizon()]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
     let fixed = meshes.len();
     let capacity = fixed + streamer.capacity() * MAX_CHUNK_PARTS;
     let mut instances = Vec::with_capacity(capacity);
@@ -2144,14 +2204,19 @@ mod tests {
         assert!(resident.meshes[..world]
             .iter()
             .all(|m| m.vertices.len() <= 1 << 20));
-        // Streamed (the default): the far terrain drawn from the start, under the ring round
-        // the start as it fills, every chunk within budget.
+        // Streamed (the default): the far terrain and the horizon drawn from the start,
+        // under the ring round the start as it fills, every chunk within budget.
         let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
-        assert!(app.is_streamed() && app.world_instances == 1);
+        assert!(app.is_streamed() && app.world_instances == 2);
         let far = app.meshes()[0].indices.len() / 3;
         assert!(
             (8192..=10_000).contains(&far),
             "far terrain: {far} triangles"
+        );
+        let horizon = app.meshes()[1].indices.len() / 3;
+        assert!(
+            (1000..=8000).contains(&horizon),
+            "horizon: {horizon} triangles"
         );
         // On the ground at the start.
         let (start, heading) = app.start;
@@ -2175,9 +2240,9 @@ mod tests {
         assert!(stats.built >= 25, "{stats:?}");
         assert!(app.world_instances > 1 && app.world_instances < world);
         assert_eq!(
-            app.instances[0].mesh,
-            MeshId(0),
-            "the far terrain stays drawn"
+            [app.instances[0].mesh, app.instances[1].mesh],
+            [MeshId(0), MeshId(1)],
+            "the far terrain and the horizon stay drawn"
         );
         // Rolling forward along the road from the start, on the ground.
         let mut input = InputState::default();
@@ -2191,5 +2256,36 @@ mod tests {
         let ahead = Vec3::new(-heading.sin(), 0.0, -heading.cos());
         assert!(moved.dot(ahead) > 10.0, "{moved}");
         assert!((now.y - y).abs() < 1.0, "car at {now}, ground {y}");
+    }
+
+    #[test]
+    fn deep_water_resets_the_car_with_a_toast() {
+        // On the sand by the pier facing the sea; full throttle until the water resets it.
+        let query = "?seed=1&place=coast&pos=440,940&yaw=270&stream=1";
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        let mut input = InputState::default();
+        input.set(Action::Throttle, 1.0);
+        let mut frames = 0;
+        while !app.water_toast() {
+            app.update(&input, 1.0 / 30.0);
+            frames += 1;
+            assert!(frames < 30 * 20, "no reset");
+        }
+        let has_toast = |app: &mut App| {
+            let view = app.scene_view(1.0, 16.0 / 9.0);
+            let hud = view.hud;
+            hud.items.iter().any(|i| match *i {
+                render::HudItem::Text { text, .. } => hud.str(text) == WATER_TOAST,
+                _ => false,
+            })
+        };
+        assert!(has_toast(&mut app));
+        // Back at the scene's start point, and the toast goes after its time.
+        let pos = app.drive.pose(1.0).pos;
+        assert!((pos.x - 440.0).abs() < 1e-3 && (pos.z - 940.0).abs() < 1e-3);
+        for _ in 0..(WATER_TOAST_S * 30.0) as usize + 2 {
+            app.update(&InputState::default(), 1.0 / 30.0);
+        }
+        assert!(!app.water_toast() && !has_toast(&mut app));
     }
 }

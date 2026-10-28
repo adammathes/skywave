@@ -23,6 +23,9 @@ RegionTemplate(
         canals: None,
     ),
 
+    // Edges: the lake east, the forest preserve west, the expressway looping back north and south.
+    edges: Edges(north: HighwayLoop, east: Lake, south: HighwayLoop, west: Forest),
+
     elevation: Elevation(
         water_level_m: 176,
         shelf_depth_m: 6,
@@ -45,7 +48,7 @@ RegionTemplate(
         // The "strip" here is the main shopping avenue a few blocks back from the bluff.
         strip: StripRule(length_m: (900, 1400), inland_m: (250, 400), width_m: (60, 80)),
         downtown_inland_m: (300, 500),
-        highway: HighwayRule(corridor_m: 72, pass_depth: 0, pass_width_m: 200),
+        highway: HighwayRule(corridor_m: 72),
         parks: ParkRule(count: (3, 4), radius_m: (90, 160)),
         pier: false,
         overlooks: (0, 0),

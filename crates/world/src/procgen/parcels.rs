@@ -44,7 +44,8 @@
 //!   square's outline; the rest becomes `LotEmpty` fields, cut like lots at field widths.
 //! - **Parking** faces are one lot each.
 //!
-//! Lots narrower than 8 m or smaller than 80 m² become `Park` (town zones) or `LotEmpty`.
+//! Lots narrower than 8 m or smaller than 80 m² become `Park` (town zones) or `LotEmpty`,
+//! and so do leftovers more than three times the zone's largest lot, like interior cores.
 //! A parcel's zone is the zone cell at its area centroid; lots in `Park` zones are `Park`,
 //! in `Highway`/`Water` zones `LotEmpty`. Its frontage edge is the street it shares the most
 //! property line with, checked to lie within `place::validate`'s reach.
@@ -97,6 +98,8 @@ const MITER_LIMIT: f32 = 2.0;
 const MIN_TIP_M: f32 = 6.0;
 /// Edge of the square farmstead parcel around a driveway's end.
 const FARMSTEAD_M: f32 = 60.0;
+/// A lot more than this many times the zone's largest (widest by deepest) is open land.
+const OVERSIZE_LOTS: f32 = 3.0;
 /// Interior cores larger than this are `LotEmpty` even in suburbs.
 const BIG_CORE_M2: f32 = 40_000.0;
 /// Vertices closer than this are merged.
@@ -936,6 +939,11 @@ impl<'a> ParcelPlan<'a> {
                 | ZoneId::Park
                 | ZoneId::Suburb
         );
+        // A leftover far bigger than any lot the zone draws (a face the streets never
+        // reached) is no lot: it is open land like an interior core.
+        let rule = self.lots_rule(zone);
+        let oversize = role == Role::Lot && area > OVERSIZE_LOTS * rule.width_m.1 * rule.depth_m;
+        let role = if oversize { Role::Core } else { role };
         let lot_kind = match role {
             Role::Core => {
                 if town && (zone != ZoneId::Suburb || area < BIG_CORE_M2) {
