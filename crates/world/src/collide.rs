@@ -1349,8 +1349,10 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
                     lot: NO_LOT,
                 })
             }
-            // Above the sidewalk, out of the car's way.
-            PropKind::NeonSign { .. } => {}
+            // Above the sidewalk, out of the car's way; track lies on the ground (or the
+            // road) and a car rolls over it.
+            PropKind::NeonSign { .. } | PropKind::Track { .. } => {}
+            PropKind::Crossbuck => posts.push(post(0.08, 3.9)),
         }
     }
     (posts, boxes)

@@ -67,6 +67,7 @@ here. A template's `edges` says what bounds each side (`crate::edges`, `place::E
 | `HighwayLoop` | as `Hills`; the highway turns back along it | as `Hills` |
 | `Forest` | a 20–30 m wooded bluff (`Park` zone) | a low forest plateau |
 | `RailYards` | a 7–9 m embankment; 160 m of industry inside it | flat yards |
+| `Desert` | a 32–48 m escarpment of mesas rising over 40 m (`Farmland` zone) | the desert floor to the horizon, buttes standing out of it |
 
 The coast side must be water and the others land. A land side's wall stands in a roadless band (the wall,
 24 m of crest wander and a 28 m clear foot); roads, lots and points of interest stay in the playable
@@ -82,8 +83,66 @@ drags it to a stop; after 1.5 s in deep water it goes back to its start with a "
 (`world/tests/place.rs`), the walls rise at least 50 m (85 m for mountains) from the band's foot, and the cars
 cannot climb them or drive out to sea (`app::drive` tests).
 
+## Inland basins
+A template with a `basin` (and no `coast`, `elevation` or `layout`) is an inland place: `socal_basin`, the 2001
+world's (`assets/regions/socal_basin.ron`; `procgen::basin`, `template::Basin`). Every side is land: hills on
+`basin.hills.side` (a `Hills` edge), a desert fringe on `basin.desert.side` beside it (a `Desert` edge), the
+other two any land kind (`socal_basin`: rail yards south, mountains west). There is no water; `water_level_m`
+lies under all ground. The macro stage, in the frame of the hills' side:
+- **Floor and hills.** The floor tilts up toward the hills (`tilt`) and rolls a little (`relief_m`); the foot
+  of the hills lies `hills.depth_m` in from their side, wandering ±20 m, and the hills rise from it to
+  `hills.height_m` at their band (smoothstep, swelling and gullied by `hills.relief_m`).
+- **Grid.** Arterials every `grid.spacing_m` both ways: "cross" lines parallel to the hills, the first along
+  their foot (24 m out), the last leaving room for the airfield before the far band; "out" lines from the
+  first cross line to the last, from 40 m inside the far side's band to the desert. One interior line each way
+  is a boulevard: two one-way carriageways of `grid.boulevard_lanes` lanes (3.4 m each) either side of a
+  `grid.median_m` median, their median-side sidewalks and street trees making the planted median; a
+  boulevard's end that meets no other line gets a short link between its carriageways. The local streets lay
+  the grid's blocks square to its axes (the industrial zone shares the grid pattern with its commercial
+  frontage, at 100 m blocks with truck-width streets).
+- **Freeway.** Between two cross lines near the middle, from the first out line (where it ends at grade, a
+  T) east into the desert, round a 220 m turn along the desert's band 60 m in, back to the last cross line
+  (where it ends at grade): the desert highway that turns back along the edge. The cross lines between it
+  and the last stop 150 m short of its desert leg. Every out line crosses it on an overpass (the coast's deck
+  rule); `freeway.interchanges` of the crossings (not the boulevards') get ramps: diamonds, and `loops` of
+  them a partial cloverleaf: in the quadrant before the bridge on the side its traffic keeps to, a loop
+  on-ramp leaves the crossing road 85 m out, turns 225° on a 38 m radius and merges 220 m past the bridge;
+  that direction's off-ramp runs round the outside of the loop to the road 132 m out; the other direction
+  has the diamond's two ramps.
+- **Channel.** Between the first two out lines, from 80 m into the hills to the far edge (cut through its
+  wall): a trapezoid `channel.depth_m` under the ground beside it (7.5 m, under the 8 m a road profile may
+  stand off the terrain), a `bed_m` bed and `wall_m` walls, deepening over its first 40 m. Every road over
+  it is a bridge: the arterial stage reads the ground with the channel filled (`BasinPlan::bridge_heights`),
+  so profiles run level across and the road mesh draws the deck and its piers. At the first bridge past
+  every `ramp_every_m` along it a ramp 8 m wide runs down one wall (alternating) at `ramp_grade`, from 16 m
+  off the bridge. Its right of way (`row_m`) is `Highway` zone, so streets, lots and buildings stop at its
+  banks; the Place carries its concrete as `WaterKind::Channel` bodies (lip to lip, and the ramps), which
+  the ground mesh paints concrete and the map grey.
+- **Rail.** Between the first two cross lines, edge to edge (into the bands' walls), at grade with every road
+  it crosses; `rail.spurs` sidings 4.5 m beside it (off a 30 m turnout, ending at a bumper) between the out
+  lines in industrial land; its right of way (`row_m`) is `Highway` zone. The detailing lays it as
+  `PropKind::Track` pieces (ballast; flush crossing panels where it crosses a road, with a `Crossbuck` on
+  each approach, on the right; a girder deck over the channel; a bumper at a spur's end).
+- **Airfield.** Between the last cross line and the far band, past the channel: a `Park`-zone field
+  `airfield.width_m` across and `length_m` long (no trees), its runway (`runway_m` wide, no sidewalks; the
+  future drag strip) and a taxiway to the last cross line.
+- **Zones.** Scored as on the coast with four more curves for basins (`Score::hills`, `rail`, `arterial`,
+  `boulevard`: distance out from the foot of the hills, from the rail line, from the nearest arterial and
+  from the nearest boulevard), then by structure: the hills, the desert fringe (`Farmland`: open dirt and
+  section roads), the rights of way (`Highway`), the airfield and parks (`Park`), the bands.
+- **Overlooks** stand on the highest benches of the hills (no steeper than 14% over 32 m, a third to two
+  thirds of the way up; gentler ground where there is none) and the arterial stage's hill roads climb to them.
+
+A non-freeway lane through a right of way takes the zone at either end of it (else industry's), so a shape
+weighed only for freeway lanes (the semi) never starts on a road across the rail line or the channel.
+Set pieces (`docs/backlog/MIRAGE2001.md` item 7) will be `Landmark` kinds placed on this layout (the
+`BasinPlan`): the race start on the boulevard, the drag strip on the runway, the channel's ramps, the grade
+crossings, the overlooks, the desert leg. Tests: `world/tests/basin.rs` (seeds 1–4 pinned; every road in the
+playable rectangle, the freeway one chain ending at grade, overpasses, a loop, the bridges, the crossings,
+the runway, a road to an overlook).
+
 ## Region templates
-A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
+A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above). Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
 ## Facade grammars
 A `world::grammar::Grammar` is data (RON, `assets/grammar/<template>_<era>.ron`, ADR 0002):

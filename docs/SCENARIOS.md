@@ -22,7 +22,9 @@ Scenario(
 ```
 Validation: years in order and the year within them, a known region, grammar, palette and preset, a
 default car no newer than the years (nor built up later, `VehicleSpec::built`), heroes that are built-in
-cars. Inland Basin (`inland_basin_2001`) is `years: (1995, 2001)` and starts in the Halberd Coupe; its
+cars. Mirage Valley (`mirage_valley_2001`; it was `inland_basin_2001` until it was renamed, and a saved
+world choice, a saved radio pick or a `?scenario=` / `--scenario` naming the old id still finds it,
+`scenario::RENAMED`) is `years: (1995, 2001)` and starts in the Halberd Coupe; its
 `heroes` are the nine 2001 hero cars (`docs/VEHICLES.md`), which no earlier world shows. The era filter and its weights are in
 `docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
 64,768 bytes, committed; rendered with `tools/screenshot`, cropped clear of the HUD and quantized, see
@@ -45,7 +47,7 @@ reached from the pause menu (and `?menu=worlds` opens the web build on it).
 **`north_shore_suburb_1986` — Lincolnwood-style, 1986.** Region template `north_shore_suburb`: a flat, pre-war grid suburb at the city edge. Brick bungalows and 50s ranches on 40-foot lots with alleys and detached garages, parkway elms and maples, strip malls and a shopping center with a big parking field, a brutalist tower hotel as the landmark, a six-lane expressway along one edge with a rail line beside it, forest preserve and golf course green, a Jewish deli, a diner, a cemetery, a high school with a track. Flat and frank light, brick-red and beige palette, mercury-vapor streetlights going sodium. Radio: 80s pop, new wave, classic rock, oldies presets. The procedural version evokes it; the place compiler on the real bounding box is the childhood version.
 
 ## Third: the early 2000s (M8)
-**`inland_basin_2001` — Inland Basin, 2001.** Region template `socal_basin`: the flat inland grid of a big
+**`mirage_valley_2001` — Mirage Valley, 2001.** Region template `socal_basin`: the flat inland grid of a big
 Southern California city at the turn of the century, inspired by the import street-racing culture
 of the era and the films and shows that mythologized it (an influence, not a copy: no titles, no
 names, no scenes reproduced). Wide industrial boulevards with four-lane straights, warehouse
@@ -58,7 +60,7 @@ underglow on the tuner cars, a lit race start line with a crowd that steps aside
 
 The deck (the player's own music, `docs/AUDIO_RADIO.md`) is named by the scenario's year:
 **TAPE** for worlds up to 1989 (Pacific Shore 1984, Lake City 1977, the 1986 suburb), **CD** for
-1990–2009 (Inland Basin 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
+1990–2009 (Mirage Valley 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
 worlds renames it and keeps the library.
 
 Era rules: the roster is filtered by year. A scenario has `years: (min, max)`; a car has a
@@ -67,7 +69,7 @@ page. Older cars appear with weights that fall off with age (a 1984 coupe is rar
 2001; a 1969 muscle coupe is a hero car), so the 2000s world has its own cars plus a thinner slice
 of the 80s roster, and the 80s world never sees a 2000s car.
 
-Hero cars (`docs/backlog/INLAND2001.md`): a late-90s Japanese inline-six twin-turbo grand tourer; an
+Hero cars (`docs/backlog/MIRAGE2001.md`): a late-90s Japanese inline-six twin-turbo grand tourer; an
 all-wheel-drive twin-turbo Japanese coupe with four round tail lamps; a late-60s big-block American
 muscle coupe with a hood-mounted supercharger; a 90s front-drive Japanese tuner coupe with a tall
 wing and a body kit; a rotary sports coupe; a Japanese all-wheel-drive rally sedan with a hood
@@ -92,8 +94,9 @@ crew garage (a warehouse with the hero cars parked and a lit sign), a taco stand
 
 "Change worlds": a World page listing every scenario as a card (title, year, a still, the cars and
 stations it ships with); picking one reloads the place and persists; `?scenario=` on the web. Built (see
-the format above), in the pause menu. Until the basin's template, grammar, palette and preset land,
-`inland_basin_2001` is a stub on the coast's, marked "coming" on its card.
+the format above), in the pause menu. Mirage Valley's place is its own, the `socal_basin` region template
+(`docs/WORLD_GENERATION.md`, "Inland basins"); until its grammar, palette and preset land it dresses in the
+coast's and is marked "coming" on its card.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

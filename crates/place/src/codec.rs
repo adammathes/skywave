@@ -309,6 +309,10 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                 }
                 PropKind::Signal { arm_dm } => w.push(arm_dm),
                 PropKind::Pier { len_m } => w.push(len_m),
+                PropKind::Track { len_dm, bed } => {
+                    w.extend_from_slice(&len_dm.to_le_bytes());
+                    w.push(bed);
+                }
                 _ => {}
             }
         }
@@ -342,6 +346,8 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::StopSign => 15,
         PropKind::Signal { .. } => 16,
         PropKind::Pier { .. } => 17,
+        PropKind::Track { .. } => 18,
+        PropKind::Crossbuck => 19,
     }
 }
 
@@ -593,6 +599,7 @@ fn region(v: u8) -> Option<RegionId> {
         1 => RegionId::CaliforniaCoast,
         2 => RegionId::GreatLakesCity,
         3 => RegionId::NorthShoreSuburb,
+        4 => RegionId::SocalBasin,
         _ => return None,
     })
 }
@@ -620,6 +627,7 @@ fn edge_kind(v: u8) -> Option<EdgeKind> {
         6 => EdgeKind::Forest,
         7 => EdgeKind::HighwayLoop,
         8 => EdgeKind::RailYards,
+        9 => EdgeKind::Desert,
         _ => return None,
     })
 }
@@ -629,6 +637,7 @@ fn water_kind(v: u8) -> Option<WaterKind> {
         0 => WaterKind::Ocean,
         1 => WaterKind::Lake,
         2 => WaterKind::River,
+        4 => WaterKind::Channel,
         3 => WaterKind::Canal,
         _ => return None,
     })
@@ -1002,6 +1011,11 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 15 => PropKind::StopSign,
                 16 => PropKind::Signal { arm_dm: r.u8()? },
                 17 => PropKind::Pier { len_m: r.u8()? },
+                18 => PropKind::Track {
+                    len_dm: r.u16()?,
+                    bed: r.u8()?,
+                },
+                19 => PropKind::Crossbuck,
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1483,6 +1497,11 @@ mod tests {
             PropKind::StopSign,
             PropKind::Signal { arm_dm: 61 },
             PropKind::Pier { len_m: 180 },
+            PropKind::Track {
+                len_dm: 160,
+                bed: crate::TRACK_BRIDGE,
+            },
+            PropKind::Crossbuck,
         ];
         let props = kinds
             .iter()

@@ -53,6 +53,8 @@ pub const ZONE_COLORS: [Rgb; 12] = [
 pub const WATER: Rgb = [104, 150, 190];
 pub const SHORE: Rgb = [74, 112, 150];
 pub const PARK: Rgb = [140, 180, 120];
+/// A dry flood channel's concrete.
+pub const CHANNEL: Rgb = [176, 174, 166];
 /// Footprints darken the ground under them to this share (out of 256).
 const BUILDING_SHADE: u32 = 216;
 
@@ -164,6 +166,11 @@ impl MapImage {
             }
         }
         for water in &place.terrain.water {
+            // A dry flood channel is concrete, not water.
+            if water.kind == place::WaterKind::Channel {
+                c.polygon(&water.polygon, |_| CHANNEL);
+                continue;
+            }
             c.polygon(&water.polygon, |_| WATER);
             c.mark_water(&water.polygon);
         }
@@ -537,6 +544,19 @@ mod tests {
             .iter()
             .fold([0.0, 0.0], |s, p| [s[0] + p[0], s[1] + p[1]]);
         [s[0] / n, s[1] / n]
+    }
+
+    #[test]
+    fn a_dry_channel_is_concrete_without_a_shore() {
+        let mut place = Place::test_grid();
+        let (x0, z0, s) = (-500.0, -500.0, 60.0);
+        place.terrain.water.push(WaterBody {
+            polygon: vec![[x0, z0], [x0, z0 + s], [x0 + s, z0 + s], [x0 + s, z0]],
+            kind: WaterKind::Channel,
+        });
+        let map = MapImage::rasterize(&place);
+        assert_eq!(rgb(map.pixel_at([-470.5, -470.5])), CHANNEL);
+        assert_eq!(rgb(map.pixel_at([-470.5, -499.5])), CHANNEL);
     }
 
     #[test]

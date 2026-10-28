@@ -69,6 +69,9 @@ pub struct Bay {
     pub half_width: f32,
 }
 
+/// How far out past an inland place [`Shore::far`] puts its shoreline.
+pub const FAR_SHORE_M: f32 = 100_000.0;
+
 /// The shoreline in the canonical frame, sampled at every height-sample row of `v`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Shore {
@@ -91,7 +94,7 @@ pub struct Shore {
 impl Shore {
     /// Draws the bays and shoreline for `nv` samples of `v` (stage [`stage::COAST`]).
     pub fn generate(seed: Seed, t: &RegionTemplate, nv: u32, len_v: f32) -> Shore {
-        let c = &t.coast;
+        let c = t.coast();
         let mut rng = Rng::new(seed, &[stage::COAST]);
         let offset = rng.range_f32(c.offset_m.0, c.offset_m.1);
         let n_bays = rng.range(u32::from(c.bays.0), u32::from(c.bays.1) + 1);
@@ -140,7 +143,7 @@ impl Shore {
         let n = nv as usize;
         let mut u = vec![0.0; n];
         let mut beach = vec![0.0; n];
-        let (b0, b1) = t.elevation.beach_width_m;
+        let (b0, b1) = t.elevation().beach_width_m;
         for (i, (su, sb)) in u.iter_mut().zip(beach.iter_mut()).enumerate() {
             let v = i as f32 * CELL_M;
             let mut s = offset + c.wiggle_m * wiggle.at(v, 0.0);
@@ -161,6 +164,20 @@ impl Shore {
             road,
             road_k,
             bays,
+        }
+    }
+
+    /// No shoreline: a "shore" [`FAR_SHORE_M`] out past the place's first side, so every
+    /// point is far inland and nothing is beach (an inland basin).
+    pub fn far(nv: u32) -> Shore {
+        let n = nv as usize;
+        Shore {
+            u: vec![-FAR_SHORE_M; n],
+            k: vec![1.0; n],
+            beach: vec![0.0; n],
+            road: vec![-FAR_SHORE_M; n],
+            road_k: vec![1.0; n],
+            bays: Vec::new(),
         }
     }
 

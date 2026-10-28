@@ -155,7 +155,7 @@ fn strip_runs_beside_the_beach() {
     let t = template(CALIFORNIA);
     // Strip cells start at most inland_m + width_m behind the beach band; allow one cell's
     // diagonal for the grid and the smoothed shoreline the strip is laid off.
-    let reach = t.layout.strip.inland_m.1 + t.layout.strip.width_m.1 + 2.0 * ZONE_CELL_M;
+    let reach = t.layout().strip.inland_m.1 + t.layout().strip.width_m.1 + 2.0 * ZONE_CELL_M;
     for seed in 1..=4 {
         let m = MacroMap::generate(Seed(seed), &t, SIZE);
         let zw = m.zone_width as usize;
@@ -208,7 +208,7 @@ fn heights_are_finite_and_within_the_template() {
                 assert!(h.is_finite() && (lo..=hi).contains(&h), "{} {h}", t.name);
                 max = max.max(h);
             }
-            let top = t.elevation.water_level_m + t.elevation.ridge_height_m.0;
+            let top = t.elevation().water_level_m + t.elevation().ridge_height_m.0;
             if hilly {
                 assert!(max >= top, "{} seed {seed}: hills only reach {max}", t.name);
                 assert!(m.pass.is_some());

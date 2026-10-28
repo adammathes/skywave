@@ -565,7 +565,7 @@ mod tests {
         r.apply(&s);
         assert_eq!(r.preset_index(), 1);
         // Another world starts on its own preset, and a pick there is its own.
-        r.set_scenario("inland_basin_2001", "1986_north_shore");
+        r.set_scenario("mirage_valley_2001", "1986_north_shore");
         r.apply(&s);
         assert_eq!(r.preset_index(), 2);
         choose_preset(&mut s, r.scenario(), 0);
@@ -577,7 +577,7 @@ mod tests {
         );
         choose_preset(&mut s, r.scenario(), 2);
         assert!(
-            !s.presets.contains_key("inland_basin_2001"),
+            !s.presets.contains_key("mirage_valley_2001"),
             "its own is no entry"
         );
         r.set_scenario(SCENARIO, SCENARIO_PRESET);

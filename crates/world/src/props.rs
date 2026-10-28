@@ -73,6 +73,14 @@ pub enum PropKind {
     Pier {
         len_m: u8,
     },
+    /// Railway track `len_dm` decimeters long centered on `pos` along `dir`, on its `bed`
+    /// (`place::TRACK_BALLAST` and the others).
+    Track {
+        len_dm: u16,
+        bed: u8,
+    },
+    /// A railroad crossing sign on a post, facing `dir`.
+    Crossbuck,
 }
 
 /// One placed prop.
@@ -411,6 +419,170 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
             neon_sign(m, base, p.dir, palette, pal, p.seed, None);
         }
         PropKind::Pier { len_m } => pier(m, base, p.dir, f32::from(len_m), pal, &mut rng),
+        PropKind::Track { len_dm, bed } => track(m, base, p.dir, f32::from(len_dm) * 0.1, bed, pal),
+        PropKind::Crossbuck => crossbuck(m, base, p.dir, pal),
+    }
+}
+
+/// Distance between a track's rails (standard gauge) and between its ties.
+const GAUGE_M: f32 = 1.435;
+const TIE_STEP_M: f32 = 1.2;
+
+/// Two rails on ties, on a ballast prism (its foot under the ground), a crossing's flush
+/// panels or a steel deck of two plate girders; a spur's end gets a bumper.
+fn track(m: &mut WorldMesh, base: V3, along: V2, len: f32, bed: u8, pal: &Palette) {
+    let f = Frame::upright(base, along);
+    let half = len * 0.5;
+    let steel = Paint::new(shade(pal.metal_dark, 200), Pattern::Metal);
+    let rail_top = Paint::new(pal.metal_light, Pattern::Metal);
+    let tie = Paint::new(mix(pal.bark, pal.concrete_dark, 140), Pattern::Plain);
+    // Heights of the tie tops and the rail tops over `base`.
+    let (tie_y, rail_y) = match bed {
+        place::TRACK_CROSSING => (0.0, 0.03),
+        _ => (0.42, 0.58),
+    };
+    match bed {
+        place::TRACK_CROSSING => {
+            let panel = Paint::new(shade(pal.asphalt_worn, 120), Pattern::Concrete);
+            boxf(
+                m,
+                &f,
+                [-half, -0.1, -1.4],
+                [half, 0.02, 1.4],
+                face::POS_Y,
+                panel,
+            );
+        }
+        place::TRACK_BRIDGE => {
+            let girder = Paint::new(shade(pal.metal_dark, 170), Pattern::Metal);
+            for z in [-1.3f32, 1.3] {
+                boxf(
+                    m,
+                    &f,
+                    [-half, tie_y - 1.4, z - 0.12],
+                    [half, tie_y + 0.25, z + 0.12],
+                    face::ALL & !face::NEG_X & !face::POS_X,
+                    girder,
+                );
+            }
+            boxf(
+                m,
+                &f,
+                [-half, tie_y - 1.4, -1.3],
+                [half, tie_y - 1.25, 1.3],
+                face::NEG_Y,
+                girder,
+            );
+        }
+        _ => {
+            let ballast = Paint::new(mix(pal.concrete_dark, pal.soil, 90), Pattern::Concrete);
+            let (y0, y1) = (-0.4, tie_y - 0.08);
+            for sigma in [-1.0f32, 1.0] {
+                quad(
+                    m,
+                    [
+                        f.p(-half, y0, sigma * 2.0),
+                        f.p(half, y0, sigma * 2.0),
+                        f.p(half, y1, sigma * 1.4),
+                        f.p(-half, y1, sigma * 1.4),
+                    ],
+                    f.y + f.z * sigma,
+                    ballast,
+                );
+            }
+            quad(
+                m,
+                [
+                    f.p(-half, y1, -1.4),
+                    f.p(half, y1, -1.4),
+                    f.p(half, y1, 1.4),
+                    f.p(-half, y1, 1.4),
+                ],
+                f.y,
+                ballast,
+            );
+        }
+    }
+    if bed != place::TRACK_CROSSING {
+        let ties = ((len / TIE_STEP_M) as u32).max(1);
+        for k in 0..ties {
+            let x = -half + (k as f32 + 0.5) * len / ties as f32;
+            boxf(
+                m,
+                &f,
+                [x - 0.12, tie_y - 0.08, -1.25],
+                [x + 0.12, tie_y, 1.25],
+                face::POS_Y | face::NEG_X | face::POS_X,
+                tie,
+            );
+        }
+    }
+    for z in [-0.5 * GAUGE_M, 0.5 * GAUGE_M] {
+        boxf(
+            m,
+            &f,
+            [-half, tie_y, z - 0.04],
+            [half, rail_y - 0.02, z + 0.04],
+            face::NEG_Z | face::POS_Z,
+            steel,
+        );
+        boxf(
+            m,
+            &f,
+            [-half, rail_y - 0.02, z - 0.04],
+            [half, rail_y, z + 0.04],
+            face::POS_Y,
+            rail_top,
+        );
+    }
+    if bed == place::TRACK_END {
+        let bumper = Paint::new(pal.paint_yellow, Pattern::Paint);
+        boxf(
+            m,
+            &f,
+            [half - 0.6, rail_y, -1.1],
+            [half, rail_y + 0.9, 1.1],
+            face::NO_BOTTOM,
+            bumper,
+        );
+    }
+}
+
+/// A white crossed pair of blades on a post over two red lamps, facing `facing`.
+fn crossbuck(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
+    let post = Paint::new(pal.metal_light, Pattern::Metal);
+    let f = Frame::upright(base, facing.left());
+    boxf(
+        m,
+        &f,
+        [-0.06, 0.0, -0.06],
+        [0.06, 3.9, 0.06],
+        face::NO_BOTTOM,
+        post,
+    );
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let c = f.p(0.0, 3.4, 0.08);
+    for (dx, dy) in [(0.69f32, 0.72f32), (0.69, -0.72)] {
+        let (u, v) = (f.x * dx + f.y * dy, f.x * -dy + f.y * dx);
+        let (u, v) = (u * 0.8, v * 0.1);
+        quad(m, [c - u - v, c + u - v, c + u + v, c - u + v], f.z, white);
+        quad(m, [c - u - v, c - u + v, c + u + v, c + u - v], -f.z, post);
+    }
+    // The lamps on a crossarm, glowing red (they flash when the set piece runs a train).
+    let arm = f.p(0.0, 2.6, 0.08);
+    boxf(
+        m,
+        &f,
+        [-0.55, 2.55, 0.0],
+        [0.55, 2.65, 0.1],
+        face::ALL,
+        post,
+    );
+    let lamp = Paint::new(pal.neon_red, Pattern::Glass).glowing(pal.neon_red, Glow::Signal);
+    for x in [-0.42f32, 0.42] {
+        let q = arm + f.x * x + f.z * 0.04;
+        let (u, v) = (f.x * 0.12, f.y * 0.12);
+        quad(m, [q - u - v, q + u - v, q + u + v, q - u + v], f.z, lamp);
     }
 }
 
@@ -1074,6 +1246,8 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::StopSign => PropKind::StopSign,
         P::Signal { arm_dm } => PropKind::TrafficSignal { arm_dm },
         P::Pier { len_m } => PropKind::Pier { len_m },
+        P::Track { len_dm, bed } => PropKind::Track { len_dm, bed },
+        P::Crossbuck => PropKind::Crossbuck,
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

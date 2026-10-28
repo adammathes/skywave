@@ -839,7 +839,7 @@ mod tests {
         build(Page::Worlds, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(ids, [ItemId::World(0), ItemId::World(1)]);
-        assert_eq!(items[1].label, "Inland Basin");
+        assert_eq!(items[1].label, "Mirage Valley");
         assert!(items.iter().all(|i| i.widget == Widget::Action));
         build(Page::Vehicle, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();

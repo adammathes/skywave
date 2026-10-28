@@ -92,7 +92,7 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   (#26, B8 and B9; motels keep the parapet, rooftop items stay on the roof); pedestrian hardening
   (#24: four review rounds, 2040-run crossing sweep at zero reached, 0.4 m step-aside clearance);
   the radio starts off every session (ce560a3) and the 181.FM presets are gone (7ca473c, pre-roll
-  ads); the M8 spec for the second world, Inland Basin 2001 (`docs/backlog/INLAND2001.md`); the 1980s sports cars
+  ads); the M8 spec for the second world, Mirage Valley 2001 (`docs/backlog/MIRAGE2001.md`); the 1980s sports cars
   and their open versions (#28: 20 cars, exotics player-only, `TRAFFIC_SHAPES`); ad-free radio
   presets (#30: 7 / 6 / 6 listener-supported, public and college stations, each cold-start
   checked; the checker gained --listen/--save/--url and ad-sign warnings); the rename of the
@@ -148,8 +148,16 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
+<<<<<<< HEAD
 - Next: the owner's drive of the reverted handling, Mirage Valley (template, then grammar), set pieces; NPC cars see pedestrians (board order 15, after #38); M8 waves
   (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2,
+=======
+- In review: the 2001 world renamed Mirage Valley (`mirage_valley_2001`, old id migrates) and its
+  region template `socal_basin` (`m8/mirage-valley`, M8 #2: no coast, `docs/WORLD_GENERATION.md`
+  "Inland basins"); its grammar and `sodium_night` palette follow on `m8/mirage-valley-grammar`.
+- Next: merge #20, #37, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
+  (the 2001 grammar, hero cars part 2, traffic cars,
+>>>>>>> origin/main
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff

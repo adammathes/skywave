@@ -28,10 +28,10 @@ fn shipped_templates_load_and_validate() {
 #[test]
 fn california_is_the_west_coast_template() {
     let t = parse(CALIFORNIA);
-    assert_eq!(t.coast.side, CoastSide::West);
-    assert_eq!(t.coast.water, CoastWater::Ocean);
-    assert!(t.coast.canals.is_some());
-    assert!(t.elevation.ridge_count.0 >= 2);
+    assert_eq!(t.coast().side, CoastSide::West);
+    assert_eq!(t.coast().water, CoastWater::Ocean);
+    assert!(t.coast().canals.is_some());
+    assert!(t.elevation().ridge_count.0 >= 2);
     for zone in [
         ZoneId::Downtown,
         ZoneId::Residential,
@@ -47,8 +47,8 @@ fn california_is_the_west_coast_template() {
 fn stubs_are_flat_lake_grids() {
     for text in [GREAT_LAKES, NORTH_SHORE] {
         let t = parse(text);
-        assert_eq!(t.coast.water, CoastWater::Lake);
-        assert_eq!(t.elevation.ridge_count, (0, 0));
+        assert_eq!(t.coast().water, CoastWater::Lake);
+        assert_eq!(t.elevation().ridge_count, (0, 0));
         assert_eq!(
             t.zones.residential.streets,
             world::template::StreetPattern::Grid
@@ -127,7 +127,7 @@ fn bad_weight_tables_are_rejected() {
 #[test]
 fn other_bad_fields_are_rejected() {
     let mut t = parse(CALIFORNIA);
-    t.elevation.beach_width_m = (120.0, 60.0);
+    t.elevation.as_mut().unwrap().beach_width_m = (120.0, 60.0);
     assert_eq!(
         t.validate(),
         Err(TemplateError::BadRange {

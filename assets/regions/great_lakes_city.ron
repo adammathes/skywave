@@ -11,7 +11,7 @@ RegionTemplate(
     sign_language: EnUs,
     era: EraDefaults(year: 1977, street_lights: Sodium, palette: "brick_and_limestone"),
 
-    coast: Coast(
+    coast: Some(Coast(
         side: East,
         water: Lake,
         offset_m: (160, 240),
@@ -20,13 +20,13 @@ RegionTemplate(
         bay_depth_m: (40, 90),
         bay_width_m: (500, 800),
         canals: None,
-    ),
+    )),
 
     // Edges: the lake east; the grid gives way to rail yards and industry west and north, and the
     // expressway loops back along a ridge south.
     edges: Edges(north: RailYards, east: Lake, south: HighwayLoop, west: RailYards),
 
-    elevation: Elevation(
+    elevation: Some(Elevation(
         water_level_m: 176,
         shelf_depth_m: 8,
         beach_width_m: (30, 70),
@@ -42,16 +42,16 @@ RegionTemplate(
         valley_length_m: (400, 600),
         valley_width_m: (200, 300),
         valley_floor_m: (0, 0),
-    ),
+    )),
 
-    layout: Layout(
+    layout: Some(Layout(
         strip: StripRule(length_m: (1200, 1700), inland_m: (60, 120), width_m: (60, 90)),
         downtown_inland_m: (120, 260),
         highway: HighwayRule(corridor_m: 64),
         parks: ParkRule(count: (3, 5), radius_m: (60, 120)),
         pier: true,
         overlooks: (0, 0),
-    ),
+    )),
 
     zones: Zones(
         downtown: ZoneRule(

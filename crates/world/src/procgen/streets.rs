@@ -694,7 +694,9 @@ impl<'a> StreetPlan<'a> {
         let joinable: Vec<bool> = arterials
             .edges
             .iter()
-            .map(|e| e.class != RoadClass::Highway && !e.oneway)
+            // Not the highway or its ramps (one-way collectors); a boulevard's one-way
+            // carriageways take streets like any arterial.
+            .map(|e| e.class != RoadClass::Highway && !(e.oneway && e.class != RoadClass::Arterial))
             .collect();
         let ebox: Vec<(V2, V2)> = arterials
             .edges
@@ -859,6 +861,16 @@ impl<'a> StreetPlan<'a> {
             } else {
                 coast_tangent(self.m, centroid)
             };
+            // A basin's grid is square to its axes, whatever its ramps and curves say.
+            let dir = if self.m.basin.is_some() {
+                if abs(dir.x) >= abs(dir.y) {
+                    V2::new(1.0f32.copysign(dir.x), 0.0)
+                } else {
+                    V2::new(0.0, 1.0f32.copysign(dir.y))
+                }
+            } else {
+                dir
+            };
             let (lr, dr) = self
                 .t
                 .zones
@@ -897,7 +909,9 @@ impl<'a> StreetPlan<'a> {
                     key,
                     comp: id,
                     pattern: p,
-                    kind: if p == P_INDUSTRIAL {
+                    // Truck streets in industry, whichever pattern laid them (a basin's
+                    // industry shares the grid with its commercial frontage).
+                    kind: if p == P_INDUSTRIAL || zone == ZoneId::Industrial {
                         Kind::Industrial
                     } else {
                         Kind::Local
@@ -991,7 +1005,7 @@ impl<'a> StreetPlan<'a> {
                 Some(GridCell {
                     comp: i as u32,
                     zone: c.zone,
-                    industrial: c.pattern == P_INDUSTRIAL,
+                    industrial: c.pattern == P_INDUSTRIAL || c.zone == ZoneId::Industrial,
                     dir: [l.d.x, l.d.y],
                     origin: [l.origin.x, l.origin.y],
                     block_m: [l.len, l.dep],

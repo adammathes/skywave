@@ -150,6 +150,8 @@ pub enum WaterKind {
     Ocean = 0,
     Lake = 1,
     Canal = 2,
+    /// A dry concrete flood channel (an inland basin's): no water in it.
+    Channel = 3,
 }
 
 /// A body of water as a simple polygon, counter-clockwise seen from above. Its surface is
@@ -228,6 +230,53 @@ pub struct MacroMap {
     pub edges: [EdgeKind; 4],
     /// The roadless band inside each side ([`edges::band_m`]), same order.
     pub bands: [f32; 4],
+    /// An inland basin's grid, channel, rail line and airfield ([`super::basin`]);
+    /// `None` on the coast.
+    pub basin: Option<BasinPlan>,
+}
+
+/// One arterial of a basin's grid: a straight line, world coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridLine {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    /// Two one-way carriageways either side of a planted median.
+    pub boulevard: bool,
+}
+
+/// What a basin's macro stage lays out besides terrain and zones (`super::basin`); the
+/// arterial stage builds its roads from it and the detailing its track. World coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BasinPlan {
+    /// The arterial grid: the lines parallel to the hills first, from the foot of the hills
+    /// out, then the lines running out from the hills, from the far side of the desert in.
+    pub lines: Vec<GridLine>,
+    /// Lines parallel to the hills (the first `cross` of `lines`).
+    pub cross: usize,
+    /// The grid lines the freeway's ends meet at grade (indices into `lines`).
+    pub freeway_ends: [usize; 2],
+    /// Lanes each way of a boulevard and its median.
+    pub boulevard_lanes: u8,
+    pub median_m: f32,
+    /// The flood channel's centerline from its head in the hills to the far edge, every
+    /// 16 m, its bed's half-width and the half-width at its lips.
+    pub channel: Vec<[f32; 2]>,
+    pub channel_half_m: (f32, f32),
+    /// The ramps down into it: from the top (at a bridge) to the foot on the bed, each 8 m
+    /// wide along the wall.
+    pub ramps: Vec<[[f32; 2]; 2]>,
+    /// The rail line's centerline from edge to edge, and the spurs beside it (each from
+    /// the turnout off the main line to its bumper).
+    pub rail: Vec<[f32; 2]>,
+    pub spurs: Vec<Vec<[f32; 2]>>,
+    /// The airfield's corners (counter-clockwise), its runway's ends, and the taxiway from
+    /// the runway's first end to the grid.
+    pub airfield: Vec<[f32; 2]>,
+    pub runway: [[f32; 2]; 2],
+    pub runway_m: f32,
+    pub taxiway: [[f32; 2]; 2],
+    /// The heights with the channel filled: what the roads and the track over it bridge.
+    pub bridge_heights: Vec<f32>,
 }
 
 /// Terrain smoothing strength per zone (by `ZoneId` discriminant).
@@ -278,14 +327,17 @@ impl MacroMap {
     /// Generates the macro map. `template` must have passed
     /// [`RegionTemplate::validate`]; sizes below one chunk are raised to one.
     pub fn generate(seed: Seed, template: &RegionTemplate, size_chunks: [u16; 2]) -> MacroMap {
+        if let Some(b) = &template.basin {
+            return super::basin::generate(seed, template, b, size_chunks);
+        }
         let t = template;
-        let e = &t.elevation;
-        let l = &t.layout;
+        let e = t.elevation();
+        let l = t.layout();
         let wl = e.water_level_m;
         let size_chunks = [size_chunks[0].max(1), size_chunks[1].max(1)];
         let nx = u32::from(size_chunks[0]) * RES_PER_CHUNK;
         let nz = u32::from(size_chunks[1]) * RES_PER_CHUNK;
-        let frame = Frame::new(t.coast.side, nx, nz);
+        let frame = Frame::new(t.coast().side, nx, nz);
         let (len_u, len_v) = (frame.len_u(), frame.len_v());
 
         // 1. Coast.
@@ -417,7 +469,7 @@ impl MacroMap {
         }
 
         let mut canals: Vec<Rect> = Vec::new();
-        if let Some(c) = &t.coast.canals {
+        if let Some(c) = &t.coast().canals {
             if rng.next_f32() < c.chance {
                 let n = rng.range(u32::from(c.fingers.0), u32::from(c.fingers.1) + 1);
                 let length = rng.range_f32(c.length_m.0, c.length_m.1);
@@ -582,6 +634,7 @@ impl MacroMap {
             pois: Vec::new(),
             edges,
             bands,
+            basin: None,
         };
         if !ridges.is_empty() {
             let mut best = (f32::NEG_INFINITY, None);
@@ -604,7 +657,7 @@ impl MacroMap {
                 .push(to_world(map.shore.road_point(v, d)));
             v += ZONE_CELL_M;
         }
-        let kind = match t.coast.water {
+        let kind = match t.coast().water {
             CoastWater::Ocean => WaterKind::Ocean,
             CoastWater::Lake => WaterKind::Lake,
         };
@@ -644,7 +697,7 @@ impl MacroMap {
             pos: to_world(map.shore.point(v_start, 0.0)),
             facing: seaward(v_start),
         });
-        let overlooks = overlooks(seed, t, &map);
+        let overlooks = overlooks(seed, l.overlooks, &map);
         for p in overlooks {
             let (_, v) = frame.to_canon(p);
             map.pois.push(MacroPoi {
@@ -737,11 +790,49 @@ impl MacroMap {
         for &x in &self.bands {
             f(&mut b, x);
         }
+        if let Some(p) = &self.basin {
+            p.hash_into(&mut b);
+        }
         hash_bytes(0x004D_4143_524F, &b)
     }
 }
 
-fn mean(xs: &[f32]) -> f32 {
+impl BasinPlan {
+    fn hash_into(&self, b: &mut Vec<u8>) {
+        let f = |b: &mut Vec<u8>, x: f32| b.extend_from_slice(&x.to_bits().to_le_bytes());
+        for l in &self.lines {
+            for x in [l.a[0], l.a[1], l.b[0], l.b[1]] {
+                f(b, x);
+            }
+            b.push(u8::from(l.boulevard));
+        }
+        b.extend_from_slice(&(self.cross as u32).to_le_bytes());
+        b.extend(self.freeway_ends.iter().map(|&e| e as u8));
+        b.push(self.boulevard_lanes);
+        f(b, self.median_m);
+        f(b, self.channel_half_m.0);
+        f(b, self.channel_half_m.1);
+        f(b, self.runway_m);
+        let pts = self
+            .channel
+            .iter()
+            .chain(self.ramps.iter().flatten())
+            .chain(&self.rail)
+            .chain(self.spurs.iter().flatten())
+            .chain(&self.airfield)
+            .chain(&self.runway)
+            .chain(&self.taxiway);
+        for p in pts {
+            f(b, p[0]);
+            f(b, p[1]);
+        }
+        for &x in &self.bridge_heights {
+            f(b, x);
+        }
+    }
+}
+
+pub(super) fn mean(xs: &[f32]) -> f32 {
     let mut acc = 0.0;
     for &x in xs {
         acc += x;
@@ -751,7 +842,7 @@ fn mean(xs: &[f32]) -> f32 {
 
 /// The polyline `pts` with every inner corner rounded by a quadratic arc that leaves the
 /// straight `radius` (clipped to half of either neighboring segment) before the corner.
-fn fillet(pts: &[(f32, f32)], radius: f32) -> Vec<(f32, f32)> {
+pub(super) fn fillet(pts: &[(f32, f32)], radius: f32) -> Vec<(f32, f32)> {
     let n = pts.len();
     let mut out = vec![pts[0]];
     for i in 1..n.saturating_sub(1) {
@@ -780,7 +871,7 @@ fn fillet(pts: &[(f32, f32)], radius: f32) -> Vec<(f32, f32)> {
 }
 
 /// Points along `line` every `step` from its start, and its last point.
-fn resample_c(line: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
+pub(super) fn resample_c(line: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
     let mut out = vec![line[0]];
     let mut carry = 0.0;
     for s in line.windows(2) {
@@ -805,7 +896,7 @@ fn resample_c(line: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
 /// [`CELL_M`] apart), from whichever is higher, the ground or the ground at the foot of the
 /// band (so the crest clears the foot by the wall's height even where the land falls
 /// toward the edge); where two walls meet the higher wins.
-fn raise_walls(
+pub(super) fn raise_walls(
     seed: Seed,
     heights: &mut [f32],
     w: usize,
@@ -871,6 +962,7 @@ fn band_zone(kind: EdgeKind) -> ZoneId {
     match kind {
         EdgeKind::Forest => ZoneId::Park,
         EdgeKind::RailYards => ZoneId::Industrial,
+        EdgeKind::Desert => ZoneId::Farmland,
         _ => ZoneId::Hills,
     }
 }
@@ -879,7 +971,7 @@ fn band_zone(kind: EdgeKind) -> ZoneId {
 /// cell is still under the water level), and industry for [`YARDS_M`] inside a
 /// `RailYards` band.
 #[allow(clippy::too_many_arguments)]
-fn paint_bands(
+pub(super) fn paint_bands(
     heights: &[f32],
     w: usize,
     sides: &[EdgeKind; 4],
@@ -992,7 +1084,7 @@ fn flatten_pocket(heights: &mut [f32], w: usize, h: usize, canals: &[Rect], wl: 
 }
 
 /// Mean height of each zone cell's 4×4 samples.
-fn cell_means(heights: &[f32], w: usize, zw: usize, zh: usize) -> Vec<f32> {
+pub(super) fn cell_means(heights: &[f32], w: usize, zw: usize, zh: usize) -> Vec<f32> {
     let n = ZONE_SAMPLES as usize;
     let mut out = vec![0.0; zw * zh];
     for cz in 0..zh {
@@ -1069,12 +1161,13 @@ fn zone_inputs(
         downtown: down,
         highway: hw,
         water,
+        basin: Vec::new(),
     }
 }
 
 /// Whether `p` lies within `r` of `line`: segments whose box, grown by `r`, misses `p`
 /// are passed over without measuring.
-fn near_polyline(line: &[[f32; 2]], p: [f32; 2], r: f32) -> bool {
+pub(super) fn near_polyline(line: &[[f32; 2]], p: [f32; 2], r: f32) -> bool {
     let q = V2::from_array(p);
     line.windows(2).any(|s| {
         let (a, b) = (s[0], s[1]);
@@ -1086,7 +1179,7 @@ fn near_polyline(line: &[[f32; 2]], p: [f32; 2], r: f32) -> bool {
     })
 }
 
-fn ccw(mut poly: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+pub(super) fn ccw(mut poly: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
     let v: Vec<V2> = poly.iter().map(|&p| V2::from_array(p)).collect();
     if signed_area(&v) < 0.0 {
         poly.reverse();
@@ -1115,7 +1208,7 @@ fn place_parks(
     toward: f32,
     zone: &mut [ZoneId],
 ) {
-    let rule = &t.layout.parks;
+    let rule = &t.layout().parks;
     let mut rng = Rng::new(seed, &[stage::ZONES, 100]);
     let n = rng.range(u32::from(rule.count.0), u32::from(rule.count.1) + 1);
     if n == 0 {
@@ -1193,7 +1286,14 @@ fn place_parks(
 
 /// Blends each sample toward a blurred copy by its zone's [`FLATTEN`] strength (itself
 /// blurred across cells so there are no steps at cell edges). Water and beach stay as made.
-fn flatten_by_zone(heights: &mut [f32], w: usize, h: usize, zone: &[ZoneId], zw: usize, zh: usize) {
+pub(super) fn flatten_by_zone(
+    heights: &mut [f32],
+    w: usize,
+    h: usize,
+    zone: &[ZoneId],
+    zw: usize,
+    zh: usize,
+) {
     let mut blurred = terrain::box_blur(heights, w, h, 3);
     for _ in 0..2 {
         blurred = terrain::box_blur(&blurred, w, h, 3);
@@ -1230,12 +1330,9 @@ fn flatten_by_zone(heights: &mut [f32], w: usize, h: usize, zone: &[ZoneId], zw:
 }
 
 /// The highest `Hills` cells, at least 400 m apart and 250 m from the pass.
-fn overlooks(seed: Seed, t: &RegionTemplate, map: &MacroMap) -> Vec<[f32; 2]> {
+pub(super) fn overlooks(seed: Seed, count: (u8, u8), map: &MacroMap) -> Vec<[f32; 2]> {
     let mut rng = Rng::new(seed, &[stage::POIS]);
-    let n = rng.range(
-        u32::from(t.layout.overlooks.0),
-        u32::from(t.layout.overlooks.1) + 1,
-    );
+    let n = rng.range(u32::from(count.0), u32::from(count.1) + 1);
     let zw = map.zone_width as usize;
     let mut cand: Vec<(f32, usize)> = map
         .zones

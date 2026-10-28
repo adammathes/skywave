@@ -62,8 +62,8 @@ pub const BUILTIN: [(&str, &str); 2] = [
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
     ),
     (
-        "inland_basin_2001",
-        include_str!("../../../assets/scenarios/inland_basin_2001.ron"),
+        "mirage_valley_2001",
+        include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
     ),
 ];
 
@@ -135,8 +135,22 @@ pub fn all() -> &'static [Scenario] {
     })
 }
 
-/// Index in [`BUILTIN`] of the scenario `id`.
+/// Built-in scenario ids that were renamed, `(old, new)`: a saved world choice, a saved
+/// radio preset or a `?scenario=` / `--scenario` naming the old id gets the world under its
+/// new one.
+pub const RENAMED: [(&str, &str); 1] = [("inland_basin_2001", "mirage_valley_2001")];
+
+/// `id`, or the id it was renamed to.
+pub fn current_id(id: &str) -> &str {
+    RENAMED
+        .iter()
+        .find(|(old, _)| *old == id)
+        .map_or(id, |(_, new)| new)
+}
+
+/// Index in [`BUILTIN`] of the scenario `id` (or of the one it was renamed to).
 pub fn index_of(id: &str) -> Option<usize> {
+    let id = current_id(id);
     BUILTIN.iter().position(|(s, _)| *s == id)
 }
 
@@ -373,8 +387,8 @@ const STILLS: [(&str, &[u8]); 2] = [
         include_bytes!("../../../assets/stills/socal_beach_1984.still"),
     ),
     (
-        "inland_basin_2001",
-        include_bytes!("../../../assets/stills/inland_basin_2001.still"),
+        "mirage_valley_2001",
+        include_bytes!("../../../assets/stills/mirage_valley_2001.still"),
     ),
 ];
 
@@ -475,9 +489,10 @@ mod tests {
         let basin = &all[1];
         assert_eq!(
             (basin.id.as_str(), basin.years, basin.stub),
-            ("inland_basin_2001", (1995, 2001), true)
+            ("mirage_valley_2001", (1995, 2001), true)
         );
         assert_eq!(index_of("atlantis"), None);
+        assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");
         assert_eq!(get(99).id, basin.id);
     }
 
@@ -725,7 +740,7 @@ mod tests {
         assert_eq!((all.w, all.h), atlas_size(BUILTIN.len() as u32));
         // `h = h * 31 + byte` mod 2^61 over each still's RGBA, as Pillow reads the
         // quantized frame the file was written from.
-        let expected = [2_138_132_481_716_855_108u128, 2_229_843_925_750_921_464];
+        let expected = [2_138_132_481_716_855_108u128, 1_026_684_147_422_145_907];
         for (k, ((id, bytes), want)) in STILLS.iter().zip(expected).enumerate() {
             assert_eq!(*id, BUILTIN[k].0);
             let [u, v, u1, v1] = still_uv(k);

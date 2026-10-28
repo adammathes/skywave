@@ -231,7 +231,7 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `drayman_van` | full-size panel van | Van | 1,900 kg, ~104 kW six, 3-speed, RWD; tall, tippy, the lowest top speed; 13.5 s, 37 m/s, 0.70 g |
 | `meadow_minivan` | front-drive minivan, wood-grain edition | Van | 1,450 kg, ~86 kW four, 3-speed, FWD; tall, roomy, wallowy; 15.0 s, 44 m/s, 0.73 g |
 
-The 2001 hero cars (`docs/backlog/INLAND2001.md` item 4), player cars of the Inland Basin and never of an
+The 2001 hero cars (`docs/backlog/MIRAGE2001.md` item 4), player cars of the Mirage Valley and never of an
 earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics still out-sprint them all:
 
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
@@ -246,8 +246,8 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `falchion_sedan` | late-90s rear-drive compact sports sedan with an aftermarket body kit, twin round lamps a side, lip on the deck | Sedan | 1,420 kg, ~170 kW inline six, 5-speed, RWD; composed, a little tail on the gas; 6.2 s, 58 m/s, 0.81 g |
 | `courser_v8` | mid-90s American front-engined V8 sports car: very long hood, slim lamp strip, steep windshield, T-top, long fastback glass | Muscle | 1,560 kg, ~225 kW pushrod V8, 5-speed, RWD; lights its rear tires under every assist (less than the Destrier), leans, pushes; 6.3 s, 62 m/s, 0.85 g |
 
-The 2001 traffic cars (`docs/backlog/INLAND2001.md` item 6), the basin's everyday cars: they drive and park in
-Inland Basin and never in an earlier world. All but the semi are player-drivable and list at the end of the
+The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
+Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
 Vehicle page in 2001; the semi is `traffic_only`.
 
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
