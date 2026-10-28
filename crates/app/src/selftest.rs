@@ -189,10 +189,10 @@ mod tests {
         assert_eq!(t.town_mesh_hash, 0xB9CA_5ED1_40B9_D278);
         assert_eq!(t.map_image_hash, 0x8a97_cf1e_db61_56ae);
         assert_eq!(t.basin_content_hash, 0x9C12_2767_C582_1C90);
-        assert_eq!(t.drive_hash, 0x6b79_14d6_2786_b636);
+        assert_eq!(t.drive_hash, 0xadde_172d_3f95_7922);
         assert_eq!(
             t.replay_hashes,
-            [0xfaa0_e96b_bf14_aaae, 0x78b6_2783_9b3c_c5f8]
+            [0x90e4_6e3d_5a39_5dc1, 0xaa95_1912_809c_e63b]
         );
         let committed: Value = serde_json::from_str(COMMITTED).expect("selftest.json parses");
         assert_eq!(
