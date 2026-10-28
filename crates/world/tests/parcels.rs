@@ -121,6 +121,7 @@ fn skeleton(m: &MacroMap, graded: &[f32], g: &RoadGraph, parcels: Vec<Parcel>) -
             heights,
             water_level: m.water_level,
             water: Vec::new(),
+            edges: m.edges,
         },
         zones: Zones { cells },
         roads: g.clone(),
@@ -316,10 +317,10 @@ fn places_with_parcels_validate() {
 /// PNGs for seeds 1–2 before and after, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 4] = [
-    0x440F_7EF3_0A84_712C,
-    0xA1B5_7AB4_D9C2_7539,
-    0xF132_3C1E_3721_E0BC,
-    0x3B0C_2CC1_24B5_4F10,
+    0xF681_DFFC_1BD4_815A,
+    0x2A4D_B770_CA8D_4C18,
+    0x64AB_7C4E_F67D_A1C2,
+    0x15C6_90CF_4B0E_F58C,
 ];
 
 fn table(hs: &[u64]) -> String {

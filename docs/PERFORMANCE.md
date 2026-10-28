@@ -372,10 +372,17 @@ So Medium's draws are unchanged: the old count's frame parity skipped the far ca
 ~600 draws, which it redraws every other frame now too. Deck's frames gain the ~300
 pre-pass draws, depth-only, for the junction's 2121k → 784k shaded fragments (overdraw
 2.71 → 1.00, lavapipe): about 1.3 M fragments of the full forward shader against ~0.3k draws
-and 428k depth-only triangles. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 1250
-draws, 750 in the median frame, 470k forward and 740k shadow triangles; Medium 1235, 555,
-470k and 1325k** (about
-10% over), and if fewer than three cars' and three people's instances more are in the
+and 428k depth-only triangles. Those numbers are main's junction before the map edges. On the map-edges coast the
+junction moved (the old point is the beachfront there) to 747.7,493.9, 35 m back on an
+approach within budget, with a car stopped beside the player and the lights ahead, and the test streams the place with the world held still, so
+the traffic it measures no longer depends on how many frames streaming took on the machine
+(it did: 88 car and figure-part instances in release, 32 in debug, at one site). There,
+busy, the same in release and debug: **Deck 828 draws, 481 in the median frame, 235k
+forward, 743k shadow; Medium 854, 434, 235k, 1223k**. Under `SKYWAVE_ENFORCE_BUDGETS` it
+fails above **Deck 911 draws, 529 in the median frame, 259k forward and 817k shadow
+triangles; Medium 939, 477, 259k and 1345k** (about 10% over; the shadow limits sit
+above main's, 740k and 1325k, which this junction's casters measure 743k and 1223k
+against), and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the
 pedestrian sim (busy) each have a median under 0.5 ms a step in a debug build
 (`app::npc` and the `traffic` budget tests), the best of three 5 s windows; the app's
@@ -590,6 +597,12 @@ What could not be verified without a GPU here:
 - **Dynamic casters in the far cascade**: a moving NPC car anywhere in it makes it redraw
   on its interval; a separate small map (or leaving cars beyond 100 m out of it) would let
   it be kept while traffic moves.
+- **Downtown junctions at Busy**: on the map-edges coast the downtown junction at
+  1143.0,1072.5 heading -76 (towers both sides) draws far past the junction budget, busy:
+  Medium 1714–1778 draws, 951–1005 in the median frame, 1.14–1.23M forward and 2.0–2.1M
+  shadow triangles; Deck 2015–2044, 1294–1305, 1.14–1.23M, 1.19M (against Medium 555
+  median draws and 470k forward triangles when it was set). The towers' facades and
+  shadows, not the cars: measure there first.
 - **Mailbox vs FIFO** on gamescope for latency at 90 Hz.
 - **Far terrain detail level** (a coarser mesh at Low) and **chunk facade LOD beyond 400 m**
   (`docs/RENDERING.md`), not implemented.

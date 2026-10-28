@@ -217,6 +217,32 @@ fn other_bad_fields_are_rejected() {
     );
 }
 
+#[test]
+fn edges_put_water_on_the_coast_side_only() {
+    use place::EdgeKind;
+    let t = parse(CALIFORNIA);
+    assert_eq!(
+        t.edges.sides(),
+        [
+            EdgeKind::HighwayLoop,
+            EdgeKind::Mountains,
+            EdgeKind::HighwayLoop,
+            EdgeKind::Ocean
+        ]
+    );
+    let bad = |f: &dyn Fn(&mut RegionTemplate)| {
+        let mut t = parse(CALIFORNIA);
+        f(&mut t);
+        t.validate()
+    };
+    let err = |field| Err(TemplateError::BadEdge { field });
+    assert_eq!(bad(&|t| t.edges.west = EdgeKind::Hills), err("edges.west"));
+    assert_eq!(bad(&|t| t.edges.west = EdgeKind::Lake), err("edges.west"));
+    assert_eq!(bad(&|t| t.edges.west = EdgeKind::Bay), Ok(()));
+    assert_eq!(bad(&|t| t.edges.east = EdgeKind::Ocean), err("edges.east"));
+    assert_eq!(bad(&|t| t.edges.north = EdgeKind::Open), err("edges.north"));
+}
+
 /// Zones that build have massing; the coverage targets of `docs/WORLD_GENERATION.md`.
 #[test]
 fn california_masses_its_zones() {

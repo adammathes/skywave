@@ -28,9 +28,9 @@
 //! kicks the body when a wheel hits a curb fast, and reports the hits as [`Bump`]s for the
 //! sound. Parked cars stay put; [`Rocking`] sways the ones the car knocks, for drawing.
 //!
-//! Water: for now the car rolls on the sea floor under it. A water body would be a patch
-//! with its own [`Surface`] kind (a slow drag region with a reset); the probe and the patch
-//! table already carry the surface kind for it.
+//! Water: the car rolls on the sea floor under it; [`WorldCollider::water_depth`] says how
+//! deep a point is under the surface, and the driver's side (`app::drive`) drags a car
+//! that wades in deep and puts it back at its start.
 //!
 //! Queries allocate nothing and use only IEEE arithmetic in a fixed order, so the same
 //! inputs give bit-identical results everywhere.
@@ -429,7 +429,10 @@ impl WorldCollider {
             shapes.patch(&b.poly, LOT_Y, surface);
         }
 
-        let walls = building_walls(place);
+        let mut walls = building_walls(place);
+        if terrain_place {
+            walls.extend(edge_walls(place));
+        }
         let (posts, mut boxes, lot_cars) = if terrain_place {
             place_prop_solids(place)
         } else {
@@ -732,6 +735,19 @@ impl WorldCollider {
         }
     }
 
+    /// How far a point at height `y` over ground point `p` (`[x, z]`) is under the water:
+    /// 0 above the surface, on dry land (the open ground there above the water level) and
+    /// on places without terrain.
+    pub fn water_depth(&self, p: [f32; 2], y: f32) -> f32 {
+        let Some(g) = &self.terrain else {
+            return 0.0;
+        };
+        if g.height_at(p[0], p[1]) >= g.water_level {
+            return 0.0;
+        }
+        (g.water_level - y).max(0.0)
+    }
+
     /// Height and surface of the ground at `[x, z]` seen from above everything, steps
     /// ignored.
     pub fn level_at(&self, p: [f32; 2]) -> (f32, Surface) {
@@ -1028,6 +1044,67 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
         }
     }
 }
+
+/// Along every land side of a terrain place, the face of its wall ([`crate::edges`]) as
+/// vertical walls 16 m long facing into the place, from under the ground to well above
+/// the crest.
+fn edge_walls(place: &Place) -> Vec<Wall> {
+    use crate::edges::face_inside;
+    use place::{NORTH, SOUTH, WEST};
+    let mut walls = Vec::new();
+    let o = place.header.origin_m();
+    let ext = place.header.extent_m();
+    let seed = place.header.seed;
+    for (side, &kind) in place.terrain.edges.iter().enumerate() {
+        let len = if side == NORTH || side == SOUTH {
+            ext[0]
+        } else {
+            ext[1]
+        };
+        let n = (len / EDGE_WALL_M) as usize + 1;
+        let at = |a: f32| {
+            let d = face_inside(seed, side, kind, a)?;
+            Some(match side {
+                NORTH => [o[0] + a, o[1] + d],
+                SOUTH => [o[0] + a, o[1] + ext[1] - d],
+                WEST => [o[0] + d, o[1] + a],
+                _ => [o[0] + ext[0] - d, o[1] + a],
+            })
+        };
+        let normal = match side {
+            NORTH => [0.0, 1.0],
+            SOUTH => [0.0, -1.0],
+            WEST => [1.0, 0.0],
+            _ => [-1.0, 0.0],
+        };
+        for k in 0..n {
+            let (a0, a1) = (
+                k as f32 * EDGE_WALL_M,
+                ((k + 1) as f32 * EDGE_WALL_M).min(len),
+            );
+            if a1 <= a0 {
+                continue;
+            }
+            let (Some(a), Some(b)) = (at(a0), at(a1)) else {
+                continue;
+            };
+            let ground = |p: [f32; 2]| place.terrain.height_at(&place.header, p).unwrap_or(0.0);
+            let base = ground(a).min(ground(b));
+            walls.push(Wall {
+                a,
+                b,
+                n: normal,
+                y0: base - 5.0,
+                y1: base + EDGE_WALL_HIGH_M,
+            });
+        }
+    }
+    walls
+}
+
+/// Length of the pieces of an edge wall's collision face, and how high it reaches.
+const EDGE_WALL_M: f32 = 16.0;
+const EDGE_WALL_HIGH_M: f32 = 400.0;
 
 /// The parking lots' ground as patches on the terrain: islands, wheel stops and walks at
 /// their heights above it, ramps from their walk down to the lot, then the asphalt at the

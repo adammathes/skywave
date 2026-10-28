@@ -3,18 +3,18 @@
 //! [`MacroMap::generate`] runs, in order:
 //! 1. coast: shoreline with bays and beach widths ([`Shore`]);
 //! 2. terrain parameters: plain width and rise, ridges;
-//! 3. layout: strip extent, downtown seed, highway centerline toward the pass, valleys,
-//!    the canal pocket;
+//! 3. layout, inside the edge bands ([`crate::edges`]): strip extent, downtown seed, the
+//!    highway's loop (from the coast along one side, round the foot of the hills, back
+//!    along the other side), valleys, the canal pocket;
 //! 4. heightfield at 4 m ([`terrain::heights`]), flattened where the canal pocket goes;
 //! 5. zones on 16 m cells: rules ([`zones::score`]), two majority passes, then the
 //!    structural zones on top (beach, strip, highway, canals, parks). The beach band is
 //!    measured from the true shoreline; the strip, downtown and canal pocket from the
 //!    smoothed one ([`Shore::road`]);
 //! 6. terrain smoothing by zone (urban zones blend toward a box-blurred copy, so roads sit
-//!    well), canals dug, and the highway corridor carved: a bed of at most 4.8% from the
-//!    coast inland ([`terrain::corridor_bed`]), through a valley cut into the hills before
-//!    the zones are painted ([`terrain::valley`]), so the highway climbs to a real pass in
-//!    cuts of tens of meters ([`terrain::carve_corridor`]);
+//!    well), canals dug, the highway corridor carved (a bed of at most 4.8% between its
+//!    coastal ends, [`terrain::corridor_bed`], [`terrain::carve_corridor`]), then the
+//!    walls of the land edges raised in their bands and the bands' zones painted;
 //! 7. pass (the highway's highest point) and points of interest.
 //!
 //! Grids: heights are `width × height` samples, 4 m apart, sample `(ix, iz)` at world
@@ -26,12 +26,13 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use place::ZoneId;
+use place::{EdgeKind, ZoneId, EAST, NORTH, SOUTH, WEST};
 use skywave_core::{hash64, hash_bytes, Rng, Seed};
 
 use super::terrain::{self, smoothstep, Ridge, Shore, TerrainParams, Valley};
 use super::zones::{self, cell_center, ZoneInputs};
 use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};
+use crate::edges;
 use crate::math::{clamp, floor, lerp, segment_distance, signed_area, sqrt, value_noise, V2};
 use crate::template::{CoastSide, CoastWater, RegionTemplate};
 
@@ -82,7 +83,18 @@ impl Frame {
         (self.n_v() - 1) as f32 * CELL_M
     }
 
-    fn extent(&self) -> [f32; 2] {
+    /// The place sides (`place::Terrain::edges` indices) at `u = len_u` (inland), `v = 0`
+    /// and `v = len_v`.
+    pub fn sides(&self) -> [usize; 3] {
+        match self.side {
+            CoastSide::West => [EAST, NORTH, SOUTH],
+            CoastSide::East => [WEST, NORTH, SOUTH],
+            CoastSide::North => [SOUTH, WEST, EAST],
+            CoastSide::South => [NORTH, WEST, EAST],
+        }
+    }
+
+    pub fn extent(&self) -> [f32; 2] {
         [
             (self.samples[0] - 1) as f32 * CELL_M,
             (self.samples[1] - 1) as f32 * CELL_M,
@@ -209,9 +221,13 @@ pub struct MacroMap {
     /// negative in cuts, zero away from the corridor). The arterial stage keeps roads off
     /// its cut and fill slopes.
     pub corridor: Vec<f32>,
-    /// The highway's highest point where it crosses the ridges; `None` on flat places.
+    /// The highway's highest point; `None` on flat places.
     pub pass: Option<[f32; 2]>,
     pub pois: Vec<MacroPoi>,
+    /// What bounds the place on each side, `[north, east, south, west]`.
+    pub edges: [EdgeKind; 4],
+    /// The roadless band inside each side ([`edges::band_m`]), same order.
+    pub bands: [f32; 4],
 }
 
 /// Terrain smoothing strength per zone (by `ZoneId` discriminant).
@@ -229,6 +245,19 @@ const FLATTEN: [f32; 12] = [
     0.8,  // Highway
     0.0,  // Water
 ];
+
+/// The highway's legs along the sides run this far inside the bands.
+const LEG_M: f32 = 60.0;
+/// Radius of the highway's two inland turns.
+const RING_RADIUS_M: f32 = 220.0;
+/// The highway's inland leg runs this far short of the hills (the plain's inland edge)...
+const RING_FOOT_M: f32 = 200.0;
+/// ...but at least this far behind downtown...
+const DOWNTOWN_CLEAR_M: f32 = 260.0;
+/// ...through points this far apart along the coast.
+const RING_STEP_M: f32 = 128.0;
+/// Along a `RailYards` edge the land this far inside the band is industry.
+const YARDS_M: f32 = 160.0;
 
 /// Along-coast distances from downtown count this much: downtowns stretch along the shore.
 const DOWNTOWN_ALONG: f32 = 0.75;
@@ -290,7 +319,11 @@ impl MacroMap {
             .collect();
         let plain_top = wl + e.beach_height_m + plain_rise;
 
-        // 3. Layout.
+        // 3. Layout, inside the bands the edge walls take (see `crate::edges`).
+        let edges = t.edges.sides();
+        let bands = edges::bands(&edges);
+        let [side_in, side_v0, side_v1] = frame.sides();
+        let (v_lo, v_hi) = (bands[side_v0], len_v - bands[side_v1]);
         let mut rng = Rng::new(seed, &[stage::LAYOUT]);
         let strip_len = rng
             .range_f32(l.strip.length_m.0, l.strip.length_m.1)
@@ -298,39 +331,52 @@ impl MacroMap {
             .max(ZONE_CELL_M);
         let strip_inland = rng.range_f32(l.strip.inland_m.0, l.strip.inland_m.1);
         let strip_width = rng.range_f32(l.strip.width_m.0, l.strip.width_m.1);
-        let strip_v0 = clamp(bay_v - 0.5 * strip_len, 64.0, len_v - 64.0);
-        let strip_v1 = clamp(bay_v + 0.5 * strip_len, 64.0, len_v - 64.0);
-        // The highway leaves past one end of the strip (toward +v or -v); the canal pocket
-        // and shore park take the other end, the first valley the other side of the hills.
+        // The strip keeps clear of the highway's legs along the sides.
+        let (strip_lo, strip_hi) = (v_lo + LEG_M + 60.0, v_hi - LEG_M - 60.0);
+        let strip_v0 = clamp(bay_v - 0.5 * strip_len, strip_lo, strip_hi);
+        let strip_v1 = clamp(bay_v + 0.5 * strip_len, strip_lo, strip_hi);
+        // The highway meets the coast at the harbor past one end of the strip (toward +v or
+        // -v); the canal pocket and shore park take the other end, the first valley the
+        // other side of the hills.
         let toward = if rng.next_f32() < 0.5 { 1.0 } else { -1.0 };
-        let pass_v = len_v
-            * if toward > 0.0 {
-                rng.range_f32(0.7, 0.84)
-            } else {
-                rng.range_f32(0.16, 0.3)
-            };
-        let start_v = clamp(
-            if toward > 0.0 {
-                strip_v1 + 70.0
-            } else {
-                strip_v0 - 70.0
-            },
-            48.0,
-            len_v - 48.0,
-        );
-        let p0 = shore.point(start_v, shore.beach_at(start_v) + 24.0);
-        let crest_u = shore_mean + beach_mean + plain_width + ridges.first().map_or(0.0, |r| r.at);
-        let p2 = (crest_u.min(len_u * 0.82).max(p0.0 + 200.0), pass_v);
-        let p1 = (0.5 * (p0.0 + p2.0), lerp(start_v, pass_v, 0.5));
-        let end_v = clamp(pass_v + rng.range_f32(-120.0, 120.0), 48.0, len_v - 48.0);
-        let p3 = (len_u + CELL_M, end_v);
-        let highway_c = catmull_rom(&[p0, p1, p2, p3], 16.0);
-
         let downtown_d = shore.beach_at(bay_v)
             + strip_inland
             + strip_width
             + rng.range_f32(l.downtown_inland_m.0, l.downtown_inland_m.1);
         let downtown_c = (shore.road_u(bay_v) + downtown_d, bay_v);
+
+        // The highway: a bypass from the coast at the harbor's end of the place, inland
+        // along that side's band, round the town along the foot of the hills and back to
+        // the coast along the other side, so it never runs off the place.
+        let (va, vb) = (v_lo + LEG_M, v_hi - LEG_M);
+        let (v_start, v_end) = if toward > 0.0 { (vb, va) } else { (va, vb) };
+        // Points are offset along `u` only, so the legs keep to their `v`.
+        let coast_end = |v: f32| {
+            let s = shore.shore_u(v);
+            (
+                s + (shore.beach_at(v) + 24.0) / shore.distance(s + 1.0, v).max(0.2),
+                v,
+            )
+        };
+        let (e0, e1) = (coast_end(v_start), coast_end(v_end));
+        // The inland leg runs a fixed distance behind the smoothed shore, at the foot of the
+        // hills and clear of downtown, short of the inland band.
+        let d_ring = (beach_mean + plain_width - RING_FOOT_M).max(downtown_d + DOWNTOWN_CLEAR_M);
+        let u_max = len_u - bands[side_in] - LEG_M;
+        let ring_at = |v: f32| {
+            let s = shore.road_u(v);
+            let u = s + d_ring / shore.road_distance(s + 1.0, v).max(0.2);
+            (u.min(u_max), v)
+        };
+        let mut corners = vec![e0];
+        let n = ((vb - va) / RING_STEP_M) as usize + 1;
+        for i in 0..=n {
+            corners.push(ring_at(lerp(v_start, v_end, i as f32 / n as f32)));
+        }
+        corners.push(e1);
+        let reach = (corners[1].0 - e0.0).min(corners[n + 1].0 - e1.0);
+        let radius = (0.45 * reach).clamp(0.0, RING_RADIUS_M);
+        let highway_c = resample_c(&fillet(&corners, radius), ZONE_CELL_M);
 
         let mut valleys: Vec<Valley> = Vec::new();
         if !ridges.is_empty() {
@@ -405,11 +451,6 @@ impl MacroMap {
         }
 
         // 4. Heightfield.
-        let highway_v = if ridges.is_empty() {
-            Vec::new()
-        } else {
-            v_per_u(&highway_c, frame.n_u() as usize)
-        };
         let bounds = t.height_bounds();
         let params = TerrainParams {
             shore: &shore,
@@ -422,9 +463,6 @@ impl MacroMap {
             warp: e.warp_m,
             ridges: &ridges,
             valleys: &valleys,
-            highway_v: &highway_v,
-            pass_depth: l.highway.pass_depth,
-            pass_half_width: l.highway.pass_width_m,
             bounds,
         };
         let mut heights = terrain::heights(seed, &frame, &params);
@@ -432,11 +470,10 @@ impl MacroMap {
         if !canals.is_empty() {
             flatten_pocket(&mut heights, w, h, &canals, wl);
         }
-        // The pass: the highway's bed profile, and the hills cut down along it.
+        // The highway's bed profile.
         let to_world = |c: (f32, f32)| frame.to_world(c.0, c.1);
         let highway: Vec<[f32; 2]> = highway_c.iter().map(|&c| to_world(c)).collect();
         let bed = terrain::corridor_bed(&heights, w, h, &highway, wl);
-        terrain::valley(&mut heights, &frame, &highway_c, &bed);
 
         // 5. Zones.
         let downtown = to_world(downtown_c);
@@ -467,7 +504,7 @@ impl MacroMap {
                 }
                 if zone[i] != ZoneId::Beach
                     && inputs.highway[i] <= corridor + ZONE_CELL_M * 2.0
-                    && polyline_distance(&highway, [x, z]) <= corridor
+                    && near_polyline(&highway, [x, z], corridor)
                 {
                     zone[i] = ZoneId::Highway;
                 }
@@ -511,8 +548,11 @@ impl MacroMap {
             }
         }
 
-        // The highway corridor, last, so nothing smooths its bed.
+        // The highway corridor, so nothing smooths its bed; then the walls along the land
+        // edges, in their bands clear of it, and the bands' zones under them.
         let corridor = terrain::carve_corridor(&mut heights, w, h, &highway, &bed, wl);
+        raise_walls(seed, &mut heights, w, h, &edges, bounds);
+        paint_bands(&heights, w, &edges, &bands, wl, &mut zone, zw, zh);
 
         // 7. Pass, water bodies, points of interest.
         let mut map = MacroMap {
@@ -540,6 +580,8 @@ impl MacroMap {
             corridor,
             pass: None,
             pois: Vec::new(),
+            edges,
+            bands,
         };
         if !ridges.is_empty() {
             let mut best = (f32::NEG_INFINITY, None);
@@ -599,8 +641,8 @@ impl MacroMap {
         }
         map.pois.push(MacroPoi {
             kind: MacroPoiKind::Harbor,
-            pos: to_world(map.shore.point(start_v, 0.0)),
-            facing: seaward(start_v),
+            pos: to_world(map.shore.point(v_start, 0.0)),
+            facing: seaward(v_start),
         });
         let overlooks = overlooks(seed, t, &map);
         for p in overlooks {
@@ -632,6 +674,20 @@ impl MacroMap {
         let cx = clamp(floor(x / ZONE_CELL_M), 0.0, (self.zone_width - 1) as f32) as usize;
         let cz = clamp(floor(z / ZONE_CELL_M), 0.0, (self.zone_height - 1) as f32) as usize;
         self.zones[cz * self.zone_width as usize + cx]
+    }
+
+    /// The playable rectangle `[x0, z0, x1, z1]`: the place less the edge bands. Roads,
+    /// lots and points of interest stay inside it.
+    pub fn playable(&self) -> [f32; 4] {
+        let ext = self.frame.extent();
+        let b = self.bands;
+        [b[WEST], b[NORTH], ext[0] - b[EAST], ext[1] - b[SOUTH]]
+    }
+
+    /// Whether world `(x, z)` lies in the playable rectangle, `margin` meters in from it.
+    pub fn in_playable(&self, x: f32, z: f32, margin: f32) -> bool {
+        let r = self.playable();
+        x >= r[0] + margin && z >= r[1] + margin && x <= r[2] - margin && z <= r[3] - margin
     }
 
     /// Signed distance inland from the shoreline at world `(x, z)`: negative in the big
@@ -677,6 +733,10 @@ impl MacroMap {
             f(&mut b, p.pos[0]);
             f(&mut b, p.pos[1]);
         }
+        b.extend(self.edges.iter().map(|&e| e as u8));
+        for &x in &self.bands {
+            f(&mut b, x);
+        }
         hash_bytes(0x004D_4143_524F, &b)
     }
 }
@@ -689,74 +749,183 @@ fn mean(xs: &[f32]) -> f32 {
     acc / xs.len().max(1) as f32
 }
 
-/// Uniform Catmull-Rom through `pts` (end tangents mirrored), sampled about every `step`.
-fn catmull_rom(pts: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
+/// The polyline `pts` with every inner corner rounded by a quadratic arc that leaves the
+/// straight `radius` (clipped to half of either neighboring segment) before the corner.
+fn fillet(pts: &[(f32, f32)], radius: f32) -> Vec<(f32, f32)> {
     let n = pts.len();
-    let at = |i: isize| -> (f32, f32) {
-        if i < 0 {
-            (2.0 * pts[0].0 - pts[1].0, 2.0 * pts[0].1 - pts[1].1)
-        } else if i as usize >= n {
-            (
-                2.0 * pts[n - 1].0 - pts[n - 2].0,
-                2.0 * pts[n - 1].1 - pts[n - 2].1,
-            )
-        } else {
-            pts[i as usize]
+    let mut out = vec![pts[0]];
+    for i in 1..n.saturating_sub(1) {
+        let (p, c, q) = (
+            V2::new(pts[i - 1].0, pts[i - 1].1),
+            V2::new(pts[i].0, pts[i].1),
+            V2::new(pts[i + 1].0, pts[i + 1].1),
+        );
+        let t = radius
+            .min(0.5 * (c - p).length())
+            .min(0.5 * (q - c).length());
+        let a = c + (p - c).normalize() * t;
+        let b = c + (q - c).normalize() * t;
+        out.push((a.x, a.y));
+        for k in 1..16 {
+            let s = k as f32 / 16.0;
+            let r = a * ((1.0 - s) * (1.0 - s)) + c * (2.0 * s * (1.0 - s)) + b * (s * s);
+            out.push((r.x, r.y));
         }
-    };
-    let mut out = Vec::new();
-    for i in 0..n as isize - 1 {
-        let (a, b, c, d) = (at(i - 1), at(i), at(i + 1), at(i + 2));
-        let (dx, dz) = (c.0 - b.0, c.1 - b.1);
-        let steps = ((sqrt(dx * dx + dz * dz) / step) as usize).max(1);
-        for s in 0..steps {
-            let t = s as f32 / steps as f32;
-            let (t2, t3) = (t * t, t * t * t);
-            let q = |p0: f32, p1: f32, p2: f32, p3: f32| {
-                0.5 * (2.0 * p1
-                    + (p2 - p0) * t
-                    + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-                    + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3)
-            };
-            out.push((q(a.0, b.0, c.0, d.0), q(a.1, b.1, c.1, d.1)));
-        }
+        out.push((b.x, b.y));
     }
-    out.push(pts[n - 1]);
+    if n > 1 {
+        out.push(pts[n - 1]);
+    }
     out
 }
 
-/// The polyline's `v` at every `u` sample (held beyond its ends).
-pub(crate) fn v_per_u(line: &[(f32, f32)], nu: usize) -> Vec<f32> {
-    let mut out = vec![f32::NAN; nu];
+/// Points along `line` every `step` from its start, and its last point.
+fn resample_c(line: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
+    let mut out = vec![line[0]];
+    let mut carry = 0.0;
     for s in line.windows(2) {
-        let (a, b) = if s[0].0 <= s[1].0 {
-            (s[0], s[1])
-        } else {
-            (s[1], s[0])
-        };
-        let i0 = clamp(a.0 / CELL_M, 0.0, nu as f32) as usize;
-        let i1 = clamp(b.0 / CELL_M + 1.0, 0.0, nu as f32) as usize;
-        for (i, o) in out.iter_mut().enumerate().take(i1).skip(i0) {
-            let u = i as f32 * CELL_M;
-            let span = b.0 - a.0;
-            let t = if span > 0.0 {
-                clamp((u - a.0) / span, 0.0, 1.0)
-            } else {
-                0.0
-            };
-            *o = lerp(a.1, b.1, t);
+        let (a, b) = (V2::new(s[0].0, s[0].1), V2::new(s[1].0, s[1].1));
+        let len = (b - a).length();
+        let mut d = step - carry;
+        while d < len {
+            let q = a.lerp(b, d / len);
+            out.push((q.x, q.y));
+            d += step;
         }
+        carry = len - (d - step);
     }
-    let first = line.first().map_or(0.0, |p| p.1);
-    let mut last = first;
-    for o in out.iter_mut() {
-        if o.is_nan() {
-            *o = last;
-        } else {
-            last = *o;
-        }
+    let last = line[line.len() - 1];
+    if out.last() != Some(&last) {
+        out.push(last);
     }
     out
+}
+
+/// Raises the wall of every land edge ([`edges::rise`]) over the heights (`w × h` samples
+/// [`CELL_M`] apart), from whichever is higher, the ground or the ground at the foot of the
+/// band (so the crest clears the foot by the wall's height even where the land falls
+/// toward the edge); where two walls meet the higher wins.
+fn raise_walls(
+    seed: Seed,
+    heights: &mut [f32],
+    w: usize,
+    h: usize,
+    sides: &[EdgeKind; 4],
+    bounds: (f32, f32),
+) {
+    let ext = [(w - 1) as f32 * CELL_M, (h - 1) as f32 * CELL_M];
+    let reach = sides.map(|k| edges::wall(k).map_or(0.0, |x| x.ramp_m + edges::CREST_WANDER_M));
+    let foot_at = sides.map(|k| ((edges::band_m(k) / CELL_M) as usize).min(w.min(h) - 1));
+    let base = heights.to_vec();
+    // Each wall's height and crest along its side, once per column (north, south) or row
+    // (east, west): they depend only on the position along it.
+    let profiles: [Vec<(f32, f32)>; 4] = core::array::from_fn(|k| {
+        let n = if k == NORTH || k == SOUTH { w } else { h };
+        (0..n)
+            .map(|i| edges::profile(seed.0, k, sides[k], i as f32 * CELL_M).unwrap_or((0.0, 0.0)))
+            .collect()
+    });
+    // The highest wall over each cell, side by side over just the strip each can reach.
+    let mut top = vec![f32::NEG_INFINITY; w * h];
+    for k in 0..4 {
+        if reach[k] <= 0.0 {
+            continue;
+        }
+        let n = (reach[k] / CELL_M) as usize + 2;
+        let (zs, xs) = match k {
+            NORTH => (0..n.min(h), 0..w),
+            SOUTH => (h.saturating_sub(n)..h, 0..w),
+            WEST => (0..h, 0..n.min(w)),
+            _ => (0..h, w.saturating_sub(n)..w),
+        };
+        for iz in zs {
+            for ix in xs.clone() {
+                let p = [ix as f32 * CELL_M, iz as f32 * CELL_M];
+                let d = edges::inside(p, ext)[k];
+                if d >= reach[k] {
+                    continue;
+                }
+                let at = if k == NORTH || k == SOUTH { ix } else { iz };
+                let rise = edges::rise_at(sides[k], profiles[k][at], d);
+                let (tx, tz) = match k {
+                    NORTH => (ix, foot_at[k]),
+                    SOUTH => (ix, h - 1 - foot_at[k]),
+                    WEST => (foot_at[k], iz),
+                    _ => (w - 1 - foot_at[k], iz),
+                };
+                let foot = base[iz * w + ix].max(base[tz * w + tx]);
+                let t = &mut top[iz * w + ix];
+                *t = t.max(foot + rise);
+            }
+        }
+    }
+    for (hp, &t) in heights.iter_mut().zip(&top) {
+        if t > *hp {
+            *hp = clamp(t, bounds.0, bounds.1);
+        }
+    }
+}
+
+/// The zone the band inside a land edge of `kind` takes.
+fn band_zone(kind: EdgeKind) -> ZoneId {
+    match kind {
+        EdgeKind::Forest => ZoneId::Park,
+        EdgeKind::RailYards => ZoneId::Industrial,
+        _ => ZoneId::Hills,
+    }
+}
+
+/// Paints the bands' zones over the cells whose centers lie in them (`Water` where the
+/// cell is still under the water level), and industry for [`YARDS_M`] inside a
+/// `RailYards` band.
+#[allow(clippy::too_many_arguments)]
+fn paint_bands(
+    heights: &[f32],
+    w: usize,
+    sides: &[EdgeKind; 4],
+    bands: &[f32; 4],
+    wl: f32,
+    zone: &mut [ZoneId],
+    zw: usize,
+    zh: usize,
+) {
+    let h = heights.len() / w;
+    let ext = [(w - 1) as f32 * CELL_M, (h - 1) as f32 * CELL_M];
+    let n = ZONE_SAMPLES as usize;
+    for cz in 0..zh {
+        for cx in 0..zw {
+            let (x, z) = cell_center(cx, cz);
+            let d = edges::inside([x, z], ext);
+            let i = cz * zw + cx;
+            for k in 0..4 {
+                if bands[k] <= 0.0 {
+                    continue;
+                }
+                if d[k] < bands[k] {
+                    let mut acc = 0.0;
+                    for j in 0..n {
+                        for q in 0..n {
+                            acc += heights[(cz * n + j) * w + cx * n + q];
+                        }
+                    }
+                    zone[i] = if acc / ((n * n) as f32) < wl {
+                        ZoneId::Water
+                    } else {
+                        band_zone(sides[k])
+                    };
+                    break;
+                }
+                let yards = sides[k] == EdgeKind::RailYards && d[k] < bands[k] + YARDS_M;
+                let fixed = matches!(
+                    zone[i],
+                    ZoneId::Water | ZoneId::Beach | ZoneId::Strip | ZoneId::Highway
+                );
+                if yards && !fixed {
+                    zone[i] = ZoneId::Industrial;
+                }
+            }
+        }
+    }
 }
 
 /// A canonical rectangle `[u0, u1, v0, v1]` in world axes, edges snapped to zone cells.
@@ -903,14 +1072,18 @@ fn zone_inputs(
     }
 }
 
-fn polyline_distance(line: &[[f32; 2]], p: [f32; 2]) -> f32 {
-    let p = V2::from_array(p);
-    let mut best = f32::INFINITY;
-    for s in line.windows(2) {
-        let (d, _) = segment_distance(p, V2::from_array(s[0]), V2::from_array(s[1]));
-        best = best.min(d);
-    }
-    best
+/// Whether `p` lies within `r` of `line`: segments whose box, grown by `r`, misses `p`
+/// are passed over without measuring.
+fn near_polyline(line: &[[f32; 2]], p: [f32; 2], r: f32) -> bool {
+    let q = V2::from_array(p);
+    line.windows(2).any(|s| {
+        let (a, b) = (s[0], s[1]);
+        let out = p[0] < a[0].min(b[0]) - r
+            || p[0] > a[0].max(b[0]) + r
+            || p[1] < a[1].min(b[1]) - r
+            || p[1] > a[1].max(b[1]) + r;
+        !out && segment_distance(q, V2::from_array(a), V2::from_array(b)).0 <= r
+    })
 }
 
 fn ccw(mut poly: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
@@ -1068,7 +1241,10 @@ fn overlooks(seed: Seed, t: &RegionTemplate, map: &MacroMap) -> Vec<[f32; 2]> {
         .zones
         .iter()
         .enumerate()
-        .filter(|(_, &z)| z == ZoneId::Hills)
+        .filter(|&(i, &z)| {
+            let (x, zc) = cell_center(i % zw, i / zw);
+            z == ZoneId::Hills && map.in_playable(x, zc, 40.0)
+        })
         .map(|(i, _)| {
             let (x, z) = cell_center(i % zw, i / zw);
             (map.height_at(x, z), i)
@@ -1118,15 +1294,18 @@ mod tests {
     }
 
     #[test]
-    fn catmull_rom_hits_control_points() {
-        let pts = [(0.0, 0.0), (100.0, 10.0), (200.0, 0.0)];
-        let line = catmull_rom(&pts, 16.0);
-        assert_eq!(line[0], pts[0]);
-        assert_eq!(*line.last().unwrap(), pts[2]);
-        assert!(line.contains(&pts[1]));
-        let v = v_per_u(&line, 60);
-        assert_eq!(v[0], 0.0);
-        assert!((v[25] - 10.0).abs() < 0.5);
-        assert_eq!(v[59], 0.0);
+    fn fillets_round_corners_and_resampling_keeps_the_ends() {
+        let line = fillet(&[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)], 30.0);
+        assert_eq!(line[0], (0.0, 0.0));
+        assert_eq!(*line.last().unwrap(), (100.0, 100.0));
+        assert!(line.contains(&(70.0, 0.0)) && line.contains(&(100.0, 30.0)));
+        assert!(!line.contains(&(100.0, 0.0)));
+        let r = resample_c(&line, 16.0);
+        assert_eq!(r[0], (0.0, 0.0));
+        assert_eq!(*r.last().unwrap(), (100.0, 100.0));
+        for s in r.windows(2) {
+            let d = V2::new(s[1].0, s[1].1) - V2::new(s[0].0, s[0].1);
+            assert!(d.length() <= 16.0 + 1e-3);
+        }
     }
 }
