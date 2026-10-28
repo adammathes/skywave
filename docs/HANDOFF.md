@@ -145,8 +145,11 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
+- In review: the 2001 world renamed Mirage Valley (`mirage_valley_2001`, old id migrates) and its
+  region template `socal_basin` (`m8/mirage-valley`, M8 #2: no coast, `docs/WORLD_GENERATION.md`
+  "Inland basins"); its grammar and `sodium_night` palette follow on `m8/mirage-valley-grammar`.
 - Next: merge #20, #37, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
-  (region template `socal_basin` and the 2001 grammar after #20, hero cars part 2, traffic cars,
+  (the 2001 grammar, hero cars part 2, traffic cars,
   set pieces, the 2001 preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
