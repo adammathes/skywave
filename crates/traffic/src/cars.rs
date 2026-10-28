@@ -43,10 +43,52 @@ use crate::lanes::{bezier, heading, Control, LaneGraph, Pose, TurnKind, CURVE_ST
 use crate::math::{dist2, dot, len2, right, sin_cos, sqrt, unit2};
 use crate::signal::Light;
 
-/// Bumper-to-bumper length every NPC car is simulated with, meters.
+/// Bumper-to-bumper length an NPC car is simulated with unless its shape's [`ShapeRule`]
+/// says otherwise, meters.
 pub const CAR_LEN_M: f32 = 4.6;
-/// Half the width every NPC car is simulated with, meters.
+/// Half the width an NPC car is simulated with unless its shape's [`ShapeRule`] says
+/// otherwise, meters.
 pub const CAR_HALF_W_M: f32 = 0.9;
+/// Zones a [`ShapeRule`] weighs, `place::ZoneId` in order.
+pub const ZONES: usize = 12;
+
+/// How a vehicle shape takes to the roads: how often a new car takes it on a lane of each
+/// zone, and its body for following and spacing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShapeRule {
+    /// Weight per [`crate::Lane::zone`] (`place::ZoneId` order; a freeway lane is
+    /// `ZoneId::Highway`) of the lane a new car starts on, times its shape weight
+    /// ([`Traffic::set_shape_weights`]); 0 never there. A shape weighed only on freeway
+    /// lanes keeps to them at every turn that allows it.
+    pub zones: [u8; ZONES],
+    /// Bumper to bumper and half the width, m.
+    pub len_m: f32,
+    pub half_w_m: f32,
+}
+
+impl Default for ShapeRule {
+    /// The same everywhere, an everyday car's body.
+    fn default() -> ShapeRule {
+        ShapeRule {
+            zones: [1; ZONES],
+            len_m: CAR_LEN_M,
+            half_w_m: CAR_HALF_W_M,
+        }
+    }
+}
+
+impl ShapeRule {
+    /// Whether it appears only on freeway lanes.
+    pub fn freeway_only(&self) -> bool {
+        let fw = place::ZoneId::Highway as usize;
+        self.zones[fw] > 0
+            && self
+                .zones
+                .iter()
+                .enumerate()
+                .all(|(z, &w)| z == fw || w == 0)
+    }
+}
 
 const DT: f32 = 1.0 / SIM_HZ as f32;
 /// Brake lamps: slowing faster than this lights them (m/s²)...
@@ -222,6 +264,9 @@ pub struct Car {
     pub shape: u8,
     /// Seed for the paint color.
     pub paint: u32,
+    /// Bumper to bumper and half the width, m (its shape's [`ShapeRule`]).
+    pub len: f32,
+    pub half_w: f32,
     /// Head lights on.
     pub lights: bool,
     /// Brake lamps lit: slowing harder than [`BRAKE_LAMP_DECEL`] in the last step, and
@@ -427,6 +472,10 @@ pub struct Traffic {
     /// Per shape, how often a new car takes it ([`Traffic::set_shape_weights`]); empty
     /// for every shape alike.
     shape_weights: Vec<u32>,
+    /// Per shape, where it drives and its body ([`Traffic::set_shape_rules`]), and the
+    /// longest body of them.
+    rules: Vec<ShapeRule>,
+    max_len: f32,
 }
 
 impl Clone for Traffic {
@@ -460,7 +509,17 @@ impl Clone for Traffic {
             by_x,
             x_key: self.x_key.clone(),
             shape_weights: self.shape_weights.clone(),
+            rules: self.rules.clone(),
+            max_len: self.max_len,
         }
+    }
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
     }
 }
 
@@ -778,6 +837,8 @@ impl Traffic {
             by_x: Vec::with_capacity(cap),
             x_key: alloc::vec![0.0; cap],
             shape_weights: Vec::new(),
+            rules: alloc::vec![ShapeRule::default(); usize::from(budget.shapes)],
+            max_len: CAR_LEN_M,
         }
     }
 
@@ -825,18 +886,42 @@ impl Traffic {
             .extend((0..n).map(|k| weights.get(k).copied().unwrap_or(0)));
     }
 
-    /// A seeded shape for a new car, by the shape weights.
-    fn pick_shape(&mut self) -> u8 {
-        let total: u32 = self.shape_weights.iter().sum();
+    /// Each shape's [`ShapeRule`] (below [`TrafficBudget::shapes`]; the rest keep the
+    /// default).
+    pub fn set_shape_rules(&mut self, rules: &[ShapeRule]) {
+        for (k, r) in self.rules.iter_mut().enumerate() {
+            *r = rules.get(k).copied().unwrap_or_default();
+        }
+        self.max_len = self.rules.iter().fold(CAR_LEN_M, |m, r| m.max(r.len_m));
+    }
+
+    /// A seeded shape for a new car on a lane of `zone`, by the shape weights times the
+    /// shapes' weights there, reduced by their common divisor (so weights alike everywhere
+    /// draw as the shape weights alone).
+    fn pick_shape(&mut self, zone: place::ZoneId) -> u8 {
+        let mut w = [0u32; 256];
+        let n = usize::from(self.budget.shapes);
+        let z = zone as usize;
+        for (k, w) in w[..n].iter_mut().enumerate() {
+            let base = if self.shape_weights.is_empty() {
+                1
+            } else {
+                self.shape_weights[k]
+            };
+            *w = base * u32::from(self.rules[k].zones[z]);
+        }
+        let g = w[..n].iter().fold(0, |g, &x| gcd(g, x));
+        let total: u32 = w[..n].iter().map(|&x| x / g.max(1)).sum();
         if total == 0 {
             return self.rng.range(0, u32::from(self.budget.shapes.max(1))) as u8;
         }
         let mut r = self.rng.range(0, total);
-        for (k, &w) in self.shape_weights.iter().enumerate() {
-            if r < w {
+        for (k, &x) in w[..n].iter().enumerate() {
+            let x = x / g;
+            if r < x {
                 return k as u8;
             }
-            r -= w;
+            r -= x;
         }
         0
     }
@@ -850,12 +935,13 @@ impl Traffic {
         }
         let id = self.next_id;
         self.next_id += 1;
-        let shape = self.pick_shape();
+        let shape = self.pick_shape(g.lanes[lane as usize].zone);
+        let rule = self.rules[usize::from(shape)];
         let paint = self.rng.next_u32();
         let v0 = self.rng.range_f32(0.9, 1.1);
         let headway = self.rng.range_f32(1.1, 1.6);
         let light_delay_s = self.rng.range_f32(0.0, LIGHT_DELAY_S);
-        let next_turn = self.pick(g, lane, false);
+        let next_turn = self.pick(g, lane, false, rule.freeway_only());
         let mut car = Car {
             id,
             pos: [0.0; 3],
@@ -864,6 +950,8 @@ impl Traffic {
             speed,
             shape,
             paint,
+            len: rule.len_m,
+            half_w: rule.half_w_m,
             lights: false,
             braking: false,
             seg: lane,
@@ -896,18 +984,27 @@ impl Traffic {
     }
 
     /// A turn to take at the end of `lane`: from any lane of its road and direction, or
-    /// only its own, weighted toward going straight. [`NONE`] when there is none.
-    fn pick(&mut self, g: &LaneGraph, lane: u32, own: bool) -> u32 {
+    /// only its own, weighted toward going straight, and onto a freeway lane when
+    /// `freeway` and there is one. [`NONE`] when there is none.
+    fn pick(&mut self, g: &LaneGraph, lane: u32, own: bool, freeway: bool) -> u32 {
         let (lo, hi) = if own {
             (lane, lane + 1)
         } else {
             self.group(g, lane)
         };
-        let weight = |l: u32, k: TurnKind| turn_weight(k) * if l == lane { 2.0 } else { 1.0 };
+        let to_fw = |t: &crate::Turn| g.lanes[t.to as usize].freeway;
+        let keep = freeway && (lo..hi).any(|l| g.next(l).iter().any(to_fw));
+        let weight = |l: u32, t: &crate::Turn| {
+            if keep && !to_fw(t) {
+                0.0
+            } else {
+                turn_weight(t.kind) * if l == lane { 2.0 } else { 1.0 }
+            }
+        };
         let mut total = 0.0;
         for l in lo..hi {
             for t in g.next(l) {
-                total += weight(l, t.kind);
+                total += weight(l, t);
             }
         }
         if total <= 0.0 {
@@ -919,7 +1016,7 @@ impl Traffic {
             let first = g.lanes[l as usize].first_turn;
             for (k, t) in g.next(l).iter().enumerate() {
                 last = first + k as u32;
-                r -= weight(l, t.kind);
+                r -= weight(l, t);
                 if r < 0.0 {
                     return last;
                 }
@@ -1082,10 +1179,11 @@ impl Traffic {
         let mut room = if last == NONE {
             to_len
         } else {
-            self.cars[last as usize].s - CAR_LEN_M
+            let l = &self.cars[last as usize];
+            l.s - l.len
         };
         room -= f32::from(self.claims[turn as usize]) * (CAR_LEN_M + S0);
-        if room < (CAR_LEN_M + 1.0).min(to_len) {
+        if room < (c.len + 1.0).min(to_len) {
             return false;
         }
         if self
@@ -1182,13 +1280,13 @@ impl Traffic {
         if len2([center[0] - c.pos[0], center[1] - c.pos[2]]) > look + 10.0 {
             return None;
         }
-        let reach = ps.r + CAR_HALF_W_M + 0.4;
+        let reach = ps.r + c.half_w + 0.4;
         let mut best: Option<f32> = None;
         let mut test = |a: [f32; 2], b: [f32; 2], start: f32, len: f32| {
             for q in ps.pts {
                 let (d, t) = point_seg(q, a, b);
                 let along = start + len * t;
-                if d < reach && along > -CAR_LEN_M * 0.5 && along < look {
+                if d < reach && along > -c.len * 0.5 && along < look {
                     let gap = along - ps.r;
                     best = Some(best.map_or(gap, |b: f32| b.min(gap)));
                 }
@@ -1244,8 +1342,8 @@ impl Traffic {
             if j == NONE {
                 continue;
             }
-            let s = self.cars[j as usize].s;
-            if s - CAR_LEN_M < MOUTH_M && (best == NONE || s < self.cars[best as usize].s) {
+            let (s, len) = (self.cars[j as usize].s, self.cars[j as usize].len);
+            if s - len < MOUTH_M && (best == NONE || s < self.cars[best as usize].s) {
                 best = j;
             }
         }
@@ -1268,7 +1366,8 @@ impl Traffic {
                 let d = l.length_m - c.s;
                 let stranded = c.next_turn != NONE && g.turns[c.next_turn as usize].from != c.seg;
                 if c.held == NONE && stranded && d < repick_m(c.speed) {
-                    self.cars[i].next_turn = self.pick(g, c.seg, true);
+                    let fw = self.rules[usize::from(c.shape)].freeway_only();
+                    self.cars[i].next_turn = self.pick(g, c.seg, true, fw);
                 }
                 // A claim stands only while the car is committed: a car held up (a car
                 // ahead, a slowdown) gives it back, and nobody keeps one on red.
@@ -1335,7 +1434,7 @@ impl Traffic {
             }
             if leader != NONE {
                 let l = &self.cars[leader as usize];
-                let gap = start + l.s - CAR_LEN_M;
+                let gap = start + l.s - l.len;
                 a = a.min(idm(v, v0, c.headway, gap, v - l.speed, S0));
                 max_ds = max_ds.min(gap - MIN_GAP);
                 break;
@@ -1412,7 +1511,8 @@ impl Traffic {
                 c.prev = c.seg;
                 c.seg = nl + c.next_turn;
                 let to = g.turns[c.next_turn as usize].to;
-                c.next_turn = self.pick(g, to, false);
+                let fw = self.rules[usize::from(c.shape)].freeway_only();
+                c.next_turn = self.pick(g, to, false, fw);
             } else {
                 let t = c.seg - nl;
                 c.s -= len;
@@ -1420,7 +1520,7 @@ impl Traffic {
                 c.seg = g.turns[t as usize].to;
                 release[0] = c.clearing;
                 c.clearing = t;
-                c.clear_left = CAR_LEN_M + 0.5 - c.s;
+                c.clear_left = c.len + 0.5 - c.s;
                 c.held = NONE;
                 c.stop = StopState::Approach;
             }
@@ -1479,10 +1579,7 @@ impl Traffic {
     /// Whether car `i` moving from `old` to `new` would touch another car or the player:
     /// come into contact, or closer while already in contact.
     fn bumps(&self, i: usize, old: &Car, new: &Car, ps: &PlayerShape) -> bool {
-        let (hl, hw) = (
-            CAR_LEN_M * 0.5 + BODY_MARGIN_M,
-            CAR_HALF_W_M + BODY_MARGIN_M,
-        );
+        let (hl, hw) = (new.len * 0.5 + BODY_MARGIN_M, new.half_w + BODY_MARGIN_M);
         let nb = body(new.pos, new.dir, hl, hw);
         let ob = body(old.pos, old.dir, hl, hw);
         let worse = |p: [f32; 3], b: &[[f32; 2]; 4]| {
@@ -1491,7 +1588,7 @@ impl Traffic {
         };
         let near =
             |p: [f32; 3], r: f32| (p[0] - new.pos[0]).abs() < r && (p[2] - new.pos[2]).abs() < r;
-        let reach = CAR_LEN_M + 1.0;
+        let reach = 0.5 * (new.len + self.max_len) + 1.0;
         // Cars sorted by x at the start of the step have moved less than a meter since.
         let x = new.pos[0];
         let lo = self
@@ -1503,7 +1600,7 @@ impl Traffic {
             }
             let o = &self.cars[j as usize];
             if j as usize != i && near(o.pos, reach) {
-                let b = body(o.pos, o.dir, CAR_LEN_M * 0.5, CAR_HALF_W_M);
+                let b = body(o.pos, o.dir, o.len * 0.5, o.half_w);
                 if worse(o.pos, &b) {
                     return true;
                 }
@@ -1522,7 +1619,7 @@ impl Traffic {
         let c = &self.cars[i];
         let lm = g.lanes[m as usize].length_m;
         let s2 = project(g, m, xz(g.pose(c.seg, c.s).pos));
-        if s2 < CAR_LEN_M + 8.0 || lm - s2 < REPICK_M * 0.5 {
+        if s2 < c.len + 8.0 || lm - s2 < REPICK_M * 0.5 {
             return None;
         }
         let v = c.speed;
@@ -1532,19 +1629,19 @@ impl Traffic {
             } else if o.seg == m || o.ghost == m {
                 if o.s >= s2 {
                     (
-                        o.s - CAR_LEN_M - s2,
+                        o.s - o.len - s2,
                         3.0 + 0.6 * v + (v - o.speed).max(0.0) * 1.5,
                     )
                 } else {
                     (
-                        s2 - CAR_LEN_M - o.s,
+                        s2 - c.len - o.s,
                         3.0 + 0.6 * o.speed + (o.speed - v).max(0.0) * 2.0,
                     )
                 }
             } else if o.seg >= self.lanes && g.turns[(o.seg - self.lanes) as usize].to == m {
                 let rest = self.seg_len(g, o.seg) - o.s;
                 (
-                    s2 + rest - CAR_LEN_M,
+                    s2 + rest - c.len,
                     3.0 + 0.6 * o.speed + (o.speed - v).max(0.0) * 2.0,
                 )
             } else {
@@ -1560,8 +1657,8 @@ impl Traffic {
         if len2([q[0] - c.pos[0], q[1] - c.pos[2]]) < PASS_GAP_M + 20.0 {
             let sp = project(g, m, q);
             let lat = len2([q[0] - g.pose(m, sp).pos[0], q[1] - g.pose(m, sp).pos[2]]);
-            let on_lane = lat < p.half_w + CAR_HALF_W_M + 0.8;
-            if on_lane && sp > s2 - CAR_LEN_M - p.half_len - 3.0 && sp < s2 + 20.0 + 2.0 * v {
+            let on_lane = lat < p.half_w + c.half_w + 0.8;
+            if on_lane && sp > s2 - c.len - p.half_len - 3.0 && sp < s2 + 20.0 + 2.0 * v {
                 return None;
             }
         }
@@ -1614,10 +1711,7 @@ impl Traffic {
                 let v0 = c.v0 * l.speed_mps;
                 let slower = |speed: f32| speed < 0.85 * v0 && speed + 2.0 < v0;
                 let slow = self.cars.iter().any(|o| {
-                    o.seg == c.seg
-                        && o.s > c.s
-                        && o.s - CAR_LEN_M - c.s < PASS_GAP_M
-                        && slower(o.speed)
+                    o.seg == c.seg && o.s > c.s && o.s - o.len - c.s < PASS_GAP_M && slower(o.speed)
                 }) || (self.plan[i].2 < PASS_GAP_M && slower(inp.player.speed));
                 if slow {
                     for m in [c.seg.wrapping_sub(1), c.seg + 1] {
@@ -1656,7 +1750,7 @@ impl Traffic {
     /// Updates car `c`'s drawn pose from its place on the graph.
     fn place(&self, g: &LaneGraph, c: &mut Car) {
         let front = self.seg_pose(g, c.seg, c.s);
-        let rs = c.s - CAR_LEN_M;
+        let rs = c.s - c.len;
         let rear = if rs >= 0.0 {
             self.seg_pose(g, c.seg, rs).pos
         } else if c.prev != NONE {
@@ -1672,9 +1766,9 @@ impl Traffic {
         } else {
             let f = front.pos;
             [
-                f[0] - front.dir[0] * CAR_LEN_M,
+                f[0] - front.dir[0] * c.len,
                 f[1],
-                f[2] - front.dir[1] * CAR_LEN_M,
+                f[2] - front.dir[1] * c.len,
             ]
         };
         let f = front.pos;
@@ -1767,7 +1861,7 @@ impl Traffic {
         while i > 0 {
             i -= 1;
             let c = &mut self.cars[i];
-            let seen = inp.view.sees(c.pos, CAR_LEN_M);
+            let seen = inp.view.sees(c.pos, c.len);
             c.hidden = if seen { 0 } else { c.hidden.saturating_add(1) };
             c.stuck = if c.speed < STOPPED_MPS {
                 c.stuck.saturating_add(1)
@@ -1810,7 +1904,7 @@ impl Traffic {
             if d < b.spawn_min_m
                 || d > b.spawn_max_m
                 || dot(rel, p.dir) <= 0.0
-                || inp.view.sees(p.pos, CAR_LEN_M + 2.0)
+                || inp.view.sees(p.pos, self.max_len + 2.0)
             {
                 continue;
             }
@@ -1823,7 +1917,7 @@ impl Traffic {
                 if o.seg == lane || o.ghost == lane {
                     clear &= (o.s - s).abs() >= 25.0;
                     if o.s > s {
-                        room = room.min(o.s - CAR_LEN_M - s);
+                        room = room.min(o.s - o.len - s);
                     }
                 }
             }

@@ -434,7 +434,7 @@ fn zone_density(z: ZoneId) -> f32 {
 }
 
 /// The zone under ground point `p` (`world`'s detail pass lookup).
-fn zone_at(place: &Place, p: [f32; 2]) -> ZoneId {
+pub(crate) fn zone_at(place: &Place, p: [f32; 2]) -> ZoneId {
     let h = &place.header;
     let res = usize::from(place.terrain.res_per_chunk.max(1));
     let [w, d] = place::Zones::cells_per_side(h, place.terrain.res_per_chunk);

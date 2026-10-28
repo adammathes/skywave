@@ -1,0 +1,47 @@
+// Percheron Crew Cab: a 2000 full-size rear-drive pickup, crew cab, long bed, empty.
+//
+// Intent: big, heavy and strong. A 5.3 L V8 through a four-speed automatic pulls it hard
+// off the line for something so large; the empty bed leaves the rear light, so it steps
+// out a little under power in the wet of a corner, and the long wheelbase and soft springs
+// make it wallow. Slow, heavy steering.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "percheron_pickup",
+    name: "Percheron Crew Cab",
+    era: Aughts,
+    year: 2000,
+    class: Pickup,
+
+    mass_kg: 2280,
+    dims_m: (5.72, 1.98, 1.86),    // length, width, height
+    wheelbase_m: 3.88,
+    track_m: 1.68,
+    cg_height_m: 0.76,
+    cg_fore_aft: 0.44,
+
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 5600,
+        torque_nm: [(800, 340), (2000, 410), (3200, 445), (4400, 420), (5600, 340)],
+    ),
+    gears: [3.06, 1.63, 1.0, 0.70],
+    final_drive: 3.73,
+    reverse: 2.3,
+    shift_ms: 400,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.88, grip_long: 0.9, load_sens: 0.12, slip_peak_deg: 9.0),
+    suspension: Susp(spring_n_m: 36000, damper: 2400, travel_m: 0.22, antiroll: 0.18),
+    steering: Steer(max_deg: 32, speed_sens: 0.5, return_rate: 5.0),
+    brakes: Brakes(max_nm: 5200, bias_front: 0.68, abs: true, handbrake_nm: 3000),
+    aero: Aero(cd: 0.56, frontal_m2: 3.1, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.05, body_roll: 0.8, engine_sound: "v8_lazy", shift_jerk: 0.15),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 110, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "percheron_pickup.shape.ron",
+)

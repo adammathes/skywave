@@ -1,0 +1,59 @@
+// Anvil Semi body: a late-90s conventional highway tractor with a sleeper, hauling a dry
+// van trailer, drawn as one body.
+//
+// Intent: the long-haul rig on the freeway. A long sloped hood over a tall chrome grille
+// between rectangular lamps, a two-piece windshield, a short day cab with a raised sleeper
+// and a roof fairing behind it, the frame and fifth wheel in the gap, then a tall,
+// wider, flat-sided trailer on a tandem at its tail. Tandem drive axles under the tractor
+// (`axles`), a chrome bumper, mud flaps, steel wheels. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "anvil_semi",
+    side: [
+        (0.00, 1.02), (0.14, 1.80), (2.02, 2.00), (2.50, 2.96),
+        (3.44, 3.58), (4.30, 3.58), (4.36, 1.44), (4.86, 1.44), (4.94, 4.02),
+        (17.50, 4.00),
+        (17.50, 1.16), (3.96, 1.14), (3.90, 0.62), (0.16, 0.56), (0.00, 0.66),
+    ],
+    plan: [
+        (0.00, 1.00), (1.96, 1.14), (4.30, 1.20), (4.94, 1.30), (17.50, 1.30),
+    ],
+    belt: [(2.02, 2.02), (4.30, 2.06)],
+    section: Section(shoulder: 0.98, tumblehome_deg: 2, greenhouse_frac: 0.97, crown: 0.02, tuck: 0.02),
+    glass: Glass(
+        windshield: (2.02, 2.50),
+        backlight: (4.32, 4.36),
+        side: [(2.58, 3.28)],
+    ),
+    wheels: Wheels(radius: 0.52, width: 0.30, arch_clearance: 0.05, front_x: 1.25, rear_x: 16.40, track: 1.96),
+    front: Front(lights: Rect, grille: Wide, bumper: Chrome, bumper_y: (0.58, 0.96)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Rubber, bumper_y: (1.04, 1.18)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.84, creases: [(0.20, 1.52, 4.30, 1.56)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: Mast, rims: Steel, hubcaps: false),
+    axles: [5.30, 6.45, 15.25],
+    details: [MudFlaps, Badge(Bar)],
+    // White, silver, white over red, white over dark blue, white over green, white over black.
+    palette: ["#eeede8", "#c4c7cb", "#eeede8/#a8202a", "#eeede8/#1e2c52", "#eeede8/#24442e", "#eeede8/#18191c"],
+    accent: "#a8202a",
+    interior: InteriorShape(
+        dash_height: 1.90,
+        dash_x: 2.30,
+        wheel_pos: (2.70, 1.74),
+        wheel_radius: 0.23,
+        column_angle_deg: 44,
+        mirror_pos: (2.50, 2.80),
+        seat: (3.10, 1.50),
+        driver_offset: 0.52,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: gray plastic, gray cloth, a dark
+        // floor, light panels, amber-lit dials.
+        colors: ["#2e3034", "#5a5c60", "#2a2c30", "#b8b6b0", "#45474b", "#8a8c90"],
+        display: "#ffae3b",
+        insert: "#45474b",
+        piping: "#6a6c70",
+        dash_top: "#26282b",
+    ),
+)

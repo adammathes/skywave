@@ -1,0 +1,58 @@
+// Wren Minivan body: a late-90s front-drive minivan with a sliding side door.
+//
+// Intent: one smooth egg of a box. A short sloped nose with a thin grille between swept
+// lamps, a windshield that runs almost straight on from the hood, a long flat roof with
+// rails, three side windows with a sliding door under the middle one (its track a seam
+// under the last window), a near-vertical liftgate and tall tail lamps. Body-colored
+// bumpers, black window frames, steel wheels under covers. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "wren_minivan",
+    side: [
+        (0.00, 0.62), (0.04, 0.72), (0.18, 0.82), (0.60, 0.94), (0.96, 1.02), (1.04, 1.05),
+        (1.50, 1.40), (1.90, 1.66), (2.20, 1.73), (4.50, 1.72), (4.76, 1.66), (4.90, 1.50),
+        (4.97, 1.06), (5.00, 1.00),
+        (5.00, 0.38), (4.86, 0.28), (4.30, 0.24), (0.80, 0.22), (0.14, 0.27), (0.00, 0.38),
+    ],
+    plan: [
+        (0.00, 0.74), (0.06, 0.84), (0.22, 0.92), (0.60, 0.955), (1.20, 0.96), (4.60, 0.96),
+        (4.88, 0.94), (5.00, 0.90),
+    ],
+    belt: [(1.04, 1.04), (4.97, 1.10)],
+    section: Section(shoulder: 0.92, tumblehome_deg: 12, greenhouse_frac: 0.86, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.06, 1.94),
+        backlight: (4.80, 4.96),
+        side: [(1.96, 2.62), (2.72, 3.80), (3.90, 4.64)],
+    ),
+    wheels: Wheels(radius: 0.33, width: 0.20, arch_clearance: 0.04, front_x: 0.96, rear_x: 3.96, track: 1.62),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.30, 0.46)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Body, bumper_y: (0.34, 0.50)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.82, creases: [(0.20, 0.70, 4.94, 0.76), (3.86, 1.00, 4.66, 1.02)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Single, antenna: None, rims: Steel, hubcaps: true),
+    details: [BlackTrim, RoofRack, Badge(Bar)],
+    // Teal green, silver, white, burgundy, champagne, navy, dark green.
+    palette: ["#2c6a68", "#b8bcc0", "#eeede8", "#5e1c26", "#c8bc9c", "#1e2a46", "#203a2e"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 1.02,
+        dash_x: 1.40,
+        wheel_pos: (1.92, 0.88),
+        wheel_radius: 0.19,
+        column_angle_deg: 30,
+        mirror_pos: (1.80, 1.54),
+        seat: (2.44, 0.62),
+        driver_offset: 0.42,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: gray-blue plastic and cloth, a
+        // lighter insert, blue-gray carpet, green-lit dials.
+        colors: ["#3c4250", "#62697a", "#3e4552", "#c6c8cc", "#4e5664", "#9aa4b6"],
+        display: "#58e090",
+        insert: "#7e8698",
+        piping: "#4e5664",
+        dash_top: "#2e323a",
+    ),
+)

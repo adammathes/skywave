@@ -1,0 +1,46 @@
+// Linnet Hatch: a 2001 front-drive five-door compact hatchback with a 1.6 L four.
+//
+// Intent: small, light and eager. A revvy little four through a five-speed (shifted for
+// you for now), short gearing, quick light steering and a stiff little body that turns in
+// sharply and tucks its nose on a lift. Never fast; always fun round town.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "linnet_hatch",
+    name: "Linnet Hatch",
+    era: Aughts,
+    year: 2001,
+    class: Hatch,
+
+    mass_kg: 1060,
+    dims_m: (4.05, 1.70, 1.52),    // length, width, height
+    wheelbase_m: 2.54,
+    track_m: 1.47,
+    cg_height_m: 0.52,
+    cg_fore_aft: 0.38,
+
+    engine: Engine(
+        idle_rpm: 850,
+        redline_rpm: 6800,
+        torque_nm: [(1000, 110), (2500, 135), (4000, 148), (5500, 140), (6800, 118)],
+    ),
+    gears: [3.45, 1.94, 1.29, 0.97, 0.78],
+    final_drive: 4.06,
+    reverse: 3.0,
+    shift_ms: 260,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 1.035, grip_long: 1.02, load_sens: 0.09, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 28000, damper: 2600, travel_m: 0.15, antiroll: 0.4),
+    steering: Steer(max_deg: 35, speed_sens: 0.6, return_rate: 9.5),
+    brakes: Brakes(max_nm: 2600, bias_front: 0.7, abs: true, handbrake_nm: 2000),
+    aero: Aero(cd: 0.33, frontal_m2: 2.05, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.05, body_roll: 0.45, engine_sound: "i4", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "sport_00s",
+        gauges: [Speedo(0, 120, mph), Tach(0, 8000)],
+        radio: "digital_blue",
+    ),
+    shape: "linnet_hatch.shape.ron",
+)
