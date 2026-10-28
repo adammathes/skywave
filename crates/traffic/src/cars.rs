@@ -315,6 +315,45 @@ pub struct Car {
     pub stuck: u32,
     /// Seconds after dusk this driver switches the lights on (off as long after dawn).
     pub light_delay_s: f32,
+    /// A set piece's hold on the car ([`Script::NONE`] for an ordinary car).
+    pub script: Script,
+}
+
+/// A set piece's hold on a car ([`Traffic::spawn_scripted`]): a racer or a convoy truck. It
+/// drives its route turn by turn at its own speed, stands where it is told to until
+/// released, stops for people on its path (ordinary cars do not see them yet), never
+/// changes lanes and is never despawned while any of that lasts. After its route's last
+/// turn it is an ordinary car again, still tagged.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Script {
+    /// Who placed it; 0 for nobody (an ordinary car).
+    pub tag: u8,
+    /// Its route ([`Traffic::set_routes`]) and the next turn of it to take, or [`NONE`]
+    /// once done.
+    pub route: u32,
+    pub leg: u32,
+    /// Its desired speed, m/s; 0 for an ordinary car's share of the posted speed.
+    pub v0_mps: f32,
+    /// Where its front stands until released: a lane and the distance along it, or
+    /// [`NONE`].
+    pub stand_seg: u32,
+    pub stand_s: f32,
+}
+
+impl Script {
+    pub const NONE: Script = Script {
+        tag: 0,
+        route: NONE,
+        leg: 0,
+        v0_mps: 0.0,
+        stand_seg: NONE,
+        stand_s: 0.0,
+    };
+
+    /// Whether it still holds the car (a route to drive or a place to stand).
+    pub fn active(&self) -> bool {
+        self.tag != 0 && (self.route != NONE || self.stand_seg != NONE)
+    }
 }
 
 /// The player's car, an obstacle every NPC car follows and yields to.
@@ -478,7 +517,20 @@ pub struct Traffic {
     max_len: f32,
     /// The lines the cars must not cross now ([`Traffic::set_barriers`]).
     barriers: Vec<Barrier>,
+    /// Scripted cars' routes ([`Traffic::set_routes`]), each turn's lane, and where the
+    /// people are ([`Traffic::set_people`]).
+    routes: Vec<Vec<u32>>,
+    turn_from: Vec<u32>,
+    people: Vec<[f32; 2]>,
 }
+
+/// Most people the scripted cars weigh at once.
+pub const MAX_PEOPLE: usize = 512;
+/// A scripted car stops for anyone this near the side of its body (its lane, not the curb
+/// beside it), ahead of it or beside it, m.
+pub const PERSON_CLEAR_M: f32 = 0.8;
+/// A person's half width, m.
+const PERSON_R_M: f32 = 0.45;
 
 /// Most [`Barrier`]s at once.
 pub const MAX_BARRIERS: usize = 64;
@@ -532,6 +584,13 @@ impl Clone for Traffic {
                 let mut b = Vec::with_capacity(MAX_BARRIERS);
                 b.extend_from_slice(&self.barriers);
                 b
+            },
+            routes: self.routes.clone(),
+            turn_from: self.turn_from.clone(),
+            people: {
+                let mut p = Vec::with_capacity(MAX_PEOPLE);
+                p.extend_from_slice(&self.people);
+                p
             },
         }
     }
@@ -876,6 +935,9 @@ impl Traffic {
             rules: alloc::vec![ShapeRule::default(); usize::from(budget.shapes)],
             max_len: CAR_LEN_M,
             barriers: Vec::with_capacity(MAX_BARRIERS),
+            routes: Vec::new(),
+            turn_from: graph.turns.iter().map(|t| t.from).collect(),
+            people: Vec::with_capacity(MAX_PEOPLE),
         }
     }
 
@@ -1089,10 +1151,108 @@ impl Traffic {
             hidden: 0,
             stuck: 0,
             light_delay_s,
+            script: Script::NONE,
         };
         self.place(g, &mut car);
         self.cars.push(car);
         Some(id)
+    }
+
+    /// The routes scripted cars drive ([`Script::route`] indexes them): each the turns to
+    /// take one after another, each from the lane the one before leads to. Call once.
+    pub fn set_routes(&mut self, routes: Vec<Vec<u32>>) {
+        self.routes = routes;
+    }
+
+    /// A car of shape `shape` (below [`TrafficBudget::shapes`]) on `script`, its front `s`
+    /// meters along `lane` at `speed`; its id, or `None` when the pool is full of cars on
+    /// scripts or seen by the camera. With the pool full, the ordinary car hidden the
+    /// longest makes room. Does not check for room on the lane.
+    pub fn spawn_scripted(
+        &mut self,
+        g: &LaneGraph,
+        lane: u32,
+        s: f32,
+        speed: f32,
+        shape: u8,
+        script: Script,
+        view: &View,
+    ) -> Option<u32> {
+        if self.cars.len() >= self.budget.cars {
+            let gone = (0..self.cars.len())
+                .filter(|&i| {
+                    let c = &self.cars[i];
+                    c.script.tag == 0 && !view.sees(c.pos, c.len)
+                })
+                .max_by_key(|&i| (self.cars[i].hidden, core::cmp::Reverse(i)))?;
+            self.remove(gone);
+        }
+        let id = self.spawn_at(g, lane, s, speed)?;
+        let rule = self.rules[usize::from(shape)];
+        let route = self.route_turn(lane, &script);
+        let mut c = *self.cars.last().expect("just spawned");
+        c.shape = shape;
+        c.len = rule.len_m;
+        c.half_w = rule.half_w_m;
+        c.v0 = 1.0;
+        c.script = script;
+        match route {
+            Some(t) => c.next_turn = t,
+            None => c.script.route = NONE,
+        }
+        self.place(g, &mut c);
+        *self.cars.last_mut().expect("just spawned") = c;
+        Some(id)
+    }
+
+    /// The turn `script` takes next from `lane`, if its route goes on from there.
+    fn route_turn(&self, lane: u32, script: &Script) -> Option<u32> {
+        let r = self.routes.get(script.route as usize)?;
+        let &t = r.get(script.leg as usize)?;
+        (self.turn_from(t) == lane).then_some(t)
+    }
+
+    fn turn_from(&self, t: u32) -> u32 {
+        self.turn_from[t as usize]
+    }
+
+    /// The script of the car with id `id`, to release it or change its speed.
+    pub fn script_mut(&mut self, id: u32) -> Option<&mut Script> {
+        self.cars
+            .iter_mut()
+            .find(|c| c.id == id)
+            .map(|c| &mut c.script)
+    }
+
+    /// Where the people are now (at most [`MAX_PEOPLE`]; the rest are dropped), for the
+    /// scripted cars to stop for. Allocates nothing.
+    pub fn set_people(&mut self, people: impl Iterator<Item = [f32; 2]>) {
+        self.people.clear();
+        self.people.extend(people.take(MAX_PEOPLE));
+    }
+
+    /// Gap from scripted car `c`'s front along its path to the nearest person within
+    /// [`PERSON_CLEAR_M`] of its body's side, when one is within `look`.
+    fn people_gap(&self, g: &LaneGraph, c: &Car, path: &Path, look: f32) -> Option<f32> {
+        let mut best: Option<f32> = None;
+        let reach = c.half_w + PERSON_CLEAR_M;
+        for &p in &self.people {
+            if len2([p[0] - c.pos[0], p[1] - c.pos[2]]) > look + c.len + reach {
+                continue;
+            }
+            let mut test = |a: [f32; 2], b: [f32; 2], start: f32, len: f32| {
+                let (d, t) = point_seg(p, a, b);
+                if d < reach {
+                    // Its distance ahead of the front, short of their body.
+                    let along = start + len * t - PERSON_R_M;
+                    if along > -c.len && along < look {
+                        best = Some(best.map_or(along, |b: f32| b.min(along)));
+                    }
+                }
+            };
+            self.walk_path(g, path, look, &mut test);
+        }
+        best
     }
 
     /// A turn to take at the end of `lane`: from any lane of its road and direction, or
@@ -1480,6 +1640,8 @@ impl Traffic {
                 if c.held == NONE && stranded && d < repick_m(c.speed) {
                     let fw = self.rules[usize::from(c.shape)].freeway_only();
                     self.cars[i].next_turn = self.pick(g, c.seg, true, fw);
+                    // Off its route: an ordinary car from here.
+                    self.cars[i].script.route = NONE;
                 }
                 // A claim stands only while the car is committed: a car held up (a car
                 // ahead, a slowdown) gives it back, and nobody keeps one on red.
@@ -1513,6 +1675,13 @@ impl Traffic {
             let to = g.turns[t as usize].to;
             (c.v0 * g.lanes[to as usize].speed_mps).min(turn_speed(g, t))
         };
+        if c.script.v0_mps > 0.0 {
+            v0 = if c.seg < nl {
+                c.script.v0_mps
+            } else {
+                c.script.v0_mps.min(turn_speed(g, c.seg - nl))
+            };
+        }
         v0 = v0.max(1.0);
         let look = (v * LOOK_S + LOOK_M).clamp(LOOK_MIN, LOOK_MAX);
         let mut a = free_accel(v, v0);
@@ -1586,6 +1755,24 @@ impl Traffic {
             a = a.min(idm(v, v0, c.headway, gap, v, LINE_S0));
             max_ds = max_ds.min(gap);
         }
+        if c.script.tag != 0 {
+            // Where it stands until released.
+            if c.script.stand_seg != NONE {
+                if let Some(&(_, start)) = path.iter().find(|p| p.0 == c.script.stand_seg) {
+                    // Not once its front is past it.
+                    let gap = start + c.script.stand_s;
+                    if gap > -0.5 {
+                        a = a.min(idm(v, v0, c.headway, gap, v, LINE_S0));
+                        max_ds = max_ds.min(gap.max(0.0));
+                    }
+                }
+            }
+            // Anyone on its path: it stops short of them, and never moves on into them.
+            if let Some(gap) = self.people_gap(g, &c, &path, look) {
+                a = a.min(idm(v, v0, c.headway, gap, v, PLAYER_S0));
+                max_ds = max_ds.min((gap - PLAYER_GAP).max(0.0));
+            }
+        }
         let player = player.unwrap_or(f32::INFINITY);
         if c.hold > 0 {
             a = -B_MAX;
@@ -1628,7 +1815,14 @@ impl Traffic {
                 c.seg = nl + c.next_turn;
                 let to = g.turns[c.next_turn as usize].to;
                 let fw = self.rules[usize::from(c.shape)].freeway_only();
-                c.next_turn = self.pick(g, to, false, fw);
+                c.script.leg += 1;
+                c.next_turn = match self.route_turn(to, &c.script) {
+                    Some(t) => t,
+                    None => {
+                        c.script.route = NONE;
+                        self.pick(g, to, false, fw)
+                    }
+                };
             } else {
                 let t = c.seg - nl;
                 c.s -= len;
@@ -1788,6 +1982,7 @@ impl Traffic {
         for i in 0..self.cars.len() {
             let c = self.cars[i];
             if !(inp.tick + u64::from(c.id)).is_multiple_of(CHANGE_EVERY)
+                || c.script.active()
                 || c.seg >= nl
                 || c.held != NONE
                 || c.clearing != NONE
@@ -1978,6 +2173,11 @@ impl Traffic {
             i -= 1;
             let c = &mut self.cars[i];
             let seen = inp.view.sees(c.pos, c.len);
+            if c.script.active() {
+                c.hidden = 0;
+                c.stuck = 0;
+                continue;
+            }
             c.hidden = if seen { 0 } else { c.hidden.saturating_add(1) };
             c.stuck = if c.speed < STOPPED_MPS {
                 c.stuck.saturating_add(1)
@@ -2109,6 +2309,16 @@ impl Traffic {
                 u64::from(c.ghost),
             ];
             h = hash64(h, &w);
+            // Only a scripted car has these, so traffic without set pieces hashes as before.
+            if c.script.tag != 0 {
+                let s = &c.script;
+                let w = [
+                    u64::from(s.tag) | u64::from(s.route) << 32,
+                    u64::from(s.leg) | u64::from(s.stand_seg) << 32,
+                    f(s.v0_mps) | f(s.stand_s) << 32,
+                ];
+                h = hash64(h, &w);
+            }
             // Only a car the player has hit has these, so traffic never hit hashes as
             // before they existed.
             if c.hold > 0

@@ -41,7 +41,7 @@ pub mod train;
 pub mod walks;
 
 pub use cars::{
-    Barrier, Car, Clock, Density, Inputs, Player, ShapeRule, Traffic, TrafficBudget, View,
+    Barrier, Car, Clock, Density, Inputs, Player, Script, ShapeRule, Traffic, TrafficBudget, View,
 };
 pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
 pub use signal::{Light, SignalClock};

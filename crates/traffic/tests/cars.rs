@@ -13,8 +13,8 @@ use place::StopLine;
 use skywave_core::Seed;
 use traffic::cars::{CAR_HALF_W_M, CAR_LEN_M};
 use traffic::{
-    Car, Clock, Control, Density, Inputs, Junction, Lane, LaneGraph, Light, Player, ShapeRule,
-    Traffic, TrafficBudget, Turn, TurnKind, View, NONE,
+    Car, Clock, Control, Density, Inputs, Junction, Lane, LaneGraph, Light, Player, Script,
+    ShapeRule, Traffic, TrafficBudget, Turn, TurnKind, View, NONE,
 };
 use world::procgen::build_place;
 use world::template::RegionTemplate;
@@ -1385,4 +1385,121 @@ fn a_car_behind_a_semi_keeps_clear_of_its_tail() {
     }
     println!("closest gap behind the semi {closest:.2} m");
     assert!(closest > 1.0, "{closest}");
+}
+
+#[test]
+fn a_scripted_car_stands_till_released_drives_its_route_and_stops_for_people() {
+    let _quiet = shared();
+    let g = crossing();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    t.set_routes(vec![vec![0]]);
+    let script = Script {
+        tag: 1,
+        route: 0,
+        leg: 0,
+        v0_mps: 20.0,
+        stand_seg: 0,
+        stand_s: 300.0,
+    };
+    let id = t
+        .spawn_scripted(&g, 0, 100.0, 0.0, 0, script, &NO_VIEW)
+        .expect("room");
+    let car = |t: &Traffic| *t.cars().iter().find(|c| c.id == id).expect("kept");
+    // Off: every ordinary car would go; this one stays, and stands at 300 m.
+    let mut tick = 0u64;
+    // Despawning while it stands; after its route it is an ordinary car, which Off would
+    // despawn.
+    let mut run = |t: &mut Traffic, secs: u64, populate: bool| {
+        for _ in 0..secs * HZ as u64 {
+            let inp = scripted(tick, Player::ABSENT);
+            if populate {
+                t.populate(&g, &inp);
+            }
+            t.step(&g, &inp);
+            tick += 1;
+        }
+    };
+    run(&mut t, 40, true);
+    let c = car(&t);
+    assert_eq!(c.seg, 0);
+    assert!(
+        c.speed < 0.05 && c.s <= 300.0 && c.s > 295.0,
+        "stood: {c:?}"
+    );
+    // Released: through the signal (it waits for green) at its own 20 m/s.
+    t.script_mut(id).expect("kept").stand_seg = NONE;
+    let mut top = 0.0f32;
+    for _ in 0..40 {
+        run(&mut t, 1, false);
+        top = top.max(car(&t).speed);
+    }
+    assert!(top > 18.0 && top < 20.5, "its own speed: {top}");
+    let c = car(&t);
+    assert_eq!(c.seg, 1, "its route's turn");
+    assert_eq!(c.script.route, NONE, "done with its route");
+    // Someone standing in its lane ahead: it stops short and never moves into them.
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    t.set_routes(vec![vec![0]]);
+    let id = t
+        .spawn_scripted(
+            &g,
+            1,
+            100.0,
+            15.0,
+            0,
+            Script {
+                stand_seg: NONE,
+                route: NONE,
+                ..script
+            },
+            &NO_VIEW,
+        )
+        .expect("room");
+    let person = [12.0 + 300.0, 1.8 + 0.6];
+    let mut tick = 0u64;
+    for _ in 0..30 * HZ as u64 {
+        t.set_people([person].into_iter());
+        let inp = scripted(tick, Player::ABSENT);
+        t.step(&g, &inp);
+        tick += 1;
+        let c = *t.cars().iter().find(|c| c.id == id).expect("kept");
+        let front = c.pos[0] + 0.5 * c.len;
+        assert!(front < person[0] - 0.45, "into them: front {front}");
+    }
+    let c = *t.cars().iter().find(|c| c.id == id).expect("kept");
+    assert!(c.speed < 0.05, "stopped for them");
+    let _ = id;
+}
+
+#[test]
+fn someone_stepping_out_right_in_front_of_a_scripted_car_stops_it_dead() {
+    let _quiet = shared();
+    let g = straight();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(9));
+    let script = Script {
+        tag: 1,
+        v0_mps: 25.0,
+        ..Script::NONE
+    };
+    let id = t
+        .spawn_scripted(&g, 0, 100.0, 25.0, 0, script, &NO_VIEW)
+        .expect("room");
+    let car = |t: &Traffic| *t.cars().iter().find(|c| c.id == id).expect("kept");
+    let mut tick = 0u64;
+    let mut person: Option<[f32; 2]> = None;
+    for _ in 0..20 * HZ as u64 {
+        let c = car(&t);
+        // At 300 m someone steps into the lane 3 m in front of it, and stays.
+        if person.is_none() && c.s > 300.0 {
+            person = Some([c.s + 3.0, 0.3]);
+        }
+        t.set_people(person.into_iter());
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        tick += 1;
+        if let Some(p) = person {
+            let front = car(&t).s;
+            assert!(front < p[0] - 0.45, "into them: front {front} of {}", p[0]);
+        }
+    }
+    assert!(person.is_some() && car(&t).speed < 0.05);
 }
