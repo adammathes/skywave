@@ -412,13 +412,21 @@ fn lot_furniture_lifts_or_stops_the_car_and_paint_does_not() {
         y - ground(m)
     );
     assert_eq!(surface, Surface::Asphalt);
-    // A light pole stops a car driving at it.
+    // A light pole stops a car driving at it, along the lot's stalls or across them, from
+    // the lot's asphalt (a pole may stand by a building's corner).
     let (pole, _) = lot.poles[0];
     let car = spec();
     let mut hit = false;
-    for (dx, dz) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
-        let d = V2::new(dx, dz);
+    let st0 = &lot.stalls[0];
+    let ax = (st0.mouth - st0.c).normalize();
+    let on_lot = |p: V2| lot.pave.iter().any(|q| point_in_polygon(p, q));
+    let mut tried = 0;
+    for d in [ax, -ax, ax.left(), -ax.left()] {
         let from = pole - d * 6.0;
+        if !on_lot(from) {
+            continue;
+        }
+        tried += 1;
         let y = c.level_at([from.x, from.y]).0;
         let mut st = VehicleState::spawn(&car, [from.x, y, from.y], heading_of(d));
         for _ in 0..3 * STEPS_PER_S {
@@ -437,6 +445,7 @@ fn lot_furniture_lifts_or_stops_the_car_and_paint_does_not() {
         }
         assert!((xz(st.pos) - pole).dot(d) < 0.0, "drove through the pole");
     }
+    assert!(tried > 0, "no way onto the pole at {pole:?} from the lot");
     assert!(hit, "the pole at {pole:?} never stopped the car");
 }
 
@@ -736,8 +745,9 @@ fn a_lot_car_never_arrives_on_the_player() {
     let look = [1.0, 0.0, 0.0];
     c.advance_lot_cars(at_hour(h as f32 - 1.0), away, look, &far, &car);
     assert!(!c.lot_cars[k].present);
-    // The player parks in its stall, then the hour comes (seen from far off).
-    let mut s = VehicleState::spawn(&car, at, 0.0);
+    // The player parks in its stall, along it, then the hour comes (seen from far off).
+    let u = c.boxes[c.lot_cars[k].solid as usize].u;
+    let mut s = VehicleState::spawn(&car, at, heading_of(V2::new(u[0], u[1])));
     for _ in 0..STEPS_PER_S {
         step(
             &car,
