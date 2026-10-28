@@ -12,6 +12,7 @@
 //! changing one stage's draws never shifts another's.
 
 pub mod arterials;
+pub mod basin;
 pub mod build;
 pub mod buildings;
 pub mod detail;
@@ -25,7 +26,9 @@ pub use arterials::{arterials, hash_graph};
 pub use build::{build_place, place_from, PLACE_CHUNKS};
 pub use buildings::{buildings, buildings_all, hash_buildings, lot_buildings};
 pub use detail::{detail, hash_detail};
-pub use macro_map::{Frame, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind};
+pub use macro_map::{
+    BasinPlan, Frame, GridLine, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind,
+};
 pub use parcels::{
     hash_parcels, parcels, parcels_all, Block, Face, FaceKind, FaceParcels, FaceStats, ParcelChunk,
     ParcelPlan,

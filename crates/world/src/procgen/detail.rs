@@ -46,7 +46,7 @@ use place::{
 };
 use skywave_core::{Rng, Seed};
 
-use super::macro_map::{MacroMap, MacroPoiKind};
+use super::macro_map::{BasinPlan, MacroMap, MacroPoiKind};
 use super::stage;
 use crate::buildings::{self, BuildingPlan, FacadeEnv};
 use crate::grammar::{Grammar, LotRules, Planting};
@@ -81,6 +81,21 @@ const PART_SCATTER: u64 = 7;
 const PART_BILLBOARD: u64 = 8;
 const PART_PIER: u64 = 9;
 const PART_CAP: u64 = 10;
+/// A point along a basin's track as it is laid: where, which way, on which bed, at what
+/// height, and the road it crosses there (edge, heading).
+type TrackSample = (V2, V2, u8, f32, Option<(usize, V2)>);
+
+/// A basin's track is laid in pieces at most this long...
+const TRACK_PIECE_M: f32 = 16.0;
+/// ...classed (ballast, crossing a road, bridging the channel) every this far along it.
+const TRACK_SAMPLE_M: f32 = 2.0;
+/// The track crosses a road where it runs over its asphalt and this much either side.
+const CROSSING_PAD_M: f32 = 1.5;
+/// The deck bridges ground this far or more below the line.
+const BRIDGE_DROP_M: f32 = 2.0;
+/// A crossing sign stands this far from the track along the road, out past the curb.
+const CROSSBUCK_BACK_M: f32 = 5.0;
+const CROSSBUCK_OUT_M: f32 = 1.2;
 /// Key of the order the lots' cars are capped in.
 const KEY_LOT_CAR: u64 = 0x4C4F_5443;
 
@@ -119,6 +134,9 @@ pub fn detail(
     let plan = ChunkPlan::new(place, &pal, grammar);
     let (props, lights) = {
         let mut d = Detailer::new(place, &plan, template, &grammar.lots, seed);
+        if let Some(b) = &m.basin {
+            d.keep_basin_clear(b);
+        }
         d.streets();
         d.junctions();
         d.houses();
@@ -132,6 +150,9 @@ pub fn detail(
                 V2::from_array(poi.pos),
                 V2::from_array(poi.facing).normalize(),
             );
+        }
+        if let Some(b) = &m.basin {
+            d.rail(b);
         }
         d.cap_cars();
         // Whatever stands outside the place has no chunk to belong to.
@@ -174,6 +195,8 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::StopSign => (15, 0),
             PropKind::Signal { arm_dm } => (16, u64::from(arm_dm)),
             PropKind::Pier { len_m } => (17, u64::from(len_m)),
+            PropKind::Track { len_dm, bed } => (18, u64::from(len_dm) | u64::from(bed) << 16),
+            PropKind::Crossbuck => (19, 0),
         };
         words.push(tag);
         words.push(payload);
@@ -282,6 +305,10 @@ struct Detailer<'a> {
     /// Props made so far; parked cars apart until they are capped.
     props: Vec<Prop>,
     cars: Vec<Prop>,
+    /// Where no tree stands: a basin's rail line and channel (segments and the half
+    /// width they keep clear) and its airfield (polygons). Empty on the coast.
+    keep_out: Vec<(V2, V2, f32)>,
+    keep_out_areas: Vec<Vec<V2>>,
 }
 
 /// Bounds of a point set.
@@ -444,6 +471,8 @@ impl<'a> Detailer<'a> {
             fp_bins,
             props: Vec::new(),
             cars: Vec::new(),
+            keep_out: Vec::new(),
+            keep_out_areas: Vec::new(),
         }
     }
 
@@ -639,7 +668,7 @@ impl<'a> Detailer<'a> {
             }),
             None => !self.near_walk(p, 1.0),
         };
-        if !walk_ok || self.wet(p) {
+        if !walk_ok || self.wet(p) || self.kept_clear(p) {
             return false;
         }
         self.add(
@@ -1414,6 +1443,148 @@ impl<'a> Detailer<'a> {
             }
             s += 24.0;
             k += 1;
+        }
+    }
+
+    /// No tree on a basin's rail line, in its channel or on its airfield.
+    fn keep_basin_clear(&mut self, b: &BasinPlan) {
+        let mut segs = |line: &[[f32; 2]], r: f32| {
+            for w in line.windows(2) {
+                self.keep_out
+                    .push((V2::from_array(w[0]), V2::from_array(w[1]), r));
+            }
+        };
+        segs(&b.rail, 8.0);
+        for s in &b.spurs {
+            segs(s, 6.0);
+        }
+        segs(&b.channel, b.channel_half_m.1 + 6.0);
+        self.keep_out_areas
+            .push(b.airfield.iter().map(|&p| V2::from_array(p)).collect());
+    }
+
+    fn kept_clear(&self, q: V2) -> bool {
+        self.keep_out
+            .iter()
+            .any(|&(a, b, r)| segment_distance(q, a, b).0 < r)
+            || self.keep_out_areas.iter().any(|a| point_in_polygon(q, a))
+    }
+
+    /// A basin's rail line and spurs as track, in pieces: on ballast over the ground, flush
+    /// in the roads it crosses at grade (with a crossing sign each way) and on a deck where
+    /// it bridges the channel; a spur ends at a bumper.
+    fn rail(&mut self, b: &BasinPlan) {
+        let (place, net) = (self.place, self.net);
+        let (w, h) = (
+            usize::from(place.header.size_chunks[0]) * super::RES_PER_CHUNK as usize,
+            usize::from(place.header.size_chunks[1]) * super::RES_PER_CHUNK as usize,
+        );
+        // The road whose asphalt `q` is on, and its surface height and heading there.
+        let road_at = |q: V2| {
+            place.roads.edges.iter().enumerate().find_map(|(i, e)| {
+                let path = &net.paths[i];
+                (0..path.raw.len().saturating_sub(1)).find_map(|k| {
+                    let (a, c) = (path.raw[k], path.raw[k + 1]);
+                    let (d, _) = segment_distance(q, a, c);
+                    (d <= 0.5 * e.width_m + CROSSING_PAD_M).then(|| {
+                        let y = crate::roads::profile_height(&path.raw, &path.raw_y, q);
+                        (i, y, (c - a).normalize())
+                    })
+                })
+            })
+        };
+        let bridge = |q: V2| super::terrain::grid_height(&b.bridge_heights, w, h, q.x, q.y);
+        let mut lines: Vec<(&[[f32; 2]], bool)> = Vec::from([(b.rail.as_slice(), false)]);
+        lines.extend(b.spurs.iter().map(|s| (s.as_slice(), true)));
+        for (line, spur) in lines {
+            let pts: Vec<V2> = line.iter().map(|&p| V2::from_array(p)).collect();
+            // Samples along the line: (point, direction, bed, height, crossed road).
+            let mut samples: Vec<TrackSample> = Vec::new();
+            for seg in pts.windows(2) {
+                let (a, c) = (seg[0], seg[1]);
+                let len = (c - a).length();
+                let n = ((len / TRACK_SAMPLE_M) as usize).max(1);
+                let d = (c - a).normalize();
+                for k in 0..n {
+                    let q = a.lerp(c, (k as f32 + 0.5) / n as f32);
+                    let ground = self.ground(q);
+                    let sample = match road_at(q) {
+                        Some((i, y, r)) => (q, d, place::TRACK_CROSSING, y, Some((i, r))),
+                        None => {
+                            let deck = bridge(q);
+                            if deck - ground >= BRIDGE_DROP_M {
+                                (q, d, place::TRACK_BRIDGE, deck, None)
+                            } else {
+                                (q, d, place::TRACK_BALLAST, ground, None)
+                            }
+                        }
+                    };
+                    samples.push(sample);
+                }
+            }
+            // Runs of one bed, cut into pieces.
+            let mut k = 0;
+            while k < samples.len() {
+                let bed = samples[k].2;
+                let mut j = k;
+                while j + 1 < samples.len() && samples[j + 1].2 == bed {
+                    j += 1;
+                }
+                let run = &samples[k..=j];
+                let per_piece = (TRACK_PIECE_M / TRACK_SAMPLE_M) as usize;
+                let pieces = run.len().div_ceil(per_piece).max(1);
+                let per = run.len().div_ceil(pieces);
+                for (pi, chunk) in run.chunks(per).enumerate() {
+                    let first = chunk[0].0 - chunk[0].1 * (0.5 * TRACK_SAMPLE_M);
+                    let last = chunk[chunk.len() - 1];
+                    let end = last.0 + last.1 * (0.5 * TRACK_SAMPLE_M);
+                    let mid = first.lerp(end, 0.5);
+                    let dir = (end - first).normalize();
+                    let len = (end - first).length();
+                    let y = chunk.iter().map(|s| s.3).sum::<f32>() / chunk.len() as f32;
+                    let at_end = spur && j + 1 == samples.len() && (pi + 1) * per >= run.len();
+                    let bed = if at_end && bed == place::TRACK_BALLAST {
+                        place::TRACK_END
+                    } else {
+                        bed
+                    };
+                    self.props.push(prop(
+                        mid,
+                        y,
+                        dir,
+                        PropKind::Track {
+                            len_dm: (len * 10.0 + 0.5) as u16,
+                            bed,
+                        },
+                    ));
+                }
+                // A crossing sign on each road approach to the track, on the right.
+                if bed == place::TRACK_CROSSING && !spur {
+                    if let Some((i, r)) = run[run.len() / 2].4 {
+                        let x = run[run.len() / 2].0;
+                        let hw = 0.5 * place.roads.edges[i].width_m
+                            + if place.roads.edges[i].sidewalk {
+                                place::SIDEWALK_WIDTH_M
+                            } else {
+                                0.0
+                            };
+                        let right_hand =
+                            self.template.driving_side == crate::template::DrivingSide::Right;
+                        for sigma in [1.0f32, -1.0] {
+                            let heading = r * sigma;
+                            let side = if right_hand {
+                                heading.right()
+                            } else {
+                                heading.left()
+                            };
+                            let q = x - heading * CROSSBUCK_BACK_M + side * (hw + CROSSBUCK_OUT_M);
+                            let y = self.ground(q);
+                            self.props.push(prop(q, y, -heading, PropKind::Crossbuck));
+                        }
+                    }
+                }
+                k = j + 1;
+            }
         }
     }
 

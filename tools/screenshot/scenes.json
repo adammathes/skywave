@@ -62,5 +62,21 @@
   "vehicle-select": {
     "about": "The pause menu's Vehicle page at golden hour: the Regent on the turntable beside the panel, its paint swatches and specs.",
     "params": { "menu": "vehicle", "car": "regent_coupe_cabrio", "t": "17:40", "still": "1", "stream": "0" }
+  },
+  "basin-boulevard-night": {
+    "about": "Mirage Valley (the socal_basin template) at night on the boulevard: the eastbound carriageway, the palm median and its lamps, the mini-malls, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+  },
+  "basin-channel-dusk": {
+    "about": "Mirage Valley's flood channel at dusk from its bed, looking down it toward the freeway's bridge, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:10", "pos": "417.9,940", "yaw": "180", "still": "1", "stream": "1" }
+  },
+  "basin-freeway-night": {
+    "about": "Mirage Valley's freeway at night, eastbound toward an overpass, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "880,1054", "yaw": "90", "still": "1", "stream": "1" }
+  },
+  "basin-hills-night": {
+    "about": "Mirage Valley from the overlook road in the hills at night: the lit grid and downtown below, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "664,184", "yaw": "180", "still": "1", "stream": "1" }
   }
 }

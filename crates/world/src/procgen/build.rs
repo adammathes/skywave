@@ -36,6 +36,7 @@ pub fn region_of(template: &RegionTemplate) -> RegionId {
         "california_coast" => RegionId::CaliforniaCoast,
         "great_lakes_city" => RegionId::GreatLakesCity,
         "north_shore_suburb" => RegionId::NorthShoreSuburb,
+        "socal_basin" => RegionId::SocalBasin,
         _ => RegionId::CaliforniaCoast,
     }
 }
@@ -131,6 +132,7 @@ fn assemble(
                 WaterKind::Ocean => PlaceWaterKind::Ocean,
                 WaterKind::Lake => PlaceWaterKind::Lake,
                 WaterKind::Canal => PlaceWaterKind::Canal,
+                WaterKind::Channel => PlaceWaterKind::Channel,
             },
         })
         .collect();

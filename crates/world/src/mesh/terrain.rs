@@ -473,6 +473,31 @@ pub fn build(
     let paint = Paint::new(pal.lawn, Pattern::Terrain);
     let wl = grid.water_level;
     let [nx, nz] = place.header.size_chunks.map(usize::from);
+    // A basin's flood channel: its ground is concrete.
+    let channels: Vec<(Vec<V2>, V2, V2)> = place
+        .terrain
+        .water
+        .iter()
+        .filter(|b| b.kind == WaterKind::Channel)
+        .map(|b| {
+            let poly: Vec<V2> = b.polygon.iter().map(|&p| V2::from_array(p)).collect();
+            let (mut lo, mut hi) = (poly[0], poly[0]);
+            for q in &poly {
+                lo = V2::new(lo.x.min(q.x), lo.y.min(q.y));
+                hi = V2::new(hi.x.max(q.x), hi.y.max(q.y));
+            }
+            (poly, lo, hi)
+        })
+        .collect();
+    let concrete_at = |p: V2| {
+        channels.iter().any(|(poly, lo, hi)| {
+            p.x >= lo.x
+                && p.y >= lo.y
+                && p.x <= hi.x
+                && p.y <= hi.y
+                && crate::math::point_in_polygon(p, poly)
+        })
+    };
     for cz in 0..nz {
         for cx in 0..nx {
             let center = grid.pos(cx * res + res / 2, cz * res + res / 2);
@@ -498,7 +523,11 @@ pub fn build(
                             }
                         }
                     }
-                    let rgb = ground_rgb(acc.map(|a| (a / 16) as u8), y, wl, nrm, p, pal, seed);
+                    let rgb = if !channels.is_empty() && concrete_at(p) {
+                        channel_rgb(nrm, p, pal, seed)
+                    } else {
+                        ground_rgb(acc.map(|a| (a / 16) as u8), y, wl, nrm, p, pal, seed)
+                    };
                     m.vertices.push(WorldVertex {
                         pos: [p.x, y, p.y],
                         normal: nrm.to_array(),
@@ -541,6 +570,14 @@ pub fn build(
             dst.indices.extend(m.indices.iter().map(|i| i + base));
         }
     }
+}
+
+/// A flood channel's concrete: pale on the bed, the walls a shade darker, stained.
+fn channel_rgb(nrm: V3, p: V2, pal: &Palette, seed: u64) -> Rgb {
+    let stain = value_noise(seed ^ KEY_GROUND, p.x, p.y, 23.0);
+    let wall = clamp((0.98 - nrm.y) * 6.0, 0.0, 1.0);
+    let tone = 236.0 - 40.0 * wall - 24.0 * stain;
+    shade(mix(pal.concrete, pal.concrete_dark, 70), tone as u32)
 }
 
 /// A terrain vertex's color: `rgb`, its zones' blended color, wet at the waterline, bare
@@ -954,6 +991,12 @@ fn horizon_rgb(kind: place::EdgeKind, above: f32, nrm: V3, p: V2, pal: &Palette,
         }
         EdgeKind::Forest => mix(shade(pal.leaf_green, 140), shade(pal.palm_green, 120), 90),
         EdgeKind::RailYards => mix(pal.concrete_dark, shade(pal.soil, 190), 110),
+        // Pale desert floor, the buttes' faces red-brown rock.
+        EdgeKind::Desert => mix(
+            mix(pal.sand, pal.soil, 120),
+            shade(pal.soil, 150),
+            up(8.0, 40.0),
+        ),
         _ => mix(pal.lawn_dry, pal.scrub, up(10.0, 120.0)),
     };
     ground_rgb(rgb, above, 0.0, nrm, p, pal, seed)

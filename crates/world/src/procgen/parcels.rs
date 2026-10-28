@@ -413,10 +413,11 @@ impl<'a> ParcelPlan<'a> {
 
     // -- Faces -----------------------------------------------------------------------------
 
-    /// Whether lots may face road `edge`: not the highway or its one-way ramps.
+    /// Whether lots may face road `edge`: not the highway or its one-way ramps (a
+    /// boulevard's one-way carriageways are arterials and do face lots).
     fn faces_lots(&self, edge: u32) -> bool {
         let e = &self.g.edges[edge as usize];
-        !(e.class == RoadClass::Highway || e.oneway)
+        !(e.class == RoadClass::Highway || (e.oneway && e.class != RoadClass::Arterial))
     }
 
     /// Half of the road plus its sidewalk: how far the property line is from the

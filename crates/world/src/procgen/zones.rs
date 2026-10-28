@@ -2,7 +2,7 @@
 //!
 //! Each land cell gets every scored zone's [`Score`](crate::template::Score) from four
 //! inputs (distance inland from the shore, slope, distance from the downtown seed, distance
-//! from the highway) plus that zone's own noise; the highest total wins, ties to the lower
+//! from the highway; in a basin also the hills, the rail line and the arterials) plus that zone's own noise; the highest total wins, ties to the lower
 //! `ZoneId`. A majority filter removes speckle. Structural zones (beach, strip, highway,
 //! parks, canals) are painted on top by [`super::macro_map`].
 
@@ -47,6 +47,10 @@ pub struct ZoneInputs {
     pub highway: Vec<f32>,
     /// Cells under water; they stay `Water`.
     pub water: Vec<bool>,
+    /// An inland basin's inputs per cell, empty elsewhere: distance out from the foot of
+    /// the hills, from the rail line, from the nearest arterial and from the nearest
+    /// boulevard, meters (the scores' `hills`, `rail`, `arterial` and `boulevard`).
+    pub basin: Vec<[f32; 4]>,
 }
 
 /// Scores every land cell and returns the winning zone per cell (`Water` for water).
@@ -69,12 +73,18 @@ pub fn score(seed: Seed, t: &RegionTemplate, inputs: &ZoneInputs) -> Vec<ZoneId>
             let (x, z) = cell_center(cx, cz);
             let mut best = (f32::NEG_INFINITY, ZoneId::Residential);
             for (zone, s, noise) in &scored {
-                let total = s.base
+                let mut total = s.base
                     + curve_at(&s.coast, inputs.coast[i])
                     + curve_at(&s.slope, inputs.slope[i])
                     + curve_at(&s.downtown, inputs.downtown[i])
                     + curve_at(&s.highway, inputs.highway[i])
                     + s.noise * noise.at(x, z);
+                if let Some(b) = inputs.basin.get(i) {
+                    total += curve_at(&s.hills, b[0])
+                        + curve_at(&s.rail, b[1])
+                        + curve_at(&s.arterial, b[2])
+                        + curve_at(&s.boulevard, b[3]);
+                }
                 if total > best.0 {
                     best = (total, *zone);
                 }

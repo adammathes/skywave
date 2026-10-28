@@ -309,6 +309,16 @@ pub struct Score {
     pub downtown: Curve,
     /// By distance from the highway centerline, meters.
     pub highway: Curve,
+    /// Inland basins only (empty elsewhere): by distance out from the foot of the hills,
+    /// from the rail line, from the nearest arterial and from the nearest boulevard.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub hills: Curve,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rail: Curve,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub arterial: Curve,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub boulevard: Curve,
     /// Amplitude of the zone's own noise term, in `[-noise, noise]`.
     pub noise: f32,
     /// Feature size of that noise.
@@ -447,7 +457,141 @@ impl Zones {
     }
 }
 
-/// A kind of place: everything world generation needs besides the seed and the era.
+/// The hills an inland basin rises into along one side: the overlook roads climb them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct BasinHills {
+    /// The side they rise toward; its edge must be `Hills`.
+    pub side: CoastSide,
+    /// From that side in to the foot of the hills.
+    pub depth_m: Range,
+    /// Height of the hills at the edge band above the floor at their foot.
+    pub height_m: Range,
+    /// Amplitude of the ridges and gullies on their face.
+    pub relief_m: f32,
+}
+
+/// The desert fringe along one side of a basin: open dirt and section roads, where the
+/// freeway leaves town as the desert highway and turns back along the edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct DesertRule {
+    /// The side it lies along; its edge must be `Desert`, beside the hills' side.
+    pub side: CoastSide,
+    /// From the inside of that side's band in to the last grid street.
+    pub depth_m: Range,
+}
+
+/// The flat grid of a basin's arterials (`docs/WORLD_GENERATION.md`, "Inland basins").
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct GridRule {
+    /// Distance between arterials, both ways.
+    pub spacing_m: f32,
+    /// Lanes each way of a boulevard: two one-way carriageways either side of a raised,
+    /// planted median, one boulevard each way across the grid.
+    pub boulevard_lanes: u8,
+    /// Width of a boulevard's median between the carriageways' curbs.
+    pub median_m: f32,
+}
+
+/// The freeway across a basin: overpasses at every arterial, a few interchanges (one of
+/// them with a loop on-ramp), and out past the desert edge it turns back along it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct FreewayRule {
+    /// Right-of-way width painted as `Highway`.
+    pub corridor_m: f32,
+    /// Diamond interchanges, the loop interchange among them.
+    pub interchanges: CountRange,
+    /// Interchanges whose on-ramp in one quadrant is a loop.
+    pub loops: u8,
+}
+
+/// The concrete flood channel: a trapezoid cut from the foot of the hills to the far edge,
+/// bridged by every road over it, with ramps down its walls.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct ChannelRule {
+    /// Depth of the bed below the ground (under the 8 m a road profile may stand off the
+    /// terrain, `place::validate`, so a bridge over it stays valid).
+    pub depth_m: f32,
+    /// Width of the flat bed.
+    pub bed_m: f32,
+    /// Horizontal run of each wall from the lip to the bed.
+    pub wall_m: f32,
+    /// Right-of-way painted as `Highway`: the channel and its fenced banks.
+    pub row_m: f32,
+    /// A ramp down into the bed at the first bridge past every this many meters along it.
+    pub ramp_every_m: f32,
+    /// Grade of a ramp.
+    pub ramp_grade: f32,
+}
+
+/// The rail line across a basin, at grade with every road it crosses, with spurs off it in
+/// the industrial land.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct RailRule {
+    /// Right-of-way width painted as `Highway`.
+    pub row_m: f32,
+    /// Spurs: sidings off the main line, beside it, each ending at a bumper.
+    pub spurs: CountRange,
+    pub spur_m: Range,
+}
+
+/// The airfield on the basin's far edge: a runway (the future drag strip) on open ground.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct AirfieldRule {
+    pub length_m: Range,
+    /// The open field across the runway.
+    pub width_m: f32,
+    /// Runway pavement width.
+    pub runway_m: f32,
+}
+
+/// An inland basin (`socal_basin`): no coast; a flat floor tilting up to hills on one side,
+/// a desert on another, laid out as a grid with a freeway, a flood channel, a rail line and
+/// an airfield (`docs/WORLD_GENERATION.md`, "Inland basins").
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Basin {
+    /// Below all ground: there is no water.
+    pub water_level_m: f32,
+    /// Absolute height of the floor at the side opposite the hills.
+    pub floor_m: Range,
+    /// How fast the floor rises toward the hills (rise over run).
+    pub tilt: f32,
+    /// Amplitude of the floor's rolling relief.
+    pub relief_m: f32,
+    pub hills: BasinHills,
+    pub desert: DesertRule,
+    pub grid: GridRule,
+    /// The downtown seed: how far out from the foot of the hills, and where along them as
+    /// a fraction of the way from the side opposite the desert.
+    pub downtown_m: Range,
+    pub downtown_along: Range,
+    pub freeway: FreewayRule,
+    pub channel: ChannelRule,
+    pub rail: RailRule,
+    pub airfield: AirfieldRule,
+    pub parks: ParkRule,
+    /// Scenic overlooks on the hills.
+    pub overlooks: CountRange,
+}
+
+/// A kind of place: everything world generation needs besides the seed and the era. A
+/// coastal place has `coast`, `elevation` and `layout`; an inland basin has `basin` and
+/// none of them.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -457,11 +601,34 @@ pub struct RegionTemplate {
     pub driving_side: DrivingSide,
     pub sign_language: SignLanguage,
     pub era: EraDefaults,
-    pub coast: Coast,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub coast: Option<Coast>,
     pub edges: Edges,
-    pub elevation: Elevation,
-    pub layout: Layout,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub elevation: Option<Elevation>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub layout: Option<Layout>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub basin: Option<Basin>,
     pub zones: Zones,
+}
+
+impl RegionTemplate {
+    /// The coast of a coastal template (one that passed [`RegionTemplate::validate`]
+    /// without a `basin`).
+    pub fn coast(&self) -> &Coast {
+        self.coast.as_ref().expect("a coastal template")
+    }
+
+    /// The elevation profile of a coastal template.
+    pub fn elevation(&self) -> &Elevation {
+        self.elevation.as_ref().expect("a coastal template")
+    }
+
+    /// The layout of a coastal template.
+    pub fn layout(&self) -> &Layout {
+        self.layout.as_ref().expect("a coastal template")
+    }
 }
 
 /// Why [`RegionTemplate::validate`] rejected a template. Checks run in field order and the
@@ -523,6 +690,8 @@ pub enum TemplateError {
     BadEdge {
         field: &'static str,
     },
+    /// Neither a coast (`coast`, `elevation` and `layout`) nor a `basin`, or parts of both.
+    BadShape,
 }
 
 impl fmt::Display for TemplateError {
@@ -565,6 +734,10 @@ impl fmt::Display for TemplateError {
             TemplateError::BadEdge { field } => write!(
                 f,
                 "{field}: the coast side must be water like coast.water, the others land"
+            ),
+            TemplateError::BadShape => write!(
+                f,
+                "a template has coast, elevation and layout, or a basin and none of them"
             ),
         }
     }
@@ -661,7 +834,35 @@ impl RegionTemplate {
             return Err(TemplateError::EraYear);
         }
 
-        let c = &self.coast;
+        match (&self.coast, &self.elevation, &self.layout, &self.basin) {
+            (Some(c), Some(e), Some(l), None) => self.validate_coast(c, e, l)?,
+            (None, None, None, Some(b)) => self.validate_basin(b)?,
+            _ => return Err(TemplateError::BadShape),
+        }
+
+        let mut scored = 0;
+        for zone in LAND_ZONES {
+            let Some(rule) = self.zones.get(zone) else {
+                continue;
+            };
+            validate_zone(zone, rule)?;
+            if rule.score.is_some() {
+                scored += 1;
+            }
+        }
+        if scored == 0 {
+            return Err(TemplateError::NoScoredZones);
+        }
+        Ok(())
+    }
+
+    fn validate_coast(
+        &self,
+        coast: &Coast,
+        elevation: &Elevation,
+        layout: &Layout,
+    ) -> Result<(), TemplateError> {
+        let c = coast;
         positive("coast.offset_m", c.offset_m)?;
         within("coast.wiggle_m", c.wiggle_m, 0.0, 500.0)?;
         count("coast.bays", c.bays)?;
@@ -702,7 +903,7 @@ impl RegionTemplate {
             }
         }
 
-        let e = &self.elevation;
+        let e = elevation;
         within("elevation.water_level_m", e.water_level_m, -100.0, 1000.0)?;
         within("elevation.shelf_depth_m", e.shelf_depth_m, 0.5, 200.0)?;
         positive("elevation.beach_width_m", e.beach_width_m)?;
@@ -729,7 +930,7 @@ impl RegionTemplate {
         positive("elevation.valley_width_m", e.valley_width_m)?;
         range("elevation.valley_floor_m", e.valley_floor_m, 0.0)?;
 
-        let l = &self.layout;
+        let l = layout;
         positive("layout.strip.length_m", l.strip.length_m)?;
         range("layout.strip.inland_m", l.strip.inland_m, 0.0)?;
         positive("layout.strip.width_m", l.strip.width_m)?;
@@ -744,18 +945,91 @@ impl RegionTemplate {
         positive("layout.parks.radius_m", l.parks.radius_m)?;
         count("layout.overlooks", l.overlooks)?;
 
-        let mut scored = 0;
-        for zone in LAND_ZONES {
-            let Some(rule) = self.zones.get(zone) else {
-                continue;
-            };
-            validate_zone(zone, rule)?;
-            if rule.score.is_some() {
-                scored += 1;
+        Ok(())
+    }
+
+    fn validate_basin(&self, b: &Basin) -> Result<(), TemplateError> {
+        within("basin.water_level_m", b.water_level_m, -1000.0, 1000.0)?;
+        range("basin.floor_m", b.floor_m, b.water_level_m + 2.0)?;
+        within("basin.tilt", b.tilt, 0.0, 0.03)?;
+        within("basin.relief_m", b.relief_m, 0.0, 10.0)?;
+        positive("basin.hills.depth_m", b.hills.depth_m)?;
+        range("basin.hills.height_m", b.hills.height_m, 0.0)?;
+        within("basin.hills.relief_m", b.hills.relief_m, 0.0, 60.0)?;
+        positive("basin.desert.depth_m", b.desert.depth_m)?;
+        let g = &b.grid;
+        within("basin.grid.spacing_m", g.spacing_m, 200.0, 800.0)?;
+        if !(1..=4).contains(&g.boulevard_lanes) {
+            return Err(TemplateError::OutOfRange {
+                field: "basin.grid.boulevard_lanes",
+            });
+        }
+        within("basin.grid.median_m", g.median_m, 2.0, 20.0)?;
+        positive("basin.downtown_m", b.downtown_m)?;
+        range("basin.downtown_along", b.downtown_along, 0.0)?;
+        within("basin.downtown_along", b.downtown_along.1, 0.0, 1.0)?;
+        let f = &b.freeway;
+        within("basin.freeway.corridor_m", f.corridor_m, 24.0, 200.0)?;
+        count("basin.freeway.interchanges", f.interchanges)?;
+        if f.loops > f.interchanges.0 {
+            return Err(TemplateError::OutOfRange {
+                field: "basin.freeway.loops",
+            });
+        }
+        let c = &b.channel;
+        // A bridge's profile may stand at most 8 m over the terrain.
+        within("basin.channel.depth_m", c.depth_m, 1.0, 7.8)?;
+        within("basin.channel.bed_m", c.bed_m, 4.0, 60.0)?;
+        within(
+            "basin.channel.wall_m",
+            c.wall_m,
+            0.5 * c.depth_m,
+            4.0 * c.depth_m,
+        )?;
+        within(
+            "basin.channel.row_m",
+            c.row_m,
+            c.bed_m + 2.0 * c.wall_m + 4.0,
+            200.0,
+        )?;
+        within("basin.channel.ramp_every_m", c.ramp_every_m, 200.0, 5000.0)?;
+        within("basin.channel.ramp_grade", c.ramp_grade, 0.04, 0.15)?;
+        let r = &b.rail;
+        within("basin.rail.row_m", r.row_m, 12.0, 100.0)?;
+        count("basin.rail.spurs", r.spurs)?;
+        positive("basin.rail.spur_m", r.spur_m)?;
+        let a = &b.airfield;
+        positive("basin.airfield.length_m", a.length_m)?;
+        within("basin.airfield.runway_m", a.runway_m, 10.0, 60.0)?;
+        within(
+            "basin.airfield.width_m",
+            a.width_m,
+            a.runway_m + 20.0,
+            400.0,
+        )?;
+        count("basin.parks.count", b.parks.count)?;
+        positive("basin.parks.radius_m", b.parks.radius_m)?;
+        count("basin.overlooks", b.overlooks)?;
+        // Every side land; the hills' side `Hills` and the desert's `Desert`, beside it.
+        let index = |s: CoastSide| match s {
+            CoastSide::North => 0,
+            CoastSide::East => 1,
+            CoastSide::South => 2,
+            CoastSide::West => 3,
+        };
+        let names = ["edges.north", "edges.east", "edges.south", "edges.west"];
+        let sides = self.edges.sides();
+        for (kind, field) in sides.into_iter().zip(names) {
+            if kind == EdgeKind::Open || kind.is_water() {
+                return Err(TemplateError::BadEdge { field });
             }
         }
-        if scored == 0 {
-            return Err(TemplateError::NoScoredZones);
+        let (h, d) = (index(b.hills.side), index(b.desert.side));
+        if sides[h] != EdgeKind::Hills {
+            return Err(TemplateError::BadEdge { field: names[h] });
+        }
+        if sides[d] != EdgeKind::Desert || (h + d) % 2 == 0 {
+            return Err(TemplateError::BadEdge { field: names[d] });
         }
         Ok(())
     }
@@ -763,14 +1037,25 @@ impl RegionTemplate {
     /// The lowest and highest terrain heights this template can produce, the edge walls
     /// on top of everything else; generation clamps to them.
     pub fn height_bounds(&self) -> (f32, f32) {
-        let e = &self.elevation;
-        let lo = e.water_level_m - e.shelf_depth_m;
         let wall = self
             .edges
             .sides()
             .iter()
             .filter_map(|&k| crate::edges::wall(k))
             .fold(0.0f32, |a, w| a.max(w.height_m.1));
+        let Some(e) = &self.elevation else {
+            let b = self.basin.as_ref().expect("a coast or a basin");
+            // The floor tilts up across the whole place toward the hills.
+            let hi = b.floor_m.1
+                + b.tilt * 4096.0
+                + 2.0 * b.relief_m
+                + b.hills.height_m.1
+                + 2.0 * b.hills.relief_m
+                + wall
+                + 4.0;
+            return (b.water_level_m, hi);
+        };
+        let lo = e.water_level_m - e.shelf_depth_m;
         let hi = e.water_level_m
             + e.beach_height_m
             + e.plain_rise_m.1
@@ -797,6 +1082,10 @@ fn validate_zone(zone: ZoneId, rule: &ZoneRule) -> Result<(), TemplateError> {
         curve(zone, "slope", &s.slope)?;
         curve(zone, "downtown", &s.downtown)?;
         curve(zone, "highway", &s.highway)?;
+        curve(zone, "hills", &s.hills)?;
+        curve(zone, "rail", &s.rail)?;
+        curve(zone, "arterial", &s.arterial)?;
+        curve(zone, "boulevard", &s.boulevard)?;
         if !(s.noise.is_finite() && s.noise >= 0.0) {
             return Err(TemplateError::BadScore {
                 zone,

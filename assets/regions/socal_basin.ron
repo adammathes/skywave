@@ -1,0 +1,255 @@
+// Southern California basin: the flat inland grid of a big city at the turn of the century
+// (docs/SCENARIOS.md, Mirage Valley 2001). No coast. A floor tilting up to hills on the north
+// (the overlook roads climb them), a desert fringe on the east where the freeway leaves town
+// as the desert highway and turns back along the mesas, rail yards on the south, mountains
+// on the west. Arterials every 400 m, one six-lane boulevard each way with a planted median,
+// an industrial belt along the rail line with 100 m blocks and spurs, a freeway across the
+// middle with overpasses at every arterial and interchanges (one with a loop on-ramp), a
+// concrete flood channel from the hills to the yards with ramps into it, an airfield on the
+// far edge (the future drag strip).
+//
+// Layout and units: crates/world/src/template.rs (`Basin`) and docs/WORLD_GENERATION.md
+// ("Inland basins"). Scored zones sum base + slope(s) + downtown(d) + highway(d) + hills(d)
+// + rail(d) + arterial(d) + boulevard(d) + noise per 16 m cell, the highest total winning;
+// the hills, the desert fringe (`Farmland` here: open dirt and section roads), the rights of
+// way (`Highway`: freeway, rail, channel), the airfield and parks are placed by structure.
+// Set pieces (docs/backlog/MIRAGE2001.md item 7) will be `Landmark` kinds placed on this
+// layout: the race start on the boulevard, the drag strip on the runway, the channel ramps,
+// the grade crossings, the overlooks, the desert leg.
+RegionTemplate(
+    name: "socal_basin",
+    driving_side: Right,
+    sign_language: EnUs,
+    era: EraDefaults(year: 2001, street_lights: Sodium, palette: "sodium_night"),
+
+    edges: Edges(north: Hills, east: Desert, south: RailYards, west: Mountains),
+
+    basin: Some(Basin(
+        water_level_m: -40,
+        floor_m: (20, 30),
+        tilt: 0.006,
+        relief_m: 0.6,
+        hills: BasinHills(side: North, depth_m: (250, 320), height_m: (80, 115), relief_m: 6),
+        desert: DesertRule(side: East, depth_m: (240, 300)),
+        grid: GridRule(spacing_m: 400, boulevard_lanes: 3, median_m: 6),
+        downtown_m: (160, 260),
+        downtown_along: (0.12, 0.3),
+        freeway: FreewayRule(corridor_m: 48, interchanges: (2, 3), loops: 1),
+        channel: ChannelRule(
+            depth_m: 7.5, bed_m: 14, wall_m: 8, row_m: 48, ramp_every_m: 1000, ramp_grade: 0.12,
+        ),
+        rail: RailRule(row_m: 32, spurs: (2, 3), spur_m: (160, 280)),
+        airfield: AirfieldRule(length_m: (760, 900), width_m: 140, runway_m: 30),
+        parks: ParkRule(count: (1, 2), radius_m: (50, 80)),
+        overlooks: (1, 2),
+    )),
+
+    zones: Zones(
+        downtown: ZoneRule(
+            score: Some(Score(
+                base: 0,
+                coast: [],
+                slope: [(0.06, 0), (0.14, -3)],
+                downtown: [(0, 3.6), (130, 3.0), (210, -1), (360, -5)],
+                highway: [],
+                noise: 0.5,
+                noise_scale_m: 140,
+            )),
+            block_m: ((90, 110), (60, 80)),
+            streets: Grid,
+            alleys: true,
+            styles: [Glass, StuccoBox, Deco, Brick],
+            trees: [(Palm, 0.7), (FanPalm, 0.3)],
+            props: Props(
+                street_light_m: 30, street_tree_m: 16, hydrant_m: 80, power_pole_m: 0,
+                bench_per_km: 8, billboard_per_km: 0, neon: 0.15, parked_cars: (0.4, 0.7),
+            ),
+            lots: Lots(width_m: (14, 28), depth_m: 40, setback_m: (0, 0, 3)),
+            massing: Some(Massing(coverage: 0.85, floors: (2, 30), floors_mean: 9, floors_spread: 0.6, style_weights: [4, 2, 1, 2])),
+        ),
+        strip: ZoneRule(
+            // Unused: the basin's main drags are its boulevards' commercial frontage.
+            score: None,
+            block_m: ((90, 140), (50, 80)),
+            streets: Grid,
+            alleys: true,
+            styles: [StuccoBox, StripMall],
+            trees: [(Palm, 1.0)],
+            props: Props(
+                street_light_m: 30, street_tree_m: 18, hydrant_m: 90, power_pole_m: 0,
+                bench_per_km: 6, billboard_per_km: 2, neon: 0.3, parked_cars: (0.3, 0.6),
+            ),
+            lots: Lots(width_m: (15, 40), depth_m: 40, setback_m: (0, 0, 4)),
+            massing: Some(Massing(coverage: 0.7, floors: (1, 2), floors_mean: 1.3, floors_spread: 0.3, style_weights: [1, 1])),
+        ),
+        residential: ZoneRule(
+            score: Some(Score(
+                base: 1.0,
+                coast: [],
+                slope: [(0.06, 0), (0.12, -1)],
+                downtown: [(0, -1.5), (220, 0)],
+                highway: [(0, -1.2), (140, -0.6), (240, 0)],
+                rail: [(0, -1.4), (200, -0.8), (300, 0)],
+                noise: 0.35,
+                noise_scale_m: 220,
+            )),
+            block_m: ((100, 130), (60, 80)),
+            streets: Grid,
+            alleys: true,
+            styles: [Dingbat, StuccoBox, Bungalow, Ranch],
+            trees: [(Palm, 0.45), (FanPalm, 0.2), (Jacaranda, 0.2), (Sycamore, 0.15)],
+            props: Props(
+                street_light_m: 50, street_tree_m: 18, hydrant_m: 110, power_pole_m: 40,
+                bench_per_km: 0.5, billboard_per_km: 0, neon: 0, parked_cars: (0.3, 0.6),
+            ),
+            lots: Lots(width_m: (14, 20), depth_m: 38, setback_m: (5, 1.5, 5)),
+            massing: Some(Massing(coverage: 0.4, floors: (1, 3), floors_mean: 1.6, floors_spread: 0.4, style_weights: [3, 2, 1, 2])),
+        ),
+        suburb: ZoneRule(
+            // Tract houses of the 1990s up against the foothills.
+            score: Some(Score(
+                base: 0.4,
+                coast: [],
+                slope: [(0, 0), (0.08, 0.4), (0.16, -2)],
+                downtown: [(0, -3), (300, 0)],
+                highway: [],
+                hills: [(0, 1.6), (200, 1.2), (320, -1.5)],
+                rail: [(0, -2), (150, -1), (220, 0)],
+                noise: 0.35,
+                noise_scale_m: 200,
+            )),
+            block_m: ((110, 170), (70, 110)),
+            streets: Curvy,
+            alleys: false,
+            styles: [Tract70s, Ranch, StuccoBox],
+            trees: [(Palm, 0.3), (Jacaranda, 0.3), (Pine, 0.2), (Eucalyptus, 0.2)],
+            props: Props(
+                street_light_m: 60, street_tree_m: 22, hydrant_m: 130, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.15, 0.35),
+            ),
+            lots: Lots(width_m: (18, 26), depth_m: 36, setback_m: (7, 2, 7)),
+            massing: Some(Massing(coverage: 0.35, floors: (1, 2), floors_mean: 1.5, floors_spread: 0.4, style_weights: [4, 2, 1])),
+        ),
+        industrial: ZoneRule(
+            // Tilt-up warehouses, auto shops and yards along the rail line and the freeway.
+            score: Some(Score(
+                base: -0.2,
+                coast: [],
+                slope: [(0, 0.3), (0.06, 0), (0.1, -3)],
+                downtown: [(0, -4), (260, -1), (400, 0)],
+                highway: [(0, 1.5), (90, 1.2), (160, -0.5)],
+                rail: [(0, 2.6), (130, 2.0), (200, -0.6)],
+                noise: 0.6,
+                noise_scale_m: 240,
+            )),
+            // The grid's pattern (so the blocks run on from the frontage), truck-width.
+            block_m: ((100, 100), (100, 100)),
+            streets: Grid,
+            alleys: false,
+            styles: [Warehouse, StuccoBox, Brick],
+            trees: [(Eucalyptus, 0.6), (FanPalm, 0.4)],
+            props: Props(
+                street_light_m: 40, street_tree_m: 0, hydrant_m: 110, power_pole_m: 38,
+                bench_per_km: 0, billboard_per_km: 3, neon: 0, parked_cars: (0.15, 0.4),
+            ),
+            lots: Lots(width_m: (36, 70), depth_m: 44, setback_m: (6, 3, 4)),
+            massing: Some(Massing(coverage: 0.55, floors: (1, 2), floors_mean: 1.1, floors_spread: 0.3, style_weights: [5, 2, 1])),
+        ),
+        commercial: ZoneRule(
+            // Mini-malls, stucco boxes and motels along the boulevards and the arterials.
+            score: Some(Score(
+                base: -0.3,
+                coast: [],
+                slope: [(0.06, 0), (0.14, -3)],
+                downtown: [(0, 1.2), (360, 0.8), (520, 0)],
+                highway: [],
+                arterial: [(0, 1.45), (30, 1.25), (46, -0.6)],
+                boulevard: [(0, 1.4), (50, 1.2), (72, -0.4)],
+                noise: 0.5,
+                noise_scale_m: 120,
+            )),
+            block_m: ((90, 130), (60, 90)),
+            streets: Grid,
+            alleys: true,
+            styles: [StripMall, StuccoBox, Motel, Deco],
+            trees: [(Palm, 0.7), (FanPalm, 0.3)],
+            props: Props(
+                street_light_m: 32, street_tree_m: 16, hydrant_m: 90, power_pole_m: 0,
+                bench_per_km: 5, billboard_per_km: 2, neon: 0.35, parked_cars: (0.3, 0.6),
+            ),
+            lots: Lots(width_m: (18, 40), depth_m: 40, setback_m: (2, 0, 4)),
+            massing: Some(Massing(coverage: 0.6, floors: (1, 3), floors_mean: 1.5, floors_spread: 0.4, style_weights: [4, 3, 1, 1])),
+        ),
+        park: ZoneRule(
+            // The parks, and the airfield's open ground.
+            score: None,
+            block_m: ((120, 240), (100, 200)),
+            streets: Curvy,
+            alleys: false,
+            styles: [],
+            trees: [(Palm, 0.5), (Sycamore, 0.3), (Jacaranda, 0.2)],
+            props: Props(
+                street_light_m: 40, street_tree_m: 14, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 10, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.2),
+            ),
+            lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
+        ),
+        beach: ZoneRule(
+            // Unused: there is no coast.
+            score: None,
+            block_m: ((150, 300), (60, 120)),
+            streets: Beachfront,
+            alleys: false,
+            styles: [StuccoBox],
+            trees: [(Palm, 1.0)],
+            props: Props(
+                street_light_m: 35, street_tree_m: 25, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.2),
+            ),
+            lots: Lots(width_m: (30, 60), depth_m: 40, setback_m: (2, 2, 2)),
+        ),
+        farmland: ZoneRule(
+            // The desert fringe: open dirt, section roads, a few yards and sheds.
+            score: None,
+            block_m: ((400, 400), (400, 400)),
+            streets: Sections,
+            alleys: false,
+            styles: [Warehouse, Ranch],
+            trees: [(Palm, 0.5), (Eucalyptus, 0.5)],
+            props: Props(
+                street_light_m: 0, street_tree_m: 0, hydrant_m: 0, power_pole_m: 55,
+                bench_per_km: 0, billboard_per_km: 2, neon: 0, parked_cars: (0.0, 0.05),
+            ),
+            lots: Lots(width_m: (100, 200), depth_m: 160, setback_m: (15, 10, 10)),
+            massing: Some(Massing(coverage: 0.04, floors: (1, 1), floors_mean: 1, floors_spread: 0, style_weights: [2, 1])),
+        ),
+        hills: ZoneRule(
+            score: None,
+            block_m: ((200, 400), (150, 300)),
+            streets: Switchback,
+            alleys: false,
+            styles: [Ranch, Glass],
+            trees: [(Eucalyptus, 0.4), (Oak, 0.4), (Pine, 0.2)],
+            props: Props(
+                street_light_m: 0, street_tree_m: 0, hydrant_m: 250, power_pole_m: 60,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.1),
+            ),
+            lots: Lots(width_m: (25, 45), depth_m: 40, setback_m: (8, 4, 8)),
+            massing: Some(Massing(coverage: 0.18, floors: (1, 2), floors_mean: 1.4, floors_spread: 0.4, style_weights: [3, 1])),
+        ),
+        highway: ZoneRule(
+            // The rights of way: the freeway corridor, the rail line and the channel.
+            score: None,
+            block_m: ((400, 800), (48, 48)),
+            streets: Grid,
+            alleys: false,
+            styles: [],
+            trees: [(Eucalyptus, 0.5), (Palm, 0.5)],
+            props: Props(
+                street_light_m: 50, street_tree_m: 0, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 4, neon: 0, parked_cars: (0.0, 0.0),
+            ),
+            lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
+        ),
+    ),
+)
