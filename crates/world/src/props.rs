@@ -117,6 +117,16 @@ pub enum PropKind {
     CrossingGate {
         arm_dm: u8,
     },
+    /// A landmark from the grammar's kits, as `place::PropKind`'s (built by
+    /// [`crate::landmarks`]).
+    Landmark {
+        kit: u8,
+        variant: u8,
+    },
+    /// The landmark gallery's lettered lot label.
+    LotLabel {
+        letter: u8,
+    },
 }
 
 /// One placed prop.
@@ -469,6 +479,11 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         | PropKind::TacoStand { .. }
         | PropKind::PicnicTable
         | PropKind::CrossingGate { .. } => crate::setpieces::build(m, p, pal, &Lexicon::default()),
+        // A landmark needs its kit, which only the chunk plan has.
+        PropKind::Landmark { .. } => {}
+        PropKind::LotLabel { letter } => {
+            crate::landmarks::lot_label(m, base, p.dir, letter, pal)
+        }
     }
 }
 
@@ -1495,6 +1510,8 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::HeroCar { slot } => PropKind::ParkedCar { color: slot },
         P::PicnicTable => PropKind::PicnicTable,
         P::CrossingGate { arm_dm } => PropKind::CrossingGate { arm_dm },
+        P::Landmark { kit, variant } => PropKind::Landmark { kit, variant },
+        P::LotLabel { letter } => PropKind::LotLabel { letter },
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

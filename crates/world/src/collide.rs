@@ -434,9 +434,10 @@ impl WorldCollider {
             walls.extend(edge_walls(place));
         }
         let (posts, mut boxes, lot_cars) = if terrain_place {
-            place_prop_solids(place)
+            place_prop_solids(place, &grammar.landmarks)
         } else {
-            let (posts, boxes) = prop_solids(&props_of(place, grammar, &net, &blocks));
+            let props = props_of(place, grammar, &net, &blocks);
+            let (posts, boxes) = prop_solids(&props, &grammar.landmarks);
             (posts, boxes, Vec::new())
         };
         boxes.extend(lot_walls);
@@ -1275,7 +1276,8 @@ fn props_of(
 }
 
 /// Collision shapes of props: radius and height of each post, half extents of each box.
-fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
+/// `kits`: the landmark kits a [`PropKind::Landmark`] indexes.
+fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Vec<BoxSolid>) {
     let mut posts = Vec::new();
     let mut boxes = Vec::new();
     for p in props {
@@ -1398,6 +1400,23 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
             }
             PropKind::StripLine { .. } => {}
             PropKind::CrossingGate { .. } => posts.push(post(0.15, 4.2)),
+            PropKind::LotLabel { .. } => posts.push(post(0.12, 2.8)),
+            PropKind::Landmark { kit, variant } => {
+                let Some(k) = kits.get(usize::from(kit)) else {
+                    continue;
+                };
+                let mut slabs = Vec::new();
+                crate::landmarks::slabs(k, usize::from(variant), p.pos, p.y, p.dir, &mut slabs);
+                boxes.extend(slabs.iter().map(|s| BoxSolid {
+                    c: arr(s.c),
+                    u: arr(s.u),
+                    half: s.half,
+                    y0: s.y0,
+                    y1: s.y1,
+                    kind: p.kind,
+                    lot: NO_LOT,
+                }));
+            }
             PropKind::TunnelPiece { .. }
             | PropKind::GuardRail { .. }
             | PropKind::ChainLink { .. }
@@ -1424,7 +1443,10 @@ fn prop_solids(props: &[Prop]) -> (Vec<Post>, Vec<BoxSolid>) {
 /// Collision shapes of a terrain place's props, from its `Props` table: [`prop_solids`]
 /// for all but the parked cars, which take their shape's size.
 /// The lots' cars ([`LotCar`]) come with their boxes, none there yet.
-fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>, Vec<LotCar>) {
+fn place_prop_solids(
+    place: &Place,
+    kits: &[crate::landmarks::Kit],
+) -> (Vec<Post>, Vec<BoxSolid>, Vec<LotCar>) {
     let seed = place.header.seed;
     let items = &place.props.items;
     let props: Vec<Prop> = items
@@ -1432,7 +1454,7 @@ fn place_prop_solids(place: &Place) -> (Vec<Post>, Vec<BoxSolid>, Vec<LotCar>) {
         .filter(|p| !matches!(p.kind, place::PropKind::ParkedCar { .. }))
         .map(|p| props::from_place(p, seed))
         .collect();
-    let (posts, mut boxes) = prop_solids(&props);
+    let (posts, mut boxes) = prop_solids(&props, kits);
     let mut lots = Vec::new();
     for p in items {
         if let place::PropKind::ParkedCar {

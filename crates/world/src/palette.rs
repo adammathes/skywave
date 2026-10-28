@@ -220,7 +220,7 @@ impl Palette {
 }
 
 /// `0xRRGGBB` in sRGB to linear unorm8.
-const fn srgb(hex: u32) -> Rgb {
+pub const fn srgb(hex: u32) -> Rgb {
     [
         SRGB_TO_LINEAR[((hex >> 16) & 0xFF) as usize],
         SRGB_TO_LINEAR[((hex >> 8) & 0xFF) as usize],

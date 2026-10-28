@@ -331,6 +331,11 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                 }
                 PropKind::HeroCar { slot } => w.push(slot),
                 PropKind::CrossingGate { arm_dm } => w.push(arm_dm),
+                PropKind::Landmark { kit, variant } => {
+                    w.push(kit);
+                    w.push(variant);
+                }
+                PropKind::LotLabel { letter } => w.push(letter),
                 _ => {}
             }
         }
@@ -379,6 +384,8 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::HeroCar { .. } => 30,
         PropKind::PicnicTable => 31,
         PropKind::CrossingGate { .. } => 32,
+        PropKind::Landmark { .. } => 33,
+        PropKind::LotLabel { .. } => 34,
     }
 }
 
@@ -1075,6 +1082,11 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                 30 => PropKind::HeroCar { slot: r.u8()? },
                 31 => PropKind::PicnicTable,
                 32 => PropKind::CrossingGate { arm_dm: r.u8()? },
+                33 => PropKind::Landmark {
+                    kit: r.u8()?,
+                    variant: r.u8()?,
+                },
+                34 => PropKind::LotLabel { letter: r.u8()? },
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1582,6 +1594,8 @@ mod tests {
             PropKind::HeroCar { slot: 3 },
             PropKind::PicnicTable,
             PropKind::CrossingGate { arm_dm: 74 },
+            PropKind::Landmark { kit: 2, variant: 1 },
+            PropKind::LotLabel { letter: b'C' },
         ];
         let props = kinds
             .iter()
