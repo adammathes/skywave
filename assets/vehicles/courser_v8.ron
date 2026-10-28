@@ -1,0 +1,47 @@
+// Courser V8: a mid-90s American front-engined V8 sports car with a T-top.
+//
+// Intent: long, low and loud. A big pushrod V8 with torque everywhere, a short-geared
+// five-speed that runs out at 140 mph and a live rear axle that lights its tires on the
+// floor whatever the assists think of it. Fast off the line, heavy in the nose, it leans
+// and wants a slow hand in a corner.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "courser_v8",
+    name: "Courser V8",
+    era: Nineties,
+    year: 1996,
+    class: Muscle,
+
+    mass_kg: 1560,
+    dims_m: (4.92, 1.89, 1.32),    // length, width, height
+    wheelbase_m: 2.57,
+    track_m: 1.54,
+    cg_height_m: 0.49,
+    cg_fore_aft: 0.45,             // 55% front
+
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 6000,
+        torque_nm: [(1000, 341), (2000, 413), (3000, 459), (4400, 454), (5200, 413), (6000, 341)],
+    ),
+    gears: [2.66, 1.78, 1.30, 1.0, 0.80],
+    final_drive: 3.96,
+    reverse: 2.9,
+    shift_ms: 230,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.933, grip_long: 0.95, load_sens: 0.09, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 30000, damper: 2900, travel_m: 0.15, antiroll: 0.36),
+    steering: Steer(max_deg: 32, speed_sens: 0.6, return_rate: 9.5),
+    brakes: Brakes(max_nm: 3700, bias_front: 0.62, abs: true, handbrake_nm: 3000),
+    aero: Aero(cd: 0.36, frontal_m2: 2.0, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: -0.15, body_roll: 0.45, engine_sound: "v8_lazy", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 7000)],
+        radio: "amber_seek",
+    ),
+    shape: "courser_v8.shape.ron",
+)
