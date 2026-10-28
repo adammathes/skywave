@@ -43,40 +43,37 @@ dispatching the next session, and updates statuses as PRs open and merge.
 
 ## Where things stand (keep current)
 
-### Resume here (2026-10-28 00:15 UTC, coordinator handed off to save quota)
-The previous coordinator stopped mid-wave. Five builder sessions are still finishing; each
+### Resume here (2026-10-28 12:47 UTC, coordinator handed off to save quota)
+The previous coordinator stopped mid-wave. Since then #42 (the Deck), #44 (handling), #37
+(parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars part 2), #47 (the #44
+revert), #48 and #49 (Mirage Valley) and #50 (set pieces part 1, 12:47,
+c15b314) merged; one builder session is running; each
 reports its state in its PR body and expects nothing but a merge. Keep at most two or three
 threads alive, no timed check-ins, probe reviewers only for sim or zero-violence code; small UI
 and docs PRs merge on the builder's verification plus green CI. Merge with a merge commit via
 the GitHub tool, `expectedHeadSha` set to the full head. After each merge tell the other open
 sessions main moved (`send_message`, Claude Code Remote), update this section and the board.
-- **#44 handling feel** (`vehicle/handling-feel`, session_0121vThANMtZPyLXazaRBJXm): review
-  done; last ask: tune the Destrier into the Arcade and Light bands instead of widening its band,
-  put the two Halberds in `LIVELY` for the no-assist launch, document the 2.9× Light band; merge
-  on green. The owner should drive this one first.
-- **#37 parking lots** (`bldg/parking-lots`, session_0121vThBfSpYpVxsB7L5B2nD): fixes pushed
-  (3fe9cf8, verifying); last asks: the hold covers cars beside a parked player within 60 m in any
-  direction and 150 m / 90° beyond; beach stalls off park and empty parcels; only the failing
-  stalls dropped at the golden's bend (look at the regenerated golden: both rows must be there);
-  merge on green. It re-pins place hashes and a golden, so #20 refreshes after it.
-- **#42 the Deck** (`m3/deck`, session_0121vThB5ZsVvpTV5D5q8345): fixes pushed (fe2b6aa,
-  verifying): partly tagged albums, one library rebuild per batch, album keys no longer silence
-  the radio, duplicate picks; merging #40/#41/#43 with controls-card rows for the Deck actions;
-  merge on green after a look at the diff.
-- **#20 map edges** (`m2/map-edges`, session_0121vThBxy2WQvcKQzuoJpnE, open since 04:38, $88):
-  goldens accepted; the native junction gate is being made to hold the world still while
-  streaming, gates re-measured in their own commit, junction goldens re-sited to 737.1,464.8
-  phase=1440 (fallback 945.7,375.6); merge on green after a look at the two junction goldens.
-  It unblocks the basin region template (board `m8-basin`).
-- **2001 traffic cars** (`m8/traffic-2001`, session_0121vThDbC8noH1ttGK4FL3c, M8 #6): seven
-  shapes built, tuning; opens a PR; a short review (names, era filter, budgets) then merge.
-- **Set pieces** (`m8/set-pieces`, M8 #7, three PRs one after another): part 1, the static places
-  (tunnel, crew garage, taco stand, drag strip with its timing, overlook turnouts, channel chain-link),
-  in review; part 2 the grade crossing and train (`m8/set-pieces-crossing`), part 3 the race start and
-  the convoy (`m8/set-pieces-race`) follow from main.
+- **Set pieces** (`m8/set-pieces`, session_0121vThAAG7g9BZqHcrxmCTx, M8 #7, dispatched 09:41 on
+  the owner's word): three PRs in turn: static places (channel ramps, tunnel, overlook, crew
+  garage, taco lot, drag strip); the grade crossing and train (`m8/set-pieces-crossing`); the
+  race line and truck convoy (`m8/set-pieces-race`). Zero violence: NPC cars do not see people in
+  general yet, so each moving piece guarantees it itself; probe-review each moving PR (a person-
+  steps-inside-bodies count at zero over a long seeded run) before merging. Messages the
+  coordinator when each PR is green. Part 1 merged as #50 (12:47, c15b314); part 2 building.
+- **Handling:** #44 reverted by #47 (05:02, edba67d) on the owner's word (the tail snapped); the
+  Falchion's `grip_lat` trimmed to 0.883 to keep its skidpad slot. The owner drives it next and
+  decides on feel pass 3 (board `feel-3`): fix causes, not a stronger yaw hand — keyboard
+  steering ramp and speed-sensitive lock, a more progressive tire tail in the assisted presets,
+  gentler stability that does not fight the counter-steer assist.
+- **Queued by the owner (board `mac-music`, order 35):** music folders in the Mac app. The web
+  build already takes folders in every Mac browser; the native app only scans `~/Music` or
+  `--music` at start, plays MP3 only (nanomp3), and has no picker. Wanted: a folder dialog from
+  Audio › Music library, drag-and-drop on the window (winit `DroppedFile`), picks remembered,
+  the Apple Music media layout; MP3 only, other files ignored (the owner: no AAC). Touches `platform-native` and `app/src/ui`.
 - **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
-  remain. Resume from the board when the owner says.
+  remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
+  17.5 m semi, a 7.4 m box truck), so seeing people must use each car's length, not 4.6 m.
 - Everything else is deferred on the board. Costs so far: coordinator $1,035 (the expensive
   part: a 400k-token context woken 100+ times a day), builders $10–90 each.
 
@@ -131,31 +128,35 @@ sessions main moved (`send_message`, Claude Code Remote), update this section an
   1.5 m back; head-on stops both; hits on grades stay level; probes at zero sidewalk reach and
   zero people inside); the 2001 hero cars part 1 (#43: Halberd Coupe and Targa, Tanager AWD,
   Destrier Coupe, Siskin Coupe; body kit, blower, targa, tall wing, twin rims; underglow on U;
-  `VehicleSpec::built`; the basin is years 1995–2001 with these as heroes); the Deck's "Skywave
+  `VehicleSpec::built`; the basin is years 1995–2001 with these as heroes); the Deck (#42: one
+  library from the folder layout and tags, TAPE / CD / MP3 by the world's year, Normal / Shuffle /
+  Continuous, readout top right, Back held + d-pad on the pad, resumes next session); handling feel (#44, NOTES 17: stronger yaw damping in Arcade and Light,
+  exotics' oversteer bias halved, no spins in Arcade or Light on any car, Off stays lively, the
+  Destrier tuned into the bands, the Halberds lively with no assists; reverted by #47); parking lots (#37, B10: front, alley and beach lots from the
+  grammar, parked cars by the hour and held near the player, golden `coast-beach-lot-noon`); natural map edges (#20: a sea horizon, walls of hills and
+  mountains, a highway that loops back; every coast fixture re-sited; the edge pass kept inside
+  the macro-map budget); the 2001 traffic cars (#45, M8 #6: Plover sedan, Sorrel utility,
+  Wren minivan, Percheron crew cab, Linnet hatch, Sledge box truck, Anvil semi; weights by zone
+  for traffic and parking; the box truck and semi never park, the semi keeps to freeways; per-car
+  length in following and junction room; none in 1984; fixed extra axles in the shape DSL); the 2001 hero cars part 2 (#46, M8 #5: Shrike Coupe,
+  Glaive Turbo, Falchion Sedan, Courser V8, the basin's heroes); Mirage Valley (#48 and
+  #49, M8 #2 and #3: the 2001 world renamed from Inland Basin, the `socal_basin` region template,
+  the 2001 grammar, lexicon and `sodium_night` palette; descriptor + trade pairs that name real
+  chains blocked by a hashed list; storefront fascia signs lettered from the grammar's lexicon);
+  the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
-- Open PRs: natural map edges (#20; goldens re-sited and accepted; the native junction draw gate
-  measured runner speed, so the session holds the world still while streaming, re-measures the
-  gates and sites the junction goldens in budget; merges on green after a look); parking lots
-  (#37; fixes verified except the hold for cars beside a parked player, beach stalls on park and
-  empty parcels, and a bend fix that removed a whole row at the golden's bend); the Deck (#42;
-  review sent: a partly tagged album splits, native rebuilds the library per folder, album keys
-  silence the radio, duplicate picks on Firefox/Safari; plus controls-card rows after #41).
-  Sessions building: handling feel (`vehicle/handling-feel`, NOTES 17); NPC cars see
-  pedestrians (`m4/npc-sees-peds`, the next zero-violence item). The owner's board (above) is
-  the queue of record for what comes next.
+- Open PRs: none; building: set pieces (see "Resume here"). Paused: NPC cars see
+  pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
+  comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
-  come and go); buildings B7, B10-B15.
+  come and go); buildings B7, B11-B15.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Mirage Valley (the 2001 world, renamed from Inland Basin; old id migrates) has its own place,
-  `socal_basin` (#48, M8 #2, `docs/WORLD_GENERATION.md` "Inland basins"). In review: its grammar,
-  lexicon and `sodium_night` palette (`m8/mirage-valley-grammar`, M8 #3); still "coming" until its
-  radio preset (M8 #8).
-- Next: merge #20, #37, #42; NPC cars see pedestrians (board order 15, after #38); M8 waves
-  (the 2001 grammar, hero cars part 2, traffic cars,
-  set pieces, the 2001 preset); B7 facade sign bands on the
+- Mirage Valley's world shows "coming" on the World page until its radio preset (M8 #8) lands.
+- Next: the owner's drive of the reverted handling; set pieces (M8 #7, three PRs); NPC cars see
+  pedestrians; music folders in the Mac app; M8 #8 (the 2001 radio preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
