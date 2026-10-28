@@ -1000,13 +1000,18 @@ impl Lcg {
     }
 }
 
-/// A minute of driving at busy traffic round a coast junction, every half second steering
-/// at the nearest NPC car with a random pedal (forward or reverse): many bumps, never a
-/// non-finite number, never a launch, and no hit leaves the player's car faster than it
-/// was going the step before by more than the rebound.
+/// A minute of driving at busy traffic round the coast's busiest block, every half second
+/// steering at the nearest NPC car with a random pedal (forward or reverse): many bumps,
+/// never a non-finite number, never a launch, and no hit leaves the player's car faster
+/// than it was going the step before by more than the rebound. (On flat streets: round the
+/// junction of the traffic goldens the car can drive off a 6 m fill bank beside the road,
+/// a fall at up to 6.5 m/s that is not a launch.)
 #[test]
 fn a_minute_of_random_bumping_stays_finite_and_grounded() {
-    let mut app = app(&format!("{}&t=12:00&traffic=busy", super::tests::JUNCTION));
+    // The busiest block of the coast at seed 1 (`peds::tests::STRIP`).
+    let mut app = app(
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5&t=12:00&traffic=busy",
+    );
     let mut rng = Lcg(7);
     let (mut throttle, mut reverse) = (0.5f32, false);
     let y0 = app.drive.state.pos[1];
