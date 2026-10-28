@@ -6,18 +6,21 @@
 //! soft limiter and the master volume. The platform owns the sink and pulls interleaved
 //! `f32` stereo from [`mixer::Mixer::render`].
 //!
-//! Radio, platform-neutral: the station model and the preset files ([`station`]), the
-//! player's own music as stations (tags, the seeded shuffle and its resume: [`music`]), the
-//! switching state machine with its tuning phase ([`radio`]), and the user's radio
-//! settings ([`settings`]). The crate plays no stream or file itself. [`Radio`] turns
-//! presses (next, previous, off) and player reports ([`PlayerEvent`]) into
-//! [`RadioCommand`]s (`Play { url }`, `PlayFile { key, start_s }`, `Stop`, `Volume`) that
-//! the platform carries out: an `<audio>` element on the web, a decoder and sink natively. The dial sweep between stations is one of the
-//! synthesized sounds ([`synth::tune`]), played by the mixer like the rest.
+//! Radio and deck, platform-neutral: the station model and the preset files ([`station`]),
+//! the switching state machine with its tuning phase ([`radio`]), the player's own music
+//! (tags and the seeded shuffle: [`music`]; the library and its transport, a tape deck, CD
+//! or MP3 player by era: [`deck`]), and the user's radio settings ([`settings`]). The crate
+//! plays no stream or file itself. [`Radio`] and [`deck::Deck`] turn presses and player
+//! reports ([`PlayerEvent`]) into [`RadioCommand`]s (`Play { url }`, `PlayFile { key,
+//! start_s }`, `Stop`, `Volume`) that the platform carries out: an `<audio>` element on the
+//! web, a decoder and sink natively. The dial sweep between stations and the deck's click
+//! are synthesized sounds ([`synth::tune`], [`synth::deck`]), played by the mixer like the
+//! rest.
 //!
 //! No recorded audio ships with the game: presets are facts (names, stream URLs,
 //! homepages) and the date their terms were checked.
 
+pub mod deck;
 pub mod mixer;
 pub mod music;
 pub mod radio;
@@ -30,5 +33,5 @@ pub use radio::{
     Channel, ErrorReason, PlayerEvent, Radio, RadioCommand, RadioState, NO_SIGNAL_SECONDS,
     TUNE_SECONDS,
 };
-pub use settings::{CustomStream, RadioSettings};
+pub use settings::{CustomStream, DeckSettings, RadioSettings};
 pub use station::{Codec, RadioPreset, Source, Station};

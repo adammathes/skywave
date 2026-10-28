@@ -25,12 +25,15 @@
 //!            scale · Bloom
 //! HUD:       Minimap · Rotate with car · Minimap zoom · Performance overlay (Off / FPS /
 //!            Full) · Show controls at start
-//! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Preset ·
-//!            Radio in background · Stations › · [web: Add stream URL] · [Remove added
-//!            streams, when there are some] · [web: Add music folder, or Pick music folder
-//!            again] · [Remove music folders, when there are some]
-//! Stations:  one on/off row per station of the preset, per added stream and per music
-//!            folder, then "Remove <folder>" per music folder
+//! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Source
+//!            (Radio / Tape, CD or MP3 by era) · Deck mode (Normal / Shuffle / Continuous) ·
+//!            [Library ›, when there is music] · Preset · Radio in background · Stations › ·
+//!            [web: Add stream URL] · [Remove added streams, when there are some] · [web:
+//!            Music library, or Pick music folder again] · [Remove music folders, when there
+//!            are some]
+//! Stations:  one on/off row per station of the preset and per added stream
+//! Library:   one row per album, "Artist - Album" (select: play it), then "Remove <folder>"
+//!            per music folder
 //! World:     Time of day · Clock speed · Traffic
 //! About:     (credit and license text)
 //! Conflict:  Keep on <existing action> · Move to <new action>
@@ -38,6 +41,7 @@
 
 use crate::camera::CameraMode;
 use crate::daylight::{Clock, CLOCK_SPEEDS};
+use crate::deck::CarDeck;
 use crate::input::{Action, AxisOptions, Bindings, DeviceKind, Sign};
 use crate::map::view::MINIMAP_RANGES_M;
 use crate::radio::{CarRadio, PRESET_TITLES};
@@ -69,6 +73,8 @@ pub enum Page {
     Audio,
     /// The stations of the preset on the dial, and the added streams.
     Stations,
+    /// The deck's albums, and the music folders they come from.
+    Library,
     World,
     About,
     /// A remap hit an input another action uses; see `Ui::conflict`.
@@ -144,8 +150,13 @@ pub enum ItemId {
     ClearStreams,
     AddMusic,
     ClearMusic,
-    /// Row `i` of `CarRadio::rows`, a music folder: take it off the dial for good.
+    /// Folder `i` of `CarDeck::folders`: take it out of the library for good.
     RemoveFolder(usize),
+    /// The radio or the deck.
+    Source,
+    DeckMode,
+    /// Album `i` of the deck's library: play it.
+    Album(usize),
     KeepExisting,
     UseNew,
 }
@@ -158,6 +169,7 @@ pub struct PageCtx<'a> {
     pub clock: &'a Clock,
     pub can_quit: bool,
     pub radio: &'a CarRadio,
+    pub deck: &'a CarDeck,
     /// The platform can ask the user for a line of text (a stream URL).
     pub text_entry: bool,
     /// The platform can ask the user for a music folder, and whether last session's must
@@ -199,6 +211,10 @@ pub const OVERLAY_NAMES: [&str; Overlay::ALL.len()] = ["Off", "FPS", "Full"];
 pub const FRAME_RATE_NAMES: [&str; FrameRate::ALL.len()] = ["Panel", "1/2", "1/3", "1/4"];
 /// The Radio in background choice: index 0 keeps playing, 1 mutes.
 pub const BACKGROUND_RADIO_NAMES: [&str; 2] = ["Keep playing", "Mute"];
+/// The Source choice: the radio, or the deck by era.
+pub const SOURCE_NAMES: [[&str; 2]; 3] = [["Radio", "Tape"], ["Radio", "CD"], ["Radio", "MP3"]];
+/// Names of [`audio::deck::Mode::ALL`].
+pub const DECK_MODE_NAMES: [&str; 3] = ["Normal", "Shuffle", "Continuous"];
 /// The Dashboard choice: index 0 draws it, 1 is hood only.
 pub const DASHBOARD_NAMES: [&str; 2] = ["Full cockpit", "Hood only"];
 
@@ -237,6 +253,7 @@ pub fn title(page: Page) -> &'static str {
         Page::Hud => "HUD",
         Page::Audio => "Audio",
         Page::Stations => "Stations",
+        Page::Library => "Library",
         Page::World => "World",
         Page::About => "About",
         Page::Conflict => "Input already in use",
@@ -268,8 +285,10 @@ pub fn note(page: Page) -> Option<&'static str> {
         Page::Camera => Some("The camera you pick or cycle to is the one the game starts in."),
         Page::Audio => Some(
             "Real internet radio: [ and ] change station, \\ turns it off.\n\
-             Streams play where the network allows; nothing is stored.",
+             Your own music: ' switches to the deck; \\ plays and pauses, [ ] tracks,\n\
+             O P albums, ; the mode. Streams play where the network allows; nothing is stored.",
         ),
+        Page::Library => Some("Select an album to play it. Files never leave this computer."),
         _ => None,
     }
 }
@@ -567,11 +586,14 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     Widget::Toggle(ctx.settings.radio.is_enabled(&row.id)),
                 );
             }
-            for (i, row) in ctx.radio.rows().iter().enumerate() {
-                if ctx.radio.files().iter().any(|c| c.id == row.id) {
-                    // Drawn as "Remove <name>" from the row.
-                    add(ItemId::RemoveFolder(i), "", Widget::Action);
-                }
+        }
+        Page::Library => {
+            // Drawn as "Artist - Album" and "Remove <folder>" from the deck.
+            for i in 0..ctx.deck.deck().library().albums.len() {
+                add(ItemId::Album(i), "", Widget::Action);
+            }
+            for i in 0..ctx.deck.folders().len() {
+                add(ItemId::RemoveFolder(i), "", Widget::Action);
             }
         }
         Page::Hud => {
@@ -627,6 +649,31 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             add(ItemId::WorldVolume, "World volume", volume(s.world_volume));
             add(ItemId::RadioVolume, "Radio volume", volume(s.radio.volume));
             add(ItemId::Mute, "Mute", Widget::Toggle(s.mute));
+            let kind = ctx.deck.kind() as usize;
+            add(
+                ItemId::Source,
+                "Source",
+                Widget::Choice {
+                    options: &SOURCE_NAMES[kind],
+                    index: usize::from(s.radio.deck.source == audio::deck::Source::Deck),
+                },
+            );
+            let mode = audio::deck::Mode::ALL
+                .iter()
+                .position(|&m| m == ctx.deck.deck().mode())
+                .unwrap_or(0);
+            add(
+                ItemId::DeckMode,
+                "Deck mode",
+                Widget::Choice {
+                    options: &DECK_MODE_NAMES,
+                    index: mode,
+                },
+            );
+            if !ctx.deck.folders().is_empty() {
+                let (id, w) = open(Page::Library);
+                add(id, "Library", w);
+            }
             add(
                 ItemId::RadioPreset,
                 "Preset",
@@ -654,9 +701,9 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             if ctx.music_again {
                 add(ItemId::AddMusic, "Pick music folder again", Widget::Action);
             } else if ctx.music_picker {
-                add(ItemId::AddMusic, "Add music folder", Widget::Action);
+                add(ItemId::AddMusic, "Music library", Widget::Action);
             }
-            if !ctx.radio.files().is_empty() || ctx.music_again {
+            if !ctx.deck.folders().is_empty() || ctx.music_again {
                 add(ItemId::ClearMusic, "Remove music folders", Widget::Action);
             }
         }
@@ -754,12 +801,14 @@ mod tests {
         bindings.set_axis_options(DeviceKind::Gamepad, Action::LookY, o);
         let clock = Clock::new(100, 6.5 * 3600.0);
         let radio = CarRadio::new();
+        let deck = CarDeck::default();
         let ctx = PageCtx {
             settings: &settings,
             bindings: &bindings,
             clock: &clock,
             can_quit: false,
             radio: &radio,
+            deck: &deck,
             text_entry: false,
             music_picker: false,
             music_again: false,
@@ -827,13 +876,22 @@ mod tests {
         assert_eq!(items[3].id, ItemId::RadioVolume);
         assert!(matches!(items[3].widget, Widget::Slider { value, .. } if value == 0.8));
         assert_eq!(items[4].widget, Widget::Toggle(false), "not muted");
-        assert!(matches!(items[5].widget, Widget::Choice { index: 0, .. }));
-        assert_eq!(items[6].id, ItemId::BackgroundRadio);
+        assert_eq!(items[5].id, ItemId::Source);
         assert!(
-            matches!(items[6].widget, Widget::Choice { index: 0, .. }),
+            matches!(items[5].widget, Widget::Choice { index: 0, options } if options[1] == "Tape"),
+            "the radio; the deck is a tape deck in 1984"
+        );
+        assert_eq!(items[6].id, ItemId::DeckMode);
+        assert!(matches!(items[6].widget, Widget::Choice { index: 0, .. }));
+        assert!(matches!(items[7].widget, Widget::Choice { index: 0, .. }));
+        assert_eq!(items[8].id, ItemId::BackgroundRadio);
+        assert!(
+            matches!(items[8].widget, Widget::Choice { index: 0, .. }),
             "keeps playing"
         );
-        assert_eq!(items.len(), 8, "no text entry, no added streams");
+        assert_eq!(items.len(), 10, "no text entry, no added streams, no music");
+        build(Page::Library, &ctx, &mut items);
+        assert!(items.is_empty());
         build(Page::Stations, &ctx, &mut items);
         assert_eq!(items.len(), radio.rows().len());
         assert!(items.iter().all(|i| i.widget == Widget::Toggle(true)));
