@@ -21,7 +21,7 @@
 //!   its first paint when that car has fewer. Not saved.
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
 //!   which starts at `chase-mid` and remembers the last one picked).
-//! - `t=HH:MM`: time of day; when given the clock is frozen there (default 17:40, running).
+//! - `t=HH:MM` (or `HH:MM:SS`): time of day; when given the clock is frozen there (default 17:40, running).
 //! - `pos=x,z`: put the car on the ground at this point, m (default the place's
 //!   `PlayerStart`: the start of the strip).
 //! - `yaw=<deg>`: the car's compass heading, degrees clockwise from north (-z): 0 north,
@@ -277,11 +277,13 @@ impl SceneSetup {
     }
 }
 
-/// `HH:MM` (00:00 to 23:59) as seconds of day.
+/// `HH:MM` (00:00 to 23:59), or `HH:MM:SS`, as seconds of day.
 fn parse_clock(s: &str) -> Option<f64> {
-    let (h, m) = s.split_once(':')?;
-    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
-    (h < 24 && m < 60 && s.len() == 5).then(|| f64::from(h * 3600 + m * 60))
+    let (h, rest) = s.split_once(':')?;
+    let (m, sec) = rest.split_once(':').unwrap_or((rest, "00"));
+    let (h, m, sec): (u32, u32, u32) = (h.parse().ok()?, m.parse().ok()?, sec.parse().ok()?);
+    let len_ok = s.len() == 5 || s.len() == 8;
+    (h < 24 && m < 60 && sec < 60 && len_ok).then(|| f64::from(h * 3600 + m * 60 + sec))
 }
 
 fn parse_switch(s: &str) -> Option<bool> {
@@ -418,5 +420,8 @@ mod tests {
         assert!(SceneSetup::default().set("zoom", "2").is_err());
         assert_eq!(parse_clock("00:00"), Some(0.0));
         assert_eq!(parse_clock("23:59"), Some(86_340.0));
+        assert_eq!(parse_clock("18:30:53"), Some(66_653.0));
+        assert_eq!(parse_clock("18:30:5"), None);
+        assert_eq!(parse_clock("18:30:60"), None);
     }
 }

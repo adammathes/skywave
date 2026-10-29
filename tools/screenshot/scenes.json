@@ -90,5 +90,13 @@
   "basin-crossing-train": {
     "about": "Mirage Valley's grade crossing on an arterial at dusk with the freight train across it (90 s into a run), from the mid chase camera stopped on the approach: both gates' arms down in red and white bands, the near mast's lamp lit, the train's boxcars, tank cars and hoppers on the track.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-mid", "lights": "1", "t": "18:25", "pos": "611.5,628", "yaw": "180", "train": "90", "still": "1", "stream": "1" }
+  },
+  "basin-boulevard-dusk-wave": {
+    "about": "Mirage Valley's boulevard at dusk, 12 s into the street lamps' wave (civil dusk at 18:30:43), eastbound toward where it started: the median's lamps lit in the blocks ahead, striking or still dark in the near ones, signs at their own moments, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:30:55", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+  },
+  "coast-dawn-haze": {
+    "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera: the morning haze over the town before it burns off.",
+    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "05:50", "lights": "1", "pos": "400.3,1510.7", "yaw": "103", "still": "1", "stream": "1" }
   }
 }
