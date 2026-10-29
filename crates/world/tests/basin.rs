@@ -23,6 +23,10 @@ fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
     g.validate().expect("validate grammar");
+    g.landmarks = world::landmarks::BUILTIN
+        .iter()
+        .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
+        .collect();
     g
 }
 
@@ -43,22 +47,22 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0x39A1_C053_F7A8_0B31,
         0xA2D7_B9A0_3D09_A4FE,
-        0x16A6_E9A3_8E03_9010,
+        0xD63F_9D8D_4370_6421,
     ),
     (
         0xA3F4_A281_380E_596B,
         0x7AD4_5617_94BE_609B,
-        0x6BCB_2415_229D_491C,
+        0x0A62_6D3C_3913_2AD6,
     ),
     (
         0x82B6_07FD_D1FD_CF4F,
         0xB348_0BC3_E55C_8454,
-        0x91B2_DA40_6193_CA87,
+        0x09F7_0A5F_B898_38CC,
     ),
     (
         0x6DBB_5CB8_4DBB_0036,
         0x68EB_95E2_5702_79E7,
-        0xD8E0_FF2A_4C6C_B06C,
+        0x8F76_1FC2_C5B2_B010,
     ),
 ];
 

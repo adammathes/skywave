@@ -22,11 +22,9 @@ const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 
-const WATER_TOWER: &str = include_str!("../../../assets/landmarks/water_tower.ron");
-
-/// The landmark kits compiled into the game, as `(id, RON text)` in file-name order: a
-/// `place::PropKind::Landmark`'s `kit` is an index into this list.
-const LANDMARKS: [(&str, &str); 1] = [("water_tower", WATER_TOWER)];
+/// The landmark kits compiled into the game: a `place::PropKind::Landmark`'s `kit` is an
+/// index into this list.
+const LANDMARKS: [(&str, &str); 5] = world::landmarks::BUILTIN;
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.
@@ -236,7 +234,7 @@ mod tests {
         let mut k = kits[0].clone();
         k.lot = [1.0, 1.0];
         let err = parse_kit(&ron::ser::to_string(&k).unwrap()).unwrap_err();
-        assert!(err.contains("water_tower"), "{err}");
+        assert!(err.contains("coffee_shop"), "{err}");
     }
 
     #[test]
