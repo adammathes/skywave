@@ -316,6 +316,25 @@ pub struct Pedestrian {
 }
 
 impl Pedestrian {
+    /// Someone standing at `pos`, for tests elsewhere in the crate.
+    #[cfg(test)]
+    pub(crate) fn standing(id: u32, pos: [f32; 3]) -> Pedestrian {
+        Pedestrian {
+            alive: true,
+            id,
+            seed: u64::from(id),
+            pos,
+            heading: 0.0,
+            pose: PedPose::REST,
+            walker: 0,
+            slot: 0,
+            height: 1.75,
+            base: pos,
+            dodge: Dodge::NONE,
+            sit: Sit::No,
+        }
+    }
+
     /// Standing height, m: the figure's ([`FigureSpec::height_m`] of [`Self::seed`], clamped
     /// to 1.4–2.1 m), which the gait is paced for; draw the figure scaled to it.
     pub fn height_m(&self) -> f32 {

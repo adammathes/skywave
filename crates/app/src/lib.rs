@@ -980,6 +980,12 @@ impl App {
             };
             self.wave
                 .step(&self.npcs.graph, self.npcs.signal_tick(), &signed, dt);
+            self.npcs.step_replies(&traffic::ReplyInput {
+                horn: self.drive.horn,
+                flash: self.drive.flash,
+                throttle: self.drive.input.throttle,
+                player: signed,
+            });
             if let Some(r) = &mut self.rail {
                 r.step(&player, self.npcs.cars(), self.npcs.crowd.pool(), dt);
             }

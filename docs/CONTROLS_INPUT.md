@@ -21,6 +21,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | High beams (`HighBeams`) | button | K | D-pad up held 1 s |
 | Underglow (`Underglow`) | button | U | — |
 | Horn | button | B (H until the controls card took it) | Left stick click |
+| Flash brights (`Flash`) | button (held) | N | B / Circle |
 | Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
 | Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
 | Map toggle | button | M | Back / Share |

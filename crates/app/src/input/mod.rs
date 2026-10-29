@@ -56,6 +56,8 @@ pub enum Action {
     /// The underglow on/off, on a car that has one.
     Underglow,
     Horn,
+    /// The high beams lit while held (a flash), whatever the switches say.
+    Flash,
     /// Swap to the next built-in vehicle, in place.
     VehicleNext,
     /// Put the car back on the nearest lane, at rest (a long press on the pad).
@@ -102,7 +104,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 43;
+    pub const COUNT: usize = 44;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -123,6 +125,7 @@ impl Action {
         Action::HighBeams,
         Action::Underglow,
         Action::Horn,
+        Action::Flash,
         Action::VehicleNext,
         Action::Reset,
         Action::MapToggle,
@@ -240,6 +243,7 @@ impl Action {
             Action::HighBeams => "HighBeams",
             Action::Underglow => "Underglow",
             Action::Horn => "Horn",
+            Action::Flash => "Flash",
             Action::VehicleNext => "VehicleNext",
             Action::Reset => "Reset",
             Action::MapToggle => "MapToggle",

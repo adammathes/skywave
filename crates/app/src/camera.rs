@@ -495,6 +495,7 @@ impl CameraRig {
             Action::HighBeams,
             Action::Underglow,
             Action::Horn,
+            Action::Flash,
             Action::TimeScrub,
         ]
         .iter()

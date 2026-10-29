@@ -24,10 +24,10 @@ use glam::{Mat3, Mat4, Quat, Vec3};
 use place::Place;
 use render::{LightSet, Mesh, MeshId, MeshInstance};
 use skywave_core::{hash64, Seed};
-use traffic::figure::{figure, FigureSpec, Outfit, Skeleton, Xform, PARTS};
-use traffic::peds::{PedInput, PedPose, PedestrianBudget, Pedestrians};
+use traffic::figure::{self, figure, FigureSpec, Outfit, Skeleton, Xform, PARTS};
+use traffic::peds::{Action, PedInput, PedPose, PedestrianBudget, Pedestrians};
 use traffic::walks::WalkGraph;
-use traffic::{Density, LaneGraph, Player, View};
+use traffic::{Density, Greet, LaneGraph, Player, Replies, ReplyInput, View};
 
 use crate::car;
 use crate::lighting::{Bounds, FrameLights};
@@ -107,7 +107,12 @@ pub struct Crowd {
     order: Vec<(u16, u16)>,
     /// Per-step sim time, ms, smoothed, for the overlay.
     step_ms: f32,
+    /// The people's and NPC drivers' answers to the player's horn, brights and throttle.
+    pub(crate) replies: Replies,
 }
+
+/// Hash key of who answers the player (`traffic::reply`).
+const KEY_REPLY: u64 = 0x0052_4550_4C59;
 
 impl Crowd {
     /// The sidewalk graph of `place` over its lane graph `lanes`, and an empty pool seeded
@@ -135,6 +140,7 @@ impl Crowd {
             built_bytes: 0,
             order: Vec::with_capacity(cap),
             step_ms: 0.0,
+            replies: Replies::new(hash64(place.header.seed, &[KEY_REPLY])),
         }
     }
 
@@ -208,6 +214,12 @@ impl Crowd {
     /// Whether the crowd runs: on, or people still to clear.
     pub fn active(&self) -> bool {
         self.density != Density::Off || self.count() > 0
+    }
+
+    /// One step of the answers to what the player did among the people and `cars`
+    /// (`traffic::reply`): never feeds back into either.
+    pub fn step_replies(&mut self, inp: &ReplyInput, cars: &[traffic::Car]) {
+        self.replies.step(inp, cars, self.peds.pedestrians());
     }
 
     /// One sim step at signal `tick` over `lanes`, round the `player`'s car seen from
@@ -297,16 +309,26 @@ impl Crowd {
         p.height_m() / self.variants[variant_of(p.seed)].height_m
     }
 
-    /// Slot `i`'s person `alpha` of the way through the step: each part's model-to-world
-    /// transform into `out`; returns the figure's ground point.
+    /// Slot `i`'s person `alpha` of the way through the step, answering the player's horn
+    /// if `replies` say so: each part's model-to-world transform into `out`; returns the
+    /// figure's ground point.
     fn parts(&mut self, i: usize, alpha: f32, out: &mut [Mat4; PARTS]) -> Vec3 {
         let (pos, heading, pose) = self.pose(i, alpha);
         let scale = self.scale(i);
-        let variant = &self.variants[variant_of(self.peds.pedestrians()[i].seed)];
+        let replies = &self.replies;
+        let p = &self.peds.pedestrians()[i];
+        let variant = &self.variants[variant_of(p.seed)];
+        let sk = &variant.skeleton;
+        let mut joints = pose.joints(sk);
+        // Nobody answers mid-dodge.
+        let still = matches!(pose.action, Action::None | Action::Sit);
+        if let Some((greet, w, s)) = replies.greeting(p.id, alpha).filter(|_| still) {
+            let to = Quat::from_rotation_y(-heading) * (Vec3::from(replies.player) - pos);
+            let look = figure::look_yaw(to.x, to.z);
+            sk.greet(&mut joints, w, s, look, greet == Greet::Wave);
+        }
         let mut xf = [Xform::IDENTITY; PARTS];
-        variant
-            .skeleton
-            .pose(&pose.joints(&variant.skeleton), &mut xf);
+        sk.pose(&joints, &mut xf);
         let root = Mat4::from_scale_rotation_translation(
             Vec3::splat(scale),
             Quat::from_rotation_y(heading),
@@ -751,6 +773,78 @@ mod tests {
         assert!(limb < 0.05, "a limb {limb:.2} m inside");
         assert!(near.len() > 5, "{}", near.len());
         assert!(dodged.len() > 3, "{}", dodged.len());
+    }
+
+    /// Honking (and flashing) every half second for 40 s standing on the strip's busiest
+    /// corner: people within reach look over and wave, each figure stays in one piece while
+    /// it does, a person answers at most once per `ANSWER_REST_S`, and the people and the
+    /// traffic go on exactly as with nobody answering: nobody stops, flinches or runs.
+    #[test]
+    fn honked_people_answer_in_one_piece_and_go_on_as_before() {
+        use crate::input::Action as Key;
+        use traffic::reply::ANSWER_REST_S;
+        let query = format!("{STRIP}&t=12:00&traffic=busy");
+        let (mut honked, mut quiet) = (app(&query), app(&query));
+        let none = InputState::default();
+        let mut press = InputState::default();
+        press.set(Key::Horn, 1.0);
+        press.set(Key::Flash, 1.0);
+        let (mut waved, mut looked) = (Vec::new(), Vec::new());
+        let (mut most, mut answers) = (0, 0u32);
+        let mut was: Vec<u32> = Vec::new();
+        for frame in 0..40 * 60 {
+            let input = if frame % 30 < 3 { &press } else { &none };
+            honked.update(input, 1.0 / 60.0);
+            // The same presses (the camera wakes on them), nobody answering.
+            quiet.update(input, 1.0 / 60.0);
+            quiet.npcs.crowd.replies = traffic::Replies::new(0);
+            let mut now = Vec::new();
+            for i in 0..honked.npcs.crowd.peds.pedestrians().len() {
+                let p = honked.npcs.crowd.peds.pedestrians()[i];
+                let Some((greet, _, _)) = honked.npcs.crowd.replies.greeting(p.id, 0.5) else {
+                    continue;
+                };
+                if !p.alive {
+                    continue;
+                }
+                assert_attached(&mut honked, i, 0.5);
+                now.push(p.id);
+                let seen = if greet == traffic::Greet::Wave {
+                    &mut waved
+                } else {
+                    &mut looked
+                };
+                if !seen.contains(&p.id) {
+                    seen.push(p.id);
+                }
+            }
+            answers += now.iter().filter(|id| !was.contains(id)).count() as u32;
+            most = most.max(now.len());
+            was = now;
+        }
+        let people = waved.len() + looked.len();
+        eprintln!(
+            "40 s of honks every 0.5 s: {} waved, {} looked over, {answers} answers, at most \
+             {most} at once",
+            waved.len(),
+            looked.len()
+        );
+        assert!(
+            waved.len() >= 3 && looked.len() >= 2,
+            "{waved:?} {looked:?}"
+        );
+        // Each person at most once per rest (40 s: twice).
+        let per = (40.0 / ANSWER_REST_S) as u32 + 1;
+        assert!(
+            answers <= people as u32 * per,
+            "{answers} answers by {people}"
+        );
+        assert!(most <= traffic::reply::GREETINGS);
+        assert_eq!(
+            honked.npcs.hash(),
+            quiet.npcs.hash(),
+            "the sim went on as before"
+        );
     }
 
     /// The in-game pedestrian step (busy people on the strip) within its budget: the best
