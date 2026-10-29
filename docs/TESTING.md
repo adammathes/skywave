@@ -21,6 +21,7 @@ cargo deny check
 tools/web-build.sh && node tools/screenshot/shoot.mjs --all     # writes tools/screenshot/out/<scene>.png
 node tools/screenshot/diff.mjs --all                             # out/ vs golden/, 2% beyond ΔE 6
 node tools/screenshot/shoot.mjs --selftest                       # wasm hashes vs native
+node tools/screenshot/shoot.mjs --gallery water_tower            # a landmark's contact sheet: out/gallery/<id>.png
 cargo bench -p world -- chunk                                    # budgets (release)
 ```
 

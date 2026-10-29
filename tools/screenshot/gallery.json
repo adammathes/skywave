@@ -1,0 +1,171 @@
+{
+  "about": "Landmark gallery contact sheets (crates/app/src/gallery.rs); written by `cargo test -p app -- --ignored write_gallery`.",
+  "kits": {
+    "water_tower": {
+      "about": "A municipal water tower on its own lot.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,74.8",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "56.7,57",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-39.7,85.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "100,72.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "155.2,54.8",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "61.3,82.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "200,74.8",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "256.7,57",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "160.3,85.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "The classic: a steel tank with a cone roof on four raked, braced legs, a balcony round it.",
+          "letter": "A",
+          "name": "Riveted, four legs"
+        },
+        {
+          "about": "A later single-column tower: the column flares into a broad sky-blue bowl.",
+          "letter": "B",
+          "name": "Pedestal"
+        },
+        {
+          "about": "A's tower painted red with a white roof and hoops, marquee bulbs under the balcony: roadside kitsch.",
+          "letter": "C",
+          "name": "Candy-striped"
+        }
+      ]
+    }
+  },
+  "times": [
+    {
+      "lights": false,
+      "name": "noon",
+      "t": "12:00"
+    },
+    {
+      "lights": false,
+      "name": "golden",
+      "t": "17:40"
+    },
+    {
+      "lights": false,
+      "name": "night",
+      "t": "22:30"
+    }
+  ]
+}

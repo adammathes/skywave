@@ -22,6 +22,7 @@ pub mod daylight;
 pub mod deck;
 pub mod dragstrip;
 pub mod drive;
+pub mod gallery;
 mod input;
 pub mod lighting;
 mod lighttiles;
