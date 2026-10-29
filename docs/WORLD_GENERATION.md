@@ -207,11 +207,12 @@ coast's Place is unchanged.
     every 16 m, up the slope until it has risen 50 m; there the lot faces down the local slope (within about
     45° of straight out over the valley), its letters' line level to within 3 m, the whole lot inside the
     playable area, at least 12 m from every road's asphalt and walk and 40 m from an overlook; of those, the
-    one most nearly across from downtown. Its base is the lowest ground under the letters' line, so they are
+    one most nearly across from downtown (framed best: see "Vistas" below, 300 m slack). Its base is the lowest ground under the letters' line, so they are
     buried a little at their feet and never float; they block a car on the slope.
   - **The water tower** (`water_tower`, `WaterTower`, variant B, the pedestal): a site its kit's lot wide and
     deep over industrial lots on any road, at least 200 m from the garage and the stand, with the most
-    industrial zone within 192 m of its middle (sampled every 32 m). Its column (not the bowl over it) blocks a
+    industrial zone within 192 m of its middle (sampled every 32 m; framed best within a quarter of the
+    most). Its column (not the bowl over it) blocks a
     car.
   On seeds 1–4 every basin has both.
 - **The downtown anchors**, two landmark kits ("Landmarks" below) standing the variant the owner picked
@@ -220,11 +221,26 @@ coast's Place is unchanged.
   **city hall** (`city_hall`, a 60 by 48 m lot, `CityHall`) stands at the head of the boulevard: across the
   road one of its ends meets at a T (the out boulevard always meets the road along the foot of the hills
   that way), its lot starting a meter behind that road's walk, square to the boulevard and facing back down
-  it, so it closes the view the whole way up with the hills behind; of the ends that qualify, the one nearest
-  downtown. The **movie palace** (`movie_palace`, 28 by 44 m, `MoviePalace` under its marquee, where people
+  it, so it closes the view the whole way up with the hills behind; of the ends that qualify, the one framed
+  best (600 m slack). The **movie palace** (`movie_palace`, 28 by 44 m, `MoviePalace` under its marquee, where people
   gather) stands on the downtown or commercial lot on an arterial or collector nearest the downtown seed
-  that overlaps no other set piece. Both lots lose their buildings. The palace's marquee bulbs chase
+  that overlaps no other set piece (framed best, 250 m slack). Both lots lose their buildings. The palace's marquee bulbs chase
   (`app::marquee`). Goldens: `basin-palace-night`, `basin-city-hall-golden`.
+
+- **Vistas** (`procgen::setpieces::{Sight, vista}`): being seen on the approach is half a landmark's
+  delight, so the four landmarks above take, of their sites, the one the roads frame best. Viewpoints lie
+  every 24 m along every road at eye height (1.2 m), looking along it each way it runs. A viewpoint 300 to
+  1500 m off with the landmark within about 32° ahead *sees* it when the line from the eye to a point three
+  quarters up the landmark's height clears the ground and every building's box (its footprint's bounds,
+  its height), but within its own lot. A seen view is a *terminated vista* where the landmark lies within
+  12 m of the road's line (on its axis, not beside it) and asphalt runs under that line every 40 m for
+  the first 240 m (a straight road pointing at it), and a *reveal* where the road crests (1 m over the
+  viewpoints 48 m back and on, a hill or an overpass top) and the landmark was hidden 48 m back. Score: seen views, plus four for each
+  terminated vista and reveal. Each landmark tries its first 16 sites by its own measure, 40 m apart and
+  within its slack of the best, and keeps the best score (the first of those alike). On seeds 1–4, against
+  the sites by measure alone, the palace goes from 0–23 seen views to 89–122 (no lot near downtown sits on
+  a street's axis, so it closes no view), the letters on seeds 1 and 3 from about 57 to 128–190 with 28–31
+  terminated vistas; it costs about 40 ms of a basin's build.
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the roadside set
@@ -232,7 +248,9 @@ once each in the picked variants on its own clear lot, 250 m apart, its cars cle
 lamps lit, the drive-in's screen seen from the freeway and a car driving in past its ticket booth; the
 letters and the water tower sited, lit, solid and clear of roads and buildings, the letters on the ground up
 the hills, the tower's column stops a car; the anchors on seeds 1–4 off roads and buildings, the city hall on a
-boulevard's axis at its head, a car driven up the boulevard at 20 m/s stopped at its arcade), the meshes' and
+boulevard's axis at its head, a car driven up the boulevard at 20 m/s stopped at its arcade; each of the four
+seen from a road at least 300 m off that points at it within 30 m, by brute force against every building's
+box), the meshes' and
 boxes' unit tests in `world::setpieces`, `app::dragstrip`'s and `app::marquee`'s tests.
 
 ## Landmarks
