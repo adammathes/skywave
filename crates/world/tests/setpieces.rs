@@ -307,13 +307,7 @@ fn every_basin_has_its_downtown_anchors() {
                 .props
                 .items
                 .iter()
-                .find(|q| {
-                    q.kind
-                        == PropKind::Landmark {
-                            kit: k as u8,
-                            variant: 0,
-                        }
-                })
+                .find(|q| matches!(q.kind, PropKind::Landmark { kit, .. } if usize::from(kit) == k))
                 .unwrap_or_else(|| panic!("seed {seed}: no kit {k}"));
             let area = footprint(q, w, d);
             // No road, no building on the lot; every landmark light on it.
@@ -342,13 +336,7 @@ fn every_basin_has_its_downtown_anchors() {
             .props
             .items
             .iter()
-            .find(|q| {
-                q.kind
-                    == PropKind::Landmark {
-                        kit: hall as u8,
-                        variant: 0,
-                    }
-            })
+            .find(|q| matches!(q.kind, PropKind::Landmark { kit, .. } if usize::from(kit) == hall))
             .unwrap();
         let (front, out) = (at(q), dir_of_yaw(q.yaw));
         let heads = b.lines.iter().filter(|l| l.boulevard).any(|l| {

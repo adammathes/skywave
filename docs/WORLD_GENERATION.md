@@ -189,7 +189,7 @@ coast's Place is unchanged.
   of any road (the bridges) and round each ramp: along a ramp's outer edge from 12 m below its top, and across
   its foot. A `ChannelRamp` landmark marks each ramp's top.
 - **The downtown anchors**, two landmark kits ("Landmarks" below) standing the variant the owner picked
-  (`PALACE_VARIANT`, `HALL_VARIANT` in `procgen::setpieces`), each kept 16 m clear of the rail line. The
+  (`PALACE_VARIANT`, A, the deco palace; `HALL_VARIANT`, B, the clock tower; in `procgen::setpieces`), each kept 16 m clear of the rail line. The
   **city hall** (`city_hall`, a 60 by 48 m lot, `CityHall`) stands at the head of the boulevard: across the
   road one of its ends meets at a T (the out boulevard always meets the road along the foot of the hills
   that way), its lot starting a meter behind that road's walk, square to the boulevard and facing back down
@@ -202,7 +202,7 @@ coast's Place is unchanged.
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the anchors on
 seeds 1–4 off roads and buildings, the city hall on a boulevard's axis at its head, a car driven up the
-boulevard at 20 m/s stopped at its steps), the meshes' and boxes' unit tests in `world::setpieces`,
+boulevard at 20 m/s stopped at its arcade), the meshes' and boxes' unit tests in `world::setpieces`,
 `app::dragstrip`'s and `app::marquee`'s tests.
 
 ## Landmarks

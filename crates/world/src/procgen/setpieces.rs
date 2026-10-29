@@ -74,8 +74,8 @@ pub const PALACE_LOT_M: (f32, f32) = (28.0, 44.0);
 pub const PALACE_VARIANT: u8 = 0;
 pub const HALL_KIT: &str = "city_hall";
 pub const HALL_LOT_M: (f32, f32) = (60.0, 48.0);
-/// A until the owner picks from the contact sheet.
-pub const HALL_VARIANT: u8 = 0;
+/// B, the clock tower: the owner's pick (2026-10-29).
+pub const HALL_VARIANT: u8 = 1;
 /// The anchors' lots keep this far from the rail line's centerline (its track, gates and
 /// signals), m.
 const RAIL_CLEAR_M: f32 = 16.0;
