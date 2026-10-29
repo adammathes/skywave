@@ -99,6 +99,14 @@
     "about": "Mirage Valley's boulevard at dusk, 12 s into the street lamps' wave (civil dusk at 18:30:43), eastbound toward where it started: the median's lamps lit in the blocks ahead, striking or still dark in the near ones, signs at their own moments, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:30:55", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
+  "basin-palace-night": {
+    "about": "Mirage Valley's movie palace at night from the far chase camera, northbound on the downtown arterial before it (a downtown anchor, variant A): the marquee's lit boards and dim bulbs (the chasing third lit, frozen at the clock's phase), the blade sign lettered THEATRE in neon over it.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "21:30", "pos": "215,790", "yaw": "0", "still": "1", "stream": "1" }
+  },
+  "basin-city-hall-golden": {
+    "about": "Mirage Valley's boulevard at golden hour from the far chase camera, northbound toward its head: the city hall (a downtown anchor, variant A, its dome and portico) closing the view across the T at the foot of the hills.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "1026,540", "yaw": "0", "still": "1", "stream": "1" }
+  },
   "coast-dawn-haze": {
     "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera: the morning haze over the town before it burns off.",
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "05:50", "lights": "1", "pos": "400.3,1510.7", "yaw": "103", "still": "1", "stream": "1" }

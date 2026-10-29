@@ -197,7 +197,7 @@ coast's Place is unchanged.
   downtown. The **movie palace** (`movie_palace`, 28 by 44 m, `MoviePalace` under its marquee, where people
   gather) stands on the downtown or commercial lot on an arterial or collector nearest the downtown seed
   that overlaps no other set piece. Both lots lose their buildings. The palace's marquee bulbs chase
-  (`app::marquee`).
+  (`app::marquee`). Goldens: `basin-palace-night`, `basin-city-hall-golden`.
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the anchors on
