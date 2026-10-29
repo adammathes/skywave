@@ -37,6 +37,10 @@
 //!   the whole way up; the movie palace on the downtown or commercial lot on an arterial or
 //!   collector nearest the downtown seed. Both clear of every other set piece and
 //!   [`RAIL_CLEAR_M`] from the rail line.
+//! - **Vistas**: each of those four landmarks takes, of the sites its own measure ranks
+//!   near the best, the one the roads frame best ([`vista`]): seen ahead from far down the
+//!   road and clear of the buildings, at the end of a straight road pointing at it, or
+//!   first over a crest.
 //!
 //! Every draw is a pure function of the place; nothing here draws randomness but the
 //! signs' name seeds (`hash64(seed, [SETPIECES, ..])`).
@@ -110,6 +114,14 @@ const LETTERS_ROAD_CLEAR_M: f32 = 12.0;
 /// by the industry within this of it, m.
 pub const TOWER_APART_M: f32 = 200.0;
 const TOWER_REACH_M: f32 = 192.0;
+/// How far from the best by their own measure a landmark's sites may be and still be
+/// chosen for their [`vista`]: the letters' distance off square across from downtown, the
+/// share of the most industry the tower's lot gives up, the hall's and the palace's
+/// distance from downtown, m.
+const LETTERS_SLACK_M: f32 = 300.0;
+const TOWER_SLACK: f32 = 0.25;
+const HALL_SLACK_M: f32 = 600.0;
+const PALACE_SLACK_M: f32 = 250.0;
 
 /// The downtown anchors, as [`LETTERS`]: the movie palace A, the deco palace, and the city
 /// hall B, the clock tower (the owner's picks, 2026-10-29, PR #75).
@@ -612,9 +624,12 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
             });
         }
     }
-    // The landmarks.
+    // The landmarks, each on the site the roads frame best of those it suits.
+    let sight = Sight::new(place);
     if let Some((kit, variant, size)) = kit_of(kits, LETTERS) {
-        if let Some(lot) = letters_site(m, place, &s, size) {
+        let sites = letters_sites(m, place, &s, size);
+        let k = &kits[usize::from(kit)];
+        if let Some(lot) = framed(&sight, &sites, LETTERS_SLACK_M, k, variant) {
             s.marks.push(Mark {
                 lot,
                 kind: PoiKind::HillsideLetters,
@@ -648,7 +663,8 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
             }
             k
         };
-        let lot = lots(place, (w, d), &[ZoneId::Industrial], &classes)
+        // Most industry first.
+        let mut sites: Vec<(f32, Lot)> = lots(place, (w, d), &[ZoneId::Industrial], &classes)
             .into_iter()
             .filter(|l| !overlaps(l, (w, d), &areas))
             .filter(|l| {
@@ -656,10 +672,12 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
                     .iter()
                     .all(|&t| (t - l.front).length() >= TOWER_APART_M)
             })
-            .map(|l| (industry(&l), l))
-            .max_by(|x, y| x.0.cmp(&y.0).then(y.1.key.cmp(&x.1.key)))
-            .map(|x| x.1);
-        if let Some(lot) = lot {
+            .map(|l| (-(industry(&l) as f32), l))
+            .collect();
+        sites.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.key.cmp(&y.1.key)));
+        let slack = TOWER_SLACK * -sites.first().map_or(0.0, |x| x.0);
+        let k = &kits[usize::from(kit)];
+        if let Some(lot) = framed(&sight, &sites, slack, k, variant) {
             s.marks.push(Mark {
                 lot,
                 kind: PoiKind::WaterTower,
@@ -681,9 +699,12 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     if let Some((kit, variant, size)) = kit_of(kits, HALL) {
         let wd = (size[0], size[1]);
         let areas = s.footprints();
-        let lot =
-            hall_site(m, place, b, wd).filter(|l| off_rail(l, wd) && !overlaps(l, wd, &areas));
-        if let Some(lot) = lot {
+        let sites: Vec<(f32, Lot)> = hall_sites(m, place, b, wd)
+            .into_iter()
+            .filter(|x| off_rail(&x.1, wd) && !overlaps(&x.1, wd, &areas))
+            .collect();
+        let k = &kits[usize::from(kit)];
+        if let Some(lot) = framed(&sight, &sites, HALL_SLACK_M, k, variant) {
             s.marks.push(Mark {
                 lot,
                 kind: PoiKind::CityHall,
@@ -697,7 +718,7 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
         let wd = (size[0], size[1]);
         let areas = s.footprints();
         let downtown = V2::from_array(m.downtown);
-        let lot = lots(
+        let mut sites: Vec<(f32, Lot)> = lots(
             place,
             wd,
             &[ZoneId::Downtown, ZoneId::Commercial],
@@ -705,13 +726,11 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
         )
         .into_iter()
         .filter(|l| off_rail(l, wd) && !overlaps(l, wd, &areas))
-        .min_by(|x, y| {
-            (x.front - downtown)
-                .length()
-                .total_cmp(&(y.front - downtown).length())
-                .then(x.key.cmp(&y.key))
-        });
-        if let Some(lot) = lot {
+        .map(|l| ((l.front - downtown).length(), l))
+        .collect();
+        sites.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.key.cmp(&y.1.key)));
+        let k = &kits[usize::from(kit)];
+        if let Some(lot) = framed(&sight, &sites, PALACE_SLACK_M, k, variant) {
             s.marks.push(Mark {
                 lot,
                 kind: PoiKind::MoviePalace,
@@ -724,15 +743,16 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     s
 }
 
-/// The city hall's lot, `w` wide and `d` deep, at the head of the boulevard: across the
-/// road one of its ends meets at a T, square to the boulevard, facing back down it; the end
-/// nearest downtown whose lot lies clear of every road and inside the playable area.
-fn hall_site(
+/// The city hall's lots, `w` wide and `d` deep, at the head of the boulevard: across the
+/// road one of its ends meets at a T, square to the boulevard, facing back down it; the ends
+/// whose lot lies clear of every road and inside the playable area, nearest downtown first,
+/// each with its distance from it.
+fn hall_sites(
     m: &MacroMap,
     place: &Place,
     b: &super::macro_map::BasinPlan,
     (w, d): (f32, f32),
-) -> Option<Lot> {
+) -> Vec<(f32, Lot)> {
     let segs: Vec<(V2, V2, f32)> = place
         .roads
         .edges
@@ -749,7 +769,7 @@ fn hall_site(
             .any(|&(a, c, hw)| segment_distance(q, a, c).0 < hw + 0.5)
     };
     let downtown = V2::from_array(m.downtown);
-    let mut best: Option<(f32, Lot)> = None;
+    let mut sites: Vec<(f32, Lot)> = Vec::new();
     for (i, l) in b.lines.iter().enumerate().filter(|(_, l)| l.boulevard) {
         let (a, c) = (V2::from_array(l.a), V2::from_array(l.b));
         for (k, (end, from)) in [(a, c), (c, a)].into_iter().enumerate() {
@@ -777,20 +797,22 @@ fn hall_site(
                 key: (i as u64) << 1 | k as u64,
             };
             let clear = samples(&lot, w, d).all(|q| !on_road(q) && m.in_playable(q.x, q.y, 20.0));
-            let score = (lot.front - downtown).length();
-            if clear && best.is_none_or(|x| score < x.0) {
-                best = Some((score, lot));
+            if clear {
+                sites.push(((lot.front - downtown).length(), lot));
             }
         }
     }
-    best.map(|x| x.1)
+    sites.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.key.cmp(&y.1.key)));
+    sites
 }
 
-/// The hillside letters' lot, `size` wide and deep (see the module docs): its front along
-/// the slope's contour below the letters, facing down it.
-fn letters_site(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> Option<Lot> {
-    let b = m.basin.as_ref()?;
-    let foot = b.lines.first()?;
+/// The hillside letters' lots, `size` wide and deep (see the module docs): each front along
+/// the slope's contour below the letters, facing down it; squarest across from downtown
+/// first, each with its distance off that line.
+fn letters_sites(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> Vec<(f32, Lot)> {
+    let Some(foot) = m.basin.as_ref().and_then(|b| b.lines.first()) else {
+        return Vec::new();
+    };
     let out = V2::from_array(m.frame.dir_to_world(1.0, 0.0));
     let downtown = V2::from_array(m.downtown);
     let h = |p: V2| m.height_at(p.x, p.y);
@@ -808,7 +830,7 @@ fn letters_site(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> O
     let (a, c) = (V2::from_array(foot.a), V2::from_array(foot.b));
     let n = ((c - a).length() / 16.0) as usize;
     let [w, d] = size;
-    let mut best: Option<(f32, usize, Lot)> = None;
+    let mut sites: Vec<(f32, Lot)> = Vec::new();
     for k in 0..=n {
         let q = a.lerp(c, k as f32 / n.max(1) as f32);
         let h0 = h(q);
@@ -854,12 +876,280 @@ fn letters_site(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> O
         if hi - lo > LETTERS_LEVEL_M || !clear || by_overlook {
             continue;
         }
-        let score = abs((p - downtown).dot(out.right()));
-        if best.as_ref().is_none_or(|x| score < x.0) {
-            best = Some((score, k, lot));
+        sites.push((abs((p - downtown).dot(out.right())), lot));
+    }
+    sites.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.key.cmp(&y.1.key)));
+    sites
+}
+
+/// A landmark is scored from road viewpoints this far apart along each road, seen from
+/// eye height over the road, between these distances and within this of straight ahead
+/// (the cosine of the half angle), m.
+const VIEW_STEP_M: f32 = 24.0;
+const EYE_M: f32 = 1.2;
+pub const VIEW_NEAR_M: f32 = 300.0;
+const VIEW_FAR_M: f32 = 1500.0;
+const VIEW_CONE: f32 = 0.85;
+/// A view is a terminated vista where the road runs on straight at the landmark: its
+/// asphalt under the line of sight every [`TERMINATED_STEP_M`] for the first
+/// [`TERMINATED_M`] of it, the landmark within [`TERMINATED_OFF_M`] of the line.
+const TERMINATED_M: f32 = 240.0;
+const TERMINATED_STEP_M: f32 = 40.0;
+const TERMINATED_OFF_M: f32 = 12.0;
+/// A view is a reveal where the road crests (its surface this much over the road two
+/// viewpoints back and two on) and the landmark is hidden two viewpoints back, m.
+const CREST_M: f32 = 1.0;
+/// A landmark's site is chosen by its score among the best this many of its sites by its
+/// own measure, those within its slack of the best and this far apart, m.
+const VISTA_TRIES: usize = 16;
+const VISTA_APART_M: f32 = 40.0;
+/// The line of sight aims this far up a landmark's height.
+const AIM_UP: f32 = 0.75;
+
+/// A place seen from its roads (`docs/WORLD_GENERATION.md`, "Set pieces", Vistas): the viewpoints along
+/// every road and its buildings' boxes, binned, for the lines of sight [`vista`] scores.
+pub struct Sight<'a> {
+    place: &'a Place,
+    /// Each viewpoint: its eye, the way along the road it looks (each way on a two-way
+    /// road) and the viewpoint two back that way, if any.
+    views: Vec<(V3, V2, Option<V3>, bool)>,
+    boxes: Vec<([f32; 3], [f32; 3])>,
+    grid: Grid,
+    roads: Vec<(V2, V2, f32)>,
+    road_grid: Grid,
+}
+
+impl<'a> Sight<'a> {
+    pub fn new(place: &'a Place) -> Sight<'a> {
+        let ground = |p: V2| {
+            place
+                .terrain
+                .height_at(&place.header, [p.x, p.y])
+                .unwrap_or(0.0)
+        };
+        let mut grid = Grid::new(place, 32.0);
+        let mut boxes = Vec::with_capacity(place.buildings.len());
+        for b in &place.buildings {
+            let (mut lo, mut hi) = (V2::new(f32::MAX, f32::MAX), V2::new(f32::MIN, f32::MIN));
+            for &q in &b.footprint {
+                lo = V2::new(lo.x.min(q[0]), lo.y.min(q[1]));
+                hi = V2::new(hi.x.max(q[0]), hi.y.max(q[1]));
+            }
+            if lo.x > hi.x {
+                continue;
+            }
+            let y = ground(lo.lerp(hi, 0.5));
+            grid.insert(lo, hi, boxes.len() as u32);
+            boxes.push(([lo.x, y - 2.0, lo.y], [hi.x, y + b.height_m, hi.y]));
+        }
+        let mut road_grid = Grid::new(place, 32.0);
+        let mut roads = Vec::new();
+        let mut views = Vec::new();
+        for e in &place.roads.edges {
+            let hw = 0.5 * e.width_m;
+            for w in e.profile.windows(2) {
+                let (a, b) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
+                let r = V2::new(hw, hw);
+                let lo = V2::new(a.x.min(b.x), a.y.min(b.y)) - r;
+                let hi = V2::new(a.x.max(b.x), a.y.max(b.y)) + r;
+                road_grid.insert(lo, hi, roads.len() as u32);
+                roads.push((a, b, hw));
+            }
+            // The road resampled every VIEW_STEP_M, at eye height.
+            let mut pts: Vec<V3> = Vec::new();
+            let mut arc = 0.0;
+            let mut next = 0.0;
+            for w in e.profile.windows(2) {
+                let v3 = |p: [f32; 3]| V3::new(p[0], p[1], p[2]);
+                let (a, b) = (v3(w[0]), v3(w[1]));
+                let len = (b - a).xz().length();
+                while next <= arc + len && len > 0.0 {
+                    pts.push(a.lerp(b, (next - arc) / len) + V3::Y * EYE_M);
+                    next += VIEW_STEP_M;
+                }
+                arc += len;
+            }
+            let n = pts.len();
+            let crest = |k: usize| {
+                k >= 2
+                    && k + 2 < n
+                    && pts[k].y - pts[k - 2].y >= CREST_M
+                    && pts[k].y - pts[k + 2].y >= CREST_M
+            };
+            for i in 0..n.saturating_sub(1) {
+                let dir = (pts[i + 1] - pts[i]).xz().normalize();
+                // Forward, and back the other way on a two-way road.
+                let back = i.checked_sub(2).map(|k| pts[k]);
+                views.push((pts[i], dir, back, crest(i)));
+                if !e.oneway {
+                    let j = i + 1;
+                    let back = (j + 2 < n).then(|| pts[j + 2]);
+                    views.push((pts[j], -dir, back, crest(j)));
+                }
+            }
+        }
+        Sight {
+            place,
+            views,
+            boxes,
+            grid,
+            roads,
+            road_grid,
         }
     }
-    best.map(|x| x.2)
+
+    /// Whether the line of sight from `a` to `b` is clear of the ground and every
+    /// building, but within `skip` of `b` (the landmark's own lot).
+    pub fn clear(&self, a: V3, b: V3, skip: f32) -> bool {
+        let run = (b - a).xz().length();
+        let end = run - skip;
+        if end <= 0.0 {
+            return true;
+        }
+        let mut t = 12.0;
+        while t < end {
+            let p = a.lerp(b, t / run);
+            if self.ground(p.xz()) > p.y {
+                return false;
+            }
+            t += 12.0;
+        }
+        let stop = a.lerp(b, end / run);
+        let step = 0.5 * self.grid.cell;
+        let n = (end / step) as usize + 1;
+        for k in 0..=n {
+            let p = a.lerp(stop, k as f32 / n as f32);
+            for &i in self.grid.at(p.xz()) {
+                let (lo, hi) = self.boxes[i as usize];
+                if segment_hits_box(a, stop, lo, hi) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    fn ground(&self, p: V2) -> f32 {
+        let (place, q) = (self.place, [p.x, p.y]);
+        place.terrain.height_at(&place.header, q).unwrap_or(0.0)
+    }
+
+    /// Whether `p` lies on a road's asphalt.
+    fn on_road(&self, p: V2) -> bool {
+        self.road_grid.at(p).iter().any(|&k| {
+            let (a, b, hw) = self.roads[k as usize];
+            segment_distance(p, a, b).0 <= hw
+        })
+    }
+}
+
+/// Whether the segment `a..b` passes through the box `lo..hi`.
+fn segment_hits_box(a: V3, b: V3, lo: [f32; 3], hi: [f32; 3]) -> bool {
+    let (a, d) = (a.to_array(), (b - a).to_array());
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for i in 0..3 {
+        if abs(d[i]) < 1e-9 {
+            if a[i] < lo[i] || a[i] > hi[i] {
+                return false;
+            }
+            continue;
+        }
+        let (mut u, mut v) = ((lo[i] - a[i]) / d[i], (hi[i] - a[i]) / d[i]);
+        if u > v {
+            core::mem::swap(&mut u, &mut v);
+        }
+        t0 = t0.max(u);
+        t1 = t1.min(v);
+        if t0 > t1 {
+            return false;
+        }
+    }
+    true
+}
+
+/// How the roads show a landmark: of the viewpoints [`VIEW_NEAR_M`] to [`VIEW_FAR_M`] off
+/// that have it ahead, those that see it, those of them on a road running straight at it
+/// and those on a crest that reveals it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Vista {
+    pub seen: u32,
+    pub terminated: u32,
+    pub reveals: u32,
+}
+
+impl Vista {
+    /// A site's score: a terminated vista or a reveal counts for this many plain views.
+    pub fn score(self) -> u32 {
+        self.seen + 4 * (self.terminated + self.reveals)
+    }
+}
+
+/// The [`Vista`] of a landmark aimed at `aim` whose lot reaches `skip` from it.
+pub fn vista(sight: &Sight, aim: V3, skip: f32) -> Vista {
+    let mut out = Vista::default();
+    for &(at, dir, back, crest) in &sight.views {
+        let to = (aim - at).xz();
+        let dist = to.length();
+        if !(VIEW_NEAR_M..=VIEW_FAR_M).contains(&dist) || dir.dot(to) < VIEW_CONE * dist {
+            continue;
+        }
+        if !sight.clear(at, aim, skip) {
+            continue;
+        }
+        out.seen += 1;
+        let off = abs(dir.turn(to));
+        let reach = TERMINATED_M.min(dist - skip);
+        let mut t = TERMINATED_STEP_M;
+        let mut straight = off <= TERMINATED_OFF_M;
+        while straight && t <= reach {
+            straight = sight.on_road(at.xz() + dir * t);
+            t += TERMINATED_STEP_M;
+        }
+        out.terminated += u32::from(straight);
+        out.reveals += u32::from(crest && back.is_some_and(|b| !sight.clear(b, aim, skip)));
+    }
+    out
+}
+
+/// The point a landmark's line of sight aims at, up its height over the middle of its
+/// bounds, and how far its lot reaches from it: kit `kit` variant `v` on a lot whose
+/// front's middle is at `base`, facing `facing` (out of the lot).
+pub fn aim(kit: &Kit, v: u8, base: V3, facing: V2) -> (V3, f32) {
+    let (lo, hi) = kit.bounds(usize::from(v));
+    let f = crate::landmarks::frame(base, facing);
+    let at = f.p(0.5 * (lo[0] + hi[0]), AIM_UP * hi[1], 0.5 * (lo[2] + hi[2]));
+    let skip = 0.5 * V2::new(hi[0] - lo[0], hi[2] - lo[2]).length() + 4.0;
+    (at, skip)
+}
+
+/// The site among `sites` (ordered best first by the landmark's own measure, each with
+/// that measure, lower better) the roads frame best: of the first [`VISTA_TRIES`] within
+/// `slack` of the best and [`VISTA_APART_M`] apart, the one with the best [`vista`], the
+/// first of those alike.
+fn framed(sight: &Sight, sites: &[(f32, Lot)], slack: f32, kit: &Kit, v: u8) -> Option<Lot> {
+    let best = sites.first()?.0;
+    let mut tried: Vec<V2> = Vec::new();
+    let mut pick: Option<(u32, Lot)> = None;
+    for &(m, lot) in sites {
+        if m > best + slack || tried.len() == VISTA_TRIES {
+            break;
+        }
+        if tried
+            .iter()
+            .any(|&q| (q - lot.front).length() < VISTA_APART_M)
+        {
+            continue;
+        }
+        tried.push(lot.front);
+        let mid = lot.at(0.0, 0.5 * kit.lot[1]);
+        let y = sight.ground(mid);
+        let (at, skip) = aim(kit, v, V3::new(lot.front.x, y, lot.front.y), -lot.inward);
+        let score = vista(sight, at, skip).score();
+        if pick.is_none_or(|p| score > p.0) {
+            pick = Some((score, lot));
+        }
+    }
+    pick.map(|p| p.1)
 }
 
 /// Indices of items binned by their bounds on a square grid.

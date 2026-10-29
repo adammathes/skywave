@@ -41,6 +41,7 @@ Kit(
                 // The drive-thru window and its little canopy on the right side.
                 Box(lo: (8.0, 1.0, -21.0), hi: (8.12, 2.2, -19.0), paint: "glass"),
                 Box(lo: (8.0, 2.8, -21.6), hi: (9.6, 3.0, -18.4), paint: "fascia"),
+                Window(at: (8.12, 1.0, -20.0), face: Right),
                 Box(lo: (-0.9, 4.8, -21.2), hi: (0.9, 5.2, -19.8), paint: "trim"),
                 // The donut: a ring on its edge facing the road, icing over its front, sprinkles.
                 Lathe(at: (0.0, 9.6, -20.5), profile: [(3.0, -1.4), (3.7, -1.21), (4.21, -0.7), (4.4, 0.0), (4.21, 0.7), (3.7, 1.21), (3.0, 1.4), (2.3, 1.21), (1.79, 0.7), (1.6, 0.0), (1.79, -0.7), (2.3, -1.21), (3.0, -1.4)], sides: 28, axis: Along, open: true, paint: "dough"),
@@ -62,13 +63,15 @@ Kit(
                 Lamp(at: (6.0, 5.2, -15.4), color: Srgb(0xFFE2B0), radius: 10.0),
                 Strut(a: (-13.5, 0.0, -3.0), b: (-13.5, 6.5, -3.0), w: 0.18, paint: "pole"),
                 Lamp(at: (-13.5, 6.7, -3.0), color: Srgb(0xFFE2B0), radius: 20.0),
-                // Stalls in front, the drive-thru lane's dashed line down the right side.
+                // Stalls in front, the drive-thru lane's dashed line down the right side and its stop
+                // bar, a car's nose ahead of the window.
                 Box(lo: (-7.56, 0.06, -13.5), hi: (-7.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-4.56, 0.06, -13.5), hi: (-4.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-1.56, 0.06, -13.5), hi: (-1.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (1.44, 0.06, -13.5), hi: (1.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (4.44, 0.06, -13.5), hi: (4.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (7.44, 0.06, -13.5), hi: (7.56, 0.08, -8.0), paint: "stripe"),
+                Box(lo: (8.3, 0.06, -23.05), hi: (11.85, 0.08, -22.75), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -30.0), hi: (12.14, 0.08, -28.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -27.0), hi: (12.14, 0.08, -25.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -24.0), hi: (12.14, 0.08, -22.5), paint: "stripe"),
@@ -101,6 +104,7 @@ Kit(
                 // The drive-thru window and its little canopy on the right side.
                 Box(lo: (6.0, 1.0, -21.0), hi: (6.12, 2.2, -19.0), paint: "glass"),
                 Box(lo: (6.0, 2.8, -21.6), hi: (7.6, 3.0, -18.4), paint: "fascia"),
+                Window(at: (6.12, 1.0, -20.0), face: Right),
                 Box(lo: (-1.0, 4.0, -20.8), hi: (1.0, 4.6, -19.2), paint: "trim"),
                 // The donut: a ring on its edge facing the road, icing over its front, sprinkles.
                 Lathe(at: (0.0, 10.5, -20.0), profile: [(4.0, -1.9), (4.95, -1.65), (5.65, -0.95), (5.9, 0.0), (5.65, 0.95), (4.95, 1.65), (4.0, 1.9), (3.05, 1.65), (2.35, 0.95), (2.1, 0.0), (2.35, -0.95), (3.05, -1.65), (4.0, -1.9)], sides: 32, axis: Along, open: true, paint: "dough"),
@@ -122,13 +126,15 @@ Kit(
                 Lamp(at: (5.5, 4.4, -15.6), color: Srgb(0xFFE2B0), radius: 10.0),
                 Strut(a: (-13.5, 0.0, -3.0), b: (-13.5, 6.5, -3.0), w: 0.18, paint: "pole"),
                 Lamp(at: (-13.5, 6.7, -3.0), color: Srgb(0xFFE2B0), radius: 20.0),
-                // Stalls in front, the drive-thru lane's dashed line down the right side.
+                // Stalls in front, the drive-thru lane's dashed line down the right side and its stop
+                // bar, a car's nose ahead of the window.
                 Box(lo: (-7.56, 0.06, -13.5), hi: (-7.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-4.56, 0.06, -13.5), hi: (-4.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-1.56, 0.06, -13.5), hi: (-1.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (1.44, 0.06, -13.5), hi: (1.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (4.44, 0.06, -13.5), hi: (4.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (7.44, 0.06, -13.5), hi: (7.56, 0.08, -8.0), paint: "stripe"),
+                Box(lo: (6.3, 0.06, -23.05), hi: (11.85, 0.08, -22.75), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -30.0), hi: (12.14, 0.08, -28.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -27.0), hi: (12.14, 0.08, -25.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -24.0), hi: (12.14, 0.08, -22.5), paint: "stripe"),
