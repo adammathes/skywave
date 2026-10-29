@@ -13,12 +13,15 @@
 //   node tools/screenshot/shoot.mjs ... --size 1280x800          # another viewport (16:10)
 //   node tools/screenshot/shoot.mjs --gallery water_tower         # a landmark's contact sheet
 //   node tools/screenshot/shoot.mjs --gallery water_tower --times noon   # only some times
+//   node tools/screenshot/shoot.mjs --gallery motel --scenario mirage_valley_2001   # in a world
 //
 // `--gallery <kit>` (may repeat) shoots every variant of a landmark kit in the landmark
 // gallery (`place=gallery`) from the fixed cameras and at the times of day in
 // `gallery.json` (written by `cargo test -p app -- --ignored write_gallery`), at 960x540
 // unless `--size` says otherwise, into out/gallery/<kit>/, then tiles them into
 // out/gallery/<kit>.png: a column per variant, a row per time and camera (sheet.mjs).
+// `--scenario <id>` dresses the gallery as that world (its palette and sky) instead of the
+// first.
 // Landmark PRs attach that sheet; the owner picks a variant by its letter.
 //
 // `--scene` may repeat and combines with `--selftest`. Scenes are named URL queries in
@@ -96,6 +99,7 @@ const galleryTimes = (() => {
   }
   return times;
 })();
+const galleryScenario = opt("--scenario", null);
 const galleryTile = (kit, shot, time) =>
   join(here, "out", "gallery", kit, `${shot.variant}-${shot.camera}-${time.name}.png`);
 for (const kit of galleryKits) {
@@ -106,7 +110,13 @@ for (const kit of galleryKits) {
   }
   for (const time of galleryTimes) {
     for (const shot of k.shots) {
-      const params = { ...shot.params, t: time.t, ...(time.lights ? { lights: "1" } : {}) };
+      // `scenario=` before `place=`: the later key wins and a world alone means its place.
+      const params = {
+        ...(galleryScenario ? { scenario: galleryScenario } : {}),
+        ...shot.params,
+        t: time.t,
+        ...(time.lights ? { lights: "1" } : {}),
+      };
       jobs.push({
         name: `gallery-${kit}-${shot.variant}-${shot.camera}-${time.name}`,
         query: "?" + Object.entries(params).map(([key, v]) => `${key}=${v}`).join("&"),

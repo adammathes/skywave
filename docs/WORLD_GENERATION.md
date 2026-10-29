@@ -195,12 +195,21 @@ and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 
 ## Landmarks
 Landmarks are the places you would slow down to look at (the feel cards, 2026-10-28). Each is a kit
-(`assets/landmarks/<id>.ron`, ADR 0007, `world::landmarks`): boxes, struts, cylinders, lathed profiles and
-lamps in named paints, in the lot's frame (`x` across, to the right seen from the road; `y` up; `z` toward the
+(`assets/landmarks/<id>.ron`, ADR 0007, `world::landmarks`): boxes, struts, cylinders, lathed profiles,
+panels and lamps in named paints, in the lot's frame (`x` across, to the right seen from the road; `y` up; `z` toward the
 road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that start `from` an earlier one and
 add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
 front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
 block a car; each `Lamp` is a `Flood` light.
+
+The kits so far: `water_tower` (the gallery's sample; the owner picked B) and the roadside set for Mirage
+Valley's boulevards (the roadside card, 2026-10-29), each in three variants awaiting the owner's pick:
+`donut_shop` (kitsch: a giant iced donut on the roof or over a walk-up stand, a drive-thru window and lane),
+`coffee_shop` (a glass dining room under a roof swooping up toward the road, or a butterfly roof; a
+canted pole sign with a starburst), `motel` (rooms round a kidney pool lit from below behind a low wall,
+an office, a pole sign with a neon arrow bending down to the drive) and `drive_in` (a screen facing the
+road that glows from dusk, speaker posts in rows, a snack bar, a ticket canopy and a marquee). Their
+signs are blank lit boards until they are sited; a sited one is lettered with an invented name.
 
 Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
 a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows
@@ -212,8 +221,9 @@ lettered with the variant, dressed in the scene's world (`scenario=`). `app::gal
 for each variant (`front` and `quarter` from the hood, `street` from the far chase camera with the car for
 scale) and writes them to `tools/screenshot/gallery.json` (`cargo test -p app -- --ignored write_gallery`;
 a test fails while it is stale). `node tools/screenshot/shoot.mjs --gallery <id>` shoots each at noon,
-golden hour and night and tiles them into `out/gallery/<id>.png`: a column per variant, a row per time and
-camera. A landmark PR attaches that sheet and the owner picks a letter.
+golden hour, dusk and night (`--scenario <id>` for another world) and tiles them into
+`out/gallery/<id>.png`: a column per variant, a row per time and camera. A landmark PR attaches that sheet
+and the owner picks a letter.
 
 Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, the gallery's layout),
 `app::places` (the kits load and round-trip, the gallery builds in every world), `app::gallery` (every
