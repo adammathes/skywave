@@ -73,6 +73,8 @@ Past a corner the two sides blend by angle, so headlands taper into the sea. The
 ridgelines into the sky's haze; there is no rectangle to see. Chunks with an ocean or lake shore draw the
 surf on the water: a foam band at the waterline and, at sea, a broken line of breakers further out.
 
+Meshes are drawn camera relative: each instance's translation goes to the GPU minus the camera's position (on the CPU) and the vertex shader projects with the view's rotation alone, adding the camera back only for lighting. In world coordinates a vertex 1–2.5 km from the origin was rounded by 0.2–0.6 mm on the GPU, and layers half a millimetre apart (a radio display on its face, mirror glass, a sign's plate) swapped in patches every frame while moving (`render::camera_relative`).
+
 WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky

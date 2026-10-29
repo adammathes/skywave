@@ -152,8 +152,7 @@ struct MeshOut {
 // less-or-equal test passes only for the nearest surface and each pixel shades once.
 @vertex
 fn vs_depth(v: VertexIn, i: InstanceIn) -> @invariant @builtin(position) vec4<f32> {
-    let world = instance_model(i) * vec4<f32>(v.pos, 1.0);
-    return frame.view_proj * world;
+    return frame.rel_view_proj * (instance_model(i) * vec4<f32>(v.pos, 1.0));
 }
 
 // Writes nothing (its target's write mask is empty); the pass needs a fragment stage.
@@ -175,11 +174,12 @@ fn cap_emissive(e: vec3<f32>) -> vec3<f32> {
 
 @vertex
 fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
-    let world = instance_model(i) * vec4<f32>(v.pos, 1.0);
+    // Camera relative (the instance's translation is), back in the world for lighting.
+    let rel = instance_model(i) * vec4<f32>(v.pos, 1.0);
     let normal_matrix = mat3x3<f32>(i.n0.xyz, i.n1.xyz, i.n2.xyz);
     var out: MeshOut;
-    out.clip = frame.view_proj * world;
-    out.world_pos = world.xyz;
+    out.clip = frame.rel_view_proj * rel;
+    out.world_pos = rel.xyz + frame.camera_pos.xyz;
     out.normal = normal_matrix * v.normal;
     out.color = v.color * i.color;
     out.uv = v.uv;

@@ -19,6 +19,8 @@ struct PackedLight {
 struct Frame {
     view_proj: mat4x4<f32>,
     inv_view_proj: mat4x4<f32>,
+    // `view_proj` from a camera at the origin: meshes' instances are camera relative.
+    rel_view_proj: mat4x4<f32>,
     // World-to-clip of each shadow cascade's sun projection.
     cascade_view_proj: array<mat4x4<f32>, 3>,
     // xyz: camera position (m), w: fog density (1/m).

@@ -86,7 +86,7 @@ pub use timing::{GpuCounts, GPU_PARTS, GPU_PART_NAMES, GPU_PASSES, GPU_PASS_NAME
 
 use bytemuck::{Pod, Zeroable};
 use cull::{Aabb, Frustum};
-use glam::{Mat3, Mat4, Vec3, Vec4Swizzles};
+use glam::{Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
 use hud::HudQuad;
 use sky::SkyModel;
 use std::future::Future;
@@ -861,6 +861,9 @@ pub struct RenderStats {
 struct FrameUniform {
     view_proj: [[f32; 4]; 4],
     inv_view_proj: [[f32; 4]; 4],
+    /// `view_proj` with the camera at the origin: what meshes are drawn with, their
+    /// instances' translations being relative to the camera ([`camera_relative`]).
+    rel_view_proj: [[f32; 4]; 4],
     cascade_view_proj: [[[f32; 4]; 4]; CASCADES],
     camera_pos: [f32; 4],
     camera_fwd: [f32; 4],
@@ -1024,12 +1027,13 @@ struct InstanceRaw {
 }
 
 impl InstanceRaw {
-    /// `inst` for a frame with `lights` lights (indices at or past it are left out).
-    fn new(inst: &MeshInstance, lights: usize) -> InstanceRaw {
+    /// `inst` for a frame with `lights` lights (indices at or past it are left out) seen
+    /// from `eye`, its translation relative to it ([`camera_relative`]).
+    fn new(inst: &MeshInstance, lights: usize, eye: Vec3) -> InstanceRaw {
         let model = Mat4::from_cols_array_2d(&inst.transform);
         let n = Mat3::from_mat4(model).inverse().transpose();
         InstanceRaw {
-            model: inst.transform,
+            model: camera_relative(inst.transform, eye),
             normal: [
                 n.x_axis.extend(0.0).to_array(),
                 n.y_axis.extend(0.0).to_array(),
@@ -1039,6 +1043,24 @@ impl InstanceRaw {
             params: instance_params(inst, lights),
         }
     }
+}
+
+/// `transform` with its translation taken relative to `eye`. Meshes are drawn camera
+/// relative: in world coordinates a vertex a kilometre or two from the origin is rounded
+/// to a tenth of a millimetre or more twice on the GPU (into the world, then back toward
+/// the camera), and a thin layer half a millimetre off its backing (a radio display, a
+/// mirror's glass, a sign's plate) lost to it in patches that changed every frame while
+/// the camera moved. Relative to the eye the numbers are small and nothing near cancels.
+fn camera_relative(mut transform: [[f32; 4]; 4], eye: Vec3) -> [[f32; 4]; 4] {
+    for (t, e) in transform[3].iter_mut().zip(eye.to_array()) {
+        *t -= e;
+    }
+    transform
+}
+
+/// `view` without its translation: the same view from a camera at the origin.
+fn view_rotation(view: Mat4) -> Mat4 {
+    Mat4::from_cols(view.x_axis, view.y_axis, view.z_axis, Vec4::W)
 }
 
 /// Bit of `params.x` (just past the light count) that skips the sun's shadow test
@@ -2833,6 +2855,10 @@ impl Renderer {
         cull: [bool; CASCADES],
     ) -> [u64; CASCADES] {
         let camera = Frustum::from_matrix(view_proj);
+        let eye = Mat4::from_cols_array_2d(&scene.camera.view)
+            .inverse()
+            .w_axis
+            .xyz();
         let boxes = fits.map(|f| Frustum::from_matrix(f.view_proj));
         let min_texels = self.quality.min_caster_texels;
         self.vis.clear();
@@ -2866,7 +2892,7 @@ impl Renderer {
             }
             self.vis.push(bits);
             self.raws.push(if bits != 0 {
-                InstanceRaw::new(inst, lights)
+                InstanceRaw::new(inst, lights, eye)
             } else {
                 InstanceRaw::zeroed()
             });
@@ -3075,8 +3101,10 @@ impl Renderer {
         let eye = inv_view.w_axis.xyz();
         let forward = -inv_view.z_axis.xyz().normalize_or(Vec3::Z);
         let rs = self.targets.size;
+        // The shadow pass draws the same camera-relative instances.
+        let to_world = Mat4::from_translation(eye);
         let cascades = fits.map(|f| CascadeUniform {
-            view_proj: f.view_proj.to_cols_array_2d(),
+            view_proj: (f.view_proj * to_world).to_cols_array_2d(),
             _pad: [[0.0; 4]; 12],
         });
         let v4 = |v: Vec3, w: f32| v.extend(w).to_array();
@@ -3084,6 +3112,7 @@ impl Renderer {
         let uniform = FrameUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
+            rel_view_proj: (proj * view_rotation(view)).to_cols_array_2d(),
             cascade_view_proj: fits.map(|f| f.view_proj.to_cols_array_2d()),
             camera_pos: v4(eye, scene.sky.fog_density.max(0.0)),
             camera_fwd: v4(forward, 0.0),
@@ -3981,7 +4010,7 @@ mod tests {
         // 16 KiB uniform block limit.
         assert_eq!(
             size_of::<FrameUniform>(),
-            5 * 64 + 29 * 16 + MAX_LIGHTS * 32
+            6 * 64 + 29 * 16 + MAX_LIGHTS * 32
         );
         assert_eq!(size_of::<PackedLight>(), 32);
         assert_eq!(size_of::<CoronaRaw>(), 32);
@@ -4017,6 +4046,7 @@ mod tests {
             [
                 "view_proj",
                 "inv_view_proj",
+                "rel_view_proj",
                 "cascade_view_proj",
                 "camera_pos",
                 "camera_fwd",
@@ -4221,7 +4251,11 @@ mod tests {
     #[test]
     fn normal_matrix_handles_non_uniform_scale() {
         let m = Mat4::from_scale(Vec3::new(4.0, 1.0, 1.0)) * Mat4::from_rotation_z(0.5);
-        let raw = InstanceRaw::new(&MeshInstance::new(MeshId(0), m.to_cols_array_2d()), 0);
+        let raw = InstanceRaw::new(
+            &MeshInstance::new(MeshId(0), m.to_cols_array_2d()),
+            0,
+            Vec3::ZERO,
+        );
         let n = Mat3::from_cols(
             Vec4::from(raw.normal[0]).xyz(),
             Vec4::from(raw.normal[1]).xyz(),
@@ -5110,6 +5144,60 @@ mod tests {
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
+    /// The web flicker on thin layers: a driver's-eye view of a radio display half a
+    /// millimetre in front of its face, 2.5 km from the origin, the car moving a little each
+    /// frame. With the shader's float32 math in world coordinates the display lost to the
+    /// face on some frames (the black wedges flickering over it); camera relative, never.
+    #[test]
+    fn thin_layers_far_from_the_origin_never_swap() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let r = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, (8, 8));
+        let (mut world_swaps, mut rel_swaps) = (0, 0);
+        for k in 0..400 {
+            let t = k as f32;
+            let car = Vec3::new(
+                2400.0 + 0.37 * t,
+                30.0 + 0.01 * (t * 0.3).sin(),
+                2450.0 + 0.11 * t,
+            );
+            let yaw = 0.3 + 0.002 * t;
+            let rot = glam::Quat::from_rotation_y(yaw);
+            let eye = car + rot * Vec3::new(0.35, 1.1, -0.3);
+            let ahead = eye + rot * Vec3::new(0.0, -0.4, 1.0);
+            let mut scene = test_scene(&[]);
+            scene.camera = Camera {
+                view: glam::camera::rh::view::look_at_mat4(eye, ahead, Vec3::Y).to_cols_array_2d(),
+                proj: glam::camera::rh::proj::directx::perspective(1.0, 16.0 / 9.0, 0.1, 3000.0)
+                    .to_cols_array_2d(),
+            };
+            let (u, _) = r.frame_uniforms(&scene);
+            let model = Mat4::from_rotation_translation(rot, car);
+            let inst = MeshInstance::new(MeshId(0), model.to_cols_array_2d());
+            let raw = InstanceRaw::new(&inst, 0, Vec3::from_slice(&u.camera_pos[..3]));
+            // The face and the display in front of it toward the driver, car local.
+            let face = Vec3::new(0.3 + 0.0001 * t, 1.0, 0.9);
+            let display = face - Vec3::Z * 0.0005;
+            let depth = |m: [[f32; 4]; 4], vp: [[f32; 4]; 4], p: Vec3| {
+                let c =
+                    Mat4::from_cols_array_2d(&vp) * (Mat4::from_cols_array_2d(&m) * p.extend(1.0));
+                c.z / c.w
+            };
+            world_swaps += usize::from(
+                depth(inst.transform, u.view_proj, display)
+                    >= depth(inst.transform, u.view_proj, face),
+            );
+            rel_swaps += usize::from(
+                depth(raw.model, u.rel_view_proj, display)
+                    >= depth(raw.model, u.rel_view_proj, face),
+            );
+        }
+        assert!(
+            world_swaps > 0,
+            "the world-space math this replaces did swap"
+        );
+        assert_eq!(rel_swaps, 0);
+    }
+
     #[test]
     fn frame_uniforms_carry_cascades_and_sky() {
         let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
@@ -5118,9 +5206,18 @@ mod tests {
         let scene = test_scene(&[]);
         let (u, c) = r.frame_uniforms(&scene);
         assert_eq!(&u.cascade_far[..3], &[30.0, 100.0, 400.0]);
+        // The shadow pass draws camera-relative instances: its matrices take them back to
+        // the world first; the forward pass samples with the world ones.
+        let eye = Vec3::from_slice(&u.camera_pos[..3]);
         for (m, cascade) in u.cascade_view_proj.iter().zip(&c) {
-            assert_eq!(*m, cascade.view_proj);
+            let rel = Mat4::from_cols_array_2d(m) * Mat4::from_translation(eye);
+            assert_eq!(rel.to_cols_array_2d(), cascade.view_proj);
         }
+        // Meshes: the same clip position from a camera-relative vertex as from the world.
+        let world = Vec3::new(3.0, 1.0, -7.0);
+        let a = Mat4::from_cols_array_2d(&u.view_proj) * world.extend(1.0);
+        let b = Mat4::from_cols_array_2d(&u.rel_view_proj) * (world - eye).extend(1.0);
+        assert!((a - b).abs().max_element() < 1e-4, "{a} {b}");
         assert!(u.cascade_texel[0] < u.cascade_texel[1]);
         // Sky ambient is blue-ish and dimmer than the sun on a white surface.
         assert!(u.sky_up[2] > u.sky_up[0]);
