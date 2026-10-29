@@ -1,6 +1,453 @@
 {
   "about": "Landmark gallery contact sheets (crates/app/src/gallery.rs); written by `cargo test -p app -- --ignored write_gallery`.",
   "kits": {
+    "coffee_shop": {
+      "about": "A jet-age coffee shop: a glass dining room under a swooping roof and a tall pole sign.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,28.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "33.4,17.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-22.7,32.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "116,28.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "149.4,17.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "93.3,32.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "232,28.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "265.4,17.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "209.3,32.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "A glass dining room under a roof that swoops up toward the street on an orange edge with neon under it, a stone kitchen block behind, a canted pole sign with a starburst.",
+          "letter": "A",
+          "name": "Upswept, orange edge"
+        },
+        {
+          "about": "The same glass room under a butterfly roof: two wings rising to the sides on raked columns, the valley over the door.",
+          "letter": "B",
+          "name": "Butterfly"
+        },
+        {
+          "about": "A with a turquoise edge and pink neon, three starbursts on the roof and bulbs along the sign: the most jet-age of the three.",
+          "letter": "C",
+          "name": "Starbursts, turquoise"
+        }
+      ]
+    },
+    "donut_shop": {
+      "about": "A donut shop with a giant donut on its roof and a drive-thru window.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,-138.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "28.3,-147.6",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-19.1,-135.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "106,-132.5",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "137.8,-142.5",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "84.3,-128.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "212,-138.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "240.5,-147.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "192.7,-135",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Kitsch",
+      "variants": [
+        {
+          "about": "A white stucco shop with a glass front and a pink fascia; a strawberry-iced donut 9 m across stands on its roof, lit from dusk.",
+          "letter": "A",
+          "name": "Glazed on the roof"
+        },
+        {
+          "about": "A small walk-up stand with two service windows under a striped awning, a bigger chocolate donut over it.",
+          "letter": "B",
+          "name": "Chocolate walk-up"
+        },
+        {
+          "about": "A's shop and donut with neon round the donut's rim and hole and a row of bulbs on the fascia: it reads at night.",
+          "letter": "C",
+          "name": "Neon-ringed"
+        }
+      ]
+    },
+    "drive_in": {
+      "about": "A drive-in theater: a big screen facing the road, speaker posts, a snack bar and a marquee.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,-278.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "53.7,-295.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-35.7,-273.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "156,-271.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "213.8,-289.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "117.3,-265.8",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "312,-278.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "365.7,-295.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "276.3,-273.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "A white screen in a dark frame on a braced steel lattice; speaker posts in rows, a snack bar, a ticket canopy and a marquee by the road.",
+          "letter": "A",
+          "name": "Steel-frame screen"
+        },
+        {
+          "about": "The screen set in a stucco tower with stepped fins and cyan neon bands; the rest as A.",
+          "letter": "B",
+          "name": "Streamline tower"
+        },
+        {
+          "about": "A with bulbs round the screen and the marquee and a starburst over the marquee.",
+          "letter": "C",
+          "name": "Bulbs and a starburst"
+        }
+      ]
+    },
     "hillside_letters": {
       "about": "The valley's name in giant letters on the hillside above it.",
       "shots": [
@@ -10,7 +457,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "0,23.6",
+            "pos": "0,-456.4",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -24,7 +471,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "25,15.7",
+            "pos": "25,-464.3",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -38,7 +485,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "-17.4,27.7",
+            "pos": "-17.4,-452.3",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -52,7 +499,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "130,41.6",
+            "pos": "130,-438.4",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -66,7 +513,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "165.3,30.4",
+            "pos": "165.3,-449.6",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -80,7 +527,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "105.3,47.9",
+            "pos": "105.3,-432.1",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -94,7 +541,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "260,23.6",
+            "pos": "260,-456.4",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -108,7 +555,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "285,15.7",
+            "pos": "285,-464.3",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -122,7 +569,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "242.6,27.7",
+            "pos": "242.6,-452.3",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -150,6 +597,155 @@
         }
       ]
     },
+    "motel": {
+      "about": "A motor court: rooms round a kidney pool behind a low wall and a sign with a neon arrow.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,-612.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "34.2,-623.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-23.1,-608.6",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "136,-612.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "170.2,-623.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "112.9,-608.6",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "272,-612.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "306.2,-623.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "248.9,-608.6",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "Two floors of rooms on a walkway round a lit kidney pool behind a low wall; a pole sign whose neon arrow bends down to the drive.",
+          "letter": "A",
+          "name": "Two-story court"
+        },
+        {
+          "about": "One long floor of rooms under a covered walk, the same pool; the board and arrow ride a raked boomerang pylon.",
+          "letter": "B",
+          "name": "Long and low, boomerang pylon"
+        },
+        {
+          "about": "A in pink and mint with marquee bulbs round the sign and along the arrow and a five-point star on top: the kitsch take.",
+          "letter": "C",
+          "name": "Starlit"
+        }
+      ]
+    },
     "water_tower": {
       "about": "A municipal water tower on its own lot.",
       "shots": [
@@ -159,7 +755,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "0,-85.2",
+            "pos": "0,-725.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -173,7 +769,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "56.7,-103",
+            "pos": "56.7,-743",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -187,7 +783,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "-39.7,-74.8",
+            "pos": "-39.7,-714.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -201,7 +797,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "100,-87.8",
+            "pos": "100,-727.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -215,7 +811,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "155.2,-105.2",
+            "pos": "155.2,-745.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -229,7 +825,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "61.3,-77.7",
+            "pos": "61.3,-717.7",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -243,7 +839,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "200,-85.2",
+            "pos": "200,-725.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -257,7 +853,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "256.7,-103",
+            "pos": "256.7,-743",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -271,7 +867,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "160.3,-74.8",
+            "pos": "160.3,-714.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -310,6 +906,11 @@
       "lights": false,
       "name": "golden",
       "t": "17:40"
+    },
+    {
+      "lights": false,
+      "name": "dusk",
+      "t": "18:45"
     },
     {
       "lights": false,

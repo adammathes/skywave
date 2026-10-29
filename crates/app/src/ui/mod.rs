@@ -175,6 +175,8 @@ pub struct Ui {
     map: MapHud,
     /// A UI scale the scene asked for, kept over whatever the store loads.
     forced_ui_scale: Option<f32>,
+    /// The driver a scene named (`driver=`), over the setting until one is picked.
+    forced_driver: Option<usize>,
     radio: CarRadio,
     deck: CarDeck,
     /// Seconds since the corner readout last had something new (a transport key, a track
@@ -261,6 +263,7 @@ impl Ui {
             hud: HudBuilder::new(),
             map: MapHud::default(),
             forced_ui_scale: None,
+            forced_driver: None,
             radio: CarRadio::new(),
             deck: CarDeck::default(),
             readout_s: readout::HIDDEN_S,
@@ -312,6 +315,16 @@ impl Ui {
 
     /// Uses UI scale `s` this session, also over settings loaded later (not saved unless
     /// another change is).
+    /// Drives with preset driver `i` this session (a scene's `driver=`), without saving it.
+    pub fn force_driver(&mut self, i: usize) {
+        self.forced_driver = Some(i % traffic::figure::PRESETS);
+    }
+
+    /// The player's driver: the scene's, else the one picked on the Vehicle page.
+    pub fn driver(&self) -> usize {
+        self.forced_driver.unwrap_or(self.settings.driver)
+    }
+
     pub fn force_ui_scale(&mut self, s: f32) {
         self.forced_ui_scale = Some(s);
         self.settings.ui_scale = s;
@@ -480,6 +493,7 @@ impl Ui {
         if let Some(s) = old.forced_ui_scale {
             self.force_ui_scale(s);
         }
+        self.forced_driver = old.forced_driver;
     }
 
     /// Hands over the settings store (to the app of the next world).
@@ -631,6 +645,7 @@ impl Ui {
             frame_rate: self.frame_rate(),
             panel_hz: self.panel_hz,
             browse: self.browse,
+            driver: self.driver(),
             scenario: self.scenario,
         }
     }
@@ -749,6 +764,11 @@ impl Ui {
                 self.browse = [i, paint];
             }
             Effect::Choose(ItemId::Paint, k) => self.browse[1] = k,
+            Effect::Choose(ItemId::Driver, k) => {
+                self.settings.driver = k % traffic::figure::PRESETS;
+                self.forced_driver = None;
+                self.dirty = true;
+            }
             Effect::Choose(ItemId::ClockSpeed, i) => {
                 self.settings.clock_speed = CLOCK_SPEEDS[i.min(CLOCK_SPEEDS.len() - 1)];
                 self.dirty = true;

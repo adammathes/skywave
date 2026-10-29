@@ -22,6 +22,7 @@ pub mod daylight;
 pub mod deck;
 pub mod dragstrip;
 pub mod drive;
+pub mod driver;
 pub mod gallery;
 mod input;
 pub mod lighting;
@@ -171,6 +172,8 @@ pub struct App {
     time: TimeOfDay,
     meshes: Vec<Mesh>,
     car_meshes: CarMeshes,
+    /// The player's preset drivers, built for the place's era.
+    pub(crate) drivers: driver::Drivers,
     /// Every car and paint registered so far (the one driven among them), for switching
     /// back and for the turntable.
     cars: Vec<RegisteredCar>,
@@ -329,6 +332,7 @@ impl App {
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let sound = sound::Sound::new(&place, &drive);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
+        let wardrobe = driver::wardrobe_for(place.header.era);
         if let Some(r) = &rail {
             let line = &r.railway.train.line;
             let pts: Vec<[f32; 2]> = line.pts.iter().map(|p| [p[0], p[2]]).collect();
@@ -351,6 +355,10 @@ impl App {
         let world_instances = instances.len();
         let car_meshes = model.register(|m| {
             meshes.push(m.clone());
+            MeshId(meshes.len() as u32 - 1)
+        });
+        let drivers = driver::Drivers::build(wardrobe, |m| {
+            meshes.push(m);
             MeshId(meshes.len() as u32 - 1)
         });
         meshes.push(preview::turntable_mesh());
@@ -424,6 +432,7 @@ impl App {
             },
             meshes,
             car_meshes,
+            drivers,
             cars,
             preview: None,
             turntable,
@@ -516,6 +525,9 @@ impl App {
         }
         if let Some(s) = setup.ui_scale {
             app.ui.force_ui_scale(s);
+        }
+        if let Some(d) = setup.driver {
+            app.ui.force_driver(d);
         }
         // A scene's density applies now; the setting's once the settings are loaded.
         app.traffic_scene = setup.traffic_density();
@@ -1087,6 +1099,18 @@ impl App {
                 },
                 &mut self.instances,
             );
+            if let Some(d) = self.drivers.get(self.ui.driver()) {
+                let look = self.camera.look_yaw(alpha);
+                // In the cockpit the driver moves with the seat adjustment, as the eye does.
+                let p = &self.camera.prefs;
+                let shift = if cabin == drive::Cabin::Full {
+                    Vec3::new(0.0, p.seat_up_m, -p.seat_forward_m)
+                } else {
+                    Vec3::ZERO
+                };
+                self.drive
+                    .push_driver(alpha, d, cabin, look, shift, &mut self.instances);
+            }
         }
         // The car's lamps, the nearest NPC cars' low beams, then every static light the
         // photocell has on; each instance gets the nearest that reach it, the car's
@@ -1132,9 +1156,14 @@ impl App {
         } else {
             0.0
         };
+        let seated = if self.npcs.active() {
+            &self.npcs.seated[..]
+        } else {
+            &[]
+        };
         self.npcs
             .crowd
-            .push(alpha, eye, clear, &self.lights, &mut self.instances);
+            .push(alpha, eye, clear, &self.lights, seated, &mut self.instances);
         if self.preview.is_some() {
             // Nothing that moves or stands by the eye cuts into the turntable: drop the
             // traffic, people and props near it (in place, keeping their order).
@@ -1157,6 +1186,7 @@ impl App {
                     car: &car.meshes,
                     layout: &car.layout,
                     turntable: self.turntable,
+                    driver: self.drivers.get(self.ui.driver()),
                 };
                 let glow = lighting::car_glow(&daylight);
                 let fill = daylight.window_emissive_scale;
@@ -1655,6 +1685,9 @@ fn lamp_heads(lenses: &Mesh) -> Vec<Vec3> {
 mod tests {
     use super::*;
 
+    /// Meshes the player's preset drivers add at setup.
+    const DRIVER_MESHES: usize = traffic::figure::PRESETS * traffic::figure::PARTS;
+
     /// Seconds since the first call: the platform clock tests pass to [`App::frame`].
     pub(crate) fn wall_clock() -> f64 {
         static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -1906,10 +1939,15 @@ mod tests {
         // the chase view).
         assert_eq!(MeshId(world as u32), ids.lods[0].body[0]);
         // ...then the turntable's disc.
-        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 4));
-        assert_eq!(ids.telltales, [3, 2].map(|k| MeshId(meshes as u32 - k)));
+        let drivers = DRIVER_MESHES as u32;
+        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 4 - drivers));
+        assert_eq!(
+            ids.telltales,
+            [3, 2].map(|k| MeshId(meshes as u32 - k - drivers))
+        );
         assert_eq!(turntable, MeshId(meshes as u32 - 1));
-        assert_eq!(view.instances.len(), world + 7);
+        // Body, glass, lamps, four wheels, the cabin and steering wheel, the driver.
+        assert_eq!(view.instances.len(), world + 9 + traffic::figure::PARTS);
         for (i, inst) in view.instances[..world].iter().enumerate() {
             assert_eq!(inst.mesh, MeshId(i as u32));
         }
@@ -1917,9 +1955,10 @@ mod tests {
         assert_eq!(view.instances[world].mesh, lod.body[0]);
         assert_eq!(view.instances[world + 1].mesh, lod.glass);
         assert_eq!(view.instances[world + 2].mesh, lod.lights[0][0]);
-        assert!(view.instances[world + 3..]
+        assert!(view.instances[world + 3..world + 7]
             .iter()
             .all(|i| i.mesh == lod.wheel));
+        assert_eq!(view.instances[world + 7].mesh, lod.interior);
         for inst in view.instances {
             assert!(Mat4::from_cols_array_2d(&inst.transform).is_finite());
         }
@@ -1970,15 +2009,21 @@ mod tests {
         assert!(car.contains(&ids.lods[0].interior));
         assert!(car.contains(&ids.lods[0].steering_wheel));
         assert!(car.contains(&ids.lods[0].shell_inside));
-        assert_eq!(car.len(), 11 + app.drive.layout.dial_count);
+        // ...and the driver's arms, legs and pelvis.
+        let driver = traffic::figure::PARTS - 2;
+        assert_eq!(car.len(), 11 + app.drive.layout.dial_count + driver);
         assert_eq!(app.instances.capacity(), cap);
-        // Back in the chase view the cabin is not drawn.
+        // Back in the chase view the cabin shows through the glass, its walls do not.
         app.set_camera_mode(CameraMode::ChaseNear);
         let view = app.scene_view(1.0, 16.0 / 9.0);
         assert!(view
             .instances
             .iter()
-            .all(|i| i.mesh != ids.lods[0].interior));
+            .any(|i| i.mesh == ids.lods[0].interior));
+        assert!(view
+            .instances
+            .iter()
+            .all(|i| i.mesh != ids.lods[0].shell_inside));
     }
 
     #[test]
@@ -2186,7 +2231,11 @@ mod tests {
     fn a_streamed_town_fills_its_ring_and_its_lamps_pool_the_same() {
         let query = "t=22:30&cam=cockpit&lights=1&still=1";
         let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
-        assert!(app.is_streamed() && app.world_instances == 0 && app.meshes().len() < 40);
+        assert!(
+            app.is_streamed()
+                && app.world_instances == 0
+                && app.meshes().len() < 40 + DRIVER_MESHES
+        );
         assert!(app.lights.lights().is_empty());
         let mut pool = render::ChunkPool::new(app.chunk_pool_config());
         let mut input = InputMapper::default();

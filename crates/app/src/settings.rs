@@ -4,7 +4,7 @@
 //! ```json
 //! { "version": 1,
 //!   "drive": { "handling": "arcade", "headlights": "auto", "vehicle": "gannet_gt",
-//!              "paint": 0 },
+//!              "paint": 0, "driver": "jacket" },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
@@ -361,6 +361,8 @@ pub struct Settings {
     /// The palette entry `vehicle` is painted in (0, its first, until one is picked on the
     /// Vehicle page; an entry past its palette is the first).
     pub paint: usize,
+    /// The player's driver: one of `traffic::figure::PRESETS`, picked on the Vehicle page.
+    pub driver: usize,
     /// The selected camera: changed on the Camera page and by cycling while driving, and
     /// the one the game starts in (a scene's `cam=` overrides it). Never `Orbit`.
     pub camera: CameraMode,
@@ -423,6 +425,7 @@ impl Default for Settings {
             headlights_auto: true,
             vehicle: None,
             paint: 0,
+            driver: 0,
             camera: CameraMode::ChaseMid,
             cockpit_fov_deg: TUNING.cockpit_fov_deg,
             seat_height_cm: 0.0,
@@ -469,6 +472,7 @@ struct DriveSection {
     vehicle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     paint: Option<usize>,
+    driver: String,
 }
 
 impl Default for DriveSection {
@@ -478,6 +482,7 @@ impl Default for DriveSection {
             headlights: headlights_name(Settings::default().headlights_auto).to_owned(),
             vehicle: None,
             paint: None,
+            driver: crate::driver::preset_key(0),
         }
     }
 }
@@ -718,6 +723,7 @@ impl Settings {
                 headlights: headlights_name(self.headlights_auto).to_owned(),
                 vehicle: self.vehicle.map(str::to_owned),
                 paint: self.vehicle.map(|_| self.paint),
+                driver: crate::driver::preset_key(self.driver),
             },
             "camera": CameraSection::of(self),
             "video": Video {
@@ -789,6 +795,7 @@ impl Settings {
             headlights_auto: drive.headlights != headlights_name(false),
             vehicle: drive.vehicle.as_deref().and_then(builtin_vehicle),
             paint: drive.paint.unwrap_or(0),
+            driver: crate::driver::preset_from_key(&drive.driver).unwrap_or(0),
             camera: CameraMode::from_name(&camera.mode).unwrap_or(d.camera),
             cockpit_fov_deg: camera.cockpit_fov_deg,
             seat_height_cm: camera.seat_height_cm,
@@ -837,6 +844,7 @@ mod tests {
             headlights_auto: false,
             vehicle: Some("homestead_wagon"),
             paint: 3,
+            driver: 2,
             camera: CameraMode::Cockpit,
             cockpit_fov_deg: 71.0,
             seat_height_cm: 4.0,

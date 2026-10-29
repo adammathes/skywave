@@ -584,6 +584,12 @@ impl CameraRig {
         self.curr = s;
     }
 
+    /// The look-around's yaw `alpha` of the way through the step, rad (positive left);
+    /// the driver's head turns with it.
+    pub fn look_yaw(&self, alpha: f32) -> f32 {
+        mix(self.prev.look_yaw, self.curr.look_yaw, alpha)
+    }
+
     /// The camera `alpha` of the way from the previous step to the current one.
     pub fn pose(&self, drive: &Drive, alpha: f32) -> CameraPose {
         let t = &self.tuning;

@@ -26,6 +26,9 @@ main pass      → HDR Rgba16Float at the resolution scale (50–100%), instance
                height + distance fog tinted by sky toward the sun, emissive channel added last
 sky            analytic sky model (Preetham or Hosek-Wilkie fit, evaluated in the shader per pixel) + sun disc + moon + stars at night;
                drawn after the meshes at the far plane, so only uncovered pixels shade it
+glass          car windows (`MeshInstance::glass`): after the sky, alpha-blended (the instance's vertex alpha, 150/255
+               for car glass, toward opaque at grazing angles by Schlick's curve), depth tested, no depth writes, never
+               in the pre-pass or the shadow cascades as drawn by the app; the cabin and driver show through
 transparents   water (planar reflection, phase 2), windows glow quads
 coronas        additive soft sprites over lamp heads, car lamps, neon, the sun and moon; occlusion from 5 depth samples
 bloom          threshold on emissive/bright, 4–5-level downsample/upsample (Rgba16Float, from half the scaled target)

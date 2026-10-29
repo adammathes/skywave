@@ -1243,6 +1243,10 @@ fn browsed(h: &Harness) -> (usize, usize) {
 
 /// The turntable's meshes in a fresh scene view: its instances come last, the disc last of
 /// them, and none casts a shadow or takes a street lamp.
+/// Instances the turntable draws: body, glass, lamps, four wheels, the interior and
+/// steering wheel, the disc and the driver's parts.
+const PREVIEW: usize = 10 + traffic::figure::PARTS;
+
 fn turntable(h: &mut Harness) -> Vec<render::MeshId> {
     h.app.scene_view(1.0, 16.0 / 9.0);
     let range = h.app.preview_instances();
@@ -1292,7 +1296,15 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     h.open(&[ItemId::Open(Page::Vehicle)]);
     assert_eq!(h.page(), Page::Vehicle);
     let ids: Vec<ItemId> = h.ui().items().iter().map(|i| i.id).collect();
-    assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(0)]);
+    assert_eq!(
+        ids,
+        [
+            ItemId::VehicleCar,
+            ItemId::Paint,
+            ItemId::Driver,
+            ItemId::Vehicle(0)
+        ]
+    );
     assert_eq!((h.focus(), browsed(&h)), (0, (0, 0)));
     let text = h.hud_text();
     let gannet = &roster::roster()[0];
@@ -1305,10 +1317,11 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     );
     assert!(text.contains("155 mph") && text.contains("1980s"), "{text}");
     // From the cockpit the turntable stands where the cabin was: no car of our own.
-    assert_eq!(turntable(&mut h).len(), 8);
+    assert_eq!(turntable(&mut h).len(), PREVIEW);
     let world = h.app.world_instances;
-    let view = h.app.scene_view(1.0, 16.0 / 9.0);
-    assert!(view.instances[world..]
+    let _ = h.app.scene_view(1.0, 16.0 / 9.0);
+    let turntable_at = h.app.preview_instances().start;
+    assert!(h.app.instances[world..turntable_at]
         .iter()
         .all(|i| i.mesh != gannet_ids.lods[0].interior));
     let (at, heading) = spot(&h.app);
@@ -1430,12 +1443,9 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
             );
             // Exactly one car on the disc: the browsed one's meshes, in its first paint.
             let meshes = turntable(&mut h);
-            let spec = crate::vehicles::builtin_spec(builtin[i].0).unwrap();
-            let open = crate::vehicles::builtin_shape(&spec)
-                .unwrap()
-                .roof
-                .convertible();
-            assert_eq!(meshes.len(), if open { 10 } else { 8 }, "{}", builtin[i].0);
+            // Body, glass, lamps, four wheels, the cabin, the disc and the driver, open
+            // top or not.
+            assert_eq!(meshes.len(), PREVIEW, "{}", builtin[i].0);
             let ids = h
                 .app
                 .cars
@@ -1469,7 +1479,8 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
     // The paint row and Drive keep the car; Back leaves without driving it.
     h.pad(PadButton::DpadDown);
     h.pad(PadButton::DpadDown);
-    assert_eq!(h.item(2).id, ItemId::Vehicle(last));
+    h.pad(PadButton::DpadDown);
+    assert_eq!(h.item(3).id, ItemId::Vehicle(last));
     h.pad(PadButton::East);
     assert_eq!(h.page(), Page::Pause);
     assert!(turntable(&mut h).is_empty(), "the page is closed");
@@ -1644,11 +1655,12 @@ fn fits(h: &mut Harness, what: &str, scale: f32) {
         }
     }
     let text = h.hud_text();
-    for want in ["Car", "Paint", "Drive this car"] {
+    for want in ["Car", "Paint", "Driver", "Drive this car"] {
         assert!(text.contains(want), "{what}: {text}");
     }
     if scale <= 1.5 {
-        assert!(text.contains("Top speed"), "{what}: {text}");
+        // At 16:10 and 1.5 the Driver row leaves room for the specs down to the drive.
+        assert!(text.contains("Engine"), "{what}: {text}");
         assert!(stage.is_some(), "{what}: room for the turntable");
     }
     match stage {
@@ -1685,7 +1697,7 @@ fn nothing_near_the_eye_cuts_into_the_turntable() {
     assert!(h.app.npcs.count() > 0, "traffic is running");
     h.open(&[ItemId::Open(Page::Vehicle)]);
     let n = turntable(&mut h).len();
-    assert_eq!(n, 8);
+    assert_eq!(n, PREVIEW);
     let world = h.app.world_instances;
     let eye = h.app.camera.pose(&h.app.drive, 1.0).eye;
     let range = h.app.preview_instances();

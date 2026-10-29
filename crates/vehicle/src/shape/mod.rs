@@ -64,6 +64,12 @@ pub struct Cockpit {
     /// The first `dial_count` entries are real.
     pub dials: [Dial; 3],
     pub dial_count: u8,
+    /// The driver's hip point (`InteriorShape::seat`).
+    pub hip: [f32; 3],
+    /// Where the driver's heels rest: the floor behind the pedals, on the driver's line.
+    pub heel: [f32; 3],
+    /// The steering wheel rim's radius (to the middle of its tube).
+    pub wheel_radius: f32,
 }
 
 /// A built car. All meshes are in model space except `wheels`.

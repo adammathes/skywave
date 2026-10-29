@@ -13,7 +13,7 @@ behaviour (a drag strip's tree, a crossing's gates) but makes a variant a code c
 ## Decision
 A landmark is a kit: a small RON file, `assets/landmarks/<id>.ron` (ADR 0002's parser, no new
 dependency), of a few primitives in the lot's own frame: boxes, struts (square beams between two
-points), cylinders, lathed profiles and lamps, each in a named paint (a palette color, so it dresses
+points), cylinders, lathed profiles, panels (flat slabs on any plane, from 2026-10-29) and lamps, each in a named paint (a palette color, so it dresses
 like its world, or a fixed sRGB one; a surface pattern; an optional glow). Variants are lettered A, B,
 C in file order; a variant may start `from` an earlier one and add parts or repaint, so a kitsch take on
 a grounded piece is a few lines. One `PropKind::Landmark { kit, variant }` covers every kit; the
@@ -34,3 +34,9 @@ New variants are data-only edits that the gallery (`place=gallery`) and its cont
 (`tools/screenshot/shoot.mjs --gallery <id>`) show at once. A kit's index is its place in file-name
 order, so a kit is added, never renamed or removed, once a place stores it. The kit frame and the
 primitive set are the format; growing it (a sweep, a sign face) is a change to this ADR.
+
+## Amendment, 2026-10-29 (the roadside set)
+A swooping roof, a canted sign board and a butterfly roof's wings are flat slabs that are neither
+level nor upright, which boxes cannot say and a row of struts says badly. `Panel { a, b, c, t }` is the
+parallelogram with corners `a`, `b`, `c` and `b + c - a`, `t` thick. A lathe's profile may now run back
+down its axis (the inside of a ring, a donut's hole): those segments face the profile's right side.

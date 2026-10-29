@@ -16,20 +16,15 @@ use world::template::RegionTemplate;
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
-/// The landmark kits, in file-name order, as the game attaches them to the grammar.
-const KITS: [&str; 2] = [
-    include_str!("../../../assets/landmarks/hillside_letters.ron"),
-    include_str!("../../../assets/landmarks/water_tower.ron"),
-];
 
 fn basin(seed: u64) -> Place {
     let t: RegionTemplate = ron::from_str(BASIN).expect("parse");
     t.validate().expect("validate");
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("grammar");
     g.lexicon = ron::from_str(LEXICON).expect("lexicon");
-    g.landmarks = KITS
+    g.landmarks = world::landmarks::BUILTIN
         .iter()
-        .map(|t| ron::from_str(t).expect("kit"))
+        .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
         .collect();
     build_place(Seed(seed), &t, &g)
 }

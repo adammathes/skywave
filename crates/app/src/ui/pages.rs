@@ -5,8 +5,9 @@
 //! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Show controls (the
 //!            controls card) · Fullscreen (on/off; the menu stays open) · Quit (native only)
 //! Vehicle:   Car (left/right through every built-in car this world has) · Paint (its
-//!            palette) · Drive this car; a turntable preview and the car's specs beside
-//!            them, and Select on any row swaps the car in where you are
+//!            palette) · Driver (the preset drivers) · Drive this car; a turntable preview
+//!            and the car's specs beside them, and Select on any row swaps the car in where
+//!            you are
 //! Worlds:    one card per scenario, side by side, three a page (still, title, kind and
 //!            year, car and station counts; "coming" on a stub); Select loads that world
 //! Settings:  Drive › · Camera › · Controls › · Video › · HUD › · Audio › · World › · About ›
@@ -103,6 +104,8 @@ pub enum ItemId {
     World(usize),
     /// The Vehicle page's paint: an entry of the car's palette.
     Paint,
+    /// The player's driver: one of `traffic::figure::PRESETS`, saved as it is chosen.
+    Driver,
     /// Look Y (and free-fly look Y) invert on a device.
     InvertLookY(DeviceKind),
     InvertLookX(DeviceKind),
@@ -185,6 +188,8 @@ pub struct PageCtx<'a> {
     pub panel_hz: f64,
     /// The Vehicle page's car (a [`crate::vehicles::BUILTIN`] index) and paint.
     pub browse: [usize; 2],
+    /// The player's driver (a `traffic::figure::PRESETS` index).
+    pub driver: usize,
     /// The world the app is: an index into [`crate::scenario::BUILTIN`].
     pub scenario: usize,
 }
@@ -771,6 +776,14 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     index: paint.min(paints - 1),
                 },
             );
+            add(
+                ItemId::Driver,
+                "Driver",
+                Widget::Choice {
+                    options: &traffic::figure::PRESET_NAMES,
+                    index: ctx.driver % traffic::figure::PRESETS,
+                },
+            );
             add(ItemId::Vehicle(car), "Drive this car", Widget::Action);
         }
         Page::About => {}
@@ -819,6 +832,7 @@ mod tests {
             frame_rate: FrameRate::Half,
             panel_hz: 90.0,
             browse: [3, 1],
+            driver: 0,
             scenario: 0,
         };
         let mut items = Vec::new();
@@ -847,7 +861,15 @@ mod tests {
         assert!(items.iter().all(|i| i.widget == Widget::Action));
         build(Page::Vehicle, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
-        assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(3)]);
+        assert_eq!(
+            ids,
+            [
+                ItemId::VehicleCar,
+                ItemId::Paint,
+                ItemId::Driver,
+                ItemId::Vehicle(3)
+            ]
+        );
         let Widget::Choice { options, index } = items[0].widget else {
             panic!("{:?}", items[0])
         };
@@ -861,7 +883,11 @@ mod tests {
             panic!("{:?}", items[1])
         };
         assert_eq!((options.len(), index), (7, 1), "the Regent's palette");
-        assert_eq!(items[2].widget, Widget::Action);
+        let Widget::Choice { options, .. } = items[2].widget else {
+            panic!("{:?}", items[2])
+        };
+        assert_eq!(options, traffic::figure::PRESET_NAMES);
+        assert_eq!(items[3].widget, Widget::Action);
         assert!(note(Page::About)
             .unwrap()
             .contains("Created by Adam Mathes"));

@@ -18,6 +18,13 @@
 //!   edge, benches and a lamp.
 //! - **The channel ramps**: chain-link along both lips of the flood channel, open where a
 //!   road bridges it, around each ramp and at its top.
+//! - **The roadside set** ([`ROADSIDE`]): landmark kits on lots of their own size. The donut
+//!   shop, the coffee shop and the motel go on commercial or strip lots on an arterial,
+//!   nearest the boulevard, [`ROADSIDE_APART_M`] from each other and the garage and stand;
+//!   the drive-in on open farmland (or an industrial lot) off a road that is not the
+//!   freeway, the site farthest from downtown within [`DRIVE_IN_VIEW_M`] of the freeway, so
+//!   its screen shows from it. Their lots' buildings go; each gets its kit's
+//!   lamps and parked cars at its own hours.
 //! - **The landmarks** built from kits ([`crate::landmarks`]; the variant each wears is the
 //!   owner's pick from the gallery's contact sheet, [`LETTERS`], [`WATER_TOWER`]): the
 //!   hillside letters on the slope of the hills [`LETTERS_RISE_M`] above their foot,
@@ -98,6 +105,21 @@ const LETTERS_ROAD_CLEAR_M: f32 = 12.0;
 pub const TOWER_APART_M: f32 = 200.0;
 const TOWER_REACH_M: f32 = 192.0;
 
+/// The roadside set: each landmark kit by id, the variant the owner picked for this world
+/// (2026-10-29, PR #70) and its point of interest. A kit the grammar does not carry is
+/// left out.
+pub const ROADSIDE: [(&str, char, PoiKind); 4] = [
+    ("donut_shop", 'B', PoiKind::DonutShop),
+    ("coffee_shop", 'C', PoiKind::CoffeeShop),
+    ("motel", 'C', PoiKind::Motel),
+    ("drive_in", 'A', PoiKind::DriveIn),
+];
+/// The least distance between the roadside set's lots and from them to the garage's and
+/// the stand's, m.
+pub const ROADSIDE_APART_M: f32 = 250.0;
+/// The farthest the drive-in's lot stands from the freeway, m (its screen shows from it).
+pub const DRIVE_IN_VIEW_M: f32 = 350.0;
+
 /// A site a set piece stands on: the middle of its front at the property line, the way
 /// into it from the road, the way along the road.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -168,6 +190,20 @@ pub struct SetPieces {
     /// The landmarks built from kits: the letters and the water tower, those that found a
     /// site.
     pub marks: Vec<Mark>,
+    /// The roadside set, in [`ROADSIDE`] order (those that found a lot).
+    pub roadside: Vec<Roadside>,
+}
+
+/// One of the roadside set on its lot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Roadside {
+    /// The kit's index in the grammar's kits and the variant's in the kit.
+    pub kit: u8,
+    pub variant: u8,
+    pub poi: PoiKind,
+    pub lot: Lot,
+    /// The kit's lot: width along the road and depth into the lot, m.
+    pub size: (f32, f32),
 }
 
 impl SetPieces {
@@ -203,6 +239,9 @@ impl SetPieces {
         for &c in &self.crossings {
             push(c, PoiKind::GradeCrossing);
         }
+        for r in &self.roadside {
+            push(r.lot.at(0.0, 0.5 * r.size.1), r.poi);
+        }
         for mark in &self.marks {
             push(mark.middle(), mark.kind);
         }
@@ -233,6 +272,9 @@ impl SetPieces {
             let r = out_dir.right() * (0.5 * RAIL_M + 2.0);
             let (a, b) = (at - out_dir * 2.0, at + out_dir * (RAIL_OUT_M + 2.0));
             out.push(vec![a - r, b - r, b + r, a + r]);
+        }
+        for r in &self.roadside {
+            out.push(r.lot.rect(r.size.0, r.size.1));
         }
         for mark in &self.marks {
             out.push(mark.lot.rect(mark.size[0], mark.size[1]));
@@ -480,6 +522,79 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
         .map(|r| [V2::from_array(r[0]), V2::from_array(r[1])])
         .collect();
 
+    // The roadside set, in order, each on ground nothing else keeps.
+    let mut fronts: Vec<V2> = s.garage.iter().chain(&s.stand).map(|l| l.front).collect();
+    for (id, letter, poi) in ROADSIDE {
+        let Some(k) = kits.iter().position(|k| k.id == id) else {
+            continue;
+        };
+        let kit = &kits[k];
+        let variant = (letter as usize).wrapping_sub('A' as usize);
+        if variant >= kit.variants.len() {
+            continue;
+        }
+        let size = (kit.lot[0], kit.lot[1]);
+        let taken = s.footprints();
+        let free = |l: &Lot| {
+            let rect = l.rect(size.0, size.1);
+            fronts
+                .iter()
+                .all(|&f| (f - l.front).length() >= ROADSIDE_APART_M)
+                && !samples(l, size.0, size.1).any(|q| taken.iter().any(|a| point_in_polygon(q, a)))
+                && !taken.iter().flatten().any(|&q| point_in_polygon(q, &rect))
+        };
+        let lot = if poi == PoiKind::DriveIn {
+            // Off the freeway (in view of it) and out by the edge: the farthest from
+            // downtown of the lots near enough the freeway, else the nearest the freeway.
+            let to_fwy = |p: V2| to_line(p, &hwy);
+            let key = |l: &Lot| {
+                let mid = l.at(0.0, 0.5 * size.1);
+                let near = to_fwy(mid) <= DRIVE_IN_VIEW_M;
+                let v = if near {
+                    -(mid - downtown).length()
+                } else {
+                    to_fwy(mid)
+                };
+                (!near, v, l.key)
+            };
+            // Open farmland at the edge (or an industrial lot), off any road but the freeway.
+            let zones = [ZoneId::Farmland, ZoneId::Industrial];
+            let kinds = [LotKind::Lot, LotKind::LotEmpty];
+            let roads = [
+                RoadClass::Arterial,
+                RoadClass::Collector,
+                RoadClass::Local,
+                RoadClass::Rural,
+            ];
+            lots_on(place, size, &zones, &kinds, &roads)
+                .into_iter()
+                .filter(|l| m.in_playable(l.front.x, l.front.y, 0.5 * size.1 + 20.0) && free(l))
+                .min_by(|x, y| {
+                    let (a, b) = (key(x), key(y));
+                    a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2))
+                })
+        } else {
+            lots(
+                place,
+                size,
+                &[ZoneId::Commercial, ZoneId::Strip],
+                &classes[..2],
+            )
+            .into_iter()
+            .filter(|l| free(l))
+            .min_by(by_blvd)
+        };
+        if let Some(lot) = lot {
+            fronts.push(lot.front);
+            s.roadside.push(Roadside {
+                kit: k as u8,
+                variant: variant as u8,
+                poi,
+                lot,
+                size,
+            });
+        }
+    }
     // The landmarks.
     if let Some((kit, variant, size)) = kit_of(kits, LETTERS) {
         if let Some(lot) = letters_site(m, place, &s, size) {
@@ -699,11 +814,11 @@ impl<'a> Parcels<'a> {
             .find(|&i| point_in_polygon(p, &self.polys[i]))
     }
 
-    /// Whether `p` lies on a lot (not a park or open land) of one of `zones`.
-    fn on_lot(&self, p: V2, zones: &[ZoneId]) -> bool {
+    /// Whether `p` lies on a parcel of one of `kinds` in one of `zones`.
+    fn on_lot(&self, p: V2, zones: &[ZoneId], kinds: &[LotKind]) -> bool {
         self.under(p).is_some_and(|i| {
             let q = &self.place.parcels[i];
-            q.lot_kind == LotKind::Lot && zones.contains(&q.zone)
+            kinds.contains(&q.lot_kind) && zones.contains(&q.zone)
         })
     }
 }
@@ -724,10 +839,16 @@ fn samples(l: &Lot, w: f32, d: f32) -> impl Iterator<Item = V2> + '_ {
 /// Sites `w` wide and `d` deep square to a road of `classes`, behind its walk, over lots
 /// (one or several side by side) of `zones` and clear of every other road; every
 /// [`SITE_STEP_M`] along each side of each such road where it runs straight.
-pub fn lots(
+pub fn lots(place: &Place, size: (f32, f32), zones: &[ZoneId], classes: &[RoadClass]) -> Vec<Lot> {
+    lots_on(place, size, zones, &[LotKind::Lot], classes)
+}
+
+/// [`lots`] over parcels of any of `kinds` (open land, say), not only built lots.
+pub fn lots_on(
     place: &Place,
     (w, d): (f32, f32),
     zones: &[ZoneId],
+    kinds: &[LotKind],
     classes: &[RoadClass],
 ) -> Vec<Lot> {
     let parcels = Parcels::new(place);
@@ -786,7 +907,7 @@ pub fn lots(
                             | k as u64,
                     };
                     let mut pts = samples(&lot, w, d);
-                    if pts.all(|q| parcels.on_lot(q, zones) && !on_road(q)) {
+                    if pts.all(|q| parcels.on_lot(q, zones, kinds) && !on_road(q)) {
                         out.push(lot);
                     }
                 }
@@ -810,6 +931,9 @@ pub fn clear(place: &mut Place, s: &SetPieces) {
         if let Some(l) = l {
             taken.extend(samples(l, w, d).filter_map(|q| parcels.under(q)));
         }
+    }
+    for r in &s.roadside {
+        taken.extend(samples(&r.lot, r.size.0, r.size.1).filter_map(|q| parcels.under(q)));
     }
     for mark in &s.marks {
         let (w, d) = (mark.size[0], mark.size[1]);
@@ -842,8 +966,8 @@ fn prop(p: V2, y: f32, facing: V2, kind: PropKind) -> Prop {
 }
 
 /// The set pieces' props and their own lights (the street lamps' come with the
-/// detailing's), on the graded `grid`; the landmarks from `kits` (the grammar's) lit in
-/// `pal`.
+/// detailing's), on the graded `grid`; `kits` and `pal` give the roadside set's and the
+/// other landmarks' lamps.
 pub fn dress(
     seed: Seed,
     place: &Place,
@@ -1030,6 +1154,41 @@ pub fn dress(
         props.push(prop(lamp, ground(lamp), -along, PropKind::StreetLight));
     }
 
+    for r in &s.roadside {
+        let Some(kit) = kits.get(usize::from(r.kit)) else {
+            continue;
+        };
+        let y = ground(r.lot.front);
+        let facing = -r.lot.inward;
+        props.push(prop(
+            r.lot.front,
+            y,
+            facing,
+            PropKind::Landmark {
+                kit: r.kit,
+                variant: r.variant,
+            },
+        ));
+        let base = V3::new(r.lot.front.x, y, r.lot.front.y);
+        crate::landmarks::lights(kit, usize::from(r.variant), base, facing, pal, &mut lights);
+        // Its customers, nosed into the stalls the kit paints (kit frame: x to the right
+        // seen from the road, z toward the road), each at its own hours.
+        let (stalls, hours) = roadside_stalls(&kit.id);
+        let classes = [0x01u8, 0x14, 0x23, 0x31, 0x45, 0x18, 0x27, 0x3A];
+        let right = r.lot.inward.right();
+        for (k, &[x, z]) in stalls.iter().enumerate() {
+            let q = r.lot.front + right * x - r.lot.inward * z;
+            props.push(prop(
+                q,
+                ground(q),
+                r.lot.inward,
+                PropKind::ParkedCar {
+                    vehicle_class: classes[k % classes.len()],
+                    hours: hours[k % hours.len()],
+                },
+            ));
+        }
+    }
     for mark in &s.marks {
         let (w, d) = (mark.size[0], mark.size[1]);
         let l = &mark.lot;
@@ -1061,6 +1220,69 @@ pub fn dress(
 
     channel_fences(place, grid, s, &mut props);
     (props, lights)
+}
+
+/// Hours `h0..h1` of the day (wrapping past midnight) as [`PropKind::ParkedCar`] bits.
+const fn hours(h0: u32, h1: u32) -> u32 {
+    let mut m = 0;
+    let mut h = h0;
+    while h != h1 {
+        m |= 1 << h;
+        h = (h + 1) % 24;
+    }
+    m
+}
+
+/// A roadside kit's parked cars: their stalls in the kit frame (`[x, z]`, m) and the
+/// hours they keep, in turn.
+fn roadside_stalls(id: &str) -> (&'static [[f32; 2]], &'static [u32]) {
+    const DONUTS: [[f32; 2]; 5] = [
+        [-6.0, -10.75],
+        [-3.0, -10.75],
+        [0.0, -10.75],
+        [3.0, -10.75],
+        [6.0, -10.75],
+    ];
+    const COFFEE: [[f32; 2]; 7] = [
+        [-9.0, -9.75],
+        [-6.0, -9.75],
+        [-3.0, -9.75],
+        [0.0, -9.75],
+        [3.0, -9.75],
+        [6.0, -9.75],
+        [9.0, -9.75],
+    ];
+    const MOTEL: [[f32; 2]; 4] = [[17.0, -7.5], [20.0, -7.5], [23.0, -7.5], [26.0, -7.5]];
+    // Two rows by the speaker posts, a car between each pair of posts but every third.
+    const DRIVE_IN: [[f32; 2]; 16] = [
+        [-27.5, -56.0],
+        [-22.5, -56.0],
+        [-12.5, -56.0],
+        [-7.5, -56.0],
+        [2.5, -56.0],
+        [7.5, -56.0],
+        [17.5, -56.0],
+        [22.5, -56.0],
+        [-22.5, -48.0],
+        [-17.5, -48.0],
+        [-7.5, -48.0],
+        [-2.5, -48.0],
+        [7.5, -48.0],
+        [12.5, -48.0],
+        [22.5, -48.0],
+        [27.5, -48.0],
+    ];
+    const DONUT_HOURS: [u32; 4] = [hours(6, 11), hours(5, 21), hours(15, 19), hours(7, 10)];
+    const COFFEE_HOURS: [u32; 4] = [hours(7, 11), hours(11, 14), hours(21, 2), hours(6, 23)];
+    const MOTEL_HOURS: [u32; 3] = [hours(18, 9), hours(20, 8), hours(16, 10)];
+    const SHOW_HOURS: [u32; 3] = [hours(19, 0), hours(19, 1), hours(20, 0)];
+    match id {
+        "donut_shop" => (&DONUTS, &DONUT_HOURS),
+        "coffee_shop" => (&COFFEE, &COFFEE_HOURS),
+        "motel" => (&MOTEL, &MOTEL_HOURS),
+        "drive_in" => (&DRIVE_IN, &SHOW_HOURS),
+        _ => (&[], &[0]),
+    }
 }
 
 /// Chain-link along both lips of the channel (see the module docs).
