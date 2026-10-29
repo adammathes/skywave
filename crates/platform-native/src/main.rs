@@ -927,8 +927,9 @@ impl Shell {
     }
 
     /// Puts the folder the player picked or dropped in the library: off the ignore list
-    /// (with everything in it), remembered for next session, and scanned, as part of the
-    /// folder it is in if that one is scanned already (so its folders keep their ids).
+    /// (with everything in it and the folders it is in), remembered for next session, and
+    /// scanned, as part of the folder it is in if that one is scanned already (so its
+    /// folders keep their ids).
     fn add_music_dir(&mut self, dir: PathBuf) {
         let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
         if let Some(file) = music::ignore_file() {
