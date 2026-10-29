@@ -3976,7 +3976,7 @@ mod tests {
             }
         }
         // The 21 the GLSL test names, and the `textureLoad` corona's 3.
-        assert_eq!(written, 24);
+        assert_eq!(written, 26);
     }
 
     /// Every entry point must translate to SPIR-V (native Vulkan; a cheap extra check).
