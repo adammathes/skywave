@@ -67,6 +67,10 @@
     "about": "Mirage Valley (the socal_basin template) at night on the boulevard: the eastbound carriageway, the palm median and its lamps, the mini-malls, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
+  "basin-boulevard-afternoon": {
+    "about": "Mirage Valley's boulevard at 15:30 from the far chase camera, as basin-boulevard-night: the filler kept quiet (no names on the shops' sign bands, only bare stucco, plain fascias and mural walls; stepped and shaped parapets), the blade neon the only signs.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "15:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+  },
   "basin-channel-golden": {
     "about": "Mirage Valley's flood channel at golden hour from its bed: the concrete trapezoid and its low-flow strip, looking down it toward the freeway's bridge, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "417.9,940", "yaw": "180", "still": "1", "stream": "1" }
