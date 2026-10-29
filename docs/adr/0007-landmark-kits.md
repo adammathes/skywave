@@ -31,6 +31,10 @@ spaces, common nouns only, so a kit still names nothing) let a landmark carry it
 without becoming Rust; words from the lexicon still mean a set piece. `Cylinder` and `Lathe` take `turn` and
 `facets`, for prisms and pyramid roofs.
 
+Amended 2026-10-29 (the drive-thru card): `Window` marks a service window (its sill on a wall and the face
+it looks out of). It builds nothing; it says where the game's behaviour happens, so a drive-thru is data on
+the kit and other windows can follow without Rust.
+
 ## Alternatives
 Rust per landmark like `world::setpieces` (every variant is code, review and a codec change; no cheap
 side-by-side variants). Imported meshes (glTF): a loader dependency, an asset pipeline and a licence
