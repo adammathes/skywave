@@ -57,6 +57,9 @@ pub struct CameraTuning {
     /// framed from behind and the road ahead of the turn shows.
     pub chase_lead_deg: f32,
     pub chase_lead_speed_mps: [f32; 2],
+    /// The lead follows the wheel on its own critically damped spring, rad/s: steering is
+    /// read raw, and a tap would otherwise jerk the view.
+    pub chase_lead_hz: f32,
     /// ...and its position chasing the target spot, damped relative to the car's velocity
     /// so speed adds no lag, only acceleration does (pull back under power, push in braking).
     pub chase_pos_hz: f32,
@@ -125,6 +128,7 @@ pub const TUNING: CameraTuning = CameraTuning {
     chase_yaw_hz: 6.5,
     chase_lead_deg: 8.0,
     chase_lead_speed_mps: [4.0, 15.0],
+    chase_lead_hz: 3.0,
     chase_pos_hz: 5.0,
     min_clearance_m: 0.4,
     chase_min_elev_deg: 3.0,
@@ -348,6 +352,9 @@ struct RigState {
     /// The chase camera's lagged copy of the car's heading, and its rate.
     yaw: f32,
     yaw_rate: f32,
+    /// The lead into the turn, rad (see [`chase_lead`]), and its rate.
+    lead: f32,
+    lead_rate: f32,
     /// Look offsets: yaw (positive left) and pitch (positive up), rad, and their return rates.
     look_yaw: f32,
     look_pitch: f32,
@@ -385,6 +392,8 @@ impl CameraRig {
             chase_vel: Vec3::ZERO,
             yaw,
             yaw_rate: 0.0,
+            lead: 0.0,
+            lead_rate: 0.0,
             look_yaw: 0.0,
             look_pitch: 0.0,
             look_yaw_rate: 0.0,
@@ -557,7 +566,11 @@ impl CameraRig {
         }
 
         // Chase yaw spring toward the car's heading, led into the turn.
-        let target_yaw = heading(drive, 1.0) + chase_lead(drive, &t);
+        let lead = chase_lead(drive, &t);
+        let w = t.chase_lead_hz;
+        s.lead_rate += (w * w * (lead - s.lead) - 2.0 * w * s.lead_rate) * dt;
+        s.lead += s.lead_rate * dt;
+        let target_yaw = heading(drive, 1.0) + s.lead;
         let w = t.chase_yaw_hz;
         let err = wrap_pi(target_yaw - s.yaw);
         s.yaw_rate += (w * w * err - 2.0 * w * s.yaw_rate) * dt;
@@ -566,7 +579,9 @@ impl CameraRig {
         // Chase position spring, damped against the car's velocity.
         let car_vel = Vec3::from(drive.state.vel);
         if self.snap {
-            s.yaw = target_yaw;
+            s.lead = lead;
+            s.lead_rate = 0.0;
+            s.yaw = heading(drive, 1.0) + lead;
             s.yaw_rate = 0.0;
             s.chase_pos = self.chase_target(drive, &s, 1.0);
             s.chase_vel = car_vel;
@@ -652,7 +667,7 @@ impl CameraRig {
                 let ahead = (t.chase_lookahead_m + t.chase_lookahead_s * speed)
                     .min(t.chase_lookahead_max_m);
                 let dir = if self.look_back { -1.0 } else { 1.0 };
-                let yaw = heading(drive, alpha) + chase_lead(drive, t);
+                let yaw = heading(drive, alpha) + mix(a.lead, b.lead, alpha);
                 let target = self.pivot(drive, alpha) + yaw_dir(yaw) * (ahead * dir);
                 CameraPose {
                     eye,
@@ -1101,6 +1116,35 @@ mod tests {
         let (mut d, rig) = setup(CameraMode::ChaseMid);
         d.state.steer = 1.0;
         assert_eq!(chase_lead(&d, &rig.tuning), 0.0);
+    }
+
+    #[test]
+    fn a_steering_tap_does_not_jerk_the_chase_view() {
+        let (mut d, mut rig) = setup(CameraMode::ChaseMid);
+        let g = flat();
+        let input = InputState::default();
+        let forward = |d: &Drive, rig: &CameraRig| rig.pose(d, 1.0).forward();
+        let mut worst = 0.0f32;
+        for i in 0..900 {
+            let s = i as f32 * DT;
+            // Up to speed, then tap right for a tenth of a second, then let go.
+            let tap = (5.0..5.1).contains(&s);
+            let car = VehicleInput {
+                throttle: ((15.0 - d.state.speed_mps) * 0.3).clamp(0.0, 1.0),
+                steer: if tap { 1.0 } else { 0.0 },
+                ..VehicleInput::default()
+            };
+            let before = forward(&d, &rig);
+            d.step(car, &g);
+            rig.step(&d, &input, DT, &g);
+            if s > 4.0 {
+                let turn = before.angle_between(forward(&d, &rig)).to_degrees();
+                worst = worst.max(turn);
+            }
+        }
+        println!("worst view turn in a step across a steering tap: {worst:.3}°");
+        // The lead is up to 8°; read raw it moved the aim ~3° in one step at this speed.
+        assert!(worst < 0.1, "{worst}°");
     }
 
     #[test]
