@@ -214,14 +214,26 @@ coast's Place is unchanged.
     industrial zone within 192 m of its middle (sampled every 32 m). Its column (not the bowl over it) blocks a
     car.
   On seeds 1–4 every basin has both.
+- **The downtown anchors**, two landmark kits ("Landmarks" below) standing the variant the owner picked
+  (`procgen::setpieces::{PALACE, HALL}`: A, the deco palace; B, the clock tower), sited after the other
+  landmarks and clear of them, each kept 16 m clear of the rail line. The
+  **city hall** (`city_hall`, a 60 by 48 m lot, `CityHall`) stands at the head of the boulevard: across the
+  road one of its ends meets at a T (the out boulevard always meets the road along the foot of the hills
+  that way), its lot starting a meter behind that road's walk, square to the boulevard and facing back down
+  it, so it closes the view the whole way up with the hills behind; of the ends that qualify, the one nearest
+  downtown. The **movie palace** (`movie_palace`, 28 by 44 m, `MoviePalace` under its marquee, where people
+  gather) stands on the downtown or commercial lot on an arterial or collector nearest the downtown seed
+  that overlaps no other set piece. Both lots lose their buildings. The palace's marquee bulbs chase
+  (`app::marquee`). Goldens: `basin-palace-night`, `basin-city-hall-golden`.
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the roadside set
 once each in the picked variants on its own clear lot, 250 m apart, its cars clear of its solids and its
 lamps lit, the drive-in's screen seen from the freeway and a car driving in past its ticket booth; the
 letters and the water tower sited, lit, solid and clear of roads and buildings, the letters on the ground up
-the hills, the tower's column stops a car), the meshes' and boxes' unit tests in `world::setpieces`,
-`app::dragstrip`'s tests.
+the hills, the tower's column stops a car; the anchors on seeds 1–4 off roads and buildings, the city hall on a
+boulevard's axis at its head, a car driven up the boulevard at 20 m/s stopped at its arcade), the meshes' and
+boxes' unit tests in `world::setpieces`, `app::dragstrip`'s and `app::marquee`'s tests.
 
 ## Landmarks
 Landmarks are the places you would slow down to look at (the feel cards, 2026-10-28). Each is a kit
@@ -231,9 +243,7 @@ road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that st
 add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
 front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
 block a car (an upright lathe only as wide as it is within those 2 m, so a pedestal's bowl is not a wall
-under it); each `Lamp` is a `Flood` light. Two kits ship: `hillside_letters` (the valley's name on the hills) and
-`water_tower`; the basin sites one of each ("Set pieces" above).
-
+under it); each `Lamp` is a `Flood` light. 
 The kits so far: `water_tower` (the gallery's sample; the owner picked B) and the roadside set for Mirage
 Valley's boulevards (the roadside card, 2026-10-29), each in three variants awaiting the owner's pick:
 `donut_shop` (kitsch: a giant iced donut on the roof or over a walk-up stand, a drive-thru window and lane),
@@ -242,7 +252,16 @@ canted pole sign with a starburst), `motel` (rooms round a kidney pool lit from 
 an office, a pole sign with a neon arrow bending down to the drive) and `drive_in` (a screen facing the
 road that glows from dusk, speaker posts in rows, a snack bar, a ticket canopy and a marquee). Mirage
 Valley sites one of each (above, "The roadside set"). Their signs are lit boards without lettering: a kit
-cannot letter, and the map carries their invented names.
+carries no names (its `Letters` take only common nouns), and the map carries their invented names.
+
+Besides solids and lamps a kit has two kinds of dressing. `Bulbs` is a row of `n` bulbs from `a` to `b`:
+drawn dim in the town's mesh, and in the game (`app::marquee`) every third is lit in turn over them, six
+steps a second of game time, so they chase (a frozen clock holds a phase, so stills are stable). `Letters`
+is lettering in the stroke letterforms (`signs::letters`) centered on a point of a face (`Road`, `Left`,
+`Right`), on a line or `stack`ed one letter under another for a blade sign, painted, channel, backlit or
+neon: capitals, digits and spaces, and only common nouns (`THEATRE`, `CITY HALL`), never a name.
+`Cylinder` and `Lathe` take `turn` (degrees about their axis) and `facets` (flat faces), so a four-sided
+lathe turned 45° is a square pyramid roof.
 
 Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
 a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows

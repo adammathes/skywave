@@ -31,6 +31,12 @@
 //!   square to the slope and across from downtown, clear of every road; the water tower
 //!   on the industrial lot with the most industry round it, at least [`TOWER_APART_M`]
 //!   from the garage and the stand. A kit the grammar does not carry is not sited.
+//! - **The downtown anchors** ([`HALL`], [`PALACE`]), after those: the city hall at the
+//!   head of the boulevard, across the road it ends on at a T (the out boulevard meets the
+//!   road along the foot of the hills that way), facing back down it, so it closes the view
+//!   the whole way up; the movie palace on the downtown or commercial lot on an arterial or
+//!   collector nearest the downtown seed. Both clear of every other set piece and
+//!   [`RAIL_CLEAR_M`] from the rail line.
 //!
 //! Every draw is a pure function of the place; nothing here draws randomness but the
 //! signs' name seeds (`hash64(seed, [SETPIECES, ..])`).
@@ -104,6 +110,17 @@ const LETTERS_ROAD_CLEAR_M: f32 = 12.0;
 /// by the industry within this of it, m.
 pub const TOWER_APART_M: f32 = 200.0;
 const TOWER_REACH_M: f32 = 192.0;
+
+/// The downtown anchors, as [`LETTERS`]: the movie palace A, the deco palace, and the city
+/// hall B, the clock tower (the owner's picks, 2026-10-29, PR #75).
+pub const PALACE: (&str, u8) = ("movie_palace", 0);
+pub const HALL: (&str, u8) = ("city_hall", 1);
+/// The anchors' lots keep this far from the rail line's centerline (its track, gates and
+/// signals), m.
+pub const RAIL_CLEAR_M: f32 = 16.0;
+/// The city hall's lot starts this far behind the asphalt and walk of the road its
+/// boulevard ends on, m.
+const HALL_SETBACK_M: f32 = 1.0;
 
 /// The roadside set: each landmark kit by id, the variant the owner picked for this world
 /// (2026-10-29, PR #70) and its point of interest. A kit the grammar does not carry is
@@ -652,7 +669,121 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
             });
         }
     }
+    // The downtown anchors: the city hall first (the boulevard fixes its site), then the
+    // palace on the nearest downtown lot; both clear of everything sited so far.
+    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
+    let off_rail = |l: &Lot, (w, d): (f32, f32)| {
+        l.rect(w, d)
+            .into_iter()
+            .chain(samples(l, w, d))
+            .all(|q| to_line(q, &rail) > RAIL_CLEAR_M)
+    };
+    if let Some((kit, variant, size)) = kit_of(kits, HALL) {
+        let wd = (size[0], size[1]);
+        let areas = s.footprints();
+        let lot =
+            hall_site(m, place, b, wd).filter(|l| off_rail(l, wd) && !overlaps(l, wd, &areas));
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::CityHall,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
+    if let Some((kit, variant, size)) = kit_of(kits, PALACE) {
+        let wd = (size[0], size[1]);
+        let areas = s.footprints();
+        let downtown = V2::from_array(m.downtown);
+        let lot = lots(
+            place,
+            wd,
+            &[ZoneId::Downtown, ZoneId::Commercial],
+            &classes[..2],
+        )
+        .into_iter()
+        .filter(|l| off_rail(l, wd) && !overlaps(l, wd, &areas))
+        .min_by(|x, y| {
+            (x.front - downtown)
+                .length()
+                .total_cmp(&(y.front - downtown).length())
+                .then(x.key.cmp(&y.key))
+        });
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::MoviePalace,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
     s
+}
+
+/// The city hall's lot, `w` wide and `d` deep, at the head of the boulevard: across the
+/// road one of its ends meets at a T, square to the boulevard, facing back down it; the end
+/// nearest downtown whose lot lies clear of every road and inside the playable area.
+fn hall_site(
+    m: &MacroMap,
+    place: &Place,
+    b: &super::macro_map::BasinPlan,
+    (w, d): (f32, f32),
+) -> Option<Lot> {
+    let segs: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .flat_map(|e| {
+            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.2 };
+            e.profile
+                .windows(2)
+                .map(move |q| (V2::new(q[0][0], q[0][2]), V2::new(q[1][0], q[1][2]), hw))
+        })
+        .collect();
+    let on_road = |q: V2| {
+        segs.iter()
+            .any(|&(a, c, hw)| segment_distance(q, a, c).0 < hw + 0.5)
+    };
+    let downtown = V2::from_array(m.downtown);
+    let mut best: Option<(f32, Lot)> = None;
+    for (i, l) in b.lines.iter().enumerate().filter(|(_, l)| l.boulevard) {
+        let (a, c) = (V2::from_array(l.a), V2::from_array(l.b));
+        for (k, (end, from)) in [(a, c), (c, a)].into_iter().enumerate() {
+            // A T: the end lies on another line, inside it.
+            let tee = b.lines.iter().enumerate().any(|(j, o)| {
+                let (p, q) = (V2::from_array(o.a), V2::from_array(o.b));
+                j != i
+                    && segment_distance(end, p, q).0 < 1.0
+                    && (end - p).length() > 20.0
+                    && (end - q).length() > 20.0
+            });
+            if !tee {
+                continue;
+            }
+            let out = (end - from).normalize();
+            // Past the asphalt and walk of the road it ends on.
+            let mut t = 0.0;
+            while on_road(end + out * t) && t < 60.0 {
+                t += 0.5;
+            }
+            let lot = Lot {
+                front: end + out * (t + HALL_SETBACK_M),
+                inward: out,
+                along: out.right(),
+                key: (i as u64) << 1 | k as u64,
+            };
+            let clear = samples(&lot, w, d).all(|q| !on_road(q) && m.in_playable(q.x, q.y, 20.0));
+            let score = (lot.front - downtown).length();
+            if clear && best.is_none_or(|x| score < x.0) {
+                best = Some((score, lot));
+            }
+        }
+    }
+    best.map(|x| x.1)
 }
 
 /// The hillside letters' lot, `size` wide and deep (see the module docs): its front along

@@ -24,7 +24,7 @@ const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ro
 
 /// The landmark kits compiled into the game: a `place::PropKind::Landmark`'s `kit` is an
 /// index into this list.
-const LANDMARKS: [(&str, &str); 6] = world::landmarks::BUILTIN;
+const LANDMARKS: [(&str, &str); 8] = world::landmarks::BUILTIN;
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.
@@ -234,7 +234,7 @@ mod tests {
         let mut k = kits[0].clone();
         k.lot = [1.0, 1.0];
         let err = parse_kit(&ron::ser::to_string(&k).unwrap()).unwrap_err();
-        assert!(err.contains("coffee_shop"), "{err}");
+        assert!(err.contains(kits[0].id.as_str()), "{err}");
     }
 
     #[test]

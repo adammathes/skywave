@@ -783,6 +783,8 @@ fn poi_kind(v: u8) -> Option<PoiKind> {
         16 => PoiKind::DriveIn,
         17 => PoiKind::HillsideLetters,
         18 => PoiKind::WaterTower,
+        19 => PoiKind::MoviePalace,
+        20 => PoiKind::CityHall,
         _ => return None,
     })
 }

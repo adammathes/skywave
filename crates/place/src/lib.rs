@@ -512,6 +512,10 @@ pub enum PoiKind {
     HillsideLetters = 17,
     /// ...and the water tower over the industrial district.
     WaterTower = 18,
+    /// Downtown's movie palace, under its marquee.
+    MoviePalace = 19,
+    /// The city hall at the head of the boulevard, on the middle of its lot.
+    CityHall = 20,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.

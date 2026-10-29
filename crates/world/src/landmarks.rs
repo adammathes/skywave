@@ -23,15 +23,19 @@ use place::{
     RoadClass, RoadGraph, Spawn, SpawnKind, Terrain, ZoneId, Zones,
 };
 
-use crate::math::{abs, floor, V2, V3};
+use crate::math::{abs, floor, sin_cos, V2, V3};
 use crate::mesh::{boxf, face, lathe, quad, rect, Frame, Glow, Paint, Pattern, WorldMesh};
 use crate::palette::{shade, srgb, Palette, Rgb};
 use crate::setpieces::Slab;
-use crate::signs::letters::{self, LetterStyle};
+use crate::signs::letters::{self, Finish, LetterStyle, Strokes};
 
 /// The built-in kits, `assets/landmarks/<id>.ron`, as `(id, RON text)` in file-name order
 /// (the app parses them; a `place::PropKind::Landmark`'s `kit` indexes this list).
-pub const BUILTIN: [(&str, &str); 6] = [
+pub const BUILTIN: [(&str, &str); 8] = [
+    (
+        "city_hall",
+        include_str!("../../../assets/landmarks/city_hall.ron"),
+    ),
     (
         "coffee_shop",
         include_str!("../../../assets/landmarks/coffee_shop.ron"),
@@ -49,6 +53,10 @@ pub const BUILTIN: [(&str, &str); 6] = [
         include_str!("../../../assets/landmarks/hillside_letters.ron"),
     ),
     ("motel", include_str!("../../../assets/landmarks/motel.ron")),
+    (
+        "movie_palace",
+        include_str!("../../../assets/landmarks/movie_palace.ron"),
+    ),
     (
         "water_tower",
         include_str!("../../../assets/landmarks/water_tower.ron"),
@@ -68,6 +76,16 @@ pub const MAX_TRIANGLES: usize = 8000;
 pub const SIDES: (u8, u8) = (3, 48);
 /// Parts below this height over the lot block a car ([`slabs`]), m.
 const SOLID_BELOW_M: f32 = 2.0;
+/// The most bulbs in a row, the most letters in a lettering.
+pub const MAX_BULBS: u16 = 400;
+pub const MAX_LETTERS: usize = 32;
+/// A row of bulbs chases in this many phases: bulb `i` is lit in phase `i % CHASE_PHASES`
+/// ([`chase`]).
+pub const CHASE_PHASES: usize = 3;
+/// Stacked letters stand this many cap heights apart, ink to ink.
+const STACK_GAP: f32 = 0.3;
+/// Channel letters stand this far off their face, m.
+const CHANNEL_DEPTH_M: f32 = 0.08;
 
 /// What a landmark is like (the owner's taste default: mostly grounded, a few pieces of
 /// roadside kitsch).
@@ -279,6 +297,31 @@ fn default_sides() -> u8 {
     12
 }
 
+fn default_bulb_r() -> f32 {
+    0.09
+}
+
+fn default_finish() -> Finish {
+    Finish::Painted
+}
+
+fn default_style() -> LetterStyle {
+    LetterStyle::Block
+}
+
+/// The face of the lot lettering is drawn on, seen from in front of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Face {
+    /// Facing the road (`+z`).
+    #[default]
+    Road,
+    /// Facing `-x`, the left seen from the road.
+    Left,
+    /// Facing `+x`.
+    Right,
+}
+
 /// One piece of a landmark, in the kit frame, m.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -308,6 +351,12 @@ pub enum Part {
         /// No end caps: a band or a tube seen from outside.
         #[cfg_attr(feature = "serde", serde(default))]
         open: bool,
+        /// Degrees the facets turn about the axis (45 squares a 4-sided one to the lot).
+        #[cfg_attr(feature = "serde", serde(default))]
+        turn: f32,
+        /// Flat facets rather than a smooth round: a prism, a pyramid roof.
+        #[cfg_attr(feature = "serde", serde(default))]
+        facets: bool,
         paint: String,
     },
     /// A surface of revolution about `axis` through `at`: the profile's points are
@@ -322,6 +371,10 @@ pub enum Part {
         /// No end caps: a band or a tube seen from outside.
         #[cfg_attr(feature = "serde", serde(default))]
         open: bool,
+        #[cfg_attr(feature = "serde", serde(default))]
+        turn: f32,
+        #[cfg_attr(feature = "serde", serde(default))]
+        facets: bool,
         paint: String,
     },
     /// A flat panel `t` thick: the parallelogram with corners `a`, `b`, `c` and
@@ -339,6 +392,34 @@ pub enum Part {
         at: [f32; 3],
         color: Color,
         radius: f32,
+    },
+    /// A row of `n` bulbs `r` in radius from `a` to `b` in `color`, chasing: drawn dim in
+    /// the mesh, the game lights every third in turn over them ([`chase`]).
+    Bulbs {
+        a: [f32; 3],
+        b: [f32; 3],
+        n: u16,
+        #[cfg_attr(feature = "serde", serde(default = "default_bulb_r"))]
+        r: f32,
+        color: Color,
+    },
+    /// Lettering `size` m to the cap centered on `at`, on the plane through it facing
+    /// `face`: a line, or one letter under another when `stack`ed (a blade sign). Capitals,
+    /// digits and spaces only; the words are common nouns (THEATRE, CITY HALL), never a
+    /// name.
+    Letters {
+        at: [f32; 3],
+        text: String,
+        size: f32,
+        #[cfg_attr(feature = "serde", serde(default))]
+        face: Face,
+        #[cfg_attr(feature = "serde", serde(default))]
+        stack: bool,
+        #[cfg_attr(feature = "serde", serde(default = "default_finish"))]
+        finish: Finish,
+        #[cfg_attr(feature = "serde", serde(default = "default_style"))]
+        style: LetterStyle,
+        paint: String,
     },
 }
 
@@ -546,8 +627,9 @@ impl Kit {
                     | Part::Strut { paint, .. }
                     | Part::Cylinder { paint, .. }
                     | Part::Lathe { paint, .. }
+                    | Part::Letters { paint, .. }
                     | Part::Panel { paint, .. } => Some(paint),
-                    Part::Lamp { .. } => None,
+                    Part::Lamp { .. } | Part::Bulbs { .. } => None,
                 };
                 if let Some(paint) = name {
                     if r.paint(paint).is_none() {
@@ -637,6 +719,69 @@ fn part_ok(part: &Part) -> bool {
                 && u.cross(v).length() > 1e-4 * u.length() * v.length()
         }
         Part::Lamp { at, radius, .. } => finite(at) && *radius > 0.0 && *radius <= 60.0,
+        Part::Bulbs { a, b, n, r, .. } => {
+            let len = v3(*b) - v3(*a);
+            finite(a)
+                && finite(b)
+                && (2..=MAX_BULBS).contains(n)
+                && (0.02..=0.5).contains(r)
+                && len.length() > 0.01
+        }
+        Part::Letters { at, text, size, .. } => {
+            finite(at)
+                && (0.1..=10.0).contains(size)
+                && (1..=MAX_LETTERS).contains(&text.len())
+                && text
+                    .bytes()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b' ')
+                && text.bytes().any(|c| c != b' ')
+        }
+    }
+}
+
+/// A lettering's strokes in its face's plane, m: `x` along the line, `y` up, centered on
+/// the origin.
+fn lettering(text: &str, size: f32, stack: bool, style: LetterStyle) -> Strokes {
+    if !stack {
+        let mut s = letters::layout(text.as_bytes(), style);
+        let w = s.ink_w();
+        s.place(size, -0.5 * w * size, -0.5 * size);
+        return s;
+    }
+    let pitch = size * (1.0 + STACK_GAP);
+    let top = 0.5 * (text.len() as f32 * pitch - STACK_GAP * size);
+    let mut out = Strokes {
+        bounds: [0.0, -top, 0.0, top],
+        ..Strokes::default()
+    };
+    for (i, c) in text.bytes().enumerate() {
+        let mut s = letters::layout(&[c], style);
+        if s.points.is_empty() {
+            continue;
+        }
+        let w = s.ink_w();
+        s.place(size, -0.5 * w * size, top - size - i as f32 * pitch);
+        let base = out.points.len() as u32;
+        out.starts.extend(s.starts.iter().map(|k| k + base));
+        out.points.extend_from_slice(&s.points);
+        out.width = s.width;
+        let b = &mut out.bounds;
+        *b = [
+            b[0].min(s.bounds[0]),
+            b[1].min(s.bounds[1]),
+            b[2].max(s.bounds[2]),
+            b[3].max(s.bounds[3]),
+        ];
+    }
+    out
+}
+
+/// The kit-frame axes of lettering on `face`: along the line, and out of the face.
+fn face_axes(face: Face) -> (V3, V3) {
+    match face {
+        Face::Road => (V3::X, V3::Z),
+        Face::Left => (V3::Z, -V3::X),
+        Face::Right => (-V3::Z, V3::X),
     }
 }
 
@@ -712,6 +857,33 @@ fn part_bounds(part: &Part) -> ([f32; 3], [f32; 3]) {
             grow(&mut lo, &mut hi, o - V3::new(0.2, 0.2, 0.2));
             grow(&mut lo, &mut hi, o + V3::new(0.2, 0.2, 0.2));
         }
+        Part::Bulbs { a, b, r, .. } => {
+            let e = V3::new(*r, *r, *r) * 1.2;
+            for p in [v3(*a), v3(*b)] {
+                grow(&mut lo, &mut hi, p - e);
+                grow(&mut lo, &mut hi, p + e);
+            }
+        }
+        Part::Letters {
+            at,
+            text,
+            size,
+            face,
+            stack,
+            style,
+            ..
+        } => {
+            let s = lettering(text, *size, *stack, *style);
+            let (x, n) = face_axes(*face);
+            let o = v3(*at);
+            let [x0, y0, x1, y1] = s.bounds;
+            let w = 0.5 * s.width;
+            for (u, v) in [(x0 - w, y0 - w), (x1 + w, y1 + w)] {
+                for d in [-0.1, 0.1] {
+                    grow(&mut lo, &mut hi, o + x * u + V3::Y * v + n * d);
+                }
+            }
+        }
     }
     (lo, hi)
 }
@@ -722,16 +894,31 @@ pub fn frame(base: V3, facing: V2) -> Frame {
     Frame::upright(base, facing.left())
 }
 
-/// A frame at kit point `o` whose `y` runs along `u` and whose ring spans `x` and `z`.
-fn axis_frame(f: &Frame, o: [f32; 3], axis: Axis) -> Frame {
+/// A frame at kit point `o` whose `y` runs along `u` and whose ring spans `x` and `z`,
+/// turned `turn` degrees about `y`.
+fn axis_frame(f: &Frame, o: [f32; 3], axis: Axis, turn: f32) -> Frame {
     let (u, x, z) = axes(axis);
     let w = |v: V3| f.v(v.x, v.y, v.z);
+    let (s, c) = sin_cos(turn.to_radians());
+    let (x, z) = (w(x), w(z));
     Frame {
         o: f.p(o[0], o[1], o[2]),
-        x: w(x),
+        x: x * c + z * s,
         y: w(u),
-        z: w(z),
+        z: z * c - x * s,
     }
+}
+
+/// A bulb `r` in radius at kit point `p`.
+fn bulb(m: &mut WorldMesh, f: &Frame, p: V3, r: f32, paint: Paint) {
+    let (lo, hi) = (p - V3::new(r, r, r), p + V3::new(r, r, r));
+    boxf(m, f, lo.to_array(), hi.to_array(), face::ALL, paint);
+}
+
+/// Bulb `i` of a row of `n` from `a` to `b`.
+fn bulb_at(a: [f32; 3], b: [f32; 3], n: u16, i: u16) -> V3 {
+    let t = f32::from(i) / f32::from(n - 1);
+    v3(a) + (v3(b) - v3(a)) * t
 }
 
 /// A square beam `w` wide from `a` to `b`, world points.
@@ -790,12 +977,14 @@ pub fn build(m: &mut WorldMesh, kit: &Kit, v: usize, base: V3, facing: V2, pal: 
                 sides,
                 axis,
                 open,
+                turn,
+                facets,
                 paint: p,
             } => {
                 if let Some(p) = paint(p) {
-                    let af = axis_frame(&f, *at, *axis);
+                    let af = axis_frame(&f, *at, *axis, *turn);
                     let profile = [[*r, 0.0], [*r, *h]];
-                    lathe(m, &af, &profile, u32::from(*sides), !open, true, p);
+                    lathe(m, &af, &profile, u32::from(*sides), !open, !facets, p);
                 }
             }
             Part::Lathe {
@@ -804,11 +993,44 @@ pub fn build(m: &mut WorldMesh, kit: &Kit, v: usize, base: V3, facing: V2, pal: 
                 sides,
                 axis,
                 open,
+                turn,
+                facets,
                 paint: p,
             } => {
                 if let Some(p) = paint(p) {
-                    let af = axis_frame(&f, *at, *axis);
-                    lathe(m, &af, profile, u32::from(*sides), !open, true, p);
+                    let af = axis_frame(&f, *at, *axis, *turn);
+                    lathe(m, &af, profile, u32::from(*sides), !open, !facets, p);
+                }
+            }
+            Part::Bulbs { a, b, n, r, color } => {
+                let rgb = color.rgb(pal);
+                let dim =
+                    Paint::new(shade(rgb, 150), Pattern::Plain).glowing(shade(rgb, 56), Glow::Neon);
+                for i in 0..*n {
+                    bulb(m, &f, bulb_at(*a, *b, *n, i), *r, dim);
+                }
+            }
+            Part::Letters {
+                at,
+                text,
+                size,
+                face,
+                stack,
+                finish,
+                style,
+                paint: p,
+            } => {
+                if let Some(p) = paint(p) {
+                    let s = lettering(text, *size, *stack, *style);
+                    let (x, n) = face_axes(*face);
+                    let w = |v: V3| f.v(v.x, v.y, v.z);
+                    let lf = Frame {
+                        o: f.p(at[0], at[1], at[2]),
+                        x: w(x),
+                        y: w(V3::Y),
+                        z: w(n),
+                    };
+                    letters::build(m, &lf, &s, *finish, 0.0, false, p, p, CHANNEL_DEPTH_M);
                 }
             }
             Part::Panel {
@@ -846,6 +1068,39 @@ pub fn build(m: &mut WorldMesh, kit: &Kit, v: usize, base: V3, facing: V2, pal: 
                     face::ALL,
                     bulb,
                 );
+            }
+        }
+    }
+}
+
+/// Whether variant `v` has bulbs that chase ([`Part::Bulbs`]).
+pub fn chases(kit: &Kit, v: usize) -> bool {
+    kit.resolve(v)
+        .is_some_and(|r| r.parts.iter().any(|p| matches!(p, Part::Bulbs { .. })))
+}
+
+/// Variant `v`'s bulbs lit in `phase` of [`CHASE_PHASES`] (every bulb `i` with
+/// `i % CHASE_PHASES == phase`), a little larger than the dim ones [`build`] draws so they
+/// cover them, for a lot at `base` facing `facing`.
+pub fn chase(
+    m: &mut WorldMesh,
+    kit: &Kit,
+    v: usize,
+    phase: usize,
+    base: V3,
+    facing: V2,
+    pal: &Palette,
+) {
+    let Some(r) = kit.resolve(v) else {
+        return;
+    };
+    let f = frame(base, facing);
+    for part in &r.parts {
+        if let Part::Bulbs { a, b, n, r, color } = part {
+            let rgb = color.rgb(pal);
+            let lit = Paint::new(rgb, Pattern::Plain).glowing(rgb, Glow::Neon);
+            for i in (0..*n).filter(|&i| usize::from(i) % CHASE_PHASES == phase) {
+                bulb(m, &f, bulb_at(*a, *b, *n, i), 1.2 * r, lit);
             }
         }
     }
@@ -903,7 +1158,7 @@ pub fn slabs(kit: &Kit, v: usize, pos: V2, y: f32, facing: V2, out: &mut Vec<Sla
     let at = |lx: f32, lz: f32| pos + x * lx + facing * lz;
     for part in &r.parts {
         let (lo, hi) = match part {
-            Part::Lamp { .. } => continue,
+            Part::Lamp { .. } | Part::Bulbs { .. } | Part::Letters { .. } => continue,
             Part::Strut { a, b, w, .. } => {
                 let low = if a[1] <= b[1] { a } else { b };
                 let h = 0.5 * w;
@@ -1214,6 +1469,8 @@ mod tests {
                         sides: 12,
                         axis: Axis::Up,
                         open: false,
+                        turn: 0.0,
+                        facets: false,
                         paint: "post".to_string(),
                     }],
                 },
@@ -1237,6 +1494,81 @@ mod tests {
         assert!(mb.triangle_count() > ma.triangle_count());
         crate::mesh::tests::assert_well_formed(&ma, 0.2);
         assert_eq!(k.bounds(1).1[1], 3.7);
+    }
+
+    #[test]
+    fn bulbs_chase_in_phases_and_letters_stand_on_their_face() {
+        let mut k = kit();
+        k.paints
+            .push(("ink".to_string(), spec(Color::Pal(Swatch::NeonRed))));
+        k.variants[1].parts = vec![
+            Part::Bulbs {
+                a: [-4.0, 3.0, -1.0],
+                b: [4.0, 3.0, -1.0],
+                n: 10,
+                r: 0.1,
+                color: Color::Srgb(0xFFE7A0),
+            },
+            Part::Letters {
+                at: [0.5, 6.0, -3.0],
+                text: "BIJOU".to_string(),
+                size: 0.8,
+                face: Face::Right,
+                stack: true,
+                finish: Finish::Neon,
+                style: LetterStyle::Block,
+                paint: "ink".to_string(),
+            },
+        ];
+        assert_eq!(k.validate(), Ok(()));
+        assert!(!chases(&k, 0) && chases(&k, 1));
+        let pal = Palette::socal_1985();
+        let south = V2::new(0.0, 1.0);
+        // Each phase lights its third of the ten bulbs (4, 3, 3), a box each.
+        let tris: Vec<usize> = (0..CHASE_PHASES)
+            .map(|ph| {
+                let mut m = WorldMesh::default();
+                chase(&mut m, &k, 1, ph, V3::ZERO, south, &pal);
+                crate::mesh::tests::assert_well_formed(&m, 0.2);
+                m.triangle_count()
+            })
+            .collect();
+        assert_eq!(tris, vec![48, 36, 36]);
+        // Five stacked letters: taller than wide, flat on the +x face.
+        let (lo, hi) = part_bounds(&k.variants[1].parts[1]);
+        assert!(hi[1] - lo[1] > 5.0 * 0.8 && hi[1] - lo[1] < 5.0 * 0.8 * 1.4);
+        assert!(hi[2] - lo[2] < 1.2 && (hi[0] - lo[0] - 0.2).abs() < 1e-4);
+        // A turned, faceted four-sided lathe is a square pyramid.
+        let mut m = WorldMesh::default();
+        let pyramid = Part::Lathe {
+            at: [0.0, 0.0, -5.0],
+            profile: vec![[1.0, 0.0], [0.0, 1.0]],
+            sides: 4,
+            axis: Axis::Up,
+            open: true,
+            turn: 45.0,
+            facets: true,
+            paint: "post".to_string(),
+        };
+        k.variants[1].parts = vec![pyramid];
+        build(&mut m, &k, 1, V3::ZERO, south, &pal);
+        let corner = core::f32::consts::FRAC_1_SQRT_2;
+        assert!(m
+            .vertices
+            .iter()
+            .any(|v| (v.pos[0] - corner).abs() < 1e-4 && (v.pos[2] + 5.0 - corner).abs() < 1e-4));
+        let mut bad = kit();
+        bad.variants[0].parts.push(Part::Letters {
+            at: [0.0, 2.0, -1.0],
+            text: "Lower".to_string(),
+            size: 1.0,
+            face: Face::Road,
+            stack: false,
+            finish: Finish::Painted,
+            style: LetterStyle::Block,
+            paint: "post".to_string(),
+        });
+        assert!(matches!(bad.validate(), Err(KitError::BadPart { .. })));
     }
 
     #[test]
@@ -1311,6 +1643,8 @@ mod tests {
             sides: 2,
             axis: Axis::Up,
             open: false,
+            turn: 0.0,
+            facets: false,
             paint: "post".to_string(),
         };
         assert!(matches!(k.validate(), Err(KitError::BadPart { .. })));
@@ -1328,6 +1662,8 @@ mod tests {
                 sides: 48,
                 axis: Axis::Up,
                 open: true,
+                turn: 0.0,
+                facets: false,
                 paint: "post".to_string(),
             };
             100

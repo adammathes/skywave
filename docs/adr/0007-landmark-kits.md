@@ -24,6 +24,13 @@ refuses unknown paints, parts off the lot or over 60 m, bad sizes and variants o
 Rust stays for what a kit cannot say: behaviour, lettering from the lexicon, anything that reads the
 place around it. A landmark that needs those is a set piece and may use a kit for its body.
 
+Amended 2026-10-29 (the downtown anchors card): the primitive set grows by two dressings and two
+options. `Bulbs` (a row of bulbs, drawn dim; the game lights every third in turn, so a marquee chases) and
+`Letters` (the stroke letterforms on a face, on a line or stacked for a blade sign; capitals, digits and
+spaces, common nouns only, so a kit still names nothing) let a landmark carry its own lights and words
+without becoming Rust; words from the lexicon still mean a set piece. `Cylinder` and `Lathe` take `turn` and
+`facets`, for prisms and pyramid roofs.
+
 ## Alternatives
 Rust per landmark like `world::setpieces` (every variant is code, review and a codec change; no cheap
 side-by-side variants). Imported meshes (glTF): a loader dependency, an asset pipeline and a licence

@@ -120,7 +120,8 @@ pub fn poi_color(kind: PoiKind) -> Rgb {
             [120, 130, 140]
         }
         PoiKind::TacoStand | PoiKind::DonutShop | PoiKind::CoffeeShop => [222, 84, 60],
-        PoiKind::Motel | PoiKind::DriveIn => [214, 60, 160],
+        PoiKind::Motel | PoiKind::DriveIn | PoiKind::MoviePalace => [214, 60, 160],
+        PoiKind::CityHall => [120, 90, 170],
     }
 }
 /// A point of interest as the full map labels it.

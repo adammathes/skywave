@@ -40,6 +40,8 @@ pub fn kind_word(kind: PoiKind) -> &'static str {
         PoiKind::DriveIn => "Drive-In",
         PoiKind::HillsideLetters => "Hill",
         PoiKind::WaterTower => "Tower",
+        PoiKind::MoviePalace => "Theatre",
+        PoiKind::CityHall => "City Hall",
     }
 }
 
