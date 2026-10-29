@@ -45,11 +45,14 @@ by `order`, before dispatching; update status as sessions start, PRs open and me
 ## Work queue (how approved work runs now)
 Open a Claude Code session on the repo and say "run the work queue". That session becomes the
 **coordinator** (`.claude/skills/work-queue/SKILL.md`). It builds nothing itself: each Queued card
-gets its own cloud session and container, which builds, verifies, opens the PR, drives CI to green
-and merges (or leaves it for the owner when the card is `hold` or needs a variant pick). The
+gets its own cloud session and container, which builds, verifies, opens the PR and drives CI to
+green; the coordinator merges it (or leaves it for the owner when the card is `hold` or needs a
+variant pick). Anything for the owner goes on the board's Needs you column, answered in the card's
+note. The
 coordinator runs one tick of `.claude/workflows/work-queue.js` whenever it wakes:
 1. reads the board (never Proposed);
-2. checks each in-flight card's session and PR: marks merges, flags what needs the owner, nudges a
+2. checks each in-flight card's session and PR: merges green ones, moves what needs the owner to
+   Needs you, reports the owner's answers in notes, nudges a
    session idle 30 min once and hands it to the owner an hour later;
 3. starts each Queued card whose `after` cards have merged, up to 8 in flight.
 It wakes on a card session's poke (each session fires the coordinator's "Skywave queue: event"
