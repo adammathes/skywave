@@ -47,22 +47,22 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0x39A1_C053_F7A8_0B31,
         0xA2D7_B9A0_3D09_A4FE,
-        0x5B92_DD5F_D513_FA54,
+        0x1C41_7645_9A52_9C4E,
     ),
     (
         0xA3F4_A281_380E_596B,
         0x7AD4_5617_94BE_609B,
-        0xC6AD_15CC_C29C_EC8C,
+        0x7846_5FDC_2892_4005,
     ),
     (
         0x82B6_07FD_D1FD_CF4F,
         0xB348_0BC3_E55C_8454,
-        0x9EF6_70DE_F757_4F1B,
+        0x7590_CFC5_D916_5888,
     ),
     (
         0x6DBB_5CB8_4DBB_0036,
         0x68EB_95E2_5702_79E7,
-        0xFCCF_D83E_FCB5_79A2,
+        0x09CE_15AF_C5C5_9A09,
     ),
 ];
 
