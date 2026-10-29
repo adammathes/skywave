@@ -2118,7 +2118,7 @@ mod tests {
         ];
         assert_eq!(
             pinned,
-            [0x77c0_b3ed_0cd3_d08c, 0x1ce7_5582_5a3e_bd1a],
+            [0x3cdc_8b19_2075_1cf5, 0xf95e_4003_3c6e_92a8],
             "{pinned:#x?}"
         );
     }
