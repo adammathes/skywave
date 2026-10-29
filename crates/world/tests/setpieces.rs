@@ -322,8 +322,8 @@ fn the_roadside_set_stands_once_each_on_its_own_clear_lot() {
                 .count();
             assert!(lit >= 1, "seed {seed}: the {name} is dark");
             println!(
-                "seed {seed}: {name} at {:.0},{:.0}, {cars} cars, {lit} lamps",
-                q.pos[0], q.pos[2]
+                "seed {seed}: {name} at {:.0},{:.0} facing {:.2},{:.2}, {cars} cars, {lit} lamps",
+                q.pos[0], q.pos[2], facing.x, facing.y
             );
         }
         // The drive-in's screen shows from the freeway: near it, and some freeway point
