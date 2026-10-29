@@ -70,9 +70,11 @@ pub const APART_M: f32 = 300.0;
 /// and the variant the place stands (the owner's pick from the contact sheet).
 pub const PALACE_KIT: &str = "movie_palace";
 pub const PALACE_LOT_M: (f32, f32) = (28.0, 44.0);
+/// A, the deco palace: the owner's pick (2026-10-29).
 pub const PALACE_VARIANT: u8 = 0;
 pub const HALL_KIT: &str = "city_hall";
 pub const HALL_LOT_M: (f32, f32) = (60.0, 48.0);
+/// A until the owner picks from the contact sheet.
 pub const HALL_VARIANT: u8 = 0;
 /// The anchors' lots keep this far from the rail line's centerline (its track, gates and
 /// signals), m.
