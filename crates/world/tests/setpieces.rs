@@ -1,14 +1,15 @@
 //! The basin's set pieces (`docs/WORLD_GENERATION.md`, "Set pieces") end to end: every one is
 //! sited on seeds 1-4, clear of the roads and buildings around it, and its solids hold a
 //! car as they should: the tunnel's walls keep a car on the freeway and let it drive
-//! through, the garage's middle bay takes a car and its walls stop one.
+//! through, the garage's middle bay takes a car and its walls stop one; every landmark is
+//! seen down a road that points at it from at least 300 m off.
 //! `cargo test -p world --release --test setpieces -- --nocapture` prints where each went.
 
 use place::{Place, PoiKind, PropKind};
 use skywave_core::Seed;
 use vehicle::{step, Assists, VehicleInput, VehicleSpec, VehicleState};
 use world::landmarks::Kit;
-use world::math::{point_in_polygon, segment_distance, V2};
+use world::math::{point_in_polygon, segment_distance, V2, V3};
 use world::procgen::build_place;
 use world::procgen::setpieces::{DRIVE_IN_VIEW_M, ROADSIDE, ROADSIDE_APART_M};
 use world::template::RegionTemplate;
@@ -722,4 +723,115 @@ fn the_city_hall_stops_a_car_driven_up_the_boulevard_into_it() {
     assert!(s.pos.iter().all(|v| v.is_finite()));
     assert!(into > 2.0, "the car never reached the hall: {into:.1} m");
     assert!(into < 20.0, "through the city hall: {into:.1} m");
+}
+
+/// Whether the line from `a` to `b` clears the ground and every building's box but within
+/// `skip` of `b` (the landmark's own lot), by brute force over the buildings.
+fn seen(p: &Place, a: V3, b: V3, skip: f32) -> bool {
+    let run = V2::new(b.x - a.x, b.z - a.z).length();
+    let end = run - skip;
+    let at = |t: f32| a.lerp(b, t / run);
+    let ground = |x: f32, z: f32| p.terrain.height_at(&p.header, [x, z]).unwrap_or(0.0);
+    let mut t = 12.0;
+    while t < end {
+        let q = at(t);
+        if ground(q.x, q.z) > q.y {
+            return false;
+        }
+        t += 4.0;
+    }
+    let stop = at(end);
+    let (o, d) = ([a.x, a.y, a.z], [stop.x - a.x, stop.y - a.y, stop.z - a.z]);
+    p.buildings.iter().all(|bd| {
+        let (mut l, mut h) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for v in &bd.footprint {
+            l = [l[0].min(v[0]), l[1].min(v[1])];
+            h = [h[0].max(v[0]), h[1].max(v[1])];
+        }
+        let y = ground(0.5 * (l[0] + h[0]), 0.5 * (l[1] + h[1]));
+        let (lo, hi) = ([l[0], y - 2.0, l[1]], [h[0], y + bd.height_m, h[1]]);
+        // The segment against the box, axis by axis.
+        let (mut t0, mut t1) = (0.0f32, 1.0f32);
+        for i in 0..3 {
+            if d[i].abs() < 1e-9 {
+                if o[i] < lo[i] || o[i] > hi[i] {
+                    return true;
+                }
+                continue;
+            }
+            let (u, v) = ((lo[i] - o[i]) / d[i], (hi[i] - o[i]) / d[i]);
+            t0 = t0.max(u.min(v));
+            t1 = t1.min(u.max(v));
+            if t0 > t1 {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+#[test]
+fn every_landmark_is_seen_from_a_road_that_points_at_it_300_m_off() {
+    use world::procgen::setpieces::WATER_TOWER;
+    use world::procgen::setpieces::{aim, vista, Sight, HALL, LETTERS, PALACE, VIEW_NEAR_M};
+    let g = grammar();
+    for seed in 1..=4u64 {
+        let p = basin(seed);
+        let sight = Sight::new(&p);
+        for (id, _) in [LETTERS, WATER_TOWER, HALL, PALACE] {
+            let kit = g.landmarks.iter().find(|k| k.id == id).unwrap();
+            let (q, v, _) = landmark(&p, id);
+            let (target, skip) = aim(
+                kit,
+                v,
+                V3::new(q.pos[0], q.pos[1], q.pos[2]),
+                dir_of_yaw(q.yaw),
+            );
+            // Every 8 m along every road at eye height, each way along it.
+            let mut views: Vec<(f32, V3, V2)> = Vec::new();
+            for e in &p.roads.edges {
+                for s in e.profile.windows(2) {
+                    let a = V3::new(s[0][0], s[0][1] + 1.2, s[0][2]);
+                    let b = V3::new(s[1][0], s[1][1] + 1.2, s[1][2]);
+                    let along = V2::new(b.x - a.x, b.z - a.z);
+                    let n = (along.length() / 8.0).ceil().max(1.0) as usize;
+                    for i in 0..n {
+                        let at = a.lerp(b, i as f32 / n as f32);
+                        let d = V2::new(target.x - at.x, target.z - at.z).length();
+                        if d >= VIEW_NEAR_M {
+                            views.push((d, at, along.normalize()));
+                        }
+                    }
+                }
+            }
+            views.sort_by(|x, y| x.0.total_cmp(&y.0));
+            // The approach shot: the nearest view whose road points at it within 30 m, else
+            // the nearest that sees it at all.
+            let off = |&(_, at, dir): &(f32, V3, V2)| {
+                let to = V2::new(target.x - at.x, target.z - at.z);
+                (dir.turn(to).abs(), dir.dot(to) > 0.0)
+            };
+            let shot = views
+                .iter()
+                .filter(|w| off(w).0 <= 30.0 && w.0 <= 900.0)
+                .chain(&views)
+                .find(|w| seen(&p, w.1, target, skip));
+            let Some(&(d, at, dir)) = shot else {
+                panic!("seed {seed}: no road {VIEW_NEAR_M} m off sees the {id}");
+            };
+            let to = V2::new(target.x - at.x, target.z - at.z);
+            let yaw = to.x.atan2(-to.y).to_degrees().rem_euclid(360.0);
+            let framed = off(&(d, at, dir)).0 <= 30.0;
+            assert!(
+                framed,
+                "seed {seed}: no road {VIEW_NEAR_M} m off points at the {id}"
+            );
+            println!(
+                "seed {seed}: {id} {:?}, seen {d:.0} m off from pos={:.0},{:.0} yaw={yaw:.0}",
+                vista(&sight, target, skip),
+                at.x,
+                at.z,
+            );
+        }
+    }
 }
