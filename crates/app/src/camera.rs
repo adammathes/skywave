@@ -76,7 +76,8 @@ pub struct CameraTuning {
     pub sway_lag_s: f32,
 
     /// Look: rate at full stick, rad/s; limits in the cockpit and hood, degrees; after this
-    /// long without look input the view returns to center at `look_return_hz`.
+    /// long without look input the view eases back to center on a critically damped spring
+    /// of natural frequency `look_return_hz`, rad/s.
     pub look_rate: f32,
     pub look_max_yaw_deg: f32,
     pub look_max_pitch_deg: f32,
@@ -139,7 +140,7 @@ pub const TUNING: CameraTuning = CameraTuning {
     look_max_yaw_deg: 140.0,
     look_max_pitch_deg: 50.0,
     look_return_delay_s: 1.0,
-    look_return_hz: 4.0,
+    look_return_hz: 5.0,
 
     idle_orbit_s: 20.0,
     idle_speed_mps: 1.0,
@@ -347,9 +348,11 @@ struct RigState {
     /// The chase camera's lagged copy of the car's heading, and its rate.
     yaw: f32,
     yaw_rate: f32,
-    /// Look offsets: yaw (positive left) and pitch (positive up), rad.
+    /// Look offsets: yaw (positive left) and pitch (positive up), rad, and their return rates.
     look_yaw: f32,
     look_pitch: f32,
+    look_yaw_rate: f32,
+    look_pitch_rate: f32,
     /// Cockpit head offset, body space, m.
     sway: Vec3,
     /// Orbit angle (a yaw around the car), rad.
@@ -384,6 +387,8 @@ impl CameraRig {
             yaw_rate: 0.0,
             look_yaw: 0.0,
             look_pitch: 0.0,
+            look_yaw_rate: 0.0,
+            look_pitch_rate: 0.0,
             sway: Vec3::ZERO,
             orbit: yaw,
         };
@@ -424,10 +429,12 @@ impl CameraRig {
             self.snap = true;
         }
         self.selected = mode;
-        self.curr.look_yaw = 0.0;
-        self.curr.look_pitch = 0.0;
-        self.prev.look_yaw = 0.0;
-        self.prev.look_pitch = 0.0;
+        for s in [&mut self.curr, &mut self.prev] {
+            s.look_yaw = 0.0;
+            s.look_pitch = 0.0;
+            s.look_yaw_rate = 0.0;
+            s.look_pitch_rate = 0.0;
+        }
         self.idle_s = 0.0;
     }
 
@@ -506,19 +513,27 @@ impl CameraRig {
             self.idle_s += dt;
         }
 
-        // Look: rate input, held where it is, back to center a while after it stops.
+        // Look: rate input, held where it is, then eased back to center a while after it
+        // stops. The return is a critically damped spring starting from rest, so the view
+        // pulls away gently and settles without overshoot (a plain exponential leaves the
+        // hold at full speed: the snap). The stick's deadzone rescales from zero, so a small
+        // correction starts from zero too.
         self.look_back = input.pressed(Action::LookBack);
         let (lx, ly) = (input.axis(Action::LookX), input.axis(Action::LookY));
         if lx != 0.0 || ly != 0.0 {
             self.look_idle_s = 0.0;
             s.look_yaw -= lx * t.look_rate * dt;
             s.look_pitch -= ly * t.look_rate * dt;
+            s.look_yaw_rate = 0.0;
+            s.look_pitch_rate = 0.0;
         } else {
             self.look_idle_s += dt;
             if self.look_idle_s > t.look_return_delay_s {
-                let k = (t.look_return_hz * dt).min(1.0);
-                s.look_yaw -= s.look_yaw * k;
-                s.look_pitch -= s.look_pitch * k;
+                let w = t.look_return_hz;
+                s.look_yaw_rate += (-w * w * s.look_yaw - 2.0 * w * s.look_yaw_rate) * dt;
+                s.look_pitch_rate += (-w * w * s.look_pitch - 2.0 * w * s.look_pitch_rate) * dt;
+                s.look_yaw += s.look_yaw_rate * dt;
+                s.look_pitch += s.look_pitch_rate * dt;
             }
         }
         if self.selected.first_person() {
@@ -529,8 +544,16 @@ impl CameraRig {
             s.look_yaw = s.look_yaw.clamp(-my, my);
             s.look_pitch = s.look_pitch.clamp(-mp, mp);
         } else {
+            // Pitch only as far as the chase elevation limits show it: past them the offset
+            // would wind up unseen and the return would sit still, then lurch into view.
+            let slot = self.chase_slot();
+            let rise = t.chase_height_m[slot] - t.chase_target_height_m;
+            let base = rise.atan2(t.chase_distance_m[slot]);
             s.look_yaw = wrap_pi(s.look_yaw);
-            s.look_pitch = s.look_pitch.clamp(-1.2, 1.2);
+            s.look_pitch = s.look_pitch.clamp(
+                base - t.chase_max_elev_deg.to_radians(),
+                base - t.chase_min_elev_deg.to_radians(),
+            );
         }
 
         // Chase yaw spring toward the car's heading, led into the turn.
@@ -908,6 +931,67 @@ mod tests {
             rig.step(&d, &input, DT, &g);
         }
         assert!(rig.curr.look_yaw.abs() < 0.01 * turned.abs());
+    }
+
+    #[test]
+    fn chase_look_eases_back_without_a_step() {
+        let (d, mut rig) = setup(CameraMode::ChaseMid);
+        let g = flat();
+        let mut input = InputState::default();
+        // A small correction on the stick, then let go.
+        input.set(Action::LookX, 0.3);
+        input.set(Action::LookY, -0.3);
+        for _ in 0..60 {
+            rig.step(&d, &input, DT, &g);
+        }
+        let (yaw0, pitch0) = (rig.curr.look_yaw, rig.curr.look_pitch);
+        assert!(yaw0 < -0.3 && pitch0 > 0.1, "{yaw0} {pitch0}");
+        input.clear();
+        let mut prev = [yaw0, pitch0];
+        let mut prev_v = [0.0f32; 2];
+        let mut max_v = [0.0f32; 2];
+        for _ in 0..(3.0 / DT) as usize {
+            rig.step(&d, &input, DT, &g);
+            let now = [rig.curr.look_yaw, rig.curr.look_pitch];
+            for i in 0..2 {
+                let v = (now[i] - prev[i]) / DT;
+                let start = [yaw0, pitch0][i];
+                // Toward center, never past it, and the speed changes a little per step:
+                // no step at the end of the hold or anywhere after.
+                assert!(now[i].abs() <= prev[i].abs() && now[i] * start >= 0.0);
+                let w = rig.tuning.look_return_hz;
+                assert!((v - prev_v[i]).abs() <= 1.01 * w * w * start.abs() * DT);
+                max_v[i] = max_v[i].max(v.abs());
+                prev_v[i] = v;
+            }
+            prev = now;
+        }
+        assert!(prev[0].abs() < 0.01 * yaw0.abs() && prev[1].abs() < 0.01 * pitch0);
+        // It does move: a critically damped spring from rest peaks at w x0 / e.
+        let w = rig.tuning.look_return_hz;
+        assert!(max_v[0] > 0.35 * w * yaw0.abs(), "{max_v:?}");
+    }
+
+    #[test]
+    fn chase_pitch_does_not_wind_up_past_the_elevation_limits() {
+        let (d, mut rig) = setup(CameraMode::ChaseMid);
+        let g = flat();
+        let mut input = InputState::default();
+        input.set(Action::LookY, -1.0);
+        for _ in 0..240 {
+            rig.step(&d, &input, DT, &g);
+        }
+        let t = &rig.tuning;
+        let base = (t.chase_height_m[1] - t.chase_target_height_m).atan2(t.chase_distance_m[1]);
+        let limit = base - t.chase_min_elev_deg.to_radians();
+        assert!((rig.curr.look_pitch - limit).abs() < 1e-6);
+        // So the return is visible from its first step.
+        input.clear();
+        let held = rig.curr.chase_pos;
+        for _ in 0..(1.2 / DT) as usize {
+            rig.step(&d, &input, DT, &g);
+        }
+        assert!(rig.curr.look_pitch < limit && rig.curr.chase_pos.y > held.y);
     }
 
     #[test]
