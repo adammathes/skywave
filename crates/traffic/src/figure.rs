@@ -635,6 +635,31 @@ fn no_flare(_: f32) -> f32 {
     0.0
 }
 
+/// The right hand's thumb on its fist (the forearm's frame): a tapered five-sided prism
+/// from the heel of the palm down the `-z` end of the knuckles, over the curled fingers on
+/// the palm's side (`-x`), its root inside the fist. `lw` moves it out with the build. The
+/// left hand's is its mirror.
+fn thumb(m: &mut Mesh, h: f32, lw: f32, skin: [u8; 4]) {
+    const SIDES: usize = 5;
+    let base = scale([-0.008 * lw, -0.158, -0.019], h);
+    let tip = scale([-0.011 * lw, -0.197, -0.027], h);
+    let d = norm(sub(tip, base));
+    // Rings advance along `d`: `U × V = -d` as `loft` wants.
+    let u = norm(cross([0.0, 0.0, 1.0], d));
+    let v = cross(u, d);
+    let mut pts = Vec::new();
+    for (t, r) in [(0.0, 0.0085), (1.0, 0.0065)] {
+        let c = add(base, scale(sub(tip, base), t));
+        for j in 0..SIDES {
+            let (sn, cs) = sin_cos(TAU * j as f32 / SIDES as f32);
+            pts.push(add(c, add(scale(u, r * h * sn), scale(v, r * h * cs))));
+        }
+    }
+    let cols = alloc::vec![skin; pts.len()];
+    let end = add(tip, scale(d, 0.005 * h));
+    m.loft(&pts, &cols, SIDES, None, Some(end));
+}
+
 // ---------------------------------------------------------------------------------------
 // The figure.
 
@@ -966,14 +991,17 @@ pub fn build(spec: &FigureSpec) -> Figure {
         lw,
         lw,
     );
+    // The forearm, then the hand closed into a fist: its knuckles across `z`, thickest at
+    // the grip point ([`GRIP_H`]) so a steering wheel's rim runs through it and out both
+    // ends; the thumb is [`thumb`].
     let la_prof = scaled(
         &[
-            st(0.012, 0.016, 0.016, 0.0),
-            st(0.0, 0.021, 0.021, 0.0),
-            st(-0.146, 0.0145, 0.015, 0.0),
-            st(-0.158, 0.012, 0.021, -0.002),
-            st(-0.215, 0.011, 0.019, -0.004),
-            st(-0.24, 0.006, 0.01, -0.004),
+            st(0.012, 0.018, 0.018, 0.0),
+            st(0.0, 0.023, 0.023, 0.0),
+            st(-0.146, 0.016, 0.0165, 0.0),
+            st(-0.165, 0.016, 0.0235, 0.0),
+            st(-0.19, 0.018, 0.0255, 0.0),
+            st(-0.212, 0.012, 0.0195, 0.0),
         ],
         h,
         lw,
@@ -1004,11 +1032,13 @@ pub fn build(spec: &FigureSpec) -> Figure {
         let last = prof[prof.len() - 1];
         let bottom = [0.0, last.y - 0.006 * h, last.cz];
         m.loft(&pts, &cols, 6, Some(top), Some(bottom));
-        m.0
+        m
     };
     // The shoulder's cap reaches up into the torso; the elbow's is a small knob.
-    let upper_arm = arm(&ua_prof, 0.0, ua, 0.024 * h);
-    let lower_arm = arm(&la_prof, ua, 0.146 * h, 0.006 * h);
+    let upper_arm = arm(&ua_prof, 0.0, ua, 0.024 * h).0;
+    let mut lower_arm = arm(&la_prof, ua, 0.146 * h, 0.006 * h);
+    thumb(&mut lower_arm, h, lw, skin);
+    let lower_arm = lower_arm.0;
 
     // Legs.
     let pants = match spec.outfit {
@@ -2130,7 +2160,7 @@ mod tests {
         ];
         assert_eq!(
             pinned,
-            [0x77c0_b3ed_0cd3_d08c, 0x1ce7_5582_5a3e_bd1a],
+            [0x3cdc_8b19_2075_1cf5, 0xf95e_4003_3c6e_92a8],
             "{pinned:#x?}"
         );
     }

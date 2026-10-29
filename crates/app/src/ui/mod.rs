@@ -903,6 +903,10 @@ impl Ui {
                 }
                 self.dirty = true;
             }
+            ItemId::CockpitDriver => {
+                self.settings.cockpit_driver = on;
+                self.dirty = true;
+            }
             ItemId::CameraShake => {
                 self.settings.camera_shake = on;
                 self.dirty = true;

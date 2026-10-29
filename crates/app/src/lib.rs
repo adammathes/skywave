@@ -1212,7 +1212,10 @@ impl App {
                 },
                 &mut self.instances,
             );
-            if let Some(d) = self.drivers.get(self.ui.driver()) {
+            // The cockpit draws the driver unless the player hid it; the outside cameras
+            // always do.
+            let shown = cabin != drive::Cabin::Full || self.ui.settings().cockpit_driver;
+            if let Some(d) = self.drivers.get(self.ui.driver()).filter(|_| shown) {
                 let look = self.camera.look_yaw(alpha);
                 // In the cockpit the driver moves with the seat adjustment, as the eye does.
                 let p = &self.camera.prefs;

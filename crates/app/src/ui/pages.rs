@@ -127,6 +127,7 @@ pub enum ItemId {
     SeatHeight,
     SeatForward,
     Dashboard,
+    CockpitDriver,
     CameraShake,
     Quality,
     FrameRate,
@@ -527,6 +528,11 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
                     options: &DASHBOARD_NAMES,
                     index: usize::from(!s.dashboard),
                 },
+            );
+            add(
+                ItemId::CockpitDriver,
+                "Show driver in first person",
+                Widget::Toggle(s.cockpit_driver),
             );
             add(
                 ItemId::CameraShake,
@@ -948,7 +954,9 @@ mod tests {
             matches!(items[4].widget, Widget::Choice { index: 0, .. }),
             "dashboard"
         );
+        assert_eq!(items[5].id, ItemId::CockpitDriver);
         assert_eq!(items[5].widget, Widget::Toggle(true));
+        assert_eq!(items[6].widget, Widget::Toggle(true));
         build(Page::Video, &ctx, &mut items);
         assert_eq!(items[0].id, ItemId::Quality);
         assert!(

@@ -177,7 +177,7 @@ action in the same context uses the input, a dialog offers "Keep on <that action
 tree is documented in `crates/app/src/ui/pages.rs`; the sim is paused while a menu is open.
 
 ## Settings UI (bindings UI ships in M1, the rest grows per milestone)
-A minimal in-game menu (bitmap font, keyboard/gamepad navigable, mouse optional): Drive (handling: Arcade / Light / Off assists; headlights: Auto / Manual; later units mph/kph, auto/manual), Camera (camera, cockpit FOV, seat height and fore-aft, dashboard or hood only, camera shake), Controls (remap table, deadzones), Video (resolution scale, shadow quality, bloom, style post), Audio (radio volume, engine volume, stations manager), World (seed code, era, region, time speed, traffic/pedestrian density), About (license, credits). All stored in one settings JSON.
+A minimal in-game menu (bitmap font, keyboard/gamepad navigable, mouse optional): Drive (handling: Arcade / Light / Off assists; headlights: Auto / Manual; later units mph/kph, auto/manual), Camera (camera, cockpit FOV, seat height and fore-aft, dashboard or hood only, show driver in first person, camera shake), Controls (remap table, deadzones), Video (resolution scale, shadow quality, bloom, style post), Audio (radio volume, engine volume, stations manager), World (seed code, era, region, time speed, traffic/pedestrian density), About (license, credits). All stored in one settings JSON.
 
 ## Accessibility
 Steering sensitivity and assist strength are settings. Color-blind-safe HUD palette. Camera shake toggle. No flashing effects above 3 Hz.
