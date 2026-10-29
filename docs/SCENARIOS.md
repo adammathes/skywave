@@ -35,7 +35,8 @@ picking one saves it as the `scenario` setting and the platform reloads the game
 moved to that world's procedural place, its start and default time (`SceneSetup::for_world`), the settings
 kept, the radio off; the old app and renderer are dropped whole. A session starts in the world last picked
 unless its scene names a place or a world (`?scenario=<id>` on the web, `--scenario <id>` natively; an id
-that is not built in starts the first world and says so). There is no title screen yet: the World page (Pause › Worlds) is
+that is not built in starts the first world and says so); with none saved, a bare start opens Mirage Valley
+(`scenario::DEFAULT`) and a scene with other keys the hand-laid test town (`SceneSetup::with_saved_world`). There is no title screen yet: the World page (Pause › Worlds) is
 reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
 ## Launch scenario
@@ -55,8 +56,12 @@ districts with roll-up doors and chain-link, mini-malls with backlit box signs, 
 palms on wide medians, a concrete flood-control channel you can drive down, a tiled downtown
 tunnel, freeway overpasses and an on-ramp loop, a rail line with a grade crossing, an airfield
 drag strip at the edge, a hills overlook at night with the city grid lit below, a desert highway
-leaving town past truck stops. Night is the default time: sodium-orange street lamps, neon
-underglow on the tuner cars, a lit race start line with a crowd that steps aside.
+leaving town past truck stops. It is the world the game is judged in: a bare start (no scene keys, no
+`--scene` flags, no world saved on the World page) opens it (`scenario::DEFAULT`). Daylight is its default
+time, 15:30: hard afternoon sun on stucco and concrete, palm shadows across the boulevards (the
+`sodium_night` palette's beiges, tans and terracotta read well in sun; its lamp and neon colors show only
+when they light). Night is a clock away: sodium-orange street lamps, neon underglow on the tuner cars, a
+lit race start line with a crowd that steps aside.
 
 The deck (the player's own music, `docs/AUDIO_RADIO.md`) is named by the scenario's year:
 **TAPE** for worlds up to 1989 (Pacific Shore 1984, Lake City 1977, the 1986 suburb), **CD** for

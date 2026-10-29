@@ -55,7 +55,8 @@ pub struct Scenario {
 }
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
-/// lists them. The first is the world a scene is in unless it names another.
+/// lists them. The first is the world a scene is in unless it names another (a bare start
+/// is in [`DEFAULT`]).
 pub const BUILTIN: [(&str, &str); 2] = [
     (
         "socal_beach_1984",
@@ -66,6 +67,10 @@ pub const BUILTIN: [(&str, &str); 2] = [
         include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
     ),
 ];
+
+/// The world a bare start opens (a scene with no keys and no world saved from the World
+/// page; `SceneSetup::with_saved_world`): the one the game is judged in.
+pub const DEFAULT: &str = "mirage_valley_2001";
 
 impl Scenario {
     /// Checks the fields against each other and against what the game has built in.
@@ -754,7 +759,7 @@ mod tests {
         assert_eq!((all.w, all.h), atlas_size(BUILTIN.len() as u32));
         // `h = h * 31 + byte` mod 2^61 over each still's RGBA, as Pillow reads the
         // quantized frame the file was written from.
-        let expected = [2_138_132_481_716_855_108u128, 2_222_339_211_682_735_395];
+        let expected = [2_138_132_481_716_855_108u128, 404_338_617_954_390_931];
         for (k, ((id, bytes), want)) in STILLS.iter().zip(expected).enumerate() {
             assert_eq!(*id, BUILTIN[k].0);
             let [u, v, u1, v1] = still_uv(k);
