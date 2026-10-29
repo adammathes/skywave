@@ -17,7 +17,7 @@ use crate::input::{Action, InputState};
 
 /// The presets compiled into the game, as `(id, RON text)`, in the order the settings
 /// page offers them.
-pub const PRESETS: [(&str, &str); 3] = [
+pub const PRESETS: [(&str, &str); 4] = [
     (
         "1984_socal",
         include_str!("../../../assets/radio/1984_socal.ron"),
@@ -30,10 +30,19 @@ pub const PRESETS: [(&str, &str); 3] = [
         "1986_north_shore",
         include_str!("../../../assets/radio/1986_north_shore.ron"),
     ),
+    (
+        "2001_basin",
+        include_str!("../../../assets/radio/2001_basin.ron"),
+    ),
 ];
 
 /// Each preset's title, as its file gives it (checked by a test).
-pub const PRESET_TITLES: [&str; PRESETS.len()] = ["1984 SoCal", "1977 Chicago", "1986 North Shore"];
+pub const PRESET_TITLES: [&str; PRESETS.len()] = [
+    "1984 SoCal",
+    "1977 Chicago",
+    "1986 North Shore",
+    "2001 Basin",
+];
 
 /// The first scenario, whose preset a radio starts on (`docs/SCENARIOS.md`); a world's own
 /// comes with [`CarRadio::set_scenario`].

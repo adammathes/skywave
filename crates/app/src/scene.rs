@@ -3,16 +3,23 @@
 //! (`tools/screenshot/scenes.json`) are written as these; the web build reads them from the
 //! URL query (`?t=17:40&cam=cockpit`), the desktop build from `--scene key=value` flags.
 //!
+//! A scene that names neither a place nor a world opens the world last picked on the World
+//! page, in its procedural place; with nothing saved, a bare start (no keys at all) opens
+//! [`crate::scenario::DEFAULT`], Mirage Valley in daylight at its default time, and any other
+//! scene the test town ([`SceneSetup::with_saved_world`]). The screenshot goldens' scenes
+//! always set keys.
+//!
 //! Keys (every one optional):
 //! - `seed=<u64>`: seed of the place (default 1): the test town's detail, or the whole
 //!   procedural place.
-//! - `place=<name>`: `town` (the hand-laid test town, the default) or `coast` (the
-//!   procedural place of the scenario's region template for the seed).
+//! - `place=<name>`: `town` (the hand-laid test town, the default for a scene with keys)
+//!   or `coast` (the procedural place of the scenario's region template for the seed).
 //! - `scenario=<id>`: the world (`crate::scenario`, `assets/scenarios/<id>.ron`) and its
 //!   procedural place (`place=coast`; a later `place=town` puts its cars and light in the
 //!   test town). An id that is not built in is the first scenario, and a toast says so.
 //!   Default: the first scenario, or the world last picked on the World page when the
-//!   scene names neither a place nor a scenario ([`SceneSetup::with_saved_world`]).
+//!   scene names neither a place nor a scenario, or for a bare start with nothing saved
+//!   [`crate::scenario::DEFAULT`] ([`SceneSetup::with_saved_world`]).
 //! - `car=<id>`: built-in vehicle id (default: the vehicle setting, the car last picked,
 //!   else [`DEFAULT_VEHICLE`]).
 //! - `paint=<n>`: the car's palette entry, counting from 0 (default: 0 with `car=`, else the
@@ -21,7 +28,8 @@
 //!   its first paint when that car has fewer. Not saved.
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
 //!   which starts at `chase-mid` and remembers the last one picked).
-//! - `t=HH:MM` (or `HH:MM:SS`): time of day; when given the clock is frozen there (default 17:40, running).
+//! - `t=HH:MM` (or `HH:MM:SS`): time of day; when given the clock is frozen there (default
+//!   the world's `default_time`, running: 17:40 in the test town and on the coast).
 //! - `pos=x,z`: put the car on the ground at this point, m (default the place's
 //!   `PlayerStart`: the start of the strip).
 //! - `yaw=<deg>`: the car's compass heading, degrees clockwise from north (-z): 0 north,
@@ -199,13 +207,22 @@ impl SceneSetup {
     }
 
     /// Unless the scene names a place or a world, the world last picked on the World page
-    /// (`settings_json`, the saved settings document), if any.
+    /// (`settings_json`, the saved settings document), if any; else, for a bare start (the
+    /// scene is [`SceneSetup::default`]), [`crate::scenario::DEFAULT`]. A scene with any
+    /// other key stays in the test town.
     pub fn with_saved_world(mut self, settings_json: Option<&str>) -> SceneSetup {
         if self.place_given {
             return self;
         }
-        let saved = settings_json.and_then(|t| crate::settings::Settings::from_json(t).0.scenario);
-        if let Some(i) = saved.and_then(crate::scenario::index_of) {
+        let saved = settings_json
+            .and_then(|t| crate::settings::Settings::from_json(t).0.scenario)
+            .and_then(crate::scenario::index_of);
+        let bare = || {
+            (self == SceneSetup::default())
+                .then(|| crate::scenario::index_of(crate::scenario::DEFAULT))
+                .flatten()
+        };
+        if let Some(i) = saved.or_else(bare) {
             self.set_world(i);
         }
         self
@@ -374,14 +391,26 @@ mod tests {
         assert_eq!((s.scenario, s.place), (1, PlaceKey::Coast));
         let s = SceneSetup::from_query("place=town").unwrap();
         assert_eq!(s.clone().with_saved_world(Some(&json)), s);
-        assert_eq!(
-            SceneSetup::default().with_saved_world(None),
-            SceneSetup::default()
-        );
-        assert_eq!(
-            SceneSetup::default().with_saved_world(Some("{}")),
-            SceneSetup::default()
-        );
+        // A bare start with nothing saved is in the default world; a scene with any key
+        // stays in the test town.
+        let mirage = crate::scenario::index_of(crate::scenario::DEFAULT).unwrap();
+        for saved in [None, Some("{}")] {
+            let s = SceneSetup::default().with_saved_world(saved);
+            assert_eq!((s.scenario, s.place), (mirage, PlaceKey::Coast));
+            assert_eq!(s.car, crate::scenario::get(mirage).default_vehicle);
+            assert!(!s.place_given && s.time_s.is_none());
+        }
+        let s = SceneSetup::from_query("t=12:00").unwrap();
+        assert_eq!(s.clone().with_saved_world(None), s);
+        assert_eq!(s.place, PlaceKey::TestTown);
+        // A saved pick still wins over the default world.
+        let coast = crate::settings::Settings {
+            scenario: Some("socal_beach_1984"),
+            ..Default::default()
+        };
+        let json = coast.to_json(&crate::input::Bindings::default());
+        let s = SceneSetup::default().with_saved_world(Some(&json));
+        assert_eq!((s.scenario, s.place), (0, PlaceKey::Coast));
         // A world's scene keeps the session's options and drops the spot and the car.
         let base =
             SceneSetup::from_query("seed=9&car=pipit_hatch&t=12:00&pos=1,2&cam=cockpit&ui=2")
