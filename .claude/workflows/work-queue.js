@@ -173,7 +173,7 @@ for (const x of checks.filter(Boolean)) {
 
 // Ready: Queued, every `after` card merged, within the in-flight cap.
 phase('Start')
-const inFlight = cards.filter(c => (c.status === 'building' || c.status === 'review') && !merged.has(c.id)).length
+const inFlight = cards.filter(c => c.session && (c.status === 'building' || c.status === 'review') && !merged.has(c.id)).length
 let queued = cards.filter(c => c.status === 'queued').sort((a, b) => (a.order || 0) - (b.order || 0))
 if (A.items && A.items.length) queued = queued.filter(c => A.items.includes(c.id))
 const ready = queued.filter(c => (c.after || []).every(d => merged.has(d)))
