@@ -29,6 +29,28 @@ use crate::palette::{shade, srgb, Palette, Rgb};
 use crate::setpieces::Slab;
 use crate::signs::letters::{self, LetterStyle};
 
+/// The built-in kits, `assets/landmarks/<id>.ron`, as `(id, RON text)` in file-name order
+/// (the app parses them; a `place::PropKind::Landmark`'s `kit` indexes this list).
+pub const BUILTIN: [(&str, &str); 5] = [
+    (
+        "coffee_shop",
+        include_str!("../../../assets/landmarks/coffee_shop.ron"),
+    ),
+    (
+        "donut_shop",
+        include_str!("../../../assets/landmarks/donut_shop.ron"),
+    ),
+    (
+        "drive_in",
+        include_str!("../../../assets/landmarks/drive_in.ron"),
+    ),
+    ("motel", include_str!("../../../assets/landmarks/motel.ron")),
+    (
+        "water_tower",
+        include_str!("../../../assets/landmarks/water_tower.ron"),
+    ),
+];
+
 /// The most variants a kit may have: one per capital letter.
 pub const MAX_VARIANTS: usize = 26;
 /// A lot's smallest and largest side, m.

@@ -117,7 +117,8 @@ pub fn poi_color(kind: PoiKind) -> Rgb {
         PoiKind::Stadium => [60, 150, 80],
         PoiKind::DragStrip | PoiKind::CrewGarage => [214, 60, 160],
         PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing => [120, 130, 140],
-        PoiKind::TacoStand => [222, 84, 60],
+        PoiKind::TacoStand | PoiKind::DonutShop | PoiKind::CoffeeShop => [222, 84, 60],
+        PoiKind::Motel | PoiKind::DriveIn => [214, 60, 160],
     }
 }
 /// A point of interest as the full map labels it.

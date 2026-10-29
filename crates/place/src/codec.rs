@@ -777,6 +777,10 @@ fn poi_kind(v: u8) -> Option<PoiKind> {
         10 => PoiKind::CrewGarage,
         11 => PoiKind::TacoStand,
         12 => PoiKind::GradeCrossing,
+        13 => PoiKind::DonutShop,
+        14 => PoiKind::CoffeeShop,
+        15 => PoiKind::Motel,
+        16 => PoiKind::DriveIn,
         _ => return None,
     })
 }

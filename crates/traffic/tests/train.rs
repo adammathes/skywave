@@ -22,6 +22,10 @@ fn basin(seed: u64) -> Place {
     t.validate().expect("validate");
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("grammar");
     g.lexicon = ron::from_str(LEXICON).expect("lexicon");
+    g.landmarks = world::landmarks::BUILTIN
+        .iter()
+        .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
+        .collect();
     build_place(Seed(seed), &t, &g)
 }
 

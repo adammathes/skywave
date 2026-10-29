@@ -7,8 +7,10 @@
 use place::{Place, PoiKind, PropKind};
 use skywave_core::Seed;
 use vehicle::{step, Assists, VehicleInput, VehicleSpec, VehicleState};
-use world::math::{segment_distance, V2};
+use world::landmarks::Kit;
+use world::math::{point_in_polygon, segment_distance, V2};
 use world::procgen::build_place;
+use world::procgen::setpieces::{DRIVE_IN_VIEW_M, ROADSIDE, ROADSIDE_APART_M};
 use world::template::RegionTemplate;
 use world::{resolve, WorldCollider};
 
@@ -21,6 +23,10 @@ fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
     g.validate().expect("validate grammar");
+    g.landmarks = world::landmarks::BUILTIN
+        .iter()
+        .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
+        .collect();
     g
 }
 
@@ -156,6 +162,221 @@ fn every_basin_has_its_set_pieces_clear_of_roads_and_buildings() {
             "seed {seed}: tunnel {:.0},{:.0} .. {:.0},{:.0}",
             a.x, a.y, b.x, b.y
         );
+    }
+}
+
+/// The roadside set's landmarks in `p`: each prop, its kit and the kit's lot rectangle.
+fn roadside<'a>(p: &'a Place, g: &'a world::Grammar) -> Vec<(&'a place::Prop, &'a Kit, Vec<V2>)> {
+    p.props
+        .items
+        .iter()
+        .filter_map(|q| match q.kind {
+            PropKind::Landmark { kit, .. } => {
+                let k = &g.landmarks[usize::from(kit)];
+                Some((q, k, footprint(q, k.lot[0], k.lot[1])))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether the segments `a..b` and `c..d` cross.
+fn crosses(a: V2, b: V2, c: V2, d: V2) -> bool {
+    let side = |p: V2, q: V2, r: V2| (q - p).turn(r - p);
+    side(a, b, c) * side(a, b, d) < 0.0 && side(c, d, a) * side(c, d, b) < 0.0
+}
+
+/// The freeway's centerline segments.
+fn freeway(p: &Place) -> Vec<(V2, V2)> {
+    p.roads
+        .edges
+        .iter()
+        .filter(|e| e.class == place::RoadClass::Highway && !e.oneway && e.lanes_fwd >= 2)
+        .flat_map(|e| {
+            e.profile
+                .windows(2)
+                .map(|s| (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2])))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn the_roadside_set_stands_once_each_on_its_own_clear_lot() {
+    let g = grammar();
+    let picks: Vec<(usize, u8)> = ROADSIDE
+        .iter()
+        .map(|(id, letter, _)| {
+            let k = g.landmarks.iter().position(|k| k.id == *id).unwrap();
+            (k, *letter as u8 - b'A')
+        })
+        .collect();
+    for seed in 1..=4u64 {
+        let p = basin(seed);
+        let set = roadside(&p, &g);
+        // Once each, in the owner's picks, each with its point of interest.
+        assert_eq!(set.len(), ROADSIDE.len(), "seed {seed}");
+        for &(kit, variant) in &picks {
+            let n = count(&p, |k| {
+                k == PropKind::Landmark {
+                    kit: kit as u8,
+                    variant,
+                }
+            });
+            assert_eq!(n, 1, "seed {seed}: kit {kit}");
+        }
+        for (_, _, poi) in ROADSIDE {
+            assert_eq!(pois(&p, poi), 1, "seed {seed}: {poi:?}");
+        }
+        let fronts: Vec<V2> = p
+            .props
+            .items
+            .iter()
+            .filter(|q| {
+                matches!(
+                    q.kind,
+                    PropKind::CrewGarage { .. } | PropKind::TacoStand { .. }
+                )
+            })
+            .map(at)
+            .collect();
+        for (i, (q, kit, area)) in set.iter().enumerate() {
+            let name = &kit.id;
+            // No road on its ground: every road stays clear of the lot's corners and no
+            // road's centerline point is inside it.
+            for e in &p.roads.edges {
+                for s in e.profile.windows(2) {
+                    let (a, b) = (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2]));
+                    for c in area {
+                        let d = segment_distance(*c, a, b).0;
+                        assert!(d > 0.5 * e.width_m, "seed {seed}: a road on the {name}");
+                    }
+                    assert!(
+                        !point_in_polygon(a, area),
+                        "seed {seed}: a road through the {name}"
+                    );
+                }
+            }
+            // No building on it, and nothing the detailing scatters: only its own cars.
+            for b in &p.buildings {
+                for v in &b.footprint {
+                    let inside = point_in_polygon(V2::from_array(*v), area);
+                    assert!(!inside, "seed {seed}: a building on the {name}");
+                }
+            }
+            let shrunk: Vec<V2> = {
+                let c = area.iter().fold(V2::new(0.0, 0.0), |a, &v| a + v) * 0.25;
+                area.iter().map(|&v| c + (v - c) * 0.97).collect()
+            };
+            for o in &p.props.items {
+                let ours = std::ptr::eq(o, *q) || matches!(o.kind, PropKind::ParkedCar { .. });
+                if !ours && point_in_polygon(at(o), &shrunk) {
+                    panic!("seed {seed}: a {:?} on the {name}", o.kind);
+                }
+            }
+            // Apart from each other and the garage and stand.
+            for (j, (o, _, _)) in set.iter().enumerate() {
+                if i != j {
+                    let d = (at(o) - at(q)).length();
+                    assert!(
+                        d >= ROADSIDE_APART_M,
+                        "seed {seed}: {name} {d:.0} m from another"
+                    );
+                }
+            }
+            for f in &fronts {
+                assert!(
+                    (*f - at(q)).length() >= ROADSIDE_APART_M,
+                    "seed {seed}: {name}"
+                );
+            }
+            // Its parked cars stand on its lot, clear of its solid parts.
+            let variant = match q.kind {
+                PropKind::Landmark { variant, .. } => usize::from(variant),
+                _ => unreachable!(),
+            };
+            let mut slabs = Vec::new();
+            let facing = dir_of_yaw(q.yaw);
+            world::landmarks::slabs(kit, variant, at(q), q.pos[1], facing, &mut slabs);
+            let mut cars = 0;
+            for o in &p.props.items {
+                if !matches!(o.kind, PropKind::ParkedCar { .. }) || !point_in_polygon(at(o), area) {
+                    continue;
+                }
+                cars += 1;
+                for sl in &slabs {
+                    let d = at(o) - sl.c;
+                    let (u, v) = (sl.u, sl.u.right());
+                    let inside =
+                        d.dot(u).abs() < sl.half[0] + 1.0 && d.dot(v).abs() < sl.half[1] + 1.0;
+                    assert!(!inside, "seed {seed}: a car parked in the {name}'s solids");
+                }
+            }
+            assert!(cars >= 4, "seed {seed}: {cars} cars at the {name}");
+            // Its lamps light it.
+            let lit = p
+                .lights
+                .items
+                .iter()
+                .filter(|l| point_in_polygon(V2::new(l.pos[0], l.pos[2]), area))
+                .count();
+            assert!(lit >= 1, "seed {seed}: the {name} is dark");
+            println!(
+                "seed {seed}: {name} at {:.0},{:.0}, {cars} cars, {lit} lamps",
+                q.pos[0], q.pos[2]
+            );
+        }
+        // The drive-in's screen shows from the freeway: near it, and some freeway point
+        // within reach sees the screen's middle over every building lower than its top.
+        let (q, kit, _) = set.iter().find(|(_, k, _)| k.id == "drive_in").unwrap();
+        let screen = at(q) - dir_of_yaw(q.yaw) * (kit.lot[1] - 6.0);
+        let fwy = freeway(&p);
+        let near = fwy
+            .iter()
+            .map(|&(a, b)| segment_distance(screen, a, b).0)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            near < DRIVE_IN_VIEW_M + 80.0,
+            "seed {seed}: screen {near:.0} m off the freeway"
+        );
+        let seen = fwy.iter().flat_map(|&(a, b)| [a, a.lerp(b, 0.5)]).any(|f| {
+            (f - screen).length() < 600.0
+                && !p.buildings.iter().any(|b| {
+                    let n = b.footprint.len();
+                    b.height_m > 12.0
+                        && (0..n).any(|i| {
+                            let (u, v) = (b.footprint[i], b.footprint[(i + 1) % n]);
+                            crosses(f, screen, V2::from_array(u), V2::from_array(v))
+                        })
+                })
+        });
+        assert!(
+            seen,
+            "seed {seed}: no freeway view of the drive-in's screen"
+        );
+    }
+}
+
+#[test]
+fn a_car_drives_into_the_drive_in_past_its_ticket_booth() {
+    let spec = halberd();
+    let g = grammar();
+    for seed in [1u64, 3] {
+        let p = basin(seed);
+        let c = WorldCollider::build(&p, &g);
+        let (q, _, _) = roadside(&p, &g)
+            .into_iter()
+            .find(|(_, k, _)| k.id == "drive_in")
+            .unwrap();
+        let out = dir_of_yaw(q.yaw);
+        let right = (-out).right();
+        let ground = |v: V2| [v.x, c.level_at([v.x, v.y]).0, v.y];
+        // The entry lane left of the booth, seen from the road.
+        let start = at(q) + right * 23.0 + out * 2.0;
+        let mut s = VehicleState::spawn(&spec, ground(start), heading_of(-out));
+        drive(&spec, &mut s, &c, 10.0, |s| input(cruise(s, 5.0), 0.0, 0.0));
+        let into = (at(q) - V2::new(s.pos[0], s.pos[2])).dot(out);
+        assert!(into > 30.0, "seed {seed}: {into:.1} m into the drive-in");
     }
 }
 

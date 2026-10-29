@@ -179,6 +179,17 @@ coast's Place is unchanged.
   line, and the board shows the time and the speed over the line, with a toast. Only the last run is kept.
 - **The overlooks.** At the end of each overlook road: a guard rail 9 m past the end across the view, two
   benches facing out, a lamp.
+- **The roadside set** (the roadside card; `procgen::setpieces::ROADSIDE` holds the owner's picks: donut
+  shop B, coffee shop C, motel C, drive-in A). Landmark kits on lots of their kit's size, square to a road
+  behind its walk; their lots lose their buildings and nothing the detailing scatters stands on them. The
+  donut shop, the coffee shop and the motel, in that order, on commercial or strip lots on an arterial or
+  collector, each the nearest the boulevard at least 250 m from the others, the garage and the stand. The
+  drive-in on open farmland (or an industrial lot) off a road that is not the freeway: of the sites within
+  350 m of the freeway, the one farthest from downtown, its screen facing the road and seen from the
+  freeway. Each is a point of interest (`DonutShop`, `CoffeeShop`, `Motel`, `DriveIn`; the map names it
+  "Stem Donuts" and so on), its kit's lamps are lights, and cars park in its painted stalls at its own hours:
+  donut runs from dawn, coffee at breakfast, lunch and late at night, the motel overnight, the drive-in's
+  two rows from 19:00 to past midnight.
 - **The grade crossings.** Every road the rail line crosses at grade: a `GradeCrossing` landmark on the track's
   middle, and a `CrossingGate` (mast, crossed blades, twin lamps, bell, the arm's pivot) on each approach on the
   right, its arm reaching across the approach to 0.3 m short of the road's middle (across the whole road on a
@@ -190,7 +201,9 @@ coast's Place is unchanged.
   its foot. A `ChannelRamp` landmark marks each ramp's top.
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
-walls hold a car to the freeway, a car drives through it and into the garage's middle bay), the meshes'
+walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the roadside set
+once each in the picked variants on its own clear lot, 250 m apart, its cars clear of its solids and its
+lamps lit, the drive-in's screen seen from the freeway and a car driving in past its ticket booth), the meshes'
 and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 
 ## Landmarks
@@ -208,8 +221,9 @@ Valley's boulevards (the roadside card, 2026-10-29), each in three variants awai
 `coffee_shop` (a glass dining room under a roof swooping up toward the road, or a butterfly roof; a
 canted pole sign with a starburst), `motel` (rooms round a kidney pool lit from below behind a low wall,
 an office, a pole sign with a neon arrow bending down to the drive) and `drive_in` (a screen facing the
-road that glows from dusk, speaker posts in rows, a snack bar, a ticket canopy and a marquee). Their
-signs are blank lit boards until they are sited; a sited one is lettered with an invented name.
+road that glows from dusk, speaker posts in rows, a snack bar, a ticket canopy and a marquee). Mirage
+Valley sites one of each (above, "The roadside set"). Their signs are lit boards without lettering: a kit
+cannot letter, and the map carries their invented names.
 
 Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
 a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows

@@ -23,6 +23,10 @@ fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
     g.validate().expect("validate grammar");
+    g.landmarks = world::landmarks::BUILTIN
+        .iter()
+        .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
+        .collect();
     g
 }
 
