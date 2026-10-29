@@ -86,7 +86,7 @@ pub use timing::{GpuCounts, GPU_PARTS, GPU_PART_NAMES, GPU_PASSES, GPU_PASS_NAME
 
 use bytemuck::{Pod, Zeroable};
 use cull::{Aabb, Frustum};
-use glam::{Mat3, Mat4, Vec3, Vec4Swizzles};
+use glam::{Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
 use hud::HudQuad;
 use sky::SkyModel;
 use std::future::Future;
@@ -240,18 +240,39 @@ impl MeshInstance {
 }
 
 /// Up to [`LIGHTS_PER_DRAW`] indices into [`SceneView::lights`]: the lights an instance is
-/// shaded by. Indices past the end of the frame's lights are ignored.
+/// shaded by, each with a weight ([`LightSet::with_weight`], 1 unless set). Indices past the
+/// end of the frame's lights are ignored. A caller choosing among more lights than fit
+/// fades a light out as others overtake it instead of swapping them in one frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LightSet {
     len: u8,
     indices: [u8; LIGHTS_PER_DRAW],
+    /// How far each light is dimmed, 0 (full) to [`DIM_STEPS`] (off).
+    dim: [u8; LIGHTS_PER_DRAW],
 }
+
+/// Steps of a light's weight in a set: four bits each in the instance's packed params.
+const DIM_STEPS: u8 = 15;
 
 impl LightSet {
     pub const EMPTY: LightSet = LightSet {
         len: 0,
         indices: [0; LIGHTS_PER_DRAW],
+        dim: [0; LIGHTS_PER_DRAW],
     };
+
+    /// The set with its `k`th light scaled by `weight` (0..=1, in fifteenths).
+    pub fn with_weight(mut self, k: usize, weight: f32) -> LightSet {
+        if k < self.len() {
+            self.dim[k] = ((1.0 - weight.clamp(0.0, 1.0)) * f32::from(DIM_STEPS)).round() as u8;
+        }
+        self
+    }
+
+    /// The weight of the `k`th light: 1 unless [`LightSet::with_weight`] dimmed it.
+    pub fn weight(&self, k: usize) -> f32 {
+        1.0 - f32::from(self.dim.get(k).copied().unwrap_or(0)) / f32::from(DIM_STEPS)
+    }
 
     /// Adds light `index`; false (and unchanged) when the set is full or `index` is not
     /// below [`MAX_LIGHTS`].
@@ -840,6 +861,9 @@ pub struct RenderStats {
 struct FrameUniform {
     view_proj: [[f32; 4]; 4],
     inv_view_proj: [[f32; 4]; 4],
+    /// `view_proj` with the camera at the origin: what meshes are drawn with, their
+    /// instances' translations being relative to the camera ([`camera_relative`]).
+    rel_view_proj: [[f32; 4]; 4],
     cascade_view_proj: [[[f32; 4]; 4]; CASCADES],
     camera_pos: [f32; 4],
     camera_fwd: [f32; 4],
@@ -995,19 +1019,21 @@ struct InstanceRaw {
     /// Inverse-transpose of the model's upper 3x3, columns padded to vec4.
     normal: [[f32; 4]; 3],
     color: [f32; 4],
-    /// x glow (emissive multiplier) as f32 bits, y cabin-light share as unorm16 | the light
-    /// set's length << 16 | [`NO_SUN_SHADOW`] when it receives no shadow, zw the set's
-    /// light indices, a byte each, low byte first.
+    /// x glow (emissive multiplier) as f16 bits | the cabin-light share as unorm8 << 16 |
+    /// the light set's length << 24 (4 bits) | [`NO_SUN_SHADOW`] when it receives no
+    /// shadow, y how far each light of the set is dimmed (4 bits a light, the first lowest),
+    /// zw the set's light indices, a byte each, low byte first.
     params: [u32; 4],
 }
 
 impl InstanceRaw {
-    /// `inst` for a frame with `lights` lights (indices at or past it are left out).
-    fn new(inst: &MeshInstance, lights: usize) -> InstanceRaw {
+    /// `inst` for a frame with `lights` lights (indices at or past it are left out) seen
+    /// from `eye`, its translation relative to it ([`camera_relative`]).
+    fn new(inst: &MeshInstance, lights: usize, eye: Vec3) -> InstanceRaw {
         let model = Mat4::from_cols_array_2d(&inst.transform);
         let n = Mat3::from_mat4(model).inverse().transpose();
         InstanceRaw {
-            model: inst.transform,
+            model: camera_relative(inst.transform, eye),
             normal: [
                 n.x_axis.extend(0.0).to_array(),
                 n.y_axis.extend(0.0).to_array(),
@@ -1019,29 +1045,49 @@ impl InstanceRaw {
     }
 }
 
-/// Bit of `params.y` (just past the light count) that skips the sun's shadow test
+/// `transform` with its translation taken relative to `eye`. Meshes are drawn camera
+/// relative: in world coordinates a vertex a kilometre or two from the origin is rounded
+/// to a tenth of a millimetre or more twice on the GPU (into the world, then back toward
+/// the camera), and a thin layer half a millimetre off its backing (a radio display, a
+/// mirror's glass, a sign's plate) lost to it in patches that changed every frame while
+/// the camera moved. Relative to the eye the numbers are small and nothing near cancels.
+fn camera_relative(mut transform: [[f32; 4]; 4], eye: Vec3) -> [[f32; 4]; 4] {
+    for (t, e) in transform[3].iter_mut().zip(eye.to_array()) {
+        *t -= e;
+    }
+    transform
+}
+
+/// `view` without its translation: the same view from a camera at the origin.
+fn view_rotation(view: Mat4) -> Mat4 {
+    Mat4::from_cols(view.x_axis, view.y_axis, view.z_axis, Vec4::W)
+}
+
+/// Bit of `params.x` (just past the light count) that skips the sun's shadow test
 /// ([`MeshInstance::receives_shadow`] off); `forward.wgsl` reads it.
-const NO_SUN_SHADOW: u32 = 1 << 24;
+const NO_SUN_SHADOW: u32 = 1 << 28;
 
 /// The packed `params` of [`InstanceRaw`].
 fn instance_params(inst: &MeshInstance, lights: usize) -> [u32; 4] {
     let mut words = [0u32; 2];
+    let mut dims = 0u32;
     let mut n = 0;
-    for &i in inst.lights.indices() {
+    for (k, &i) in inst.lights.indices().iter().enumerate() {
         if usize::from(i) < lights {
             words[n / 4] |= u32::from(i) << (8 * (n % 4));
+            dims |= u32::from(inst.lights.dim[k]) << (4 * n);
             n += 1;
         }
     }
-    let cabin = (inst.cabin.clamp(0.0, 1.0) * 65535.0).round() as u32;
+    let cabin = (inst.cabin.clamp(0.0, 1.0) * 255.0).round() as u32;
     let shadow = if inst.receives_shadow {
         0
     } else {
         NO_SUN_SHADOW
     };
     [
-        inst.glow.max(0.0).to_bits(),
-        cabin | (n as u32) << 16 | shadow,
+        u32::from(f16_bits(inst.glow.max(0.0))) | cabin << 16 | (n as u32) << 24 | shadow,
+        dims,
         words[0],
         words[1],
     ]
@@ -2809,6 +2855,10 @@ impl Renderer {
         cull: [bool; CASCADES],
     ) -> [u64; CASCADES] {
         let camera = Frustum::from_matrix(view_proj);
+        let eye = Mat4::from_cols_array_2d(&scene.camera.view)
+            .inverse()
+            .w_axis
+            .xyz();
         let boxes = fits.map(|f| Frustum::from_matrix(f.view_proj));
         let min_texels = self.quality.min_caster_texels;
         self.vis.clear();
@@ -2842,7 +2892,7 @@ impl Renderer {
             }
             self.vis.push(bits);
             self.raws.push(if bits != 0 {
-                InstanceRaw::new(inst, lights)
+                InstanceRaw::new(inst, lights, eye)
             } else {
                 InstanceRaw::zeroed()
             });
@@ -3051,8 +3101,10 @@ impl Renderer {
         let eye = inv_view.w_axis.xyz();
         let forward = -inv_view.z_axis.xyz().normalize_or(Vec3::Z);
         let rs = self.targets.size;
+        // The shadow pass draws the same camera-relative instances.
+        let to_world = Mat4::from_translation(eye);
         let cascades = fits.map(|f| CascadeUniform {
-            view_proj: f.view_proj.to_cols_array_2d(),
+            view_proj: (f.view_proj * to_world).to_cols_array_2d(),
             _pad: [[0.0; 4]; 12],
         });
         let v4 = |v: Vec3, w: f32| v.extend(w).to_array();
@@ -3060,6 +3112,7 @@ impl Renderer {
         let uniform = FrameUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
+            rel_view_proj: (proj * view_rotation(view)).to_cols_array_2d(),
             cascade_view_proj: fits.map(|f| f.view_proj.to_cols_array_2d()),
             camera_pos: v4(eye, scene.sky.fog_density.max(0.0)),
             camera_fwd: v4(forward, 0.0),
@@ -3957,7 +4010,7 @@ mod tests {
         // 16 KiB uniform block limit.
         assert_eq!(
             size_of::<FrameUniform>(),
-            5 * 64 + 29 * 16 + MAX_LIGHTS * 32
+            6 * 64 + 29 * 16 + MAX_LIGHTS * 32
         );
         assert_eq!(size_of::<PackedLight>(), 32);
         assert_eq!(size_of::<CoronaRaw>(), 32);
@@ -3993,6 +4046,7 @@ mod tests {
             [
                 "view_proj",
                 "inv_view_proj",
+                "rel_view_proj",
                 "cascade_view_proj",
                 "camera_pos",
                 "camera_fwd",
@@ -4152,29 +4206,43 @@ mod tests {
         };
         assert_eq!(inst.lights.len(), LIGHTS_PER_DRAW, "the ninth is left out");
         let p = instance_params(&inst, MAX_LIGHTS);
-        assert_eq!(f32::from_bits(p[0]), 0.75);
-        assert_eq!(p[1] & 0xffff, 32768);
-        assert_eq!(p[1] >> 16, 8);
+        assert_eq!(
+            p[0],
+            0x3a00 | 128 << 16 | 8 << 24,
+            "0.75 as a half float, cabin, count"
+        );
+        assert_eq!(p[1], 0, "nothing dimmed");
         assert_eq!(p[2], 3 | 255 << 8 | 7 << 16);
         assert_eq!(p[3], 200 | 1 << 8 | 2 << 16 | 9 << 24);
         // With 10 lights in the frame, 255 and 200 are not there.
         let p = instance_params(&inst, 10);
-        assert_eq!(p[1] >> 16, 6);
+        assert_eq!(p[0] >> 24, 6);
         assert_eq!(p[2], 3 | 7 << 8 | 1 << 24);
         assert_eq!(p[3], 2 | 9 << 8);
         inst.lights = LightSet::EMPTY;
         inst.glow = -1.0;
         inst.cabin = 2.0;
-        assert_eq!(instance_params(&inst, 4), [0, 65535, 0, 0]);
-        // No sun shadow: the bit past the light count, which the shader reads as 256 in
-        // the count's word, leaving the count itself alone.
+        assert_eq!(instance_params(&inst, 4), [255 << 16, 0, 0, 0]);
+        // No sun shadow: the bit past the light count, which the shader reads as 16 in the
+        // count's word.
         inst.receives_shadow = false;
         inst.lights = LightSet::from_indices(&[1, 2]);
         let p = instance_params(&inst, 4);
-        assert_eq!(p[1], 65535 | 2 << 16 | NO_SUN_SHADOW);
-        assert_eq!(((p[1] >> 16) & 255, (p[1] >> 16) & 256), (2, 256));
+        assert_eq!(p[0], 255 << 16 | 2 << 24 | NO_SUN_SHADOW);
         let wgsl = include_str!("../shaders/forward.wgsl");
-        assert!(wgsl.contains("(in.lights.x & 256u) == 0u"));
+        assert!(wgsl.contains("(i.params.x >> 24u) & 31u"));
+        assert!(wgsl.contains("(in.lights.x & 16u) == 0u"));
+        // Dimmed lights: four bits each in y, packed with the lights kept.
+        inst.lights = LightSet::from_indices(&[1, 9, 2])
+            .with_weight(0, 0.5)
+            .with_weight(2, 0.0)
+            .with_weight(3, 0.0);
+        assert_eq!(inst.lights.weight(0), 1.0 - 8.0 / 15.0);
+        assert_eq!((inst.lights.weight(1), inst.lights.weight(2)), (1.0, 0.0));
+        assert_eq!(inst.lights.weight(3), 1.0, "past the set");
+        assert_eq!(instance_params(&inst, 4)[1], 8 | 15 << 4);
+        assert_eq!(LightSet::EMPTY.with_weight(0, 0.0), LightSet::EMPTY);
+        assert!(wgsl.contains("(light_set.y >> (4u * k)) & 15u"));
         let mut set = LightSet::EMPTY;
         assert!(set.is_empty() && !set.push(MAX_LIGHTS) && set.push(MAX_LIGHTS - 1));
         assert_eq!(set.indices(), &[255]);
@@ -4183,7 +4251,11 @@ mod tests {
     #[test]
     fn normal_matrix_handles_non_uniform_scale() {
         let m = Mat4::from_scale(Vec3::new(4.0, 1.0, 1.0)) * Mat4::from_rotation_z(0.5);
-        let raw = InstanceRaw::new(&MeshInstance::new(MeshId(0), m.to_cols_array_2d()), 0);
+        let raw = InstanceRaw::new(
+            &MeshInstance::new(MeshId(0), m.to_cols_array_2d()),
+            0,
+            Vec3::ZERO,
+        );
         let n = Mat3::from_cols(
             Vec4::from(raw.normal[0]).xyz(),
             Vec4::from(raw.normal[1]).xyz(),
@@ -5072,6 +5144,60 @@ mod tests {
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
+    /// The web flicker on thin layers: a driver's-eye view of a radio display half a
+    /// millimetre in front of its face, 2.5 km from the origin, the car moving a little each
+    /// frame. With the shader's float32 math in world coordinates the display lost to the
+    /// face on some frames (the black wedges flickering over it); camera relative, never.
+    #[test]
+    fn thin_layers_far_from_the_origin_never_swap() {
+        let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
+        let r = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, (8, 8));
+        let (mut world_swaps, mut rel_swaps) = (0, 0);
+        for k in 0..400 {
+            let t = k as f32;
+            let car = Vec3::new(
+                2400.0 + 0.37 * t,
+                30.0 + 0.01 * (t * 0.3).sin(),
+                2450.0 + 0.11 * t,
+            );
+            let yaw = 0.3 + 0.002 * t;
+            let rot = glam::Quat::from_rotation_y(yaw);
+            let eye = car + rot * Vec3::new(0.35, 1.1, -0.3);
+            let ahead = eye + rot * Vec3::new(0.0, -0.4, 1.0);
+            let mut scene = test_scene(&[]);
+            scene.camera = Camera {
+                view: glam::camera::rh::view::look_at_mat4(eye, ahead, Vec3::Y).to_cols_array_2d(),
+                proj: glam::camera::rh::proj::directx::perspective(1.0, 16.0 / 9.0, 0.1, 3000.0)
+                    .to_cols_array_2d(),
+            };
+            let (u, _) = r.frame_uniforms(&scene);
+            let model = Mat4::from_rotation_translation(rot, car);
+            let inst = MeshInstance::new(MeshId(0), model.to_cols_array_2d());
+            let raw = InstanceRaw::new(&inst, 0, Vec3::from_slice(&u.camera_pos[..3]));
+            // The face and the display in front of it toward the driver, car local.
+            let face = Vec3::new(0.3 + 0.0001 * t, 1.0, 0.9);
+            let display = face - Vec3::Z * 0.0005;
+            let depth = |m: [[f32; 4]; 4], vp: [[f32; 4]; 4], p: Vec3| {
+                let c =
+                    Mat4::from_cols_array_2d(&vp) * (Mat4::from_cols_array_2d(&m) * p.extend(1.0));
+                c.z / c.w
+            };
+            world_swaps += usize::from(
+                depth(inst.transform, u.view_proj, display)
+                    >= depth(inst.transform, u.view_proj, face),
+            );
+            rel_swaps += usize::from(
+                depth(raw.model, u.rel_view_proj, display)
+                    >= depth(raw.model, u.rel_view_proj, face),
+            );
+        }
+        assert!(
+            world_swaps > 0,
+            "the world-space math this replaces did swap"
+        );
+        assert_eq!(rel_swaps, 0);
+    }
+
     #[test]
     fn frame_uniforms_carry_cascades_and_sky() {
         let (device, queue) = noop_device(wgpu::Limits::downlevel_webgl2_defaults());
@@ -5080,9 +5206,18 @@ mod tests {
         let scene = test_scene(&[]);
         let (u, c) = r.frame_uniforms(&scene);
         assert_eq!(&u.cascade_far[..3], &[30.0, 100.0, 400.0]);
+        // The shadow pass draws camera-relative instances: its matrices take them back to
+        // the world first; the forward pass samples with the world ones.
+        let eye = Vec3::from_slice(&u.camera_pos[..3]);
         for (m, cascade) in u.cascade_view_proj.iter().zip(&c) {
-            assert_eq!(*m, cascade.view_proj);
+            let rel = Mat4::from_cols_array_2d(m) * Mat4::from_translation(eye);
+            assert_eq!(rel.to_cols_array_2d(), cascade.view_proj);
         }
+        // Meshes: the same clip position from a camera-relative vertex as from the world.
+        let world = Vec3::new(3.0, 1.0, -7.0);
+        let a = Mat4::from_cols_array_2d(&u.view_proj) * world.extend(1.0);
+        let b = Mat4::from_cols_array_2d(&u.rel_view_proj) * (world - eye).extend(1.0);
+        assert!((a - b).abs().max_element() < 1e-4, "{a} {b}");
         assert!(u.cascade_texel[0] < u.cascade_texel[1]);
         // Sky ambient is blue-ish and dimmer than the sun on a white surface.
         assert!(u.sky_up[2] > u.sky_up[0]);
