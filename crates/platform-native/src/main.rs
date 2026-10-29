@@ -51,6 +51,8 @@
 
 mod music;
 mod pad;
+#[cfg(target_os = "macos")]
+mod pad_mac;
 mod radio;
 mod settings;
 mod sfx;

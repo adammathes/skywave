@@ -60,6 +60,9 @@ fastnoise-lite = { version = "=1.1.1", default-features = false, features = ["li
 # Native gamepads (platform-native only). Default features: evdev + udev on Linux (the
 # Steam Deck's controller is a standard evdev pad), IOKit on macOS, Windows.Gaming.Input.
 gilrs = "=0.11.2"
+# macOS gamepads the Game Controller framework knows (platform-native only; MIT, already in
+# the tree through wgpu, winit and cpal). Plain messages to the framework, no binding crate.
+objc2 = "=0.6.5"
 
 # Native audio output (platform-native only; Apache-2.0). ALSA on Linux (libasound2-dev to
 # build), CoreAudio on macOS, WASAPI on Windows.

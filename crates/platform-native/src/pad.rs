@@ -16,7 +16,8 @@
 //! - `LeftZ`/`RightZ` (generic axes of unmapped devices) and `C`/`Z` are ignored;
 //!   `DPadX`/`DPadY` hat axes become d-pad buttons in gilrs's default filters.
 //!
-//! The first connected pad is "the" pad; others are ignored until it disconnects.
+//! The first connected pad is "the" pad; others are ignored until it disconnects. On macOS a
+//! controller Apple's Game Controller framework knows takes precedence (`pad_mac`).
 
 use std::fmt::Write as _;
 
@@ -24,7 +25,7 @@ use app::{pad_table, InputMapper};
 use gilrs::{Axis, Button, EventType, GamepadId, Gilrs, MappingSource};
 
 /// gilrs's button at each W3C standard-mapping index (see `app::pad_table::BUTTONS`).
-const BUTTONS: [Button; 17] = [
+pub(crate) const BUTTONS: [Button; 17] = [
     Button::South,
     Button::East,
     Button::West,
@@ -46,7 +47,7 @@ const BUTTONS: [Button; 17] = [
 
 /// gilrs's axis at each standard-mapping axis index, and the factor that turns its value
 /// into the standard convention (+Y down).
-const AXES: [(Axis, f32); 4] = [
+pub(crate) const AXES: [(Axis, f32); 4] = [
     (Axis::LeftStickX, 1.0),
     (Axis::LeftStickY, -1.0),
     (Axis::RightStickX, 1.0),
@@ -89,12 +90,43 @@ pub fn apply(input: &mut InputMapper, ev: PadEvent) {
     }
 }
 
+/// The backend named in the startup line, so a field report says what read the pads.
+#[cfg(target_os = "linux")]
+const BACKEND: &str = "gilrs evdev";
+#[cfg(target_os = "macos")]
+const BACKEND: &str = "Game Controller framework, then gilrs IOKit HID";
+#[cfg(target_os = "windows")]
+const BACKEND: &str = "gilrs Windows.Gaming.Input";
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+const BACKEND: &str = "gilrs";
+
+/// A hot-plug message: to stderr when `verbose` (`--stats`), else the info log.
+pub(crate) fn note(verbose: bool, msg: std::fmt::Arguments) {
+    if verbose {
+        eprintln!("{msg}");
+    } else {
+        log::info!("{msg}");
+    }
+}
+
+/// How gilrs names a pad's buttons.
+fn mapping(pad: &gilrs::Gamepad) -> &'static str {
+    match pad.mapping_source() {
+        MappingSource::SdlMappings => "SDL mapping",
+        MappingSource::Driver => "driver mapping",
+        MappingSource::None => "no mapping",
+    }
+}
+
 /// The gamepad backend and which pad is active.
 pub struct Pads {
     gilrs: Option<Gilrs>,
     active: Option<GamepadId>,
     /// Print hot-plug messages to stderr (`--stats`) instead of the info log.
     verbose: bool,
+    /// The controller the Game Controller framework knows, which overrides gilrs.
+    #[cfg(target_os = "macos")]
+    mac: crate::pad_mac::GameControllers,
 }
 
 impl Pads {
@@ -118,24 +150,27 @@ impl Pads {
             gilrs,
             active,
             verbose,
+            #[cfg(target_os = "macos")]
+            mac: crate::pad_mac::GameControllers::new(verbose),
         }
     }
 
-    /// One line describing the detected pads, e.g. `gamepads: 0 "Xbox Controller" (SDL
-    /// mapping, active)`.
+    /// One line naming the backend and the detected pads, e.g. `gamepads (gilrs evdev): 0
+    /// "Xbox Controller" (SDL mapping, active)`. Pads found later are announced as they
+    /// connect (on macOS that is all of them: both backends find pads as the app starts).
     pub fn summary(&self) -> String {
-        let mut line = String::from("gamepads:");
+        let mut line = format!("gamepads ({BACKEND}):");
+        #[cfg(target_os = "macos")]
+        {
+            let _ = write!(line, " game controller {};", self.mac.summary());
+        }
         let Some(g) = &self.gilrs else {
             line.push_str(" unavailable");
             return line;
         };
         let mut any = false;
         for (id, pad) in g.gamepads() {
-            let mapping = match pad.mapping_source() {
-                MappingSource::SdlMappings => "SDL mapping",
-                MappingSource::Driver => "driver mapping",
-                MappingSource::None => "no mapping",
-            };
+            let mapping = mapping(&pad);
             let active = if Some(id) == self.active {
                 ", active"
             } else {
@@ -152,11 +187,17 @@ impl Pads {
     }
 
     fn note(&self, msg: std::fmt::Arguments) {
-        if self.verbose {
-            eprintln!("{msg}");
-        } else {
-            log::info!("{msg}");
-        }
+        note(self.verbose, msg);
+    }
+
+    /// Whether gilrs's pad is ignored: a framework controller drives instead (macOS).
+    #[cfg(target_os = "macos")]
+    fn overridden(&self) -> bool {
+        self.mac.driving()
+    }
+    #[cfg(not(target_os = "macos"))]
+    fn overridden(&self) -> bool {
+        false
     }
 
     /// Drains pending gamepad events into `input`. Hot-plug is always handled; button and
@@ -164,6 +205,15 @@ impl Pads {
     /// [`Pads::resync`] catches up when focus returns). Allocates nothing unless a pad
     /// connects or disconnects.
     pub fn poll(&mut self, input: &mut InputMapper, focused: bool) {
+        #[cfg(target_os = "macos")]
+        {
+            let r = self.mac.poll(input, focused);
+            // Back to gilrs's pad, if any, when the framework's controller goes away.
+            if r.changed && !r.driving && focused {
+                self.resync(input);
+            }
+        }
+        let overridden = self.overridden();
         loop {
             let Some(ev) = self.gilrs.as_mut().and_then(Gilrs::next_event) else {
                 return;
@@ -172,7 +222,8 @@ impl Pads {
             let id = ev.id;
             match ev.event {
                 EventType::Connected => {
-                    let name = g.gamepad(id).name().to_owned();
+                    let pad = g.gamepad(id);
+                    let name = format!("{:?} ({})", pad.name(), mapping(&pad));
                     // Some backends also announce the pads found at startup, one of
                     // which may already be active.
                     let adopt = self.active.is_none_or(|a| a == id);
@@ -180,7 +231,7 @@ impl Pads {
                         self.active = Some(id);
                     }
                     let role = if adopt { "active" } else { "ignored" };
-                    self.note(format_args!("gamepad connected: {id} {name:?} ({role})"));
+                    self.note(format_args!("gamepad connected: {id} {name} ({role})"));
                     if adopt && focused {
                         self.resync(input);
                     }
@@ -188,7 +239,9 @@ impl Pads {
                 EventType::Disconnected => {
                     self.note(format_args!("gamepad disconnected: {id}"));
                     if self.active == Some(id) {
-                        pad_table::release_gamepad(input);
+                        if !overridden {
+                            pad_table::release_gamepad(input);
+                        }
                         self.active = g.gamepads().map(|(other, _)| other).find(|&x| x != id);
                         if let Some(next) = self.active {
                             self.note(format_args!("gamepad {next} is now active"));
@@ -198,7 +251,7 @@ impl Pads {
                         }
                     }
                 }
-                _ if !focused || Some(id) != self.active => {}
+                _ if !focused || overridden || Some(id) != self.active => {}
                 EventType::ButtonPressed(b, _)
                 | EventType::ButtonReleased(b, _)
                 | EventType::ButtonChanged(b, _, _) => {
@@ -218,6 +271,10 @@ impl Pads {
 
     /// Feeds the active pad's whole current state, after it takes over or focus returns.
     pub fn resync(&self, input: &mut InputMapper) {
+        if self.overridden() {
+            // The framework's controller is fed whole every frame anyway.
+            return;
+        }
         let (Some(g), Some(id)) = (&self.gilrs, self.active) else {
             return;
         };
