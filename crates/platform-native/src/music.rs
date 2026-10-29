@@ -16,7 +16,8 @@
 //! frame, so a large library never stalls a frame. "Remove music folders" on the Audio page
 //! writes the folders to an ignore list beside the settings (`music-ignored.txt`, one path
 //! a line; delete a line to bring a folder back), which later scans skip, and forgets the
-//! picked folders; picking a folder again takes it and everything in it off the list.
+//! picked folders; picking a folder again takes it, everything in it and the folders it is in
+//! off the list.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -307,12 +308,13 @@ pub fn add_to_list(file: &Path, paths: &[String]) {
     write_list(file, &list);
 }
 
-/// Takes the paths at or inside `dir` off the list at `file` (all of them with no `dir`).
+/// Takes the paths at, inside or above `dir` off the list at `file` (all of them with no
+/// `dir`): an ignored folder above a picked one would hide it from the scan.
 pub fn remove_from_list(file: &Path, dir: Option<&Path>) {
     let list = load_list(file);
     let kept: Vec<String> = list
         .iter()
-        .filter(|p| dir.is_some_and(|d| !Path::new(p).starts_with(d)))
+        .filter(|p| dir.is_some_and(|d| !Path::new(p).starts_with(d) && !d.starts_with(p)))
         .cloned()
         .collect();
     if kept.len() != list.len() {
@@ -570,17 +572,23 @@ mod tests {
         add_to_list(&file, &["/Volumes/Card/MP3 Player".into()]);
         add_to_list(&file, &["/Users/a/Tunes".into()]);
         add_to_list(&file, &["/Users/a/Tunes/Surf Band".into()]);
+        add_to_list(&file, &["/Users/a/Tunesmith".into()]);
         assert_eq!(
             load_list(&file),
             [
                 "/Users/a/Tunes",
                 "/Volumes/Card/MP3 Player",
-                "/Users/a/Tunes/Surf Band"
+                "/Users/a/Tunes/Surf Band",
+                "/Users/a/Tunesmith"
             ]
         );
-        // Picked again: off the list, everything in it too (the ignore list's use).
-        remove_from_list(&file, Some(Path::new("/Users/a/Tunes")));
-        assert_eq!(load_list(&file), ["/Volumes/Card/MP3 Player"]);
+        // Picked again: off the list, everything in it and above it too (the ignore list's
+        // use: an ignored folder above the pick would hide it from the scan).
+        remove_from_list(&file, Some(Path::new("/Users/a/Tunes/Surf Band/Beach Mix")));
+        assert_eq!(
+            load_list(&file),
+            ["/Volumes/Card/MP3 Player", "/Users/a/Tunesmith"]
+        );
         // "Remove music folders": all of them.
         remove_from_list(&file, None);
         assert!(load_list(&file).is_empty());
