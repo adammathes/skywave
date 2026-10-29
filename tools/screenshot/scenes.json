@@ -75,6 +75,10 @@
     "about": "Mirage Valley's flood channel at golden hour from its bed: the concrete trapezoid and its low-flow strip, looking down it toward the freeway's bridge, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "417.9,940", "yaw": "180", "still": "1", "stream": "1" }
   },
+  "basin-drive-thru-noon": {
+    "about": "Mirage Valley's donut shop drive-thru at noon from the near chase camera: the car stopped in the lane with its driver's door at the window (donut=1.1: the serve 1.1 s in), the person inside leaning out over the sill holding the pink box out to it.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-near", "t": "12:00", "still": "1", "stream": "1", "donut": "1.1" }
+  },
   "basin-freeway-night": {
     "about": "Mirage Valley's freeway at night, eastbound inside its tiled tunnel (the set piece), toward the far portal and an overpass past it, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "880,1054", "yaw": "90", "still": "1", "stream": "1" }

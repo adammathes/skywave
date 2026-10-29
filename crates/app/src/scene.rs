@@ -57,6 +57,9 @@
 //! - `phase=<tick>`: the signal tick (120 a second) the junction lights start at before
 //!   that warm-up (default 0), so a still scene can pick where in their cycle the lights
 //!   are: a red with a queue at it, say.
+//! - `donut=<s>`: the car stopped with its driver's door at the place's first service
+//!   window (the donut shop's drive-thru; over `pos` and `yaw`), its order in and the serve
+//!   `<s>` seconds along (`app::drivethru`: past `SERVE_S` the box is on the seat).
 
 use crate::camera::CameraMode;
 use crate::drive::DEFAULT_VEHICLE;
@@ -129,6 +132,8 @@ pub struct SceneSetup {
     /// Seconds into a run of the place's train at the start: it starts warning at its
     /// first end, runs that long, and the scene opens there (`None`: it rests a while).
     pub train_s: Option<f32>,
+    /// Seconds into a serve at the place's first service window, the car stopped at it.
+    pub donut_s: Option<f32>,
 }
 
 impl Default for SceneSetup {
@@ -157,6 +162,7 @@ impl Default for SceneSetup {
             traffic: None,
             phase: None,
             train_s: None,
+            donut_s: None,
         }
     }
 }
@@ -182,9 +188,9 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 20] = [
+    pub const KEYS: [&'static str; 21] = [
         "seed", "place", "scenario", "car", "paint", "driver", "cam", "t", "pos", "yaw", "lights",
-        "glow", "fly", "still", "map", "ui", "stream", "traffic", "phase", "train",
+        "glow", "fly", "still", "map", "ui", "stream", "traffic", "phase", "train", "donut",
     ];
 
     /// World `scenario` and its procedural place; its own car unless the scene named one.
@@ -293,6 +299,13 @@ impl SceneSetup {
                     return Err(bad());
                 }
                 self.train_s = Some(s);
+            }
+            "donut" => {
+                let s: f32 = value.parse().map_err(|_| bad())?;
+                if !(0.0..=60.0).contains(&s) {
+                    return Err(bad());
+                }
+                self.donut_s = Some(s);
             }
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;

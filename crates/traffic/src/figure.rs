@@ -1578,6 +1578,36 @@ impl Skeleton {
 }
 
 // ---------------------------------------------------------------------------------------
+// Serving.
+
+impl Skeleton {
+    /// Leaning out of a service window to hand something over: standing, the back tipped
+    /// forward by `lean` (0 upright, 1 out over the sill), the right arm held out ahead by
+    /// `reach` (0 hanging, 1 about level), the elbow a little bent, the left forearm on the sill. Both 0 is the standing
+    /// pose ([`Skeleton::walk`] at rest).
+    pub fn serve(&self, lean: f32, reach: f32) -> Joints {
+        let mut j = self.walk(0.0, 0.0);
+        let tip = 0.5 * smooth(0.0, 1.0, lean);
+        let reach = smooth(0.0, 1.0, reach);
+        j.rot[Part::Torso as usize][0] -= tip;
+        j.rot[Part::Head as usize][0] += 0.7 * tip;
+        // The free hand comes up to rest on the sill.
+        j.rot[Part::UpperArmL as usize][0] += tip + 0.5 * lean;
+        j.rot[Part::LowerArmL as usize][0] += 1.0 * lean;
+        j.rot[Part::UpperArmR as usize][0] += tip + 1.25 * reach;
+        j.rot[Part::LowerArmR as usize][0] += 0.3 * reach;
+        j
+    }
+
+    /// The right palm in the figure frame for pose `j`.
+    pub fn hand(&self, j: &Joints) -> V3 {
+        let mut xf = [Xform::IDENTITY; PARTS];
+        self.pose(j, &mut xf);
+        xf[Part::LowerArmR as usize].apply([0.0, -GRIP_H * self.height_m, 0.0])
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Driving.
 
 /// Where a driver sits, in the figure frame: `+x` right, `+y` up, `-z` forward, the origin
@@ -2136,6 +2166,25 @@ mod tests {
         assert!(swing(1.6) > swing(1.2) && swing(1.2) > swing(0.0));
         // The pelvis bobs: lowest at double support, highest mid-stance.
         assert!(sk.walk(0.0, 1.4).root[1] + 0.02 < sk.walk(0.31, 1.4).root[1]);
+    }
+
+    #[test]
+    fn serving_leans_out_and_holds_the_hand_ahead() {
+        let sk = figure(3, Era::Eighties).skeleton;
+        assert_eq!(sk.serve(0.0, 0.0), sk.walk(0.0, 0.0));
+        let rest = sk.hand(&sk.serve(0.0, 0.0));
+        let out = sk.hand(&sk.serve(1.0, 1.0));
+        let j = sk.serve(1.0, 1.0);
+        assert!(j.rot.iter().flatten().chain(&j.root).all(|v| v.is_finite()));
+        // Ahead (-z) by most of an arm and raised to about the chest.
+        assert!(out[2] < rest[2] - 0.5, "{rest:?} -> {out:?}");
+        assert!(
+            out[1] > rest[1] + 0.35 && out[1] < 0.8 * sk.height_m,
+            "{out:?}"
+        );
+        // The head goes out with the back.
+        let (e0, e1) = (sk.eye(&sk.serve(0.0, 0.0)), sk.eye(&sk.serve(1.0, 0.0)));
+        assert!(e1[2] < e0[2] - 0.15, "{e0:?} -> {e1:?}");
     }
 
     #[test]

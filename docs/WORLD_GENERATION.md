@@ -190,6 +190,12 @@ coast's Place is unchanged.
   "Stem Donuts" and so on), its kit's lamps are lights, and cars park in its painted stalls at its own hours:
   donut runs from dawn, coffee at breakfast, lunch and late at night, the motel overnight, the drive-in's
   two rows from 19:00 to past midnight.
+  The donut shop has a drive-thru (the drive-thru card): its lane runs down the shop's right side, dashed,
+  with a stop bar across it 2.75 m past the window. In the app (`app::drivethru`) stopping is the order: a
+  car still for 0.6 s with its driver's door within 2.4 m of the window and 1.5 m along it, its driver's
+  side to it, gets the person inside leaning out over the sill with a box, which goes in the window and
+  lands on the passenger seat, and rides there (up to three stacked) until the car is switched. No menu,
+  no money, no UI; the radio plays on. Driving 6 m off lets the window serve again.
 - **The grade crossings.** Every road the rail line crosses at grade: a `GradeCrossing` landmark on the track's
   middle, and a `CrossingGate` (mast, crossed blades, twin lamps, bell, the arm's pivot) on each approach on the
   right, its arm reaching across the approach to 0.3 m short of the road's middle (across the whole road on a
@@ -262,6 +268,8 @@ is lettering in the stroke letterforms (`signs::letters`) centered on a point of
 neon: capitals, digits and spaces, and only common nouns (`THEATRE`, `CITY HALL`), never a name.
 `Cylinder` and `Lathe` take `turn` (degrees about their axis) and `facets` (flat faces), so a four-sided
 lathe turned 45° is a square pyramid roof.
+`Window` marks a service window: its sill's middle on the wall's face and the face it looks out of. It
+builds nothing; the game puts someone inside it to serve a car stopped beside it (`app::drivethru`, above).
 
 Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
 a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows

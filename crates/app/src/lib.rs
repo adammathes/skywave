@@ -23,6 +23,7 @@ pub mod deck;
 pub mod dragstrip;
 pub mod drive;
 pub mod driver;
+pub mod drivethru;
 pub mod gallery;
 mod input;
 pub mod lighting;
@@ -239,6 +240,8 @@ pub struct App {
     strip: Option<dragstrip::DragStrip>,
     /// The landmarks' chasing bulbs.
     marquees: Option<marquee::Marquees>,
+    /// The landmarks' service windows and the boxes on the passenger seat.
+    drivethru: Option<drivethru::DriveThru>,
     /// The place's railway: its train and its crossings' gates.
     rail: Option<crossing::Rail>,
 }
@@ -334,6 +337,7 @@ impl App {
         let mut strip = dragstrip::DragStrip::of(&place);
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let mut marquees = marquee::Marquees::of(&place, &grammar.landmarks);
+        let mut drivethru = drivethru::DriveThru::of(&place, &grammar.landmarks, seed);
         let sound = sound::Sound::new(&place, &drive);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         let wardrobe = driver::wardrobe_for(place.header.era);
@@ -411,10 +415,23 @@ impl App {
                 .collect();
             mq.set_ids(ids);
         }
+        if let Some(dt) = &mut drivethru {
+            let ids = dt
+                .meshes()
+                .into_iter()
+                .map(|m| {
+                    meshes.push(m);
+                    MeshId(meshes.len() as u32 - 1)
+                })
+                .collect();
+            dt.set_ids(ids);
+        }
         let extra = drive::MAX_CAR_INSTANCES
             + dragstrip::MAX_INSTANCES
             + rail.as_ref().map_or(0, |r| r.capacity())
             + marquees.as_ref().map_or(0, |m| m.capacity())
+            + drivethru::MAX_INSTANCES
+            + usize::from(drivethru::MAX_BOXES)
             + preview::MAX_INSTANCES
             + prop_capacity(&props)
             + npcs.capacity();
@@ -482,6 +499,7 @@ impl App {
             world_pick: None,
             strip,
             marquees,
+            drivethru,
             rail,
         })
     }
@@ -555,6 +573,9 @@ impl App {
             app.apply_traffic(d);
             app.finish_warm_up();
         }
+        if let Some(secs) = setup.donut_s {
+            app.serve_at_window(secs);
+        }
         if let (Some(secs), Some(r)) = (setup.train_s, app.rail.as_mut()) {
             r.railway.train.phase = traffic::train::Phase::Announcing { t: 0.0 };
             let player = npc::player(
@@ -572,6 +593,50 @@ impl App {
             }
         }
         Ok(app)
+    }
+
+    /// The car stopped with its driver's door at the place's first service window (its
+    /// order in) and the serve `secs` seconds along; nothing on a place without one.
+    fn serve_at_window(&mut self, secs: f32) {
+        let Some(w) = self
+            .drivethru
+            .as_ref()
+            .and_then(|d| d.windows.first().copied())
+        else {
+            return;
+        };
+        // The door the gap from the wall, the driver's side to it; the car's middle is
+        // half its width out from the door and the hip's station back from it.
+        let hip = self.drive.layout.seating.hip;
+        let out = Vec3::new(w.out.x, 0.0, w.out.y) * -hip.x.signum();
+        let heading = (-out.z).atan2(out.x);
+        let rot = glam::Quat::from_rotation_y(heading);
+        let door = w.sill + Vec3::new(w.out.x, 0.0, w.out.y) * drivethru::PARK_GAP_M;
+        let mid = door
+            + rot
+                * Vec3::new(
+                    0.5 * self.drive.spec.dims_m[1] * -hip.x.signum(),
+                    0.0,
+                    -hip.z,
+                );
+        let (y, _) = self.ground.level_at([mid.x, mid.z]);
+        self.drive = Drive::with_layout(
+            self.drive.spec.clone(),
+            self.drive.layout,
+            [mid.x, y, mid.z],
+            heading,
+        );
+        self.camera = CameraRig::new(self.camera.selected(), &self.drive);
+        self.curr = fly_from(&self.camera.pose(&self.drive, 1.0));
+        self.prev = self.curr;
+        let car = self.drive_thru_car();
+        if let Some(d) = &mut self.drivethru {
+            let dt = SIM_DT as f32;
+            let steps = ((drivethru::HOLD_S + secs) / dt).ceil() as u32 + 1;
+            for _ in 0..steps {
+                d.step(&car, dt);
+            }
+        }
     }
 
     /// Selects a car camera.
@@ -738,6 +803,10 @@ impl App {
         if self.drive.spec.id != car.id {
             let spec = vehicles::builtin_spec(car.id)?;
             self.drive.switch_car(spec, car.layout, &self.ground);
+            // The boxes stay with the car they were handed into.
+            if let Some(d) = &mut self.drivethru {
+                d.boxes = 0;
+            }
             self.sound.set_car(&self.drive);
             self.settle_camera();
         }
@@ -927,6 +996,10 @@ impl App {
                     dt,
                 );
             }
+            let car = self.drive_thru_car();
+            if let Some(d) = &mut self.drivethru {
+                d.step(&car, dt);
+            }
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
             self.time.step(input, SIM_DT);
@@ -941,6 +1014,23 @@ impl App {
         self.npcs.note_time(traffic_s * 1000.0, steps.count);
         self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
         steps
+    }
+
+    /// The player's car as a service window sees it.
+    fn drive_thru_car(&self) -> drivethru::Car {
+        let pose = self.drive.pose(1.0);
+        let hip = self.drive.layout.seating.hip;
+        let out = pose.rot * Vec3::new(hip.x.signum(), 0.0, 0.0);
+        let door = pose.point(Vec3::new(
+            0.5 * self.drive.spec.dims_m[1] * hip.x.signum(),
+            0.0,
+            hip.z,
+        ));
+        drivethru::Car {
+            door: glam::Vec2::new(door.x, door.z),
+            side: glam::Vec2::new(out.x, out.z).normalize_or_zero(),
+            speed: self.drive.state.speed_mps,
+        }
     }
 
     /// Where the eye is now and the way it looks.
@@ -1128,6 +1218,16 @@ impl App {
                 self.drive
                     .push_driver(alpha, d, cabin, look, shift, &mut self.instances);
             }
+            if let Some(d) = &self.drivethru {
+                let body = self.drive.pose(alpha).matrix();
+                let seat = drivethru::seat_point(self.drive.layout.seating.hip);
+                let inside = if cabin == drive::Cabin::Full {
+                    1.0
+                } else {
+                    0.0
+                };
+                d.push_seat(body, seat, inside, &mut self.instances);
+            }
         }
         // The car's lamps, the nearest NPC cars' low beams, then every static light the
         // photocell has on; each instance gets the nearest that reach it, the car's
@@ -1166,6 +1266,11 @@ impl App {
         }
         if let Some(m) = &self.marquees {
             m.push(eye, self.ticks, &mut self.instances);
+        }
+        if let Some(d) = &self.drivethru {
+            let pose = self.drive.pose(alpha);
+            let seat = drivethru::seat_point(self.drive.layout.seating.hip);
+            d.push(eye, &pose, seat, &self.lights, &mut self.instances);
         }
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs

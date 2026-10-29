@@ -421,6 +421,14 @@ pub enum Part {
         style: LetterStyle,
         paint: String,
     },
+    /// A service window, a drive-thru's: its sill's middle on the wall's outer face at
+    /// `at`, facing out `face`. Someone inside leans out of it to serve a car that stops
+    /// with its driver's door beside it. Builds nothing; the game reads it ([`windows`]).
+    Window {
+        at: [f32; 3],
+        #[cfg_attr(feature = "serde", serde(default))]
+        face: Face,
+    },
 }
 
 /// One look of a landmark, lettered by its place in the kit (A, B, C...).
@@ -629,7 +637,7 @@ impl Kit {
                     | Part::Lathe { paint, .. }
                     | Part::Letters { paint, .. }
                     | Part::Panel { paint, .. } => Some(paint),
-                    Part::Lamp { .. } | Part::Bulbs { .. } => None,
+                    Part::Lamp { .. } | Part::Bulbs { .. } | Part::Window { .. } => None,
                 };
                 if let Some(paint) = name {
                     if r.paint(paint).is_none() {
@@ -719,6 +727,7 @@ fn part_ok(part: &Part) -> bool {
                 && u.cross(v).length() > 1e-4 * u.length() * v.length()
         }
         Part::Lamp { at, radius, .. } => finite(at) && *radius > 0.0 && *radius <= 60.0,
+        Part::Window { at, .. } => finite(at),
         Part::Bulbs { a, b, n, r, .. } => {
             let len = v3(*b) - v3(*a);
             finite(a)
@@ -852,6 +861,7 @@ fn part_bounds(part: &Part) -> ([f32; 3], [f32; 3]) {
                 grow(&mut lo, &mut hi, p + V3::new(h, h, h));
             }
         }
+        Part::Window { at, .. } => return (*at, *at),
         Part::Lamp { at, .. } => {
             let o = v3(*at);
             grow(&mut lo, &mut hi, o - V3::new(0.2, 0.2, 0.2));
@@ -1056,6 +1066,7 @@ pub fn build(m: &mut WorldMesh, kit: &Kit, v: usize, base: V3, facing: V2, pal: 
                     boxf(m, &pf, [0.0, -0.5, 0.0], [1.0, 0.5, 1.0], face::ALL, p);
                 }
             }
+            Part::Window { .. } => {}
             Part::Lamp { at, color, .. } => {
                 let rgb = color.rgb(pal);
                 let bulb = Paint::new(rgb, Pattern::Plain).glowing(rgb, Glow::Lamp);
@@ -1125,6 +1136,26 @@ pub fn lights(kit: &Kit, v: usize, base: V3, facing: V2, pal: &Palette, out: &mu
     }
 }
 
+/// Variant `v`'s service windows ([`Part::Window`]) for a lot at `base` facing `facing`:
+/// each sill's middle and the way the window faces out, world.
+pub fn windows(kit: &Kit, v: usize, base: V3, facing: V2) -> Vec<(V3, V2)> {
+    let Some(r) = kit.resolve(v) else {
+        return Vec::new();
+    };
+    let f = frame(base, facing);
+    r.parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Window { at, face } => {
+                let n = face_axes(*face).1;
+                let out = f.x * n.x + f.y * n.y + f.z * n.z;
+                Some((f.p(at[0], at[1], at[2]), V2::new(out.x, out.z)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The widest an upright lathe is below [`SOLID_BELOW_M`] over the lot: its profile at `at`
 /// cut off at that height.
 fn low_radius(at: [f32; 3], profile: &[[f32; 2]]) -> f32 {
@@ -1158,7 +1189,9 @@ pub fn slabs(kit: &Kit, v: usize, pos: V2, y: f32, facing: V2, out: &mut Vec<Sla
     let at = |lx: f32, lz: f32| pos + x * lx + facing * lz;
     for part in &r.parts {
         let (lo, hi) = match part {
-            Part::Lamp { .. } | Part::Bulbs { .. } | Part::Letters { .. } => continue,
+            Part::Lamp { .. } | Part::Bulbs { .. } | Part::Letters { .. } | Part::Window { .. } => {
+                continue
+            }
             Part::Strut { a, b, w, .. } => {
                 let low = if a[1] <= b[1] { a } else { b };
                 let h = 0.5 * w;
