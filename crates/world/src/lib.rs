@@ -21,6 +21,7 @@ pub mod collide;
 pub mod edges;
 pub mod grammar;
 pub mod ground;
+pub mod landmarks;
 pub mod lanes;
 pub mod lots;
 pub mod math;
@@ -555,7 +556,16 @@ impl ChunkPlan {
                             None if setpieces::is_set_piece(p.kind) => {
                                 setpieces::build(m, p, palette, &self.grammar.lexicon)
                             }
-                            None => props::build(m, p, palette, &self.kit),
+                            None => match p.kind {
+                                props::PropKind::Landmark { kit, variant } => {
+                                    if let Some(k) = self.grammar.landmarks.get(usize::from(kit)) {
+                                        let base = p.pos.at(p.y);
+                                        let v = usize::from(variant);
+                                        landmarks::build(m, k, v, base, p.dir, palette);
+                                    }
+                                }
+                                _ => props::build(m, p, palette, &self.kit),
+                            },
                         }
                         if out.kept_vertices() >= max_vertices {
                             return Some(i + 1);

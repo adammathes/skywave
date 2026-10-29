@@ -193,6 +193,32 @@ Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of road
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay), the meshes'
 and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 
+## Landmarks
+Landmarks are the places you would slow down to look at (the feel cards, 2026-10-28). Each is a kit
+(`assets/landmarks/<id>.ron`, ADR 0007, `world::landmarks`): boxes, struts, cylinders, lathed profiles and
+lamps in named paints, in the lot's frame (`x` across, to the right seen from the road; `y` up; `z` toward the
+road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that start `from` an earlier one and
+add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
+front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
+block a car; each `Lamp` is a `Flood` light.
+
+Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
+a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows
+on the map once you have seen it.
+
+**The gallery** (`place=gallery`, `world::landmarks::gallery`) lines every kit's variants up on flat lawn:
+one east-west road per kit, its variants' lots north of it from A westward, each with a lit label post
+lettered with the variant, dressed in the scene's world (`scenario=`). `app::gallery` places fixed cameras
+for each variant (`front` and `quarter` from the hood, `street` from the far chase camera with the car for
+scale) and writes them to `tools/screenshot/gallery.json` (`cargo test -p app -- --ignored write_gallery`;
+a test fails while it is stale). `node tools/screenshot/shoot.mjs --gallery <id>` shoots each at noon,
+golden hour and night and tiles them into `out/gallery/<id>.png`: a column per variant, a row per time and
+camera. A landmark PR attaches that sheet and the owner picks a letter.
+
+Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, the gallery's layout),
+`app::places` (the kits load and round-trip, the gallery builds in every world), `app::gallery` (every
+camera on open ground facing its landmark).
+
 ## Region templates
 A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above). Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 

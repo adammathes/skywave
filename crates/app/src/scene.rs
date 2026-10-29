@@ -12,8 +12,11 @@
 //! Keys (every one optional):
 //! - `seed=<u64>`: seed of the place (default 1): the test town's detail, or the whole
 //!   procedural place.
-//! - `place=<name>`: `town` (the hand-laid test town, the default for a scene with keys)
-//!   or `coast` (the procedural place of the scenario's region template for the seed).
+//! - `place=<name>`: `town` (the hand-laid test town, the default for a scene with keys),
+//!   `coast` (the procedural place of the scenario's region template for the seed) or
+//!   `gallery` (the landmark gallery, `world::landmarks::gallery`: every landmark kit's
+//!   variants side by side on lettered lots, dressed as the scenario's world;
+//!   `tools/screenshot`'s `--gallery` shoots its contact sheets).
 //! - `scenario=<id>`: the world (`crate::scenario`, `assets/scenarios/<id>.ron`) and its
 //!   procedural place (`place=coast`; a later `place=town` puts its cars and light in the
 //!   test town). An id that is not built in is the first scenario, and a toast says so.
@@ -63,6 +66,8 @@ pub enum PlaceKey {
     TestTown,
     /// The procedural place of the scene's seed and its scenario's region template.
     Coast,
+    /// The landmark gallery (`world::landmarks::gallery`).
+    Gallery,
 }
 
 impl PlaceKey {
@@ -70,6 +75,7 @@ impl PlaceKey {
         match name {
             "town" => Some(PlaceKey::TestTown),
             "coast" => Some(PlaceKey::Coast),
+            "gallery" => Some(PlaceKey::Gallery),
             _ => None,
         }
     }
@@ -381,6 +387,14 @@ mod tests {
         );
         let s = SceneSetup::from_query("?scenario=mirage_valley_2001&place=town").unwrap();
         assert_eq!((s.scenario, s.place), (1, PlaceKey::TestTown));
+        let s = SceneSetup::from_query("?place=gallery&scenario=mirage_valley_2001").unwrap();
+        assert_eq!(
+            (s.scenario, s.place),
+            (1, PlaceKey::Coast),
+            "the last word wins"
+        );
+        let s = SceneSetup::from_query("?scenario=mirage_valley_2001&place=gallery").unwrap();
+        assert_eq!((s.scenario, s.place), (1, PlaceKey::Gallery));
         // The world picked last, unless the scene names one or a place.
         let picked = crate::settings::Settings {
             scenario: Some("mirage_valley_2001"),

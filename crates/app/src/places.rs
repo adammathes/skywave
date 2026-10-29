@@ -1,12 +1,14 @@
-//! The places a scene can be in ([`PlaceKey`]): the hand-laid test town, or a procedural
-//! place built at load from its seed and its scenario's region template. A scenario names
-//! its facade grammar ([`grammar_of`]; the test town uses the first scenario's,
-//! [`grammar`]) and every grammar letters its shop signs from one lexicon.
+//! The places a scene can be in ([`PlaceKey`]): the hand-laid test town, a procedural place
+//! built at load from its seed and its scenario's region template, or the landmark gallery.
+//! A scenario names its facade grammar ([`grammar_of`]; the test town uses the first
+//! scenario's, [`grammar`]); every grammar letters its shop signs from one lexicon and
+//! carries the landmark kits ([`landmarks`]).
 
 use std::sync::OnceLock;
 
 use place::Place;
 use skywave_core::Seed;
+use world::landmarks::Kit;
 use world::template::RegionTemplate;
 use world::{Grammar, Palette};
 
@@ -19,6 +21,12 @@ const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/califor
 const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
+
+const WATER_TOWER: &str = include_str!("../../../assets/landmarks/water_tower.ron");
+
+/// The landmark kits compiled into the game, as `(id, RON text)` in file-name order: a
+/// `place::PropKind::Landmark`'s `kit` is an index into this list.
+const LANDMARKS: [(&str, &str); 1] = [("water_tower", WATER_TOWER)];
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.
@@ -55,12 +63,33 @@ pub fn palette_of(s: &Scenario) -> Palette {
     palette(&s.palette).unwrap_or_else(Palette::socal_1985)
 }
 
+/// Parses a landmark kit (`assets/landmarks/*.ron`) and checks it.
+pub fn parse_kit(text: &str) -> Result<Kit, String> {
+    let k: Kit = ron::from_str(text).map_err(|e| format!("landmark kit: {e}"))?;
+    k.validate()
+        .map_err(|e| format!("landmark kit `{}`: {e}", k.id))?;
+    Ok(k)
+}
+
+/// The built-in landmark kits, parsed once, in [`LANDMARKS`] order. They are built in and
+/// their tests parse them, so a failure here is a build that should not have shipped.
+pub fn landmarks() -> &'static [Kit] {
+    static KITS: OnceLock<Vec<Kit>> = OnceLock::new();
+    KITS.get_or_init(|| {
+        LANDMARKS
+            .iter()
+            .map(|(_, text)| parse_kit(text).expect("the built-in landmark kits"))
+            .collect()
+    })
+}
+
 /// Parses a facade grammar (`assets/grammar/*.ron`) and the sign lexicon it names
 /// (`assets/grammar/lexicon.ron`), attaches the lexicon and validates both.
 pub fn load_grammar(text: &str, lexicon: &str) -> Result<Grammar, String> {
     let mut g: Grammar = ron::from_str(text).map_err(|e| format!("grammar: {e}"))?;
     g.lexicon = ron::from_str(lexicon).map_err(|e| format!("lexicon: {e}"))?;
     g.validate().map_err(|e| format!("grammar: {e}"))?;
+    g.landmarks = landmarks().to_vec();
     Ok(g)
 }
 
@@ -105,7 +134,8 @@ pub fn build(key: PlaceKey, seed: Seed) -> Result<Place, String> {
     build_in(key, seed, crate::scenario::get(0))
 }
 
-/// The place `key` names for `seed`: the test town, or scenario `s`'s procedural place.
+/// The place `key` names for `seed`: the test town, scenario `s`'s procedural place, or the
+/// landmark gallery dressed as `s`'s world.
 pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String> {
     match key {
         PlaceKey::TestTown => {
@@ -121,6 +151,21 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
             t.validate()
                 .map_err(|e| format!("region template: {e:?}"))?;
             Ok(world::procgen::build_place(seed, &t, grammar_of(s)))
+        }
+        PlaceKey::Gallery => {
+            let text = region_text(&s.region).ok_or("no such region template")?;
+            let t: RegionTemplate =
+                ron::from_str(text).map_err(|e| format!("region template: {e}"))?;
+            let g = grammar_of(s);
+            let region = world::procgen::build::region_of(&t);
+            let pal = palette_of(s);
+            Ok(world::landmarks::gallery(
+                seed.0,
+                &g.landmarks,
+                region,
+                g.era,
+                &pal,
+            ))
         }
     }
 }
@@ -170,6 +215,45 @@ mod tests {
         // The first scenario's grammar is the coast's.
         assert_eq!(grammar_of(crate::scenario::get(0)), grammar());
         assert!(region_text("atlantis").is_none() && grammar_text("atlantis.ron").is_none());
+    }
+
+    #[test]
+    fn the_landmark_kits_load_and_round_trip() {
+        let kits = landmarks();
+        assert_eq!(kits.len(), LANDMARKS.len());
+        for ((id, text), k) in LANDMARKS.iter().zip(kits) {
+            assert_eq!(&k.id, id, "a kit's id is its file stem");
+            let back = ron::ser::to_string(k).unwrap();
+            assert_eq!(&parse_kit(&back).unwrap(), k);
+            assert_eq!(&parse_kit(text).unwrap(), k);
+        }
+        // File-name order, so a kit's index stays put as kits are added.
+        assert!(LANDMARKS.windows(2).all(|w| w[0].0 < w[1].0));
+        for s in crate::scenario::all() {
+            assert_eq!(grammar_of(s).landmarks, kits);
+        }
+        assert!(parse_kit("Kit(").is_err());
+        let mut k = kits[0].clone();
+        k.lot = [1.0, 1.0];
+        let err = parse_kit(&ron::ser::to_string(&k).unwrap()).unwrap_err();
+        assert!(err.contains("water_tower"), "{err}");
+    }
+
+    #[test]
+    fn the_gallery_builds_in_every_world() {
+        for s in crate::scenario::all() {
+            let p = build_in(PlaceKey::Gallery, Seed(1), s).unwrap();
+            assert_eq!(p.validate(), Ok(()));
+            let n: usize = landmarks().iter().map(|k| k.variants.len()).sum();
+            let marks = p
+                .props
+                .items
+                .iter()
+                .filter(|q| matches!(q.kind, place::PropKind::Landmark { .. }))
+                .count();
+            assert_eq!(marks, n);
+            assert_eq!(p.header.era, grammar_of(s).era);
+        }
     }
 
     #[test]
