@@ -43,19 +43,19 @@ follow-ups and review leftovers go in as Proposed. Read `items` where status is 
 by `order`, before dispatching; update status as sessions start, PRs open and merge.
 
 ## Work queue (how approved work runs now)
-Open a Claude Code session on the repo and say "run the work queue" (or "do all the approved items
-in the work queue in new subagents", "just do <card>", "stop at PRs", "land what's open", "what's
-queued?"). The `work-queue` skill (`.claude/skills/work-queue/SKILL.md`) turns that into a run of
-the saved workflow `.claude/workflows/work-queue.js`, which:
-1. reads the Queued cards (never Proposed) and any queue PRs left open by an earlier run;
-2. lands those PRs (merge on green, one fix attempt on red);
-3. builds up to 3 Queued cards in parallel subagents, each in its own worktree on `q/<card id>`;
-4. has each reviewed by an independent read-only reviewer (its own probes for sim, world
-   generation, traffic or pedestrians) for up to 3 fix rounds, then moves stuck cards to Needs you;
-5. opens the PR, waits for CI, merges on green, and updates the card at every step.
-Screenshots run under `flock /tmp/skywave-screenshots.lock` so builders never render two at once.
-Out-of-scope ideas from reviews become new Proposed cards. Scheduling it (a timed session that
-says "run the work queue") is a later step if the owner wants it.
+Open a Claude Code session on the repo and say "run the work queue". That session becomes the
+**coordinator** (`.claude/skills/work-queue/SKILL.md`). It builds nothing itself: each Queued card
+gets its own cloud session and container, which builds, verifies, opens the PR, drives CI to green
+and merges (or leaves it for the owner when the card is `hold` or needs a variant pick). The
+coordinator runs one tick of `.claude/workflows/work-queue.js` whenever it wakes:
+1. reads the board (never Proposed);
+2. checks each in-flight card's session and PR: marks merges, flags what needs the owner, nudges a
+   session idle 30 min once and hands it to the owner an hour later;
+3. starts each Queued card whose `after` cards have merged, up to 8 in flight.
+It wakes on a card session's poke (each session fires the coordinator's "Skywave queue: event"
+trigger at its outcome), on a card session failing, and hourly ("Skywave queue: hourly") for what
+pokes miss. It tells the owner only what needs them, and stops (deleting both triggers) when
+nothing is in flight or Queued. A new coordinator takes over by running a tick.
 
 ## Where things stand (keep current)
 
@@ -65,7 +65,7 @@ Nothing is running. Since the previous coordinator stopped: #42 (the Deck), #44 
 part 2), #48 and #49 (Mirage Valley), #50 and #52 (set pieces parts 1 and 2: static places, grade
 crossings and a freight train), #53 (music folders in the native app) merged.
 - **How work runs now:** the owner approves cards on the board (Proposed → Queued); a session told
-  "run the work queue" works them (see "Work queue" above). No standing coordinator.
+  "run the work queue" becomes the coordinator for them (see "Work queue" above).
 - **Queued (approved 22:10):** seven "game feel" cards: the landmark gallery first, then pilot
   landmarks, vista siting, quiet the filler, the roadside set, downtown anchors, dusk moments.
 - **Needs the owner:** drive the reverted handling (then decide feel pass 3, board `feel-3`);
