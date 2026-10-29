@@ -1359,6 +1359,12 @@ impl State {
             }
             self.stream_idle = Some(idle);
         }
+        // A still scene shows one picture, so it draws nothing until that picture is
+        // whole: on a software rasterizer a frame of a half-streamed town costs seconds,
+        // and streaming only advances between frames.
+        if self.app.still() && !idle {
+            return;
+        }
         let mut reconfigured = false;
         let (surface, device, config) = (&self.surface, &self.device, &self.config);
         let acquire = || match surface.get_current_texture() {
