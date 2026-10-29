@@ -51,6 +51,7 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::Screenshot, _) => "Screenshot",
         (Action::DebugOverlay, _) => "Performance overlay",
         (Action::Controls, _) => "Controls card",
+        (Action::Fullscreen, _) => "Fullscreen",
         (Action::MenuUp, _) => "Menu up",
         (Action::MenuDown, _) => "Menu down",
         (Action::MenuLeft, _) => "Menu left",

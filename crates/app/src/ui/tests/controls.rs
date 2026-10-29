@@ -42,6 +42,7 @@ fn the_card_lists_the_live_bindings_and_follows_a_remap() {
         "Start (hold)",
         "H / F1",
         "Select (hold)",
+        "F12 / F",
     ] {
         assert!(text.contains(want), "{want}: {text}");
     }
