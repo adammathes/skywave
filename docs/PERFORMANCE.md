@@ -378,10 +378,13 @@ junction moved (the old point is the beachfront there) to 747.7,493.9, 35 m back
 approach within budget, with a car stopped beside the player and the lights ahead, and the test streams the place with the world held still, so
 the traffic it measures no longer depends on how many frames streaming took on the machine
 (it did: 88 car and figure-part instances in release, 32 in debug, at one site). There,
-busy, the same in release and debug: **Deck 828 draws, 481 in the median frame, 235k
-forward, 743k shadow; Medium 854, 434, 235k, 1223k**. Under `SKYWAVE_ENFORCE_BUDGETS` it
-fails above **Deck 911 draws, 529 in the median frame, 259k forward and 817k shadow
-triangles; Medium 939, 477, 259k and 1345k** (about 10% over; the shadow limits sit
+busy, the same in release and debug: Deck 828 draws, 481 in the median frame, 235k
+forward, 743k shadow; Medium 854, 434, 235k, 1223k. With drivers in every near NPC car
+(drawn in the crowd's part runs, so no draws of their own), the cars' see-through glass (a
+draw per shape) and their cabins: **Deck 872, 520, 258k, 763k; Medium 886, 460, 258k,
+1255k**. Under `SKYWAVE_ENFORCE_BUDGETS` it fails above **Deck 959 draws, 572 in the median
+frame, 284k forward and 840k shadow triangles; Medium 975, 506, 284k and 1381k** (about
+10% over; the shadow limits sit
 above main's, 740k and 1325k, which this junction's casters measure 743k and 1223k
 against), and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the

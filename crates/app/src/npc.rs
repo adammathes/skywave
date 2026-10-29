@@ -233,8 +233,9 @@ pub struct Npcs {
     /// Per shape and crowd figure (`shape * peds::VARIANTS + variant`), the driver's parts
     /// seated in it, in the mesh's frame.
     drivers: Vec<[Mat4; PARTS]>,
-    /// Scratch for drawing the drivers in mesh order: figure and car slot.
-    driver_order: Vec<(u16, u16)>,
+    /// The near cars' drivers this frame, for the crowd to draw with its people (the same
+    /// part meshes, so no draw of their own).
+    pub(crate) seated: Vec<peds::Seated>,
     /// Per shape, its body as the player's car hits it.
     bodies: Vec<CarBody>,
     /// Scratch for drawing in mesh order: mesh id and car slot.
@@ -284,7 +285,8 @@ impl Npcs {
         let rules: Vec<traffic::ShapeRule> = specs.iter().map(shape_rule).collect();
         traffic.set_shape_rules(&rules);
         let cap = budget.cars;
-        let crowd = peds::Crowd::new(place, &graph, seed);
+        let mut crowd = peds::Crowd::new(place, &graph, seed);
+        crowd.reserve_seated(cap);
         let bodies = specs
             .iter()
             .map(CarBody::of)
@@ -305,7 +307,7 @@ impl Npcs {
             heads: Vec::new(),
             glass: Vec::new(),
             drivers: Vec::new(),
-            driver_order: Vec::with_capacity(cap),
+            seated: Vec::with_capacity(cap),
             bodies,
             // A car, its brake lamps and its glass.
             order: Vec::with_capacity(3 * cap),
@@ -664,8 +666,9 @@ impl Npcs {
     /// way through the step, in mesh order, lit by the frame's `lights` when close;
     /// lamps glow by `lamp_glow` on cars with their lights on, and a braking car adds its
     /// brake lamps' overlay glowing by `lamp_glow`, day or night. A car within
-    /// [`DETAIL_RADIUS_M`] adds its see-through glass and its driver (a crowd figure picked
-    /// by the car's id). Returns how many.
+    /// [`DETAIL_RADIUS_M`] adds its see-through glass, and its driver (a crowd figure picked
+    /// by the car's id) goes into [`Npcs::seated`] for the crowd to draw. Returns how many
+    /// instances.
     pub fn push(
         &mut self,
         alpha: f32,
@@ -682,7 +685,7 @@ impl Npcs {
             DETAIL_RADIUS_M * DETAIL_RADIUS_M,
         );
         let mut order = core::mem::take(&mut self.order);
-        let mut drivers = core::mem::take(&mut self.driver_order);
+        let mut drivers = core::mem::take(&mut self.seated);
         order.clear();
         drivers.clear();
         let figures = self.crowd.variants();
@@ -701,13 +704,17 @@ impl Npcs {
                     order.push((glass.0, i as u16 | GLASS_SLOT));
                     if figures > 0 {
                         let v = hash64(self.place_seed, &[KEY_DRIVER, u64::from(c.id)]);
-                        drivers.push(((v % figures as u64) as u16, i as u16));
+                        drivers.push(peds::Seated {
+                            figure: (v % figures as u64) as u16,
+                            car: i as u16,
+                            parts: [Mat4::IDENTITY; PARTS],
+                            lights: LightSet::EMPTY,
+                        });
                     }
                 }
             }
         }
         order.sort_unstable();
-        drivers.sort_unstable();
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
         let place = |i: u16| {
             let (pos, heading) = self.pose(usize::from(i), alpha);
@@ -734,33 +741,17 @@ impl Npcs {
                 ..MeshInstance::new(MeshId(mesh), transform.to_cols_array_2d())
             });
         }
-        // The drivers, part-major within each figure: each part mesh's instances one run.
-        let mut g = 0;
-        while g < drivers.len() {
-            let v = drivers[g].0;
-            let n = drivers[g..].iter().take_while(|d| d.0 == v).count();
-            if let Some((_, ids)) = self.crowd.variant(usize::from(v)) {
-                for (k, &id) in ids.iter().enumerate() {
-                    for &(_, i) in &drivers[g..g + n] {
-                        let c = &self.traffic.cars()[usize::from(i)];
-                        let seat = usize::from(c.shape) * peds::VARIANTS + usize::from(v);
-                        let (transform, lights) = place(i);
-                        out.push(MeshInstance {
-                            lights,
-                            casts_shadow: false,
-                            ..MeshInstance::new(
-                                id,
-                                (transform * self.drivers[seat][k]).to_cols_array_2d(),
-                            )
-                        });
-                    }
-                }
-            }
-            g += n;
+        // The drivers, placed; the crowd draws them.
+        for d in &mut drivers {
+            let c = &self.traffic.cars()[usize::from(d.car)];
+            let seat = usize::from(c.shape) * peds::VARIANTS + usize::from(d.figure);
+            let (transform, lights) = place(d.car);
+            d.parts = self.drivers[seat].map(|m| transform * m);
+            d.lights = lights;
         }
-        let n = order.len() + drivers.len() * PARTS;
+        let n = order.len();
         self.order = order;
-        self.driver_order = drivers;
+        self.seated = drivers;
         n
     }
 

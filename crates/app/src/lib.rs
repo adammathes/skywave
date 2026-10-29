@@ -1153,9 +1153,14 @@ impl App {
         } else {
             0.0
         };
+        let seated = if self.npcs.active() {
+            &self.npcs.seated[..]
+        } else {
+            &[]
+        };
         self.npcs
             .crowd
-            .push(alpha, eye, clear, &self.lights, &mut self.instances);
+            .push(alpha, eye, clear, &self.lights, seated, &mut self.instances);
         if self.preview.is_some() {
             // Nothing that moves or stands by the eye cuts into the turntable: drop the
             // traffic, people and props near it (in place, keeping their order).
