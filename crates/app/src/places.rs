@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(g.template, "socal_basin");
         assert_eq!(g.era, place::Era::Aughts);
         assert_eq!(g.lexicon.id, "us_basin");
-        assert!(g.street.bus_stop_m > 0.0 && g.signs.banner_256 > 0);
+        assert!(g.street.bus_stop_m > 0.0 && !g.signs.fascias.is_empty());
         // The coast's lexicon is not the basin's: it lacks its trades.
         assert!(load_grammar(SOCAL_BASIN_2001, LEXICON).is_err());
         let text = ron::ser::to_string(&g).unwrap();

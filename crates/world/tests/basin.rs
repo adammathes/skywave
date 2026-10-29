@@ -357,3 +357,67 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
         );
     }
 }
+
+/// The filler keeps quiet so the landmarks stand out (`docs/WORLD_GENERATION.md`, "The 2001
+/// basin's grammar"): for seeds 1-4 no building's sign band glows with letters, while the
+/// blade neon and the landmarks still carry signs; the buildings' street fronts keep their
+/// triangles in hand. Run with `--nocapture` for the numbers.
+#[test]
+fn the_basin_s_filler_keeps_quiet() {
+    use world::grammar::Fascia;
+    use world::mesh::Glow;
+    use world::props::PropKind;
+    use world::{build_chunk_meshes, ChunkPlan, MeshKind};
+
+    let (t, g) = (template(), grammar());
+    let pal = world::palette::Palette::sodium_night();
+    for seed in 1..=4u64 {
+        let p = build_place(Seed(seed), &t, &g);
+        let meshes = build_chunk_meshes(&p, &pal, &g);
+        let neon = |kind: MeshKind| -> usize {
+            let of = meshes.iter().filter(|c| c.kind == kind);
+            of.map(|c| {
+                let glows = c.mesh.vertices.iter();
+                glows.filter(|v| v.emissive[3] == Glow::Neon as u8).count()
+            })
+            .sum()
+        };
+        let tris: usize = meshes
+            .iter()
+            .filter(|c| c.kind == MeshKind::Building)
+            .map(|c| c.mesh.indices.len() / 3)
+            .sum();
+        let plan = ChunkPlan::new(&p, &pal, &g);
+        let blades = plan
+            .props()
+            .iter()
+            .filter(|p| matches!(p.kind, PropKind::NeonSign { .. }))
+            .count();
+        let (lit_buildings, lit_props) = (neon(MeshKind::Building), neon(MeshKind::Prop));
+        // The mix of blank fronts the grammar asks for: bare, a plain band, a mural.
+        let mut kinds = [0usize; 4];
+        for i in 0..p.buildings.len() as u32 {
+            kinds[usize::from(world::buildings::signage(seed, i, &g.signs).fascia)] += 1;
+        }
+        println!("seed {seed}: fascias lettered/bare/band/mural {kinds:?}");
+        assert_eq!(kinds[Fascia::Lettered as usize], 0);
+        assert!(
+            kinds[1..].iter().all(|&n| n * 20 > p.buildings.len()),
+            "{kinds:?}"
+        );
+        println!(
+            "seed {seed}: {} buildings, {tris} building triangles, {lit_buildings} glowing \
+             letter vertices on buildings, {blades} blade signs, {lit_props} glowing sign \
+             vertices on props",
+            p.buildings.len()
+        );
+        assert_eq!(
+            lit_buildings, 0,
+            "seed {seed}: a building's sign band is lettered"
+        );
+        assert!(
+            blades > 0 && lit_props > 0,
+            "seed {seed}: the neon is gone too"
+        );
+    }
+}

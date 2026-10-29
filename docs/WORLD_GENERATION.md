@@ -236,7 +236,7 @@ ByUse<T>    { residential, office, other }   other: commercial, industrial, civi
 SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], lit_box_256,
               shop_lit_256, lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
               wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius,
-              banner_256 (optional, 0), fascia_words (optional, false) }
+              fascias: [(Lettered | Bare | Band | Mural, weight)] (optional, empty: Lettered) }
 StreetDress { bus_stop_m (0: none), faces: [(Ad | Blank | Pictogram, weight)] (empty: Ad) }
 Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
 TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
@@ -350,21 +350,23 @@ building, from an `Rng` keyed by the building's door pick):
 ## The 2001 basin's grammar
 `socal_basin_2001.ron` (`Aughts`, `socal_basin`) started from the coast's and changes what the turn of the
 century changed: stucco boxes with plain parapets (no false fronts, hardly a cornice); auto shops in the
-industrial stucco (roll-up bays and a shop front for its sign); mini-malls under flat canopies whose tenants
-sign in backlit boxes (`lit_box_256` 190) and hang vinyl banners from the canopy's front edge
-(`banner_256`: a tenant in three or so of a banner mall, a colored panel with a band on it); vinyl and
-aluminum awnings, little canvas; lots busy late into the night. Its signs draw from their own closed lexicon,
+industrial stucco (roll-up bays and a shop front); mini-malls under flat canopies; vinyl and aluminum
+awnings, little canvas; lots busy late into the night. Its filler keeps quiet so the landmarks stand out:
+the buildings' sign bands (over a run of storefronts, a mini-mall unit, a motel's parapet) carry no names
+(`fascias`: bare stucco 3, a plain fascia in the trim's color 4, a flat panel of one strong color 1, the
+mural buildings' blank ground floor bays in it too; a motel or a mansard canopy without a name has no
+band at all); the shops are told apart by their tops (stepped and shaped parapets, no cornices) and a
+roll-up bay or a blank wall among the storefronts. Its signs draw from their own closed lexicon,
 `lexicon_2001.ron` (`us_basin`: the coast's invented names, the period's descriptors and trades: taquerias
 and taco stands, wheels, tint, smog checks, car audio, pagers and phones, nails), which `app::places`
 attaches by the id the grammar names; the coast's `lexicon.ron` is untouched, so the coast's signs never
-change. The buildings' fascia sign boxes letter from it too (`fascia_words`: a box's words are a shop
-sign's main line drawn from it, or its trade alone when that is too long; without the flag, as on the coast,
-they keep the older syllable names of `signs::business_name`). Its trades leave out every descriptor whose
+change. They letter the blade neon and the landmarks; a lettered fascia (the coast's, every one) keeps the
+older syllable names of `signs::business_name`. Its trades leave out every descriptor whose
 pair would read as a real chain, singular or plural (`descriptors_out`; their keys are on the test
 blocklist and `no_descriptor_names_a_chain_with_its_trade` checks every descriptor and trade). Its `street` puts a bus stop (`PropKind::BusShelter`: posts, a flat roof, a glazed back screen, a
 bench and a lit ad box across the downstream end) on an arterial's walk about every 320 m in commercial,
 residential, downtown and suburban zones (a block's piece of arterial gets one with the chance of its share
-of the spacing), and gives billboards and the shelters' ad boxes faces blank or one big pictogram
+of the spacing), and gives billboards and the shelters' ad boxes faces mostly blank, one in four a big pictogram
 (`PropKind::FaceBillboard`), never the coast's lettered ads. The tilt-up warehouses, dingbats, the tract
 houses' tile roofs and the downtown towers come from their styles as on the coast. The `sodium_night`
 palette (the template's and the scenario's) paints it: beige and tan stucco, terracotta tiles, deep
