@@ -8,6 +8,7 @@ use super::*;
 use crate::input::{Key, PadAxis, PadButton};
 use audio::deck::Source;
 use skywave_core::{Seed, SIM_DT};
+use traffic::figure::Part;
 
 const DT: f64 = 1.0 / 60.0;
 
@@ -1158,6 +1159,38 @@ fn camera_page_sets_the_cockpit_and_the_camera_is_remembered() {
     let mut scene = App::from_setup(&setup).unwrap();
     scene.set_settings_store(Box::new(store.clone()));
     assert_eq!(scene.hud_state().camera_mode, CameraMode::ChaseFar);
+}
+
+/// "Show driver in first person" off hides the driver's arms and legs from the cockpit and
+/// is saved; the chase cameras still draw the whole driver.
+#[test]
+fn the_cockpit_driver_can_be_hidden() {
+    let store = SharedStore::default();
+    let mut h = Harness::with_store(&store);
+    let arm = h.app.drivers.get(h.app.ui.driver()).unwrap().ids[Part::LowerArmR as usize];
+    let drawn = |h: &mut Harness| {
+        let view = h.app.scene_view(1.0, 16.0 / 9.0);
+        view.instances.iter().any(|i| i.mesh == arm)
+    };
+    let mut cycles = 0;
+    while h.app.hud_state().camera_mode != CameraMode::Cockpit {
+        h.key(Key::KeyC);
+        cycles += 1;
+        assert!(cycles < 8, "no cockpit in the cycle");
+    }
+    assert!(drawn(&mut h), "the driver's on by default");
+    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Camera)]);
+    h.focus_on(ItemId::CockpitDriver);
+    h.pad(PadButton::South);
+    h.pad(PadButton::Start);
+    assert!(!h.app.settings().cockpit_driver);
+    assert!(!drawn(&mut h), "hidden in the cockpit");
+    let (saved, _) = Settings::from_json(&store.load().expect("saved"));
+    assert!(!saved.cockpit_driver);
+    while h.app.hud_state().camera_mode.first_person() {
+        h.key(Key::KeyC);
+    }
+    assert!(drawn(&mut h), "the chase camera draws the driver");
 }
 
 #[test]

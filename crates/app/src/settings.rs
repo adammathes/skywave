@@ -6,7 +6,7 @@
 //!   "drive": { "handling": "arcade", "headlights": "auto", "vehicle": "gannet_gt",
 //!              "paint": 0, "driver": "jacket" },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
-//!               "seat_forward_cm": 0.0, "dashboard": true, "shake": true },
+//!               "seat_forward_cm": 0.0, "dashboard": true, "driver": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
 //!              "frame_rate": "panel" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0,
@@ -374,6 +374,9 @@ pub struct Settings {
     /// The cockpit draws the dashboard, wheel and gauges; off leaves the windshield frame
     /// and the hood ("hood only").
     pub dashboard: bool,
+    /// The cockpit draws the driver's arms, hands and legs; the outside cameras always draw
+    /// the whole driver.
+    pub cockpit_driver: bool,
     /// Head sway in the cockpit from the car's g-forces and springs.
     pub camera_shake: bool,
     /// HUD and menu scale, 1–2 (TV distance wants more).
@@ -431,6 +434,7 @@ impl Default for Settings {
             seat_height_cm: 0.0,
             seat_forward_cm: 0.0,
             dashboard: true,
+            cockpit_driver: true,
             camera_shake: true,
             ui_scale: 1.0,
             resolution_scale: 1.0,
@@ -510,6 +514,7 @@ struct CameraSection {
     seat_height_cm: f32,
     seat_forward_cm: f32,
     dashboard: bool,
+    driver: bool,
     shake: bool,
 }
 
@@ -527,6 +532,7 @@ impl CameraSection {
             seat_height_cm: s.seat_height_cm,
             seat_forward_cm: s.seat_forward_cm,
             dashboard: s.dashboard,
+            driver: s.cockpit_driver,
             shake: s.camera_shake,
         }
     }
@@ -801,6 +807,7 @@ impl Settings {
             seat_height_cm: camera.seat_height_cm,
             seat_forward_cm: camera.seat_forward_cm,
             dashboard: camera.dashboard,
+            cockpit_driver: camera.driver,
             camera_shake: camera.shake,
             ui_scale: video.ui_scale,
             resolution_scale: video.resolution_scale,
@@ -850,6 +857,7 @@ mod tests {
             seat_height_cm: 4.0,
             seat_forward_cm: -3.0,
             dashboard: false,
+            cockpit_driver: false,
             camera_shake: false,
             ui_scale: 1.75,
             resolution_scale: 0.75,
