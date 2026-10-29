@@ -111,12 +111,14 @@ pub const ROAD_ORDER: [RoadClass; 7] = [
 pub fn poi_color(kind: PoiKind) -> Rgb {
     match kind {
         PoiKind::Pier | PoiKind::Marina => [40, 110, 190],
-        PoiKind::Lighthouse | PoiKind::Overlook => [120, 90, 170],
+        PoiKind::Lighthouse | PoiKind::Overlook | PoiKind::HillsideLetters => [120, 90, 170],
         PoiKind::Diner => [222, 84, 60],
         PoiKind::Gas => [232, 160, 30],
         PoiKind::Stadium => [60, 150, 80],
         PoiKind::DragStrip | PoiKind::CrewGarage => [214, 60, 160],
-        PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing => [120, 130, 140],
+        PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing | PoiKind::WaterTower => {
+            [120, 130, 140]
+        }
         PoiKind::TacoStand | PoiKind::DonutShop | PoiKind::CoffeeShop => [222, 84, 60],
         PoiKind::Motel | PoiKind::DriveIn => [214, 60, 160],
     }

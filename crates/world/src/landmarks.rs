@@ -31,7 +31,7 @@ use crate::signs::letters::{self, LetterStyle};
 
 /// The built-in kits, `assets/landmarks/<id>.ron`, as `(id, RON text)` in file-name order
 /// (the app parses them; a `place::PropKind::Landmark`'s `kit` indexes this list).
-pub const BUILTIN: [(&str, &str); 5] = [
+pub const BUILTIN: [(&str, &str); 6] = [
     (
         "coffee_shop",
         include_str!("../../../assets/landmarks/coffee_shop.ron"),
@@ -43,6 +43,10 @@ pub const BUILTIN: [(&str, &str); 5] = [
     (
         "drive_in",
         include_str!("../../../assets/landmarks/drive_in.ron"),
+    ),
+    (
+        "hillside_letters",
+        include_str!("../../../assets/landmarks/hillside_letters.ron"),
     ),
     ("motel", include_str!("../../../assets/landmarks/motel.ron")),
     (
@@ -866,9 +870,31 @@ pub fn lights(kit: &Kit, v: usize, base: V3, facing: V2, pal: &Palette, out: &mu
     }
 }
 
+/// The widest an upright lathe is below [`SOLID_BELOW_M`] over the lot: its profile at `at`
+/// cut off at that height.
+fn low_radius(at: [f32; 3], profile: &[[f32; 2]]) -> f32 {
+    let top = SOLID_BELOW_M - at[1];
+    let mut r = 0.0f32;
+    for w in profile.windows(2) {
+        let ([r0, a0], [r1, a1]) = (w[0], w[1]);
+        if a0 <= top {
+            r = r.max(r0);
+        }
+        if a1 <= top {
+            r = r.max(r1);
+        }
+        // Where the segment crosses the cut.
+        if (a0 - top) * (a1 - top) < 0.0 {
+            r = r.max(r0 + (r1 - r0) * (top - a0) / (a1 - a0));
+        }
+    }
+    r
+}
+
 /// The boxes variant `v` blocks a car with, for a lot at ground point `pos` (height `y`)
 /// facing `facing`: each part that starts within [`SOLID_BELOW_M`] of the lot, as its
-/// bounds (a strut as a post round its low end).
+/// bounds (a strut as a post round its low end, an upright lathe as wide as it is low down:
+/// a pedestal's column, not the bowl over it).
 pub fn slabs(kit: &Kit, v: usize, pos: V2, y: f32, facing: V2, out: &mut Vec<Slab>) {
     let Some(r) = kit.resolve(v) else {
         return;
@@ -885,6 +911,19 @@ pub fn slabs(kit: &Kit, v: usize, pos: V2, y: f32, facing: V2, out: &mut Vec<Sla
                     [low[0] - h, low[1], low[2] - h],
                     [low[0] + h, low[1] + SOLID_BELOW_M, low[2] + h],
                 )
+            }
+            Part::Lathe {
+                at,
+                profile,
+                axis: Axis::Up,
+                ..
+            } => {
+                let r = low_radius(*at, profile);
+                let (_, hi) = part_bounds(part);
+                if r <= 0.0 {
+                    continue;
+                }
+                ([at[0] - r, at[1], at[2] - r], [at[0] + r, hi[1], at[2] + r])
             }
             _ => part_bounds(part),
         };

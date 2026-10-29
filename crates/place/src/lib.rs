@@ -507,6 +507,11 @@ pub enum PoiKind {
     Motel = 15,
     /// A drive-in theater, its screen facing the road.
     DriveIn = 16,
+    /// The landmarks built from kits beside the set pieces, each at its lot's middle: the
+    /// valley's name in letters on the hillside...
+    HillsideLetters = 17,
+    /// ...and the water tower over the industrial district.
+    WaterTower = 18,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.
