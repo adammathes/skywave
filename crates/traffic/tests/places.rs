@@ -5,9 +5,9 @@
 
 use std::sync::OnceLock;
 
-use place::{Place, PropKind};
+use place::{Place, PropKind, RoadClass};
 use skywave_core::Seed;
-use traffic::lanes::CURVE_STEPS;
+use traffic::lanes::{CURVE_STEPS, WAVE_DELAY_TICKS};
 use traffic::signal::cycle_ticks;
 use traffic::{Control, LaneGraph, Light, TurnKind, NONE};
 use world::procgen::build_place;
@@ -34,7 +34,7 @@ const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s
 /// Pinned [`LaneGraph::hash`] of the coast at seed 1. The graph is a pure function of the
 /// place, so this moves when lane building or the place's roads or props change; update it
 /// in its own commit with the reason.
-const COAST_SEED1_HASH: u64 = 0x8a7d_05e8_0195_3c0d;
+const COAST_SEED1_HASH: u64 = 0x63a3_8e5b_71ba_c82e;
 
 /// Size ceilings for the coast's graph (16×16 chunks); about twice what seed 1 needs.
 const MAX_LANES: usize = 2_400;
@@ -303,6 +303,297 @@ fn crossing_approaches_never_go_together() {
     }
     println!("signal junctions {junctions}, most phases {most_phases}");
     assert!(junctions > 0);
+}
+
+/// Which lanes are on the main roads (arterials and the beachfront), the ones the lane
+/// graph times as green waves.
+fn main_lanes(b: &Built) -> Vec<bool> {
+    b.graph
+        .lanes
+        .iter()
+        .map(|l| {
+            matches!(
+                b.place.roads.edges[l.edge as usize].class,
+                RoadClass::Arterial | RoadClass::Beachfront
+            )
+        })
+        .collect()
+}
+
+/// A car holding the posted speed down the main roads: past the stop line of `from` (a
+/// signal approach) at `tick`, straight on through `first`, and on through every signal
+/// after for as long as the main road goes, at most `most` signals. Returns how many in a
+/// row it meets green, with each junction's offset from `offset`.
+fn green_run(
+    g: &LaneGraph,
+    main: &[bool],
+    from: u32,
+    first: u32,
+    tick: u64,
+    most: u32,
+    offset: &dyn Fn(usize) -> u32,
+) -> u32 {
+    let light = |lane: u32, t: f32| {
+        let l = &g.lanes[lane as usize];
+        let j = &g.junctions[l.end_node as usize];
+        let off = offset(l.end_node as usize);
+        traffic::signal::light(off, l.phase, j.phases, tick + (t * 120.0) as u64)
+    };
+    let turn = |a: u32, b: u32| g.next(a).iter().find(|x| x.to == b).unwrap().length_m;
+    let mut t = turn(from, first) / g.lanes[first as usize].speed_mps;
+    let mut lane = first;
+    let mut greens = 0;
+    while greens < most {
+        let Some((arr, dt)) = g.wave_link(lane, main) else {
+            break;
+        };
+        t += dt;
+        if light(arr, t) != Light::Green {
+            break;
+        }
+        greens += 1;
+        let Some(x) = g
+            .next(arr)
+            .iter()
+            .find(|x| x.kind == TurnKind::Straight && main[x.to as usize])
+        else {
+            break;
+        };
+        t += x.length_m / g.lanes[arr as usize].speed_mps;
+        lane = x.to;
+    }
+    greens
+}
+
+#[test]
+fn a_car_at_the_limit_rides_a_green_wave_down_the_main_roads() {
+    let mut coast_best = 0;
+    for b in places() {
+        let g = &b.graph;
+        let main = main_lanes(b);
+        let seed = b.place.header.seed;
+        let timed = |n: usize| g.junctions[n].offset;
+        let hashed = |n: usize| traffic::signal::offset(seed, n as u32, g.junctions[n].phases);
+        // Next signal on green, after one passed on green, for every link and five
+        // moments through the green; then the longest run anywhere.
+        let (mut links, mut wave, mut random, mut best, mut best_hashed) = (0, 0, 0, 0, 0);
+        // The same for the links timed down the wave (the next signal timed from this one).
+        let (mut with, mut with_green) = (0, 0);
+        for t in &g.turns {
+            let (from, first) = (t.from, t.to);
+            let l = &g.lanes[from as usize];
+            if t.kind != TurnKind::Straight
+                || l.control != Control::Signal
+                || !main[first as usize]
+                || g.lanes[first as usize].slot != 0
+            {
+                continue;
+            }
+            let j = &g.junctions[l.end_node as usize];
+            let cycle = u64::from(cycle_ticks(j.phases));
+            // When `from`'s green starts.
+            let start = (0..cycle)
+                .find(|&k| {
+                    g.light(from, k) == Some(Light::Green)
+                        && g.light(from, k + cycle - 1) != Some(Light::Green)
+                })
+                .unwrap();
+            let Some((arr, dt)) = g.wave_link(first, &main) else {
+                continue;
+            };
+            let next = g.lanes[arr as usize].end_node as usize;
+            let v = g.lanes[first as usize].speed_mps;
+            let ticks = ((dt + t.length_m / v) * 120.0 + 0.5) as u32 + WAVE_DELAY_TICKS;
+            let down = g.junctions[next].phases == j.phases
+                && g.junctions[next].offset
+                    == traffic::signal::follow(
+                        j.offset,
+                        l.phase,
+                        g.lanes[arr as usize].phase,
+                        j.phases,
+                        ticks,
+                    );
+            for s in [1u64, 6, 12, 18, 24] {
+                let tick = start + s * 120;
+                links += 1;
+                let green = green_run(g, &main, from, first, tick, 1, &timed);
+                wave += green;
+                if down {
+                    with += 1;
+                    with_green += green;
+                }
+                random += green_run(g, &main, from, first, tick, 1, &hashed);
+                best = best.max(green_run(g, &main, from, first, tick, 12, &timed));
+                best_hashed = best_hashed.max(green_run(g, &main, from, first, tick, 12, &hashed));
+            }
+        }
+        let share = |n: u32| n as f32 / links.max(1) as f32;
+        println!(
+            "{}: {links} main-road link drives, next light green {:.1}% timed ({:.1}% with hashed offsets), {:.1}% of {with} down the wave; longest run {best} ({best_hashed})",
+            b.name,
+            100.0 * share(wave),
+            100.0 * share(random),
+            100.0 * with_green as f32 / with.max(1) as f32,
+        );
+        assert!(with_green as f32 >= 0.95 * with as f32, "{}", b.name);
+        if links > 0 {
+            assert!(share(wave) > share(random), "{}", b.name);
+        }
+        if b.name == "california_coast seed 1" {
+            coast_best = best;
+            assert!(share(wave) >= 0.7, "{}", b.name);
+        }
+    }
+    assert!(
+        coast_best >= 4,
+        "longest green run on the coast {coast_best}"
+    );
+}
+
+/// A drive at the posted speed down the coast's longest green wave (the best run from any
+/// main-road approach 6 s into its green): the lane and turn pieces from 40 m before the
+/// first stop line on through the last green, the tick it passes that line, the greens
+/// expected (that one too).
+fn longest_wave(b: &Built) -> (Vec<(bool, u32, f32)>, u64, u32) {
+    let g = &b.graph;
+    let main = main_lanes(b);
+    let timed = |n: usize| g.junctions[n].offset;
+    let mut best = (0, 0, 0, 0u64);
+    for t in &g.turns {
+        let l = &g.lanes[t.from as usize];
+        if t.kind != TurnKind::Straight || l.control != Control::Signal || !main[t.to as usize] {
+            continue;
+        }
+        let cycle = u64::from(cycle_ticks(g.junctions[l.end_node as usize].phases));
+        let start = (0..cycle)
+            .find(|&k| {
+                g.light(t.from, k) == Some(Light::Green)
+                    && g.light(t.from, k + cycle - 1) != Some(Light::Green)
+            })
+            .unwrap();
+        let tick = start + 6 * 120;
+        let n = green_run(g, &main, t.from, t.to, tick, 12, &timed);
+        if n > best.0 {
+            best = (n, t.from, t.to, tick);
+        }
+    }
+    let (n, from, first, tick) = best;
+    let turn_id = |a: u32, b: u32| {
+        let l = &g.lanes[a as usize];
+        (l.first_turn..l.first_turn + l.turn_count)
+            .find(|&k| g.turns[k as usize].to == b)
+            .unwrap()
+    };
+    let mut path = vec![(false, from, 40.0f32.min(g.lanes[from as usize].length_m))];
+    let (mut lane, mut prev) = (first, from);
+    let mut signals = 0;
+    while signals < n {
+        let t = turn_id(prev, lane);
+        path.push((true, t, g.turns[t as usize].length_m));
+        let l = &g.lanes[lane as usize];
+        path.push((false, lane, l.length_m));
+        signals += u32::from(l.control == Control::Signal);
+        let next = g
+            .next(lane)
+            .iter()
+            .find(|x| x.kind == TurnKind::Straight && main[x.to as usize]);
+        if signals == n {
+            // On across the last junction.
+            if let Some(x) = next {
+                path.push((true, turn_id(lane, x.to), x.length_m));
+            }
+            break;
+        }
+        (prev, lane) = (lane, next.unwrap().to);
+    }
+    (path, tick, n + 1)
+}
+
+/// Drives `path` (from [`longest_wave`]) at `speed(seconds, posted)` m/s through a
+/// [`traffic::Streak`], passing the first stop line at about `tick`; returns the streak's
+/// run after every step.
+fn drive_streak(
+    g: &LaneGraph,
+    path: &[(bool, u32, f32)],
+    tick: u64,
+    speed: &dyn Fn(f32, f32) -> f32,
+) -> (Vec<u8>, u32) {
+    let mut streak = traffic::Streak::new(g);
+    let posted = g.lanes[path[0].1 as usize].speed_mps;
+    let mut t0 = tick - (path[0].2 / posted * 120.0) as u64;
+    let mut runs = Vec::new();
+    let (mut piece, mut s) = (0, 0.0f32);
+    let lane0 = &g.lanes[path[0].1 as usize];
+    s += lane0.length_m - path[0].2;
+    let mut k = 0u64;
+    while piece < path.len() {
+        let (turn, id, _) = path[piece];
+        let (pose, len) = if turn {
+            (g.turn_pose(id, s), g.turns[id as usize].length_m)
+        } else {
+            (g.pose(id, s), g.lanes[id as usize].length_m)
+        };
+        let v = speed(k as f32 / 120.0, posted);
+        let car = traffic::Player {
+            pos: pose.pos,
+            heading: pose.heading,
+            speed: v,
+            half_len: 2.3,
+            half_w: 0.9,
+        };
+        streak.step(g, t0, &car, 1.0 / 120.0);
+        runs.push(streak.run);
+        s += v / 120.0;
+        if s > len {
+            s -= len;
+            piece += 1;
+        }
+        t0 += 1;
+        k += 1;
+    }
+    (runs, streak.greens)
+}
+
+#[test]
+fn the_streak_counts_a_green_wave_and_ends_quietly() {
+    let b = coast();
+    let g = &b.graph;
+    let (path, tick, greens) = longest_wave(b);
+    println!("longest wave on the coast: {greens} greens in a row at the posted speed");
+    assert!(greens >= 5, "{greens}");
+    // Holding the limit: every light adds one.
+    let (runs, counted) = drive_streak(g, &path, tick, &|_, v| v);
+    assert_eq!(counted, greens);
+    assert_eq!(*runs.last().unwrap(), greens as u8);
+    assert!(runs.windows(2).all(|w| w[1] == w[0] || w[1] == w[0] + 1));
+    // A hard brake for a second after the second light ends the run there; the next light
+    // starts again at 1.
+    let after = |runs: &[u8], n: u8| runs.iter().position(|&r| r == n).unwrap();
+    let second = after(&runs, 2) as f32 / 120.0;
+    let brake = move |t: f32, v: f32| {
+        let into = t - (second + 0.5);
+        if (0.0..1.0).contains(&into) {
+            v - 6.0 * into
+        } else if (1.0..2.0).contains(&into) {
+            v - 6.0 * (2.0 - into)
+        } else {
+            v
+        }
+    };
+    let (braked, _) = drive_streak(g, &path, tick, &brake);
+    let k = ((second + 0.9) * 120.0) as usize;
+    assert_eq!(braked[k], 0, "the hard brake ends the run");
+    assert!(braked[k..].contains(&1));
+    // Speeding a fifth over the limit never gets a run going.
+    let (fast, n) = drive_streak(g, &path, tick, &|_, v| v * 1.25);
+    assert!(fast.iter().all(|&r| r == 0), "{n}");
+    // Through the first light on red (a cycle's half later): the run starts after it.
+    let (late, _) = drive_streak(g, &path, tick + 30 * 120, &|_, v| v);
+    assert!(
+        late[..((path[0].2 / g.lanes[path[0].1 as usize].speed_mps + 0.5) * 120.0) as usize]
+            .iter()
+            .all(|&r| r == 0)
+    );
 }
 
 /// Whether a drawn stop sign (`signal` false) or signal pole stands within `reach` of `at`.

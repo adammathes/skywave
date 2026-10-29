@@ -42,6 +42,7 @@ pub mod sound;
 pub mod stream;
 pub mod ui;
 pub mod vehicles;
+mod wave;
 mod worldmesh;
 
 pub use settings::{
@@ -211,6 +212,8 @@ pub struct App {
     props: Option<propinst::PropInstances>,
     /// The place's NPC traffic.
     npcs: npc::Npcs,
+    /// The player's run of greens down the place's signals.
+    wave: wave::Wave,
     /// The scene's traffic density over the setting (`traffic=`; off unless a scene
     /// says otherwise, so tests and the self-test drive alone).
     traffic_scene: Option<traffic::Density>,
@@ -441,6 +444,7 @@ impl App {
             map,
             start,
             props,
+            wave: wave::Wave::new(&npcs.graph),
             npcs,
             traffic_scene: Some(traffic::Density::Off),
             sound,
@@ -872,6 +876,12 @@ impl App {
                 peds_s += now() - t;
             }
             let player = self.traffic_player();
+            let signed = traffic::Player {
+                speed: self.drive.state.speed_mps,
+                ..player
+            };
+            self.wave
+                .step(&self.npcs.graph, self.npcs.signal_tick(), &signed, dt);
             if let Some(r) = &mut self.rail {
                 r.step(&player, self.npcs.cars(), self.npcs.crowd.pool(), dt);
             }
@@ -898,6 +908,7 @@ impl App {
             self.water_toast = WATER_TOAST_S;
         }
         self.water_toast = (self.water_toast - dt_real as f32).max(0.0);
+        self.wave.frame(dt_real as f32);
         self.npcs.note_time(traffic_s * 1000.0, steps.count);
         self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
         steps
@@ -1070,7 +1081,10 @@ impl App {
                 alpha,
                 &self.car_meshes,
                 cabin,
-                lighting::car_glow(&daylight),
+                drive::CarGlow {
+                    speedo: self.wave.speedo_glow(),
+                    ..lighting::car_glow(&daylight)
+                },
                 &mut self.instances,
             );
         }

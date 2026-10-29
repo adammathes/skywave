@@ -217,6 +217,7 @@ pub fn car_glow(d: &Daylight) -> CarGlow {
     CarGlow {
         lamps: glow_cap(d, CAR_LAMP_EXPOSED).max(day),
         instruments: glow_cap(d, INSTRUMENT_EXPOSED),
+        speedo: 1.0,
     }
 }
 

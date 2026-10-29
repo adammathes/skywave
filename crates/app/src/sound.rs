@@ -190,6 +190,9 @@ impl Sound {
             tune_volume: 0.0,
             deck_clicks: 0,
             deck_kind: 0,
+            // Set by the app from the green wave (`App::frame`).
+            waves: 0,
+            wave_run: 0,
         }
     }
 

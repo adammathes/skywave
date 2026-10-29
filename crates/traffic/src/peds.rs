@@ -139,8 +139,14 @@ const HOP_SLOPE: f32 = 3.75;
 const FUTURE_DT_S: f32 = 0.05;
 const FUTURE_N: usize = 50;
 const FUTURE_CLEAR_M: f32 = 0.25;
+/// A way out of the car's way that comes nearer its footprint than where it starts stays
+/// at least this clear of it all the way.
+const PASS_CLEAR_M: f32 = 0.2;
 /// A move under way changes course, if its spot is no longer clear, after this long, s.
 const REPLAN_S: f32 = 0.25;
+/// A move to the least bad spot runs on while the spot loses no more than this of its
+/// clearance, m.
+const LEAST_SLACK_M: f32 = 0.1;
 /// With the car closer than this (s), the hop is a startled jump: under way at once and
 /// quicker.
 const URGENT_TTI_S: f32 = 0.8;
@@ -335,6 +341,11 @@ struct Dodge {
     stuck: bool,
     /// The offset where the episode's first move began.
     origin: [f32; 2],
+    /// For a move to the least bad spot (none was clear) with the car still coming, how
+    /// clear of the car's way the spot was then: it runs on while the spot stays as clear,
+    /// rather than starting over from a standstill (once the car is alongside, a person
+    /// keeps looking for better).
+    least: Option<f32>,
 }
 
 impl Dodge {
@@ -348,6 +359,7 @@ impl Dodge {
         stuck: false,
         quick: false,
         origin: [0.0; 2],
+        least: None,
     };
 
     /// The offset now: the figure's own sidestep or hop curve, scaled to the move.
@@ -637,13 +649,36 @@ impl CarFrame {
                 }
             }
         }
-        let mut prev = self.out_of(p);
-        (1..=4).all(|k| {
-            let g = self.out_of(crate::math::lerp3(p, q, k as f32 / 4.0));
-            let ok = g > 0.1 || g >= prev - 1e-3;
-            prev = g;
-            ok
-        })
+        // Never closer to the footprint than where they start, unless clear of it by a
+        // body's width all the way.
+        self.least_out_of(p, q) >= self.out_of(p).min(PASS_CLEAR_M) - 1e-3
+    }
+
+    /// The least [`CarFrame::out_of`] along the straight way from `p` to `q`, exactly: it
+    /// is convex along a line, so the least is at an end, where either axis crosses the
+    /// middle, or where the two axes' distances meet.
+    fn least_out_of(&self, p: [f32; 3], q: [f32; 3]) -> f32 {
+        let ((a0, l0), (a1, l1)) = (self.rel(p), self.rel(q));
+        let (da, dl) = (a1 - a0, l1 - l0);
+        let at = |t: f32| ((a0 + da * t).abs() - self.hl).max((l0 + dl * t).abs() - self.hw);
+        let mut least = at(0.0).min(at(1.0));
+        let mut try_at = |num: f32, den: f32| {
+            if den != 0.0 {
+                let t = num / den;
+                if t > 0.0 && t < 1.0 {
+                    least = least.min(at(t));
+                }
+            }
+        };
+        try_at(-a0, da);
+        try_at(-l0, dl);
+        for sa in [-1.0, 1.0] {
+            for sl in [-1.0, 1.0] {
+                // sa a - hl = sl l - hw along the way.
+                try_at(self.hl - self.hw - sa * a0 + sl * l0, sa * da - sl * dl);
+            }
+        }
+        least
     }
 
     /// Whether someone at `p` going on along `dir` at `v` comes within [`FUTURE_CLEAR_M`]
@@ -2216,7 +2251,11 @@ impl Pedestrians {
                 // A move under way may change course only once it has run a little, so
                 // a person never keeps restarting in place.
                 let busy = dg.action != Action::None && dg.t < 1.0 && dg.t * dg.dur < REPLAN_S;
-                let spot_ok = dg.action != Action::None && !car.blocks(to, car.spot_clear());
+                let spot_ok = dg.action != Action::None
+                    && (!car.blocks(to, car.spot_clear())
+                        || dg
+                            .least
+                            .is_some_and(|c| dg.t < 1.0 && car.clearance(to) >= c - LEAST_SLACK_M));
                 if !busy && !spot_ok {
                     // Moves back to back stay within reach of where the first began,
                     // unless the car keeps coming.
@@ -2242,7 +2281,7 @@ impl Pedestrians {
                         tti,
                     };
                     let target = dodge_target(walks, &seek);
-                    if let Some(target) = target {
+                    if let Some((target, least)) = target {
                         let delta = [target[0] - here[0], target[2] - here[2]];
                         // A startled or long hop runs the whole way at once.
                         let (action, quick, dur) = move_kind(tti, len2(delta));
@@ -2256,6 +2295,7 @@ impl Pedestrians {
                             calm: 0.0,
                             stuck: false,
                             origin,
+                            least: (least && tti > 0.0).then(|| car.clearance(target)),
                         };
                     } else {
                         // No room across the walk: keep up with the walker as it moves off
@@ -2369,8 +2409,9 @@ impl Pedestrians {
 /// Where to get out of the car's way from `p`: the nearest point within [`DODGE_REACH_M`]
 /// on the walk geometry around (walks, corners and spurs, within each link's width; on
 /// a crossing, its links too) at least [`SPOT_CLEAR_M`] clear of the car's footprint and
-/// path (see [`Seek`]). `None` if there is none: the walker must move off along its path.
-fn dodge_target(walks: &WalkGraph, seek: &Seek) -> Option<[f32; 3]> {
+/// path (see [`Seek`]), and whether it is only the least bad spot. `None` if there is none:
+/// the walker must move off along its path.
+fn dodge_target(walks: &WalkGraph, seek: &Seek) -> Option<([f32; 3], bool)> {
     let c = walks.cell_of(xz(seek.p))? as i32;
     let w = walks.grid_cells[0] as i32;
     let (cx, cz) = (c % w, c / w);
@@ -2396,7 +2437,7 @@ fn dodge_target(walks: &WalkGraph, seek: &Seek) -> Option<[f32; 3]> {
             continue;
         }
         if let Some(q) = dodge_search(walks, seek, &future, (cx, cz, w), pass) {
-            return Some(q);
+            return Some((q, pass == Pass::LeastBad));
         }
     }
     None

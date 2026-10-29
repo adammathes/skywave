@@ -265,9 +265,19 @@ fn sixty_through_a_red_light_touches_no_car() {
     );
 
     // Busy traffic, the player waiting at the lane's start for a moment to go: its own
-    // lane clear ahead, and the line reached 4–9 s into the red.
+    // lane clear ahead, a cross-traffic car waiting at its line, and the line reached 4–9 s
+    // into the red.
     let mut app = app_at(start.pos, start.heading, "t=12:00&traffic=busy");
     let red = |t: u64| g.light(lane, t) == Some(traffic::Light::Red);
+    let (node, phase) = (
+        g.lanes[lane as usize].end_node,
+        g.lanes[lane as usize].phase,
+    );
+    let at_line = |c: &traffic::Car| {
+        g.lanes
+            .get(c.seg as usize)
+            .is_some_and(|cl| cl.end_node == node && cl.phase != phase && cl.length_m - c.s < 3.0)
+    };
     let mut waited = 0;
     loop {
         let t = app.npcs.signals.tick + u64::from(arrive);
@@ -276,7 +286,8 @@ fn sixty_through_a_red_light_touches_no_car() {
             .cars()
             .iter()
             .all(|c| c.seg != lane && c.prev != lane);
-        if clear && red(t) && red(t - 4 * 120) && !red(t - 9 * 120) {
+        let waiting = app.npcs.cars().iter().any(|c| at_line(c) && c.speed < 0.5);
+        if clear && waiting && red(t) && red(t - 4 * 120) && !red(t - 9 * 120) {
             break;
         }
         let hold = follow(&app, start.pos, start.dir, 0.0);
@@ -292,13 +303,11 @@ fn sixty_through_a_red_light_touches_no_car() {
     let mut near = std::collections::BTreeMap::new();
     let mut least = f32::INFINITY;
     let mut first_overlap = None;
-    let (node, phase) = (
-        g.lanes[lane as usize].end_node,
-        g.lanes[lane as usize].phase,
-    );
     // Per cross-traffic car at its stop line on a green: steps it stood there while the
     // player came through, and whether it moved off once the player had cleared.
     let mut held = std::collections::BTreeMap::new();
+    // Whether the player cleared the junction (a bump in it can stop the car there).
+    let mut cleared = false;
     run_up(&mut app, lane, arrive + 10 * 120, |app| {
         tick += 1;
         let p = app.traffic_player();
@@ -310,12 +319,9 @@ fn sixty_through_a_red_light_touches_no_car() {
         // Cross traffic held at its line on a green while the player comes through,
         // until the player has cleared the junction.
         let clear = s - half_len > len + 15.0;
+        cleared |= clear;
         for c in app.npcs.cars() {
-            let Some(cl) = g.lanes.get(c.seg as usize) else {
-                continue;
-            };
-            let green = g.light(c.seg, app.npcs.signals.tick) == Some(traffic::Light::Green);
-            if cl.end_node == node && cl.phase != phase && green && cl.length_m - c.s < 3.0 {
+            if at_line(c) && g.light(c.seg, app.npcs.signals.tick) == Some(traffic::Light::Green) {
                 let w = held.entry(c.id).or_insert((0u32, false));
                 if !clear && c.speed < 0.5 {
                     w.0 += 1;
@@ -348,10 +354,11 @@ fn sixty_through_a_red_light_touches_no_car() {
         .values()
         .filter(|&&(lo, hi)| lo < hi - 2.0 || lo < 0.5)
         .count();
-    // Yielded: stood a second or more on its green for the player, then went.
+    // Yielded: stood a second or more on its green for the player, then went once the
+    // player had cleared the junction (held on while it stands in it).
     let yielded = held
         .values()
-        .filter(|&&(stood, went)| stood >= 120 && went)
+        .filter(|&&(stood, went)| stood >= 120 && (went || !cleared))
         .count();
     eprintln!(
         "60 mph through a red: waited {:.1} s, line at {speed:.1} m/s, {} cars near in the \

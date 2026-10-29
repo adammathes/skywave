@@ -25,6 +25,9 @@
 //! NPC cars drive on the lane graph ([`Traffic`], [`cars`]): a fixed pool stepped at 120 Hz with car
 //! following, signals and stop signs, right of way, lane changes, and spawning by density
 //! out of the player's view.
+//!
+//! Signals along the main roads are timed as green waves ([`lanes`]); [`wave`] notices the
+//! player riding one.
 #![no_std]
 
 extern crate alloc;
@@ -39,9 +42,11 @@ pub mod peds;
 pub mod signal;
 pub mod train;
 pub mod walks;
+pub mod wave;
 
 pub use cars::{
     Barrier, Car, Clock, Density, Inputs, Player, ShapeRule, Traffic, TrafficBudget, View,
 };
 pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
 pub use signal::{Light, SignalClock};
+pub use wave::Streak;
