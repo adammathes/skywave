@@ -99,6 +99,18 @@
     "about": "Mirage Valley's boulevard at dusk, 12 s into the street lamps' wave (civil dusk at 18:30:43), eastbound toward where it started: the median's lamps lit in the blocks ahead, striking or still dark in the near ones, signs at their own moments, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:30:55", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
+  "basin-letters-golden": {
+    "about": "Mirage Valley's hillside letters at golden hour from the far chase camera across the flood channel, north toward the hills: MIRAGE in white sheet-metal letters on the slope above the foothill houses, downtown's towers either side.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "388,700", "yaw": "0", "still": "1", "stream": "1" }
+  },
+  "basin-water-tower-noon": {
+    "about": "Mirage Valley's water tower at noon from the far chase camera on an industrial street: the sky-blue pedestal tower (variant B) over the warehouses and their parked cars.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "12:00", "pos": "560,1940", "yaw": "104", "still": "1", "stream": "1" }
+  },
+  "basin-drive-in-night": {
+    "about": "Mirage Valley's drive-in at 21:30 from the far chase camera across the boulevard: its screen glowing over the lot, the marquee box lit by the entrance, the rows filled with cars.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "21:30", "pos": "356,1290", "yaw": "0", "still": "1", "stream": "1" }
+  },
   "coast-dawn-haze": {
     "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera: the morning haze over the town before it burns off.",
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "05:50", "lights": "1", "pos": "400.3,1510.7", "yaw": "103", "still": "1", "stream": "1" }
