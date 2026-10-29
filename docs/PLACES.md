@@ -28,7 +28,8 @@ Buildings    { Vec<Building { footprint: Vec<[f32;2]>, height_m f32, floors u8, 
                               Glass, Warehouse, Barn, Motel, StripMall), built_year: Option<u16>,
                               use: Residential|Commercial|Office|Industrial|Civic|Hotel|Parking }> }
 POIs         { Vec<Poi { pos, kind: Pier|Lighthouse|Overlook|Diner|Gas|Marina|Stadium|DragStrip|ChannelRamp|Tunnel|
-                         CrewGarage|TacoStand|GradeCrossing|MoviePalace|CityHall, name_seed u64 }> }
+                         CrewGarage|TacoStand|GradeCrossing|DonutShop|CoffeeShop|Motel|DriveIn|HillsideLetters|
+                         WaterTower|MoviePalace|CityHall, name_seed u64 }> }
 Spawns       { Vec<Spawn { pos, heading, kind: PlayerStart|Garage }> }
 ```
 

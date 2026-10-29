@@ -498,10 +498,24 @@ pub enum PoiKind {
     TacoStand = 11,
     /// Where a rail line crosses a road at grade, on the track's middle.
     GradeCrossing = 12,
+    /// The roadside set (`docs/WORLD_GENERATION.md`, "Landmarks"), each at its lot's middle:
+    /// a donut shop with a giant donut over it.
+    DonutShop = 13,
+    /// A jet-age coffee shop under a swooping roof.
+    CoffeeShop = 14,
+    /// A motor court round a pool.
+    Motel = 15,
+    /// A drive-in theater, its screen facing the road.
+    DriveIn = 16,
+    /// The landmarks built from kits beside the set pieces, each at its lot's middle: the
+    /// valley's name in letters on the hillside...
+    HillsideLetters = 17,
+    /// ...and the water tower over the industrial district.
+    WaterTower = 18,
     /// Downtown's movie palace, under its marquee.
-    MoviePalace = 13,
+    MoviePalace = 19,
     /// The city hall at the head of the boulevard, on the middle of its lot.
-    CityHall = 14,
+    CityHall = 20,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.

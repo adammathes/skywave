@@ -22,17 +22,9 @@ const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 
-const CITY_HALL: &str = include_str!("../../../assets/landmarks/city_hall.ron");
-const MOVIE_PALACE: &str = include_str!("../../../assets/landmarks/movie_palace.ron");
-const WATER_TOWER: &str = include_str!("../../../assets/landmarks/water_tower.ron");
-
-/// The landmark kits compiled into the game, as `(id, RON text)` in file-name order: a
-/// `place::PropKind::Landmark`'s `kit` is an index into this list.
-const LANDMARKS: [(&str, &str); 3] = [
-    ("city_hall", CITY_HALL),
-    ("movie_palace", MOVIE_PALACE),
-    ("water_tower", WATER_TOWER),
-];
+/// The landmark kits compiled into the game: a `place::PropKind::Landmark`'s `kit` is an
+/// index into this list.
+const LANDMARKS: [(&str, &str); 8] = world::landmarks::BUILTIN;
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.

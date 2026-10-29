@@ -1,24 +1,27 @@
 //! The landmark gallery's contact sheets: where `tools/screenshot/shoot.mjs --gallery <kit>`
 //! puts the car and the camera to shoot each variant of a landmark kit
 //! (`world::landmarks::gallery`, `place=gallery`) from a few fixed cameras at noon, golden
-//! hour and night, before it tiles the shots into one sheet per kit.
+//! hour, dusk and night, before it tiles the shots into one sheet per kit.
 //!
 //! The shots are written to `tools/screenshot/gallery.json` by
 //! `cargo test -p app -- --ignored write_gallery`; a test fails while that file is stale.
 //! Every camera stands south of its lot on open ground and faces the landmark's middle:
-//! - `front`: the hood camera straight on, far enough back that the top fits the frame;
+//! - `front`: the hood camera straight on, far enough back that the top and the sides fit
+//!   the frame;
 //! - `quarter`: the hood camera from 35° east of straight on, as far back;
 //! - `street`: the far chase camera from 20° west, a little farther, the car in the frame
 //!   for scale.
 
 use serde_json::{json, Map, Value};
-use world::landmarks::{gallery_lots, letter, Kit};
+use world::landmarks::{gallery_lots, letter, Kit, GALLERY_SETBACK_M};
 
-/// The times of day every shot is taken at: `(name, clock, headlights)`. Night leaves the
-/// headlights off: their pool on the lawn outshines the landmark's own lamps.
-pub const TIMES: [(&str, &str, bool); 3] = [
+/// The times of day every shot is taken at: `(name, clock, headlights)`. Dusk is after the
+/// street lamps strike, with blue still in the sky. Night leaves the headlights off: their
+/// pool on the lawn outshines the landmark's own lamps.
+pub const TIMES: [(&str, &str, bool); 4] = [
     ("noon", "12:00", false),
     ("golden", "17:40", false),
+    ("dusk", "18:45", false),
     ("night", "22:30", false),
 ];
 
@@ -36,6 +39,12 @@ const EYE_M: f32 = 1.25;
 const TOP_SHARE: f32 = 0.8;
 /// The nearest a camera stands to a landmark's middle, m.
 const MIN_DISTANCE_M: f32 = 30.0;
+/// The sheets' frames' width over height (`shoot.mjs --gallery` shoots 960x540) and the
+/// share of the half width a landmark's side may take.
+const ASPECT: f32 = 16.0 / 9.0;
+const SIDE_SHARE: f32 = 0.9;
+/// The least a camera stands south of its row's road, m.
+const ROAD_CLEAR_M: f32 = 12.0;
 
 /// One shot of the sheet, before the time of day.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,13 +69,18 @@ pub fn shots(kits: &[Kit], k: usize) -> Vec<Shot> {
     let mut out = Vec::new();
     for lot in gallery_lots(kits).iter().filter(|l| l.kit == k) {
         let kit = &kits[k];
-        let (_, hi) = kit.bounds(lot.variant);
+        let (lo, hi) = kit.bounds(lot.variant);
         // The landmark's middle: halfway back on its lot.
         let mid = [lot.front[0], lot.front[1] - 0.5 * kit.lot[1]];
-        let fit = ((hi[1] * 1.05 - EYE_M) / (half_fov * TOP_SHARE).tan()).max(MIN_DISTANCE_M);
+        let half_hfov = (half_fov.tan() * ASPECT).atan();
+        let side = 0.5 * (hi[0] - lo[0]) * 1.05 / (half_hfov * SIDE_SHARE).tan();
+        let top = (hi[1] * 1.05 - EYE_M) / (half_fov * TOP_SHARE).tan();
+        let fit = top.max(side).max(MIN_DISTANCE_M);
         for (camera, cam, bearing, share) in CAMERAS {
-            let d = (fit * share).max(MIN_DISTANCE_M) + 0.5 * kit.lot[1];
             let (s, c) = bearing.to_radians().sin_cos();
+            // Back from the lot's middle, and always south of the row's road and walks.
+            let clear = (0.5 * kit.lot[1] + GALLERY_SETBACK_M + ROAD_CLEAR_M) / c;
+            let d = ((fit * share).max(MIN_DISTANCE_M) + 0.5 * kit.lot[1]).max(clear);
             let pos = [mid[0] + s * d, mid[1] + c * d];
             let (dx, dz) = (mid[0] - pos[0], mid[1] - pos[1]);
             let yaw = dx.atan2(-dz).to_degrees();
@@ -201,12 +215,12 @@ mod tests {
             }
         }
         // The water tower's front camera fits its top: about 85 m back.
-        let front = &shots(kits, 0)[0];
+        let tower = kits.iter().position(|k| k.id == "water_tower").unwrap();
+        let front = &shots(kits, tower)[0];
         assert_eq!((front.variant, front.camera), ('A', "front"));
-        assert!(
-            (70.0..110.0).contains(&(front.pos[1] - (-24.0))),
-            "{front:?}"
-        );
+        let lot = lots.iter().find(|l| l.kit == tower).unwrap();
+        let mid = lot.front[1] - 0.5 * kits[tower].lot[1];
+        assert!((70.0..110.0).contains(&(front.pos[1] - mid)), "{front:?}");
     }
 
     #[test]

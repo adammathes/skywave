@@ -18,12 +18,25 @@
 //!   edge, benches and a lamp.
 //! - **The channel ramps**: chain-link along both lips of the flood channel, open where a
 //!   road bridges it, around each ramp and at its top.
-//! - **The downtown anchors**, two landmark kits (`assets/landmarks/`): the movie palace on
-//!   the downtown or commercial lot on an arterial or collector nearest the downtown seed,
-//!   clear of the garage and the stand; the city hall at the head of the boulevard, across
-//!   the road it ends on at a T (the out boulevard meets the road along the foot of the hills
-//!   that way), facing back down it, so it closes the view the whole way up. The lots'
-//!   buildings go.
+//! - **The roadside set** ([`ROADSIDE`]): landmark kits on lots of their own size. The donut
+//!   shop, the coffee shop and the motel go on commercial or strip lots on an arterial,
+//!   nearest the boulevard, [`ROADSIDE_APART_M`] from each other and the garage and stand;
+//!   the drive-in on open farmland (or an industrial lot) off a road that is not the
+//!   freeway, the site farthest from downtown within [`DRIVE_IN_VIEW_M`] of the freeway, so
+//!   its screen shows from it. Their lots' buildings go; each gets its kit's
+//!   lamps and parked cars at its own hours.
+//! - **The landmarks** built from kits ([`crate::landmarks`]; the variant each wears is the
+//!   owner's pick from the gallery's contact sheet, [`LETTERS`], [`WATER_TOWER`]): the
+//!   hillside letters on the slope of the hills [`LETTERS_RISE_M`] above their foot,
+//!   square to the slope and across from downtown, clear of every road; the water tower
+//!   on the industrial lot with the most industry round it, at least [`TOWER_APART_M`]
+//!   from the garage and the stand. A kit the grammar does not carry is not sited.
+//! - **The downtown anchors** ([`HALL`], [`PALACE`]), after those: the city hall at the
+//!   head of the boulevard, across the road it ends on at a T (the out boulevard meets the
+//!   road along the foot of the hills that way), facing back down it, so it closes the view
+//!   the whole way up; the movie palace on the downtown or commercial lot on an arterial or
+//!   collector nearest the downtown seed. Both clear of every other set piece and
+//!   [`RAIL_CLEAR_M`] from the rail line.
 //!
 //! Every draw is a pure function of the place; nothing here draws randomness but the
 //! signs' name seeds (`hash64(seed, [SETPIECES, ..])`).
@@ -39,8 +52,7 @@ use skywave_core::Seed;
 
 use super::macro_map::{MacroMap, MacroPoiKind};
 use crate::landmarks::Kit;
-use crate::math::V3;
-use crate::math::{point_in_polygon, segment_distance, V2};
+use crate::math::{abs, point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
 use crate::palette::Palette;
 use crate::props::yaw_of_dir;
@@ -66,22 +78,6 @@ const APRON_M: f32 = 9.0;
 const STAND_LOT_M: (f32, f32) = (22.0, 20.0);
 /// The garage and the stand stand at least this far apart, m.
 pub const APART_M: f32 = 300.0;
-/// The downtown anchors: each kit's id, its lot (the kit's own, which a test holds it to)
-/// and the variant the place stands (the owner's pick from the contact sheet).
-pub const PALACE_KIT: &str = "movie_palace";
-pub const PALACE_LOT_M: (f32, f32) = (28.0, 44.0);
-/// A, the deco palace: the owner's pick (2026-10-29).
-pub const PALACE_VARIANT: u8 = 0;
-pub const HALL_KIT: &str = "city_hall";
-pub const HALL_LOT_M: (f32, f32) = (60.0, 48.0);
-/// B, the clock tower: the owner's pick (2026-10-29).
-pub const HALL_VARIANT: u8 = 1;
-/// The anchors' lots keep this far from the rail line's centerline (its track, gates and
-/// signals), m.
-const RAIL_CLEAR_M: f32 = 16.0;
-/// The city hall's lot starts this far behind the asphalt and walk of the road its
-/// boulevard ends on, m.
-const HALL_SETBACK_M: f32 = 1.0;
 /// The drag strip's start line lies this far down the runway from its taxiway end; its
 /// finish a quarter mile on, or an eighth where the runway is short, m.
 pub const STRIP_IN_M: f32 = 60.0;
@@ -98,6 +94,48 @@ const FENCE_OUT_M: f32 = 0.6;
 /// An overlook's turnout: its guard rail this far past the road's end, this long, m.
 const RAIL_OUT_M: f32 = 9.0;
 const RAIL_M: f32 = 18.0;
+/// The landmarks a basin builds from kits: `(kit id, variant)`, the variant the owner's
+/// pick from the gallery's contact sheet (`docs/WORLD_GENERATION.md`, "Landmarks").
+pub const LETTERS: (&str, u8) = ("hillside_letters", 0);
+/// B, the pedestal (the owner's pick from the gallery sample).
+pub const WATER_TOWER: (&str, u8) = ("water_tower", 1);
+/// The letters stand where the hills have risen this far over the road along their foot,
+/// their faces this far back on their lot, their line level to within this, and no road
+/// comes within this of their lot, m.
+pub const LETTERS_RISE_M: f32 = 50.0;
+const LETTERS_FACE_M: f32 = 8.6;
+const LETTERS_LEVEL_M: f32 = 3.0;
+const LETTERS_ROAD_CLEAR_M: f32 = 12.0;
+/// The water tower stands at least this far from the garage and the stand, and is scored
+/// by the industry within this of it, m.
+pub const TOWER_APART_M: f32 = 200.0;
+const TOWER_REACH_M: f32 = 192.0;
+
+/// The downtown anchors, as [`LETTERS`]: the movie palace A, the deco palace, and the city
+/// hall B, the clock tower (the owner's picks, 2026-10-29, PR #75).
+pub const PALACE: (&str, u8) = ("movie_palace", 0);
+pub const HALL: (&str, u8) = ("city_hall", 1);
+/// The anchors' lots keep this far from the rail line's centerline (its track, gates and
+/// signals), m.
+pub const RAIL_CLEAR_M: f32 = 16.0;
+/// The city hall's lot starts this far behind the asphalt and walk of the road its
+/// boulevard ends on, m.
+const HALL_SETBACK_M: f32 = 1.0;
+
+/// The roadside set: each landmark kit by id, the variant the owner picked for this world
+/// (2026-10-29, PR #70) and its point of interest. A kit the grammar does not carry is
+/// left out.
+pub const ROADSIDE: [(&str, char, PoiKind); 4] = [
+    ("donut_shop", 'B', PoiKind::DonutShop),
+    ("coffee_shop", 'C', PoiKind::CoffeeShop),
+    ("motel", 'C', PoiKind::Motel),
+    ("drive_in", 'A', PoiKind::DriveIn),
+];
+/// The least distance between the roadside set's lots and from them to the garage's and
+/// the stand's, m.
+pub const ROADSIDE_APART_M: f32 = 250.0;
+/// The farthest the drive-in's lot stands from the freeway, m (its screen shows from it).
+pub const DRIVE_IN_VIEW_M: f32 = 350.0;
 
 /// A site a set piece stands on: the middle of its front at the property line, the way
 /// into it from the road, the way along the road.
@@ -127,6 +165,25 @@ impl Lot {
     }
 }
 
+/// A landmark built from a kit on its own lot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mark {
+    pub lot: Lot,
+    pub kind: PoiKind,
+    /// The kit's index in the grammar's and the variant it wears.
+    pub kit: u8,
+    pub variant: u8,
+    /// Its lot's width and depth, m.
+    pub size: [f32; 2],
+}
+
+impl Mark {
+    /// The middle of its lot.
+    fn middle(&self) -> V2 {
+        self.lot.at(0.0, 0.5 * self.size[1])
+    }
+}
+
 /// Where a basin's set pieces go (see the module docs); empty on any other place.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SetPieces {
@@ -135,9 +192,6 @@ pub struct SetPieces {
     pub tunnel_width_m: f32,
     pub garage: Option<Lot>,
     pub stand: Option<Lot>,
-    /// The movie palace's lot and the city hall's.
-    pub palace: Option<Lot>,
-    pub hall: Option<Lot>,
     /// The drag strip: its start line's middle, the way down it, the distance to the
     /// finish and the runway's width.
     pub strip: Option<(V2, V2, f32, f32)>,
@@ -150,6 +204,23 @@ pub struct SetPieces {
     pub channel: Option<(V2, V2, f32)>,
     /// Where the rail line crosses a road at grade, in order along it.
     pub crossings: Vec<V2>,
+    /// The landmarks built from kits: the letters and the water tower, those that found a
+    /// site.
+    pub marks: Vec<Mark>,
+    /// The roadside set, in [`ROADSIDE`] order (those that found a lot).
+    pub roadside: Vec<Roadside>,
+}
+
+/// One of the roadside set on its lot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Roadside {
+    /// The kit's index in the grammar's kits and the variant's in the kit.
+    pub kit: u8,
+    pub variant: u8,
+    pub poi: PoiKind,
+    pub lot: Lot,
+    /// The kit's lot: width along the road and depth into the lot, m.
+    pub size: (f32, f32),
 }
 
 impl SetPieces {
@@ -173,12 +244,6 @@ impl SetPieces {
         if let Some(l) = &self.stand {
             push(l.at(0.0, 0.5 * STAND_LOT_M.1), PoiKind::TacoStand);
         }
-        if let Some(l) = &self.palace {
-            push(l.at(0.0, 6.0), PoiKind::MoviePalace);
-        }
-        if let Some(l) = &self.hall {
-            push(l.at(0.0, 0.5 * HALL_LOT_M.1), PoiKind::CityHall);
-        }
         if let Some((start, _, _, _)) = self.strip {
             push(start, PoiKind::DragStrip);
         }
@@ -190,6 +255,12 @@ impl SetPieces {
         }
         for &c in &self.crossings {
             push(c, PoiKind::GradeCrossing);
+        }
+        for r in &self.roadside {
+            push(r.lot.at(0.0, 0.5 * r.size.1), r.poi);
+        }
+        for mark in &self.marks {
+            push(mark.middle(), mark.kind);
         }
         out
     }
@@ -209,12 +280,6 @@ impl SetPieces {
         if let Some(l) = &self.stand {
             out.push(l.rect(STAND_LOT_M.0, STAND_LOT_M.1));
         }
-        if let Some(l) = &self.palace {
-            out.push(l.rect(PALACE_LOT_M.0, PALACE_LOT_M.1));
-        }
-        if let Some(l) = &self.hall {
-            out.push(l.rect(HALL_LOT_M.0, HALL_LOT_M.1));
-        }
         if let Some((start, dir, run, width)) = self.strip {
             let r = dir.right() * (0.5 * width + 3.0);
             let (a, b) = (start - dir * 40.0, start + dir * (run + 40.0));
@@ -224,6 +289,12 @@ impl SetPieces {
             let r = out_dir.right() * (0.5 * RAIL_M + 2.0);
             let (a, b) = (at - out_dir * 2.0, at + out_dir * (RAIL_OUT_M + 2.0));
             out.push(vec![a - r, b - r, b + r, a + r]);
+        }
+        for r in &self.roadside {
+            out.push(r.lot.rect(r.size.0, r.size.1));
+        }
+        for mark in &self.marks {
+            out.push(mark.lot.rect(mark.size[0], mark.size[1]));
         }
         out
     }
@@ -273,9 +344,26 @@ fn road_y(place: &Place, q: V2, keep: impl Fn(&place::Edge) -> bool) -> Option<f
     best.map(|b| b.1)
 }
 
+/// Kit `id` in `kits`: its index, `variant` and its lot; `None` if the grammar does not
+/// carry it or it has no such variant.
+fn kit_of(kits: &[Kit], (id, variant): (&str, u8)) -> Option<(u8, u8, [f32; 2])> {
+    let k = kits.iter().position(|k| k.id == id)?;
+    (usize::from(variant) < kits[k].variants.len()).then(|| (k as u8, variant, kits[k].lot))
+}
+
+/// Whether the lot `l`, `w` wide and `d` deep, overlaps one of `areas`.
+fn overlaps(l: &Lot, (w, d): (f32, f32), areas: &[Vec<V2>]) -> bool {
+    let rect = l.rect(w, d);
+    areas.iter().any(|a| {
+        samples(l, w, d).any(|q| point_in_polygon(q, a))
+            || a.iter().any(|&q| point_in_polygon(q, &rect))
+    })
+}
+
 /// Where the set pieces of the place `m` describes go, its roads, lots and buildings
-/// standing (see the module docs). Empty unless `m` is a basin.
-pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
+/// standing (see the module docs), the landmarks from `kits` (the grammar's). Empty unless
+/// `m` is a basin.
+pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     let Some(b) = m.basin.as_ref() else {
         return SetPieces::default();
     };
@@ -377,38 +465,6 @@ pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
         .filter(|l| garage.is_none_or(|g| (g.front - l.front).length() >= APART_M))
         .min_by(by_blvd);
 
-    // The downtown anchors: the city hall first (its site is fixed by the boulevard), then
-    // the palace on the nearest downtown lot clear of every other set piece.
-    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
-    let off_rail = |l: &Lot, (w, d): (f32, f32)| {
-        let mut r = l.rect(w, d);
-        r.extend(samples(l, w, d));
-        r.iter().all(|&q| to_line(q, &rail) > RAIL_CLEAR_M)
-    };
-    s.hall = hall_site(m, place, b).filter(|l| off_rail(l, HALL_LOT_M));
-    let taken = s.footprints();
-    let overlaps = |l: &Lot| {
-        let r = l.rect(PALACE_LOT_M.0, PALACE_LOT_M.1);
-        taken.iter().any(|f| {
-            r.iter().any(|&q| point_in_polygon(q, f)) || f.iter().any(|&q| point_in_polygon(q, &r))
-        })
-    };
-    let by_downtown = |x: &Lot, y: &Lot| {
-        (x.front - downtown)
-            .length()
-            .total_cmp(&(y.front - downtown).length())
-            .then(x.key.cmp(&y.key))
-    };
-    s.palace = lots(
-        place,
-        PALACE_LOT_M,
-        &[ZoneId::Downtown, ZoneId::Commercial],
-        &classes[..2],
-    )
-    .into_iter()
-    .filter(|l| !overlaps(l) && off_rail(l, PALACE_LOT_M))
-    .min_by(by_downtown);
-
     // The drag strip.
     let (r0, r1) = (V2::from_array(b.runway[0]), V2::from_array(b.runway[1]));
     let len = (r1 - r0).length();
@@ -482,14 +538,201 @@ pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
         .iter()
         .map(|r| [V2::from_array(r[0]), V2::from_array(r[1])])
         .collect();
+
+    // The roadside set, in order, each on ground nothing else keeps.
+    let mut fronts: Vec<V2> = s.garage.iter().chain(&s.stand).map(|l| l.front).collect();
+    for (id, letter, poi) in ROADSIDE {
+        let Some(k) = kits.iter().position(|k| k.id == id) else {
+            continue;
+        };
+        let kit = &kits[k];
+        let variant = (letter as usize).wrapping_sub('A' as usize);
+        if variant >= kit.variants.len() {
+            continue;
+        }
+        let size = (kit.lot[0], kit.lot[1]);
+        let taken = s.footprints();
+        let free = |l: &Lot| {
+            let rect = l.rect(size.0, size.1);
+            fronts
+                .iter()
+                .all(|&f| (f - l.front).length() >= ROADSIDE_APART_M)
+                && !samples(l, size.0, size.1).any(|q| taken.iter().any(|a| point_in_polygon(q, a)))
+                && !taken.iter().flatten().any(|&q| point_in_polygon(q, &rect))
+        };
+        let lot = if poi == PoiKind::DriveIn {
+            // Off the freeway (in view of it) and out by the edge: the farthest from
+            // downtown of the lots near enough the freeway, else the nearest the freeway.
+            let to_fwy = |p: V2| to_line(p, &hwy);
+            let key = |l: &Lot| {
+                let mid = l.at(0.0, 0.5 * size.1);
+                let near = to_fwy(mid) <= DRIVE_IN_VIEW_M;
+                let v = if near {
+                    -(mid - downtown).length()
+                } else {
+                    to_fwy(mid)
+                };
+                (!near, v, l.key)
+            };
+            // Open farmland at the edge (or an industrial lot), off any road but the freeway.
+            let zones = [ZoneId::Farmland, ZoneId::Industrial];
+            let kinds = [LotKind::Lot, LotKind::LotEmpty];
+            let roads = [
+                RoadClass::Arterial,
+                RoadClass::Collector,
+                RoadClass::Local,
+                RoadClass::Rural,
+            ];
+            lots_on(place, size, &zones, &kinds, &roads)
+                .into_iter()
+                .filter(|l| m.in_playable(l.front.x, l.front.y, 0.5 * size.1 + 20.0) && free(l))
+                .min_by(|x, y| {
+                    let (a, b) = (key(x), key(y));
+                    a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2))
+                })
+        } else {
+            lots(
+                place,
+                size,
+                &[ZoneId::Commercial, ZoneId::Strip],
+                &classes[..2],
+            )
+            .into_iter()
+            .filter(|l| free(l))
+            .min_by(by_blvd)
+        };
+        if let Some(lot) = lot {
+            fronts.push(lot.front);
+            s.roadside.push(Roadside {
+                kit: k as u8,
+                variant: variant as u8,
+                poi,
+                lot,
+                size,
+            });
+        }
+    }
+    // The landmarks.
+    if let Some((kit, variant, size)) = kit_of(kits, LETTERS) {
+        if let Some(lot) = letters_site(m, place, &s, size) {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::HillsideLetters,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
+    let taken: Vec<V2> = [s.garage, s.stand]
+        .iter()
+        .flatten()
+        .map(|l| l.front)
+        .collect();
+    if let Some((kit, variant, size)) = kit_of(kits, WATER_TOWER) {
+        let (w, d) = (size[0], size[1]);
+        let areas = s.footprints();
+        // The industry round a lot: industrial zone samples every 32 m within reach.
+        let industry = |l: &Lot| {
+            let c = l.at(0.0, 0.5 * d);
+            let n = (TOWER_REACH_M / 32.0) as i32;
+            let mut k = 0u32;
+            for i in -n..=n {
+                for j in -n..=n {
+                    let q = c + V2::new(i as f32, j as f32) * 32.0;
+                    let inside = (q - c).length() <= TOWER_REACH_M;
+                    if inside && m.zone_at(q.x, q.y) == ZoneId::Industrial {
+                        k += 1;
+                    }
+                }
+            }
+            k
+        };
+        let lot = lots(place, (w, d), &[ZoneId::Industrial], &classes)
+            .into_iter()
+            .filter(|l| !overlaps(l, (w, d), &areas))
+            .filter(|l| {
+                taken
+                    .iter()
+                    .all(|&t| (t - l.front).length() >= TOWER_APART_M)
+            })
+            .map(|l| (industry(&l), l))
+            .max_by(|x, y| x.0.cmp(&y.0).then(y.1.key.cmp(&x.1.key)))
+            .map(|x| x.1);
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::WaterTower,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
+    // The downtown anchors: the city hall first (the boulevard fixes its site), then the
+    // palace on the nearest downtown lot; both clear of everything sited so far.
+    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
+    let off_rail = |l: &Lot, (w, d): (f32, f32)| {
+        l.rect(w, d)
+            .into_iter()
+            .chain(samples(l, w, d))
+            .all(|q| to_line(q, &rail) > RAIL_CLEAR_M)
+    };
+    if let Some((kit, variant, size)) = kit_of(kits, HALL) {
+        let wd = (size[0], size[1]);
+        let areas = s.footprints();
+        let lot =
+            hall_site(m, place, b, wd).filter(|l| off_rail(l, wd) && !overlaps(l, wd, &areas));
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::CityHall,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
+    if let Some((kit, variant, size)) = kit_of(kits, PALACE) {
+        let wd = (size[0], size[1]);
+        let areas = s.footprints();
+        let downtown = V2::from_array(m.downtown);
+        let lot = lots(
+            place,
+            wd,
+            &[ZoneId::Downtown, ZoneId::Commercial],
+            &classes[..2],
+        )
+        .into_iter()
+        .filter(|l| off_rail(l, wd) && !overlaps(l, wd, &areas))
+        .min_by(|x, y| {
+            (x.front - downtown)
+                .length()
+                .total_cmp(&(y.front - downtown).length())
+                .then(x.key.cmp(&y.key))
+        });
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::MoviePalace,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
     s
 }
 
-/// The city hall's lot at the head of the boulevard: across the road one of its ends meets
-/// at a T, square to the boulevard, facing back down it; the end nearest downtown whose lot
-/// lies clear of every road and inside the playable area.
-fn hall_site(m: &MacroMap, place: &Place, b: &super::macro_map::BasinPlan) -> Option<Lot> {
-    let (w, d) = HALL_LOT_M;
+/// The city hall's lot, `w` wide and `d` deep, at the head of the boulevard: across the
+/// road one of its ends meets at a T, square to the boulevard, facing back down it; the end
+/// nearest downtown whose lot lies clear of every road and inside the playable area.
+fn hall_site(
+    m: &MacroMap,
+    place: &Place,
+    b: &super::macro_map::BasinPlan,
+    (w, d): (f32, f32),
+) -> Option<Lot> {
     let segs: Vec<(V2, V2, f32)> = place
         .roads
         .edges
@@ -541,6 +784,82 @@ fn hall_site(m: &MacroMap, place: &Place, b: &super::macro_map::BasinPlan) -> Op
         }
     }
     best.map(|x| x.1)
+}
+
+/// The hillside letters' lot, `size` wide and deep (see the module docs): its front along
+/// the slope's contour below the letters, facing down it.
+fn letters_site(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> Option<Lot> {
+    let b = m.basin.as_ref()?;
+    let foot = b.lines.first()?;
+    let out = V2::from_array(m.frame.dir_to_world(1.0, 0.0));
+    let downtown = V2::from_array(m.downtown);
+    let h = |p: V2| m.height_at(p.x, p.y);
+    let roads: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .flat_map(|e| {
+            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
+            e.profile
+                .windows(2)
+                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
+        })
+        .collect();
+    let (a, c) = (V2::from_array(foot.a), V2::from_array(foot.b));
+    let n = ((c - a).length() / 16.0) as usize;
+    let [w, d] = size;
+    let mut best: Option<(f32, usize, Lot)> = None;
+    for k in 0..=n {
+        let q = a.lerp(c, k as f32 / n.max(1) as f32);
+        let h0 = h(q);
+        // Up the slope from the road until it has risen enough.
+        let Some(p) = (3..60)
+            .map(|i| q - out * (8.0 * i as f32))
+            .find(|&p| h(p) - h0 >= LETTERS_RISE_M)
+        else {
+            continue;
+        };
+        let g = V2::new(
+            h(p + V2::new(8.0, 0.0)) - h(p - V2::new(8.0, 0.0)),
+            h(p + V2::new(0.0, 8.0)) - h(p - V2::new(0.0, 8.0)),
+        );
+        if g.length() < 1e-3 {
+            continue;
+        }
+        let down = -g.normalize();
+        if down.dot(out) < 0.7 {
+            continue;
+        }
+        let lot = Lot {
+            front: p + down * LETTERS_FACE_M,
+            inward: -down,
+            along: down.left(),
+            key: k as u64,
+        };
+        let line = (0..=12).map(|i| p + lot.along * ((i as f32 / 12.0 - 0.5) * w));
+        let (lo, hi) = line.fold((f32::MAX, f32::MIN), |(lo, hi), q| {
+            (lo.min(h(q)), hi.max(h(q)))
+        });
+        let rect = lot.rect(w, d);
+        let clear = samples(&lot, w, d).chain(rect.iter().copied()).all(|q| {
+            m.in_playable(q.x, q.y, 30.0)
+                && roads
+                    .iter()
+                    .all(|&(r0, r1, hw)| segment_distance(q, r0, r1).0 > hw + LETTERS_ROAD_CLEAR_M)
+        });
+        let by_overlook = s
+            .overlooks
+            .iter()
+            .any(|&(at, _)| (at - lot.at(0.0, 0.5 * d)).length() < 40.0);
+        if hi - lo > LETTERS_LEVEL_M || !clear || by_overlook {
+            continue;
+        }
+        let score = abs((p - downtown).dot(out.right()));
+        if best.as_ref().is_none_or(|x| score < x.0) {
+            best = Some((score, k, lot));
+        }
+    }
+    best.map(|x| x.2)
 }
 
 /// Indices of items binned by their bounds on a square grid.
@@ -626,11 +945,11 @@ impl<'a> Parcels<'a> {
             .find(|&i| point_in_polygon(p, &self.polys[i]))
     }
 
-    /// Whether `p` lies on a lot (not a park or open land) of one of `zones`.
-    fn on_lot(&self, p: V2, zones: &[ZoneId]) -> bool {
+    /// Whether `p` lies on a parcel of one of `kinds` in one of `zones`.
+    fn on_lot(&self, p: V2, zones: &[ZoneId], kinds: &[LotKind]) -> bool {
         self.under(p).is_some_and(|i| {
             let q = &self.place.parcels[i];
-            q.lot_kind == LotKind::Lot && zones.contains(&q.zone)
+            kinds.contains(&q.lot_kind) && zones.contains(&q.zone)
         })
     }
 }
@@ -651,10 +970,16 @@ fn samples(l: &Lot, w: f32, d: f32) -> impl Iterator<Item = V2> + '_ {
 /// Sites `w` wide and `d` deep square to a road of `classes`, behind its walk, over lots
 /// (one or several side by side) of `zones` and clear of every other road; every
 /// [`SITE_STEP_M`] along each side of each such road where it runs straight.
-pub fn lots(
+pub fn lots(place: &Place, size: (f32, f32), zones: &[ZoneId], classes: &[RoadClass]) -> Vec<Lot> {
+    lots_on(place, size, zones, &[LotKind::Lot], classes)
+}
+
+/// [`lots`] over parcels of any of `kinds` (open land, say), not only built lots.
+pub fn lots_on(
     place: &Place,
     (w, d): (f32, f32),
     zones: &[ZoneId],
+    kinds: &[LotKind],
     classes: &[RoadClass],
 ) -> Vec<Lot> {
     let parcels = Parcels::new(place);
@@ -713,7 +1038,7 @@ pub fn lots(
                             | k as u64,
                     };
                     let mut pts = samples(&lot, w, d);
-                    if pts.all(|q| parcels.on_lot(q, zones) && !on_road(q)) {
+                    if pts.all(|q| parcels.on_lot(q, zones, kinds) && !on_road(q)) {
                         out.push(lot);
                     }
                 }
@@ -732,16 +1057,18 @@ const SITE_STEP_M: f32 = 6.0;
 pub fn clear(place: &mut Place, s: &SetPieces) {
     let parcels = Parcels::new(place);
     let mut taken: Vec<usize> = Vec::new();
-    let sites = [
-        (&s.garage, GARAGE_LOT_M),
-        (&s.stand, STAND_LOT_M),
-        (&s.palace, PALACE_LOT_M),
-        (&s.hall, HALL_LOT_M),
-    ];
+    let sites = [(&s.garage, GARAGE_LOT_M), (&s.stand, STAND_LOT_M)];
     for (l, (w, d)) in sites {
         if let Some(l) = l {
             taken.extend(samples(l, w, d).filter_map(|q| parcels.under(q)));
         }
+    }
+    for r in &s.roadside {
+        taken.extend(samples(&r.lot, r.size.0, r.size.1).filter_map(|q| parcels.under(q)));
+    }
+    for mark in &s.marks {
+        let (w, d) = (mark.size[0], mark.size[1]);
+        taken.extend(samples(&mark.lot, w, d).filter_map(|q| parcels.under(q)));
     }
     let lots: Vec<Vec<V2>> = taken.iter().map(|&i| parcels.polys[i].clone()).collect();
     let mut areas = s.footprints();
@@ -770,8 +1097,8 @@ fn prop(p: V2, y: f32, facing: V2, kind: PropKind) -> Prop {
 }
 
 /// The set pieces' props and their own lights (the street lamps' come with the
-/// detailing's), on the graded `grid`; the downtown anchors from `kits` (the grammar's, by
-/// id: none stands where its kit is missing) in `pal`.
+/// detailing's), on the graded `grid`; `kits` and `pal` give the roadside set's and the
+/// other landmarks' lamps.
 pub fn dress(
     seed: Seed,
     place: &Place,
@@ -958,37 +1285,135 @@ pub fn dress(
         props.push(prop(lamp, ground(lamp), -along, PropKind::StreetLight));
     }
 
-    for (lot, id, variant) in [
-        (&s.palace, PALACE_KIT, PALACE_VARIANT),
-        (&s.hall, HALL_KIT, HALL_VARIANT),
-    ] {
-        let (Some(l), Some(kit)) = (lot, kits.iter().position(|k| k.id == id)) else {
+    for r in &s.roadside {
+        let Some(kit) = kits.get(usize::from(r.kit)) else {
             continue;
         };
+        let y = ground(r.lot.front);
+        let facing = -r.lot.inward;
+        props.push(prop(
+            r.lot.front,
+            y,
+            facing,
+            PropKind::Landmark {
+                kit: r.kit,
+                variant: r.variant,
+            },
+        ));
+        let base = V3::new(r.lot.front.x, y, r.lot.front.y);
+        crate::landmarks::lights(kit, usize::from(r.variant), base, facing, pal, &mut lights);
+        // Its customers, nosed into the stalls the kit paints (kit frame: x to the right
+        // seen from the road, z toward the road), each at its own hours.
+        let (stalls, hours) = roadside_stalls(&kit.id);
+        let classes = [0x01u8, 0x14, 0x23, 0x31, 0x45, 0x18, 0x27, 0x3A];
+        let right = r.lot.inward.right();
+        for (k, &[x, z]) in stalls.iter().enumerate() {
+            let q = r.lot.front + right * x - r.lot.inward * z;
+            props.push(prop(
+                q,
+                ground(q),
+                r.lot.inward,
+                PropKind::ParkedCar {
+                    vehicle_class: classes[k % classes.len()],
+                    hours: hours[k % hours.len()],
+                },
+            ));
+        }
+    }
+    for mark in &s.marks {
+        let (w, d) = (mark.size[0], mark.size[1]);
+        let l = &mark.lot;
         let out = -l.inward;
-        let y = ground(l.front);
+        // Its base: the lowest ground under the letters' line, or under the lot (the pad
+        // reaches down into the ground).
+        let y = if mark.kind == PoiKind::HillsideLetters {
+            (0..=12)
+                .map(|i| ground(l.at((i as f32 / 12.0 - 0.5) * w, LETTERS_FACE_M)))
+                .fold(f32::MAX, f32::min)
+        } else {
+            samples(l, w, d).map(ground).fold(f32::MAX, f32::min)
+        };
         props.push(prop(
             l.front,
             y,
             out,
             PropKind::Landmark {
-                kit: kit as u8,
-                variant,
+                kit: mark.kit,
+                variant: mark.variant,
             },
         ));
-        let base = V3::new(l.front.x, y, l.front.y);
-        crate::landmarks::lights(
-            &kits[kit],
-            usize::from(variant),
-            base,
-            out,
-            pal,
-            &mut lights,
-        );
+        if let Some(kit) = kits.get(usize::from(mark.kit)) {
+            let base = V3::new(l.front.x, y, l.front.y);
+            let v = usize::from(mark.variant);
+            crate::landmarks::lights(kit, v, base, out, pal, &mut lights);
+        }
     }
 
     channel_fences(place, grid, s, &mut props);
     (props, lights)
+}
+
+/// Hours `h0..h1` of the day (wrapping past midnight) as [`PropKind::ParkedCar`] bits.
+const fn hours(h0: u32, h1: u32) -> u32 {
+    let mut m = 0;
+    let mut h = h0;
+    while h != h1 {
+        m |= 1 << h;
+        h = (h + 1) % 24;
+    }
+    m
+}
+
+/// A roadside kit's parked cars: their stalls in the kit frame (`[x, z]`, m) and the
+/// hours they keep, in turn.
+fn roadside_stalls(id: &str) -> (&'static [[f32; 2]], &'static [u32]) {
+    const DONUTS: [[f32; 2]; 5] = [
+        [-6.0, -10.75],
+        [-3.0, -10.75],
+        [0.0, -10.75],
+        [3.0, -10.75],
+        [6.0, -10.75],
+    ];
+    const COFFEE: [[f32; 2]; 7] = [
+        [-9.0, -9.75],
+        [-6.0, -9.75],
+        [-3.0, -9.75],
+        [0.0, -9.75],
+        [3.0, -9.75],
+        [6.0, -9.75],
+        [9.0, -9.75],
+    ];
+    const MOTEL: [[f32; 2]; 4] = [[17.0, -7.5], [20.0, -7.5], [23.0, -7.5], [26.0, -7.5]];
+    // Two rows by the speaker posts, a car between each pair of posts but every third.
+    const DRIVE_IN: [[f32; 2]; 16] = [
+        [-27.5, -56.0],
+        [-22.5, -56.0],
+        [-12.5, -56.0],
+        [-7.5, -56.0],
+        [2.5, -56.0],
+        [7.5, -56.0],
+        [17.5, -56.0],
+        [22.5, -56.0],
+        [-22.5, -48.0],
+        [-17.5, -48.0],
+        [-7.5, -48.0],
+        [-2.5, -48.0],
+        [7.5, -48.0],
+        [12.5, -48.0],
+        [22.5, -48.0],
+        [27.5, -48.0],
+    ];
+    const DONUT_HOURS: [u32; 4] = [hours(6, 11), hours(5, 21), hours(15, 19), hours(7, 10)];
+    const COFFEE_HOURS: [u32; 4] = [hours(7, 11), hours(11, 14), hours(21, 2), hours(6, 23)];
+    const MOTEL_HOURS: [u32; 3] = [hours(18, 9), hours(20, 8), hours(16, 10)];
+    const SHOW_HOURS: [u32; 3] = [hours(19, 0), hours(19, 1), hours(20, 0)];
+    match id {
+        "donut_shop" => (&DONUTS, &DONUT_HOURS),
+        "coffee_shop" => (&COFFEE, &COFFEE_HOURS),
+        "motel" => (&MOTEL, &MOTEL_HOURS),
+        "drive_in" => (&DRIVE_IN, &SHOW_HOURS),
+        _ => (&[], &[0]),
+    }
 }
 
 /// Chain-link along both lips of the channel (see the module docs).

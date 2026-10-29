@@ -18,22 +18,15 @@ use world::template::RegionTemplate;
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
-/// The landmark kits, in file-name order as the game attaches them (the downtown anchors
-/// stand only where their kits are).
-const KITS: [&str; 3] = [
-    include_str!("../../../assets/landmarks/city_hall.ron"),
-    include_str!("../../../assets/landmarks/movie_palace.ron"),
-    include_str!("../../../assets/landmarks/water_tower.ron"),
-];
 
 fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
-    g.landmarks = KITS
-        .iter()
-        .map(|t| ron::from_str(t).expect("parse kit"))
-        .collect();
     g.validate().expect("validate grammar");
+    g.landmarks = world::landmarks::BUILTIN
+        .iter()
+        .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
+        .collect();
     g
 }
 
@@ -54,22 +47,22 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0x39A1_C053_F7A8_0B31,
         0xA2D7_B9A0_3D09_A4FE,
-        0x92D1_6EDB_2DCF_938C,
+        0x5B92_DD5F_D513_FA54,
     ),
     (
         0xA3F4_A281_380E_596B,
         0x7AD4_5617_94BE_609B,
-        0xBD66_6205_6CB9_6F7B,
+        0xC6AD_15CC_C29C_EC8C,
     ),
     (
         0x82B6_07FD_D1FD_CF4F,
         0xB348_0BC3_E55C_8454,
-        0xD6A6_DA92_34CD_ECDF,
+        0x9EF6_70DE_F757_4F1B,
     ),
     (
         0x6DBB_5CB8_4DBB_0036,
         0x68EB_95E2_5702_79E7,
-        0xF0DB_04D5_1007_11EC,
+        0xFCCF_D83E_FCB5_79A2,
     ),
 ];
 

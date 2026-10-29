@@ -29,6 +29,9 @@
 //!   paint saved with the vehicle setting). With `car=`, past the end of its palette is an
 //!   error; without, it paints the car the game starts in (the saved one, else the default),
 //!   its first paint when that car has fewer. Not saved.
+//! - `driver=<name>`: the player's driver this session, a preset's name in lower case
+//!   (`jacket`, `suit`, `tee`, `sundress`), over the saved setting until one is picked on
+//!   the Vehicle page. Not saved.
 //! - `cam=<name>`: camera, a [`CameraMode::name`] or `chase` (default: the camera setting,
 //!   which starts at `chase-mid` and remembers the last one picked).
 //! - `t=HH:MM` (or `HH:MM:SS`): time of day; when given the clock is frozen there (default
@@ -97,6 +100,8 @@ pub struct SceneSetup {
     pub car_given: bool,
     /// The car's palette entry, if the scene gave one.
     pub paint: Option<usize>,
+    /// The player's driver, if the scene named one.
+    pub driver: Option<usize>,
     /// The camera, or `None` for the player's camera setting.
     pub camera: Option<CameraMode>,
     /// Seconds of day the clock is frozen at, or `None` for the default running clock.
@@ -137,6 +142,7 @@ impl Default for SceneSetup {
             car: DEFAULT_VEHICLE.to_string(),
             car_given: false,
             paint: None,
+            driver: None,
             camera: None,
             time_s: None,
             pos: None,
@@ -176,9 +182,9 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 19] = [
-        "seed", "place", "scenario", "car", "paint", "cam", "t", "pos", "yaw", "lights", "glow",
-        "fly", "still", "map", "ui", "stream", "traffic", "phase", "train",
+    pub const KEYS: [&'static str; 20] = [
+        "seed", "place", "scenario", "car", "paint", "driver", "cam", "t", "pos", "yaw", "lights",
+        "glow", "fly", "still", "map", "ui", "stream", "traffic", "phase", "train",
     ];
 
     /// World `scenario` and its procedural place; its own car unless the scene named one.
@@ -254,6 +260,7 @@ impl SceneSetup {
                 self.car_given = true;
             }
             "paint" => self.paint = Some(value.parse().map_err(|_| bad())?),
+            "driver" => self.driver = Some(crate::driver::preset_from_key(value).ok_or_else(bad)?),
             "cam" => self.camera = Some(CameraMode::from_name(value).ok_or_else(bad)?),
             "t" => self.time_s = Some(parse_clock(value).ok_or_else(bad)?),
             "pos" => {
@@ -334,7 +341,7 @@ mod tests {
     #[test]
     fn parses_every_key() {
         let s = SceneSetup::from_query(
-            "?seed=7&place=coast&car=homestead_wagon&paint=2&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&glow=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
+            "?seed=7&place=coast&car=homestead_wagon&paint=2&driver=suit&cam=cockpit&t=22:30&pos=-200.5,97&yaw=180&lights=1&glow=1&fly=0&still=1&map=1&ui=1.5&stream=0&traffic=busy",
         )
         .unwrap();
         assert!(s.map && !s.stream);
@@ -350,6 +357,7 @@ mod tests {
         assert_eq!(s.car, "homestead_wagon");
         assert!(s.car_given && !SceneSetup::default().car_given);
         assert_eq!((s.paint, SceneSetup::default().paint), (Some(2), None));
+        assert_eq!((s.driver, SceneSetup::default().driver), (Some(1), None));
         assert_eq!(s.camera, Some(CameraMode::Cockpit));
         assert_eq!(s.time_s, Some(22.0 * 3600.0 + 30.0 * 60.0));
         assert_eq!(s.pos, Some([-200.5, 97.0]));
@@ -441,6 +449,7 @@ mod tests {
             "seed=x",
             "paint=-1",
             "paint=red",
+            "driver=nobody",
             "cam=drone",
             "t=24:00",
             "t=7:30",

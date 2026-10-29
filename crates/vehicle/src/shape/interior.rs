@@ -62,6 +62,12 @@ impl<'a, 'b> Interior<'a, 'b> {
         let x_d = -i.driver_offset;
         let eye = [x_d, i.seat.1 + 0.60, self.z(i.seat.0 + 0.16)];
         self.cockpit.eye = eye;
+        self.cockpit.hip = [x_d, i.seat.1, self.z(i.seat.0)];
+        // The pedals stand 0.42 m ahead of the dash's edge; the heels rest 0.2 m behind
+        // them.
+        let heel = i.dash_x - 0.22;
+        self.cockpit.heel = [x_d, self.floor_y(heel), self.z(heel)];
+        self.cockpit.wheel_radius = i.wheel_radius;
         if self.lod0() {
             self.shell();
         }
@@ -1129,7 +1135,7 @@ impl<'a, 'b> Interior<'a, 'b> {
         // A convertible shows its headrests over the doors even at LOD1.
         if self.b.convertible {
             self.soup.obox(
-                madd(madd(hinge, d, 0.68), nb, 0.06),
+                madd(madd(hinge, d, 0.62), nb, 0.06),
                 ax,
                 [0.12, 0.085, 0.045],
                 m.seat,
@@ -1226,8 +1232,9 @@ impl<'a, 'b> Interior<'a, 'b> {
             [half_w - 0.01, 0.27, 0.008],
             m.int_trim,
         );
-        // Head restraint on two posts.
-        let hc = madd(madd(hinge, d, 0.7), nb, 0.06);
+        // Head restraint on two posts, low enough that the driver's head shows over it from
+        // the chase cameras.
+        let hc = madd(madd(hinge, d, 0.64), nb, 0.06);
         self.pillow(hc, ax, [0.12, 0.08, 0.045], 0.035, m.seat);
         self.pipe(
             madd(madd(hc, nb, -0.047), RIGHT, -0.1),

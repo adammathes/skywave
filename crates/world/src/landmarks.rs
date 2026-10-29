@@ -29,6 +29,40 @@ use crate::palette::{shade, srgb, Palette, Rgb};
 use crate::setpieces::Slab;
 use crate::signs::letters::{self, Finish, LetterStyle, Strokes};
 
+/// The built-in kits, `assets/landmarks/<id>.ron`, as `(id, RON text)` in file-name order
+/// (the app parses them; a `place::PropKind::Landmark`'s `kit` indexes this list).
+pub const BUILTIN: [(&str, &str); 8] = [
+    (
+        "city_hall",
+        include_str!("../../../assets/landmarks/city_hall.ron"),
+    ),
+    (
+        "coffee_shop",
+        include_str!("../../../assets/landmarks/coffee_shop.ron"),
+    ),
+    (
+        "donut_shop",
+        include_str!("../../../assets/landmarks/donut_shop.ron"),
+    ),
+    (
+        "drive_in",
+        include_str!("../../../assets/landmarks/drive_in.ron"),
+    ),
+    (
+        "hillside_letters",
+        include_str!("../../../assets/landmarks/hillside_letters.ron"),
+    ),
+    ("motel", include_str!("../../../assets/landmarks/motel.ron")),
+    (
+        "movie_palace",
+        include_str!("../../../assets/landmarks/movie_palace.ron"),
+    ),
+    (
+        "water_tower",
+        include_str!("../../../assets/landmarks/water_tower.ron"),
+    ),
+];
+
 /// The most variants a kit may have: one per capital letter.
 pub const MAX_VARIANTS: usize = 26;
 /// A lot's smallest and largest side, m.
@@ -343,6 +377,15 @@ pub enum Part {
         facets: bool,
         paint: String,
     },
+    /// A flat panel `t` thick: the parallelogram with corners `a`, `b`, `c` and
+    /// `b + c - a` (a sloped roof, a canted sign face, a screen), centered on that plane.
+    Panel {
+        a: [f32; 3],
+        b: [f32; 3],
+        c: [f32; 3],
+        t: f32,
+        paint: String,
+    },
     /// A lamp: a small glowing bulb at `at` that also lights the ground round it (a flood
     /// light of `radius` m in `color`, on whenever the street lamps are).
     Lamp {
@@ -584,7 +627,8 @@ impl Kit {
                     | Part::Strut { paint, .. }
                     | Part::Cylinder { paint, .. }
                     | Part::Lathe { paint, .. }
-                    | Part::Letters { paint, .. } => Some(paint),
+                    | Part::Letters { paint, .. }
+                    | Part::Panel { paint, .. } => Some(paint),
                     Part::Lamp { .. } | Part::Bulbs { .. } => None,
                 };
                 if let Some(paint) = name {
@@ -662,6 +706,17 @@ fn part_ok(part: &Part) -> bool {
                 && profile.iter().all(|p| finite(p) && p[0] >= 0.0)
                 && profile.iter().any(|p| p[0] > 0.0)
                 && sides_ok(*sides)
+        }
+        Part::Panel { a, b, c, t, .. } => {
+            let (u, v) = (v3(*b) - v3(*a), v3(*c) - v3(*a));
+            finite(a)
+                && finite(b)
+                && finite(c)
+                && *t > 0.0
+                && *t < 10.0
+                && u.length() > 0.01
+                && v.length() > 0.01
+                && u.cross(v).length() > 1e-4 * u.length() * v.length()
         }
         Part::Lamp { at, radius, .. } => finite(at) && *radius > 0.0 && *radius <= 60.0,
         Part::Bulbs { a, b, n, r, .. } => {
@@ -787,6 +842,14 @@ fn part_bounds(part: &Part) -> ([f32; 3], [f32; 3]) {
                         o + u * p[1] + x * (sx * p[0]) + z * (sz * p[0]),
                     );
                 }
+            }
+        }
+        Part::Panel { a, b, c, t, .. } => {
+            let h = 0.5 * t;
+            let (a, b, c) = (v3(*a), v3(*b), v3(*c));
+            for p in [a, b, c, b + c - a] {
+                grow(&mut lo, &mut hi, p - V3::new(h, h, h));
+                grow(&mut lo, &mut hi, p + V3::new(h, h, h));
             }
         }
         Part::Lamp { at, .. } => {
@@ -970,6 +1033,29 @@ pub fn build(m: &mut WorldMesh, kit: &Kit, v: usize, base: V3, facing: V2, pal: 
                     letters::build(m, &lf, &s, *finish, 0.0, false, p, p, CHANNEL_DEPTH_M);
                 }
             }
+            Part::Panel {
+                a,
+                b,
+                c,
+                t,
+                paint: p,
+            } => {
+                if let Some(p) = paint(p) {
+                    let (a, b, c) = (
+                        f.p(a[0], a[1], a[2]),
+                        f.p(b[0], b[1], b[2]),
+                        f.p(c[0], c[1], c[2]),
+                    );
+                    let (x, z) = (b - a, c - a);
+                    let pf = Frame {
+                        o: a,
+                        x,
+                        y: z.cross(x).normalize() * *t,
+                        z,
+                    };
+                    boxf(m, &pf, [0.0, -0.5, 0.0], [1.0, 0.5, 1.0], face::ALL, p);
+                }
+            }
             Part::Lamp { at, color, .. } => {
                 let rgb = color.rgb(pal);
                 let bulb = Paint::new(rgb, Pattern::Plain).glowing(rgb, Glow::Lamp);
@@ -1039,9 +1125,31 @@ pub fn lights(kit: &Kit, v: usize, base: V3, facing: V2, pal: &Palette, out: &mu
     }
 }
 
+/// The widest an upright lathe is below [`SOLID_BELOW_M`] over the lot: its profile at `at`
+/// cut off at that height.
+fn low_radius(at: [f32; 3], profile: &[[f32; 2]]) -> f32 {
+    let top = SOLID_BELOW_M - at[1];
+    let mut r = 0.0f32;
+    for w in profile.windows(2) {
+        let ([r0, a0], [r1, a1]) = (w[0], w[1]);
+        if a0 <= top {
+            r = r.max(r0);
+        }
+        if a1 <= top {
+            r = r.max(r1);
+        }
+        // Where the segment crosses the cut.
+        if (a0 - top) * (a1 - top) < 0.0 {
+            r = r.max(r0 + (r1 - r0) * (top - a0) / (a1 - a0));
+        }
+    }
+    r
+}
+
 /// The boxes variant `v` blocks a car with, for a lot at ground point `pos` (height `y`)
 /// facing `facing`: each part that starts within [`SOLID_BELOW_M`] of the lot, as its
-/// bounds (a strut as a post round its low end).
+/// bounds (a strut as a post round its low end, an upright lathe as wide as it is low down:
+/// a pedestal's column, not the bowl over it).
 pub fn slabs(kit: &Kit, v: usize, pos: V2, y: f32, facing: V2, out: &mut Vec<Slab>) {
     let Some(r) = kit.resolve(v) else {
         return;
@@ -1058,6 +1166,19 @@ pub fn slabs(kit: &Kit, v: usize, pos: V2, y: f32, facing: V2, out: &mut Vec<Sla
                     [low[0] - h, low[1], low[2] - h],
                     [low[0] + h, low[1] + SOLID_BELOW_M, low[2] + h],
                 )
+            }
+            Part::Lathe {
+                at,
+                profile,
+                axis: Axis::Up,
+                ..
+            } => {
+                let r = low_radius(*at, profile);
+                let (_, hi) = part_bounds(part);
+                if r <= 0.0 {
+                    continue;
+                }
+                ([at[0] - r, at[1], at[2] - r], [at[0] + r, hi[1], at[2] + r])
             }
             _ => part_bounds(part),
         };
@@ -1448,6 +1569,40 @@ mod tests {
             paint: "post".to_string(),
         });
         assert!(matches!(bad.validate(), Err(KitError::BadPart { .. })));
+    }
+
+    #[test]
+    fn a_panel_is_a_closed_slab_on_its_plane() {
+        // A roof sloping up toward the road, 0.3 m thick.
+        let mut k = kit();
+        k.variants[1].parts = vec![Part::Panel {
+            a: [-3.0, 4.0, -8.0],
+            b: [3.0, 4.0, -8.0],
+            c: [-3.0, 6.0, -2.0],
+            t: 0.3,
+            paint: "post".to_string(),
+        }];
+        assert_eq!(k.validate(), Ok(()));
+        let pal = Palette::socal_1985();
+        let mut m = WorldMesh::default();
+        build(&mut m, &k, 1, V3::ZERO, V2::new(0.0, 1.0), &pal);
+        crate::mesh::tests::assert_well_formed(&m, 0.999);
+        // Its top corner and half its thickness (the lot is wider than the panel).
+        let (_, hi) = k.bounds(1);
+        assert!((hi[1] - 6.15).abs() < 1e-4, "{hi:?}");
+        // High enough not to block a car: only the post A started with does.
+        let mut s = Vec::new();
+        slabs(&k, 1, V2::new(0.0, 0.0), 0.0, V2::new(0.0, 1.0), &mut s);
+        assert_eq!(s.len(), 1);
+        // Three corners in a line are refused.
+        k.variants[1].parts = vec![Part::Panel {
+            a: [0.0, 4.0, -8.0],
+            b: [1.0, 4.0, -8.0],
+            c: [2.0, 4.0, -8.0],
+            t: 0.3,
+            paint: "post".to_string(),
+        }];
+        assert!(matches!(k.validate(), Err(KitError::BadPart { .. })));
     }
 
     #[test]

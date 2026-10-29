@@ -179,6 +179,17 @@ coast's Place is unchanged.
   line, and the board shows the time and the speed over the line, with a toast. Only the last run is kept.
 - **The overlooks.** At the end of each overlook road: a guard rail 9 m past the end across the view, two
   benches facing out, a lamp.
+- **The roadside set** (the roadside card; `procgen::setpieces::ROADSIDE` holds the owner's picks: donut
+  shop B, coffee shop C, motel C, drive-in A). Landmark kits on lots of their kit's size, square to a road
+  behind its walk; their lots lose their buildings and nothing the detailing scatters stands on them. The
+  donut shop, the coffee shop and the motel, in that order, on commercial or strip lots on an arterial or
+  collector, each the nearest the boulevard at least 250 m from the others, the garage and the stand. The
+  drive-in on open farmland (or an industrial lot) off a road that is not the freeway: of the sites within
+  350 m of the freeway, the one farthest from downtown, its screen facing the road and seen from the
+  freeway. Each is a point of interest (`DonutShop`, `CoffeeShop`, `Motel`, `DriveIn`; the map names it
+  "Stem Donuts" and so on), its kit's lamps are lights, and cars park in its painted stalls at its own hours:
+  donut runs from dawn, coffee at breakfast, lunch and late at night, the motel overnight, the drive-in's
+  two rows from 19:00 to past midnight.
 - **The grade crossings.** Every road the rail line crosses at grade: a `GradeCrossing` landmark on the track's
   middle, and a `CrossingGate` (mast, crossed blades, twin lamps, bell, the arm's pivot) on each approach on the
   right, its arm reaching across the approach to 0.3 m short of the road's middle (across the whole road on a
@@ -188,8 +199,24 @@ coast's Place is unchanged.
 - **The channel ramps.** Chain-link along both lips of the flood channel, 0.6 m outside them, open within 4 m
   of any road (the bridges) and round each ramp: along a ramp's outer edge from 12 m below its top, and across
   its foot. A `ChannelRamp` landmark marks each ramp's top.
+- **The landmarks** built from kits ("Landmarks" below), each a `PropKind::Landmark` at its lot's front middle
+  facing out, its kit's lamps as `Flood` lights, its lot's buildings and other props gone, and a point of
+  interest at its lot's middle. The variant each wears is the owner's pick from the gallery's contact sheet
+  (`procgen::setpieces::{LETTERS, WATER_TOWER}`); a kit the grammar does not carry is not sited.
+  - **The hillside letters** (`hillside_letters`, `HillsideLetters`): from the road along the foot of the hills,
+    every 16 m, up the slope until it has risen 50 m; there the lot faces down the local slope (within about
+    45° of straight out over the valley), its letters' line level to within 3 m, the whole lot inside the
+    playable area, at least 12 m from every road's asphalt and walk and 40 m from an overlook; of those, the
+    one most nearly across from downtown. Its base is the lowest ground under the letters' line, so they are
+    buried a little at their feet and never float; they block a car on the slope.
+  - **The water tower** (`water_tower`, `WaterTower`, variant B, the pedestal): a site its kit's lot wide and
+    deep over industrial lots on any road, at least 200 m from the garage and the stand, with the most
+    industrial zone within 192 m of its middle (sampled every 32 m). Its column (not the bowl over it) blocks a
+    car.
+  On seeds 1–4 every basin has both.
 - **The downtown anchors**, two landmark kits ("Landmarks" below) standing the variant the owner picked
-  (`PALACE_VARIANT`, A, the deco palace; `HALL_VARIANT`, B, the clock tower; in `procgen::setpieces`), each kept 16 m clear of the rail line. The
+  (`procgen::setpieces::{PALACE, HALL}`: A, the deco palace; B, the clock tower), sited after the other
+  landmarks and clear of them, each kept 16 m clear of the rail line. The
   **city hall** (`city_hall`, a 60 by 48 m lot, `CityHall`) stands at the head of the boulevard: across the
   road one of its ends meets at a T (the out boulevard always meets the road along the foot of the hills
   that way), its lot starting a meter behind that road's walk, square to the boulevard and facing back down
@@ -200,19 +227,32 @@ coast's Place is unchanged.
   (`app::marquee`). Goldens: `basin-palace-night`, `basin-city-hall-golden`.
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
-walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the anchors on
-seeds 1–4 off roads and buildings, the city hall on a boulevard's axis at its head, a car driven up the
-boulevard at 20 m/s stopped at its arcade), the meshes' and boxes' unit tests in `world::setpieces`,
-`app::dragstrip`'s and `app::marquee`'s tests.
+walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the roadside set
+once each in the picked variants on its own clear lot, 250 m apart, its cars clear of its solids and its
+lamps lit, the drive-in's screen seen from the freeway and a car driving in past its ticket booth; the
+letters and the water tower sited, lit, solid and clear of roads and buildings, the letters on the ground up
+the hills, the tower's column stops a car; the anchors on seeds 1–4 off roads and buildings, the city hall on a
+boulevard's axis at its head, a car driven up the boulevard at 20 m/s stopped at its arcade), the meshes' and
+boxes' unit tests in `world::setpieces`, `app::dragstrip`'s and `app::marquee`'s tests.
 
 ## Landmarks
 Landmarks are the places you would slow down to look at (the feel cards, 2026-10-28). Each is a kit
-(`assets/landmarks/<id>.ron`, ADR 0007, `world::landmarks`): boxes, struts, cylinders, lathed profiles and
-lamps in named paints, in the lot's frame (`x` across, to the right seen from the road; `y` up; `z` toward the
+(`assets/landmarks/<id>.ron`, ADR 0007, `world::landmarks`): boxes, struts, cylinders, lathed profiles,
+panels and lamps in named paints, in the lot's frame (`x` across, to the right seen from the road; `y` up; `z` toward the
 road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that start `from` an earlier one and
 add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
 front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
-block a car (not bulbs or lettering); each `Lamp` is a `Flood` light.
+block a car (an upright lathe only as wide as it is within those 2 m, so a pedestal's bowl is not a wall
+under it); each `Lamp` is a `Flood` light. 
+The kits so far: `water_tower` (the gallery's sample; the owner picked B) and the roadside set for Mirage
+Valley's boulevards (the roadside card, 2026-10-29), each in three variants awaiting the owner's pick:
+`donut_shop` (kitsch: a giant iced donut on the roof or over a walk-up stand, a drive-thru window and lane),
+`coffee_shop` (a glass dining room under a roof swooping up toward the road, or a butterfly roof; a
+canted pole sign with a starburst), `motel` (rooms round a kidney pool lit from below behind a low wall,
+an office, a pole sign with a neon arrow bending down to the drive) and `drive_in` (a screen facing the
+road that glows from dusk, speaker posts in rows, a snack bar, a ticket canopy and a marquee). Mirage
+Valley sites one of each (above, "The roadside set"). Their signs are lit boards without lettering: a kit
+carries no names (its `Letters` take only common nouns), and the map carries their invented names.
 
 Besides solids and lamps a kit has two kinds of dressing. `Bulbs` is a row of `n` bulbs from `a` to `b`:
 drawn dim in the town's mesh, and in the game (`app::marquee`) every third is lit in turn over them, six
@@ -233,8 +273,9 @@ lettered with the variant, dressed in the scene's world (`scenario=`). `app::gal
 for each variant (`front` and `quarter` from the hood, `street` from the far chase camera with the car for
 scale) and writes them to `tools/screenshot/gallery.json` (`cargo test -p app -- --ignored write_gallery`;
 a test fails while it is stale). `node tools/screenshot/shoot.mjs --gallery <id>` shoots each at noon,
-golden hour and night and tiles them into `out/gallery/<id>.png`: a column per variant, a row per time and
-camera. A landmark PR attaches that sheet and the owner picks a letter.
+golden hour, dusk and night (`--scenario <id>` for another world) and tiles them into
+`out/gallery/<id>.png`: a column per variant, a row per time and camera. A landmark PR attaches that sheet
+and the owner picks a letter.
 
 Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, the gallery's layout),
 `app::places` (the kits load and round-trip, the gallery builds in every world), `app::gallery` (every
