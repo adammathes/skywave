@@ -160,7 +160,6 @@ crossings and a freight train), #53 (music folders in the native app) merged.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Mirage Valley's world shows "coming" on the World page until its radio preset (M8 #8) lands.
 - Next: the owner's drive of the reverted handling; set pieces (M8 #7, three PRs); NPC cars see
   pedestrians; music folders in the Mac app; M8 #8 (the 2001 radio preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
