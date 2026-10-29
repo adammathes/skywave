@@ -61,6 +61,11 @@ pub struct Grammar {
     /// grammar and attached by its loader; not part of the grammar file.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub lexicon: Lexicon,
+    /// The landmark kits (`assets/landmarks/*.ron`, in file-name order), parsed beside the
+    /// grammar and attached by its loader; a [`place::PropKind::Landmark`]'s `kit` indexes
+    /// them. Not part of the grammar file.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub landmarks: Vec<crate::landmarks::Kit>,
 }
 
 /// A value per kind of use.
