@@ -325,12 +325,15 @@
   // id, name, files' paths in it, sizes and first bytes (for tags) with takeFolder(), and
   // plays a file through the radio player by its
   // key ("<folder id>/<path in it>"), so nothing is uploaded or sent anywhere. Picked
-  // folders are remembered as handles in IndexedDB (with a stable id) where the browser can
-  // store them; when it cannot, or has not granted reading them again, `again` is true and
-  // the game's menu says "Pick music folder again" (pick() then asks one remembered folder's
-  // permission per press, or opens the picker). forget(id) drops a folder for good ("*":
-  // all). The picker needs a user activation (a key or a click; a gamepad press is none):
-  // pick() returns false when there is none, and the game says how else to add music.
+  // folders, and loose dropped files, are remembered as handles in IndexedDB (with a stable
+  // id) where the browser can store them; when it cannot, or has not granted reading them
+  // again, `again` is true and the game's menu says "Pick music folder again". While a
+  // remembered folder waits for the browser's permission, `reconnect` is true (the game
+  // says "Press any key to reconnect your music") and each key or click asks one folder's
+  // permission (pick() does the same, or opens the picker). forget(id) drops a folder for
+  // good ("*": all). The picker needs a user activation (a key or a click; a gamepad press
+  // is none): pick() returns false when there is none, and the game says how else to add
+  // music.
   (() => {
     const HEAD = 64 * 1024; // audio::music::HEAD_BYTES
     const MAX_FILES = 4096; // audio::music::MAX_TRACKS
@@ -340,7 +343,8 @@
     const playable = (f) => AUDIO.test(f.name) && (!f.type || tester.canPlayType(f.type) !== "");
     const files = new Map(); // key -> File
     const ready = []; // folders read, for takeFolder()
-    let roots = []; // remembered folders: { id, handle, granted, asked }
+    let roots = []; // remembered folders: { id, handle, tape, granted, asked }
+    let asking = false; // a permission prompt is up
     const storage = (fn) => { try { return fn(localStorage); } catch { return null; } };
     const newId = (p) => p + Math.random().toString(16).slice(2, 10);
     // A folder without a handle (the folder input, a dropped folder or loose files) is the
@@ -409,8 +413,49 @@
     }
     async function scan(root, announce) {
       const out = [];
-      try { await walkHandle(root.handle, "", out, 0); } catch (e) { console.warn("skywave: music folder", e); }
-      await add(root.id, root.handle.name, out, announce, true);
+      if (root.tape) {
+        for (const h of root.tape) {
+          try { out.push({ rel: h.name, file: await h.getFile() }); } catch { /* moved or deleted */ }
+        }
+      } else {
+        try { await walkHandle(root.handle, "", out, 0); } catch (e) { console.warn("skywave: music folder", e); }
+      }
+      await add(root.id, root.tape ? "Mixtape" : root.handle.name, out, announce, true, !!root.tape);
+    }
+
+    // A remembered root's handles: its folder's, or a mixtape's files. It is readable when
+    // any is (a mixtape's files not granted are left out of its scan).
+    const handles = (r) => r.tape || [r.handle];
+    async function granted(r) {
+      for (const h of handles(r)) {
+        try { if ((await h.queryPermission({ mode: "read" })) === "granted") return true; } catch { /* gone */ }
+      }
+      return false;
+    }
+    // Asks the next waiting root's permission: one prompt per press, as a prompt uses up
+    // the key's user activation. A browser that restores every permission from one prompt
+    // grants the others too: they are read as well.
+    async function reconnect() {
+      const r = roots.find((o) => !o.granted && !o.asked);
+      if (!r) return;
+      asking = true;
+      r.asked = true;
+      try {
+        for (const h of handles(r)) if ((await h.requestPermission({ mode: "read" })) !== "granted") break;
+      } catch { /* refused, or no activation left */ }
+      for (const o of roots) {
+        if (!o.granted && (await granted(o))) { o.granted = true; await scan(o, true); }
+      }
+      asking = false;
+      music.reconnect = roots.some((o) => !o.granted && !o.asked);
+      music.again = roots.some((o) => !o.granted);
+    }
+    for (const t of ["keydown", "pointerdown"]) {
+      window.addEventListener(t, () => {
+        if (asking || !music.reconnect) return;
+        if (navigator.userActivation && !navigator.userActivation.isActive) return; // Esc gives none
+        reconnect();
+      }, true);
     }
 
     // Remembered folders (IndexedDB; handles are structured-clonable where supported).
@@ -424,7 +469,7 @@
       try {
         const d = await db();
         d.transaction("music", "readwrite").objectStore("music")
-          .put(roots.map(({ id, handle }) => ({ id, handle })), "roots");
+          .put(roots.map(({ id, handle, tape }) => ({ id, handle, tape })), "roots");
       } catch { /* private mode: not remembered */ }
     }
     async function load() {
@@ -439,11 +484,18 @@
     }
     // The remembered root for `handle` (the same folder keeps its id), added if new.
     async function remember(handle) {
-      for (const r of roots) if (await r.handle.isSameEntry(handle)) { r.granted = true; return r; }
-      const r = { id: newId("h"), handle, granted: true, asked: false };
+      for (const r of roots) if (r.handle && (await r.handle.isSameEntry(handle))) { r.granted = true; return r; }
+      const r = { id: newId("h"), handle, tape: null, granted: true, asked: false };
       roots.push(r);
       await store();
       return r;
+    }
+    // Loose dropped files as a remembered mixtape (`id` from their names and sizes, so the
+    // same drop replaces itself).
+    async function rememberTape(id, tape) {
+      roots = roots.filter((r) => r.id !== id);
+      roots.push({ id, handle: null, tape, granted: true, asked: false });
+      await store();
     }
 
     const input = document.createElement("input");
@@ -487,25 +539,19 @@
             const out = [];
             await walkEntry(t.entry, "", out, 0);
             await add(sameId("d", t.entry.name, out), t.entry.name, out, true, false);
-          } else if (t.file) loose.push({ rel: t.file.name, file: t.file });
+          } else if (t.file) loose.push({ rel: t.file.name, file: t.file, handle: h && h.kind === "file" ? h : null });
         }
-        if (loose.length > 0) await add(sameId("d", "Mixtape", loose), "Mixtape", loose, true, false, true);
+        if (loose.length > 0) {
+          const id = sameId("d", "Mixtape", loose);
+          const kept = !!window.showDirectoryPicker && loose.every((l) => l.handle);
+          if (kept) await rememberTape(id, loose.map((l) => l.handle));
+          await add(id, "Mixtape", loose, true, kept, true);
+        }
       })();
     });
 
     async function pickNow() {
-      // One permission prompt per press: a prompt uses up the key's user activation.
-      for (const r of roots) {
-        if (r.granted || r.asked) continue;
-        r.asked = true;
-        try {
-          if ((await r.handle.requestPermission({ mode: "read" })) === "granted") {
-            r.granted = true;
-            await scan(r, true);
-          }
-        } catch { /* refused */ }
-        return;
-      }
+      if (roots.some((r) => !r.granted && !r.asked)) return reconnect();
       if (window.showDirectoryPicker) {
         try {
           const h = await window.showDirectoryPicker({ id: "skywave-music", mode: "read", startIn: "music" });
@@ -516,8 +562,10 @@
 
     const music = {
       again: false,
+      reconnect: false,
       // "Music library". False when there is no user activation to open a picker from.
       pick() {
+        if (asking) return true; // this press already asked for a remembered folder
         if (navigator.userActivation && !navigator.userActivation.isActive) return false;
         pickNow();
         return true;
@@ -535,6 +583,7 @@
           for (const k of [...files.keys()]) if (k.startsWith(`${id}/`)) files.delete(k);
         }
         music.again = roots.some((r) => !r.granted);
+        music.reconnect = roots.some((r) => !r.granted && !r.asked);
         store();
       },
     };
@@ -542,12 +591,13 @@
 
     (async () => {
       roots = window.showDirectoryPicker
-        ? (await load()).map(({ id, handle }) => ({ id, handle, granted: false, asked: false }))
+        ? (await load()).map(({ id, handle, tape }) => ({ id, handle, tape: tape || null, granted: false, asked: false }))
         : [];
       for (const r of roots) {
-        try { r.granted = (await r.handle.queryPermission({ mode: "read" })) === "granted"; } catch { /* gone */ }
+        r.granted = await granted(r);
         if (r.granted) await scan(r, false);
       }
+      music.reconnect = roots.some((r) => !r.granted);
       music.again = roots.some((r) => !r.granted) || (roots.length === 0 && !!storage((s) => s.getItem(PICKED_KEY)));
     })();
   })();

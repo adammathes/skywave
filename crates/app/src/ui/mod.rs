@@ -51,6 +51,8 @@ use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
 pub const CAPTURE_TIMEOUT: f32 = 8.0;
 /// Seconds a status message stays up.
 const TOAST_SECONDS: f32 = 2.5;
+/// Seconds "Press any key to reconnect your music" stays up, unless a key comes first.
+const RECONNECT_TOAST_SECONDS: f32 = 10.0;
 /// Seconds the new car's name stays up after a switch, and "Car reset" after a reset.
 pub const VEHICLE_TOAST_SECONDS: f32 = 2.0;
 /// Miles per hour in one meter per second.
@@ -110,6 +112,9 @@ pub enum Toast {
     MusicNoMp3s,
     /// The platform has no folder dialog to open.
     MusicNoDialog,
+    /// Folders remembered from last session wait for the browser's permission, which the
+    /// next key or click asks for.
+    MusicReconnect,
     MusicRemoved,
     /// The text given for a stream was not an `https://` URL (or there are too many).
     StreamRejected,
@@ -1684,6 +1689,18 @@ impl App {
     /// gamepad press): say how else to add music.
     pub fn music_picker_refused(&mut self) {
         self.ui.show(Toast::MusicNeedsKeyboard);
+    }
+
+    /// The platform's remembered music folders wait for a key or click to reconnect
+    /// (`on`), or no longer do: says so for [`RECONNECT_TOAST_SECONDS`], or takes the
+    /// toast down.
+    pub fn music_reconnect(&mut self, on: bool) {
+        let ui = &mut self.ui;
+        if on {
+            ui.toast = Some((Toast::MusicReconnect, RECONNECT_TOAST_SECONDS));
+        } else if matches!(ui.toast, Some((Toast::MusicReconnect, _))) {
+            ui.toast = None;
+        }
     }
 
     /// The paths of the music folders the user removed since the last call, for the

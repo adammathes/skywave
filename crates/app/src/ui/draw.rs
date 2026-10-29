@@ -1278,6 +1278,7 @@ impl Display for ToastText<'_> {
             Toast::MusicNoDialog => {
                 f.write_str("No folder dialog: use --music DIR or drop a folder")
             }
+            Toast::MusicReconnect => f.write_str("Press any key to reconnect your music"),
             Toast::MusicRemoved => f.write_str("Music folder removed"),
             Toast::StreamRejected => f.write_str("Not added: use an https:// stream URL"),
             Toast::World(i) => {
