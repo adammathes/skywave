@@ -332,11 +332,7 @@ impl App {
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let sound = sound::Sound::new(&place, &drive);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
-        let figure_era = if place.header.era == place::Era::Seventies {
-            traffic::figure::Era::Seventies
-        } else {
-            traffic::figure::Era::Eighties
-        };
+        let wardrobe = driver::wardrobe_for(place.header.era);
         if let Some(r) = &rail {
             let line = &r.railway.train.line;
             let pts: Vec<[f32; 2]> = line.pts.iter().map(|p| [p[0], p[2]]).collect();
@@ -361,7 +357,7 @@ impl App {
             meshes.push(m.clone());
             MeshId(meshes.len() as u32 - 1)
         });
-        let drivers = driver::Drivers::build(figure_era, |m| {
+        let drivers = driver::Drivers::build(wardrobe, |m| {
             meshes.push(m);
             MeshId(meshes.len() as u32 - 1)
         });

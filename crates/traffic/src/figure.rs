@@ -1731,8 +1731,15 @@ pub const PRESETS: usize = 4;
 /// Picker names of the [`PRESETS`].
 pub const PRESET_NAMES: [&str; PRESETS] = ["Jacket", "Suit", "Tee", "Sundress"];
 
-/// One preset: build, outfit and hair, skin and hair colors, and per era (seventies,
-/// eighties) top, trim, bottom, shoes and accent, sRGB.
+/// Which of the presets' wardrobes a world dresses them in: the 1980s coast, or 2001.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wardrobe {
+    Eighties = 0,
+    Aughts = 1,
+}
+
+/// One preset: build, outfit and hair, skin and hair colors, and per wardrobe (1980s,
+/// 2001) top, trim, bottom, shoes and accent, sRGB.
 struct Preset {
     height_m: f32,
     build: f32,
@@ -1746,8 +1753,8 @@ struct Preset {
     clothes: [[u32; 5]; 2],
 }
 
-/// Grown-up, put-together looks for a drive: a jacket over a shirt or tee, a suit with a
-/// tie in the seventies, a weekend tee and shorts, a sundress; sunglasses on two.
+/// Grown-up, put-together looks for a drive: a jacket over a tee, a suit, a weekend tee and
+/// shorts, a sundress; sunglasses on two.
 const PRESET_LOOKS: [Preset; PRESETS] = [
     Preset {
         height_m: 1.8,
@@ -1760,10 +1767,10 @@ const PRESET_LOOKS: [Preset; PRESETS] = [
         skin: SKIN[3],
         hair_rgb: HAIR[1],
         clothes: [
-            // Tan suede over a cream shirt, dark denim.
-            [0x7d5a3a, 0xe6dabf, 0x2b3f5e, 0x3e2a1c, 0x7a2a1e],
-            // Black over a white tee, stonewash.
-            [0x26262a, 0xf2f2ee, 0x4d6c96, 0x1e1b1a, 0x2a3a6e],
+            // 1980s: black over a white tee, stonewash.
+            [0x26262a, 0xf2f2ee, 0x7f9bbd, 0x1e1b1a, 0x2a3a6e],
+            // 2001: an olive field jacket over a grey tee, dark indigo.
+            [0x5a5f3a, 0x9a9a96, 0x24304a, 0x3e2a1c, 0x2a3a6e],
         ],
     },
     Preset {
@@ -1777,10 +1784,10 @@ const PRESET_LOOKS: [Preset; PRESETS] = [
         skin: SKIN[7],
         hair_rgb: HAIR[0],
         clothes: [
-            // Navy, a pale blue shirt, a burgundy tie.
-            [0x2c3550, 0xdfe8f2, 0x2c3550, 0x1e1b1a, 0x7a2a1e],
-            // Charcoal over a white shirt.
+            // 1980s: charcoal over a white shirt.
             [0x3c3c42, 0xf2efe6, 0x3c3c42, 0x1e1b1a, 0x2a3a6e],
+            // 2001: black over a pale blue shirt, open at the neck.
+            [0x1f1f22, 0xcfdcea, 0x1f1f22, 0x1e1b1a, 0x2a3a6e],
         ],
     },
     Preset {
@@ -1794,10 +1801,10 @@ const PRESET_LOOKS: [Preset; PRESETS] = [
         skin: SKIN[1],
         hair_rgb: HAIR[2],
         clothes: [
-            // A mustard tee, khaki shorts.
-            [0xc8962e, 0xf2efe6, 0xb39a72, 0xe8e8e4, 0xc8962e],
-            // A white tee, navy shorts.
+            // 1980s: a white tee, navy shorts.
             [0xf2f2ee, 0xdfe8f2, 0x2a3148, 0xe8e8e4, 0x3a6fe0],
+            // 2001: a navy tee, khaki cargo shorts, grey sneakers.
+            [0x26324a, 0x9a9a96, 0xa89a78, 0xc8c8c4, 0x3a6fe0],
         ],
     },
     Preset {
@@ -1811,25 +1818,26 @@ const PRESET_LOOKS: [Preset; PRESETS] = [
         skin: SKIN[5],
         hair_rgb: HAIR[6],
         clothes: [
-            // Burnt orange.
-            [0xd9782d, 0xd9782d, 0xd9782d, 0x6a4a2e, 0xc8962e],
-            // Coral.
+            // 1980s: coral.
             [0xf07a62, 0xf07a62, 0xf07a62, 0xc89a62, 0x2fb3b0],
+            // 2001: deep teal.
+            [0x2a5d6a, 0x2a5d6a, 0x2a5d6a, 0x2a2622, 0xc8962e],
         ],
     },
 ];
 
 impl FigureSpec {
-    /// The player's preset driver `i` (wrapping) dressed for `era`.
-    pub fn preset(i: usize, era: Era) -> FigureSpec {
+    /// The player's preset driver `i` (wrapping) dressed from `wardrobe`. The figure is
+    /// built as the eighties' (no seventies flares or tie in either).
+    pub fn preset(i: usize, wardrobe: Wardrobe) -> FigureSpec {
         let p = &PRESET_LOOKS[i % PRESETS];
-        let [top, trim, bottom, shoes, accent] = p.clothes[era as usize];
+        let [top, trim, bottom, shoes, accent] = p.clothes[wardrobe as usize];
         FigureSpec {
             height_m: p.height_m,
             build: p.build,
             shoulders: p.shoulders,
             slouch: p.slouch,
-            era,
+            era: Era::Eighties,
             outfit: p.outfit,
             hair: p.hair,
             headband: false,
@@ -1961,9 +1969,9 @@ mod tests {
     #[test]
     fn presets_build_within_budget_and_differ() {
         let mut hashes = StdVec::new();
-        for era in ERAS {
+        for wardrobe in [Wardrobe::Eighties, Wardrobe::Aughts] {
             for i in 0..PRESETS {
-                let f = build(&FigureSpec::preset(i, era));
+                let f = build(&FigureSpec::preset(i, wardrobe));
                 assert!((600..=1200).contains(&f.triangle_count()));
                 hashes.push(mesh_hash(&f));
             }
@@ -1972,8 +1980,8 @@ mod tests {
             assert!(hashes[i + 1..].iter().all(|b| b != a));
         }
         assert_eq!(
-            FigureSpec::preset(PRESETS, Era::Eighties),
-            FigureSpec::preset(0, Era::Eighties)
+            FigureSpec::preset(PRESETS, Wardrobe::Eighties),
+            FigureSpec::preset(0, Wardrobe::Eighties)
         );
     }
 

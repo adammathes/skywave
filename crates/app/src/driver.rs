@@ -5,8 +5,9 @@
 //!
 //! - **The player's driver** is one of [`figure::PRESETS`], picked on the Vehicle page and
 //!   kept in the settings (`driver`, the `driver=` scene key). [`Drivers::build`] builds all
-//!   of them for the place's era at setup (13 part meshes each, a few thousand triangles in
-//!   all), so a pick switches at once. The outside cameras draw the whole figure; the
+//!   of them at setup in the place's wardrobe ([`wardrobe_for`]: the 1980s coast's or
+//!   2001's; 13 part meshes each, a few thousand triangles in all), so a pick switches at
+//!   once. The outside cameras draw the whole figure; the
 //!   cockpit draws it without the head and torso, so nothing comes between the eye and the
 //!   road and the arms and hands are on the wheel below it.
 //! - **NPC cars' drivers** are the crowd's figures (`crate::peds`), one per car by its id,
@@ -14,7 +15,7 @@
 
 use glam::{Mat3, Mat4, Vec3};
 use render::{Mesh, MeshId};
-use traffic::figure::{self, Era, FigureSpec, Part, Seat, Skeleton, Xform, PARTS};
+use traffic::figure::{self, FigureSpec, Part, Seat, Skeleton, Wardrobe, Xform, PARTS};
 use vehicle::shape::{CarMesh, Detail, ShapeSpec};
 
 /// How far the hands follow the wheel round from where they grip it, rad; past it they
@@ -215,19 +216,29 @@ pub struct Driver {
     pub ids: [MeshId; PARTS],
 }
 
-/// The player's preset drivers for one era, built and registered.
+/// The presets' wardrobe for a place of `era`: 2001's from the 2000s on, else the 1980s'.
+pub fn wardrobe_for(era: place::Era) -> Wardrobe {
+    if era as u8 >= place::Era::Aughts as u8 {
+        Wardrobe::Aughts
+    } else {
+        Wardrobe::Eighties
+    }
+}
+
+/// The player's preset drivers in one wardrobe, built and registered.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Drivers {
-    pub era: Option<Era>,
+    pub wardrobe: Option<Wardrobe>,
     pub list: Vec<Driver>,
 }
 
 impl Drivers {
-    /// Builds every preset dressed for `era`, registering each part mesh with `register`.
-    pub fn build(era: Era, mut register: impl FnMut(Mesh) -> MeshId) -> Drivers {
+    /// Builds every preset dressed from `wardrobe`, registering each part mesh with
+    /// `register`.
+    pub fn build(wardrobe: Wardrobe, mut register: impl FnMut(Mesh) -> MeshId) -> Drivers {
         let list = (0..figure::PRESETS)
             .map(|i| {
-                let f = figure::build(&FigureSpec::preset(i, era));
+                let f = figure::build(&FigureSpec::preset(i, wardrobe));
                 Driver {
                     skeleton: f.skeleton,
                     ids: core::array::from_fn(|p| register(crate::car::plain_mesh(&f.parts[p]))),
@@ -235,7 +246,7 @@ impl Drivers {
             })
             .collect();
         Drivers {
-            era: Some(era),
+            wardrobe: Some(wardrobe),
             list,
         }
     }
@@ -267,8 +278,8 @@ mod tests {
     #[test]
     fn every_car_seats_a_driver_with_hands_on_the_wheel() {
         let figures: Vec<figure::Figure> = (0..figure::PRESETS)
-            .map(|i| figure::build(&FigureSpec::preset(i, Era::Eighties)))
-            .chain((0..8).map(|s| figure::figure(s, Era::Seventies)))
+            .map(|i| figure::build(&FigureSpec::preset(i, Wardrobe::Eighties)))
+            .chain((0..8).map(|s| figure::figure(s, figure::Era::Eighties)))
             .collect();
         for (_, src) in vehicles::BUILTIN_SHAPES {
             let shape = vehicles::load_shape(src).unwrap();
@@ -347,8 +358,8 @@ mod tests {
             crate::settings::SEAT_FORWARD_CM,
         );
         let figures: Vec<figure::Figure> = (0..figure::PRESETS)
-            .map(|i| figure::build(&FigureSpec::preset(i, Era::Eighties)))
-            .chain((0..8).map(|s| figure::figure(s, Era::Seventies)))
+            .map(|i| figure::build(&FigureSpec::preset(i, Wardrobe::Eighties)))
+            .chain((0..8).map(|s| figure::figure(s, figure::Era::Eighties)))
             .collect();
         let mut worst = f32::MAX;
         for (_, src) in vehicles::BUILTIN_SHAPES {
@@ -387,6 +398,15 @@ mod tests {
             }
         }
         eprintln!("nearest drawn driver vertex to the cockpit eye: {worst:.3} m");
+    }
+
+    /// The 1980s coast dresses the presets for the eighties, Mirage Valley for 2001.
+    #[test]
+    fn worlds_pick_their_wardrobe() {
+        assert_eq!(wardrobe_for(place::Era::Eighties), Wardrobe::Eighties);
+        assert_eq!(wardrobe_for(place::Era::Aughts), Wardrobe::Aughts);
+        let built = |w| figure::build(&FigureSpec::preset(0, w)).parts;
+        assert_ne!(built(Wardrobe::Eighties), built(Wardrobe::Aughts));
     }
 
     #[test]

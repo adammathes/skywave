@@ -1375,7 +1375,7 @@ mod tests {
     fn the_driver_sits_at_the_wheel_from_every_camera() {
         let f = traffic::figure::build(&traffic::figure::FigureSpec::preset(
             0,
-            traffic::figure::Era::Eighties,
+            traffic::figure::Wardrobe::Eighties,
         ));
         let driver = crate::driver::Driver {
             skeleton: f.skeleton,
