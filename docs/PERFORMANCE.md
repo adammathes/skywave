@@ -277,7 +277,7 @@ Cuts looked at and not made, by this accounting:
   opacity (within 1/255) only past 3 km (thick haze) to 9 km (clear); nothing drawn is that
   far, so there is nothing to drop.
 - **Lights**: the shader's loop already stops at the instance's own light count (its set is
-  nearest first); what costs is the few chunk tiles with full sets under most pixels. Finer
+  brightest first); what costs is the few chunk tiles with full sets under most pixels. Finer
   light tiles in `app::lighttiles` would cut the 7 evaluations per fragment; a follow-up.
 - **Bloom at Deck**: checked against the counters: the chain starts at half the target
   (640×400) and has four levels, seven passes (prefilter, three down, three up), about

@@ -7,9 +7,10 @@
 //! [`FrameLights`] fills both once a frame: the car's own lights first, then every static
 //! light of the place (street lamps, neon, storefront fill) while the photocell has them on
 //! (the nearest to the camera when there are more than fit, the farthest of those fading
-//! out), then for each instance the nearest lights whose reach touches its bounds. Fixed
-//! arrays and buffers sized at load: nothing allocates per frame, and the cost is one
-//! box-to-sphere test per light and instance.
+//! out), then for each instance the lights that light its bounds most, each fading out as
+//! the first left out closes on it, so none pops off when they swap. Fixed arrays and
+//! buffers sized at load: nothing allocates per frame, and the cost is one box-to-sphere
+//! test per light and instance.
 //!
 //! Units: `Daylight` gives illuminance in lux and luminance in cd/m²; the renderer takes
 //! kilolux and kcd/m². Directions agree (world X east, Y up, Z south).
@@ -293,62 +294,101 @@ impl Bounds {
         if light.radius <= 0.0 || self.distance_squared(p) >= light.radius * light.radius {
             return false;
         }
+        self.ahead_of(light) >= 0.0
+    }
+
+    /// How far the box reaches in front of a spot narrower than a hemisphere (along its
+    /// axis, m; negative when it is wholly behind); infinite for any other light.
+    fn ahead_of(&self, light: &PointLight) -> f32 {
         let axis = Vec3::from(light.direction);
-        if axis != Vec3::ZERO && light.cone_cos[0] >= 0.0 {
-            let half = (self.max - self.min) * 0.5;
-            let ahead = (self.center() - p).dot(axis) + half.dot(axis.abs());
-            if ahead < 0.0 {
-                return false;
-            }
+        if axis == Vec3::ZERO || light.cone_cos[0] < 0.0 {
+            return f32::INFINITY;
         }
-        true
+        let half = (self.max - self.min) * 0.5;
+        (self.center() - Vec3::from(light.position)).dot(axis) + half.dot(axis.abs())
     }
 }
 
-/// The nearest [`LIGHTS_PER_DRAW`] of `lights` that reach `bounds` (by distance to the
-/// box, then to its center, then order), as a light set. Allocates nothing.
+/// The [`LIGHTS_PER_DRAW`] of `lights` that light `bounds` most ([`light_score`]), as a
+/// light set. When more reach it than fit, each kept light fades out as the first left out
+/// closes on it (fully out where they tie), so a light leaving the set as the camera, the
+/// car or the frame's lights move never pops off the whole instance at once: they swap at
+/// zero. Allocates nothing.
 pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
     light_set_ranked(lights, bounds, 0..0)
 }
 
+/// Share of a kept light's score within which the first left out fades it out.
+const SET_FADE: f32 = 0.5;
+
+/// How strongly `light` lights `bounds`, for ranking: its brightest channel through the
+/// renderer's reach window at the box's nearest point, over one plus that distance squared
+/// (and a hundredth of the distance to the center squared, which orders lights that are all
+/// inside the box), ramped in over the first [`SPOT_RAMP_M`] the box reaches in front of a
+/// spot. Zero where it does not reach. Continuous in the light's position, direction and
+/// color, so ranks change only by crossing.
+pub fn light_score(light: &PointLight, bounds: &Bounds) -> f32 {
+    if !bounds.reached_by(light) {
+        return 0.0;
+    }
+    let p = Vec3::from(light.position);
+    let d2 = bounds.distance_squared(p);
+    let ratio = d2 / (light.radius * light.radius);
+    let window = (1.0 - ratio * ratio) * (1.0 - ratio * ratio);
+    let lum = light.color[0].max(light.color[1]).max(light.color[2]);
+    let ahead = (bounds.ahead_of(light) / SPOT_RAMP_M).min(1.0);
+    lum * window * ahead / (1.0 + d2 + 0.01 * bounds.center().distance_squared(p))
+}
+
+/// A spot's score ramps in over this much of a box in front of it, m: a car's headlights
+/// sweeping round as it turns come into a light tile's set gradually, not at full rank.
+const SPOT_RAMP_M: f32 = 10.0;
+
 /// [`light_set`], the lights in `second` (the NPC cars' low beams) taking only the slots
-/// the others leave: no beam crowds out a street lamp or the player's headlights.
+/// the others leave: no beam crowds out a street lamp or the player's headlights. Only a
+/// light of the same rank fades the kept ones out (a lamp reaching a box whose set is full
+/// with a beam in it still takes the beam's slot at once; that needs eight lights there).
 pub fn light_set_ranked(
     lights: &[PointLight],
     bounds: &Bounds,
     second: core::ops::Range<usize>,
 ) -> LightSet {
-    // Insertion into a short sorted array: most boxes are reached by a handful of lights.
-    let mut best = [(false, f32::INFINITY, f32::INFINITY, 0usize); LIGHTS_PER_DRAW];
+    // Insertion into a short sorted array (best first) holding one more than a set: most
+    // boxes are reached by a handful of lights. Ties keep the earlier light.
+    const KEEP: usize = LIGHTS_PER_DRAW + 1;
+    let mut best = [(false, 0.0f32, 0usize); KEEP];
     let mut n = 0;
-    let center = bounds.center();
+    // `a` ranks above `b`: not a beam when `b` is, else the higher score.
+    type Key = (bool, f32, usize);
+    let above = |a: &Key, b: &Key| if a.0 == b.0 { a.1 > b.1 } else { b.0 };
     for (i, l) in lights.iter().enumerate().take(MAX_LIGHTS) {
-        if !bounds.reached_by(l) {
+        let key = (second.contains(&i), light_score(l, bounds), i);
+        if key.1 <= 0.0 || (n == KEEP && !above(&key, &best[n - 1])) {
             continue;
         }
-        let p = Vec3::from(l.position);
-        let key = (
-            second.contains(&i),
-            bounds.distance_squared(p),
-            center.distance_squared(p),
-            i,
-        );
-        type Key = (bool, f32, f32, usize);
-        let worse = |a: &Key, b: &Key| (a.0, a.1, a.2) > (b.0, b.1, b.2);
-        if n == LIGHTS_PER_DRAW && !worse(&best[n - 1], &key) {
-            continue;
-        }
-        let mut k = n.min(LIGHTS_PER_DRAW - 1);
-        while k > 0 && worse(&best[k - 1], &key) {
+        let mut k = n.min(KEEP - 1);
+        while k > 0 && above(&key, &best[k - 1]) {
             best[k] = best[k - 1];
             k -= 1;
         }
         best[k] = key;
-        n = (n + 1).min(LIGHTS_PER_DRAW);
+        n = (n + 1).min(KEEP);
     }
     let mut set = LightSet::EMPTY;
-    for &(_, _, _, i) in &best[..n] {
+    for &(_, _, i) in &best[..n.min(LIGHTS_PER_DRAW)] {
         set.push(i);
+    }
+    if n < KEEP {
+        return set;
+    }
+    // Each kept light fades as the first left out closes on it, so lights overtaking it
+    // together (the car's two headlights, lamps with near-equal scores) hand over smoothly
+    // whichever slot it is in.
+    let next = best[KEEP - 1];
+    for (k, key) in best[..LIGHTS_PER_DRAW].iter().enumerate() {
+        if key.0 == next.0 {
+            set = set.with_weight(k, (key.1 - next.1) / (SET_FADE * key.1));
+        }
     }
     set
 }
@@ -670,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn instances_get_the_nearest_lights_that_reach_them() {
+    fn instances_get_the_lights_that_light_them_most() {
         let mut lights = lamps_along_x(30, 10.0);
         // A headlight at x 100 pointing +x, and an unlit tail lamp corona.
         lights.push(PointLight {
@@ -706,11 +746,8 @@ mod tests {
                 let mut reach: Vec<usize> = (0..lights.len())
                     .filter(|&i| b.reached_by(&lights[i]))
                     .collect();
-                let key = |i: &usize| {
-                    let p = Vec3::from(lights[*i].position);
-                    (b.distance_squared(p), b.center().distance_squared(p))
-                };
-                reach.sort_by(|a, b| key(a).partial_cmp(&key(b)).unwrap());
+                let score = |i: &usize| light_score(&lights[*i], &b);
+                reach.sort_by(|x, y| score(y).total_cmp(&score(x)).then(x.cmp(y)));
                 reach.truncate(LIGHTS_PER_DRAW);
                 let set = light_set(&lights, &b);
                 let got: Vec<usize> = set.indices().iter().map(|&i| usize::from(i)).collect();
@@ -727,5 +764,128 @@ mod tests {
         assert_eq!(instances[0].lights.len(), 4);
         assert!(instances[1].lights.is_empty());
         assert_eq!(instances[2].lights, LightSet::EMPTY);
+    }
+
+    /// The weight each of `count` lights has in `set` (0 out of it).
+    fn weights(set: &LightSet, count: usize) -> Vec<f32> {
+        let mut w = vec![0.0; count];
+        for (k, &i) in set.indices().iter().enumerate() {
+            w[usize::from(i)] = set.weight(k);
+        }
+        w
+    }
+
+    /// A box reached by more lights than a set holds, and lights moving past it (a car's
+    /// lamps, or the camera moving the frame's lights): no light's share of the box jumps
+    /// from one frame to the next. Ranked by distance alone they swapped in one frame, and
+    /// a street lamp's pool switched off across a whole light tile (the web flicker).
+    #[test]
+    fn a_full_light_set_hands_over_without_popping() {
+        // Two lights moving together, like a car's headlights, overtake lamps together.
+        let mut lights = lamps_along_x(14, 10.0);
+        lights.push(PointLight::omni([0.0, 6.0, 4.0], [3.0; 3], 22.0));
+        lights.push(PointLight::omni([0.0, 6.0, 5.2], [3.0; 3], 22.0));
+        let moving = lights.len() - 2;
+        let tile = Bounds {
+            min: Vec3::new(10.0, 0.0, -6.0),
+            max: Vec3::new(110.0, 8.0, 6.0),
+        };
+        let mut prev: Option<Vec<f32>> = None;
+        let (mut swaps, mut faded) = (0, 0);
+        // 60 frames a second at 20 m/s.
+        for step in 0..=3600 {
+            lights[moving].position[0] = -40.0 + step as f32 / 3.0;
+            lights[moving + 1].position[0] = -40.0 + step as f32 / 3.0;
+            let set = light_set(&lights, &tile);
+            assert_eq!(set.len(), LIGHTS_PER_DRAW, "more reach it than fit");
+            let w = weights(&set, lights.len());
+            faded += usize::from(set.weight(LIGHTS_PER_DRAW - 1) < 1.0);
+            if let Some(p) = &prev {
+                for (k, (a, b)) in p.iter().zip(&w).enumerate() {
+                    assert!(
+                        (a - b).abs() < 0.2,
+                        "light {k} jumps {a} -> {b} at step {step}"
+                    );
+                    swaps += usize::from((*a > 0.0) != (*b > 0.0));
+                }
+            }
+            prev = Some(w);
+        }
+        // They come into the set and leave it again, fading in and out: no frame moves any
+        // light's share by a fifth (the swap moved two lights by all of it).
+        assert!(
+            swaps >= 2 && faded > 100,
+            "{swaps} swaps, {faded} frames fading"
+        );
+    }
+
+    /// The web flicker, measured: driving up the coast's strip at night for ten seconds,
+    /// every static light's light on every lit piece of the town (its share there, the
+    /// frame's fade times its weight in the piece's set, times a bound on what it gives
+    /// there) never steps by 25 lux from one 60 Hz frame to the next, and by 10 lux only a
+    /// few times, in the middle of a fade. Ranked by distance alone, a lamp at full strength
+    /// left a full set in one frame whenever the car's headlights or a lamp fading into the
+    /// frame's lights came nearer: 12 steps over 10 lux in the same drive, the worst a
+    /// whole lamp (70 lux) switching off.
+    #[test]
+    fn driving_at_night_no_lamp_pops_on_the_town() {
+        use crate::{App, InputState, SceneSetup};
+        use std::collections::BTreeMap;
+        let query = "place=coast&t=22:30&lights=1&stream=0&car=gannet_gt&traffic=busy";
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        let key = |l: &PointLight| l.position.map(f32::to_bits);
+        let statics: BTreeMap<_, _> = app.lights.statics().iter().map(|l| (key(l), *l)).collect();
+        let bounds: Vec<_> = app.bounds[..app.world_instances].to_vec();
+        let mut input = InputState::default();
+        input.set(Action::Throttle, 0.6);
+        // Per piece: each static light's share of it (frame fade times set weight).
+        let mut prev: Vec<BTreeMap<[u32; 3], f32>> = Vec::new();
+        let (mut worst, mut lit, mut steps) = (0.0f32, 0usize, 0usize);
+        for _ in 0..600 {
+            app.update(&input, 1.0 / 60.0);
+            let view = app.scene_view(1.0, 16.0 / 9.0);
+            let shares: Vec<BTreeMap<[u32; 3], f32>> = view.instances[..bounds.len()]
+                .iter()
+                .map(|inst| {
+                    let set = inst.lights;
+                    let mut m = BTreeMap::new();
+                    for (k, &i) in set.indices().iter().enumerate() {
+                        let l = &view.lights[usize::from(i)];
+                        if let Some(s) = statics.get(&key(l)) {
+                            m.insert(key(l), set.weight(k) * l.color[0] / s.color[0]);
+                        }
+                    }
+                    m
+                })
+                .collect();
+            lit += shares.iter().map(|m| m.len()).sum::<usize>();
+            for ((a, b), piece) in prev.iter().zip(&shares).zip(&bounds) {
+                let Some(piece) = piece else { continue };
+                for k in a.keys().chain(b.keys()) {
+                    let jump = (a.get(k).unwrap_or(&0.0) - b.get(k).unwrap_or(&0.0)).abs();
+                    // Red (sodium's brightest) at the piece's nearest point, the lamp no
+                    // nearer than its mast's height (7.5 m), klux.
+                    let l = &statics[k];
+                    let d2 = piece.distance_squared(Vec3::from(l.position));
+                    let ratio = d2 / (l.radius * l.radius);
+                    let at = l.color[0] * (1.0 - ratio * ratio).max(0.0).powi(2) / d2.max(56.0);
+                    worst = worst.max(jump * at);
+                    steps += usize::from(jump * at > 0.01);
+                }
+            }
+            prev = shares;
+        }
+        assert!(
+            app.hud_state().speed_mps > 15.0,
+            "{}",
+            app.hud_state().speed_mps
+        );
+        assert!(lit > 100_000, "the town is lit: {lit}");
+        assert!(
+            worst < 0.025,
+            "a lamp's light on a piece of town jumped {} lux",
+            worst * 1000.0
+        );
+        assert!(steps <= 6, "{steps} steps over 10 lux");
     }
 }

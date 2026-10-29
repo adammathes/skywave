@@ -24,7 +24,7 @@ use crate::lighting::Bounds;
 /// eight lamps reach a 32 m tile).
 pub const MIN_TILE_M: f32 = 32.0;
 /// Static lights a tile may be reached by before it is split: a whole draw's set. Near the
-/// car its headlights then push the farthest one or two out of the set (those that only
+/// car its headlights then fade the weakest one or two out of the set (those that only
 /// graze the tile, at the edge of their reach); leaving room for them instead would cut
 /// 150 more tiles in the test town for little to see.
 pub const STATIC_LIGHTS_PER_TILE: usize = LIGHTS_PER_DRAW;

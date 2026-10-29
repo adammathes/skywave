@@ -240,18 +240,39 @@ impl MeshInstance {
 }
 
 /// Up to [`LIGHTS_PER_DRAW`] indices into [`SceneView::lights`]: the lights an instance is
-/// shaded by. Indices past the end of the frame's lights are ignored.
+/// shaded by, each with a weight ([`LightSet::with_weight`], 1 unless set). Indices past the
+/// end of the frame's lights are ignored. A caller choosing among more lights than fit
+/// fades a light out as others overtake it instead of swapping them in one frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LightSet {
     len: u8,
     indices: [u8; LIGHTS_PER_DRAW],
+    /// How far each light is dimmed, 0 (full) to [`DIM_STEPS`] (off).
+    dim: [u8; LIGHTS_PER_DRAW],
 }
+
+/// Steps of a light's weight in a set: four bits each in the instance's packed params.
+const DIM_STEPS: u8 = 15;
 
 impl LightSet {
     pub const EMPTY: LightSet = LightSet {
         len: 0,
         indices: [0; LIGHTS_PER_DRAW],
+        dim: [0; LIGHTS_PER_DRAW],
     };
+
+    /// The set with its `k`th light scaled by `weight` (0..=1, in fifteenths).
+    pub fn with_weight(mut self, k: usize, weight: f32) -> LightSet {
+        if k < self.len() {
+            self.dim[k] = ((1.0 - weight.clamp(0.0, 1.0)) * f32::from(DIM_STEPS)).round() as u8;
+        }
+        self
+    }
+
+    /// The weight of the `k`th light: 1 unless [`LightSet::with_weight`] dimmed it.
+    pub fn weight(&self, k: usize) -> f32 {
+        1.0 - f32::from(self.dim.get(k).copied().unwrap_or(0)) / f32::from(DIM_STEPS)
+    }
 
     /// Adds light `index`; false (and unchanged) when the set is full or `index` is not
     /// below [`MAX_LIGHTS`].
@@ -995,9 +1016,10 @@ struct InstanceRaw {
     /// Inverse-transpose of the model's upper 3x3, columns padded to vec4.
     normal: [[f32; 4]; 3],
     color: [f32; 4],
-    /// x glow (emissive multiplier) as f32 bits, y cabin-light share as unorm16 | the light
-    /// set's length << 16 | [`NO_SUN_SHADOW`] when it receives no shadow, zw the set's
-    /// light indices, a byte each, low byte first.
+    /// x glow (emissive multiplier) as f16 bits | the cabin-light share as unorm8 << 16 |
+    /// the light set's length << 24 (4 bits) | [`NO_SUN_SHADOW`] when it receives no
+    /// shadow, y how far each light of the set is dimmed (4 bits a light, the first lowest),
+    /// zw the set's light indices, a byte each, low byte first.
     params: [u32; 4],
 }
 
@@ -1019,29 +1041,31 @@ impl InstanceRaw {
     }
 }
 
-/// Bit of `params.y` (just past the light count) that skips the sun's shadow test
+/// Bit of `params.x` (just past the light count) that skips the sun's shadow test
 /// ([`MeshInstance::receives_shadow`] off); `forward.wgsl` reads it.
-const NO_SUN_SHADOW: u32 = 1 << 24;
+const NO_SUN_SHADOW: u32 = 1 << 28;
 
 /// The packed `params` of [`InstanceRaw`].
 fn instance_params(inst: &MeshInstance, lights: usize) -> [u32; 4] {
     let mut words = [0u32; 2];
+    let mut dims = 0u32;
     let mut n = 0;
-    for &i in inst.lights.indices() {
+    for (k, &i) in inst.lights.indices().iter().enumerate() {
         if usize::from(i) < lights {
             words[n / 4] |= u32::from(i) << (8 * (n % 4));
+            dims |= u32::from(inst.lights.dim[k]) << (4 * n);
             n += 1;
         }
     }
-    let cabin = (inst.cabin.clamp(0.0, 1.0) * 65535.0).round() as u32;
+    let cabin = (inst.cabin.clamp(0.0, 1.0) * 255.0).round() as u32;
     let shadow = if inst.receives_shadow {
         0
     } else {
         NO_SUN_SHADOW
     };
     [
-        inst.glow.max(0.0).to_bits(),
-        cabin | (n as u32) << 16 | shadow,
+        u32::from(f16_bits(inst.glow.max(0.0))) | cabin << 16 | (n as u32) << 24 | shadow,
+        dims,
         words[0],
         words[1],
     ]
@@ -4152,29 +4176,43 @@ mod tests {
         };
         assert_eq!(inst.lights.len(), LIGHTS_PER_DRAW, "the ninth is left out");
         let p = instance_params(&inst, MAX_LIGHTS);
-        assert_eq!(f32::from_bits(p[0]), 0.75);
-        assert_eq!(p[1] & 0xffff, 32768);
-        assert_eq!(p[1] >> 16, 8);
+        assert_eq!(
+            p[0],
+            0x3a00 | 128 << 16 | 8 << 24,
+            "0.75 as a half float, cabin, count"
+        );
+        assert_eq!(p[1], 0, "nothing dimmed");
         assert_eq!(p[2], 3 | 255 << 8 | 7 << 16);
         assert_eq!(p[3], 200 | 1 << 8 | 2 << 16 | 9 << 24);
         // With 10 lights in the frame, 255 and 200 are not there.
         let p = instance_params(&inst, 10);
-        assert_eq!(p[1] >> 16, 6);
+        assert_eq!(p[0] >> 24, 6);
         assert_eq!(p[2], 3 | 7 << 8 | 1 << 24);
         assert_eq!(p[3], 2 | 9 << 8);
         inst.lights = LightSet::EMPTY;
         inst.glow = -1.0;
         inst.cabin = 2.0;
-        assert_eq!(instance_params(&inst, 4), [0, 65535, 0, 0]);
-        // No sun shadow: the bit past the light count, which the shader reads as 256 in
-        // the count's word, leaving the count itself alone.
+        assert_eq!(instance_params(&inst, 4), [255 << 16, 0, 0, 0]);
+        // No sun shadow: the bit past the light count, which the shader reads as 16 in the
+        // count's word.
         inst.receives_shadow = false;
         inst.lights = LightSet::from_indices(&[1, 2]);
         let p = instance_params(&inst, 4);
-        assert_eq!(p[1], 65535 | 2 << 16 | NO_SUN_SHADOW);
-        assert_eq!(((p[1] >> 16) & 255, (p[1] >> 16) & 256), (2, 256));
+        assert_eq!(p[0], 255 << 16 | 2 << 24 | NO_SUN_SHADOW);
         let wgsl = include_str!("../shaders/forward.wgsl");
-        assert!(wgsl.contains("(in.lights.x & 256u) == 0u"));
+        assert!(wgsl.contains("(i.params.x >> 24u) & 31u"));
+        assert!(wgsl.contains("(in.lights.x & 16u) == 0u"));
+        // Dimmed lights: four bits each in y, packed with the lights kept.
+        inst.lights = LightSet::from_indices(&[1, 9, 2])
+            .with_weight(0, 0.5)
+            .with_weight(2, 0.0)
+            .with_weight(3, 0.0);
+        assert_eq!(inst.lights.weight(0), 1.0 - 8.0 / 15.0);
+        assert_eq!((inst.lights.weight(1), inst.lights.weight(2)), (1.0, 0.0));
+        assert_eq!(inst.lights.weight(3), 1.0, "past the set");
+        assert_eq!(instance_params(&inst, 4)[1], 8 | 15 << 4);
+        assert_eq!(LightSet::EMPTY.with_weight(0, 0.0), LightSet::EMPTY);
+        assert!(wgsl.contains("(light_set.y >> (4u * k)) & 15u"));
         let mut set = LightSet::EMPTY;
         assert!(set.is_empty() && !set.push(MAX_LIGHTS) && set.push(MAX_LIGHTS - 1));
         assert_eq!(set.indices(), &[255]);
