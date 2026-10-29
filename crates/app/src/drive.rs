@@ -1098,7 +1098,7 @@ mod tests {
         assert_eq!(d.lights(1.0).1, 0);
         let mut out = Vec::new();
         d.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
-        // Body (pop-ups down), glass, unlit lamps, four wheels.
+        // Body (pop-ups down), glass, unlit lamps, four wheels, the cabin through the glass.
         let meshes: Vec<MeshId> = out.iter().map(|i| i.mesh).collect();
         assert_eq!(
             meshes,
@@ -1109,7 +1109,9 @@ mod tests {
                 lod.wheel,
                 lod.wheel,
                 lod.wheel,
-                lod.wheel
+                lod.wheel,
+                lod.interior,
+                lod.steering_wheel
             ]
         );
 

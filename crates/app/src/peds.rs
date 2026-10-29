@@ -427,14 +427,29 @@ mod tests {
         app.npcs.crowd.variants.iter().flat_map(|v| v.ids).collect()
     }
 
-    /// The instances of `app`'s view drawing a pedestrian's part.
+    /// NPC cars near enough to draw their drivers.
+    fn npc_drivers(app: &App) -> usize {
+        let eye = app.camera.pose(&app.drive, 1.0).eye;
+        let near = crate::npc::DETAIL_RADIUS_M;
+        app.npcs
+            .cars()
+            .iter()
+            .filter(|c| Vec3::from(c.pos).distance(eye) <= near)
+            .count()
+    }
+
+    /// The instances of `app`'s view drawing a pedestrian's part (the NPC cars' drivers,
+    /// the same figures, left out).
     fn part_instances(app: &mut App, alpha: f32) -> usize {
         let ids = ids(app);
+        let drivers = npc_drivers(app);
         let view = app.scene_view(alpha, 16.0 / 9.0);
-        view.instances
+        let parts = view
+            .instances
             .iter()
             .filter(|i| ids.contains(&i.mesh))
-            .count()
+            .count();
+        parts - drivers * PARTS
     }
 
     /// Live people within [`DRAW_RADIUS_M`] of the eye.
@@ -502,10 +517,12 @@ mod tests {
             let drawn = part_instances(&mut app, (step % 4) as f32 / 4.0);
             assert_eq!(drawn, in_reach(&app) * PARTS, "step {step}");
             let ids = ids(&app);
+            // The people (the NPC cars' drivers, the same figures, come first).
             let meshes: Vec<MeshId> = app.instances[world.min(app.instances.len())..]
                 .iter()
                 .filter(|i| ids.contains(&i.mesh))
                 .map(|i| i.mesh)
+                .skip(npc_drivers(&app) * PARTS)
                 .collect();
             assert!(meshes.windows(2).all(|w| w[0].0 <= w[1].0), "mesh order");
         }

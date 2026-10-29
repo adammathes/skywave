@@ -842,9 +842,10 @@ mod tests {
     /// Bytes of parked- and NPC-car mesh on the coast (seed 1), vertices plus indices: 22.9 MB with
     /// the four first shapes in every paint the place used, 65 MB for twelve shapes that
     /// way, 21.5 MB for twelve in at most six paints each, 24.8 MB for the fourteen that
-    /// park (the sports cars' two common coupes added). The ceiling is ~1.2x the four
+    /// park (the sports cars' two common coupes added), 27.0 MB with a cabin in each near
+    /// level and a glass per shape (drivers). The ceiling is ~1.2x the fourteen
     /// (`docs/PERFORMANCE.md`).
-    const PARKED_MESH_BYTES_MAX: usize = 27_000_000;
+    const PARKED_MESH_BYTES_MAX: usize = 30_000_000;
     /// The same in the 2001 world (the coast's place until the basin's lands): the 1980s
     /// cars and the 2001 traffic cars, nineteen shapes parked and 21 driving, 36.3 MB
     /// (33.0 parked, 3.3 for the traffic's own, most of it the two trucks); the ceiling is
@@ -879,7 +880,8 @@ mod tests {
         let parking = (0..vehicles::BUILTIN_SHAPES.len())
             .filter(|&k| era[k] > 0 && !UNPARKED.contains(&shape_id(k)))
             .count();
-        assert!(cars.len() <= parking * (OWN_PAINTS + ERA_PAINTS) * 2);
+        // Two levels per (shape, paint) and one glass per shape.
+        assert!(cars.len() <= parking * ((OWN_PAINTS + ERA_PAINTS) * 2 + 1));
         // The traffic takes the parked cars' era paints, sharing their meshes; it builds
         // only the (shape, paint) pairs the place does not park, inside the same budget.
         let mut npcs = crate::npc::Npcs::new(&place, skywave_core::Seed(1), era);
@@ -894,16 +896,16 @@ mod tests {
         let built = built - crate::peds::VARIANTS * traffic::figure::PARTS;
         let driving = usize::from(npcs.budget_shapes());
         eprintln!("world {scenario}: traffic: {driving} shapes, {built} more meshes, {npc} bytes");
-        // Plus each traffic shape's brake lamp overlay at both levels, and the meshes of the
-        // shapes that drive and never park.
+        // Plus each traffic shape's brake lamp overlay at both levels and its glass, and the
+        // meshes of the shapes that drive and never park.
         let unparked_drivers = (0..vehicles::BUILTIN_SHAPES.len())
             .filter(|&k| era[k] > 0 && vehicles::TRAFFIC_SHAPES.contains(&k))
             .filter(|&k| UNPARKED.contains(&shape_id(k)))
             .count();
         assert!(
             cars.len() + built
-                <= parking * (OWN_PAINTS + ERA_PAINTS) * 2
-                    + driving * 2
+                <= parking * ((OWN_PAINTS + ERA_PAINTS) * 2 + 1)
+                    + driving * 3
                     + unparked_drivers * ERA_PAINTS * 2
         );
         bytes + npc

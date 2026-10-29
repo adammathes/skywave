@@ -883,7 +883,11 @@ mod tests {
             panic!("{:?}", items[1])
         };
         assert_eq!((options.len(), index), (7, 1), "the Regent's palette");
-        assert_eq!(items[2].widget, Widget::Action);
+        let Widget::Choice { options, .. } = items[2].widget else {
+            panic!("{:?}", items[2])
+        };
+        assert_eq!(options, traffic::figure::PRESET_NAMES);
+        assert_eq!(items[3].widget, Widget::Action);
         assert!(note(Page::About)
             .unwrap()
             .contains("Created by Adam Mathes"));

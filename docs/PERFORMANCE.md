@@ -102,10 +102,11 @@ on the coast (seed 1), vertices plus indices, measured in `parked_car_meshes_sta
 | Twelve shapes, every paint used | 436 | 1.20M | 65.0 MB |
 | Twelve shapes, 2 palette + 4 era paints per shape per place | 144 | 396k | 21.5 MB |
 | The same plus NPC traffic (its era paints are the parked cars'; shares every mesh on the coast) | 144 | 396k | 21.5 MB |
-| Fourteen shapes (the Longbow Coupe and Appaloosa GT added; the exotics and open sports cars never park), traffic included (shipped) | 168 | 460k | 24.8 MB |
+| Fourteen shapes (the Longbow Coupe and Appaloosa GT added; the exotics and open sports cars never park), traffic included | 168 | 460k | 24.8 MB |
+| The same with a cabin (interior and steering wheel) in each near level and a see-through glass mesh per shape, for drivers (shipped) | 196 | 491k | 27.0 MB |
 
 Each place draws its six paints per shape from the era's weights by its seed, so the street
-mix still varies place to place. The test fails above 27 MB (about 1.2x the four-shape set),
+mix still varies place to place. The test fails above 30 MB (about 1.2x the fourteen-shape set),
 always, not only under `SKYWAVE_ENFORCE_BUDGETS`, and counts the meshes the traffic builds for itself (`app::npc`: only shape and paint pairs the place does not park; none on the coast). The lasting fix is paint as a per-instance
 attribute (`docs/IDEAS.md`).
 
