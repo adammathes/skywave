@@ -408,6 +408,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Screenshot => vec![key(Key::F12, Pos)],
             Action::DebugOverlay => vec![key(Key::F3, Pos)],
             Action::Controls => vec![key(Key::KeyH, Pos), key(Key::F1, Pos)],
+            Action::Fullscreen => vec![key(Key::KeyF, Pos)],
             Action::MenuUp => vec![key(Key::ArrowUp, Pos)],
             Action::MenuDown => vec![key(Key::ArrowDown, Pos)],
             Action::MenuLeft => vec![key(Key::ArrowLeft, Pos)],
@@ -462,7 +463,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Pause => vec![btn(PadButton::Start)],
             // Held, so a tap stays the pause menu.
             Action::Controls => vec![btn(PadButton::Start).held_long()],
-            Action::Screenshot | Action::DebugOverlay => vec![],
+            Action::Screenshot | Action::DebugOverlay | Action::Fullscreen => vec![],
             Action::MenuUp => vec![btn(PadButton::DpadUp), axis(PadAxis::LeftY, Neg)],
             Action::MenuDown => vec![btn(PadButton::DpadDown), axis(PadAxis::LeftY, Pos)],
             Action::MenuLeft => vec![btn(PadButton::DpadLeft), axis(PadAxis::LeftX, Neg)],
@@ -517,7 +518,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 27] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 28] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -634,6 +635,7 @@ mod tests {
                 vec![K(Key::KeyH), K(Key::F1)],
                 vec![B(PadButton::Start)],
             ),
+            (Action::Fullscreen, vec![K(Key::KeyF)], vec![]),
         ];
         for (action, keys, pads) in table {
             assert_eq!(raws(kb, action), keys, "{action:?} keyboard");

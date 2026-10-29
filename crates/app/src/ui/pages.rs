@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! Pause:     Resume · Reset car · Vehicle › · Settings › · Worlds › · Show controls (the
-//!            controls card) · Quit (native only)
+//!            controls card) · Fullscreen (on/off; the menu stays open) · Quit (native only)
 //! Vehicle:   Car (left/right through every built-in car this world has) · Paint (its
 //!            palette) · Drive this car; a turntable preview and the car's specs beside
 //!            them, and Select on any row swaps the car in where you are
@@ -89,6 +89,8 @@ pub enum ItemId {
     ResetCar,
     /// Show the controls card over the menu.
     Controls,
+    /// Fullscreen on/off (the platform does it; the menu stays open).
+    Fullscreen,
     Quit,
     Open(Page),
     /// Swap to the built-in car with this index in [`crate::vehicles::BUILTIN`] (in the
@@ -321,6 +323,7 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
             let (id, w) = open(Page::Worlds);
             add(id, "Worlds", w);
             add(ItemId::Controls, "Show controls", Widget::Action);
+            add(ItemId::Fullscreen, "Fullscreen", Widget::Action);
             if ctx.can_quit {
                 add(ItemId::Quit, "Quit", Widget::Action);
             }
@@ -834,6 +837,7 @@ mod tests {
                 ItemId::Open(Page::Settings),
                 ItemId::Open(Page::Worlds),
                 ItemId::Controls,
+                ItemId::Fullscreen,
             ]
         );
         build(Page::Worlds, &ctx, &mut items);

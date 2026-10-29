@@ -70,6 +70,8 @@ pub enum Action {
     DebugOverlay,
     /// Show or hide the controls card (a long press on the pad).
     Controls,
+    /// Fullscreen on/off: the canvas on the web, a borderless window on native.
+    Fullscreen,
     MenuUp,
     MenuDown,
     MenuLeft,
@@ -100,7 +102,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 42;
+    pub const COUNT: usize = 43;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -130,6 +132,7 @@ impl Action {
         Action::Screenshot,
         Action::DebugOverlay,
         Action::Controls,
+        Action::Fullscreen,
         Action::MenuUp,
         Action::MenuDown,
         Action::MenuLeft,
@@ -246,6 +249,7 @@ impl Action {
             Action::Screenshot => "Screenshot",
             Action::DebugOverlay => "DebugOverlay",
             Action::Controls => "Controls",
+            Action::Fullscreen => "Fullscreen",
             Action::MenuUp => "MenuUp",
             Action::MenuDown => "MenuDown",
             Action::MenuLeft => "MenuLeft",

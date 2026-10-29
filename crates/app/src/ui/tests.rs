@@ -1843,6 +1843,33 @@ fn the_pause_menu_resets_the_car() {
 }
 
 #[test]
+fn fullscreen_toggles_on_its_key_and_from_the_pause_menu() {
+    let mut h = Harness::new();
+    h.key(Key::KeyF);
+    assert!(h.app.take_fullscreen_toggle());
+    assert!(!h.app.take_fullscreen_toggle(), "once per press");
+    // The menu item asks too, and the menu stays open.
+    h.open(&[ItemId::Fullscreen]);
+    assert!(h.app.menu_open());
+    assert!(h.app.take_fullscreen_toggle());
+    // A press a remap captures is not a toggle.
+    h.open(&[
+        ItemId::Open(Page::Settings),
+        ItemId::Open(Page::Controls),
+        ItemId::Open(Page::Device(DeviceKind::KeyboardMouse)),
+        ItemId::Open(Page::Bindings(DeviceKind::KeyboardMouse)),
+    ]);
+    h.focus_on(ItemId::Bind(
+        DeviceKind::KeyboardMouse,
+        Action::Horn,
+        Sign::Full,
+    ));
+    h.key(Key::Enter);
+    h.key(Key::KeyF);
+    assert!(!h.app.take_fullscreen_toggle());
+}
+
+#[test]
 fn reset_is_listed_on_both_bindings_pages() {
     for (device, input) in [
         (DeviceKind::Gamepad, "Select (hold)"),
