@@ -14,16 +14,13 @@ use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
 use place::{Place, PropKind};
 use render::{Mesh, MeshId, MeshInstance};
 use skywave_core::{hash64, Seed};
-use traffic::figure::{figure, Era, Figure, Xform, PARTS};
+use traffic::figure::{figure, Era, Figure, MeshData, Xform, PARTS};
 use world::landmarks::Kit;
-use world::math::{V2, V3};
-use world::mesh::{boxf, face, Frame, Paint};
-use world::{MeshKind, Pattern, WorldMesh};
+use world::math::V3;
 
+use crate::car;
 use crate::drive::Pose;
 use crate::lighting::{Bounds, FrameLights};
-use crate::worldmesh::atlas_mesh;
-use crate::{car, convert, Part};
 
 /// How long the car holds still at the window before the order is in, s.
 pub const HOLD_S: f32 = 0.6;
@@ -286,7 +283,7 @@ impl DriveThru {
             frame.transform_point3(hand - Vec3::Y * 0.5 * BOX_M[1])
         };
         let server_rot = Quat::from_mat4(&frame);
-        let transform = if t < 0.6 || t >= LAND_S {
+        let transform = if !(0.6..LAND_S).contains(&t) {
             return;
         } else if t < HANDOFF_S {
             Mat4::from_rotation_translation(server_rot, held(t))
@@ -338,16 +335,48 @@ fn part_matrix(x: &Xform) -> Mat4 {
     )
 }
 
-/// The box: pink card centered on its middle, a white lid band round its top edge.
+/// The box: pink card centered on its middle, a cream lid band round its top edge (vertex
+/// colors linear, as the figures' and the cars').
 fn box_mesh() -> Mesh {
-    let mut m = WorldMesh::default();
-    let f = Frame::upright(V3::ZERO, V2::new(1.0, 0.0));
+    let mut m = MeshData::default();
     let [w, h, d] = BOX_M.map(|v| 0.5 * v);
-    let card = Paint::new([238, 150, 186], Pattern::Plain);
-    let lid = Paint::new([248, 244, 236], Pattern::Plain);
-    boxf(&mut m, &f, [-w, -h, -d], [w, 0.6 * h, d], face::ALL, card);
-    boxf(&mut m, &f, [-w, 0.6 * h, -d], [w, h, d], face::ALL, lid);
-    convert(&atlas_mesh(&m, MeshKind::Prop), Part::Base)
+    let card = [150, 30, 62, 255];
+    let lid = [118, 100, 88, 255];
+    let band = 0.6 * h;
+    for (lo, hi, color) in [(-h, band, card), (band, h, lid)] {
+        // Each face: its normal axis and sign, then its four corners counter-clockwise.
+        for axis in 0..3 {
+            for sign in [-1.0f32, 1.0] {
+                let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
+                let corner = |a: f32, b: f32| {
+                    let mut p = [0.0f32; 3];
+                    let ext = |i: usize, t: f32| match i {
+                        0 => t * w,
+                        1 => 0.5 * (lo + hi) + t * 0.5 * (hi - lo),
+                        _ => t * d,
+                    };
+                    p[axis] = ext(axis, sign);
+                    p[u] = ext(u, a);
+                    p[v] = ext(v, b);
+                    p
+                };
+                let base = m.positions.len() as u32;
+                let quad = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+                for (a, b) in quad {
+                    m.positions.push(corner(a * sign, b));
+                    let mut n = [0.0; 3];
+                    n[axis] = sign;
+                    m.normals.push(n);
+                    m.uvs.push([0.0; 2]);
+                    m.colors.push(color);
+                    m.emissive.push([0; 4]);
+                }
+                m.indices
+                    .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+            }
+        }
+    }
+    car::plain_mesh(&m)
 }
 
 #[cfg(test)]

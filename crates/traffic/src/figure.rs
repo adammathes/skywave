@@ -1583,7 +1583,7 @@ impl Skeleton {
 impl Skeleton {
     /// Leaning out of a service window to hand something over: standing, the back tipped
     /// forward by `lean` (0 upright, 1 out over the sill), the right arm held out ahead by
-    /// `reach` (0 hanging, 1 about level), the elbow a little bent. Both 0 is the standing
+    /// `reach` (0 hanging, 1 about level), the elbow a little bent, the left forearm on the sill. Both 0 is the standing
     /// pose ([`Skeleton::walk`] at rest).
     pub fn serve(&self, lean: f32, reach: f32) -> Joints {
         let mut j = self.walk(0.0, 0.0);
@@ -1591,7 +1591,9 @@ impl Skeleton {
         let reach = smooth(0.0, 1.0, reach);
         j.rot[Part::Torso as usize][0] -= tip;
         j.rot[Part::Head as usize][0] += 0.7 * tip;
-        j.rot[Part::UpperArmL as usize][0] += tip;
+        // The free hand comes up to rest on the sill.
+        j.rot[Part::UpperArmL as usize][0] += tip + 0.5 * lean;
+        j.rot[Part::LowerArmL as usize][0] += 1.0 * lean;
         j.rot[Part::UpperArmR as usize][0] += tip + 1.25 * reach;
         j.rot[Part::LowerArmR as usize][0] += 0.3 * reach;
         j
