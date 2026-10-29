@@ -30,6 +30,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Screenshot | button | F12 | — |
 | Performance overlay (`DebugOverlay`) | button | F3 | — |
 | Controls card (`Controls`) | button | H, F1 | Start / Options held 1 s (also pause menu › Show controls) |
+| Fullscreen (`Fullscreen`) | button | F | — (pause menu › Fullscreen) |
 
 F3 cycles the performance overlay Off → FPS → Full → Off. FPS is the frame rate alone (one decimal, the
 same average the full overlay shows) in the top left corner, which the driving HUD leaves empty; Full is
@@ -41,6 +42,18 @@ shows once the menu closes. The window in the background hides it too. While a s
 number sits below its two lines (a long station name reaches the corner at large UI scales). Holding F3
 and pressing C (Camera cycle) toggles the free-fly camera; the F3 press that starts the chord also moves
 the overlay one mode.
+
+`Fullscreen` toggles fullscreen, under menus, the map and the controls card too (not while a remap is
+waiting for its input). On the web it puts the canvas in fullscreen (`requestFullscreen`, Safari's
+`webkitRequestFullscreen` where that is all there is) and takes it out on the next press. Browsers allow
+that only from a user gesture, so the page toggles it in the key's own keydown handler, not on the next
+frame. The browser's own Esc also leaves fullscreen; that press does not open the pause menu (it is
+dropped while the page is fullscreen and for 0.5 s after it leaves). The canvas follows its new size on
+the next frame either way, and right-button pointer lock for mouse look works in fullscreen too. The
+pause menu's Fullscreen item does the same and leaves the menu open; on the web a browser may refuse it
+when no key or click came just before (a pad's Select is not a gesture to browsers), and a pad binding
+of `Fullscreen` likewise. On native it switches the window to borderless fullscreen on its monitor and
+back.
 
 While the full map is open the sim keeps running, but the car gets no driving input (it coasts): the menu
 directions (arrows, d-pad, left stick) pan the map, Map zoom and the wheel zoom it, and Map toggle, Back or
@@ -109,7 +122,8 @@ is separate and stays.
 controller inputs side by side, read from the live bindings, so a remap shows at once. Rows are grouped
 Drive (steer, throttle, brake, handbrake, horn, reset car, next car), Camera (cycle, look around, look
 back), Lights (headlights, high beams), Radio (on/off, next, previous), Menus (pause, map, map zoom, time
-of day, move, select, back) and Help (the card itself, the performance overlay, screenshot). Each input is
+of day, move, select, back) and Help (the card itself, the performance overlay, and one row for screenshot and fullscreen,
+"F12 / F", so the card stays one Deck screen). Each input is
 named once, " / " between them, "-" for none; a row whose inputs are directions names them by family
 (`Arrows`, `D-pad`, `LS`, `RS`, `Mouse`), so Steer reads "A / D / Arrows" and "LS". Pad inputs use the
 names the Bindings page uses (A/B/X/Y, LB/RB, LT/RT, LS/RS, D-pad up/down/left/right, Start, Select);

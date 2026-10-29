@@ -23,7 +23,7 @@ use render::{LightSet, Mesh, MeshId, MeshInstance};
 use vehicle::shape;
 use world::{MeshKind, Palette, WorldMesh};
 
-use crate::lighting::{Bounds, FrameLights};
+use crate::lighting::{Bounds, FrameLights, LampClock};
 use crate::worldmesh::atlas_mesh;
 use crate::{car, convert, lighttiles, vehicles, Part};
 
@@ -292,8 +292,11 @@ pub struct PropInstances {
     ids: Vec<MeshId>,
     /// Sorted by mesh.
     entries: Vec<Entry>,
-    /// The street lights' mesh.
+    /// The street lights' mesh...
     lamp_mesh: u16,
+    /// ...and where its light hangs in it, so a lens switches in the dusk wave with its
+    /// light's pool (the wave keys on the head).
+    lamp_head: Vec3,
     /// Per shape, per paint (its palette, then the era's): the parked car's level-1 mesh
     /// (level 2 is the next), when the place parks it.
     cars: Vec<Vec<Option<u16>>>,
@@ -325,6 +328,7 @@ impl PropInstances {
         // Each kind's shapes, built at the origin facing yaw 0 (`-z`).
         let mut meshes = Vec::new();
         let mut first = [0u16; LOOKS.len()];
+        let mut lamp_head = Vec3::ZERO;
         for (k, look) in LOOKS.iter().enumerate() {
             first[k] = meshes.len() as u16;
             for v in 0..look.variants {
@@ -341,7 +345,14 @@ impl PropInstances {
                 let mut mesh = convert(&m, Part::Base);
                 // A lamp's lens (left out of a chunk's lit geometry, which keeps lenses
                 // apart for the photocell) is part of its mesh.
-                lighttiles::append(&mut mesh, &convert(&m, Part::Lamps));
+                let lens = convert(&m, Part::Lamps);
+                if k == LAMP_LOOK && v == 0 {
+                    lamp_head = crate::lamp_heads(&lens)
+                        .first()
+                        .copied()
+                        .unwrap_or_default();
+                }
+                lighttiles::append(&mut mesh, &lens);
                 meshes.push(mesh);
             }
         }
@@ -478,6 +489,7 @@ impl PropInstances {
             ids: Vec::new(),
             entries,
             lamp_mesh,
+            lamp_head,
             cars: car_mesh,
         }))
     }
@@ -508,7 +520,8 @@ impl PropInstances {
 
     /// Appends the instances near `eye` whose chunk `live` says is drawn, at most
     /// [`MAX_PROP_INSTANCES`], each with the nearest of `lights` that reach it when within
-    /// [`LIT_RADIUS_M`]; street lamp lenses glow by `lamp_glow`; parked cars `rocking`
+    /// [`LIT_RADIUS_M`]; street lamp lenses glow as `lamps` has them in the dusk wave
+    /// (`lights`' [`FrameLights::wave`]); parked cars `rocking`
     /// knocked lean on their springs, and a lot's are there only while `lot_cars` (the
     /// collider's) says so. Returns how many.
     #[allow(clippy::too_many_arguments)]
@@ -517,12 +530,13 @@ impl PropInstances {
         eye: Vec3,
         live: impl Fn([i32; 2]) -> bool,
         lights: &FrameLights,
-        lamp_glow: f32,
+        lamps: LampClock,
         rocking: &world::collide::Rocking,
         lot_cars: &[world::collide::LotCar],
         out: &mut Vec<MeshInstance>,
     ) -> usize {
         let mut n = 0;
+        let wave = lights.wave();
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
         let near2 = CAR_DETAIL_RADIUS_M * CAR_DETAIL_RADIUS_M;
         // Two passes so each mesh's instances stay one run: everything near (and every
@@ -553,7 +567,9 @@ impl PropInstances {
                 };
                 // A parked car's lamps (built lit for the traffic) are off.
                 let glow = if e.mesh == self.lamp_mesh {
-                    lamp_glow
+                    let head =
+                        Mat4::from_cols_array_2d(&e.transform).transform_point3(self.lamp_head);
+                    lamps.street(wave, head.to_array())
                 } else if e.car {
                     0.0
                 } else {

@@ -4,8 +4,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use app::{
-    pad_table, App, InputMapper, Key, RawInput, SceneSetup, SettingsStore, MOUSE_BUTTONS,
-    MOUSE_RIGHT,
+    pad_table, Action, App, DeviceKind, InputMapper, Key, RawInput, SceneSetup, SettingsStore,
+    MOUSE_BUTTONS, MOUSE_RIGHT,
 };
 use audio::RadioCommand;
 use render::{HdrMode, MeshId, MeshInstance, Probe, Renderer, RendererOptions, SceneView};
@@ -67,6 +67,11 @@ struct State {
     music: Option<MusicGlue>,
     /// Whether the glue last said the folders must be picked again.
     music_again: bool,
+    /// The `Fullscreen` key toggled it in its keydown handler since the last frame: the
+    /// app's toggle for that press is already done.
+    keyed_fullscreen: bool,
+    /// When fullscreen last ended (event time, ms), for the Esc that ended it.
+    fullscreen_left_ms: f64,
 }
 
 /// What the page is told changed about the deck: source, track changes, mode, playing,
@@ -778,6 +783,8 @@ pub async fn run(
         radio_reported: NOT_REPORTED,
         music,
         music_again: false,
+        keyed_fullscreen: false,
+        fullscreen_left_ms: f64::NEG_INFINITY,
     }));
     listen_keys(&window, &state)?;
     listen_mouse(&window, &state)?;
@@ -858,10 +865,27 @@ fn listen_keys(window: &web_sys::Window, state: &Rc<RefCell<State>>) -> Result<(
         let handler = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
             if let Some(key) = Key::from_code(&e.code()) {
                 let raw = RawInput::Key(key);
-                let input = &mut state.borrow_mut().input;
+                let state = &mut *state.borrow_mut();
+                // The browser's own Esc out of fullscreen does not also open the pause menu
+                // (some browsers send it while still fullscreen, others just after).
+                if key == Key::Escape
+                    && (fullscreen() || e.time_stamp() - state.fullscreen_left_ms < ESC_GRACE_MS)
+                {
+                    return;
+                }
+                let input = &mut state.input;
                 // Keep browser shortcuts (Ctrl+R, F5, ...) unless the game uses the key.
                 if input.bindings().is_bound(raw) && !e.ctrl_key() && !e.meta_key() {
                     e.prevent_default();
+                }
+                // Toggled here, in the key's own handler: browsers only let a user gesture
+                // ask for fullscreen.
+                let full = input
+                    .bindings()
+                    .get(DeviceKind::KeyboardMouse, Action::Fullscreen);
+                if down && !e.repeat() && full.iter().any(|b| b.raw == raw && b.hold.is_none()) {
+                    toggle_fullscreen(&state.canvas);
+                    state.keyed_fullscreen = true;
                 }
                 if down {
                     input.press(raw);
@@ -874,11 +898,75 @@ fn listen_keys(window: &web_sys::Window, state: &Rc<RefCell<State>>) -> Result<(
         // The listener lives as long as the page.
         handler.forget();
     }
+    let left = state.clone();
     let state = state.clone();
     let blur = Closure::<dyn FnMut()>::new(move || state.borrow_mut().input.release_all());
     window.add_event_listener_with_callback("blur", blur.as_ref().unchecked_ref())?;
     blur.forget();
+    let change = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+        if !fullscreen() {
+            left.borrow_mut().fullscreen_left_ms = e.time_stamp();
+        }
+    });
+    if let Some(document) = window.document() {
+        for event in ["fullscreenchange", "webkitfullscreenchange"] {
+            document.add_event_listener_with_callback(event, change.as_ref().unchecked_ref())?;
+        }
+    }
+    change.forget();
     Ok(())
+}
+
+/// How long after fullscreen ends an Esc press is still the one that ended it, ms.
+const ESC_GRACE_MS: f64 = 500.0;
+
+thread_local! {
+    /// Swallows a refused fullscreen request's promise, so it is not an uncaught error.
+    static IGNORE: Closure<dyn FnMut(JsValue)> = Closure::new(|_: JsValue| {});
+}
+
+/// Calls the first of `names` that `target` has (the standard name, then Safari's prefixed
+/// one), swallowing a rejected promise.
+fn call_first(target: &JsValue, names: [&str; 2]) {
+    for name in names {
+        let f = js_sys::Reflect::get(target, &JsValue::from_str(name))
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+        if let Some(f) = f {
+            if let Ok(promise) = f
+                .call0(target)
+                .and_then(|r| r.dyn_into::<js_sys::Promise>())
+            {
+                IGNORE.with(|ignore| {
+                    let _ = promise.catch(ignore);
+                });
+            }
+            return;
+        }
+    }
+}
+
+/// Something on the page is fullscreen.
+fn fullscreen() -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    ["fullscreenElement", "webkitFullscreenElement"]
+        .iter()
+        .filter_map(|k| js_sys::Reflect::get(&document, &JsValue::from_str(k)).ok())
+        .any(|e| !e.is_null() && !e.is_undefined())
+}
+
+/// Leaves fullscreen, or puts `canvas` in it. The frame loop resizes the canvas to its
+/// new layout size either way.
+fn toggle_fullscreen(canvas: &HtmlCanvasElement) {
+    if fullscreen() {
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            call_first(&document, ["exitFullscreen", "webkitExitFullscreen"]);
+        }
+    } else {
+        call_first(canvas, ["requestFullscreen", "webkitRequestFullscreen"]);
+    }
 }
 
 /// A DOM `MouseEvent.button` the mapper tracks.
@@ -1240,6 +1328,12 @@ impl State {
             sfx.frame(self.app.audio_params(), dt);
         }
         self.pump_radio();
+        // The menu's item (and a pad binding) toggle here; browsers may refuse one that
+        // no recent key or click asked for.
+        let keyed = std::mem::take(&mut self.keyed_fullscreen);
+        if self.app.take_fullscreen_toggle() && !keyed {
+            toggle_fullscreen(&self.canvas);
+        }
         if let Some(world) = self.app.take_world_pick() {
             self.switch_world(world);
         }

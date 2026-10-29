@@ -95,6 +95,27 @@ const NEON_CORONA: Corona = Corona {
 const STOREFRONT_KCD: f32 = 0.4;
 /// A set piece's flood and tube lights (a tunnel's ceiling lamps, a garage's tubes).
 const FLOOD_KCD: f32 = 0.9;
+/// The dusk wave lasts about this long, game seconds: every street lamp and sign has
+/// switched by then (each warms up a little after)...
+pub const WAVE_S: f32 = 20.0;
+/// ...the front crossing the place east to west in this much of it...
+const FRONT_S: f32 = 14.0;
+/// ...a block (this square on the grid, m) a moment of its own within this...
+const BLOCK_M: f32 = 90.0;
+const BLOCK_S: f32 = 4.0;
+/// ...and each lamp within this, by where it stands along a triangle wave this long, m.
+const LAMP_S: f32 = 1.0;
+const LAMP_PERIOD_M: f32 = 23.0;
+/// Signs and landmarks follow the front over this much of the wave, the rest their own.
+const SIGN_FRONT_S: f32 = 10.0;
+/// A switched lamp strikes, blinking at a third (`STRIKE_HZ` times a second, a quarter of
+/// them out), for this long, then warms to full by `WARM_S`, game seconds.
+const STRIKE_S: f32 = 1.2;
+const STRIKE_HZ: f32 = 6.0;
+const STRIKE_LEVEL: f32 = 0.3;
+const WARM_S: f32 = 3.0;
+const WAVE_SALT: u64 = 0x4455_534b;
+const SIGN_SALT: u64 = 0x5349_474e;
 /// When more static lights are on than the frame holds, the farthest kept ones fade out
 /// over this share of the distance to the first one left out, so none pops as the camera
 /// moves.
@@ -199,14 +220,148 @@ pub fn car_glow(d: &Daylight) -> CarGlow {
     }
 }
 
-/// Street lamp heads' emissive multiplier: on or off with the photocell (civil dusk to
-/// civil dawn), not ramped with the windows.
-pub fn streetlamp_glow(d: &Daylight) -> f32 {
-    if d.streetlights_on {
-        1.0
-    } else {
-        0.0
+/// When the lamps switch: the photocell's moment and how long ago it was.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LampClock {
+    /// The photocell: on from civil dusk to civil dawn.
+    pub on: bool,
+    /// Game seconds since it last switched.
+    pub since: f32,
+}
+
+impl LampClock {
+    pub fn of(d: &Daylight) -> LampClock {
+        LampClock {
+            on: d.streetlights_on,
+            since: d.lamps_switched_s,
+        }
     }
+
+    /// Whether any light may be lit: the photocell is on, or the dawn wave is still going.
+    pub fn any(&self) -> bool {
+        self.on || self.since < WAVE_S
+    }
+
+    /// The level every light has once the wave has passed, if it has.
+    fn settled(&self) -> Option<f32> {
+        if self.on && self.since >= WAVE_S + WARM_S {
+            Some(1.0)
+        } else if !self.on && self.since >= WAVE_S {
+            Some(0.0)
+        } else {
+            None
+        }
+    }
+
+    /// How brightly a light that switches `delay` seconds after the photocell shines, 0..1.
+    /// Switching on at dusk it strikes, flickering at a third for [`STRIKE_S`] in a pattern
+    /// seeded by `seed`, then warms up to full by [`WARM_S`], as sodium does; at dawn it
+    /// simply goes out.
+    pub fn level(&self, delay: f32, seed: u32) -> f32 {
+        if let Some(l) = self.settled() {
+            return l;
+        }
+        let t = self.since - delay;
+        if !self.on {
+            return if t < 0.0 { 1.0 } else { 0.0 };
+        }
+        if t < 0.0 {
+            0.0
+        } else if t < STRIKE_S {
+            let blink = skywave_core::hash64(u64::from(seed), &[(t * STRIKE_HZ) as u64]);
+            if blink & 3 == 0 {
+                0.05
+            } else {
+                STRIKE_LEVEL
+            }
+        } else {
+            let w = ((t - STRIKE_S) / (WARM_S - STRIKE_S)).min(1.0);
+            STRIKE_LEVEL + (1.0 - STRIKE_LEVEL) * w * w * (3.0 - 2.0 * w)
+        }
+    }
+
+    /// [`LampClock::level`] of the street lamp at `pos` on `wave`.
+    pub fn street(&self, wave: &DuskWave, pos: [f32; 3]) -> f32 {
+        match self.settled() {
+            Some(l) => l,
+            None => {
+                let (delay, seed) = wave.street(pos);
+                self.level(delay, seed)
+            }
+        }
+    }
+}
+
+/// The dusk wave over the place: street lamps switch block by block from east to west,
+/// following the dark across the grid, signs and landmarks each a moment of their own in
+/// the same [`WAVE_S`]. Pure functions of a light's position, so a lamp keeps its moment
+/// whether it is an instanced lens, a chunk's light or both.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DuskWave {
+    /// The easternmost and westernmost x the wave crosses, m.
+    east: f32,
+    west: f32,
+}
+
+impl DuskWave {
+    /// The wave across lights at x positions `xs` (a wave of zero width when there are none).
+    pub fn across(xs: impl IntoIterator<Item = f32>) -> DuskWave {
+        let (mut east, mut west) = (f32::NEG_INFINITY, f32::INFINITY);
+        for x in xs {
+            east = east.max(x);
+            west = west.min(x);
+        }
+        if west > east {
+            (east, west) = (0.0, 0.0);
+        }
+        DuskWave { east, west }
+    }
+
+    /// Where the front is at `pos`, 0 at the east edge to 1 at the west.
+    fn front(&self, pos: [f32; 3]) -> f32 {
+        ((self.east - pos[0]) / (self.east - self.west).max(1.0)).clamp(0.0, 1.0)
+    }
+
+    /// When the street lamp at `pos` switches (seconds after the photocell, under
+    /// [`WAVE_S`]) and its flicker seed: the front, its block's moment, and its own along
+    /// the block. Continuous in `pos` within a block, so a lens and its light (a few
+    /// centimetres apart) switch together.
+    pub fn street(&self, pos: [f32; 3]) -> (f32, u32) {
+        let block = [
+            (pos[0] / BLOCK_M).floor() as i32 as u32 as u64,
+            (pos[2] / BLOCK_M).floor() as i32 as u32 as u64,
+        ];
+        let b = skywave_core::hash64(WAVE_SALT, &block);
+        // A triangle wave along z: neighbours on a north-south street a moment apart.
+        let along = (pos[2] / LAMP_PERIOD_M).rem_euclid(1.0);
+        let own = 1.0 - (2.0 * along - 1.0).abs();
+        let delay = FRONT_S * self.front(pos) + BLOCK_S * unit(b) + LAMP_S * own;
+        (delay, b as u32)
+    }
+
+    /// When the sign or landmark light at `pos` switches, and its seed: in the same window,
+    /// following the front loosely, each at its own moment.
+    pub fn sign(&self, pos: [f32; 3]) -> (f32, u32) {
+        let h = skywave_core::hash64(SIGN_SALT, &[cm(pos[0]), cm(pos[1]), cm(pos[2])]);
+        let delay = SIGN_FRONT_S * self.front(pos) + (WAVE_S - SIGN_FRONT_S - 1.0) * unit(h);
+        (delay, h as u32)
+    }
+}
+
+/// A coordinate in whole centimetres, as hash input.
+fn cm(x: f32) -> u64 {
+    (x * 100.0).round() as i32 as u32 as u64
+}
+
+/// The top 24 bits of a hash as `0..1`.
+fn unit(h: u64) -> f32 {
+    (h >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// Whether a static light is a street lamp ([`streetlamp`]'s downward spot and halo); the
+/// rest are signs, shop fills and set pieces' lights.
+fn is_streetlamp(l: &PointLight) -> bool {
+    l.direction == [0.0, -1.0, 0.0] && l.corona == STREETLAMP_CORONA
 }
 
 /// A street lamp hanging at `head`: a sodium spot shining down, with its corona.
@@ -308,15 +463,16 @@ impl Bounds {
 /// The nearest [`LIGHTS_PER_DRAW`] of `lights` that reach `bounds` (by distance to the
 /// box, then to its center, then order), as a light set. Allocates nothing.
 pub fn light_set(lights: &[PointLight], bounds: &Bounds) -> LightSet {
-    light_set_ranked(lights, bounds, 0..0)
+    light_set_ranked(lights, bounds, |_| false)
 }
 
-/// [`light_set`], the lights in `second` (the NPC cars' low beams) taking only the slots
-/// the others leave: no beam crowds out a street lamp or the player's headlights.
+/// [`light_set`], the lights `second` names (the NPC cars' low beams, lamps still warming
+/// up) taking only the slots the others leave: none crowds out a lit street lamp or the
+/// player's headlights.
 pub fn light_set_ranked(
     lights: &[PointLight],
     bounds: &Bounds,
-    second: core::ops::Range<usize>,
+    second: impl Fn(usize) -> bool,
 ) -> LightSet {
     // Insertion into a short sorted array: most boxes are reached by a handful of lights.
     let mut best = [(false, f32::INFINITY, f32::INFINITY, 0usize); LIGHTS_PER_DRAW];
@@ -328,7 +484,7 @@ pub fn light_set_ranked(
         }
         let p = Vec3::from(l.position);
         let key = (
-            second.contains(&i),
+            second(i),
             bounds.distance_squared(p),
             center.distance_squared(p),
             i,
@@ -359,23 +515,45 @@ pub struct FrameLights {
     statics: Vec<PointLight>,
     /// Which statics shine (a streamed chunk's lights only while it is drawn).
     active: Vec<bool>,
+    /// Each static's moment in the dusk wave (seconds after the photocell) and seed.
+    switch: Vec<(f32, u32)>,
+    /// Scratch: each static's level this frame (0 when out or inactive).
+    level: Vec<f32>,
+    wave: DuskWave,
     /// Scratch for picking the nearest statics: squared distance to the camera and index.
     order: Vec<(f32, u32)>,
     lights: [PointLight; MAX_LIGHTS],
     len: usize,
-    /// The lights that only fill slots the others leave ([`light_set_ranked`]).
+    /// The lights that only fill slots the others leave ([`light_set_ranked`]): these, and
+    /// every one from `dim`, the statics still striking or warming up.
     second: core::ops::Range<usize>,
+    dim: usize,
 }
 
 impl FrameLights {
     pub fn new(statics: Vec<PointLight>) -> FrameLights {
+        let wave = DuskWave::across(statics.iter().map(|l| l.position[0]));
+        let switch = statics
+            .iter()
+            .map(|l| {
+                if is_streetlamp(l) {
+                    wave.street(l.position)
+                } else {
+                    wave.sign(l.position)
+                }
+            })
+            .collect();
         FrameLights {
             order: Vec::with_capacity(statics.len()),
             active: vec![true; statics.len()],
+            level: vec![0.0; statics.len()],
+            switch,
+            wave,
             statics,
             lights: [PointLight::omni([0.0; 3], [0.0; 3], 0.0); MAX_LIGHTS],
             len: 0,
             second: 0..0,
+            dim: MAX_LIGHTS,
         }
     }
 
@@ -391,6 +569,11 @@ impl FrameLights {
         }
     }
 
+    /// The dusk wave across the place's lights, for the lamp lenses drawn apart from them.
+    pub fn wave(&self) -> &DuskWave {
+        &self.wave
+    }
+
     /// Capacity of the scratch buffer, which must not grow after load.
     pub fn order_capacity(&self) -> usize {
         self.order.capacity()
@@ -401,52 +584,76 @@ impl FrameLights {
         &self.lights[..self.len]
     }
 
-    /// This frame's lights: `dynamic` (the car's), then the static ones when `statics_on`
-    /// (the street lamps' photocell), all of them when they fit, else those nearest `eye`,
-    /// the farthest fading out toward the first left out.
-    pub fn gather(&mut self, eye: Vec3, statics_on: bool, dynamic: &[PointLight]) {
+    /// This frame's lights: `dynamic` (the car's), then the static ones `lamps` has lit
+    /// (each at its moment in the dusk wave, dimmed by its level), all of them when they
+    /// fit, else those nearest `eye`, the farthest fading out toward the first left out.
+    pub fn gather(&mut self, eye: Vec3, lamps: LampClock, dynamic: &[PointLight]) {
         self.second = 0..0;
+        self.dim = MAX_LIGHTS;
         let n = dynamic.len().min(MAX_LIGHTS);
         self.lights[..n].copy_from_slice(&dynamic[..n]);
         self.len = n;
-        if !statics_on {
+        if !lamps.any() {
             return;
         }
-        let room = MAX_LIGHTS - n;
-        let active = &self.active;
-        let on = || {
-            self.statics
-                .iter()
-                .zip(active)
-                .filter(|(_, &a)| a)
-                .map(|(l, _)| l)
+        let mut lit = 0;
+        for (i, level) in self.level.iter_mut().enumerate() {
+            *level = if self.active[i] {
+                let (delay, seed) = self.switch[i];
+                lamps.level(delay, seed)
+            } else {
+                0.0
+            };
+            lit += usize::from(*level > 0.0);
+        }
+        let dim = |l: &PointLight, w: f32| {
+            let mut l = *l;
+            l.color = l.color.map(|c| c * w);
+            l.corona.strength *= w;
+            l
         };
-        if on().count() <= room {
-            for l in on() {
-                self.lights[self.len] = *l;
-                self.len += 1;
+        let room = MAX_LIGHTS - n;
+        // Full-strength lights first, then those warming up, which rank second.
+        if lit <= room {
+            for warming in [false, true] {
+                if warming {
+                    self.dim = self.len;
+                }
+                for (l, &w) in self.statics.iter().zip(&self.level) {
+                    if w > 0.0 && (w < 1.0) == warming {
+                        self.lights[self.len] = dim(l, w);
+                        self.len += 1;
+                    }
+                }
             }
             return;
         }
+        let level = &self.level;
         self.order.clear();
         self.order.extend(
             self.statics
                 .iter()
                 .enumerate()
-                .filter(|&(i, _)| active[i])
+                .filter(|&(i, _)| level[i] > 0.0)
                 .map(|(i, l)| (Vec3::from(l.position).distance_squared(eye), i as u32)),
         );
         // Ties keep the earlier light, so the choice is deterministic.
         let by_distance = |a: &(f32, u32), b: &(f32, u32)| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1));
         let (kept, cut, _) = self.order.select_nth_unstable_by(room, by_distance);
         let cut = cut.0.sqrt();
-        for &(d2, i) in kept.iter() {
-            let w = ((cut - d2.sqrt()) / (STATIC_FADE * cut)).clamp(0.0, 1.0);
-            let mut l = self.statics[i as usize];
-            l.color = l.color.map(|c| c * w);
-            l.corona.strength *= w;
-            self.lights[self.len] = l;
-            self.len += 1;
+        for warming in [false, true] {
+            if warming {
+                self.dim = self.len;
+            }
+            for &(d2, i) in kept.iter() {
+                let i = i as usize;
+                if (level[i] < 1.0) != warming {
+                    continue;
+                }
+                let w = ((cut - d2.sqrt()) / (STATIC_FADE * cut)).clamp(0.0, 1.0);
+                self.lights[self.len] = dim(&self.statics[i], w * level[i]);
+                self.len += 1;
+            }
         }
     }
 
@@ -458,7 +665,8 @@ impl FrameLights {
 
     /// The light set of an instance covering `bounds` ([`light_set_ranked`]).
     pub fn set_for(&self, bounds: &Bounds) -> LightSet {
-        light_set_ranked(self.lights(), bounds, self.second.clone())
+        let (second, dim) = (self.second.clone(), self.dim);
+        light_set_ranked(self.lights(), bounds, |i| second.contains(&i) || i >= dim)
     }
 
     /// Sets each instance's light set from its bounds (`None`: lit by the sun and sky only).
@@ -575,13 +783,153 @@ mod tests {
 
     #[test]
     fn street_lamps_switch_with_the_photocell() {
-        assert_eq!(streetlamp_glow(&at(12.0)), 0.0);
-        assert_eq!(streetlamp_glow(&at(17.0 + 40.0 / 60.0)), 0.0);
+        let glow = |d: &Daylight| LampClock::of(d).level(WAVE_S - 1.0, 7);
+        assert_eq!(glow(&at(12.0)), 0.0);
+        assert_eq!(glow(&at(17.0 + 40.0 / 60.0)), 0.0);
         // Civil dusk is about 18:30 in late September; the dusk scene at 18:35 has them on.
-        assert_eq!(streetlamp_glow(&at(18.0 + 35.0 / 60.0)), 1.0);
-        assert_eq!(streetlamp_glow(&at(22.5)), 1.0);
+        assert_eq!(glow(&at(18.0 + 35.0 / 60.0)), 1.0);
+        assert_eq!(glow(&at(22.5)), 1.0);
+        assert_eq!(glow(&at(5.0)), 1.0);
+        assert!(!LampClock::of(&at(12.0)).any());
         // The windows are already most of the way up when the lamps come on.
         assert!(at(18.0 + 35.0 / 60.0).window_emissive_scale > 0.9);
+    }
+
+    /// The photocell long on (every light lit) and long off.
+    const ON: LampClock = LampClock {
+        on: true,
+        since: 3600.0,
+    };
+    const OFF: LampClock = LampClock {
+        on: false,
+        since: 3600.0,
+    };
+
+    /// A grid of street lamps 30 m apart over 1.5 km by 600 m.
+    fn lamp_grid() -> Vec<PointLight> {
+        let mut v = Vec::new();
+        for i in 0..50 {
+            for j in 0..20 {
+                // Off the 90 m block lines, as lamps by the roads are.
+                let (x, z) = (7.0 + i as f32 * 30.0, 11.0 + j as f32 * 30.0);
+                v.push(streetlamp(Vec3::new(x, 7.5, z)));
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn the_lamps_come_on_in_a_wave_east_to_west_over_twenty_seconds() {
+        let lamps = lamp_grid();
+        let wave = DuskWave::across(lamps.iter().map(|l| l.position[0]));
+        let at = |since: f32| LampClock { on: true, since };
+        let lit = |since: f32| {
+            lamps
+                .iter()
+                .filter(|l| at(since).street(&wave, l.position) > 0.0)
+                .count()
+        };
+        // None at the photocell's moment, some partway, all by the end of the wave.
+        assert_eq!(lit(0.0), 0);
+        let mid = lit(0.5 * WAVE_S);
+        assert!(mid > lamps.len() / 5 && mid < 4 * lamps.len() / 5, "{mid}");
+        assert_eq!(lit(WAVE_S), lamps.len());
+        for l in &lamps {
+            let (delay, _) = wave.street(l.position);
+            assert!((0.0..WAVE_S).contains(&delay));
+            assert_eq!(at(WAVE_S + WARM_S).street(&wave, l.position), 1.0);
+        }
+        // The front starts in the east (+x) and the blocks keep it ragged, not a line.
+        let mean = |range: core::ops::Range<f32>| {
+            let ds: Vec<f32> = lamps
+                .iter()
+                .filter(|l| range.contains(&l.position[0]))
+                .map(|l| wave.street(l.position).0)
+                .collect();
+            ds.iter().sum::<f32>() / ds.len() as f32
+        };
+        assert!(mean(1200.0..1500.0) + 8.0 < mean(0.0..300.0));
+        let column: Vec<f32> = (0..20)
+            .map(|j| wave.street([750.0, 7.5, j as f32 * 30.0]).0)
+            .collect();
+        let (lo, hi) = column
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), &d| (a.min(d), b.max(d)));
+        assert!(hi - lo > 1.5, "one street, one moment: {lo}..{hi}");
+        // A lens and its light a few centimetres apart switch together.
+        for l in &lamps {
+            let p = l.position;
+            let near = [p[0] + 0.03, p[1] - 0.2, p[2] - 0.03];
+            assert!((wave.street(p).0 - wave.street(near).0).abs() < 0.05);
+        }
+        // Signs come on in the same window, each at its own moment.
+        let signs: Vec<f32> = (0..200)
+            .map(|i| wave.sign([i as f32 * 7.0, 4.0, 13.0]).0)
+            .collect();
+        assert!(signs.iter().all(|d| (0.0..WAVE_S).contains(d)));
+        assert!(signs.windows(2).filter(|w| w[0] == w[1]).count() == 0);
+    }
+
+    #[test]
+    fn a_lamp_strikes_flickering_then_warms_up_and_goes_out_at_dawn() {
+        let on = |since: f32| LampClock { on: true, since };
+        let delay = 5.0;
+        let mut seen = Vec::new();
+        let mut t = 0.0;
+        while t < delay + WAVE_S {
+            seen.push(on(t).level(delay, 1234));
+            t += 1.0 / 12.0;
+        }
+        assert!(seen.iter().all(|l| (0.0..=1.0).contains(l)));
+        assert_eq!(seen[(delay * 12.0) as usize - 1], 0.0);
+        // It flickers while it strikes: dips after it first lit.
+        let strike = &seen[(delay * 12.0) as usize..((delay + STRIKE_S) * 12.0) as usize];
+        assert!(strike.iter().any(|&l| l < 0.1) && strike.iter().any(|&l| l > 0.2));
+        // Then climbs steadily to full.
+        let warm = &seen[((delay + STRIKE_S) * 12.0) as usize + 1..];
+        assert!(warm.windows(2).all(|w| w[1] >= w[0]));
+        assert_eq!(*warm.last().unwrap(), 1.0);
+        // At dawn it is on until its moment, then out.
+        let off = |since: f32| LampClock { on: false, since };
+        assert_eq!(off(0.0).level(delay, 1), 1.0);
+        assert_eq!(off(delay + 0.01).level(delay, 1), 0.0);
+        assert!(off(0.0).any() && !off(WAVE_S).any());
+    }
+
+    #[test]
+    fn mid_wave_the_frame_holds_only_the_lit_lights_dimmed_by_their_level() {
+        let mut frame = FrameLights::new(lamp_grid());
+        let n = frame.statics().len();
+        let mid = LampClock {
+            on: true,
+            since: 0.5 * WAVE_S,
+        };
+        frame.gather(Vec3::new(750.0, 1.2, 300.0), mid, &[]);
+        let lit = frame.lights().len();
+        assert!(lit > 0 && lit <= MAX_LIGHTS.min(n));
+        let full = STREETLAMP_RGB[0] * STREETLAMP_KCD;
+        assert!(frame.lights().iter().all(|l| l.color[0] <= full + 1e-5));
+        assert!(frame.lights().iter().any(|l| l.color[0] < 0.5 * full));
+        frame.gather(Vec3::ZERO, OFF, &[]);
+        assert!(frame.lights().is_empty());
+        frame.gather(Vec3::ZERO, ON, &[]);
+        assert_eq!(frame.lights().len(), MAX_LIGHTS.min(n));
+        // Lamps still warming up take only the slots the rest leave: a headlight far off
+        // in a box crowded with them keeps its slot.
+        let eye = Vec3::new(750.0, 1.2, 300.0);
+        let head = PointLight::omni([eye.x - 60.0, 0.7, eye.z], [10.0; 3], 80.0);
+        let early = LampClock {
+            on: true,
+            since: 10.0,
+        };
+        frame.gather(eye, early, &[head]);
+        let warming = frame.lights()[1..]
+            .iter()
+            .filter(|l| l.color[0] < 0.99 * full)
+            .count();
+        assert!(warming > 8, "{warming}");
+        let crowded = Bounds::cube(eye, 30.0);
+        assert!(frame.set_for(&crowded).indices().contains(&0));
     }
 
     fn lamps_along_x(count: usize, spacing: f32) -> Vec<PointLight> {
@@ -633,9 +981,9 @@ mod tests {
     fn every_static_light_is_on_when_they_fit() {
         let mut frame = FrameLights::new(lamps_along_x(100, 20.0));
         let head = PointLight::omni([0.0; 3], [1.0; 3], 10.0);
-        frame.gather(Vec3::ZERO, false, &[head, head]);
+        frame.gather(Vec3::ZERO, OFF, &[head, head]);
         assert_eq!(frame.lights().len(), 2, "photocell off: the car's only");
-        frame.gather(Vec3::ZERO, true, &[head, head]);
+        frame.gather(Vec3::ZERO, ON, &[head, head]);
         assert_eq!(frame.lights().len(), 102);
         assert_eq!(frame.lights()[2..], frame.statics()[..]);
     }
@@ -649,7 +997,7 @@ mod tests {
         let mut prev = vec![0.0f32; count];
         for step in 0..=400 {
             let eye = Vec3::new(4000.0 + step as f32 * 0.5, 1.2, 0.0);
-            frame.gather(eye, true, &dynamic);
+            frame.gather(eye, ON, &dynamic);
             let lights = frame.lights();
             assert_eq!(lights.len(), MAX_LIGHTS);
             let mut now = vec![0.0f32; count];
@@ -719,7 +1067,7 @@ mod tests {
         }
         // Instances get their sets; those without bounds none.
         let mut frame = FrameLights::new(lamps_along_x(30, 10.0));
-        frame.gather(Vec3::ZERO, true, &[]);
+        frame.gather(Vec3::ZERO, ON, &[]);
         let mut instances =
             [MeshInstance::new(render::MeshId(0), glam::Mat4::IDENTITY.to_cols_array_2d()); 3];
         instances[1].lights = LightSet::from_indices(&[1]);

@@ -1047,10 +1047,12 @@ impl App {
         };
         let daylight = self.time.daylight();
         self.instances.truncate(self.world_instances);
-        let lamp_glow = lighting::streetlamp_glow(&daylight);
-        for (inst, role) in self.instances.iter_mut().zip(&self.roles) {
+        // The street lamps switch in a wave at dusk; a chunk's own lenses (set pieces'
+        // lamps; the street lamps are instanced) mid-wave, each part a moment of its own.
+        let lamps = lighting::LampClock::of(&daylight);
+        for (k, (inst, role)) in self.instances.iter_mut().zip(&self.roles).enumerate() {
             if *role == PartRole::Lamps {
-                inst.glow = lamp_glow;
+                inst.glow = lamps.level(0.5 * lighting::WAVE_S, k as u32);
             }
         }
         let first_person = !self.fly && self.camera.mode().first_person();
@@ -1083,8 +1085,7 @@ impl App {
         let mut npc_lights = [dynamic[0]; npc::NPC_LIGHTS];
         let m = self.npcs.lights(alpha, eye, &mut npc_lights);
         dynamic[n..n + m].copy_from_slice(&npc_lights[..m]);
-        self.lights
-            .gather(eye, daylight.streetlights_on, &dynamic[..n + m]);
+        self.lights.gather(eye, lamps, &dynamic[..n + m]);
         self.lights.set_second(n..n + m);
         let (world, car) = self.instances.split_at_mut(self.world_instances);
         self.lights.assign(&self.bounds, world);
@@ -1100,15 +1101,7 @@ impl App {
             let lights = &self.lights;
             let rocking = &self.drive.rocking;
             let lots = &self.ground.lot_cars;
-            props.push(
-                eye,
-                live,
-                lights,
-                lamp_glow,
-                rocking,
-                lots,
-                &mut self.instances,
-            );
+            props.push(eye, live, lights, lamps, rocking, lots, &mut self.instances);
         }
         if let Some(st) = &self.strip {
             st.push(eye, &mut self.instances);

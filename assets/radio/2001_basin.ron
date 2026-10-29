@@ -1,0 +1,112 @@
+// Radio preset: 2001 Basin, for Mirage Valley. Ad-free stations only (docs/AUDIO_RADIO.md,
+// "the ad-free rule"): listener-supported, public and college broadcasters that publish their
+// stream URLs for listening in other players, each checked for pre-roll and mid-roll ads as
+// its `ad-free:` note says. Nothing is rehosted. Unlike the older presets, the dash names
+// here are invented for the world; each note says whose stream it is.
+// tools/check-streams.mjs plays every URL as the published page asks for it (its Referer
+// and Origin) and warns about a station without an `ad-free:` note; `verified` turns true
+// after the owner's first listen. Format: crates/audio/src/station.rs.
+RadioPreset(
+    id: "2001_basin",
+    title: "2001 Basin",
+    scenario: "mirage_valley_2001",
+    stations: [
+        // ad-free: 2026-10-28, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // dublab, a non-profit Los Angeles community station on the air since 1999; a DJ
+        // set from the first second both times (steady loudness per 5 s, no speech an offline
+        // recognizer could find). Terms: dublab.com's own player plays this URL; nothing forbids
+        // other players.
+        Station(
+            id: "dusk_signal",
+            name: "Dusk Signal",
+            era: "mixed",
+            format: "beats, hip hop and electronic",
+            source: Stream(
+                urls: ["https://dublab.out.airtime.pro/dublab_a"],
+                homepage: "https://www.dublab.com/",
+                codec: Mp3,
+                bitrate_kbps: 192,
+                terms_checked: "2026-10-28",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-28, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // DNBRadio, non-profit, listener-supported and volunteer-run; a live DJ mix from
+        // the first second both times (steady loudness, no speech), ICY titles are the
+        // show. Terms: its how-to-listen page publishes these URLs in a .pls for other
+        // players.
+        Station(
+            id: "mirage_breaks",
+            name: "Mirage Breaks",
+            era: "mixed",
+            format: "drum and bass DJ mixes",
+            source: Stream(
+                urls: [
+                    "https://azrelay.drmnbss.org/listen/dnbradio/radio.aac",
+                    // The same channel in MP3, for players without AAC (native).
+                    "https://azrelay.drmnbss.org/listen/dnbradio/radio.mp3",
+                ],
+                homepage: "https://dnbradio.com/how-to-listen",
+                codec: Aac,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-28",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-28, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // KXSC, the non-profit student-run station of a Los Angeles university; music from
+        // the first second both times (no speech; one quieter stretch each, no sudden
+        // jump). Terms: kxsc.org's own player plays this URL; nothing forbids other players.
+        Station(
+            id: "quad_radio",
+            name: "Quad Radio",
+            era: "mixed",
+            format: "college radio: indie and alternative",
+            source: Stream(
+                urls: ["https://broadcast.shoutcheap.com/proxy/kxsckxsc/stream"],
+                homepage: "https://kxsc.org/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-28",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-28, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // Radio Bilingue, a non-profit Latino public radio network from California's
+        // valleys, donor-supported (underwriting read on air is its own programming); music
+        // from the first second both times (steady loudness, no speech heard by a Spanish
+        // recognizer). Terms: the site's Listen button links this
+        // URL; nothing forbids other players.
+        Station(
+            id: "sol_del_valle",
+            name: "Radio Sol del Valle",
+            era: "mixed",
+            format: "Latin: regional Mexican and more",
+            source: Stream(
+                urls: ["https://radio.radiobilingue.org/"],
+                homepage: "https://radiobilingue.org/en/listen/",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-28",
+                verified: false,
+            ),
+        ),
+        // ad-free: 2026-10-28, two 60 s cold starts: no pre-roll, no break, no ad mark;
+        // Radio Paradise Main Mix, listener-supported, "Always 100% commercial-free"; music
+        // from the first second both times. Terms: URLs published for other players.
+        Station(
+            id: "overpass_rock",
+            name: "Overpass Rock",
+            era: "mixed",
+            format: "alternative and album rock",
+            source: Stream(
+                urls: ["https://stream.radioparadise.com/mp3-128"],
+                homepage: "https://radioparadise.com/listen/stream-links",
+                codec: Mp3,
+                bitrate_kbps: 128,
+                terms_checked: "2026-10-28",
+                verified: false,
+            ),
+        ),
+    ],
+)
