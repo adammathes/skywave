@@ -1292,7 +1292,15 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     h.open(&[ItemId::Open(Page::Vehicle)]);
     assert_eq!(h.page(), Page::Vehicle);
     let ids: Vec<ItemId> = h.ui().items().iter().map(|i| i.id).collect();
-    assert_eq!(ids, [ItemId::VehicleCar, ItemId::Paint, ItemId::Vehicle(0)]);
+    assert_eq!(
+        ids,
+        [
+            ItemId::VehicleCar,
+            ItemId::Paint,
+            ItemId::Driver,
+            ItemId::Vehicle(0)
+        ]
+    );
     assert_eq!((h.focus(), browsed(&h)), (0, (0, 0)));
     let text = h.hud_text();
     let gannet = &roster::roster()[0];
@@ -1644,7 +1652,7 @@ fn fits(h: &mut Harness, what: &str, scale: f32) {
         }
     }
     let text = h.hud_text();
-    for want in ["Car", "Paint", "Drive this car"] {
+    for want in ["Car", "Paint", "Driver", "Drive this car"] {
         assert!(text.contains(want), "{what}: {text}");
     }
     if scale <= 1.5 {

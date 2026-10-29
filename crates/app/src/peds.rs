@@ -155,6 +155,16 @@ impl Crowd {
         self.built_bytes = bytes;
     }
 
+    /// How many figures are built (none until the density is first on).
+    pub fn variants(&self) -> usize {
+        self.variants.len()
+    }
+
+    /// Figure `v`'s skeleton and part meshes, if built.
+    pub fn variant(&self, v: usize) -> Option<(&Skeleton, &[MeshId; PARTS])> {
+        self.variants.get(v).map(|f| (&f.skeleton, &f.ids))
+    }
+
     /// Most instances a frame draws: a part for every person the pool holds.
     pub fn capacity(&self) -> usize {
         self.prev.len() * PARTS

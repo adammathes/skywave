@@ -22,6 +22,7 @@ pub mod daylight;
 pub mod deck;
 pub mod dragstrip;
 pub mod drive;
+pub mod driver;
 pub mod gallery;
 mod input;
 pub mod lighting;
@@ -171,6 +172,8 @@ pub struct App {
     time: TimeOfDay,
     meshes: Vec<Mesh>,
     car_meshes: CarMeshes,
+    /// The player's preset drivers, built for the place's era.
+    pub(crate) drivers: driver::Drivers,
     /// Every car and paint registered so far (the one driven among them), for switching
     /// back and for the turntable.
     cars: Vec<RegisteredCar>,
@@ -329,6 +332,11 @@ impl App {
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let sound = sound::Sound::new(&place, &drive);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
+        let figure_era = if place.header.era == place::Era::Seventies {
+            traffic::figure::Era::Seventies
+        } else {
+            traffic::figure::Era::Eighties
+        };
         if let Some(r) = &rail {
             let line = &r.railway.train.line;
             let pts: Vec<[f32; 2]> = line.pts.iter().map(|p| [p[0], p[2]]).collect();
@@ -351,6 +359,10 @@ impl App {
         let world_instances = instances.len();
         let car_meshes = model.register(|m| {
             meshes.push(m.clone());
+            MeshId(meshes.len() as u32 - 1)
+        });
+        let drivers = driver::Drivers::build(figure_era, |m| {
+            meshes.push(m);
             MeshId(meshes.len() as u32 - 1)
         });
         meshes.push(preview::turntable_mesh());
@@ -424,6 +436,7 @@ impl App {
             },
             meshes,
             car_meshes,
+            drivers,
             cars,
             preview: None,
             turntable,
@@ -516,6 +529,9 @@ impl App {
         }
         if let Some(s) = setup.ui_scale {
             app.ui.force_ui_scale(s);
+        }
+        if let Some(d) = setup.driver {
+            app.ui.force_driver(d);
         }
         // A scene's density applies now; the setting's once the settings are loaded.
         app.traffic_scene = setup.traffic_density();
@@ -1087,6 +1103,11 @@ impl App {
                 },
                 &mut self.instances,
             );
+            if let Some(d) = self.drivers.get(self.ui.driver()) {
+                let look = self.camera.look_yaw(alpha);
+                self.drive
+                    .push_driver(alpha, d, cabin, look, &mut self.instances);
+            }
         }
         // The car's lamps, the nearest NPC cars' low beams, then every static light the
         // photocell has on; each instance gets the nearest that reach it, the car's
@@ -1157,6 +1178,7 @@ impl App {
                     car: &car.meshes,
                     layout: &car.layout,
                     turntable: self.turntable,
+                    driver: self.drivers.get(self.ui.driver()),
                 };
                 let glow = lighting::car_glow(&daylight);
                 let fill = daylight.window_emissive_scale;

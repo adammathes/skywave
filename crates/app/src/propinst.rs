@@ -280,6 +280,9 @@ struct Entry {
     reach2: f32,
     /// A parked car: it sways when knocked ([`world::collide::Rocking`]).
     car: bool,
+    /// A parked car's see-through glass, drawn over its near level ([`car::parked_cabin`]);
+    /// `u16::MAX` for every other prop.
+    glass: u16,
     /// A parking lot's car: its index into the collider's lot cars
     /// ([`world::WorldCollider::lot_cars`], in `Props` order), drawn only while there;
     /// [`world::collide::NO_LOT`] for every other prop.
@@ -292,6 +295,9 @@ pub struct PropInstances {
     ids: Vec<MeshId>,
     /// Sorted by mesh.
     entries: Vec<Entry>,
+    /// The parked cars' entries ordered by their glass mesh, so each glass mesh's instances
+    /// are one run.
+    by_glass: Vec<u32>,
     /// The street lights' mesh...
     lamp_mesh: u16,
     /// ...and where its light hangs in it, so a lens switches in the dusk wave with its
@@ -372,6 +378,7 @@ impl PropInstances {
             .iter()
             .map(|s| vec![None; s.palette.len() + shape::ERA_1980S_PAINT.len()])
             .collect();
+        let mut glass_mesh: Vec<Option<u16>> = vec![None; shapes.len()];
         let mut entries = Vec::with_capacity(items.len());
         let mut lots = 0u32;
         for p in items {
@@ -387,6 +394,7 @@ impl PropInstances {
             );
             let mut tint = [1.0; 4];
             let mut far = u16::MAX;
+            let mut glass = u16::MAX;
             let (mesh, transform, bounds, reach) = match p.kind {
                 PropKind::ParkedCar { .. } | PropKind::HeroCar { .. } => {
                     let (s, paint, era) = match p.kind {
@@ -429,6 +437,15 @@ impl PropInstances {
                         }
                     };
                     far = id + 1;
+                    glass = match glass_mesh[s] {
+                        Some(g) => g,
+                        None => {
+                            meshes.push(car::parked_cabin(&shapes[s])?.0);
+                            let g = (meshes.len() - 1) as u16;
+                            glass_mesh[s] = Some(g);
+                            g
+                        }
+                    };
                     let m = Mat4::from_rotation_translation(Quat::from_rotation_y(p.yaw), pos);
                     let b = Bounds::cube(pos + Vec3::Y, 2.8);
                     // Road dust and sun wear: a little darker and warmer, up to 14%; a hero
@@ -473,6 +490,7 @@ impl PropInstances {
                 chunk,
                 reach2: reach * reach,
                 car,
+                glass,
                 lot: match p.kind {
                     PropKind::ParkedCar { hours, .. } if hours != place::ALL_HOURS => {
                         lots += 1;
@@ -484,10 +502,15 @@ impl PropInstances {
         }
         // Stable, so each mesh's instances keep the table's order.
         entries.sort_by_key(|e| e.mesh);
+        let mut by_glass: Vec<u32> = (0..entries.len() as u32)
+            .filter(|&i| entries[i as usize].glass != u16::MAX)
+            .collect();
+        by_glass.sort_by_key(|&i| entries[i as usize].glass);
         Ok(Some(PropInstances {
             meshes,
             ids: Vec::new(),
             entries,
+            by_glass,
             lamp_mesh,
             lamp_head,
             cars: car_mesh,
@@ -513,9 +536,9 @@ impl PropInstances {
         self.ids = ids;
     }
 
-    /// Instanced props in all.
+    /// Most instances a frame can draw: every prop, and a parked car's glass.
     pub fn count(&self) -> usize {
-        self.entries.len()
+        self.entries.len() + self.by_glass.len()
     }
 
     /// Appends the instances near `eye` whose chunk `live` says is drawn, at most
@@ -539,6 +562,37 @@ impl PropInstances {
         let wave = lights.wave();
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
         let near2 = CAR_DETAIL_RADIUS_M * CAR_DETAIL_RADIUS_M;
+        // Whether a prop shows, how far it is (squared) and whether at its far level.
+        let shown = |e: &Entry| {
+            let d2 = e.bounds.distance_squared(eye);
+            if d2 > e.reach2 || !live(e.chunk) {
+                return None;
+            }
+            if e.lot != world::collide::NO_LOT
+                && !lot_cars.get(e.lot as usize).is_some_and(|c| c.present)
+            {
+                return None;
+            }
+            Some((d2, e.far != e.mesh && d2 > near2))
+        };
+        let lights_for = |e: &Entry, d2: f32| {
+            if d2 < lit2 {
+                lights.set_for(&e.bounds)
+            } else {
+                LightSet::EMPTY
+            }
+        };
+        // A knocked parked car leans the same at either level of detail, glass and all.
+        let transform_of = |e: &Entry| {
+            let mut transform = e.transform;
+            if e.car {
+                let at = [transform[3][0], transform[3][2]];
+                if let Some(tilt) = rocking.tilt_at(at) {
+                    transform = tilted(transform, tilt);
+                }
+            }
+            transform
+        };
         // Two passes so each mesh's instances stay one run: everything near (and every
         // prop with one level), then the far parked cars at their lower level.
         for far in [false, true] {
@@ -546,25 +600,13 @@ impl PropInstances {
                 if n == MAX_PROP_INSTANCES {
                     return n;
                 }
-                let d2 = e.bounds.distance_squared(eye);
-                if d2 > e.reach2 || !live(e.chunk) {
+                let Some((d2, lod_far)) = shown(e) else {
                     continue;
-                }
-                if e.lot != world::collide::NO_LOT
-                    && !lot_cars.get(e.lot as usize).is_some_and(|c| c.present)
-                {
-                    continue;
-                }
-                let lod_far = e.far != e.mesh && d2 > near2;
+                };
                 if lod_far != far {
                     continue;
                 }
                 let mesh = if far { e.far } else { e.mesh };
-                let lights = if d2 < lit2 {
-                    lights.set_for(&e.bounds)
-                } else {
-                    LightSet::EMPTY
-                };
                 // A parked car's lamps (built lit for the traffic) are off.
                 let glow = if e.mesh == self.lamp_mesh {
                     let head =
@@ -575,22 +617,31 @@ impl PropInstances {
                 } else {
                     1.0
                 };
-                // A knocked parked car leans the same at either level of detail.
-                let mut transform = e.transform;
-                if e.car {
-                    let at = [transform[3][0], transform[3][2]];
-                    if let Some(tilt) = rocking.tilt_at(at) {
-                        transform = tilted(transform, tilt);
-                    }
-                }
                 out.push(MeshInstance {
-                    lights,
+                    lights: lights_for(e, d2),
                     glow,
                     color: e.tint,
-                    ..MeshInstance::new(self.ids[usize::from(mesh)], transform)
+                    ..MeshInstance::new(self.ids[usize::from(mesh)], transform_of(e))
                 });
                 n += 1;
             }
+        }
+        // The near parked cars' glass, over their cabins.
+        for &i in &self.by_glass {
+            if n == MAX_PROP_INSTANCES {
+                return n;
+            }
+            let e = &self.entries[i as usize];
+            let Some((d2, false)) = shown(e) else {
+                continue;
+            };
+            out.push(MeshInstance {
+                lights: lights_for(e, d2),
+                glass: true,
+                casts_shadow: false,
+                ..MeshInstance::new(self.ids[usize::from(e.glass)], transform_of(e))
+            });
+            n += 1;
         }
         n
     }

@@ -13,6 +13,8 @@ use render::{Corona, MeshId, MeshInstance, PointLight};
 use vehicle::sim::{DT, FRONT_LEFT, FRONT_RIGHT, REAR_LEFT};
 use vehicle::{Assists, VehicleInput, VehicleSpec, VehicleState};
 
+use traffic::figure::PARTS;
+
 use crate::car::{CarLayout, CarMeshes, CarModel};
 use crate::input::{Action, InputState};
 use crate::vehicles;
@@ -41,10 +43,10 @@ pub const START_GROUND: [f32; 3] = [-92.0, 0.0, 4.9];
 /// `-z` (north), positive turns left.
 pub const START_HEADING_RAD: f32 = -FRAC_PI_2;
 
-/// Most instances one car adds per frame: body, glass, lamps, four wheels, then in the
-/// cockpit the cabin walls, the cabin, the steering wheel, the dial ticks, up to three
-/// needles and the two headlight tell-tales.
-pub const MAX_CAR_INSTANCES: usize = 16;
+/// Most instances one car adds per frame: body, glass, lamps, underglow, four wheels, then
+/// the cabin walls, the cabin, the steering wheel, the dial ticks, up to three needles and
+/// the two headlight tell-tales, and the driver's parts.
+pub const MAX_CAR_INSTANCES: usize = 17 + PARTS;
 
 /// Headlights: one spot per headlamp, from just behind its lens (inside the lamp, so the
 /// car's own nose is not lit), aimed this far below the car's forward axis, degrees...
@@ -612,11 +614,11 @@ impl Drive {
     }
 
     /// Appends the car's instances at level of detail 0: body (pop-ups up while the
-    /// headlights are on), glass, the lamps in their state, four wheels and, by `cabin` (the
-    /// first-person cameras), the cabin walls (the shell inside out) and then the interior,
-    /// steering wheel and gauge needles, lit by the cabin light. An open-top car shows its
-    /// interior and steering wheel from the outside cameras too, lit like the outside ("hood
-    /// only" keeps to the walls). The lamps and the instruments glow by `glow`. At most
+    /// headlights are on), glass (see-through), the lamps in their state, four wheels and, by
+    /// `cabin` (the first-person cameras), the cabin walls (the shell inside out) and then
+    /// the interior, steering wheel and gauge needles, lit by the cabin light. The outside
+    /// cameras see the interior and steering wheel through the glass (or over an open top),
+    /// lit like the outside ("hood only" keeps to the walls). The lamps and the instruments glow by `glow`. At most
     /// [`MAX_CAR_INSTANCES`].
     pub fn push_instances(
         &self,
@@ -636,7 +638,12 @@ impl Drive {
         let on = usize::from(self.headlights);
         let body = self.pose(alpha).matrix();
         out.push(instance(lod.body[on], body));
-        out.push(instance(lod.glass, body));
+        // See-through: the driver and the cabin show through it. Sunlight comes in.
+        out.push(MeshInstance {
+            glass: true,
+            casts_shadow: false,
+            ..instance(lod.glass, body)
+        });
         out.push(MeshInstance {
             glow: glow.lamps,
             ..instance(lod.lights[on][usize::from(self.braking())], body)
@@ -650,7 +657,7 @@ impl Drive {
         for w in self.wheels(alpha) {
             out.push(instance(lod.wheel, w));
         }
-        if cabin == Cabin::Outside && self.layout.open_top {
+        if cabin == Cabin::Outside {
             let open = |mesh: MeshId, m: Mat4| MeshInstance {
                 glow: glow.instruments,
                 ..instance(mesh, m)
@@ -686,6 +693,45 @@ impl Drive {
             if self.high_beams_lit() {
                 out.push(inside(high, body));
             }
+        }
+    }
+
+    /// Appends the driver's parts seated in the car `alpha` of the way through the step,
+    /// hands on the steering wheel, head turned by the camera's `look_yaw`: the whole figure
+    /// from the outside cameras, without the head and torso in the cockpit ([`Cabin::Full`];
+    /// "hood only" draws no driver). Lit by the cabin light in the cockpit, casting no
+    /// shadow (the car's own shadows them).
+    pub fn push_driver(
+        &self,
+        alpha: f32,
+        driver: &crate::driver::Driver,
+        cabin: Cabin,
+        look_yaw: f32,
+        out: &mut Vec<MeshInstance>,
+    ) {
+        if cabin == Cabin::Frame {
+            return;
+        }
+        let steer = mix(self.prev.steer_angle_rad, self.state.steer_angle_rad, alpha);
+        let turn = -steer * self.layout.steering_ratio;
+        let mut parts = [Mat4::IDENTITY; PARTS];
+        crate::driver::pose(
+            &driver.skeleton,
+            &self.layout.seating,
+            turn,
+            crate::driver::head_turn(look_yaw),
+            &mut parts,
+        );
+        let body = self.pose(alpha).matrix();
+        for (k, m) in parts.iter().enumerate() {
+            if cabin == Cabin::Full && !crate::driver::in_cockpit(k) {
+                continue;
+            }
+            out.push(MeshInstance {
+                cabin: if cabin == Cabin::Full { 1.0 } else { 0.0 },
+                casts_shadow: false,
+                ..MeshInstance::new(driver.ids[k], (body * *m).to_cols_array_2d())
+            });
         }
     }
 
@@ -1268,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn an_open_top_shows_its_cabin_from_every_camera() {
+    fn the_cabin_shows_from_every_camera() {
         let ids = ids();
         let lod = ids.lods[0];
         for id in [
@@ -1300,11 +1346,64 @@ mod tests {
             assert_eq!(out.len(), 8, "{id}");
             assert_eq!(out[7].mesh, lod.shell_inside);
         }
+        // A hardtop's cabin shows through its glass, which is see-through and casts no
+        // shadow.
         let hardtop = Drive::new("homestead_wagon").unwrap();
         assert!(!hardtop.layout.open_top);
         let mut out = Vec::new();
         hardtop.push_instances(0.5, &ids, Cabin::Outside, CarGlow::default(), &mut out);
-        assert_eq!(out.len(), 7);
+        assert_eq!(out.len(), 9);
+        assert_eq!(
+            (out[7].mesh, out[8].mesh),
+            (lod.interior, lod.steering_wheel)
+        );
+        assert!(out[1].mesh == lod.glass && out[1].glass && !out[1].casts_shadow);
+        assert_eq!(out.iter().filter(|i| i.glass).count(), 1);
+    }
+
+    /// The driver: every part from outside, no head or torso in the cockpit, nobody with
+    /// "hood only"; within the car's instance budget, casting no shadow, hands moving with
+    /// the steering wheel.
+    #[test]
+    fn the_driver_sits_at_the_wheel_from_every_camera() {
+        let f = traffic::figure::build(&traffic::figure::FigureSpec::preset(
+            0,
+            traffic::figure::Era::Eighties,
+        ));
+        let driver = crate::driver::Driver {
+            skeleton: f.skeleton,
+            ids: core::array::from_fn(|k| MeshId(100 + k as u32)),
+        };
+        let mut d = Drive::new(DEFAULT_VEHICLE).unwrap();
+        let ids = ids();
+        let count = |d: &Drive, cabin| {
+            let mut out = Vec::new();
+            d.push_instances(0.5, &ids, cabin, CarGlow::default(), &mut out);
+            let car = out.len();
+            d.push_driver(0.5, &driver, cabin, 0.0, &mut out);
+            assert!(out.len() <= MAX_CAR_INSTANCES);
+            assert!(out[car..].iter().all(|i| !i.casts_shadow));
+            out[car..].to_vec()
+        };
+        assert_eq!(count(&d, Cabin::Outside).len(), PARTS);
+        let cockpit = count(&d, Cabin::Full);
+        assert_eq!(cockpit.len(), PARTS - 2);
+        assert!(cockpit.iter().all(|i| i.cabin == 1.0));
+        let head = driver.ids[traffic::figure::Part::Head as usize];
+        assert!(cockpit.iter().all(|i| i.mesh != head));
+        assert!(count(&d, Cabin::Frame).is_empty());
+        // Steering moves the left hand (the forearm's end) round with the rim.
+        let hand = |d: &Drive| {
+            let i = count(d, Cabin::Outside)[traffic::figure::Part::LowerArmL as usize];
+            Mat4::from_cols_array_2d(&i.transform).transform_point3(Vec3::NEG_Y * 0.3)
+        };
+        let straight = hand(&d);
+        d.state.steer_angle_rad = 0.2;
+        d.prev.steer_angle_rad = 0.2;
+        assert!(
+            hand(&d).distance(straight) > 0.05,
+            "the hands follow the wheel"
+        );
     }
 
     #[test]

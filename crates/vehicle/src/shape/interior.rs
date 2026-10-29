@@ -62,6 +62,12 @@ impl<'a, 'b> Interior<'a, 'b> {
         let x_d = -i.driver_offset;
         let eye = [x_d, i.seat.1 + 0.60, self.z(i.seat.0 + 0.16)];
         self.cockpit.eye = eye;
+        self.cockpit.hip = [x_d, i.seat.1, self.z(i.seat.0)];
+        // The pedals stand 0.42 m ahead of the dash's edge; the heels rest 0.2 m behind
+        // them.
+        let heel = i.dash_x - 0.22;
+        self.cockpit.heel = [x_d, self.floor_y(heel), self.z(heel)];
+        self.cockpit.wheel_radius = i.wheel_radius;
         if self.lod0() {
             self.shell();
         }

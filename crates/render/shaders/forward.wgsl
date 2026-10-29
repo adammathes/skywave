@@ -383,3 +383,21 @@ fn fs_mesh(in: MeshOut) -> @location(0) vec4<f32> {
 fn fs_mesh_ldr(in: MeshOut) -> @location(0) vec4<f32> {
     return display(shade(in), in.clip.xy);
 }
+
+// Window glass: the instance color's alpha, rising toward opaque at grazing angles where
+// glass reflects most (Schlick's curve).
+fn glass_alpha(in: MeshOut) -> f32 {
+    let v = normalize(frame.camera_pos.xyz - in.world_pos);
+    let f = pow(1.0 - clamp(abs(dot(normalize(in.normal), v)), 0.0, 1.0), 5.0);
+    return mix(in.color.a, 1.0, f);
+}
+
+@fragment
+fn fs_glass(in: MeshOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(shade(in), glass_alpha(in));
+}
+
+@fragment
+fn fs_glass_ldr(in: MeshOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(display(shade(in), in.clip.xy).rgb, glass_alpha(in));
+}

@@ -17,11 +17,12 @@
 //! switch is on, with two lights under the car for the glow on the road
 //! ([`CarLayout::underglow`]).
 //!
-//! **Glass** is single-sided, facing out. The forward pass culls back faces and has no
-//! blended path yet, so windows are opaque tinted panes seen from outside and vanish from
-//! inside: the cockpit sees the street through the windshield and side glass. Glass uvs
-//! (meters along the car and up) map onto one pane of [`Tile::WindowGlass`], so the panes
-//! carry its sky-reflection gradient and highlight streak.
+//! **Glass** is single-sided, facing out. It is drawn see-through (`MeshInstance::glass`:
+//! blended by its color's alpha, the shape's 150 of 255, more opaque at grazing angles) so
+//! the outside cameras see the cabin and the driver in it, and it vanishes from inside: the
+//! cockpit sees the street through the windshield and side glass. Glass uvs (meters along
+//! the car and up) map onto one pane of [`Tile::WindowGlass`], so the panes carry its
+//! sky-reflection gradient and highlight streak.
 //!
 //! **Cabin walls.** The interior mesh covers the dash, door cards, pillars and seats but
 //! not every gap down to the floor, and the shell's own faces point out, so from the seat
@@ -31,8 +32,8 @@
 //! the shell's front faces, so it costs only triangles, and only in the first-person
 //! cameras.
 //!
-//! **Convertibles** ([`CarLayout::open_top`]) have no roof or side glass, so their cabin
-//! shows from outside: every camera draws the interior and steering wheel. The body has
+//! **Convertibles** ([`CarLayout::open_top`]) have no roof or side glass. Every camera
+//! draws the interior and steering wheel (through the glass or over the open top). The body has
 //! nothing above the belt over the cabin, so neither has its inside-out copy, and the
 //! cockpit sees the sky. A targa is open over the front seats the same way, so it counts as
 //! open too.
@@ -208,11 +209,12 @@ pub struct CarLayout {
     pub taillamps: [Vec3; 2],
     /// Overall body extent: length, width, height, m (the spec's `dims_m`).
     pub dims: [f32; 3],
-    /// A convertible or a targa: the cabin shows from outside, so the interior and steering
-    /// wheel are drawn from every camera, not only the first-person ones.
+    /// A convertible or a targa: no roof over the front seats.
     pub open_top: bool,
     /// The underglow's lights, if the car has one.
     pub underglow: Option<Underglow>,
+    /// Where the driver sits, body space.
+    pub seating: crate::driver::Seating,
 }
 
 /// How far over the tubes the underglow's lights sit (inside the body, which they do not
@@ -298,6 +300,7 @@ impl CarLayout {
             dims: spec.dims_m,
             open_top: shape.roof.convertible() || shape.details.contains(&Detail::Targa),
             underglow: Underglow::of(&car.underglow, offset),
+            seating: crate::driver::Seating::of(c, offset),
         }
     }
 
@@ -563,8 +566,9 @@ impl CarModel {
 }
 
 /// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
-/// detail `lod` (1 near, 2 far), as one mesh (body, glass, lamps and four wheels), its origin
-/// on the ground midway between the axles, nose toward `-z`. The lamps are built lit (head
+/// detail `lod` (1 near, 2 far), as one mesh (body, lamps and four wheels; near, the cabin
+/// and steering wheel, seen through the separate [`parked_cabin`] glass; far, the glass),
+/// its origin on the ground midway between the axles, nose toward `-z`. The lamps are built lit (head
 /// lamps as the shape has them, tail lamps at [`TAIL_GLOW`]): an instance's `glow` switches
 /// them, 0 for a parked car, the lamp glow for an NPC car driving with its lights on.
 pub fn parked_mesh(
@@ -606,7 +610,12 @@ fn parked_mesh_and_lamps(
         out.vertices.extend_from_slice(&m.vertices);
         out.indices.extend(m.indices.iter().map(|i| i + base));
     };
-    add(&convert(&car.glass, offset, Surface::Glass));
+    if lod <= 1 {
+        add(&convert(&car.interior, offset, Surface::Plain));
+        add(&convert(&car.steering_wheel, offset, Surface::Plain));
+    } else {
+        add(&convert(&car.glass, offset, Surface::Glass));
+    }
     let heads = lamp_centers(&car.lights, LampGroup::Head).map(|p| p + offset);
     let mut lamps = convert(&car.lights, offset, Surface::Plain);
     for v in &mut lamps.vertices {
@@ -635,6 +644,30 @@ fn parked_mesh_and_lamps(
         add(&w);
     }
     Ok((out, heads))
+}
+
+/// The near [`parked_mesh`]'s glass (drawn see-through over its cabin) and where its driver
+/// sits, in the same frame.
+pub fn parked_cabin(shape: &ShapeSpec) -> Result<(Mesh, crate::driver::Seating), String> {
+    let car = shape::build_with(
+        shape,
+        &BuildOptions {
+            color_index: 0,
+            lod: 1,
+            popups_up: false,
+            paint: None,
+        },
+    )
+    .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
+    let offset = Vec3::new(
+        0.0,
+        0.0,
+        -0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]),
+    );
+    Ok((
+        convert(&car.glass, offset, Surface::Glass),
+        crate::driver::Seating::of(&car.cockpit, offset),
+    ))
 }
 
 /// How far a brake overlay's lenses stand off the parked mesh's, at levels of detail 1 and

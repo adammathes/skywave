@@ -1577,6 +1577,273 @@ impl Skeleton {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Driving.
+
+/// Where a driver sits, in the figure frame: `+x` right, `+y` up, `-z` forward, the origin
+/// anywhere (the car's own frame scaled to the figure does).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seat {
+    /// The hip joint (the seat's hip point).
+    pub hip: V3,
+    /// How far the seat back leans back from upright, radians.
+    pub recline: f32,
+    /// Where each heel rests on the floor, left then right.
+    pub heels: [V3; 2],
+    /// Each foot's pitch on its pedal or the floor, radians, toe up.
+    pub toe: f32,
+    /// Where each hand grips the wheel rim, left then right.
+    pub hands: [V3; 2],
+    /// Head turn, radians, positive to the left.
+    pub look: f32,
+}
+
+/// Grip point along the forearm from the elbow, as a share of the height: the palm.
+const GRIP_H: f32 = 0.19;
+
+/// The figure's eye above the neck joint at rest (the head part's frame), as shares of the
+/// height and of the head: the head sits 0.04 h up its neck, the eyes 0.47 of its height.
+fn eye_in_head(h: f32) -> V3 {
+    let hh = 0.23 * sqrt(h / 1.75);
+    [0.0, 0.04 * h + 0.47 * hh, -0.004 * h - 0.3 * hh]
+}
+
+/// `[pitch, yaw, roll]` of the rotation `m` ([`euler`]'s inverse).
+fn angles(m: &M3) -> V3 {
+    let roll = atan2(m[1][0], sqrt(m[0][0] * m[0][0] + m[2][0] * m[2][0]));
+    [atan2(-m[1][2], m[1][1]), atan2(-m[2][0], m[0][0]), roll]
+}
+
+impl Skeleton {
+    /// The eye's distance from the hip joint sitting straight up, m: what a seat scales the
+    /// figure by to put its eyes where the car's are.
+    pub fn hip_to_eye(&self) -> f32 {
+        let e = eye_in_head(self.height_m);
+        self.offset[Part::Torso as usize][1] + self.offset[Part::Head as usize][1] + e[1]
+    }
+
+    /// The eye in the figure frame for `j` (a posed figure's eye point).
+    pub fn eye(&self, j: &Joints) -> V3 {
+        let mut xf = [Xform::IDENTITY; PARTS];
+        self.pose(j, &mut xf);
+        xf[Part::Head as usize].apply(eye_in_head(self.height_m))
+    }
+
+    /// Seated at the wheel: the hips on `seat.hip`, the back on the seat back, the heels
+    /// on the floor with the feet on the pedals, the hands gripping the rim where `seat`
+    /// says (two-bone arms, elbows down and a little out) and the head level, turned by
+    /// `seat.look`. A target out of reach is reached for as far as the limb goes.
+    pub fn drive(&self, seat: &Seat) -> Joints {
+        let mut j = Joints {
+            root: seat.hip,
+            rot: [[0.0; 3]; PARTS],
+        };
+        // The pelvis tips back with the seat; the back sits on it, rounded a little by a
+        // slouch; the head comes level and turns with the look, the shoulders a little.
+        let back = seat.recline.clamp(0.0, 0.6);
+        let round = -0.04 - 0.06 * self.slouch;
+        let look = seat.look.clamp(-1.3, 1.3);
+        j.rot[Part::Pelvis as usize][0] = back;
+        j.rot[Part::Torso as usize] = [round, 0.12 * look, 0.0];
+        for side in 0..2 {
+            let h = seat.heels[side];
+            self.leg(&mut j, side, h[0], h[1], h[2], seat.toe);
+        }
+        let a = self.upper_arm_m;
+        let b = GRIP_H * self.height_m;
+        let arms = [
+            (Part::UpperArmL, Part::LowerArmL, -1.0),
+            (Part::UpperArmR, Part::LowerArmR, 1.0),
+        ];
+        // A wheel out of easy reach brings the shoulders forward: the back leans off the
+        // seat back until the farther hand is within reach, up to 0.6 rad.
+        let mut xf = [Xform::IDENTITY; PARTS];
+        let lever = self.offset[Part::UpperArmL as usize][1];
+        let mut lean = 0.0;
+        for _ in 0..3 {
+            self.pose(&j, &mut xf);
+            let torso = xf[Part::Torso as usize];
+            let short = arms
+                .iter()
+                .enumerate()
+                .map(|(k, &(upper, _, _))| {
+                    let d = sub(seat.hands[k], torso.apply(self.offset[upper as usize]));
+                    sqrt(dot(d, d)) - 0.96 * (a + b)
+                })
+                .fold(0.0f32, f32::max);
+            if short <= 0.0 || lean >= 0.6 {
+                break;
+            }
+            let more = (short / lever).min(0.6 - lean);
+            lean += more;
+            j.rot[Part::Torso as usize][0] -= more;
+        }
+        self.pose(&j, &mut xf);
+        let torso = xf[Part::Torso as usize];
+        // The head turns about the vertical, whatever the back's lean: its rotation in the
+        // figure frame, taken back into the torso's.
+        let head = euler([-0.02, 0.85 * look, 0.0]);
+        let mut rel = [[0.0; 3]; 3];
+        for (c, col) in (0..3)
+            .map(|c| tmul(&torso.rot, [head[0][c], head[1][c], head[2][c]]))
+            .enumerate()
+        {
+            for r in 0..3 {
+                rel[r][c] = col[r];
+            }
+        }
+        j.rot[Part::Head as usize] = angles(&rel);
+        // Arms: the shoulders where the torso puts them, each hand on its grip.
+        for (k, (upper, lower, s)) in arms.into_iter().enumerate() {
+            let shoulder = self.offset[upper as usize];
+            // The hand from the shoulder, in the torso's frame.
+            let mut d = tmul(&torso.rot, sub(seat.hands[k], torso.apply(shoulder)));
+            let len = sqrt(dot(d, d)).clamp(1e-3, (a + b) * 0.995);
+            d = scale(norm(d), len);
+            let dir = norm(d);
+            // The elbow bends toward its pole: down, out to the side and a little back.
+            let pole = [0.55 * s, -1.0, 0.25];
+            let n = norm(sub(pole, scale(dir, dot(pole, dir))));
+            let cos_a = ((a * a + len * len - b * b) / (2.0 * a * len)).clamp(-1.0, 1.0);
+            let sin_a = sqrt(1.0 - cos_a * cos_a);
+            let elbow = add(scale(dir, a * cos_a), scale(n, a * sin_a));
+            // The upper arm's frame: `+y` from the elbow up to the shoulder, `-z` toward
+            // the hand across the bend, `x = y × z`.
+            let y = scale(elbow, -1.0 / a);
+            let to_hand = sub(d, elbow);
+            let fwd = norm(sub(to_hand, scale(y, dot(to_hand, y))));
+            let z = scale(fwd, -1.0);
+            let x = cross(y, z);
+            let m = [[x[0], y[0], z[0]], [x[1], y[1], z[1]], [x[2], y[2], z[2]]];
+            j.rot[upper as usize] = angles(&m);
+            // The forearm swings forward (`+pitch`) by the elbow's bend.
+            let cos_e = dot(scale(y, -1.0), norm(to_hand));
+            j.rot[lower as usize] = [acos(cos_e), 0.0, 0.0];
+        }
+        j
+    }
+}
+
+/// The player's drivers to pick from ([`FigureSpec::preset`]): a name for the picker and
+/// how each looks. Invented people; the clothes are the era's.
+pub const PRESETS: usize = 4;
+
+/// Picker names of the [`PRESETS`].
+pub const PRESET_NAMES: [&str; PRESETS] = ["Jacket", "Suit", "Tee", "Sundress"];
+
+/// One preset: build, outfit and hair, skin and hair colors, and per era (seventies,
+/// eighties) top, trim, bottom, shoes and accent, sRGB.
+struct Preset {
+    height_m: f32,
+    build: f32,
+    shoulders: f32,
+    slouch: f32,
+    outfit: Outfit,
+    hair: Hair,
+    sunglasses: bool,
+    /// A headband in the eighties.
+    headband: bool,
+    skin: u32,
+    hair_rgb: u32,
+    clothes: [[u32; 5]; 2],
+}
+
+const PRESET_LOOKS: [Preset; PRESETS] = [
+    Preset {
+        height_m: 1.78,
+        build: 0.45,
+        shoulders: 0.7,
+        slouch: 0.4,
+        outfit: Outfit::JeansJacket,
+        hair: Hair::Short,
+        sunglasses: false,
+        headband: false,
+        skin: SKIN[3],
+        hair_rgb: HAIR[2],
+        clothes: [
+            [0x6b4a2f, 0xe6dabf, 0x3c5a82, 0x3e2a1c, 0x7a2a1e],
+            [0x26262a, 0xf2efe6, 0x4d6c96, 0x1e1b1a, 0x2fb3b0],
+        ],
+    },
+    Preset {
+        height_m: 1.83,
+        build: 0.55,
+        shoulders: 0.8,
+        slouch: 0.15,
+        outfit: Outfit::Suit,
+        hair: Hair::Cropped,
+        sunglasses: true,
+        headband: false,
+        skin: SKIN[7],
+        hair_rgb: HAIR[0],
+        clothes: [
+            [0x5e2430, 0xf0e2c8, 0x5e2430, 0x1e1b1a, 0xc8962e],
+            [0xe3dccb, 0x2fb3b0, 0xe3dccb, 0xe8e8e4, 0x2a3a6e],
+        ],
+    },
+    Preset {
+        height_m: 1.7,
+        build: 0.3,
+        shoulders: 0.45,
+        slouch: 0.6,
+        outfit: Outfit::ShortsTee,
+        hair: Hair::Long,
+        sunglasses: false,
+        headband: true,
+        skin: SKIN[1],
+        hair_rgb: HAIR[5],
+        clothes: [
+            [0xd9782d, 0xf2efe6, 0xb39a72, 0xe8e8e4, 0xc8962e],
+            [0x3a6fe0, 0xf2f2ee, 0xe9e6df, 0xe8e8e4, 0xe8559a],
+        ],
+    },
+    Preset {
+        height_m: 1.66,
+        build: 0.35,
+        shoulders: 0.2,
+        slouch: 0.3,
+        outfit: Outfit::Sundress,
+        hair: Hair::Full,
+        sunglasses: true,
+        headband: false,
+        skin: SKIN[5],
+        hair_rgb: HAIR[1],
+        clothes: [
+            [0x2f6f6a, 0x2f6f6a, 0x2f6f6a, 0x6a4a2e, 0xc8962e],
+            [0xf2d64b, 0xf2d64b, 0xf2d64b, 0xc89a62, 0x2fb3b0],
+        ],
+    },
+];
+
+impl FigureSpec {
+    /// The player's preset driver `i` (wrapping) dressed for `era`.
+    pub fn preset(i: usize, era: Era) -> FigureSpec {
+        let p = &PRESET_LOOKS[i % PRESETS];
+        let [top, trim, bottom, shoes, accent] = p.clothes[era as usize];
+        FigureSpec {
+            height_m: p.height_m,
+            build: p.build,
+            shoulders: p.shoulders,
+            slouch: p.slouch,
+            era,
+            outfit: p.outfit,
+            hair: p.hair,
+            headband: p.headband && era == Era::Eighties,
+            sunglasses: p.sunglasses,
+            socks: false,
+            palette: Palette {
+                skin: lin(p.skin),
+                hair: lin(p.hair_rgb),
+                top: lin(top),
+                trim: lin(trim),
+                bottom: lin(bottom),
+                shoes: lin(shoes),
+                accent: lin(accent),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1611,6 +1878,99 @@ mod tests {
             .iter()
             .map(|&p| xf[k].apply(p)[1])
             .fold(f32::MAX, f32::min)
+    }
+
+    /// A car seat for figure `sk`: hips 0.3 m over the floor, the wheel in easy reach ahead,
+    /// hands at ten to two turned by `steer`.
+    fn test_seat(sk: &Skeleton, steer: f32, look: f32) -> Seat {
+        let h = sk.height_m;
+        let hip = [0.0, 0.3, 0.0];
+        let wheel = [0.0, 0.3 + 0.2 * h, -0.34];
+        let r = 0.19;
+        let grip = |a: f32| {
+            let (s, c) = sin_cos(a + steer);
+            [wheel[0] - r * c, wheel[1] + r * s, wheel[2]]
+        };
+        Seat {
+            hip,
+            recline: 0.3,
+            heels: [[-0.12, 0.0, -0.75], [0.12, 0.0, -0.75]],
+            toe: 0.5,
+            hands: [grip(0.35), grip(PI - 0.35)],
+            look,
+        }
+    }
+
+    #[test]
+    fn a_driver_grips_the_wheel_with_heels_down_and_looks_level() {
+        for seed in 0..40 {
+            let era = ERAS[seed as usize % 2];
+            let f = figure(seed, era);
+            let sk = &f.skeleton;
+            let mut xf = [Xform::IDENTITY; PARTS];
+            for steer in [-1.2f32, -0.5, 0.0, 0.5, 1.2] {
+                for look in [-1.0, 0.0, 1.0] {
+                    let seat = test_seat(sk, steer, look);
+                    let j = sk.drive(&seat);
+                    sk.pose(&j, &mut xf);
+                    assert!(xf.iter().all(|x| x.pos.iter().all(|v| v.is_finite())));
+                    for (k, lower) in [Part::LowerArmL, Part::LowerArmR].into_iter().enumerate() {
+                        let hand = xf[lower as usize].apply([0.0, -GRIP_H * sk.height_m, 0.0]);
+                        let miss = sqrt(dot(sub(hand, seat.hands[k]), sub(hand, seat.hands[k])));
+                        assert!(
+                            miss < 0.01,
+                            "seed {seed} steer {steer}: hand {k} off by {miss}"
+                        );
+                    }
+                    // Elbows below the shoulders' line to the hands: down, not up.
+                    for (upper, lower) in [
+                        (Part::UpperArmL, Part::LowerArmL),
+                        (Part::UpperArmR, Part::LowerArmR),
+                    ] {
+                        let (sh, el) = (xf[upper as usize].pos, xf[lower as usize].pos);
+                        assert!(el[1] < sh[1], "seed {seed}: elbow over the shoulder");
+                    }
+                    for (k, foot) in [Part::FootL, Part::FootR].into_iter().enumerate() {
+                        let y = lowest(&f, &xf, foot);
+                        assert!((-0.03..0.05).contains(&y), "seed {seed}: foot {k} at {y}");
+                    }
+                    // The head stays level, turned by the look.
+                    let head = xf[Part::Head as usize].rot;
+                    assert!(head[1][1] > 0.97, "seed {seed}: head tipped {:?}", head);
+                    let fwd = mul(&head, [0.0, 0.0, -1.0]);
+                    let yaw = atan2(-fwd[0], -fwd[2]);
+                    assert!(
+                        (yaw - look).abs() < 0.3 + 0.2 * look.abs(),
+                        "{yaw} for {look}"
+                    );
+                }
+            }
+            let eye = sk.eye(&sk.drive(&test_seat(sk, 0.0, 0.0)));
+            let up = eye[1] - 0.3;
+            assert!(
+                up > 0.75 * sk.hip_to_eye() && up < sk.hip_to_eye(),
+                "eye {eye:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn presets_build_within_budget_and_differ() {
+        let mut hashes = StdVec::new();
+        for era in ERAS {
+            for i in 0..PRESETS {
+                let f = build(&FigureSpec::preset(i, era));
+                assert!((600..=1200).contains(&f.triangle_count()));
+                hashes.push(mesh_hash(&f));
+            }
+        }
+        for (i, a) in hashes.iter().enumerate() {
+            assert!(hashes[i + 1..].iter().all(|b| b != a));
+        }
+        assert_eq!(
+            FigureSpec::preset(PRESETS, Era::Eighties),
+            FigureSpec::preset(0, Era::Eighties)
+        );
     }
 
     #[test]

@@ -47,9 +47,9 @@ const DISC_TOP: [u8; 4] = [120, 122, 126, 255];
 const DISC_RIM: [u8; 4] = [46, 48, 52, 255];
 const DISC_SEGMENTS: u32 = 64;
 
-/// Instances [`push`] adds at most: body, glass, lamps, four wheels, an open car's interior
-/// and steering wheel, and the disc.
-pub const MAX_INSTANCES: usize = 10;
+/// Instances [`push`] adds at most: body, glass, lamps, four wheels, the interior and
+/// steering wheel, the disc and the driver's parts.
+pub const MAX_INSTANCES: usize = 10 + traffic::figure::PARTS;
 
 /// The disc: radius 1, its top at `y = 0`, [`DISC_THICKNESS_M`] thick; scaled across to
 /// each car.
@@ -93,6 +93,8 @@ pub struct Model<'a> {
     pub car: &'a CarMeshes,
     pub layout: &'a CarLayout,
     pub turntable: MeshId,
+    /// The player's driver, at the wheel.
+    pub driver: Option<&'a crate::driver::Driver>,
 }
 
 /// The disc's frame (its top's center, `+y` up, scaled from meters of car) to world, so the
@@ -165,7 +167,8 @@ fn car_on_table(layout: &CarLayout) -> Mat4 {
 
 /// Appends the turntable's instances with the disc's frame at `table` (from
 /// [`table_to_world`]): the car at rest (body with the lamps down and off, glass, lamps,
-/// four wheels; an open car's interior and steering wheel too) and the disc, with `fill`
+/// four wheels, the interior and steering wheel seen through the glass, the driver at the
+/// wheel) and the disc, with `fill`
 /// (0 to 1) of the cabin light. None cast a shadow or take street lamps. At most
 /// [`MAX_INSTANCES`].
 pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<MeshInstance>) {
@@ -180,7 +183,10 @@ pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<
     let layout = model.layout;
     let body = table * car_on_table(layout);
     out.push(instance(lod.body[0], body, 1.0));
-    out.push(instance(lod.glass, body, 1.0));
+    out.push(MeshInstance {
+        glass: true,
+        ..instance(lod.glass, body, 1.0)
+    });
     out.push(instance(lod.lights[0][0], body, glow.lamps));
     for (k, hub) in layout.wheel_centers.iter().enumerate() {
         let side = if k % 2 == 0 {
@@ -194,10 +200,15 @@ pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<
             1.0,
         ));
     }
-    if layout.open_top {
-        out.push(instance(lod.interior, body, glow.instruments));
-        let wheel = body * layout.steering_wheel(0.0);
-        out.push(instance(lod.steering_wheel, wheel, glow.instruments));
+    out.push(instance(lod.interior, body, glow.instruments));
+    let wheel = body * layout.steering_wheel(0.0);
+    out.push(instance(lod.steering_wheel, wheel, glow.instruments));
+    if let Some(d) = model.driver {
+        let mut parts = [Mat4::IDENTITY; traffic::figure::PARTS];
+        crate::driver::pose(&d.skeleton, &layout.seating, 0.0, 0.0, &mut parts);
+        for (k, m) in parts.iter().enumerate() {
+            out.push(instance(d.ids[k], body * *m, 1.0));
+        }
     }
     let r = disc_radius(layout);
     let disc = table * Mat4::from_scale(Vec3::new(r, 1.0, r));

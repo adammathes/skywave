@@ -219,6 +219,10 @@ pub struct MeshInstance {
     /// geometry mostly hides (the far terrain), so the depth test rejects those pixels
     /// before they are shaded.
     pub late: bool,
+    /// Window glass: drawn after everything else (the sky too) without writing depth,
+    /// blended over what is behind it by its color's alpha, more opaque at grazing angles.
+    /// Never in the depth pre-pass.
+    pub glass: bool,
 }
 
 impl MeshInstance {
@@ -235,6 +239,7 @@ impl MeshInstance {
             casts_shadow: true,
             receives_shadow: true,
             late: false,
+            glass: false,
         }
     }
 }
@@ -1249,6 +1254,8 @@ pub struct Renderer {
     shadow_clear_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    /// [`MeshInstance::glass`]: blended, no depth writes.
+    glass_pipeline: wgpu::RenderPipeline,
     /// The depth pre-pass, and the mesh pipeline that follows it (less-or-equal).
     depth_pipeline: wgpu::RenderPipeline,
     mesh_after_depth_pipeline: wgpu::RenderPipeline,
@@ -1590,6 +1597,38 @@ impl Renderer {
             })
         };
         let mesh_pipeline = mesh("mesh", wgpu::CompareFunction::Less);
+        let fs_glass = if hdr { "fs_glass" } else { "fs_glass_ldr" };
+        let glass_target = [Some(wgpu::ColorTargetState {
+            format: color_format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::COLOR,
+        })];
+        let glass_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("glass"),
+            layout: Some(&forward_pl),
+            vertex: wgpu::VertexState {
+                module: &forward_module,
+                entry_point: Some("vs_mesh"),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            primitive: back_faces,
+            depth_stencil: depth(
+                DEPTH_FORMAT,
+                false,
+                wgpu::CompareFunction::LessEqual,
+                Default::default(),
+            ),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &forward_module,
+                entry_point: Some(fs_glass),
+                compilation_options: Default::default(),
+                targets: &glass_target,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let mesh_after_depth_pipeline = mesh("mesh after depth", wgpu::CompareFunction::LessEqual);
         let depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("depth pre-pass"),
@@ -1952,6 +1991,7 @@ impl Renderer {
             shadow_clear_pipeline,
             sky_pipeline,
             mesh_pipeline,
+            glass_pipeline,
             depth_pipeline,
             mesh_after_depth_pipeline,
             hud_pipeline,
@@ -2315,7 +2355,7 @@ impl Renderer {
                 });
             }
         }
-        let (ranges, late_start) = self.pack(scene, drawn);
+        let (ranges, late_start, glass_start) = self.pack(scene, drawn);
         // Which lights any instance uses, for the stats.
         let mut used = [0u64; MAX_LIGHTS / 64];
         for inst in scene.instances {
@@ -2430,7 +2470,7 @@ impl Renderer {
             timed |= 1 << timing::PASS_SHADOW;
         }
         let mut forward_draws = 1;
-        let triangles;
+        let mut triangles;
         {
             let color = self.targets.hdr.as_ref().unwrap_or(view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2478,7 +2518,7 @@ impl Renderer {
             }
             let parts = [
                 (timing::PART_MESHES, ranges[0].start..late_start),
-                (timing::PART_LATE, late_start..ranges[0].end),
+                (timing::PART_LATE, late_start..glass_start),
             ];
             let mut tris = 0;
             for (part, range) in parts {
@@ -2505,6 +2545,18 @@ impl Renderer {
                     pass.end_occlusion_query();
                 }
                 t.part(&mut pass, timing::PART_SKY, false);
+            }
+            // Glass over everything behind it, sky included.
+            if glass_start < ranges[0].end {
+                pass.set_pipeline(&self.glass_pipeline);
+                let (d, n) = self.draw_instances(
+                    &mut pass,
+                    scene.instances,
+                    glass_start..ranges[0].end,
+                    None,
+                );
+                forward_draws += d;
+                triangles += n;
             }
         }
         timed |= 1 << timing::PASS_FORWARD;
@@ -2901,17 +2953,26 @@ impl Renderer {
     }
 
     /// Packs the culled instances into `instance_staging`: the forward pass first (its
-    /// `late` instances last), then each cascade in `drawn`. Returns each pass's range of
-    /// it and where the forward pass's `late` instances start.
+    /// `late` instances, then its `glass`, last), then each cascade in `drawn`. Returns
+    /// each pass's range of it and where the forward pass's `late` and `glass` instances
+    /// start.
     fn pack(
         &mut self,
         scene: &SceneView,
         drawn: [bool; CASCADES],
-    ) -> ([std::ops::Range<usize>; PASSES], usize) {
+    ) -> ([std::ops::Range<usize>; PASSES], usize, usize) {
         self.order.clear();
         self.instance_staging.clear();
         let mut ranges: [std::ops::Range<usize>; PASSES] = std::array::from_fn(|_| 0..0);
-        let mut late_start = 0;
+        let (mut late_start, mut glass_start) = (0, 0);
+        // Which forward sweep an instance is in: the rest, late, glass.
+        let sweep_of = |inst: &MeshInstance| {
+            if inst.glass {
+                2
+            } else {
+                u8::from(inst.late)
+            }
+        };
         for (p, range) in ranges.iter_mut().enumerate() {
             let start = self.order.len();
             if p > 0 && !drawn[p - 1] {
@@ -2919,19 +2980,22 @@ impl Renderer {
                 continue;
             }
             let bit = 1u8 << p;
-            // The forward pass draws `late` instances after the rest.
-            let sweeps: &[Option<bool>] = if p == 0 {
-                &[Some(false), Some(true)]
+            // The forward pass draws `late` instances after the rest, and glass last.
+            let sweeps: &[Option<u8>] = if p == 0 {
+                &[Some(0), Some(1), Some(2)]
             } else {
                 &[None]
             };
-            for &late in sweeps {
-                if late == Some(true) {
+            for &key in sweeps {
+                if key == Some(1) {
                     late_start = self.order.len();
+                }
+                if key == Some(2) {
+                    glass_start = self.order.len();
                 }
                 let sweep = self.order.len();
                 for (i, inst) in scene.instances.iter().enumerate() {
-                    if self.vis[i] & bit != 0 && late.is_none_or(|l| inst.late == l) {
+                    if self.vis[i] & bit != 0 && key.is_none_or(|k| sweep_of(inst) == k) {
                         self.order.push(i as u32);
                     }
                 }
@@ -2939,7 +3003,7 @@ impl Renderer {
                 // draw order: the first drawn wins a less-than test. After the pre-pass the
                 // test is less-or-equal, where the last drawn wins, so the meshes go in
                 // reverse and the same one wins.
-                if late == Some(false) && self.quality.depth_prepass {
+                if key == Some(0) && self.quality.depth_prepass {
                     self.order[sweep..].reverse();
                 }
                 for &i in &self.order[sweep..] {
@@ -2948,7 +3012,7 @@ impl Renderer {
             }
             *range = start..self.order.len();
         }
-        (ranges, late_start)
+        (ranges, late_start, glass_start)
     }
 
     /// Model-space bounds of what `id` draws, or `None` when it draws nothing.
