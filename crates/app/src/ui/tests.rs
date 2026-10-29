@@ -1843,6 +1843,33 @@ fn the_pause_menu_resets_the_car() {
 }
 
 #[test]
+fn fullscreen_toggles_on_its_key_and_from_the_pause_menu() {
+    let mut h = Harness::new();
+    h.key(Key::KeyF);
+    assert!(h.app.take_fullscreen_toggle());
+    assert!(!h.app.take_fullscreen_toggle(), "once per press");
+    // The menu item asks too, and the menu stays open.
+    h.open(&[ItemId::Fullscreen]);
+    assert!(h.app.menu_open());
+    assert!(h.app.take_fullscreen_toggle());
+    // A press a remap captures is not a toggle.
+    h.open(&[
+        ItemId::Open(Page::Settings),
+        ItemId::Open(Page::Controls),
+        ItemId::Open(Page::Device(DeviceKind::KeyboardMouse)),
+        ItemId::Open(Page::Bindings(DeviceKind::KeyboardMouse)),
+    ]);
+    h.focus_on(ItemId::Bind(
+        DeviceKind::KeyboardMouse,
+        Action::Horn,
+        Sign::Full,
+    ));
+    h.key(Key::Enter);
+    h.key(Key::KeyF);
+    assert!(!h.app.take_fullscreen_toggle());
+}
+
+#[test]
 fn reset_is_listed_on_both_bindings_pages() {
     for (device, input) in [
         (DeviceKind::Gamepad, "Select (hold)"),
@@ -2542,15 +2569,19 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         "Beach town, 1984",
         "20 cars",
         "Mirage Valley",
-        "coming",
+        "5 stations",
         "here",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
+    assert!(!text.contains("coming"), "every world is built: {text}");
     let stills = images(&mut h, render::HudTexture::Still);
     assert_eq!(stills.len(), 2);
     assert_eq!((stills[0].uv[0], stills[1].uv[0]), (0.0, 0.5));
-    assert!(stills[1].color[0] < 200, "the stub's still is greyed");
+    assert!(
+        stills.iter().all(|s| s.color[0] == 255),
+        "no still is greyed"
+    );
     h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 1);
     h.pad(PadButton::DpadRight);

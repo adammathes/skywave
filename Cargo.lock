@@ -1611,6 +1611,7 @@ dependencies = [
  "gilrs",
  "log",
  "nanomp3-core",
+ "objc2 0.6.5",
  "pollster",
  "render",
  "rustls",

@@ -115,7 +115,12 @@ pub const ROWS: [Row; 25] = [
     row("Menus", "Back", &[Action::MenuBack]),
     row("Help", "This card", &[Action::Controls]),
     row("Help", "Performance", &[Action::DebugOverlay]),
-    row("Help", "Screenshot", &[Action::Screenshot]),
+    // One row, as the radio's, so the card stays one Deck screen.
+    row(
+        "Help",
+        "Screenshot, fullscreen",
+        &[Action::Screenshot, Action::Fullscreen],
+    ),
 ];
 
 /// Why the card is up.

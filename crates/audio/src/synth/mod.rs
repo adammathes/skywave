@@ -1,6 +1,7 @@
 //! The synthesized sounds (`docs/AUDIO_RADIO.md`, "Engine and world sound"): no recorded
 //! audio anywhere. [`engine`] is the car's engine, [`world`] everything else the car and the
-//! place make, [`tune`] the radio's dial between stations, [`deck`] the deck's mechanism. All read one [`AudioParams`], a
+//! place make, [`tune`] the radio's dial between stations, [`deck`] the deck's mechanism,
+//! [`chime`] the green wave's bell. All read one [`AudioParams`], a
 //! plain struct the app fills every frame from the car's sim state, the collider, the place
 //! and the radio.
 //!
@@ -8,12 +9,14 @@
 //! parameter update (the native audio thread reads them without waiting) never loses one,
 //! and one that sees the same update twice never doubles it.
 
+pub mod chime;
 pub mod deck;
 pub mod dsp;
 pub mod engine;
 pub mod tune;
 pub mod world;
 
+pub use chime::ChimeSynth;
 pub use deck::DeckSynth;
 pub use engine::{EngineProfile, EngineSynth};
 pub use tune::TuneSynth;
@@ -135,6 +138,11 @@ pub struct AudioParams {
     pub deck_clicks: u32,
     /// ...of this mechanism: 0 a tape deck, 1 a CD player, 2 an MP3 player.
     pub deck_kind: u8,
+    /// Counts every signal passed on green in a run (the green wave, `traffic::Streak`):
+    /// each new one rings the chime...
+    pub waves: u32,
+    /// ...as the run's `wave_run`th light (1 the first): higher and fuller as it grows.
+    pub wave_run: u8,
 }
 
 impl Default for AudioParams {
@@ -171,6 +179,8 @@ impl Default for AudioParams {
             tune_volume: 1.0,
             deck_clicks: 0,
             deck_kind: 0,
+            waves: 0,
+            wave_run: 0,
         }
     }
 }

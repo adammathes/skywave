@@ -67,6 +67,10 @@
     "about": "Mirage Valley (the socal_basin template) at night on the boulevard: the eastbound carriageway, the palm median and its lamps, the mini-malls, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
+  "basin-boulevard-afternoon": {
+    "about": "Mirage Valley's boulevard at 15:30 from the far chase camera, as basin-boulevard-night: the filler kept quiet (no names on the shops' sign bands, only bare stucco, plain fascias and mural walls; stepped and shaped parapets), the blade neon the only signs.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "15:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+  },
   "basin-channel-golden": {
     "about": "Mirage Valley's flood channel at golden hour from its bed: the concrete trapezoid and its low-flow strip, looking down it toward the freeway's bridge, from the far chase camera.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "417.9,940", "yaw": "180", "still": "1", "stream": "1" }
@@ -90,5 +94,13 @@
   "basin-crossing-train": {
     "about": "Mirage Valley's grade crossing on an arterial at dusk with the freight train across it (90 s into a run), from the mid chase camera stopped on the approach: both gates' arms down in red and white bands, the near mast's lamp lit, the train's boxcars, tank cars and hoppers on the track.",
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-mid", "lights": "1", "t": "18:25", "pos": "611.5,628", "yaw": "180", "train": "90", "still": "1", "stream": "1" }
+  },
+  "basin-boulevard-dusk-wave": {
+    "about": "Mirage Valley's boulevard at dusk, 12 s into the street lamps' wave (civil dusk at 18:30:43), eastbound toward where it started: the median's lamps lit in the blocks ahead, striking or still dark in the near ones, signs at their own moments, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:30:55", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+  },
+  "coast-dawn-haze": {
+    "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera: the morning haze over the town before it burns off.",
+    "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "05:50", "lights": "1", "pos": "400.3,1510.7", "yaw": "103", "still": "1", "stream": "1" }
   }
 }

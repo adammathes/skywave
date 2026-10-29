@@ -364,7 +364,13 @@ fn shade(in: MeshOut) -> vec3<f32> {
     let to_frag = in.world_pos - frame.camera_pos.xyz;
     let dist = length(to_frag);
     let fog = 1.0 - exp(-dist * frame.camera_pos.w);
-    c = mix(c, sky_radiance(to_frag / max(dist, 1e-4)), fog);
+    // A fog thicker than any weather's (a morning haze, over 0.002/m) lies on the ground
+    // too: its in-scatter fades into the ground's over a wider band below the horizon, so
+    // no line marks the eye height. Thinner fog keeps the sky's own band exactly.
+    var d = to_frag / max(dist, 1e-4);
+    let band = 0.03 + 0.5 * clamp((frame.camera_pos.w - 0.002) / 0.002, 0.0, 1.0);
+    d.y = select(d.y, d.y * (0.03 / band), d.y < 0.0);
+    c = mix(c, sky_radiance(d), fog);
     return min(c, vec3<f32>(MAX_RADIANCE));
 }
 

@@ -26,6 +26,9 @@ rustls.workspace = true
 rustls-native-certs.workspace = true
 nanomp3-core.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+
 [dev-dependencies]
 # The no-op device for the culling benchmark (`culling_on_the_coast`).
 wgpu = { workspace = true, features = ["noop"] }

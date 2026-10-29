@@ -193,6 +193,32 @@ Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of road
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay), the meshes'
 and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 
+## Landmarks
+Landmarks are the places you would slow down to look at (the feel cards, 2026-10-28). Each is a kit
+(`assets/landmarks/<id>.ron`, ADR 0007, `world::landmarks`): boxes, struts, cylinders, lathed profiles and
+lamps in named paints, in the lot's frame (`x` across, to the right seen from the road; `y` up; `z` toward the
+road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that start `from` an earlier one and
+add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
+front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
+block a car; each `Lamp` is a `Flood` light.
+
+Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
+a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows
+on the map once you have seen it.
+
+**The gallery** (`place=gallery`, `world::landmarks::gallery`) lines every kit's variants up on flat lawn:
+one east-west road per kit, its variants' lots north of it from A westward, each with a lit label post
+lettered with the variant, dressed in the scene's world (`scenario=`). `app::gallery` places fixed cameras
+for each variant (`front` and `quarter` from the hood, `street` from the far chase camera with the car for
+scale) and writes them to `tools/screenshot/gallery.json` (`cargo test -p app -- --ignored write_gallery`;
+a test fails while it is stale). `node tools/screenshot/shoot.mjs --gallery <id>` shoots each at noon,
+golden hour and night and tiles them into `out/gallery/<id>.png`: a column per variant, a row per time and
+camera. A landmark PR attaches that sheet and the owner picks a letter.
+
+Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, the gallery's layout),
+`app::places` (the kits load and round-trip, the gallery builds in every world), `app::gallery` (every
+camera on open ground facing its landmark).
+
 ## Region templates
 A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above). Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
@@ -236,7 +262,7 @@ ByUse<T>    { residential, office, other }   other: commercial, industrial, civi
 SignRules   { awnings: [(Awning, weight)], mall_canopies: [(Awning, weight)], lit_box_256,
               shop_lit_256, lexicon: String, trades: [TradeRule], forms: [(Form, weight)],
               wordmarks: [(Block | Condensed | Script | Slab, weight)], line_256, name_radius,
-              banner_256 (optional, 0), fascia_words (optional, false) }
+              fascias: [(Lettered | Bare | Band | Mural, weight)] (optional, empty: Lettered) }
 StreetDress { bus_stop_m (0: none), faces: [(Ad | Blank | Pictogram, weight)] (empty: Ad) }
 Awning      Striped | Solid | Canopy | None | Bullnose | Aluminum | Mansard
 TradeRule   { trade: String, weight, pictograms: [(Pictogram, weight)],
@@ -350,21 +376,23 @@ building, from an `Rng` keyed by the building's door pick):
 ## The 2001 basin's grammar
 `socal_basin_2001.ron` (`Aughts`, `socal_basin`) started from the coast's and changes what the turn of the
 century changed: stucco boxes with plain parapets (no false fronts, hardly a cornice); auto shops in the
-industrial stucco (roll-up bays and a shop front for its sign); mini-malls under flat canopies whose tenants
-sign in backlit boxes (`lit_box_256` 190) and hang vinyl banners from the canopy's front edge
-(`banner_256`: a tenant in three or so of a banner mall, a colored panel with a band on it); vinyl and
-aluminum awnings, little canvas; lots busy late into the night. Its signs draw from their own closed lexicon,
+industrial stucco (roll-up bays and a shop front); mini-malls under flat canopies; vinyl and aluminum
+awnings, little canvas; lots busy late into the night. Its filler keeps quiet so the landmarks stand out:
+the buildings' sign bands (over a run of storefronts, a mini-mall unit, a motel's parapet) carry no names
+(`fascias`: bare stucco 3, a plain fascia in the trim's color 4, a flat panel of one strong color 1, the
+mural buildings' blank ground floor bays in it too; a motel or a mansard canopy without a name has no
+band at all); the shops are told apart by their tops (stepped and shaped parapets, no cornices) and a
+roll-up bay or a blank wall among the storefronts. Its signs draw from their own closed lexicon,
 `lexicon_2001.ron` (`us_basin`: the coast's invented names, the period's descriptors and trades: taquerias
 and taco stands, wheels, tint, smog checks, car audio, pagers and phones, nails), which `app::places`
 attaches by the id the grammar names; the coast's `lexicon.ron` is untouched, so the coast's signs never
-change. The buildings' fascia sign boxes letter from it too (`fascia_words`: a box's words are a shop
-sign's main line drawn from it, or its trade alone when that is too long; without the flag, as on the coast,
-they keep the older syllable names of `signs::business_name`). Its trades leave out every descriptor whose
+change. They letter the blade neon and the landmarks; a lettered fascia (the coast's, every one) keeps the
+older syllable names of `signs::business_name`. Its trades leave out every descriptor whose
 pair would read as a real chain, singular or plural (`descriptors_out`; their keys are on the test
 blocklist and `no_descriptor_names_a_chain_with_its_trade` checks every descriptor and trade). Its `street` puts a bus stop (`PropKind::BusShelter`: posts, a flat roof, a glazed back screen, a
 bench and a lit ad box across the downstream end) on an arterial's walk about every 320 m in commercial,
 residential, downtown and suburban zones (a block's piece of arterial gets one with the chance of its share
-of the spacing), and gives billboards and the shelters' ad boxes faces blank or one big pictogram
+of the spacing), and gives billboards and the shelters' ad boxes faces mostly blank, one in four a big pictogram
 (`PropKind::FaceBillboard`), never the coast's lettered ads. The tilt-up warehouses, dingbats, the tract
 houses' tile roofs and the downtown towers come from their styles as on the coast. The `sodium_night`
 palette (the template's and the scenario's) paints it: beige and tan stucco, terracotta tiles, deep

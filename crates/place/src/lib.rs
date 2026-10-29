@@ -761,6 +761,20 @@ pub enum PropKind {
     CrossingGate {
         arm_dm: u8,
     },
+    /// A landmark built from a kit (`docs/WORLD_GENERATION.md`, "Landmarks"): variant
+    /// `variant` of kit `kit`, an index into the kits the place's grammar carries (the
+    /// built-in `assets/landmarks/*.ron`, in file-name order); `pos` at the middle of its
+    /// lot's front edge, facing: out of the lot toward the road.
+    Landmark {
+        kit: u8,
+        variant: u8,
+    },
+    /// The landmark gallery's lot label (`place=gallery`): a low lit plate on a post
+    /// lettered with `letter` (an ASCII capital, the variant's letter); facing: the way the
+    /// plate faces.
+    LotLabel {
+        letter: u8,
+    },
 }
 
 /// [`PropKind::Track`] beds: on a ballast embankment over the ground...

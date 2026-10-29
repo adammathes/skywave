@@ -11,5 +11,5 @@ node tools/screenshot/shoot.mjs --size 1280x800 --url-query "?scenario=<id>&cam=
 python3 -c "from PIL import Image; im = Image.open('/tmp/<id>.png').convert('RGB').crop((264, 130, 1128, 670)).resize((320, 200), Image.LANCZOS); q = im.quantize(256, dither=Image.Dither.FLOYDSTEINBERG); pal = q.getpalette()[:768]; open('assets/stills/<id>.still', 'wb').write(bytes(pal + [0] * (768 - len(pal))) + q.tobytes())"
 ```
 
-`mirage_valley_2001`'s still is its boulevard at its default time (22:30), headlights on: the query above
-with `&pos=800,1256&yaw=90&lights=1`, in its own grammar and palette.
+`mirage_valley_2001`'s still is its boulevard at its default time (15:30, afternoon sun): the query above
+with `&pos=800,1256&yaw=90`, in its own grammar and palette.

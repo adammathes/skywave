@@ -22,6 +22,7 @@ pub mod daylight;
 pub mod deck;
 pub mod dragstrip;
 pub mod drive;
+pub mod gallery;
 mod input;
 pub mod lighting;
 mod lighttiles;
@@ -41,6 +42,7 @@ pub mod sound;
 pub mod stream;
 pub mod ui;
 pub mod vehicles;
+mod wave;
 mod worldmesh;
 
 pub use settings::{
@@ -210,6 +212,8 @@ pub struct App {
     props: Option<propinst::PropInstances>,
     /// The place's NPC traffic.
     npcs: npc::Npcs,
+    /// The player's run of greens down the place's signals.
+    wave: wave::Wave,
     /// The scene's traffic density over the setting (`traffic=`; off unless a scene
     /// says otherwise, so tests and the self-test drive alone).
     traffic_scene: Option<traffic::Density>,
@@ -440,6 +444,7 @@ impl App {
             map,
             start,
             props,
+            wave: wave::Wave::new(&npcs.graph),
             npcs,
             traffic_scene: Some(traffic::Density::Off),
             sound,
@@ -871,6 +876,12 @@ impl App {
                 peds_s += now() - t;
             }
             let player = self.traffic_player();
+            let signed = traffic::Player {
+                speed: self.drive.state.speed_mps,
+                ..player
+            };
+            self.wave
+                .step(&self.npcs.graph, self.npcs.signal_tick(), &signed, dt);
             if let Some(r) = &mut self.rail {
                 r.step(&player, self.npcs.cars(), self.npcs.crowd.pool(), dt);
             }
@@ -897,6 +908,7 @@ impl App {
             self.water_toast = WATER_TOAST_S;
         }
         self.water_toast = (self.water_toast - dt_real as f32).max(0.0);
+        self.wave.frame(dt_real as f32);
         self.npcs.note_time(traffic_s * 1000.0, steps.count);
         self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
         steps
@@ -1046,10 +1058,12 @@ impl App {
         };
         let daylight = self.time.daylight();
         self.instances.truncate(self.world_instances);
-        let lamp_glow = lighting::streetlamp_glow(&daylight);
-        for (inst, role) in self.instances.iter_mut().zip(&self.roles) {
+        // The street lamps switch in a wave at dusk; a chunk's own lenses (set pieces'
+        // lamps; the street lamps are instanced) mid-wave, each part a moment of its own.
+        let lamps = lighting::LampClock::of(&daylight);
+        for (k, (inst, role)) in self.instances.iter_mut().zip(&self.roles).enumerate() {
             if *role == PartRole::Lamps {
-                inst.glow = lamp_glow;
+                inst.glow = lamps.level(0.5 * lighting::WAVE_S, k as u32);
             }
         }
         let first_person = !self.fly && self.camera.mode().first_person();
@@ -1067,7 +1081,10 @@ impl App {
                 alpha,
                 &self.car_meshes,
                 cabin,
-                lighting::car_glow(&daylight),
+                drive::CarGlow {
+                    speedo: self.wave.speedo_glow(),
+                    ..lighting::car_glow(&daylight)
+                },
                 &mut self.instances,
             );
         }
@@ -1082,8 +1099,7 @@ impl App {
         let mut npc_lights = [dynamic[0]; npc::NPC_LIGHTS];
         let m = self.npcs.lights(alpha, eye, &mut npc_lights);
         dynamic[n..n + m].copy_from_slice(&npc_lights[..m]);
-        self.lights
-            .gather(eye, daylight.streetlights_on, &dynamic[..n + m]);
+        self.lights.gather(eye, lamps, &dynamic[..n + m]);
         self.lights.set_second(n..n + m);
         let (world, car) = self.instances.split_at_mut(self.world_instances);
         self.lights.assign(&self.bounds, world);
@@ -1099,15 +1115,7 @@ impl App {
             let lights = &self.lights;
             let rocking = &self.drive.rocking;
             let lots = &self.ground.lot_cars;
-            props.push(
-                eye,
-                live,
-                lights,
-                lamp_glow,
-                rocking,
-                lots,
-                &mut self.instances,
-            );
+            props.push(eye, live, lights, lamps, rocking, lots, &mut self.instances);
         }
         if let Some(st) = &self.strip {
             st.push(eye, &mut self.instances);

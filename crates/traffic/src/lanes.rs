@@ -34,11 +34,22 @@
 //! group into phases by their direction of travel at the stop line: the most nearly
 //! opposite pairs (at least 145 degrees apart) share a phase, every other approach gets
 //! its own, so no two crossing streams are green together.
+//!
+//! **Green waves.** Signals along the main roads (arterials and the beachfront) are timed
+//! progressively, as real ones are: down a main road from one signal to the next through
+//! free junctions (at most [`WAVE_MAX_S`] apart at the posted speed, both on the same
+//! cycle), the next turns green for the through traffic as long after the last as a car
+//! at the posted speed takes to get there (plus [`WAVE_DELAY_TICKS`]), so a driver who
+//! holds the limit catches a run of greens. Each corridor is timed breadth first from one
+//! end (the signal with the fewest such links, then node order), so its wave runs the whole
+//! length in one direction; at a crossing of two main roads the one reached first sets the
+//! time. The side streets' phases keep their place in each junction's cycle, and signals
+//! off the main roads keep their hashed offsets ([`signal::offset`]).
 
 use alloc::vec::Vec;
 
 use place::{Place, RoadClass, StopLine, ZoneId};
-use skywave_core::hash64;
+use skywave_core::{hash64, SIM_HZ};
 
 use crate::math::{atan2, dir, dist2, dot, lerp3, right, turn_angle, unit2};
 use crate::signal;
@@ -83,6 +94,14 @@ const SIGN_ALONG_M: f32 = 45.0;
 const OPPOSITE_COS: f32 = -0.8;
 /// Samples used to measure a turn curve and map arc length onto it.
 pub const CURVE_STEPS: usize = 16;
+/// Signals further apart than this down a main road, s at the posted speed, are not
+/// timed from each other.
+pub const WAVE_MAX_S: f32 = 45.0;
+/// How much later than a car at the posted speed would reach it the next signal down a
+/// main road turns green, ticks: a little, so a car through the last one the moment it
+/// turned green still meets green, and one going faster than the limit does not. A car
+/// that pulled away from a stop arrives later anyway, well inside the green.
+pub const WAVE_DELAY_TICKS: u32 = SIM_HZ / 2;
 
 /// What a lane meets at its end.
 #[repr(u8)]
@@ -849,7 +868,112 @@ impl LaneGraph {
                 }
             }
         }
+        let main: Vec<bool> = g
+            .lanes
+            .iter()
+            .map(|l| {
+                matches!(
+                    edges[l.edge as usize].class,
+                    RoadClass::Arterial | RoadClass::Beachfront
+                )
+            })
+            .collect();
+        g.coordinate(&main);
         g
+    }
+
+    /// The next signal down a main road from `first` (a main road's lane), through free
+    /// junctions straight on along main roads: the lane arriving at it and the travel time
+    /// at the posted speed from `first`'s start to its stop line, s. `None` past a stop
+    /// sign, a dead end, a turn off the main road or [`WAVE_MAX_S`].
+    pub fn wave_link(&self, first: u32, main: &[bool]) -> Option<(u32, f32)> {
+        let mut lane = first;
+        let mut t = 0.0;
+        loop {
+            let l = &self.lanes[lane as usize];
+            let v = l.speed_mps.max(1.0);
+            t += l.length_m / v;
+            if t > WAVE_MAX_S {
+                return None;
+            }
+            match l.control {
+                Control::Signal => return Some((lane, t)),
+                Control::Free => {}
+                _ => return None,
+            }
+            let turn = self
+                .next(lane)
+                .iter()
+                .find(|x| x.kind == TurnKind::Straight && main[x.to as usize])?;
+            t += turn.length_m / v;
+            lane = turn.to;
+        }
+    }
+
+    /// Progressive signal timing along the main roads (`main`, per lane): see the module
+    /// docs, "Green waves".
+    fn coordinate(&mut self, main: &[bool]) {
+        let nodes = self.junctions.len();
+        // The lane driving straight into each lane through its start node, if any, and
+        // that turn's length.
+        let mut into = alloc::vec![(NONE, 0.0f32); self.lanes.len()];
+        for t in &self.turns {
+            if t.kind == TurnKind::Straight {
+                into[t.to as usize] = (t.from, t.length_m);
+            }
+        }
+        // Per signalized node, its links down the main roads: (first lane, lane arriving
+        // at the next signal, travel s from stop line to stop line), one per direction of each road (slot 0), where
+        // a lane drives straight into the first and both junctions run the same cycle.
+        let mut links: Vec<Vec<(u32, u32, f32)>> = (0..nodes).map(|_| Vec::new()).collect();
+        for (id, l) in self.lanes.iter().enumerate() {
+            let a = l.start_node as usize;
+            if !main[id] || l.slot != 0 || self.junctions[a].phases == 0 || into[id].0 == NONE {
+                continue;
+            }
+            if let Some((arr, t)) = self.wave_link(id as u32, main) {
+                let b = self.lanes[arr as usize].end_node as usize;
+                if b != a && self.junctions[b].phases == self.junctions[a].phases {
+                    // From the stop line: across the junction first.
+                    let t = t + into[id].1 / l.speed_mps.max(1.0);
+                    links[a].push((id as u32, arr, t));
+                }
+            }
+        }
+        // Each corridor starts from an end where it can (fewest links, then node order),
+        // so its wave runs the whole length one way; breadth first from there, each
+        // junction timed from the first neighbor that reaches it.
+        let mut roots: Vec<usize> = (0..nodes).filter(|&n| !links[n].is_empty()).collect();
+        roots.sort_by_key(|&n| (links[n].len(), n));
+        let mut fixed = alloc::vec![false; nodes];
+        let mut queue: Vec<usize> = Vec::new();
+        for root in roots {
+            if fixed[root] {
+                continue;
+            }
+            fixed[root] = true;
+            queue.clear();
+            queue.push(root);
+            let mut head = 0;
+            while head < queue.len() {
+                let a = queue[head];
+                head += 1;
+                for &(first, arr, t) in &links[a] {
+                    let b = self.lanes[arr as usize].end_node as usize;
+                    if fixed[b] {
+                        continue;
+                    }
+                    let ja = self.junctions[a];
+                    let from = self.lanes[into[first as usize].0 as usize].phase;
+                    let to = self.lanes[arr as usize].phase;
+                    let ticks = (t * SIM_HZ as f32 + 0.5) as u32 + WAVE_DELAY_TICKS;
+                    self.junctions[b].offset =
+                        signal::follow(ja.offset, from, to, ja.phases, ticks);
+                    fixed[b] = true;
+                    queue.push(b);
+                }
+            }
+        }
     }
 
     fn push_turn(&mut self, node: u32, from: u32, to: u32, kind: TurnKind) {

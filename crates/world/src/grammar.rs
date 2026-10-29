@@ -61,6 +61,11 @@ pub struct Grammar {
     /// grammar and attached by its loader; not part of the grammar file.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub lexicon: Lexicon,
+    /// The landmark kits (`assets/landmarks/*.ron`, in file-name order), parsed beside the
+    /// grammar and attached by its loader; a [`place::PropKind::Landmark`]'s `kit` indexes
+    /// them. Not part of the grammar file.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub landmarks: Vec<crate::landmarks::Kit>,
 }
 
 /// A value per kind of use.
@@ -440,14 +445,26 @@ pub struct SignRules {
     pub line_256: u32,
     /// No two signs closer than this share a wordmark or a name, m.
     pub name_radius: f32,
-    /// Strip-mall tenants with a vinyl banner hung on the canopy's fascia beside their
-    /// letters (0 when the file says nothing).
+    /// What a building's sign bands carry, with integer weights; empty: lettered, every
+    /// one.
     #[cfg_attr(feature = "serde", serde(default))]
-    pub banner_256: u32,
-    /// The buildings' fascia signs are lettered from the lexicon too, as the blade signs
-    /// are, rather than with the older syllable names (false when the file says nothing).
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub fascia_words: bool,
+    pub fascias: Vec<(Fascia, u32)>,
+}
+
+/// What a building's sign band (over a run of storefronts, a strip-mall unit, a motel's
+/// parapet) carries.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Fascia {
+    /// An invented name, in neon letters or on a backlit box.
+    Lettered = 0,
+    /// Nothing: the wall runs up past the transoms.
+    Bare = 1,
+    /// A plain fascia in the trim's color.
+    Band = 2,
+    /// A flat panel of one strong color, the blank ground floor walls in it too.
+    Mural = 3,
 }
 
 /// Street furniture a grammar sets beside the template's props (`Grammar::street`).
@@ -518,6 +535,11 @@ impl SignRules {
     /// The strip-mall canopy `r` picks.
     pub fn mall_canopy(&self, r: u64) -> Awning {
         draw(&self.mall_canopies, r, Awning::None)
+    }
+
+    /// The fascia `r` picks.
+    pub fn fascia(&self, r: u64) -> Fascia {
+        draw(&self.fascias, r, Fascia::Lettered)
     }
 }
 
@@ -712,8 +734,8 @@ impl Grammar {
         if s.shop_lit_256 > 256 {
             return Err(bad("signs.shop_lit_256"));
         }
-        if s.banner_256 > 256 {
-            return Err(bad("signs.banner_256"));
+        if !s.fascias.is_empty() && s.fascias.iter().map(|&(_, w)| u64::from(w)).sum::<u64>() == 0 {
+            return Err(bad("signs.fascias"));
         }
         let st = &self.street;
         if !(st.bus_stop_m.is_finite() && (st.bus_stop_m == 0.0 || st.bus_stop_m >= 60.0)) {
@@ -933,22 +955,25 @@ mod tests {
             g.signs.lit_box_256 > coast_80s().signs.lit_box_256,
             "backlit boxes lead"
         );
-        assert!(g.signs.banner_256 > 0 && g.street.bus_stop_m > 0.0);
+        assert!(g.street.bus_stop_m > 0.0);
         assert!(
             !g.street.faces.iter().any(|&(f, _)| f == Face::Ad),
             "no lettered ads"
         );
+        // Its buildings carry no names: the blade signs and the landmarks do.
+        assert!((0..256).all(|r| g.signs.fascia(r) != Fascia::Lettered));
         // The coast's says nothing of either, so it keeps what it had.
         let c = coast_80s();
         assert_eq!(
-            (c.signs.banner_256, c.street.clone()),
-            (0, StreetDress::default())
+            (c.signs.fascias.clone(), c.street.clone()),
+            (Vec::new(), StreetDress::default())
         );
+        assert_eq!(c.signs.fascia(7), Fascia::Lettered);
         let mut bad = g.clone();
         bad.street.bus_stop_m = 10.0;
         assert!(bad.validate().is_err());
         let mut bad = g.clone();
-        bad.signs.banner_256 = 300;
+        bad.signs.fascias = vec![(Fascia::Bare, 0)];
         assert!(bad.validate().is_err());
     }
 

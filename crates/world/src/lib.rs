@@ -21,6 +21,7 @@ pub mod collide;
 pub mod edges;
 pub mod grammar;
 pub mod ground;
+pub mod landmarks;
 pub mod lanes;
 pub mod lots;
 pub mod math;
@@ -223,7 +224,7 @@ pub struct ChunkPlan {
     props: Vec<props::Prop>,
     /// Per prop, the shop sign a blade sign is lettered with (`None` for every other kind).
     shop_signs: Vec<Option<signs::lexicon::ShopSign>>,
-    /// The grammar the shop signs and the buildings' fascia signs are lettered by.
+    /// The grammar the shop signs are lettered by.
     grammar: Grammar,
     kit: props::PropKit,
     /// Chunks that may hold a mesh, `[min, max]` inclusive.
@@ -526,8 +527,7 @@ impl ChunkPlan {
                     let m = out.at(c, MeshKind::Building);
                     let (base, drop) = self.footings[i];
                     let mark = m.vertices.len();
-                    let g = Some(&self.grammar);
-                    let s = buildings::build_on(m, b, plan, palette, seed, i as u32, drop, g);
+                    let s = buildings::build_on(m, b, plan, palette, seed, i as u32, drop);
                     // Its props are in `props` already.
                     buildings::house_site(m, b, plan, env, palette, seed, i as u32);
                     if base != 0.0 {
@@ -556,7 +556,16 @@ impl ChunkPlan {
                             None if setpieces::is_set_piece(p.kind) => {
                                 setpieces::build(m, p, palette, &self.grammar.lexicon)
                             }
-                            None => props::build(m, p, palette, &self.kit),
+                            None => match p.kind {
+                                props::PropKind::Landmark { kit, variant } => {
+                                    if let Some(k) = self.grammar.landmarks.get(usize::from(kit)) {
+                                        let base = p.pos.at(p.y);
+                                        let v = usize::from(variant);
+                                        landmarks::build(m, k, v, base, p.dir, palette);
+                                    }
+                                }
+                                _ => props::build(m, p, palette, &self.kit),
+                            },
                         }
                         if out.kept_vertices() >= max_vertices {
                             return Some(i + 1);

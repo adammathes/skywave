@@ -233,6 +233,8 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::HeroCar { slot } => (30, u64::from(slot)),
             PropKind::PicnicTable => (31, 0),
             PropKind::CrossingGate { arm_dm } => (32, u64::from(arm_dm)),
+            PropKind::Landmark { kit, variant } => (33, u64::from(kit) | u64::from(variant) << 8),
+            PropKind::LotLabel { letter } => (34, u64::from(letter)),
         };
         words.push(tag);
         words.push(payload);
@@ -320,8 +322,6 @@ struct Detailer<'a> {
     net: &'a Network,
     side_zone: &'a [[Option<ZoneId>; 2]],
     plans: &'a [(Vec<FacadeEnv>, BuildingPlan)],
-    /// The grammar the buildings' fascia signs are lettered by.
-    grammar: &'a Grammar,
     footings: &'a [(f32, f32)],
     grid: &'a TerrainGrid,
     template: &'a RegionTemplate,
@@ -493,7 +493,6 @@ impl<'a> Detailer<'a> {
             net,
             side_zone: &plan.side_zone,
             plans: &plan.plans,
-            grammar: &plan.grammar,
             footings: &plan.footings,
             grid,
             template,
@@ -1805,8 +1804,7 @@ impl<'a> Detailer<'a> {
             let (base, drop) = self.footings[i];
             scratch.vertices.clear();
             scratch.indices.clear();
-            let g = Some(self.grammar);
-            buildings::build_on(&mut scratch, b, plan, pal, self.seed, i as u32, drop, g);
+            buildings::build_on(&mut scratch, b, plan, pal, self.seed, i as u32, drop);
             for (c, n, rgb) in neon_clusters(&scratch) {
                 let p = c + n * 1.2;
                 out.push(Light {

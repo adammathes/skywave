@@ -51,6 +51,8 @@
 
 mod music;
 mod pad;
+#[cfg(target_os = "macos")]
+mod pad_mac;
 mod radio;
 mod settings;
 mod sfx;
@@ -75,7 +77,7 @@ use winit::event::{
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
 /// Pixel-precise scrolling (touchpads) counts this many pixels as one wheel notch, the
 /// same figure the web build uses.
@@ -1120,6 +1122,14 @@ impl ApplicationHandler for Shell {
                 if self.app.quit_requested() {
                     event_loop.exit();
                     return;
+                }
+                if self.app.take_fullscreen_toggle() {
+                    if let Some(gpu) = &self.gpu {
+                        // Borderless on the window's monitor; `Resized` reconfigures the surface.
+                        let full = gpu.window.fullscreen().is_none();
+                        gpu.window
+                            .set_fullscreen(full.then_some(Fullscreen::Borderless(None)));
+                    }
                 }
                 if let Some(world) = self.app.take_world_pick() {
                     match self.app.switch_world(&self.opts.scene, world) {

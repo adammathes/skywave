@@ -136,6 +136,9 @@ pub struct Ui {
     vehicle_pick: Option<(usize, usize)>,
     /// The pause menu's "Reset car" was chosen; the app resets the car.
     reset_pick: bool,
+    /// `Fullscreen` was pressed or the pause menu's "Fullscreen" chosen; the platform
+    /// toggles it ([`App::take_fullscreen_toggle`]).
+    fullscreen_pick: bool,
     /// The world the app is: an index into [`crate::scenario::BUILTIN`].
     scenario: usize,
     /// The World page picked this world; the platform loads it.
@@ -232,6 +235,7 @@ impl Ui {
             camera_changed: false,
             vehicle_pick: None,
             reset_pick: false,
+            fullscreen_pick: false,
             scenario: 0,
             world_pick: None,
             vehicle: 0,
@@ -958,6 +962,7 @@ impl Ui {
         match id {
             ItemId::Resume => self.close(),
             ItemId::Controls => self.open_controls(),
+            ItemId::Fullscreen => self.fullscreen_pick = true,
             ItemId::ResetCar => {
                 // Back to the road, where the car now is.
                 self.reset_pick = true;
@@ -1302,8 +1307,13 @@ impl App {
         let state = input.sample(dt as f32).clone();
         let was_open = self.ui.is_open();
         let was_card = self.ui.controls_take_input();
+        let capturing = self.ui.capture.is_some();
         self.ui
             .handle(&state, input, &mut self.time.clock, dt as f32);
+        // Under menus, the map and the card too; a press a remap captures is not one.
+        if state.just_pressed(Action::Fullscreen) && !capturing {
+            self.ui.fullscreen_pick = true;
+        }
         // The card asked for takes the keys and the sticks, as the full map does, and so
         // does a press it used (to close or scroll it): none of it reaches the car or the
         // radio.
@@ -1398,6 +1408,7 @@ impl App {
         self.audio.tunes = radio.tunes();
         self.audio.tune_volume = self.ui.settings.radio.volume;
         self.audio.deck_clicks = deck.clicks();
+        (self.audio.waves, self.audio.wave_run) = self.wave.chime();
         self.audio.deck_kind = match self.ui.deck.kind() {
             audio::deck::Kind::Tape => 0,
             audio::deck::Kind::Cd => 1,
@@ -1802,6 +1813,12 @@ impl App {
     /// The player chose Quit.
     pub fn quit_requested(&self) -> bool {
         self.ui.quit
+    }
+
+    /// The player asked for fullscreen on or off (the `Fullscreen` key or the pause menu),
+    /// once: the platform toggles it.
+    pub fn take_fullscreen_toggle(&mut self) -> bool {
+        std::mem::take(&mut self.ui.fullscreen_pick)
     }
 
     /// A menu is open (and the simulation paused).

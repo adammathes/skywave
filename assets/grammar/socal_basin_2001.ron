@@ -4,14 +4,15 @@
 // for the coast's (`california_coast_80s.ron`, which this started from).
 //
 // What changes from the 1980s coast: stucco boxes with plain parapets (fewer cornices, no
-// false fronts); auto shops in the industrial stucco (roll-up bays and a shop front with a
-// sign); mini-malls whose tenants sign in backlit boxes under a flat canopy, with vinyl
-// banners; awnings vinyl and aluminum, not canvas; the trades and words of the turn of the
-// century (`lexicon_2001.ron`: taco stands, auto shops, pagers and phones); lots busy into
-// the night; bus stops along the arterials; billboards blank or with one big pictogram
-// (no lettered ads). Tilt-up warehouses, dingbats and the tract houses' tile roofs come
-// from their styles' rules as on the coast; the downtown towers from the template's
-// downtown massing. Every value is a starting value, not yet fitted (ADR 0005).
+// false fronts); auto shops in the industrial stucco (roll-up bays and a shop front);
+// mini-malls under a flat canopy; awnings vinyl and aluminum, not canvas; lots busy into the
+// night; bus stops along the arterials; billboards mostly blank (no lettered ads). The
+// filler keeps quiet so the landmarks stand out: the buildings' sign bands carry no names,
+// only bare stucco, a plain fascia or a wall in one strong color; the words of the turn of
+// the century (`lexicon_2001.ron`: taco stands, auto shops, pagers and phones) are on the
+// blade neon and the landmarks. Tilt-up warehouses, dingbats and the tract houses' tile
+// roofs come from their styles' rules as on the coast; the downtown towers from the
+// template's downtown massing. Every value is a starting value, not yet fitted (ADR 0005).
 Grammar(
     era: Aughts,
     template: "socal_basin",
@@ -81,7 +82,9 @@ Grammar(
                 water_tank_1_in: 2,
             ),
         ),
-        // Shops and flats in smooth stucco; the lower parapet on flats.
+        // Shops and flats in smooth stucco; the lower parapet on flats. Shops told apart by
+        // their tops (stepped and shaped parapets) and a roll-up bay or a blank wall, not
+        // their signs.
         StyleRules(
             style: StuccoBox,
             zones: All,
@@ -98,7 +101,7 @@ Grammar(
                 ground: ByUse(
                     residential: GroundBays(storefront: 0, lobby: 0, garage: 0, wall: 0, door: 0),
                     office: GroundBays(storefront: 2, lobby: 2, garage: 0, wall: 1, door: 0),
-                    other: GroundBays(storefront: 6, lobby: 0, garage: 0, wall: 1, door: 1),
+                    other: GroundBays(storefront: 5, lobby: 0, garage: 1, wall: 2, door: 1),
                 ),
                 front_bay_w: (5.5, 8),
                 pier_w: (0.35, 0.5),
@@ -131,8 +134,8 @@ Grammar(
             top: Top(
                 parapet_h: ByUse(residential: 0.5, office: 0.8, other: 0.8),
                 kinds: TopKinds(
-                    parapet: 3, cornice: 1, stepped: 1, shaped: 1,
-                    false_front: 2, bracketed: 0, mansard: 1,
+                    parapet: 3, cornice: 0, stepped: 2, shaped: 2,
+                    false_front: 1, bracketed: 0, mansard: 1,
                 ),
                 cornice_d: 0.3,
             ),
@@ -972,15 +975,15 @@ Grammar(
         wordmarks: [(Block, 4), (Condensed, 3), (Slab, 2), (Script, 1)],
         line_256: 70,
         name_radius: 400,
-        // The vinyl banners on the mini-malls' fascias.
-        banner_256: 110,
-        // The buildings' fascia signs lettered from the lexicon too.
-        fascia_words: true,
+        // The filler keeps quiet so the landmarks stand out: no names on the buildings'
+        // sign bands (the blade neon and the landmarks carry the words), only bare stucco,
+        // a plain fascia or now and then a wall in one strong color.
+        fascias: [(Bare, 3), (Band, 4), (Mural, 1)],
     ),
 
     // Bus stops every 320 m along the arterials; billboards and the shelters' ad boxes
-    // blank or one big pictogram.
-    street: StreetDress(bus_stop_m: 320, faces: [(Pictogram, 3), (Blank, 2)]),
+    // mostly blank, now and then one big pictogram.
+    street: StreetDress(bus_stop_m: 320, faces: [(Pictogram, 1), (Blank, 3)]),
 
     // Parking lots (B10): the coast's layout (docs/backlog/BUILDINGS.md, "Parking lots"); the
     // occupancy shaped by hand for the basin: its commercial strips busy late into the night,

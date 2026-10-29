@@ -11,6 +11,15 @@
 //   node tools/screenshot/shoot.mjs --music                       # the deck plays a library
 //   node tools/screenshot/shoot.mjs [--url-query "?seed=1"] [--out path.png]   # ad hoc
 //   node tools/screenshot/shoot.mjs ... --size 1280x800          # another viewport (16:10)
+//   node tools/screenshot/shoot.mjs --gallery water_tower         # a landmark's contact sheet
+//   node tools/screenshot/shoot.mjs --gallery water_tower --times noon   # only some times
+//
+// `--gallery <kit>` (may repeat) shoots every variant of a landmark kit in the landmark
+// gallery (`place=gallery`) from the fixed cameras and at the times of day in
+// `gallery.json` (written by `cargo test -p app -- --ignored write_gallery`), at 960x540
+// unless `--size` says otherwise, into out/gallery/<kit>/, then tiles them into
+// out/gallery/<kit>.png: a column per variant, a row per time and camera (sheet.mjs).
+// Landmark PRs attach that sheet; the owner picks a variant by its letter.
 //
 // `--scene` may repeat and combines with `--selftest`. Scenes are named URL queries in
 // `scenes.json` (keys: crates/app/src/scene.rs). `--selftest` opens `?selftest=1`, reads
@@ -29,7 +38,9 @@ import { readFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readPng } from "./png.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { readPng, writePng } from "./png.mjs";
+import { composeSheet } from "./sheet.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
@@ -43,7 +54,8 @@ const opt = (name, fallback) => {
 const opts = (name) => args.flatMap((a, i) => (a === name && i + 1 < args.length ? [args[i + 1]] : []));
 const flag = (name) => args.includes(name);
 
-const [WIDTH, HEIGHT] = opt("--size", "1280x720").split("x").map(Number);
+const galleryKits = opts("--gallery");
+const [WIDTH, HEIGHT] = opt("--size", galleryKits.length ? "960x540" : "1280x720").split("x").map(Number);
 if (!(WIDTH > 0 && HEIGHT > 0)) {
   console.error("shoot: --size wants WIDTHxHEIGHT, e.g. 1280x800");
   process.exit(2);
@@ -72,6 +84,63 @@ const jobs = names.map((name) => ({
   query: sceneQuery(name),
   out: join(here, golden ? "golden" : "out", `${name}.png`),
 }));
+// The landmark gallery's shots: per kit, per time of day, per shot of gallery.json.
+const gallery = galleryKits.length ? JSON.parse(await readFile(join(here, "gallery.json"), "utf8")) : null;
+const galleryTimes = (() => {
+  if (!gallery) return [];
+  const want = opt("--times", null)?.split(",");
+  const times = gallery.times.filter((t) => !want || want.includes(t.name));
+  if (times.length === 0) {
+    console.error(`shoot: --times names none of ${gallery.times.map((t) => t.name).join(", ")}`);
+    process.exit(2);
+  }
+  return times;
+})();
+const galleryTile = (kit, shot, time) =>
+  join(here, "out", "gallery", kit, `${shot.variant}-${shot.camera}-${time.name}.png`);
+for (const kit of galleryKits) {
+  const k = gallery.kits[kit];
+  if (!k) {
+    console.error(`shoot: no landmark kit "${kit}" in gallery.json (have: ${Object.keys(gallery.kits).join(", ")})`);
+    process.exit(2);
+  }
+  for (const time of galleryTimes) {
+    for (const shot of k.shots) {
+      const params = { ...shot.params, t: time.t, ...(time.lights ? { lights: "1" } : {}) };
+      jobs.push({
+        name: `gallery-${kit}-${shot.variant}-${shot.camera}-${time.name}`,
+        query: "?" + Object.entries(params).map(([key, v]) => `${key}=${v}`).join("&"),
+        out: galleryTile(kit, shot, time),
+      });
+    }
+  }
+}
+
+/// Tiles kit `kit`'s captures into out/gallery/<kit>.png.
+async function writeSheet(kit) {
+  const k = gallery.kits[kit];
+  const cameras = [...new Set(k.shots.map((s) => s.camera))];
+  const rows = galleryTimes.flatMap((time) => cameras.map((camera) => ({ time, camera })));
+  const columns = k.variants.map((v) => ({ letter: v.letter, name: v.name }));
+  const tiles = (j, c) => {
+    const shot = k.shots.find((s) => s.variant === columns[c].letter && s.camera === rows[j].camera);
+    const file = shot && galleryTile(kit, shot, rows[j].time);
+    return file && existsSync(file) ? readPng(readFileSync(file)) : null;
+  };
+  const img = composeSheet({
+    title: `${kit.replaceAll("_", " ")} (${k.tone.toLowerCase()}): pick a letter`,
+    columns,
+    rows: rows.map((r) => ({ time: r.time.name, camera: r.camera })),
+    tiles,
+    captureWidth: WIDTH,
+    captureHeight: HEIGHT,
+  });
+  const out = join(here, "out", "gallery", `${kit}.png`);
+  await mkdir(dirname(out), { recursive: true });
+  await writeFile(out, writePng(img.width, img.height, img.rgba));
+  console.log(`shoot: gallery: wrote ${relative(process.cwd(), out) || out} (${img.width}x${img.height})`);
+}
+
 const selftest = flag("--selftest");
 const music = flag("--music");
 if (jobs.length === 0 && !selftest && !music) {
@@ -391,6 +460,14 @@ try {
       await shoot(job);
     } catch (e) {
       console.error(`shoot: ${job.name}: FAILED: ${e.message}`);
+      failed++;
+    }
+  }
+  for (const kit of galleryKits) {
+    try {
+      await writeSheet(kit);
+    } catch (e) {
+      console.error(`shoot: gallery: ${kit}: FAILED: ${e.message}`);
       failed++;
     }
   }
