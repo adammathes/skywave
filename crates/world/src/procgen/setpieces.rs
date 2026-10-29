@@ -18,6 +18,15 @@
 //!   edge, benches and a lamp.
 //! - **The channel ramps**: chain-link along both lips of the flood channel, open where a
 //!   road bridges it, around each ramp and at its top.
+//! - **The landmarks** built from kits ([`crate::landmarks`]; the variant each wears is the
+//!   owner's pick from the gallery's contact sheet, [`LETTERS`], [`WATER_TOWER`],
+//!   [`DRIVE_IN`]): the hillside letters on the slope of the hills [`LETTERS_RISE_M`] above
+//!   their foot, square to the slope and across from downtown, clear of every road; the
+//!   water tower on the industrial lot with the most industry round it, at least
+//!   [`TOWER_APART_M`] from the garage and the stand; the drive-in on the commercial,
+//!   strip, industrial or desert lot nearest the boulevard at least [`APART_M`] from the
+//!   other lots, its rows filling with cars after dark. A kit the grammar does not carry
+//!   is not sited.
 //!
 //! Every draw is a pure function of the place; nothing here draws randomness but the
 //! signs' name seeds (`hash64(seed, [SETPIECES, ..])`).
@@ -32,8 +41,11 @@ use place::{
 use skywave_core::Seed;
 
 use super::macro_map::{MacroMap, MacroPoiKind};
-use crate::math::{point_in_polygon, segment_distance, V2};
+use crate::landmarks::Kit;
+use crate::lots::LOT_CAR;
+use crate::math::{abs, point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
+use crate::palette::Palette;
 use crate::props::yaw_of_dir;
 use crate::setpieces::{bay_x, GARAGE_M, STAND_M, TUNNEL_H_M};
 
@@ -73,6 +85,27 @@ const FENCE_OUT_M: f32 = 0.6;
 /// An overlook's turnout: its guard rail this far past the road's end, this long, m.
 const RAIL_OUT_M: f32 = 9.0;
 const RAIL_M: f32 = 18.0;
+/// The landmarks a basin builds from kits: `(kit id, variant)`, the variant the owner's
+/// pick from the gallery's contact sheet (`docs/WORLD_GENERATION.md`, "Landmarks").
+pub const LETTERS: (&str, u8) = ("hillside_letters", 0);
+/// B, the pedestal (the owner's pick from the gallery sample).
+pub const WATER_TOWER: (&str, u8) = ("water_tower", 1);
+pub const DRIVE_IN: (&str, u8) = ("drive_in", 0);
+/// The letters stand where the hills have risen this far over the road along their foot,
+/// their faces this far back on their lot, their line level to within this, and no road
+/// comes within this of their lot, m.
+pub const LETTERS_RISE_M: f32 = 50.0;
+const LETTERS_FACE_M: f32 = 8.6;
+const LETTERS_LEVEL_M: f32 = 3.0;
+const LETTERS_ROAD_CLEAR_M: f32 = 12.0;
+/// The water tower stands at least this far from the garage and the stand, and is scored
+/// by the industry within this of it, m.
+pub const TOWER_APART_M: f32 = 200.0;
+const TOWER_REACH_M: f32 = 192.0;
+/// The drive-in's car rows in its kit's frame (`assets/landmarks/drive_in.ron`): `x` of
+/// each stall and `z` of each row, m, facing the screen.
+const DRIVE_IN_STALLS: [f32; 5] = [-12.0, -6.0, 0.0, 6.0, 12.0];
+const DRIVE_IN_ROWS: [f32; 3] = [-17.0, -25.0, -33.0];
 
 /// A site a set piece stands on: the middle of its front at the property line, the way
 /// into it from the road, the way along the road.
@@ -102,6 +135,25 @@ impl Lot {
     }
 }
 
+/// A landmark built from a kit on its own lot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mark {
+    pub lot: Lot,
+    pub kind: PoiKind,
+    /// The kit's index in the grammar's and the variant it wears.
+    pub kit: u8,
+    pub variant: u8,
+    /// Its lot's width and depth, m.
+    pub size: [f32; 2],
+}
+
+impl Mark {
+    /// The middle of its lot.
+    fn middle(&self) -> V2 {
+        self.lot.at(0.0, 0.5 * self.size[1])
+    }
+}
+
 /// Where a basin's set pieces go (see the module docs); empty on any other place.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SetPieces {
@@ -122,6 +174,9 @@ pub struct SetPieces {
     pub channel: Option<(V2, V2, f32)>,
     /// Where the rail line crosses a road at grade, in order along it.
     pub crossings: Vec<V2>,
+    /// The landmarks built from kits: the letters, the water tower, the drive-in, those
+    /// that found a site.
+    pub marks: Vec<Mark>,
 }
 
 impl SetPieces {
@@ -157,6 +212,9 @@ impl SetPieces {
         for &c in &self.crossings {
             push(c, PoiKind::GradeCrossing);
         }
+        for mark in &self.marks {
+            push(mark.middle(), mark.kind);
+        }
         out
     }
 
@@ -184,6 +242,9 @@ impl SetPieces {
             let r = out_dir.right() * (0.5 * RAIL_M + 2.0);
             let (a, b) = (at - out_dir * 2.0, at + out_dir * (RAIL_OUT_M + 2.0));
             out.push(vec![a - r, b - r, b + r, a + r]);
+        }
+        for mark in &self.marks {
+            out.push(mark.lot.rect(mark.size[0], mark.size[1]));
         }
         out
     }
@@ -233,9 +294,26 @@ fn road_y(place: &Place, q: V2, keep: impl Fn(&place::Edge) -> bool) -> Option<f
     best.map(|b| b.1)
 }
 
+/// Kit `id` in `kits`: its index, `variant` and its lot; `None` if the grammar does not
+/// carry it or it has no such variant.
+fn kit_of(kits: &[Kit], (id, variant): (&str, u8)) -> Option<(u8, u8, [f32; 2])> {
+    let k = kits.iter().position(|k| k.id == id)?;
+    (usize::from(variant) < kits[k].variants.len()).then(|| (k as u8, variant, kits[k].lot))
+}
+
+/// Whether the lot `l`, `w` wide and `d` deep, overlaps one of `areas`.
+fn overlaps(l: &Lot, (w, d): (f32, f32), areas: &[Vec<V2>]) -> bool {
+    let rect = l.rect(w, d);
+    areas.iter().any(|a| {
+        samples(l, w, d).any(|q| point_in_polygon(q, a))
+            || a.iter().any(|&q| point_in_polygon(q, &rect))
+    })
+}
+
 /// Where the set pieces of the place `m` describes go, its roads, lots and buildings
-/// standing (see the module docs). Empty unless `m` is a basin.
-pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
+/// standing (see the module docs), the landmarks from `kits` (the grammar's). Empty unless
+/// `m` is a basin.
+pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     let Some(b) = m.basin.as_ref() else {
         return SetPieces::default();
     };
@@ -410,7 +488,167 @@ pub fn site(m: &MacroMap, place: &Place) -> SetPieces {
         .iter()
         .map(|r| [V2::from_array(r[0]), V2::from_array(r[1])])
         .collect();
+
+    // The landmarks.
+    if let Some((kit, variant, size)) = kit_of(kits, LETTERS) {
+        if let Some(lot) = letters_site(m, place, &s, size) {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::HillsideLetters,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
+    let taken: Vec<V2> = [s.garage, s.stand]
+        .iter()
+        .flatten()
+        .map(|l| l.front)
+        .collect();
+    if let Some((kit, variant, size)) = kit_of(kits, WATER_TOWER) {
+        let (w, d) = (size[0], size[1]);
+        let areas = s.footprints();
+        // The industry round a lot: industrial zone samples every 32 m within reach.
+        let industry = |l: &Lot| {
+            let c = l.at(0.0, 0.5 * d);
+            let n = (TOWER_REACH_M / 32.0) as i32;
+            let mut k = 0u32;
+            for i in -n..=n {
+                for j in -n..=n {
+                    let q = c + V2::new(i as f32, j as f32) * 32.0;
+                    let inside = (q - c).length() <= TOWER_REACH_M;
+                    if inside && m.zone_at(q.x, q.y) == ZoneId::Industrial {
+                        k += 1;
+                    }
+                }
+            }
+            k
+        };
+        let lot = lots(place, (w, d), &[ZoneId::Industrial], &classes)
+            .into_iter()
+            .filter(|l| !overlaps(l, (w, d), &areas))
+            .filter(|l| {
+                taken
+                    .iter()
+                    .all(|&t| (t - l.front).length() >= TOWER_APART_M)
+            })
+            .map(|l| (industry(&l), l))
+            .max_by(|x, y| x.0.cmp(&y.0).then(y.1.key.cmp(&x.1.key)))
+            .map(|x| x.1);
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::WaterTower,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
+    if let Some((kit, variant, size)) = kit_of(kits, DRIVE_IN) {
+        let (w, d) = (size[0], size[1]);
+        let areas = s.footprints();
+        let mut taken = taken;
+        taken.extend(s.marks.iter().map(|k| k.lot.front));
+        let zones = [
+            ZoneId::Commercial,
+            ZoneId::Strip,
+            ZoneId::Industrial,
+            ZoneId::Farmland,
+        ];
+        let lot = lots(place, (w, d), &zones, &classes[..2])
+            .into_iter()
+            .filter(|l| !overlaps(l, (w, d), &areas))
+            .filter(|l| taken.iter().all(|&t| (t - l.front).length() >= APART_M))
+            .min_by(by_blvd);
+        if let Some(lot) = lot {
+            s.marks.push(Mark {
+                lot,
+                kind: PoiKind::DriveIn,
+                kit,
+                variant,
+                size,
+            });
+        }
+    }
     s
+}
+
+/// The hillside letters' lot, `size` wide and deep (see the module docs): its front along
+/// the slope's contour below the letters, facing down it.
+fn letters_site(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> Option<Lot> {
+    let b = m.basin.as_ref()?;
+    let foot = b.lines.first()?;
+    let out = V2::from_array(m.frame.dir_to_world(1.0, 0.0));
+    let downtown = V2::from_array(m.downtown);
+    let h = |p: V2| m.height_at(p.x, p.y);
+    let roads: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .flat_map(|e| {
+            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
+            e.profile
+                .windows(2)
+                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
+        })
+        .collect();
+    let (a, c) = (V2::from_array(foot.a), V2::from_array(foot.b));
+    let n = ((c - a).length() / 16.0) as usize;
+    let [w, d] = size;
+    let mut best: Option<(f32, usize, Lot)> = None;
+    for k in 0..=n {
+        let q = a.lerp(c, k as f32 / n.max(1) as f32);
+        let h0 = h(q);
+        // Up the slope from the road until it has risen enough.
+        let Some(p) = (3..60)
+            .map(|i| q - out * (8.0 * i as f32))
+            .find(|&p| h(p) - h0 >= LETTERS_RISE_M)
+        else {
+            continue;
+        };
+        let g = V2::new(
+            h(p + V2::new(8.0, 0.0)) - h(p - V2::new(8.0, 0.0)),
+            h(p + V2::new(0.0, 8.0)) - h(p - V2::new(0.0, 8.0)),
+        );
+        if g.length() < 1e-3 {
+            continue;
+        }
+        let down = -g.normalize();
+        if down.dot(out) < 0.7 {
+            continue;
+        }
+        let lot = Lot {
+            front: p + down * LETTERS_FACE_M,
+            inward: -down,
+            along: down.left(),
+            key: k as u64,
+        };
+        let line = (0..=12).map(|i| p + lot.along * ((i as f32 / 12.0 - 0.5) * w));
+        let (lo, hi) = line.fold((f32::MAX, f32::MIN), |(lo, hi), q| {
+            (lo.min(h(q)), hi.max(h(q)))
+        });
+        let rect = lot.rect(w, d);
+        let clear = samples(&lot, w, d).chain(rect.iter().copied()).all(|q| {
+            m.in_playable(q.x, q.y, 30.0)
+                && roads
+                    .iter()
+                    .all(|&(r0, r1, hw)| segment_distance(q, r0, r1).0 > hw + LETTERS_ROAD_CLEAR_M)
+        });
+        let by_overlook = s
+            .overlooks
+            .iter()
+            .any(|&(at, _)| (at - lot.at(0.0, 0.5 * d)).length() < 40.0);
+        if hi - lo > LETTERS_LEVEL_M || !clear || by_overlook {
+            continue;
+        }
+        let score = abs((p - downtown).dot(out.right()));
+        if best.as_ref().is_none_or(|x| score < x.0) {
+            best = Some((score, k, lot));
+        }
+    }
+    best.map(|x| x.2)
 }
 
 /// Indices of items binned by their bounds on a square grid.
@@ -608,6 +846,10 @@ pub fn clear(place: &mut Place, s: &SetPieces) {
             taken.extend(samples(l, w, d).filter_map(|q| parcels.under(q)));
         }
     }
+    for mark in &s.marks {
+        let (w, d) = (mark.size[0], mark.size[1]);
+        taken.extend(samples(&mark.lot, w, d).filter_map(|q| parcels.under(q)));
+    }
     let lots: Vec<Vec<V2>> = taken.iter().map(|&i| parcels.polys[i].clone()).collect();
     let mut areas = s.footprints();
     areas.extend(lots);
@@ -635,12 +877,15 @@ fn prop(p: V2, y: f32, facing: V2, kind: PropKind) -> Prop {
 }
 
 /// The set pieces' props and their own lights (the street lamps' come with the
-/// detailing's), on the graded `grid`.
+/// detailing's), on the graded `grid`; the landmarks from `kits` (the grammar's) lit in
+/// `pal`.
 pub fn dress(
     seed: Seed,
     place: &Place,
     grid: &TerrainGrid,
     s: &SetPieces,
+    kits: &[Kit],
+    pal: &Palette,
 ) -> (Vec<Prop>, Vec<Light>) {
     let mut props = Vec::new();
     let mut lights = Vec::new();
@@ -818,6 +1063,60 @@ pub fn dress(
         }
         let lamp = at + along * (0.5 * RAIL_M + 1.0);
         props.push(prop(lamp, ground(lamp), -along, PropKind::StreetLight));
+    }
+
+    for mark in &s.marks {
+        let (w, d) = (mark.size[0], mark.size[1]);
+        let l = &mark.lot;
+        let out = -l.inward;
+        // Its base: the lowest ground under the letters' line, or under the lot (the pad
+        // reaches down into the ground).
+        let y = if mark.kind == PoiKind::HillsideLetters {
+            (0..=12)
+                .map(|i| ground(l.at((i as f32 / 12.0 - 0.5) * w, LETTERS_FACE_M)))
+                .fold(f32::MAX, f32::min)
+        } else {
+            samples(l, w, d).map(ground).fold(f32::MAX, f32::min)
+        };
+        props.push(prop(
+            l.front,
+            y,
+            out,
+            PropKind::Landmark {
+                kit: mark.kit,
+                variant: mark.variant,
+            },
+        ));
+        if let Some(kit) = kits.get(usize::from(mark.kit)) {
+            let base = V3::new(l.front.x, y, l.front.y);
+            let v = usize::from(mark.variant);
+            crate::landmarks::lights(kit, v, base, out, pal, &mut lights);
+        }
+        // The drive-in's rows fill after dark: each car from 19:00 or 20:00 to 23:00 or
+        // 01:00, by its stall.
+        if mark.kind == PoiKind::DriveIn {
+            let x = out.left();
+            let classes = [0x01u8, 0x14, 0x23, 0x31, 0x45, 0x52];
+            let mut k = 0usize;
+            for &z in &DRIVE_IN_ROWS {
+                for &sx in &DRIVE_IN_STALLS {
+                    let q = l.front + x * sx + out * z;
+                    let from = 19 + (k % 2) as u32;
+                    let to = if k.is_multiple_of(3) { 25 } else { 23 };
+                    let hours = (from..to).fold(0u32, |m, h| m | 1 << (h % 24));
+                    props.push(prop(
+                        q,
+                        ground(q),
+                        -out,
+                        PropKind::ParkedCar {
+                            vehicle_class: classes[k % classes.len()],
+                            hours: hours | LOT_CAR,
+                        },
+                    ));
+                    k += 1;
+                }
+            }
+        }
     }
 
     channel_fences(place, grid, s, &mut props);

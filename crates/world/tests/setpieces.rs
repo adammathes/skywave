@@ -15,11 +15,21 @@ use world::{resolve, WorldCollider};
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+/// The landmark kits, in file-name order, as the game attaches them to the grammar.
+const KITS: [&str; 3] = [
+    include_str!("../../../assets/landmarks/drive_in.ron"),
+    include_str!("../../../assets/landmarks/hillside_letters.ron"),
+    include_str!("../../../assets/landmarks/water_tower.ron"),
+];
 const HALBERD: &str = include_str!("../../../assets/vehicles/halberd_coupe.ron");
 
 fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
+    g.landmarks = KITS
+        .iter()
+        .map(|t| ron::from_str(t).expect("parse kit"))
+        .collect();
     g.validate().expect("validate grammar");
     g
 }
@@ -265,4 +275,161 @@ fn the_tunnel_walls_its_road_and_the_garage_takes_a_car() {
     drive(&spec, &mut s, &c, 5.0, |s| input(cruise(s, 8.0), 0.0, 0.0));
     let off = (V2::new(s.pos[0], s.pos[2]) - front).dot(x);
     assert!(off > 0.5 * gw, "through the garage's wall: {off:.1} m");
+}
+
+/// The landmark built from kit `id` (the basin's one), and that kit's lot.
+fn landmark<'a>(p: &'a Place, id: &str) -> (&'a place::Prop, u8, [f32; 2]) {
+    let kits = grammar().landmarks;
+    let k = kits.iter().position(|k| k.id == id).unwrap();
+    let mut marks = p.props.items.iter().filter_map(|q| match q.kind {
+        PropKind::Landmark { kit, variant } if usize::from(kit) == k => Some((q, variant)),
+        _ => None,
+    });
+    let (q, v) = marks.next().unwrap_or_else(|| panic!("no {id}"));
+    assert!(marks.next().is_none(), "two {id}s");
+    (q, v, kits[k].lot)
+}
+
+#[test]
+fn every_basin_has_its_landmarks_on_open_ground_lit_and_filling_at_night() {
+    use world::procgen::setpieces::{DRIVE_IN, LETTERS, LETTERS_RISE_M, WATER_TOWER};
+    for seed in 1..=4u64 {
+        let p = basin(seed);
+        let c = WorldCollider::build(&p, &grammar());
+        for kind in [
+            PoiKind::HillsideLetters,
+            PoiKind::WaterTower,
+            PoiKind::DriveIn,
+        ] {
+            assert_eq!(pois(&p, kind), 1, "seed {seed}: {kind:?}");
+        }
+        let mut fronts = Vec::new();
+        for (id, variant) in [LETTERS, WATER_TOWER, DRIVE_IN] {
+            let (q, v, [w, d]) = landmark(&p, id);
+            assert_eq!(v, variant, "seed {seed}: {id}");
+            // No road and no building on its lot; the letters keep well clear of roads.
+            let area = footprint(q, w, d);
+            let clear = if id == LETTERS.0 { 12.0 } else { 0.0 };
+            for e in &p.roads.edges {
+                for s in e.profile.windows(2) {
+                    let (a, b) = (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2]));
+                    for k in 0..=20 {
+                        let t = k as f32 / 20.0;
+                        let edge = area[k % 4].lerp(area[(k + 1) % 4], t);
+                        let d = segment_distance(edge, a, b).0;
+                        assert!(d > 0.5 * e.width_m + clear, "seed {seed}: {id} on a road");
+                    }
+                }
+            }
+            for b in &p.buildings {
+                for v in &b.footprint {
+                    let v = V2::from_array(*v);
+                    assert!(
+                        !world::math::point_in_polygon(v, &area),
+                        "seed {seed}: a building on the {id}'s lot"
+                    );
+                }
+            }
+            // Its lamps light it.
+            let lit = p
+                .lights
+                .items
+                .iter()
+                .filter(|l| {
+                    let at = V2::new(l.pos[0], l.pos[2]);
+                    world::math::point_in_polygon(at, &area)
+                })
+                .count();
+            assert!(lit >= 2, "seed {seed}: {id} has {lit} lights");
+            // Something of it stops a car.
+            let solid = c
+                .boxes
+                .iter()
+                .filter(|b| matches!(b.kind, world::props::PropKind::Landmark { .. }))
+                .filter(|b| world::math::point_in_polygon(V2::new(b.c[0], b.c[1]), &area))
+                .count();
+            assert!(solid >= 1, "seed {seed}: nothing of the {id} is solid");
+            fronts.push(at(q));
+            let letter = world::landmarks::letter(usize::from(v));
+            println!(
+                "seed {seed}: {id} {letter} at {:.0},{:.0}",
+                q.pos[0], q.pos[2]
+            );
+        }
+        // Apart from each other.
+        for i in 0..fronts.len() {
+            for j in i + 1..fronts.len() {
+                assert!((fronts[i] - fronts[j]).length() > 150.0, "seed {seed}");
+            }
+        }
+
+        // The letters: up the hills over the road at their foot, facing out over the
+        // valley, their line on the ground (buried a little, never floating).
+        let (q, _, [w, _]) = landmark(&p, LETTERS.0);
+        let out = dir_of_yaw(q.yaw);
+        let x = out.left();
+        let mut lowest = f32::MAX;
+        for k in 0..=24 {
+            let lx = (k as f32 / 24.0 - 0.5) * (w - 6.0);
+            for z in [8.0f32, 9.2] {
+                let g = at(q) + x * lx - out * z;
+                let ground = c.level_at([g.x, g.y]).0;
+                lowest = lowest.min(ground - q.pos[1]);
+                assert!(
+                    ground - q.pos[1] < 3.5 && ground - q.pos[1] > -0.6,
+                    "seed {seed}: the letters' foot is {:.1} m off the ground",
+                    ground - q.pos[1]
+                );
+            }
+        }
+        let below = at(q) + out * 80.0;
+        let rise = q.pos[1] - c.level_at([below.x, below.y]).0;
+        assert!(
+            rise > 0.4 * LETTERS_RISE_M,
+            "seed {seed}: letters {rise:.0} m up"
+        );
+
+        // The drive-in's rows: empty at noon, full at nine at night.
+        let cars: Vec<u32> = p
+            .props
+            .items
+            .iter()
+            .filter_map(|r| match r.kind {
+                PropKind::ParkedCar { hours, .. } => Some((r, hours)),
+                _ => None,
+            })
+            .filter(|(r, _)| {
+                let (dq, _, [dw, dd]) = landmark(&p, DRIVE_IN.0);
+                world::math::point_in_polygon(at(r), &footprint(dq, dw, dd))
+            })
+            .map(|x| x.1)
+            .collect();
+        assert_eq!(cars.len(), 15, "seed {seed}");
+        assert!(cars.iter().all(|h| h >> 12 & 1 == 0 && h >> 21 & 1 == 1));
+    }
+}
+
+#[test]
+fn the_water_tower_and_the_drive_in_screen_stop_a_car() {
+    use world::procgen::setpieces::{DRIVE_IN, WATER_TOWER};
+    let spec = halberd();
+    let p = basin(1);
+    let c = WorldCollider::build(&p, &grammar());
+    let ground = |q: V2| [q.x, c.level_at([q.x, q.y]).0, q.y];
+    // From the road straight at the tower's column, and at the screen down an aisle of
+    // the drive-in (between its speaker posts, past its booth): each stops the car short.
+    for (id, aisle, depth) in [(WATER_TOWER.0, 0.0, 12.0), (DRIVE_IN.0, 6.0, 38.0)] {
+        let (q, _, _) = landmark(&p, id);
+        let out = dir_of_yaw(q.yaw);
+        let front = at(q);
+        // On the lot's front edge, clear of the cars parked at the curb.
+        let start = front - out * 0.5 + out.left() * aisle;
+        let mut s = VehicleState::spawn(&spec, ground(start), heading_of(-out));
+        drive(&spec, &mut s, &c, 10.0, |s| input(cruise(s, 8.0), 0.0, 0.0));
+        let into = (front - V2::new(s.pos[0], s.pos[2])).dot(out);
+        assert!(into < depth, "{id}: {into:.1} m into its lot of {depth}");
+        assert!(into > depth - 6.0, "{id}: only {into:.1} m in");
+        println!("{id}: stopped {into:.1} m in");
+        assert!(s.pos.iter().all(|v| v.is_finite()));
+    }
 }

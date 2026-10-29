@@ -6,7 +6,8 @@
 //! The shots are written to `tools/screenshot/gallery.json` by
 //! `cargo test -p app -- --ignored write_gallery`; a test fails while that file is stale.
 //! Every camera stands south of its lot on open ground and faces the landmark's middle:
-//! - `front`: the hood camera straight on, far enough back that the top fits the frame;
+//! - `front`: the hood camera straight on, far enough back that the top and the sides fit
+//!   the frame;
 //! - `quarter`: the hood camera from 35° east of straight on, as far back;
 //! - `street`: the far chase camera from 20° west, a little farther, the car in the frame
 //!   for scale.
@@ -36,6 +37,10 @@ const EYE_M: f32 = 1.25;
 const TOP_SHARE: f32 = 0.8;
 /// The nearest a camera stands to a landmark's middle, m.
 const MIN_DISTANCE_M: f32 = 30.0;
+/// The sheets' frames' width over height (`shoot.mjs --gallery` shoots 960x540) and the
+/// share of the half width a landmark's side may take.
+const ASPECT: f32 = 16.0 / 9.0;
+const SIDE_SHARE: f32 = 0.9;
 
 /// One shot of the sheet, before the time of day.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,10 +65,13 @@ pub fn shots(kits: &[Kit], k: usize) -> Vec<Shot> {
     let mut out = Vec::new();
     for lot in gallery_lots(kits).iter().filter(|l| l.kit == k) {
         let kit = &kits[k];
-        let (_, hi) = kit.bounds(lot.variant);
+        let (lo, hi) = kit.bounds(lot.variant);
         // The landmark's middle: halfway back on its lot.
         let mid = [lot.front[0], lot.front[1] - 0.5 * kit.lot[1]];
-        let fit = ((hi[1] * 1.05 - EYE_M) / (half_fov * TOP_SHARE).tan()).max(MIN_DISTANCE_M);
+        let half_hfov = (half_fov.tan() * ASPECT).atan();
+        let side = 0.5 * (hi[0] - lo[0]) * 1.05 / (half_hfov * SIDE_SHARE).tan();
+        let top = (hi[1] * 1.05 - EYE_M) / (half_fov * TOP_SHARE).tan();
+        let fit = top.max(side).max(MIN_DISTANCE_M);
         for (camera, cam, bearing, share) in CAMERAS {
             let d = (fit * share).max(MIN_DISTANCE_M) + 0.5 * kit.lot[1];
             let (s, c) = bearing.to_radians().sin_cos();
@@ -201,12 +209,12 @@ mod tests {
             }
         }
         // The water tower's front camera fits its top: about 85 m back.
-        let front = &shots(kits, 0)[0];
+        let tower = kits.iter().position(|k| k.id == "water_tower").unwrap();
+        let front = &shots(kits, tower)[0];
         assert_eq!((front.variant, front.camera), ('A', "front"));
-        assert!(
-            (70.0..110.0).contains(&(front.pos[1] - (-24.0))),
-            "{front:?}"
-        );
+        let lot = lots.iter().find(|l| l.kit == tower).unwrap();
+        let mid = lot.front[1] - 0.5 * kits[tower].lot[1];
+        assert!((70.0..110.0).contains(&(front.pos[1] - mid)), "{front:?}");
     }
 
     #[test]

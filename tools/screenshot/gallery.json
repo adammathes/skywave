@@ -1,6 +1,304 @@
 {
   "about": "Landmark gallery contact sheets (crates/app/src/gallery.rs); written by `cargo test -p app -- --ignored write_gallery`.",
   "kits": {
+    "drive_in": {
+      "about": "A drive-in movie theater's screen, speaker rows and marquee on its own lot.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,33.2",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "38.6,21.1",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-26.1,37.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "124,37.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "165.3,24.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "96,43",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "248,42.8",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "292,28.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "218,48.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "A plain white screen on a braced steel frame over a stucco skirt, a booth, a box marquee on two posts.",
+          "letter": "A",
+          "name": "Steel screen"
+        },
+        {
+          "about": "A's screen framed in a stepped peach stucco tower with a neon crown line, a taller marquee.",
+          "letter": "B",
+          "name": "Stucco tower"
+        },
+        {
+          "about": "B with a big neon star over the marquee and chaser bulbs round its box: roadside kitsch.",
+          "letter": "C",
+          "name": "Neon star"
+        }
+      ]
+    },
+    "hillside_letters": {
+      "about": "The valley's name in giant letters on the hillside above it.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,-136.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "25,-144.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-17.4,-132.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "130,-118.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "165.3,-129.6",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "105.3,-112.1",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "260,-136.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "285,-144.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "242.6,-132.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "MIRAGE in ten-metre white sheet-metal letters on raked legs, three flood lamps at their foot.",
+          "letter": "A",
+          "name": "Sheet-metal name"
+        },
+        {
+          "about": "A single white M twice the height, the way a valley town marks its hill; two flood lamps.",
+          "letter": "B",
+          "name": "One tall M"
+        },
+        {
+          "about": "A's letters with a line of marquee bulbs down every stroke, lit at dusk: roadside kitsch.",
+          "letter": "C",
+          "name": "Marquee name"
+        }
+      ]
+    },
     "water_tower": {
       "about": "A municipal water tower on its own lot.",
       "shots": [
@@ -10,7 +308,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "0,74.8",
+            "pos": "0,-245.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -24,7 +322,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "56.7,57",
+            "pos": "56.7,-263",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -38,7 +336,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "-39.7,85.2",
+            "pos": "-39.7,-234.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -52,7 +350,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "100,72.2",
+            "pos": "100,-247.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -66,7 +364,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "155.2,54.8",
+            "pos": "155.2,-265.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -80,7 +378,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "61.3,82.3",
+            "pos": "61.3,-237.7",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -94,7 +392,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "200,74.8",
+            "pos": "200,-245.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -108,7 +406,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "256.7,57",
+            "pos": "256.7,-263",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -122,7 +420,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "160.3,85.2",
+            "pos": "160.3,-234.8",
             "seed": "1",
             "still": "1",
             "stream": "0",

@@ -167,7 +167,8 @@ pub fn detail(
         let clear = |p: &Prop| !kept(V2::new(p.pos[0], p.pos[2]));
         d.props.retain(clear);
         d.cars.retain(clear);
-        let (own, own_lights) = super::setpieces::dress(Seed(d.seed), place, d.grid, sites);
+        let (own, own_lights) =
+            super::setpieces::dress(Seed(d.seed), place, d.grid, sites, &grammar.landmarks, &pal);
         d.props.extend(own);
         d.cap_cars();
         // Whatever stands outside the place has no chunk to belong to.
