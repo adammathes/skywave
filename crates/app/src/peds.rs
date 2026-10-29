@@ -61,6 +61,20 @@ pub fn variant_of(seed: u64) -> usize {
     (seed % VARIANTS as u64) as usize
 }
 
+/// A person seated in an NPC car (`crate::npc`), drawn with the crowd as figure
+/// `figure`'s parts at `parts` (world transforms), lit by `lights`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seated {
+    pub figure: u16,
+    /// The car's slot in the traffic pool.
+    pub car: u16,
+    pub parts: [Mat4; PARTS],
+    pub lights: LightSet,
+}
+
+/// Marks a draw-order slot as an entry of `seated`, not a person of the pool.
+const SEATED: u16 = 0x8000;
+
 /// A slot's person at the start of the step, to interpolate from.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Snap {
@@ -153,6 +167,16 @@ impl Crowd {
             })
             .collect();
         self.built_bytes = bytes;
+    }
+
+    /// How many figures are built (none until the density is first on).
+    pub fn variants(&self) -> usize {
+        self.variants.len()
+    }
+
+    /// Figure `v`'s skeleton and part meshes, if built.
+    pub fn variant(&self, v: usize) -> Option<(&Skeleton, &[MeshId; PARTS])> {
+        self.variants.get(v).map(|f| (&f.skeleton, &f.ids))
     }
 
     /// Most instances a frame draws: a part for every person the pool holds.
@@ -294,16 +318,23 @@ impl Crowd {
         pos
     }
 
+    /// Room for `n` [`Seated`] drivers in the draw order, so drawing them never allocates.
+    pub fn reserve_seated(&mut self, n: usize) {
+        self.order.reserve(n);
+    }
+
     /// Appends one instance per part of every live person within [`DRAW_RADIUS_M`] of
-    /// `eye` and not within `clear_m` of it (whole figures, never some parts),
-    /// `alpha` of the way through the step, in mesh order, lit by the frame's `lights`
-    /// when close. Returns how many instances.
+    /// `eye` and not within `clear_m` of it (whole figures, never some parts), and of every
+    /// `seated` driver (casting no shadow: the car's roof does), `alpha` of the way through
+    /// the step, in mesh order, lit by the frame's `lights` when close. Returns how many
+    /// instances.
     pub fn push(
         &mut self,
         alpha: f32,
         eye: Vec3,
         clear_m: f32,
         lights: &FrameLights,
+        seated: &[Seated],
         out: &mut Vec<MeshInstance>,
     ) -> usize {
         if self.variants.is_empty() {
@@ -316,6 +347,11 @@ impl Crowd {
             let d2 = Vec3::from(p.pos).distance_squared(eye);
             if p.alive && d2 <= draw2 && d2 >= clear2 {
                 order.push((variant_of(p.seed) as u16, i as u16));
+            }
+        }
+        for (k, s) in seated.iter().enumerate() {
+            if usize::from(s.figure) < self.variants.len() {
+                order.push((s.figure, k as u16 | SEATED));
             }
         }
         order.sort_unstable();
@@ -336,7 +372,19 @@ impl Crowd {
                 MeshInstance::new(self.variants[v].ids[0], Mat4::IDENTITY.to_cols_array_2d());
             out.resize(base + n * PARTS, blank);
             for j in 0..n {
-                let i = usize::from(order[g + j].1);
+                let slot = order[g + j].1;
+                if slot & SEATED != 0 {
+                    let s = &seated[usize::from(slot & !SEATED)];
+                    for (k, m) in s.parts.iter().enumerate() {
+                        out[base + k * n + j] = MeshInstance {
+                            lights: s.lights,
+                            casts_shadow: false,
+                            ..MeshInstance::new(self.variants[v].ids[k], m.to_cols_array_2d())
+                        };
+                    }
+                    continue;
+                }
+                let i = usize::from(slot);
                 let pos = self.parts(i, alpha, &mut parts);
                 let bounds = Bounds::cube(pos + Vec3::Y * FIGURE_HALF_M, FIGURE_HALF_M);
                 let d2 = bounds.distance_squared(eye);
@@ -417,14 +465,29 @@ mod tests {
         app.npcs.crowd.variants.iter().flat_map(|v| v.ids).collect()
     }
 
-    /// The instances of `app`'s view drawing a pedestrian's part.
+    /// NPC cars near enough to draw their drivers.
+    fn npc_drivers(app: &App) -> usize {
+        let eye = app.camera.pose(&app.drive, 1.0).eye;
+        let near = crate::npc::DETAIL_RADIUS_M;
+        app.npcs
+            .cars()
+            .iter()
+            .filter(|c| Vec3::from(c.pos).distance(eye) <= near)
+            .count()
+    }
+
+    /// The instances of `app`'s view drawing a pedestrian's part (the NPC cars' drivers,
+    /// the same figures, left out).
     fn part_instances(app: &mut App, alpha: f32) -> usize {
         let ids = ids(app);
+        let drivers = npc_drivers(app);
         let view = app.scene_view(alpha, 16.0 / 9.0);
-        view.instances
+        let parts = view
+            .instances
             .iter()
             .filter(|i| ids.contains(&i.mesh))
-            .count()
+            .count();
+        parts - drivers * PARTS
     }
 
     /// Live people within [`DRAW_RADIUS_M`] of the eye.
@@ -492,6 +555,7 @@ mod tests {
             let drawn = part_instances(&mut app, (step % 4) as f32 / 4.0);
             assert_eq!(drawn, in_reach(&app) * PARTS, "step {step}");
             let ids = ids(&app);
+            // The people and the NPC cars' drivers among them, one run per part mesh.
             let meshes: Vec<MeshId> = app.instances[world.min(app.instances.len())..]
                 .iter()
                 .filter(|i| ids.contains(&i.mesh))
