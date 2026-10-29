@@ -43,22 +43,22 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0x39A1_C053_F7A8_0B31,
         0xA2D7_B9A0_3D09_A4FE,
-        0xEA6C_7E33_404D_6490,
+        0x16A6_E9A3_8E03_9010,
     ),
     (
         0xA3F4_A281_380E_596B,
         0x7AD4_5617_94BE_609B,
-        0x848C_6FC5_048F_84B7,
+        0x6BCB_2415_229D_491C,
     ),
     (
         0x82B6_07FD_D1FD_CF4F,
         0xB348_0BC3_E55C_8454,
-        0xC8F8_8D5D_68DB_F3C6,
+        0x91B2_DA40_6193_CA87,
     ),
     (
         0x6DBB_5CB8_4DBB_0036,
         0x68EB_95E2_5702_79E7,
-        0xA585_E909_3644_732E,
+        0xD8E0_FF2A_4C6C_B06C,
     ),
 ];
 
@@ -354,6 +354,70 @@ fn basins_hold_their_grid_freeway_channel_rail_airfield_and_hills() {
             b.ramps.len(),
             b.spurs.len(),
             overlooks.len()
+        );
+    }
+}
+
+/// The filler keeps quiet so the landmarks stand out (`docs/WORLD_GENERATION.md`, "The 2001
+/// basin's grammar"): for seeds 1-4 no building's sign band glows with letters, while the
+/// blade neon and the landmarks still carry signs; the buildings' street fronts keep their
+/// triangles in hand. Run with `--nocapture` for the numbers.
+#[test]
+fn the_basin_s_filler_keeps_quiet() {
+    use world::grammar::Fascia;
+    use world::mesh::Glow;
+    use world::props::PropKind;
+    use world::{build_chunk_meshes, ChunkPlan, MeshKind};
+
+    let (t, g) = (template(), grammar());
+    let pal = world::palette::Palette::sodium_night();
+    for seed in 1..=4u64 {
+        let p = build_place(Seed(seed), &t, &g);
+        let meshes = build_chunk_meshes(&p, &pal, &g);
+        let neon = |kind: MeshKind| -> usize {
+            let of = meshes.iter().filter(|c| c.kind == kind);
+            of.map(|c| {
+                let glows = c.mesh.vertices.iter();
+                glows.filter(|v| v.emissive[3] == Glow::Neon as u8).count()
+            })
+            .sum()
+        };
+        let tris: usize = meshes
+            .iter()
+            .filter(|c| c.kind == MeshKind::Building)
+            .map(|c| c.mesh.indices.len() / 3)
+            .sum();
+        let plan = ChunkPlan::new(&p, &pal, &g);
+        let blades = plan
+            .props()
+            .iter()
+            .filter(|p| matches!(p.kind, PropKind::NeonSign { .. }))
+            .count();
+        let (lit_buildings, lit_props) = (neon(MeshKind::Building), neon(MeshKind::Prop));
+        // The mix of blank fronts the grammar asks for: bare, a plain band, a mural.
+        let mut kinds = [0usize; 4];
+        for i in 0..p.buildings.len() as u32 {
+            kinds[usize::from(world::buildings::signage(seed, i, &g.signs).fascia)] += 1;
+        }
+        println!("seed {seed}: fascias lettered/bare/band/mural {kinds:?}");
+        assert_eq!(kinds[Fascia::Lettered as usize], 0);
+        assert!(
+            kinds[1..].iter().all(|&n| n * 20 > p.buildings.len()),
+            "{kinds:?}"
+        );
+        println!(
+            "seed {seed}: {} buildings, {tris} building triangles, {lit_buildings} glowing \
+             letter vertices on buildings, {blades} blade signs, {lit_props} glowing sign \
+             vertices on props",
+            p.buildings.len()
+        );
+        assert_eq!(
+            lit_buildings, 0,
+            "seed {seed}: a building's sign band is lettered"
+        );
+        assert!(
+            blades > 0 && lit_props > 0,
+            "seed {seed}: the neon is gone too"
         );
     }
 }

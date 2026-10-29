@@ -31,7 +31,7 @@ use alloc::vec::Vec;
 use place::{Building, BuildingUse, Roof, StyleTag, ZoneId};
 use skywave_core::{Rng, Seed};
 
-use crate::grammar::{pick, Awning, Base, Grammar, GroundBays, SignRules, StyleRules};
+use crate::grammar::{pick, Awning, Base, Fascia, Grammar, GroundBays, SignRules, StyleRules};
 use crate::math::{abs, clamp, floor, offset_polygon, V2, V3};
 use crate::mesh::{
     boxf, face, frustum, lathe, polygon_cap, quad, rect, ring_band, tri, Frame, Glow, Paint,
@@ -39,7 +39,6 @@ use crate::mesh::{
 };
 use crate::palette::{mix, shade, Palette, Rgb};
 use crate::props::{Prop, PropKind};
-use crate::signs::lexicon::ShopSign;
 use crate::LOT_Y;
 
 /// Depth of window insets.
@@ -291,9 +290,15 @@ pub struct Signage {
     /// glass is not emissive: a big pane at a lit window's brightness reads as a white
     /// wall).
     pub shop_lit: bool,
-    /// A strip mall's tenants may hang vinyl banners from its canopy (some of them, by the
-    /// name seed).
-    pub banner: bool,
+    /// What its sign bands carry ([`Fascia`] as `u8`).
+    pub fascia: u8,
+}
+
+impl Signage {
+    /// Its sign bands carry names.
+    fn lettered(&self) -> bool {
+        self.fascia == Fascia::Lettered as u8
+    }
 }
 
 /// Rng key for signage.
@@ -308,7 +313,7 @@ pub fn signage(seed: u64, index: u32, rules: &SignRules) -> Signage {
         canopy: rules.mall_canopy(h >> 40) as u8,
         lit_box: (h >> 16) & 255 < u64::from(rules.lit_box_256),
         shop_lit: (h >> 24) & 255 < u64::from(rules.shop_lit_256),
-        banner: (h >> 32) & 255 < u64::from(rules.banner_256),
+        fascia: rules.fascia(h >> 32) as u8,
     }
 }
 
@@ -894,7 +899,7 @@ fn plan_one(
 
 /// Colors of one building.
 #[derive(Clone, Copy)]
-struct Look<'a> {
+struct Look {
     roof_tile: Paint,
     shop_glass: Paint,
     wall: Paint,
@@ -916,16 +921,15 @@ struct Look<'a> {
     upper: Paint,
     /// The building's signage, if the detailing gave it any.
     signage: Option<Signage>,
-    /// The grammar its fascia signs take their words from, when it letters them from its
-    /// lexicon ([`SignRules::fascia_words`]).
-    words: Option<&'a Grammar>,
+    /// The color of a [`Fascia::Mural`] building's panels and blank ground floor walls.
+    mural: Paint,
 }
 
 fn choose<T: Copy>(rng: &mut Rng, items: &[T]) -> T {
     items[rng.range(0, items.len() as u32) as usize]
 }
 
-fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look<'static> {
+fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look {
     let (wall_rgb, pattern, trim_rgb) = match b.style {
         StyleTag::Craftsman => (
             choose(
@@ -1089,12 +1093,12 @@ fn look(b: &Building, pal: &Palette, rng: &mut Rng) -> Look<'static> {
         sky: pal.sky_blue,
         upper: Paint::new(wall_rgb, pattern),
         signage: None,
-        words: None,
+        mural: Paint::new(wall_rgb, Pattern::Paint),
     }
     .styled(b, pal, rng)
 }
 
-impl Look<'_> {
+impl Look {
     /// The touches of the styles that have their own (drawn after the shared colors so
     /// the older styles keep theirs).
     fn styled(mut self, b: &Building, pal: &Palette, rng: &mut Rng) -> Self {
@@ -1158,7 +1162,7 @@ pub fn build(
     seed: u64,
     index: u32,
 ) -> BuildingStats {
-    build_on(m, b, plan, pal, seed, index, 0.0, None)
+    build_on(m, b, plan, pal, seed, index, 0.0)
 }
 
 /// Where a building stands on uneven ground (`height_at(x, z)`): the ground height its
@@ -1182,8 +1186,7 @@ pub fn footing(fp: &[[f32; 2]], height_at: impl Fn(f32, f32) -> f32) -> (f32, f3
 }
 
 /// [`build`] for a building whose ground falls up to `drop` below its floor: the plinth
-/// reaches down that far. `words` is the grammar its fascia signs may be lettered by.
-#[allow(clippy::too_many_arguments)]
+/// reaches down that far.
 pub fn build_on(
     m: &mut WorldMesh,
     b: &Building,
@@ -1192,13 +1195,16 @@ pub fn build_on(
     seed: u64,
     index: u32,
     drop: f32,
-    words: Option<&Grammar>,
 ) -> BuildingStats {
     let start = m.indices.len();
     let mut rng = Rng::new(Seed(seed), &[KEY_BUILDING, u64::from(index)]);
     let mut look = look(b, pal, &mut rng);
     look.signage = plan.signage;
-    look.words = words.filter(|g| g.signs.fascia_words);
+    if let Some(s) = plan.signage.filter(|s| s.fascia == Fascia::Mural as u8) {
+        let colors = [pal.teal, pal.terracotta, pal.navy, pal.salmon, pal.mint];
+        let c = colors[((s.name_seed >> 56) % colors.len() as u64) as usize];
+        look.mural = Paint::new(c, Pattern::Paint);
+    }
     let fp: Vec<V2> = b.footprint.iter().map(|&p| V2::from_array(p)).collect();
     let n = fp.len();
     let mut stats = BuildingStats::default();
@@ -1307,7 +1313,7 @@ pub fn build_on(
     } else {
         roof_clutter(m, plan, &fp, &inner, &look, pal, &mut rng);
     }
-    if b.style == StyleTag::Motel {
+    if b.style == StyleTag::Motel && plan.signage.is_none_or(|s| s.lettered()) {
         // The motel's name on the street side, over the parapet.
         let i = plan.frontage;
         let (a, c) = (fp[i], fp[(i + 1) % n]);
@@ -2386,7 +2392,7 @@ fn base_band(
                     sign_band(m, f, sx0 + 0.1, x1 - 0.1, sy0, sy1, look, rng);
                 }
             }
-            BayKind::Wall => rect(m, f, x0, y0, x1, y1, 0.0, false, look.wall),
+            BayKind::Wall => rect(m, f, x0, y0, x1, y1, 0.0, false, wall_bay(look)),
             BayKind::Lobby | BayKind::Door | BayKind::Garage => {
                 let (w, h) = match kind {
                     BayKind::Lobby => (plan.door_w, plan.door_h),
@@ -2405,6 +2411,14 @@ fn base_band(
                 }
             }
         }
+    }
+}
+
+/// The paint of a blank ground floor bay: the wall's, or a mural building's color.
+fn wall_bay(look: &Look) -> Paint {
+    match look.signage {
+        Some(s) if s.fascia == Fascia::Mural as u8 => look.mural,
+        _ => look.wall,
     }
 }
 
@@ -2975,6 +2989,17 @@ fn sign_band(
     }
     let depth = 0.14;
     if let Some(s) = look.signage {
+        match s.fascia {
+            k if k == Fascia::Bare as u8 => return,
+            k if k == Fascia::Band as u8 => {
+                let sides = face::ALL & !face::NEG_Z;
+                return boxf(m, f, [x0, y0, 0.0], [x1, y1, 0.08], sides, look.trim);
+            }
+            k if k == Fascia::Mural as u8 => {
+                return rect(m, f, x0, y0, x1, y1, 0.01, false, look.mural);
+            }
+            _ => {}
+        }
         if named_sign(m, f, x0, x1, y0, y1, depth, look, s) {
             return;
         }
@@ -3014,23 +3039,6 @@ fn sign_band(
     }
 }
 
-/// A fascia sign's words from grammar `g`'s lexicon, drawn from the hash `h`: its shop
-/// sign's main line, or its trade alone, whichever fits in `max_len` characters first
-/// (empty when neither does).
-fn fascia_words(g: &Grammar, h: u64, max_len: usize) -> Vec<u8> {
-    let s = ShopSign::draw(&g.signs, &g.lexicon, g.era, h);
-    let text = s.text(&g.lexicon);
-    if text.len() <= max_len {
-        return text;
-    }
-    let trade = g.lexicon.trades[usize::from(s.trade)].as_bytes();
-    if trade.len() <= max_len {
-        trade.to_vec()
-    } else {
-        Vec::new()
-    }
-}
-
 /// A sign box lettered with an invented name: neon letters on a dark box, or dark letters
 /// on a backlit one. False (nothing drawn) when no name fits.
 #[allow(clippy::too_many_arguments)]
@@ -3050,10 +3058,7 @@ fn named_sign(
     let max = ((x1 - x0 - 0.3) / (4.0 * px)) as usize;
     // Each sign of a building its own name, keyed by where it starts along the wall.
     let key = skywave_core::mix64(s.name_seed ^ u64::from(x0.to_bits()));
-    let name = match look.words {
-        Some(g) => fascia_words(g, key, max.min(18)),
-        None => crate::signs::business_name(key, max.min(18)),
-    };
+    let name = crate::signs::business_name(key, max.min(18));
     if name.is_empty() {
         return false;
     }
@@ -3135,7 +3140,8 @@ fn strip_mall_front(
         let neon = choose(rng, &pal.neon());
         let unit_look = Look { neon, ..*look };
         storefront_unit(m, &sub, unit, y0, canopy_y, &unit_look, rng);
-        if mansard && h > 0.8 {
+        let lettered = look.signage.is_none_or(|s| s.lettered());
+        if mansard && h > 0.8 && lettered {
             // Letters on the mansard's shingled face: a frame whose y runs up the slope.
             let (rise, run) = (h - 0.25, 0.6 * h);
             let along = f.y * rise - f.z * run;
@@ -3215,42 +3221,6 @@ fn strip_mall_front(
             look.trim,
         );
         boxf(m, f, lo, hi, face::NEG_Y, underside(look, look.trim));
-    }
-    // Vinyl banners hung from the canopy's front edge, one tenant in three or so.
-    if let Some(s) = look.signage.filter(|s| s.banner) {
-        for u in 0..units {
-            let bits = skywave_core::mix64(s.name_seed ^ u64::from(u));
-            if !bits.is_multiple_of(3) || unit < 5.0 {
-                continue;
-            }
-            let colors = [pal.hydrant_red, pal.paint_yellow, pal.teal, pal.navy];
-            let ground = colors[((bits >> 8) % 4) as usize];
-            let band = if ground == pal.paint_yellow {
-                pal.hydrant_red
-            } else {
-                pal.paint_white
-            };
-            let mid = unit * (u as f32 + 0.5);
-            let half = (0.3 * unit).min(2.2);
-            let (y0, y1) = (canopy_y - 0.95, canopy_y - 0.05);
-            let z = depth + 0.04;
-            let vinyl = Paint::new(ground, Pattern::Paint);
-            let ink = Paint::new(band, Pattern::Paint);
-            rect(m, f, mid - half, y0, mid + half, y1, z, false, vinyl);
-            rect(m, f, mid - half, y0, mid + half, y1, z - 0.01, true, vinyl);
-            let (b0, b1) = (y0 + 0.3, y1 - 0.3);
-            rect(
-                m,
-                f,
-                mid - 0.8 * half,
-                b0,
-                mid + 0.8 * half,
-                b1,
-                z + 0.01,
-                false,
-                ink,
-            );
-        }
     }
     // Square posts.
     for u in 0..=units {
@@ -4055,26 +4025,6 @@ pub fn house_site(
 mod tests {
     use super::*;
 
-    #[test]
-    fn fascia_signs_take_the_lexicon_s_words_when_the_grammar_asks() {
-        let g = crate::grammar::basin_01();
-        assert!(g.signs.fascia_words && !crate::grammar::coast_80s().signs.fascia_words);
-        let trades = &g.lexicon.trades;
-        for h in 0..2000u64 {
-            let t = fascia_words(&g, skywave_core::mix64(h), 18);
-            assert!(!t.is_empty() && t.len() <= 18);
-            let t = core::str::from_utf8(&t).unwrap();
-            assert!(
-                trades.iter().any(|w| t.contains(w.as_str())) || t.ends_with("'S"),
-                "{t}"
-            );
-            // A short box falls back to the trade alone, or to nothing.
-            let short = fascia_words(&g, skywave_core::mix64(h), 6);
-            assert!(short.len() <= 6);
-        }
-        assert!(fascia_words(&g, 1, 2).is_empty());
-    }
-
     fn env(n: usize) -> Vec<FacadeEnv> {
         (0..n)
             .map(|i| FacadeEnv {
@@ -4399,7 +4349,7 @@ mod tests {
             canopy: canopy as u8,
             lit_box: false,
             shop_lit: true,
-            banner: false,
+            fascia: Fascia::Lettered as u8,
         }
     }
 
@@ -4459,6 +4409,45 @@ mod tests {
                     let glow = lit_undersides(&m);
                     assert_eq!(glow > 0, lit && awning != Awning::None, "{awning:?} {lit}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn only_lettered_fascias_glow() {
+        let g = crate::grammar::basin_01();
+        let pal = Palette::sodium_night();
+        let fronts = [
+            shop(StyleTag::StuccoBox, BuildingUse::Commercial, 2, 30.0, 18.0),
+            Building {
+                height_m: 5.4,
+                ..shop(StyleTag::StripMall, BuildingUse::Commercial, 1, 66.0, 22.0)
+            },
+            shop(StyleTag::Motel, BuildingUse::Hotel, 2, 60.0, 10.0),
+        ];
+        for b in &fronts {
+            for canopy in [Awning::Mansard, Awning::Canopy] {
+                let mut lettered = 0;
+                for fascia in 0..4u8 {
+                    let mut glow = 0;
+                    for pick in 0..8u32 {
+                        let mut plan = plan_building(b, ZoneId::Strip, &env(4), pick, &g);
+                        plan.signage = Some(Signage {
+                            fascia,
+                            ..lit_shop(Awning::Bullnose, canopy)
+                        });
+                        let mut m = WorldMesh::default();
+                        build(&mut m, b, &plan, &pal, 5, pick);
+                        let neon = m.vertices.iter();
+                        glow += neon.filter(|v| v.emissive[3] == Glow::Neon as u8).count();
+                    }
+                    if fascia == Fascia::Lettered as u8 {
+                        lettered = glow;
+                    } else {
+                        assert_eq!(glow, 0, "{:?} {canopy:?} {fascia}", b.style);
+                    }
+                }
+                assert!(lettered > 0, "{:?} {canopy:?}", b.style);
             }
         }
     }
