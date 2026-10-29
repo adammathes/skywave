@@ -199,6 +199,8 @@ pub fn vehicle_input(input: &InputState) -> VehicleInput {
 pub struct CarGlow {
     pub lamps: f32,
     pub instruments: f32,
+    /// The speedometer's needle on top of the instruments' (the green wave, [`crate::wave`]).
+    pub speedo: f32,
 }
 
 impl Default for CarGlow {
@@ -207,6 +209,7 @@ impl Default for CarGlow {
         CarGlow {
             lamps: 1.0,
             instruments: 1.0,
+            speedo: 1.0,
         }
     }
 }
@@ -670,7 +673,11 @@ impl Drive {
             out.push(inside(ids.dial_ticks, body));
             let needles = self.needles(alpha);
             for (k, n) in needles.iter().enumerate().take(self.layout.dial_count) {
-                out.push(inside(ids.needles[k], body * *n));
+                let mut needle = inside(ids.needles[k], body * *n);
+                if k == 0 {
+                    needle.glow *= glow.speedo;
+                }
+                out.push(needle);
             }
             let [low, high] = ids.telltales;
             if self.headlights {
@@ -1223,6 +1230,7 @@ mod tests {
             let glow = CarGlow {
                 lamps: 0.5,
                 instruments: 0.25,
+                speedo: 2.0,
             };
             d.push_instances(0.5, &ids, Cabin::Full, glow, &mut out);
             let dials = d.layout.dial_count;
@@ -1238,7 +1246,12 @@ mod tests {
             // The outside is outside the cabin light; the lamps and instruments glow as
             // asked.
             assert!(out[..7].iter().all(|i| i.cabin == 0.0));
-            assert!(out[7..].iter().all(|i| i.cabin == 1.0 && i.glow == 0.25));
+            assert!(out[7..].iter().all(|i| i.cabin == 1.0));
+            // The speedometer's needle glows by the green wave on top.
+            assert!(out[7..]
+                .iter()
+                .enumerate()
+                .all(|(k, i)| i.glow == if k == 4 { 0.5 } else { 0.25 }));
             assert_eq!(out[2].glow, 0.5);
             assert!(out[7].color[0] < 0.5, "dark cabin walls");
             assert!(out.iter().skip(8).all(|i| i.color == [1.0; 4]));

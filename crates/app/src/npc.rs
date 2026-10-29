@@ -409,6 +409,11 @@ impl Npcs {
         self.density = density;
     }
 
+    /// The signal tick the junction lights show.
+    pub fn signal_tick(&self) -> u64 {
+        self.signals.tick
+    }
+
     /// Starts the junction lights at signal tick `tick` (a scene's `phase=`).
     pub fn set_signal_tick(&mut self, tick: u64) {
         self.signals.tick = tick;

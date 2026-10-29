@@ -1398,6 +1398,7 @@ impl App {
         self.audio.tunes = radio.tunes();
         self.audio.tune_volume = self.ui.settings.radio.volume;
         self.audio.deck_clicks = deck.clicks();
+        (self.audio.waves, self.audio.wave_run) = self.wave.chime();
         self.audio.deck_kind = match self.ui.deck.kind() {
             audio::deck::Kind::Tape => 0,
             audio::deck::Kind::Cd => 1,
