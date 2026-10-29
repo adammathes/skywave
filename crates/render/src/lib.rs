@@ -2892,7 +2892,8 @@ impl Renderer {
         drawn: [bool; CASCADES],
     ) -> ([std::ops::Range<usize>; PASSES], usize) {
         self.cull(scene, lights, view_proj, fits, drawn);
-        self.pack(scene, drawn)
+        let (ranges, late, _) = self.pack(scene, drawn);
+        (ranges, late)
     }
 
     /// Culls every instance for the forward pass (`view_proj`) and each cascade in `cull`.
@@ -5657,6 +5658,34 @@ mod tests {
         // drawn again, the near one keeps its casters and its map.
         assert_eq!(s.shadow_instances, [0, 2, 2], "{s:?}");
         assert_eq!(r.vis[3] & 0b1110, 0b0010, "{s:?}");
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// Glass goes last in the forward pass, after the late backdrop, and the frame
+    /// validates with the blended pipeline drawing it.
+    #[test]
+    fn glass_is_drawn_last() {
+        let (device, mut r) = full_renderer(RendererOptions {
+            culling: false,
+            ..Default::default()
+        });
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let ground = r.add_mesh(&Mesh::ground_quad(10.0, 10.0, [90, 120, 60, 255]));
+        let pane = MeshInstance {
+            glass: true,
+            casts_shadow: false,
+            color: [1.0, 1.0, 1.0, 0.5],
+            ..at(block, Vec3::Y)
+        };
+        let backdrop = MeshInstance {
+            late: true,
+            ..at(ground, Vec3::ZERO)
+        };
+        let instances = [pane, backdrop, at(block, Vec3::ZERO)];
+        let scene = test_scene(&instances);
+        render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
+        assert_eq!(r.stats().instances_drawn, 3);
+        assert_eq!(r.order[..3], [2, 1, 0], "the backdrop, then the glass");
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
