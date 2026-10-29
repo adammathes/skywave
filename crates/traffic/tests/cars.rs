@@ -1096,6 +1096,69 @@ fn coast_traffic_obeys_signals_keeps_apart_and_hides_its_comings_and_goings() {
     assert!(despawns > 0);
 }
 
+/// Busy traffic for 120 s on `graph` (the coast's, its signals as given): mean speed,
+/// share of car-steps standing, cars entering a junction on red.
+fn flow(b: &Coast, graph: &LaneGraph) -> (f32, f32, u32) {
+    let mut t = Traffic::new(graph, TrafficBudget::default(), Seed(1));
+    let (mut speed, mut steps, mut standing, mut reds) = (0.0f64, 0u64, 0u64, 0);
+    let mut before: Vec<Car> = Vec::with_capacity(t.budget.cars);
+    for tick in 0..(120 * HZ) as u64 {
+        let yaw = tick as f32 / (40.0 * HZ as f32) * std::f32::consts::TAU;
+        let inp = inputs(tick, b.player, b.view_at(yaw), Density::Busy);
+        before.clear();
+        before.extend_from_slice(t.cars());
+        t.step(graph, &inp);
+        t.populate(graph, &inp);
+        // From 30 s on, once the streets have filled.
+        if tick < 30 * HZ as u64 {
+            continue;
+        }
+        for c in t.cars() {
+            speed += f64::from(c.speed);
+            steps += 1;
+            standing += u64::from(c.speed < 0.5);
+            let Some(o) = before.iter().find(|o| o.id == c.id) else {
+                continue;
+            };
+            if o.seg < t_lanes(graph) && o.seg != c.seg && c.seg >= t_lanes(graph) {
+                reds += u32::from(graph.light(o.seg, inp.tick) == Some(Light::Red));
+            }
+        }
+    }
+    (
+        (speed / steps.max(1) as f64) as f32,
+        standing as f32 / steps.max(1) as f32,
+        reds,
+    )
+}
+
+#[test]
+fn green_waves_keep_the_traffic_moving() {
+    let _quiet = shared();
+    let b = coast();
+    // The same place with every junction on its hashed offset, as before the waves.
+    let mut hashed = b.graph.clone();
+    for (n, j) in hashed.junctions.iter_mut().enumerate() {
+        if j.phases > 0 {
+            j.offset = traffic::signal::offset(1, n as u32, j.phases);
+        }
+    }
+    let (v, stand, reds) = flow(b, &b.graph);
+    let (v0, stand0, reds0) = flow(b, &hashed);
+    println!(
+        "coast busy 120 s: mean speed {v:.2} m/s, {:.1}% of car-steps standing, {reds} red \
+         entries with green waves; {v0:.2} m/s, {:.1}%, {reds0} with hashed offsets",
+        100.0 * stand,
+        100.0 * stand0
+    );
+    assert_eq!(reds, 0);
+    assert!(v >= 0.98 * v0, "slower with green waves: {v} < {v0}");
+    assert!(
+        stand <= stand0 * 1.02 + 0.005,
+        "more standing: {stand} > {stand0}"
+    );
+}
+
 fn t_lanes(g: &LaneGraph) -> u32 {
     g.lanes.len() as u32
 }

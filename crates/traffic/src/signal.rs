@@ -3,7 +3,9 @@
 //! Every signalized junction runs a fixed cycle of its phases (two at a plain crossing,
 //! more at a skewed or many-road junction), counted in 120 Hz sim ticks: phase 0 green,
 //! yellow, all red, then phase 1, and so on. A junction's cycle starts at its own offset,
-//! a hash of the place seed and its node, so neighboring lights do not change in lockstep.
+//! a hash of the place seed and its node, so neighboring lights do not change in lockstep;
+//! along the main roads the lane graph times each from the last instead ([`follow`]: a
+//! green wave, `crate::lanes`).
 //! The light a lane faces is a pure function of the tick, so the whole state of every
 //! signal in the place is one [`SignalClock`].
 
@@ -51,6 +53,17 @@ impl SignalClock {
 pub fn offset(seed: u64, node: u32, phases: u8) -> u32 {
     let cycle = u64::from(cycle_ticks(phases.max(1)));
     (hash64(seed, &[KEY_SIGNAL, u64::from(node)]) % cycle) as u32
+}
+
+/// The offset of a junction with `phases` phases whose phase `to` turns green `ticks`
+/// after phase `from` of one with the same phases and offset `offset` does (a green wave).
+pub fn follow(offset: u32, from: u8, to: u8, phases: u8, ticks: u32) -> u32 {
+    let cycle = u64::from(cycle_ticks(phases.max(1)));
+    let p = u64::from(PHASE_TICKS);
+    // Phase `k` turns green when the tick is `k * PHASE_TICKS - offset` round the cycle.
+    let green =
+        (u64::from(from) * p + cycle - u64::from(offset) % cycle + u64::from(ticks)) % cycle;
+    ((u64::from(to) * p + cycle - green) % cycle) as u32
 }
 
 /// The light shown to `phase` (below `phases`) of a junction with cycle `offset` at `tick`.
@@ -109,6 +122,28 @@ mod tests {
             assert!(greens[..phases as usize].iter().all(|&g| g == GREEN_TICKS));
         }
         assert_eq!(cycle_ticks(2), 60 * SIM_HZ);
+    }
+
+    #[test]
+    fn a_followed_phase_turns_green_that_much_later() {
+        for phases in 1..=3u8 {
+            let cycle = u64::from(cycle_ticks(phases));
+            let off = offset(5, 11, phases);
+            for (from, to, ticks) in [(0, 0, 900), (1, 0, 3000), (0, phases - 1, 7199), (0, 0, 0)] {
+                let next = follow(off, from, to, phases, ticks);
+                assert!(u64::from(next) < cycle);
+                // Find `from`'s green start, then `to`'s comes `ticks` later.
+                let start = (0..cycle)
+                    .find(|&t| {
+                        light(off, from, phases, t) == Light::Green
+                            && light(off, from, phases, t + cycle - 1) != Light::Green
+                    })
+                    .unwrap();
+                let at = start + u64::from(ticks);
+                assert_eq!(light(next, to, phases, at), Light::Green);
+                assert_ne!(light(next, to, phases, at + cycle - 1), Light::Green);
+            }
+        }
     }
 
     #[test]
