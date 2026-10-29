@@ -78,7 +78,11 @@ pub const ROWS: [Row; 25] = [
     merged("Camera", "Look around", &[Action::LookX, Action::LookY]),
     row("Camera", "Look back", &[Action::LookBack]),
     row("Lights", "Headlights", &[Action::Headlights]),
-    row("Lights", "High beams", &[Action::HighBeams]),
+    row(
+        "Lights",
+        "High beams, flash",
+        &[Action::HighBeams, Action::Flash],
+    ),
     row("Lights", "Underglow", &[Action::Underglow]),
     // The deck shares the radio's keys (on/off plays and pauses it, the dial its tracks);
     // two rows in all, so the card stays one Deck screen.

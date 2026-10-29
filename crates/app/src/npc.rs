@@ -122,6 +122,12 @@ const GLASS_SLOT: u16 = 0x4000;
 const STANDING_MPS: f32 = 0.3;
 /// Hash key of the NPC drivers' figures.
 const KEY_DRIVER: u64 = 0x4452_4956_4552;
+/// A car flashing its brights back glows its lamps this much brighter.
+const FLASH_GLOW: f32 = 3.0;
+/// A car revving back: its engine note this much higher and its gain this much more at
+/// the peak.
+const REV_PITCH: f32 = 1.6;
+const REV_GAIN: f32 = 0.6;
 
 /// An NPC car's body as the player's car hits it: its shape's box (the body from nose to
 /// tail and its widest point) and its car's mass.
@@ -566,6 +572,12 @@ impl Npcs {
         self.crowd.step(&self.graph, tick, inp.player, inp.view);
     }
 
+    /// One step of the answers to what the player did (`traffic::reply`): never feeds
+    /// back into the cars or the people.
+    pub fn step_replies(&mut self, inp: &traffic::ReplyInput) {
+        self.crowd.step_replies(inp, self.traffic.cars());
+    }
+
     /// Runs up to `max` of the warm-up's steps (cars and people) still due, the player
     /// and the view held still. Returns how many ran.
     pub fn warm_up(&mut self, inp: &StepInputs, max: u32) -> u32 {
@@ -736,9 +748,16 @@ impl Npcs {
             let (transform, lights) = place(i);
             let brake = slot & BRAKE_SLOT != 0;
             let glass = slot & GLASS_SLOT != 0;
+            let flash = c.lights && self.crowd.replies.flashing(c.id, alpha);
             out.push(MeshInstance {
                 lights,
-                glow: if c.lights || brake { lamp_glow } else { 0.0 },
+                glow: if flash {
+                    lamp_glow * FLASH_GLOW
+                } else if c.lights || brake {
+                    lamp_glow
+                } else {
+                    0.0
+                },
                 casts_shadow: !brake && !glass,
                 glass,
                 ..MeshInstance::new(MeshId(mesh), transform.to_cols_array_2d())
@@ -774,7 +793,16 @@ impl Npcs {
                 continue;
             }
             let d2 = Vec3::from(c.pos).distance_squared(eye);
-            if d2 > reach2 || (n == LIT_CARS && d2 >= best[n - 1].0) {
+            if d2 > reach2 {
+                continue;
+            }
+            // A car flashing back comes first.
+            let d2 = if self.crowd.replies.flashing(c.id, alpha) {
+                -1.0 / (1.0 + d2)
+            } else {
+                d2
+            };
+            if n == LIT_CARS && d2 >= best[n - 1].0 {
                 continue;
             }
             let mut k = n.min(LIT_CARS - 1);
@@ -791,9 +819,15 @@ impl Npcs {
                 pos,
                 rot: Quat::from_rotation_y(heading),
             };
-            let heads = self.heads[usize::from(self.traffic.cars()[i].shape)];
-            out[2 * k] = drive::headlight(&pose, heads[0]);
-            out[2 * k + 1] = drive::headlight(&pose, heads[1]);
+            let c = &self.traffic.cars()[i];
+            let heads = self.heads[usize::from(c.shape)];
+            let beam = if self.crowd.replies.flashing(c.id, alpha) {
+                drive::high_beam
+            } else {
+                drive::headlight
+            };
+            out[2 * k] = beam(&pose, heads[0]);
+            out[2 * k + 1] = beam(&pose, heads[1]);
         }
         2 * n
     }
@@ -814,7 +848,8 @@ impl Npcs {
         let reach2 = HEAR_RADIUS_M * HEAR_RADIUS_M;
         for (i, c) in self.traffic.cars().iter().enumerate() {
             let d2 = Vec3::from(c.pos).distance_squared(ear);
-            if c.speed < 0.5 || d2 > reach2 || (n == TRAFFIC_VOICES && d2 >= best[n - 1].0) {
+            let quiet = c.speed < 0.5 && self.crowd.replies.rev(c.id, alpha) == 0.0;
+            if quiet || d2 > reach2 || (n == TRAFFIC_VOICES && d2 >= best[n - 1].0) {
                 continue;
             }
             let mut k = n.min(TRAFFIC_VOICES - 1);
@@ -860,10 +895,11 @@ impl Npcs {
             let closing = -(vel - velocity).dot(u);
             let doppler = SOUND_MPS / (SOUND_MPS - closing.clamp(-100.0, 100.0));
             let load = 0.35 + 0.65 * (c.speed / 15.0).min(1.0);
+            let rev = self.crowd.replies.rev(c.id, alpha);
             *v = TrafficVoice {
-                gain: ((6.0 / d).min(1.0) * load).min(1.0),
+                gain: ((6.0 / d).min(1.0) * (load + REV_GAIN * rev)).min(1.0),
                 pan: u.dot(right).clamp(-1.0, 1.0),
-                hz: (30.0 + 4.5 * c.speed) * doppler,
+                hz: (30.0 + 4.5 * c.speed) * (1.0 + REV_PITCH * rev) * doppler,
             };
         }
         out
@@ -1420,6 +1456,172 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The player's car `dist` m from car `c`, facing `dir` (x, z), standing.
+    fn facing(c: &traffic::Car, dist: [f32; 2], dir: [f32; 2]) -> Player {
+        let fwd = Vec3::new(c.dir[0], 0.0, c.dir[1]);
+        let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+        let at = Vec3::from(c.pos) + fwd * dist[0] + right * dist[1];
+        Player {
+            pos: at.to_array(),
+            heading: (-dir[0]).atan2(-dir[1]),
+            speed: 0.0,
+            ..Player::ABSENT
+        }
+    }
+
+    fn reply_steps(app: &mut App, inp: &traffic::ReplyInput, s: f32) {
+        for _ in 0..(s * skywave_core::SIM_HZ as f32) as u32 {
+            app.npcs.step_replies(inp);
+        }
+    }
+
+    /// At night, flashing the brights at each lit car from 60 m ahead of it in its path:
+    /// about the share of them flash back, twice, their lamps glowing brighter and their
+    /// beams high, first in the light set however far down the ranking they were.
+    #[test]
+    fn some_oncoming_cars_flash_back_at_night() {
+        let mut app = app("place=town&t=23:00&traffic=busy&still=1&stream=0");
+        app.update(&InputState::default(), 0.0);
+        let cars: Vec<traffic::Car> = app
+            .npcs
+            .cars()
+            .iter()
+            .filter(|c| c.lights)
+            .copied()
+            .collect();
+        assert!(cars.len() > 10, "{} lit cars", cars.len());
+        let (mut back, mut tried) = (0, 0);
+        for c in &cars {
+            let player = facing(c, [60.0, 0.0], [-c.dir[0], -c.dir[1]]);
+            let off = traffic::ReplyInput {
+                horn: false,
+                flash: false,
+                throttle: 0.0,
+                player,
+            };
+            let on = traffic::ReplyInput { flash: true, ..off };
+            reply_steps(&mut app, &on, 0.05);
+            tried += 1;
+            // Whoever is nearest in the brights' cone answers (or not): this car or one
+            // between.
+            let mut blinks = 0;
+            let mut lit = false;
+            let mut who = None;
+            let high = drive::high_beam(
+                &drive::Pose {
+                    pos: Vec3::ZERO,
+                    rot: Quat::IDENTITY,
+                },
+                Vec3::ZERO,
+            );
+            for _ in 0..240 {
+                reply_steps(&mut app, &off, 1.0 / 120.0);
+                if who.is_none() {
+                    let cars = app.npcs.cars();
+                    who = cars
+                        .iter()
+                        .find(|o| app.npcs.crowd.replies.flashing(o.id, 0.0))
+                        .copied();
+                }
+                let Some(c) = &who else {
+                    continue;
+                };
+                let now = app.npcs.crowd.replies.flashing(c.id, 0.0);
+                if now && !lit {
+                    blinks += 1;
+                    let eye = Vec3::from(player.pos);
+                    let mut out = [PointLight::omni([0.0; 3], [0.0; 3], 0.0); NPC_LIGHTS];
+                    let n = app.npcs.lights(0.0, eye, &mut out);
+                    // Its high beams, first.
+                    assert!(n >= 2 && out[..2].iter().all(|l| l.radius == high.radius));
+                    let at = Vec3::from(out[0].position);
+                    assert!(at.distance(Vec3::from(c.pos)) < 4.0, "{at} {:?}", c.pos);
+                }
+                lit = now;
+            }
+            if blinks > 0 {
+                assert_eq!(blinks, 2, "car {}", c.id);
+                back += 1;
+            }
+            reply_steps(&mut app, &off, traffic::reply::FLASH_REST_S);
+        }
+        eprintln!("{back} of {tried} lit cars flashed back");
+        let share = back as f32 / tried as f32;
+        assert!((0.2..0.7).contains(&share), "{back} of {tried}");
+    }
+
+    /// Blipping the throttle standing beside each stopped car: about the share of drivers
+    /// rev back, heard as a voice even though the car stands, its note rising.
+    #[test]
+    fn some_drivers_beside_rev_back() {
+        let mut app = app(&format!(
+            "{JUNCTION}&t=12:00&traffic=busy&stream=0&phase=1440"
+        ));
+        app.update(&InputState::default(), 0.0);
+        for _ in 0..900 {
+            app.update(&InputState::default(), 1.0 / 15.0);
+            if app.npcs.cars().iter().filter(|c| c.speed < 0.1).count() > 8 {
+                break;
+            }
+        }
+        let cars: Vec<traffic::Car> = app
+            .npcs
+            .cars()
+            .iter()
+            .filter(|c| c.speed < 0.1)
+            .copied()
+            .collect();
+        assert!(cars.len() > 5, "{} stopped cars", cars.len());
+        let (mut back, mut tried) = (0, 0);
+        for c in &cars {
+            let player = facing(c, [0.0, -3.4], c.dir);
+            // Nothing else beside it to answer instead.
+            let others = cars
+                .iter()
+                .filter(|o| o.id != c.id)
+                .any(|o| Vec3::from(o.pos).distance(Vec3::from(player.pos)) < 6.5);
+            if others {
+                continue;
+            }
+            let idle = traffic::ReplyInput {
+                horn: false,
+                flash: false,
+                throttle: 0.0,
+                player,
+            };
+            let gas = traffic::ReplyInput {
+                throttle: 1.0,
+                ..idle
+            };
+            reply_steps(&mut app, &idle, 1.0);
+            reply_steps(&mut app, &gas, 0.25);
+            tried += 1;
+            let mut top = 0.0f32;
+            for _ in 0..100 {
+                reply_steps(&mut app, &idle, 1.0 / 60.0);
+                let rev = app.npcs.crowd.replies.rev(c.id, 0.0);
+                let ear = Vec3::from(player.pos);
+                let v = app
+                    .npcs
+                    .voices(0.0, ear, Vec3::new(c.dir[0], 0.0, c.dir[1]), Vec3::ZERO);
+                let slot = app.npcs.voice_ids.iter().position(|&id| id == c.id);
+                if rev > 0.3 {
+                    let v = v[slot.expect("a revving car is heard")];
+                    assert!(
+                        v.hz > 30.0 * (1.0 + 0.3 * REV_PITCH) && v.gain > 0.0,
+                        "{v:?}"
+                    );
+                }
+                top = top.max(rev);
+            }
+            back += u32::from(top > 0.5);
+            reply_steps(&mut app, &idle, traffic::reply::BLIP_REST_S);
+        }
+        eprintln!("{back} of {tried} drivers beside revved back");
+        assert!(tried >= 4, "{tried}");
+        assert!(back >= 1 && back < tried, "{back} of {tried}");
     }
 
     /// Switched on from Settings mid-game, the warm-up runs a batch a frame, never more.

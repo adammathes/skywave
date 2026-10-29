@@ -1529,6 +1529,48 @@ impl Skeleton {
     }
 }
 
+/// Back and forth sways of a [`Skeleton::greet`] wave per second.
+pub const WAVE_HZ: f32 = 1.6;
+
+impl Skeleton {
+    /// A friendly reply to the player's horn (`crate::reply`), laid over any pose `j` by
+    /// `w` (0–1): the head and shoulders turn toward `look` ([`look_yaw`]) and, with `wave`,
+    /// the arm on that side comes up with the hand open beside the head and sways side to
+    /// side, `t` seconds in. The legs and the root are left as they are: a walker keeps
+    /// walking, a sitter stays sat, nobody stops, steps or startles.
+    pub fn greet(&self, j: &mut Joints, w: f32, t: f32, look: f32, wave: bool) {
+        let w = w.clamp(0.0, 1.0);
+        let yaw = look.clamp(-1.6, 1.6);
+        let (torso, head) = (Part::Torso as usize, Part::Head as usize);
+        j.rot[torso][1] = lerp(j.rot[torso][1], 0.3 * yaw, w);
+        j.rot[head][1] = lerp(j.rot[head][1], 0.7 * yaw, w);
+        if !wave {
+            return;
+        }
+        // The arm toward the car: the left when it is to the left (look positive).
+        let s = if yaw > 0.0 { -1.0 } else { 1.0 };
+        let (upper, lower) = if s < 0.0 {
+            (Part::UpperArmL as usize, Part::LowerArmL as usize)
+        } else {
+            (Part::UpperArmR as usize, Part::LowerArmR as usize)
+        };
+        // Upper arm forward and out a little below level, forearm up past it, the hand
+        // swaying about a slight outward lean.
+        let sway = 0.3 * sin(TAU * WAVE_HZ * t);
+        let up = [1.2, -s * 0.75, -s * 0.15 + sway];
+        let fore = [1.55, 0.0, 0.0];
+        let l = |a: V3, b: V3| {
+            [
+                lerp(a[0], b[0], w),
+                lerp(a[1], b[1], w),
+                lerp(a[2], b[2], w),
+            ]
+        };
+        j.rot[upper] = l(j.rot[upper], up);
+        j.rot[lower] = l(j.rot[lower], fore);
+    }
+}
+
 /// Seat height of the place's benches above the ground they stand on (`world::props`).
 pub const SEAT_M: f32 = 0.46;
 
@@ -2136,6 +2178,48 @@ mod tests {
         assert!(swing(1.6) > swing(1.2) && swing(1.2) > swing(0.0));
         // The pelvis bobs: lowest at double support, highest mid-stance.
         assert!(sk.walk(0.0, 1.4).root[1] + 0.02 < sk.walk(0.31, 1.4).root[1]);
+    }
+
+    #[test]
+    fn a_wave_raises_the_hand_on_the_cars_side_and_leaves_the_legs_be() {
+        for seed in [3, 8, 21] {
+            let f = figure(seed, Era::Eighties);
+            let sk = f.skeleton;
+            let mut xf = [Xform::IDENTITY; PARTS];
+            for (walk, speed) in [(0.3, 0.0), (0.7, 1.4)] {
+                let base = sk.walk(walk, speed);
+                let mut same = base;
+                sk.greet(&mut same, 0.0, 1.0, 1.0, true);
+                assert_eq!(same, base, "no weight, no change");
+                for look in [-1.2, 1.2] {
+                    let side = if look > 0.0 { -1.0 } else { 1.0 };
+                    let (upper, lower) = if side < 0.0 {
+                        (Part::UpperArmL as usize, Part::LowerArmL as usize)
+                    } else {
+                        (Part::UpperArmR as usize, Part::LowerArmR as usize)
+                    };
+                    for i in 0..=40 {
+                        let t = i as f32 * 0.05;
+                        let mut j = base;
+                        sk.greet(&mut j, 1.0, t, look, true);
+                        assert_eq!(j.root, base.root);
+                        assert_eq!(j.rot[Part::UpperLegL as usize..], base.rot[7..]);
+                        sk.pose(&j, &mut xf);
+                        let hand = f.parts[lower]
+                            .positions
+                            .iter()
+                            .map(|&p| xf[lower].apply(p))
+                            .fold([0.0, f32::MIN, 0.0], |a, p| if p[1] > a[1] { p } else { a });
+                        let shoulder = xf[upper].pos;
+                        let head = xf[Part::Head as usize].pos;
+                        assert!(hand[1] > shoulder[1] + 0.15, "{seed} {t}: hand {hand:?}");
+                        assert!(side * (hand[0] - head[0]) > 0.1, "{seed} {t}: {hand:?}");
+                        // Up beside the head, not out in front of it.
+                        assert!(hand[2] > head[2] - 0.45, "{seed} {t}: {hand:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

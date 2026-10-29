@@ -39,6 +39,7 @@ pub mod figure;
 pub mod lanes;
 pub mod math;
 pub mod peds;
+pub mod reply;
 pub mod signal;
 pub mod train;
 pub mod walks;
@@ -48,5 +49,6 @@ pub use cars::{
     Barrier, Car, Clock, Density, Inputs, Player, ShapeRule, Traffic, TrafficBudget, View,
 };
 pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
+pub use reply::{Greet, Replies, ReplyInput};
 pub use signal::{Light, SignalClock};
 pub use wave::Streak;

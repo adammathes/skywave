@@ -271,6 +271,8 @@ pub struct Drive {
     pub auto_dark: Option<bool>,
     /// Held this frame (for the audio task).
     pub horn: bool,
+    /// The brights flashed: held this frame, they light whatever the switches say.
+    pub flash: bool,
     /// Rolling angle of each wheel, rad, kept for drawing (the sim keeps only the rate),
     /// now and one step ago. Both wrap together so they always interpolate the short way.
     roll: [f32; 4],
@@ -325,6 +327,7 @@ impl Drive {
             underglow: false,
             auto_dark: None,
             horn: false,
+            flash: false,
             roll: [0.0; 4],
             prev_roll: [0.0; 4],
             start_ground: ground,
@@ -472,6 +475,7 @@ impl Drive {
             self.underglow = !self.underglow;
         }
         self.horn = input.pressed(Action::Horn);
+        self.flash = input.pressed(Action::Flash);
     }
 
     /// After [`Drive::step`]: an NPC car touched this car (`npc::Npcs::collide`), heard
@@ -483,9 +487,14 @@ impl Drive {
         }
     }
 
-    /// The high beams are lit: selected, with the headlights on.
+    /// The high beams are lit: selected with the headlights on, or flashed.
     pub fn high_beams_lit(&self) -> bool {
-        self.headlights && self.high_beams
+        (self.headlights && self.high_beams) || self.flash
+    }
+
+    /// The head lamps are lit: the headlights on, or the brights flashed.
+    pub fn head_lamps_lit(&self) -> bool {
+        self.headlights || self.flash
     }
 
     /// One fixed step with the driver asking for `input`.
@@ -635,7 +644,7 @@ impl Drive {
             ..instance(mesh, m)
         };
         let lod = &ids.lods[0];
-        let on = usize::from(self.headlights);
+        let on = usize::from(self.head_lamps_lit());
         let body = self.pose(alpha).matrix();
         out.push(instance(lod.body[on], body));
         // See-through: the driver and the cabin show through it. Sunlight comes in.
@@ -771,7 +780,7 @@ impl Drive {
             out[n] = light;
             n += 1;
         };
-        if self.headlights {
+        if self.head_lamps_lit() {
             push(at(l));
             push(at(r));
         }
