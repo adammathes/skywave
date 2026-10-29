@@ -27,6 +27,7 @@ mod input;
 pub mod lighting;
 mod lighttiles;
 pub mod map;
+mod marquee;
 pub mod npc;
 pub mod pacing;
 mod peds;
@@ -233,6 +234,8 @@ pub struct App {
     world_pick: Option<usize>,
     /// The place's drag strip, its tree and timing board.
     strip: Option<dragstrip::DragStrip>,
+    /// The landmarks' chasing bulbs.
+    marquees: Option<marquee::Marquees>,
     /// The place's railway: its train and its crossings' gates.
     rail: Option<crossing::Rail>,
 }
@@ -327,6 +330,7 @@ impl App {
             })?;
         let mut strip = dragstrip::DragStrip::of(&place);
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
+        let mut marquees = marquee::Marquees::of(&place, &grammar.landmarks);
         let sound = sound::Sound::new(&place, &drive);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         if let Some(r) = &rail {
@@ -388,9 +392,21 @@ impl App {
                 .collect();
             r.set_ids(ids);
         }
+        if let Some(mq) = &mut marquees {
+            let ids = mq
+                .meshes(&grammar.landmarks, &palette)
+                .into_iter()
+                .map(|m| {
+                    meshes.push(m);
+                    MeshId(meshes.len() as u32 - 1)
+                })
+                .collect();
+            mq.set_ids(ids);
+        }
         let extra = drive::MAX_CAR_INSTANCES
             + dragstrip::MAX_INSTANCES
             + rail.as_ref().map_or(0, |r| r.capacity())
+            + marquees.as_ref().map_or(0, |m| m.capacity())
             + preview::MAX_INSTANCES
             + prop_capacity(&props)
             + npcs.capacity();
@@ -456,6 +472,7 @@ impl App {
             overlay: render::HudBuilder::new(),
             world_pick: None,
             strip,
+            marquees,
             rail,
         })
     }
@@ -1122,6 +1139,9 @@ impl App {
         }
         if let Some(r) = &self.rail {
             r.push(alpha, eye, &self.lights, &mut self.instances);
+        }
+        if let Some(m) = &self.marquees {
+            m.push(eye, self.ticks, &mut self.instances);
         }
         let npc_glow = lighting::car_glow(&daylight).lamps;
         self.npcs

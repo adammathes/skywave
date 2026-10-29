@@ -266,3 +266,131 @@ fn the_tunnel_walls_its_road_and_the_garage_takes_a_car() {
     let off = (V2::new(s.pos[0], s.pos[2]) - front).dot(x);
     assert!(off > 0.5 * gw, "through the garage's wall: {off:.1} m");
 }
+
+/// The grammar with the landmark kits the game attaches.
+fn grammar_with_kits() -> world::Grammar {
+    let mut g = grammar();
+    g.landmarks = [CITY_HALL, MOVIE_PALACE, WATER_TOWER]
+        .iter()
+        .map(|t| {
+            let k: world::landmarks::Kit = ron::from_str(t).expect("parse kit");
+            k.validate().expect("valid kit");
+            k
+        })
+        .collect();
+    g
+}
+
+const CITY_HALL: &str = include_str!("../../../assets/landmarks/city_hall.ron");
+const MOVIE_PALACE: &str = include_str!("../../../assets/landmarks/movie_palace.ron");
+const WATER_TOWER: &str = include_str!("../../../assets/landmarks/water_tower.ron");
+
+#[test]
+fn every_basin_has_its_downtown_anchors() {
+    use world::procgen::setpieces::{HALL_KIT, HALL_LOT_M, PALACE_KIT, PALACE_LOT_M};
+    let g = grammar_with_kits();
+    let kit = |id: &str| g.landmarks.iter().position(|k| k.id == id).unwrap();
+    let (hall, palace) = (kit(HALL_KIT), kit(PALACE_KIT));
+    // The sites are sized to the kits' own lots.
+    assert_eq!(g.landmarks[hall].lot, [HALL_LOT_M.0, HALL_LOT_M.1]);
+    assert_eq!(g.landmarks[palace].lot, [PALACE_LOT_M.0, PALACE_LOT_M.1]);
+    let t: RegionTemplate = ron::from_str(BASIN).expect("parse");
+    for seed in 1..=4u64 {
+        let p = build_place(Seed(seed), &t, &g);
+        assert_eq!(p.validate(), Ok(()), "seed {seed}");
+        assert_eq!(pois(&p, PoiKind::CityHall), 1, "seed {seed}");
+        assert_eq!(pois(&p, PoiKind::MoviePalace), 1, "seed {seed}");
+        let m = world::procgen::MacroMap::generate(Seed(seed), &t, world::procgen::PLACE_CHUNKS);
+        let b = m.basin.as_ref().unwrap();
+        for (k, (w, d)) in [(hall, HALL_LOT_M), (palace, PALACE_LOT_M)] {
+            let q = p
+                .props
+                .items
+                .iter()
+                .find(|q| {
+                    q.kind
+                        == PropKind::Landmark {
+                            kit: k as u8,
+                            variant: 0,
+                        }
+                })
+                .unwrap_or_else(|| panic!("seed {seed}: no kit {k}"));
+            let area = footprint(q, w, d);
+            // No road, no building on the lot; every landmark light on it.
+            for e in &p.roads.edges {
+                for s in e.profile.windows(2) {
+                    let (a, c) = (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2]));
+                    for v in &area {
+                        let dist = segment_distance(*v, a, c).0;
+                        assert!(dist > 0.5 * e.width_m, "seed {seed}: kit {k} on a road");
+                    }
+                }
+            }
+            for bd in &p.buildings {
+                for v in &bd.footprint {
+                    let v = V2::from_array(*v);
+                    assert!(
+                        !world::math::point_in_polygon(v, &area),
+                        "seed {seed}: a building on kit {k}"
+                    );
+                }
+            }
+            println!("seed {seed}: kit {k} at {:.0},{:.0}", q.pos[0], q.pos[2]);
+        }
+        // The hall faces back down a boulevard from its head, on its axis.
+        let q = p
+            .props
+            .items
+            .iter()
+            .find(|q| {
+                q.kind
+                    == PropKind::Landmark {
+                        kit: hall as u8,
+                        variant: 0,
+                    }
+            })
+            .unwrap();
+        let (front, out) = (at(q), dir_of_yaw(q.yaw));
+        let heads = b.lines.iter().filter(|l| l.boulevard).any(|l| {
+            let (a, c) = (V2::from_array(l.a), V2::from_array(l.b));
+            [(a, c), (c, a)].iter().any(|&(end, from)| {
+                let down = (from - end).normalize();
+                let on_axis = segment_distance(front, end - down * 60.0, end).0 < 0.5;
+                on_axis && out.dot(down) > 0.999 && (front - end).length() < 40.0
+            })
+        });
+        assert!(
+            heads,
+            "seed {seed}: the city hall does not head a boulevard"
+        );
+    }
+}
+
+#[test]
+fn the_city_hall_stops_a_car_driven_up_the_boulevard_into_it() {
+    let spec = halberd();
+    let g = grammar_with_kits();
+    let t: RegionTemplate = ron::from_str(BASIN).expect("parse");
+    let p = build_place(Seed(1), &t, &g);
+    let c = WorldCollider::build(&p, &g);
+    let q = p
+        .props
+        .items
+        .iter()
+        .find(|q| matches!(q.kind, PropKind::Landmark { .. }) && at(q).y < 500.0)
+        .unwrap();
+    let (front, out) = (at(q), dir_of_yaw(q.yaw));
+    let ground = |v: V2| [v.x, c.level_at([v.x, v.y]).0, v.y];
+    // Up the boulevard's inner lane from 150 m out at 20 m/s, straight on across the T and
+    // over the forecourt: the building stops it short of the back of its lot.
+    let start = front + out * 150.0 + out.left() * 6.0;
+    let mut s = VehicleState::spawn(&spec, ground(start), heading_of(-out));
+    drive(&spec, &mut s, &c, 14.0, |s| {
+        input(cruise(s, 20.0), 0.0, 0.0)
+    });
+    let into = (front - V2::new(s.pos[0], s.pos[2])).dot(out);
+    println!("into the city hall's lot: {into:.1} m");
+    assert!(s.pos.iter().all(|v| v.is_finite()));
+    assert!(into > 2.0, "the car never reached the hall: {into:.1} m");
+    assert!(into < 20.0, "through the city hall: {into:.1} m");
+}

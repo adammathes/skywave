@@ -18,10 +18,21 @@ use world::template::RegionTemplate;
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+/// The landmark kits, in file-name order as the game attaches them (the downtown anchors
+/// stand only where their kits are).
+const KITS: [&str; 3] = [
+    include_str!("../../../assets/landmarks/city_hall.ron"),
+    include_str!("../../../assets/landmarks/movie_palace.ron"),
+    include_str!("../../../assets/landmarks/water_tower.ron"),
+];
 
 fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
+    g.landmarks = KITS
+        .iter()
+        .map(|t| ron::from_str(t).expect("parse kit"))
+        .collect();
     g.validate().expect("validate grammar");
     g
 }

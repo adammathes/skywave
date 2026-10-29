@@ -1,6 +1,304 @@
 {
   "about": "Landmark gallery contact sheets (crates/app/src/gallery.rs); written by `cargo test -p app -- --ignored write_gallery`.",
   "kits": {
+    "city_hall": {
+      "about": "A city hall at the head of the boulevard.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,72.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "62.4,53.1",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-43,82.1",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "136,97.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "212.8,73.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "82.7,110.5",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "272,130.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "367.6,100.6",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "205.2,147.5",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "Limestone wings either side of a columned portico, a drum and a green copper dome with a lantern rising behind it.",
+          "letter": "A",
+          "name": "Domed"
+        },
+        {
+          "about": "A white stucco block behind a long arcade, a tower with lit clock faces and a tiled pyramid roof over the middle, a fountain in the forecourt.",
+          "letter": "B",
+          "name": "Clock tower"
+        },
+        {
+          "about": "A pale stepped tower of the 1930s rising out of a wide base, glass between its piers, CITY HALL in bronze over the doors, a beacon on top.",
+          "letter": "C",
+          "name": "Moderne tower"
+        }
+      ]
+    },
+    "movie_palace": {
+      "about": "A downtown movie palace with a marquee and a blade sign.",
+      "shots": [
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "0,-118.7",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "43.2,-132.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "-29.4,-113.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "A"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "104,-96.8",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "159.7,-114.4",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "65.6,-88.5",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "B"
+        },
+        {
+          "camera": "front",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "208,-109.9",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "0"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "quarter",
+          "params": {
+            "cam": "hood",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "256.2,-125.1",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "-35"
+          },
+          "variant": "C"
+        },
+        {
+          "camera": "street",
+          "params": {
+            "cam": "chase-far",
+            "car": "gannet_gt",
+            "place": "gallery",
+            "pos": "175,-103.3",
+            "seed": "1",
+            "still": "1",
+            "stream": "0",
+            "yaw": "20"
+          },
+          "variant": "C"
+        }
+      ],
+      "tone": "Grounded",
+      "variants": [
+        {
+          "about": "A cream terra-cotta front between gold piers, a red blade lettered THEATRE in neon, the marquee ringed with bulbs.",
+          "letter": "A",
+          "name": "Deco palace"
+        },
+        {
+          "about": "A white streamline front with rounded corners and teal speed lines, a pylon lettered CINEMA rising out of it, a rounded marquee.",
+          "letter": "B",
+          "name": "Moderne pylon"
+        },
+        {
+          "about": "A peach stucco front with a tile-roofed corner tower, a navy blade lettered PALACE in red neon, the marquee ringed with bulbs.",
+          "letter": "C",
+          "name": "Spanish revival"
+        }
+      ]
+    },
     "water_tower": {
       "about": "A municipal water tower on its own lot.",
       "shots": [
@@ -10,7 +308,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "0,74.8",
+            "pos": "0,-245.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -24,7 +322,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "56.7,57",
+            "pos": "56.7,-263",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -38,7 +336,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "-39.7,85.2",
+            "pos": "-39.7,-234.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -52,7 +350,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "100,72.2",
+            "pos": "100,-247.8",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -66,7 +364,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "155.2,54.8",
+            "pos": "155.2,-265.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -80,7 +378,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "61.3,82.3",
+            "pos": "61.3,-237.7",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -94,7 +392,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "200,74.8",
+            "pos": "200,-245.2",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -108,7 +406,7 @@
             "cam": "hood",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "256.7,57",
+            "pos": "256.7,-263",
             "seed": "1",
             "still": "1",
             "stream": "0",
@@ -122,7 +420,7 @@
             "cam": "chase-far",
             "car": "gannet_gt",
             "place": "gallery",
-            "pos": "160.3,85.2",
+            "pos": "160.3,-234.8",
             "seed": "1",
             "still": "1",
             "stream": "0",

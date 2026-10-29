@@ -498,6 +498,10 @@ pub enum PoiKind {
     TacoStand = 11,
     /// Where a rail line crosses a road at grade, on the track's middle.
     GradeCrossing = 12,
+    /// Downtown's movie palace, under its marquee.
+    MoviePalace = 13,
+    /// The city hall at the head of the boulevard, on the middle of its lot.
+    CityHall = 14,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.

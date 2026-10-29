@@ -188,10 +188,22 @@ coast's Place is unchanged.
 - **The channel ramps.** Chain-link along both lips of the flood channel, 0.6 m outside them, open within 4 m
   of any road (the bridges) and round each ramp: along a ramp's outer edge from 12 m below its top, and across
   its foot. A `ChannelRamp` landmark marks each ramp's top.
+- **The downtown anchors**, two landmark kits ("Landmarks" below) standing the variant the owner picked
+  (`PALACE_VARIANT`, `HALL_VARIANT` in `procgen::setpieces`), each kept 16 m clear of the rail line. The
+  **city hall** (`city_hall`, a 60 by 48 m lot, `CityHall`) stands at the head of the boulevard: across the
+  road one of its ends meets at a T (the out boulevard always meets the road along the foot of the hills
+  that way), its lot starting a meter behind that road's walk, square to the boulevard and facing back down
+  it, so it closes the view the whole way up with the hills behind; of the ends that qualify, the one nearest
+  downtown. The **movie palace** (`movie_palace`, 28 by 44 m, `MoviePalace` under its marquee, where people
+  gather) stands on the downtown or commercial lot on an arterial or collector nearest the downtown seed
+  that overlaps no other set piece. Both lots lose their buildings. The palace's marquee bulbs chase
+  (`app::marquee`).
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
-walls hold a car to the freeway, a car drives through it and into the garage's middle bay), the meshes'
-and boxes' unit tests in `world::setpieces`, `app::dragstrip`'s tests.
+walls hold a car to the freeway, a car drives through it and into the garage's middle bay; the anchors on
+seeds 1–4 off roads and buildings, the city hall on a boulevard's axis at its head, a car driven up the
+boulevard at 20 m/s stopped at its steps), the meshes' and boxes' unit tests in `world::setpieces`,
+`app::dragstrip`'s and `app::marquee`'s tests.
 
 ## Landmarks
 Landmarks are the places you would slow down to look at (the feel cards, 2026-10-28). Each is a kit
@@ -200,7 +212,16 @@ lamps in named paints, in the lot's frame (`x` across, to the right seen from th
 road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that start `from` an earlier one and
 add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
 front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
-block a car; each `Lamp` is a `Flood` light.
+block a car (not bulbs or lettering); each `Lamp` is a `Flood` light.
+
+Besides solids and lamps a kit has two kinds of dressing. `Bulbs` is a row of `n` bulbs from `a` to `b`:
+drawn dim in the town's mesh, and in the game (`app::marquee`) every third is lit in turn over them, six
+steps a second of game time, so they chase (a frozen clock holds a phase, so stills are stable). `Letters`
+is lettering in the stroke letterforms (`signs::letters`) centered on a point of a face (`Road`, `Left`,
+`Right`), on a line or `stack`ed one letter under another for a blade sign, painted, channel, backlit or
+neon: capitals, digits and spaces, and only common nouns (`THEATRE`, `CITY HALL`), never a name.
+`Cylinder` and `Lathe` take `turn` (degrees about their axis) and `facets` (flat faces), so a four-sided
+lathe turned 45° is a square pyramid roof.
 
 Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
 a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows
