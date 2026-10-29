@@ -118,6 +118,8 @@ const CAR_HALF_M: f32 = 2.8;
 const BRAKE_SLOT: u16 = 0x8000;
 /// ...or its glass.
 const GLASS_SLOT: u16 = 0x4000;
+/// Below this speed (m/s) an NPC car's driver rests a hand on the thigh.
+const STANDING_MPS: f32 = 0.3;
 /// Hash key of the NPC drivers' figures.
 const KEY_DRIVER: u64 = 0x4452_4956_4552;
 
@@ -230,8 +232,9 @@ pub struct Npcs {
     heads: Vec<[Vec3; 2]>,
     /// Per shape, its near glass (see-through, over the cabin) mesh id.
     glass: Vec<MeshId>,
-    /// Per shape and crowd figure (`shape * peds::VARIANTS + variant`), the driver's parts
-    /// seated in it, in the mesh's frame.
+    /// Per shape, crowd figure and whether the car stands
+    /// (`(shape * peds::VARIANTS + variant) * 2 + standing`), the driver's parts seated in
+    /// it, in the mesh's frame: both hands on the wheel, or the left resting on the thigh.
     drivers: Vec<[Mat4; PARTS]>,
     /// The near cars' drivers this frame, for the crowd to draw with its people (the same
     /// part meshes, so no draw of their own).
@@ -377,16 +380,16 @@ impl Npcs {
         self.glass = glass;
         self.built_bytes = bytes;
         self.crowd.build_meshes(register);
-        // Every figure in every shape, at the wheel held straight: an NPC driver never
-        // moves, so it is posed once.
+        // Every figure in every shape at the wheel held straight, driving and standing: an
+        // NPC driver has those two poses only, so each is posed once.
         self.drivers = seats
             .iter()
             .flat_map(|seat| {
                 let crowd = &self.crowd;
-                (0..peds::VARIANTS).map(move |v| {
+                (0..peds::VARIANTS * 2).map(move |k| {
                     let mut parts = [Mat4::IDENTITY; PARTS];
-                    if let Some((sk, _)) = crowd.variant(v) {
-                        driver::pose(sk, seat, 0.0, 0.0, &mut parts);
+                    if let Some((sk, _)) = crowd.variant(k / 2) {
+                        driver::pose(sk, seat, 0.0, 0.0, (k % 2) as f32, &mut parts);
                     }
                     parts
                 })
@@ -744,7 +747,9 @@ impl Npcs {
         // The drivers, placed; the crowd draws them.
         for d in &mut drivers {
             let c = &self.traffic.cars()[usize::from(d.car)];
-            let seat = usize::from(c.shape) * peds::VARIANTS + usize::from(d.figure);
+            let standing = c.speed < STANDING_MPS;
+            let seat = (usize::from(c.shape) * peds::VARIANTS + usize::from(d.figure)) * 2
+                + usize::from(standing);
             let (transform, lights) = place(d.car);
             d.parts = self.drivers[seat].map(|m| transform * m);
             d.lights = lights;

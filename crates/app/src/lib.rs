@@ -1105,8 +1105,15 @@ impl App {
             );
             if let Some(d) = self.drivers.get(self.ui.driver()) {
                 let look = self.camera.look_yaw(alpha);
+                // In the cockpit the driver moves with the seat adjustment, as the eye does.
+                let p = &self.camera.prefs;
+                let shift = if cabin == drive::Cabin::Full {
+                    Vec3::new(0.0, p.seat_up_m, -p.seat_forward_m)
+                } else {
+                    Vec3::ZERO
+                };
                 self.drive
-                    .push_driver(alpha, d, cabin, look, &mut self.instances);
+                    .push_driver(alpha, d, cabin, look, shift, &mut self.instances);
             }
         }
         // The car's lamps, the nearest NPC cars' low beams, then every static light the

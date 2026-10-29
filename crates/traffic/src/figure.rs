@@ -1741,76 +1741,80 @@ struct Preset {
     outfit: Outfit,
     hair: Hair,
     sunglasses: bool,
-    /// A headband in the eighties.
-    headband: bool,
     skin: u32,
     hair_rgb: u32,
     clothes: [[u32; 5]; 2],
 }
 
+/// Grown-up, put-together looks for a drive: a jacket over a shirt or tee, a suit with a
+/// tie in the seventies, a weekend tee and shorts, a sundress; sunglasses on two.
 const PRESET_LOOKS: [Preset; PRESETS] = [
     Preset {
-        height_m: 1.78,
+        height_m: 1.8,
         build: 0.45,
-        shoulders: 0.7,
-        slouch: 0.4,
+        shoulders: 0.75,
+        slouch: 0.3,
         outfit: Outfit::JeansJacket,
         hair: Hair::Short,
-        sunglasses: false,
-        headband: false,
+        sunglasses: true,
         skin: SKIN[3],
-        hair_rgb: HAIR[2],
+        hair_rgb: HAIR[1],
         clothes: [
-            [0x6b4a2f, 0xe6dabf, 0x3c5a82, 0x3e2a1c, 0x7a2a1e],
-            [0x26262a, 0xf2efe6, 0x4d6c96, 0x1e1b1a, 0x2fb3b0],
+            // Tan suede over a cream shirt, dark denim.
+            [0x7d5a3a, 0xe6dabf, 0x2b3f5e, 0x3e2a1c, 0x7a2a1e],
+            // Black over a white tee, stonewash.
+            [0x26262a, 0xf2f2ee, 0x4d6c96, 0x1e1b1a, 0x2a3a6e],
         ],
     },
     Preset {
-        height_m: 1.83,
+        height_m: 1.84,
         build: 0.55,
-        shoulders: 0.8,
-        slouch: 0.15,
+        shoulders: 0.85,
+        slouch: 0.1,
         outfit: Outfit::Suit,
         hair: Hair::Cropped,
-        sunglasses: true,
-        headband: false,
+        sunglasses: false,
         skin: SKIN[7],
         hair_rgb: HAIR[0],
         clothes: [
-            [0x5e2430, 0xf0e2c8, 0x5e2430, 0x1e1b1a, 0xc8962e],
-            [0xe3dccb, 0x2fb3b0, 0xe3dccb, 0xe8e8e4, 0x2a3a6e],
+            // Navy, a pale blue shirt, a burgundy tie.
+            [0x2c3550, 0xdfe8f2, 0x2c3550, 0x1e1b1a, 0x7a2a1e],
+            // Charcoal over a white shirt.
+            [0x3c3c42, 0xf2efe6, 0x3c3c42, 0x1e1b1a, 0x2a3a6e],
         ],
     },
     Preset {
-        height_m: 1.7,
-        build: 0.3,
-        shoulders: 0.45,
-        slouch: 0.6,
+        height_m: 1.72,
+        build: 0.35,
+        shoulders: 0.5,
+        slouch: 0.45,
         outfit: Outfit::ShortsTee,
         hair: Hair::Long,
         sunglasses: false,
-        headband: true,
         skin: SKIN[1],
-        hair_rgb: HAIR[5],
+        hair_rgb: HAIR[2],
         clothes: [
-            [0xd9782d, 0xf2efe6, 0xb39a72, 0xe8e8e4, 0xc8962e],
-            [0x3a6fe0, 0xf2f2ee, 0xe9e6df, 0xe8e8e4, 0xe8559a],
+            // A mustard tee, khaki shorts.
+            [0xc8962e, 0xf2efe6, 0xb39a72, 0xe8e8e4, 0xc8962e],
+            // A white tee, navy shorts.
+            [0xf2f2ee, 0xdfe8f2, 0x2a3148, 0xe8e8e4, 0x3a6fe0],
         ],
     },
     Preset {
-        height_m: 1.66,
+        height_m: 1.68,
         build: 0.35,
-        shoulders: 0.2,
-        slouch: 0.3,
+        shoulders: 0.25,
+        slouch: 0.2,
         outfit: Outfit::Sundress,
         hair: Hair::Full,
         sunglasses: true,
-        headband: false,
         skin: SKIN[5],
-        hair_rgb: HAIR[1],
+        hair_rgb: HAIR[6],
         clothes: [
-            [0x2f6f6a, 0x2f6f6a, 0x2f6f6a, 0x6a4a2e, 0xc8962e],
-            [0xf2d64b, 0xf2d64b, 0xf2d64b, 0xc89a62, 0x2fb3b0],
+            // Burnt orange.
+            [0xd9782d, 0xd9782d, 0xd9782d, 0x6a4a2e, 0xc8962e],
+            // Coral.
+            [0xf07a62, 0xf07a62, 0xf07a62, 0xc89a62, 0x2fb3b0],
         ],
     },
 ];
@@ -1828,7 +1832,7 @@ impl FigureSpec {
             era,
             outfit: p.outfit,
             hair: p.hair,
-            headband: p.headband && era == Era::Eighties,
+            headband: false,
             sunglasses: p.sunglasses,
             socks: false,
             palette: Palette {

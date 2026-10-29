@@ -15,7 +15,7 @@
 use glam::{Mat3, Mat4, Vec3};
 use render::{Mesh, MeshId};
 use traffic::figure::{self, Era, FigureSpec, Part, Seat, Skeleton, Xform, PARTS};
-use vehicle::shape::Cockpit;
+use vehicle::shape::{CarMesh, Detail, ShapeSpec};
 
 /// How far the hands follow the wheel round from where they grip it, rad; past it they
 /// stay put and the rim slides through them (no hand-over-hand).
@@ -30,9 +30,19 @@ const LOOK_MAX_RAD: f32 = 1.2;
 const HEEL_X_M: [f32; 2] = [-0.13, 0.08];
 /// The feet's pitch on the pedals, rad (toe up).
 const TOE_RAD: f32 = 0.45;
-/// Least and most a figure is scaled to sit its eyes at the car's (whose roof leaves a
-/// low sports car's driver a few centimeters at that).
-const SCALE: (f32, f32) = (0.7, 1.15);
+/// A figure is scaled this much past sitting its eyes at the car's cockpit eye (a point
+/// that suits a slight adult): a grown-up at the wheel...
+const GROW: f32 = 1.12;
+/// ...as far as the roof allows, keeping the crown this far under its skin, m...
+const HEADROOM_M: f32 = 0.05;
+/// ...and never less or more than this.
+const SCALE: (f32, f32) = (0.7, 1.25);
+/// The crown above the eyes, as a share of the head's height (`traffic::figure`'s head: the
+/// eyes at 0.47 of it, the skull to 0.91, a little hair over that).
+const CROWN_OVER_EYE: f32 = 0.66;
+/// Below this speed (m/s) the left hand comes off the wheel to rest on the thigh, all of it
+/// standing still.
+const REST_BELOW_MPS: f32 = 1.0;
 
 /// Where a driver sits in one car's frame (body space for the player's car, the parked
 /// mesh's for an NPC car).
@@ -45,19 +55,52 @@ pub struct Seating {
     /// Toward the driver; a positive turn about it is counter-clockwise as they see it.
     pub wheel_axis: Vec3,
     pub wheel_radius: f32,
+    /// Height of the roof's skin over the driver's head; infinite over an open top.
+    pub roof: f32,
 }
 
 impl Seating {
-    /// The seat of `cockpit` (model space) in the frame `offset` from it.
-    pub fn of(cockpit: &Cockpit, offset: Vec3) -> Seating {
+    /// The driver's seat of `car` (built from `shape`, model space) in the frame `offset`
+    /// from it.
+    pub fn of(shape: &ShapeSpec, car: &CarMesh, offset: Vec3) -> Seating {
+        let cockpit = &car.cockpit;
         let at = |p: [f32; 3]| Vec3::from(p) + offset;
+        // The body's highest point over the head: within 15 cm of the driver's line, from
+        // just ahead of the eyes to 30 cm behind them.
+        let open = shape.roof.convertible() || shape.details.contains(&Detail::Targa);
+        let [x, _, z] = cockpit.eye;
+        let roof = car
+            .body
+            .positions
+            .iter()
+            .filter(|p| !open && (p[0] - x).abs() < 0.15 && (-0.05..0.3).contains(&(p[2] - z)))
+            .fold(f32::INFINITY, |r, p| {
+                if r == f32::INFINITY {
+                    p[1]
+                } else {
+                    r.max(p[1])
+                }
+            });
         Seating {
+            roof: roof + offset.y,
             hip: at(cockpit.hip),
             heel: at(cockpit.heel),
             eye: at(cockpit.eye),
             wheel_pivot: at(cockpit.wheel_pivot),
             wheel_axis: Vec3::from(cockpit.wheel_axis),
             wheel_radius: cockpit.wheel_radius,
+        }
+    }
+
+    /// The seat moved by the player's seat adjustment `shift` (body space: up, and `-z`
+    /// forward), which moves the cockpit eye: the driver moves with it, hands still on the
+    /// wheel and heels on the floor.
+    pub fn moved(&self, shift: Vec3) -> Seating {
+        Seating {
+            hip: self.hip + shift,
+            eye: self.eye + shift,
+            heel: self.heel + Vec3::new(0.0, 0.0, shift.z),
+            ..*self
         }
     }
 
@@ -74,18 +117,43 @@ impl Seating {
     }
 }
 
+/// How far the left hand has come off the wheel at `speed` m/s (0 on it, 1 resting).
+pub fn rest_at(speed: f32) -> f32 {
+    (1.0 - speed.abs() / REST_BELOW_MPS).clamp(0.0, 1.0)
+}
+
 /// The head's turn for a camera look-around of `look_yaw` rad.
 pub fn head_turn(look_yaw: f32) -> f32 {
     (look_yaw * LOOK_SHARE).clamp(-LOOK_MAX_RAD, LOOK_MAX_RAD)
 }
 
+/// How big `skeleton`'s figure sits at `seat`: [`GROW`] past its eyes at the cockpit eye,
+/// within [`SCALE`], its crown [`HEADROOM_M`] under the roof.
+pub fn scale(skeleton: &Skeleton, seat: &Seating) -> f32 {
+    let to_eye = seat.eye - seat.hip;
+    let fit = to_eye.length() / skeleton.hip_to_eye();
+    let h = skeleton.height_m;
+    let crown = (skeleton.hip_to_eye() + CROWN_OVER_EYE * 0.23 * (h / 1.75).sqrt())
+        * (to_eye.y / to_eye.length().max(1e-3));
+    let room = (seat.roof - HEADROOM_M - seat.hip.y) / crown.max(1e-3);
+    (fit * GROW).min(room).clamp(SCALE.0, SCALE.1)
+}
+
 /// Each part of `skeleton`'s figure seated at `seat` into `out`, as transforms from the
 /// part's mesh into the car's frame: the wheel turned `turn` rad (the steering wheel's own
-/// angle), the head turned `look` rad. Allocates nothing.
-pub fn pose(skeleton: &Skeleton, seat: &Seating, turn: f32, look: f32, out: &mut [Mat4; PARTS]) {
-    // Scaled so the eyes sit where the car's are; the back leans along the hip-to-eye line.
+/// angle), the head turned `look` rad, the left hand resting on the thigh by `rest` (0 on
+/// the wheel, 1 off it; [`rest_at`]). Allocates nothing.
+pub fn pose(
+    skeleton: &Skeleton,
+    seat: &Seating,
+    turn: f32,
+    look: f32,
+    rest: f32,
+    out: &mut [Mat4; PARTS],
+) {
+    // The back leans along the hip-to-eye line.
     let to_eye = seat.eye - seat.hip;
-    let k = (to_eye.length() / skeleton.hip_to_eye()).clamp(SCALE.0, SCALE.1);
+    let k = scale(skeleton, seat);
     let recline = to_eye.z.atan2(to_eye.y.max(1e-3));
     let local = |p: Vec3| ((p - seat.hip) / k).to_array();
     // The heels on the floor behind the pedals, or as far toward them as the legs reach
@@ -96,12 +164,23 @@ pub fn pose(skeleton: &Skeleton, seat: &Seating, turn: f32, look: f32, out: &mut
     let ahead = (reach * reach - drop * drop).max(0.0).sqrt();
     let heel = |x: f32| [x / k, floor[1], floor[2].max(-ahead)];
     let grips = seat.grips(turn);
+    // Resting, the left hand lies on the thigh a little short of the knee.
+    let knee = 0.7 * skeleton.thigh_m;
+    let thigh = [
+        -skeleton.offset[Part::UpperLegR as usize][0] * 1.1,
+        0.06 * skeleton.height_m,
+        -knee,
+    ];
+    let left = local(grips[0]);
+    let rest = rest.clamp(0.0, 1.0);
+    let rest = rest * rest * (3.0 - 2.0 * rest);
+    let left = core::array::from_fn(|i| left[i] + (thigh[i] - left[i]) * rest);
     let s = Seat {
         hip: [0.0; 3],
         recline,
         heels: [heel(HEEL_X_M[0]), heel(HEEL_X_M[1])],
         toe: TOE_RAD,
-        hands: [local(grips[0]), local(grips[1])],
+        hands: [left, local(grips[1])],
         look,
     };
     let mut xf = [Xform::IDENTITY; PARTS];
@@ -194,7 +273,7 @@ mod tests {
         for (_, src) in vehicles::BUILTIN_SHAPES {
             let shape = vehicles::load_shape(src).unwrap();
             let car = vehicle::shape::build_lod(&shape, 0, 1).unwrap();
-            let seat = Seating::of(&car.cockpit, Vec3::ZERO);
+            let seat = Seating::of(&shape, &car, Vec3::ZERO);
             // The roof over the head: the body's highest point near it, if it has one.
             let open =
                 shape.roof.convertible() || shape.details.contains(&vehicle::shape::Detail::Targa);
@@ -202,7 +281,7 @@ mod tests {
                 let sk = &f.skeleton;
                 for turn in [-3.0, -1.0, 0.0, 1.0, 3.0] {
                     let mut out = [Mat4::IDENTITY; PARTS];
-                    pose(sk, &seat, turn, 0.0, &mut out);
+                    pose(sk, &seat, turn, 0.0, 0.0, &mut out);
                     assert!(out.iter().all(|m| m.is_finite()), "{}", shape.id);
                     let grips = seat.grips(turn);
                     for (j, lower) in [Part::LowerArmL, Part::LowerArmR].into_iter().enumerate() {
@@ -253,6 +332,61 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// First person: from the cockpit eye wherever the seat adjustment and the tuning put
+    /// it, no part the cockpit draws comes within 5 cm of the camera's near plane, hands on
+    /// the wheel or the left at rest, the wheel at any turn; and the hidden head and torso
+    /// hold the eye (the camera is never outside its own body looking back at it).
+    #[test]
+    fn the_cockpit_camera_never_cuts_into_the_driver() {
+        let tuning = crate::camera::TUNING;
+        let clear = tuning.cockpit_near_m + 0.05;
+        let (up, fwd) = (
+            crate::settings::SEAT_HEIGHT_CM,
+            crate::settings::SEAT_FORWARD_CM,
+        );
+        let figures: Vec<figure::Figure> = (0..figure::PRESETS)
+            .map(|i| figure::build(&FigureSpec::preset(i, Era::Eighties)))
+            .chain((0..8).map(|s| figure::figure(s, Era::Seventies)))
+            .collect();
+        let mut worst = f32::MAX;
+        for (_, src) in vehicles::BUILTIN_SHAPES {
+            let shape = vehicles::load_shape(src).unwrap();
+            let car = vehicle::shape::build_lod(&shape, 0, 0).unwrap();
+            let seat = Seating::of(&shape, &car, Vec3::ZERO);
+            for f in &figures {
+                for (turn, rest) in [(-3.0, 0.0), (0.0, 0.0), (3.0, 0.0), (0.0, 1.0)] {
+                    for u in [up[0], 0.0, up[1]] {
+                        for w in [fwd[0], 0.0, fwd[1]] {
+                            // The seat adjustment moves the driver and the eye together.
+                            let shift = Vec3::new(0.0, u / 100.0, -w / 100.0);
+                            let moved = seat.moved(shift);
+                            let mut out = [Mat4::IDENTITY; PARTS];
+                            pose(&f.skeleton, &moved, turn, 0.0, rest, &mut out);
+                            let eye = moved.eye
+                                + Vec3::new(
+                                    0.0,
+                                    tuning.cockpit_eye_up_m,
+                                    -tuning.cockpit_eye_forward_m,
+                                );
+                            for k in (0..PARTS).filter(|&k| in_cockpit(k)) {
+                                for p in &f.parts[k].positions {
+                                    let d = out[k].transform_point3(Vec3::from(*p)).distance(eye);
+                                    worst = worst.min(d);
+                                    assert!(
+                                        d > clear,
+                                        "{}: part {k} {d:.3} m from the eye",
+                                        shape.id
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("nearest drawn driver vertex to the cockpit eye: {worst:.3} m");
     }
 
     #[test]

@@ -300,7 +300,7 @@ impl CarLayout {
             dims: spec.dims_m,
             open_top: shape.roof.convertible() || shape.details.contains(&Detail::Targa),
             underglow: Underglow::of(&car.underglow, offset),
-            seating: crate::driver::Seating::of(c, offset),
+            seating: crate::driver::Seating::of(shape, car, offset),
         }
     }
 
@@ -666,7 +666,7 @@ pub fn parked_cabin(shape: &ShapeSpec) -> Result<(Mesh, crate::driver::Seating),
     );
     Ok((
         convert(&car.glass, offset, Surface::Glass),
-        crate::driver::Seating::of(&car.cockpit, offset),
+        crate::driver::Seating::of(shape, &car, offset),
     ))
 }
 

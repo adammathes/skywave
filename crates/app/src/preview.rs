@@ -205,7 +205,7 @@ pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<
     out.push(instance(lod.steering_wheel, wheel, glow.instruments));
     if let Some(d) = model.driver {
         let mut parts = [Mat4::IDENTITY; traffic::figure::PARTS];
-        crate::driver::pose(&d.skeleton, &layout.seating, 0.0, 0.0, &mut parts);
+        crate::driver::pose(&d.skeleton, &layout.seating, 0.0, 0.0, 0.0, &mut parts);
         for (k, m) in parts.iter().enumerate() {
             out.push(instance(d.ids[k], body * *m, 1.0));
         }

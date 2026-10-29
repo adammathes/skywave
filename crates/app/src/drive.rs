@@ -697,7 +697,9 @@ impl Drive {
     }
 
     /// Appends the driver's parts seated in the car `alpha` of the way through the step,
-    /// hands on the steering wheel, head turned by the camera's `look_yaw`: the whole figure
+    /// hands on the steering wheel (the left resting on the thigh while the car stands),
+    /// head turned by the camera's `look_yaw`, moved with the seat by `seat_shift` (the
+    /// player's seat adjustment, body space; the cockpit's alone): the whole figure
     /// from the outside cameras, without the head and torso in the cockpit ([`Cabin::Full`];
     /// "hood only" draws no driver). Lit by the cabin light in the cockpit, casting no
     /// shadow (the car's own shadows them).
@@ -707,6 +709,7 @@ impl Drive {
         driver: &crate::driver::Driver,
         cabin: Cabin,
         look_yaw: f32,
+        seat_shift: Vec3,
         out: &mut Vec<MeshInstance>,
     ) {
         if cabin == Cabin::Frame {
@@ -714,12 +717,14 @@ impl Drive {
         }
         let steer = mix(self.prev.steer_angle_rad, self.state.steer_angle_rad, alpha);
         let turn = -steer * self.layout.steering_ratio;
+        let speed = mix(self.prev.speed_mps, self.state.speed_mps, alpha);
         let mut parts = [Mat4::IDENTITY; PARTS];
         crate::driver::pose(
             &driver.skeleton,
-            &self.layout.seating,
+            &self.layout.seating.moved(seat_shift),
             turn,
             crate::driver::head_turn(look_yaw),
+            crate::driver::rest_at(speed),
             &mut parts,
         );
         let body = self.pose(alpha).matrix();
@@ -1382,7 +1387,7 @@ mod tests {
             let mut out = Vec::new();
             d.push_instances(0.5, &ids, cabin, CarGlow::default(), &mut out);
             let car = out.len();
-            d.push_driver(0.5, &driver, cabin, 0.0, &mut out);
+            d.push_driver(0.5, &driver, cabin, 0.0, Vec3::ZERO, &mut out);
             assert!(out.len() <= MAX_CAR_INSTANCES);
             assert!(out[car..].iter().all(|i| !i.casts_shadow));
             out[car..].to_vec()
@@ -1394,18 +1399,25 @@ mod tests {
         let head = driver.ids[traffic::figure::Part::Head as usize];
         assert!(cockpit.iter().all(|i| i.mesh != head));
         assert!(count(&d, Cabin::Frame).is_empty());
-        // Steering moves the left hand (the forearm's end) round with the rim.
-        let hand = |d: &Drive| {
-            let i = count(d, Cabin::Outside)[traffic::figure::Part::LowerArmL as usize];
+        // Steering moves the right hand (the forearm's end) round with the rim; standing,
+        // the left rests on the thigh, and comes back to the wheel under way.
+        use traffic::figure::Part::{LowerArmL, LowerArmR};
+        let hand = |d: &Drive, part: traffic::figure::Part| {
+            let i = count(d, Cabin::Outside)[part as usize];
             Mat4::from_cols_array_2d(&i.transform).transform_point3(Vec3::NEG_Y * 0.3)
         };
-        let straight = hand(&d);
+        let straight = hand(&d, LowerArmR);
+        let resting = hand(&d, LowerArmL);
         d.state.steer_angle_rad = 0.2;
         d.prev.steer_angle_rad = 0.2;
         assert!(
-            hand(&d).distance(straight) > 0.05,
+            hand(&d, LowerArmR).distance(straight) > 0.05,
             "the hands follow the wheel"
         );
+        d.state.speed_mps = 5.0;
+        d.prev.speed_mps = 5.0;
+        let grip = d.layout.seating.grips(-0.2 * d.layout.steering_ratio)[0];
+        assert!(hand(&d, LowerArmL).distance(grip) < resting.distance(grip) - 0.1);
     }
 
     #[test]
