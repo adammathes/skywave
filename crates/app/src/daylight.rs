@@ -53,6 +53,18 @@ const EXTINCTION_GREY: f32 = 0.08;
 const SUN_DARK_RED: [f32; 3] = [0.40, 0.05, 0.0];
 /// Exponential fog coefficient per unit turbidity, 1/m.
 const FOG_PER_TURBIDITY: f32 = 0.0003;
+/// The morning haze over the basin: it settles through the small hours (from this many
+/// seconds after midnight)...
+const HAZE_SETTLES_S: f64 = 2.0 * 3600.0;
+/// ...is thickest from an hour before sunrise, starts to burn off half an hour after it and
+/// is gone three and a half hours after it, by mid-morning (seconds from sunrise).
+const HAZE_THICK_S: f64 = -3600.0;
+const HAZE_BURNS_S: f64 = 1800.0;
+const HAZE_GONE_S: f64 = 3.5 * 3600.0;
+/// At its thickest it adds this much to the weather's haze (turbidity +2.4)...
+const HAZE_WEATHER: f32 = 0.6;
+/// ...and this much fog, 1/m: about a kilometre's visibility, a low grey basin.
+const HAZE_FOG: f32 = 0.0028;
 
 /// Exposure keys: sun elevation (degrees, ascending) → EV100.
 const EV_ELEV: [f32; 11] = [
@@ -161,6 +173,12 @@ pub struct Daylight {
     pub exposure: f32,
     /// Civil dusk to civil dawn, with hysteresis (see [`streetlights_next`]).
     pub streetlights_on: bool,
+    /// Game seconds since the photocell last switched (on at civil dusk, off at dawn): the
+    /// clock the street lamps' wave and the signs' delays run on, `0..86400`.
+    pub lamps_switched_s: f32,
+    /// The morning haze, 0..1: settles overnight, thickest at dawn, burnt off by
+    /// mid-morning. Already in `turbidity` and `fog_density`.
+    pub haze: f32,
     /// Lit-window emissive scale: 0 by day, ramping over blue hour to 1 by −8°.
     pub window_emissive_scale: f32,
     /// 0 by day, 1 at astronomical night (−18°).
@@ -198,7 +216,11 @@ impl Daylight {
         let (moon_elev, _) = elevation_azimuth(moon);
         let lit_fraction = (1.0 - (core::f64::consts::TAU * phase_f).cos()) as f32 * 0.5;
 
-        let turbidity = weather.turbidity();
+        let haze = morning_haze(latitude_deg, day_of_year, secs);
+        let turbidity = Weather {
+            haze: weather.haze + HAZE_WEATHER * haze,
+        }
+        .turbidity();
         let (sun_color, sun_intensity) = sunlight(sun_elev, turbidity);
 
         let ev100 = ev100(sun_elev);
@@ -208,6 +230,22 @@ impl Daylight {
         let sky_horizon_color = scale(horizon, 1.0 / exposure);
 
         let morning = secs < DAY_SECONDS * 0.5;
+        // Without history, assume a continuous clock: lights that came on overnight are
+        // still on during the morning hysteresis band, and still off in the evening one.
+        let streetlights_on = streetlights_next(morning, sun_elev);
+        let switched = if streetlights_on {
+            DAY_SECONDS * 0.5 + half_day(lat, day_of_year, STREETLIGHTS_ON_DEG)
+        } else {
+            DAY_SECONDS * 0.5 - half_day(lat, day_of_year, STREETLIGHTS_OFF_DEG)
+        };
+        // The photocell may read a hair ahead of the analytic moment: just switched, not a
+        // day ago.
+        let since = (secs - switched).rem_euclid(DAY_SECONDS);
+        let since = if since > DAY_SECONDS - 60.0 {
+            0.0
+        } else {
+            since
+        };
         Daylight {
             sun_dir: to_f32(sun),
             sun_elevation_deg: sun_elev,
@@ -220,13 +258,13 @@ impl Daylight {
             sky_zenith_color,
             sky_horizon_color,
             turbidity,
-            fog_density: FOG_PER_TURBIDITY * turbidity,
+            fog_density: FOG_PER_TURBIDITY * turbidity + HAZE_FOG * haze,
             fog_color: sky_horizon_color,
             ev100,
             exposure,
-            // Without history, assume a continuous clock: lights that came on overnight are
-            // still on during the morning hysteresis band, and still off in the evening one.
-            streetlights_on: streetlights_next(morning, sun_elev),
+            streetlights_on,
+            lamps_switched_s: since as f32,
+            haze,
             window_emissive_scale: 1.0 - smoothstep(-8.0, 0.0, sun_elev),
             star_brightness: 1.0 - smoothstep(-18.0, -4.0, sun_elev),
             phase: phase(sun_elev, morning),
@@ -248,12 +286,36 @@ pub fn streetlights_next(was_on: bool, sun_elevation_deg: f32) -> bool {
 /// midnight sun this is `(0, 86400)`; in polar night, `(43200, 43200)`.
 pub fn sun_times(latitude_deg: f32, day_of_year: u16) -> (f32, f32) {
     let lat = f64::from(latitude_deg).to_radians();
-    let decl = declination(day_of_year);
-    let cos_h = (SUNRISE_ELEVATION_DEG.to_radians().sin() - lat.sin() * decl.sin())
-        / (lat.cos() * decl.cos());
-    let half_day = cos_h.clamp(-1.0, 1.0).acos() / core::f64::consts::TAU * DAY_SECONDS;
+    let half_day = half_day(lat, day_of_year, SUNRISE_ELEVATION_DEG as f32);
     let noon = DAY_SECONDS * 0.5;
     ((noon - half_day) as f32, (noon + half_day) as f32)
+}
+
+/// Seconds from noon to when the sun's center is at `elev_deg` (latitude `lat` in
+/// radians), clamped to `0..43200` where it never gets there.
+fn half_day(lat: f64, day_of_year: u16, elev_deg: f32) -> f64 {
+    let decl = declination(day_of_year);
+    let cos_h = (f64::from(elev_deg).to_radians().sin() - lat.sin() * decl.sin())
+        / (lat.cos() * decl.cos());
+    cos_h.clamp(-1.0, 1.0).acos() / core::f64::consts::TAU * DAY_SECONDS
+}
+
+/// The morning haze at `secs` (apparent solar time), 0..1: rising from
+/// [`HAZE_SETTLES_S`] to its thickest an hour before sunrise, burning off by mid-morning.
+fn morning_haze(latitude_deg: f32, day_of_year: u16, secs: f64) -> f32 {
+    let (rise, _) = sun_times(latitude_deg, day_of_year);
+    let rise = f64::from(rise);
+    let settle = smoothstep(
+        HAZE_SETTLES_S as f32,
+        (rise + HAZE_THICK_S).max(HAZE_SETTLES_S + 1.0) as f32,
+        secs as f32,
+    );
+    let burn = smoothstep(
+        (rise + HAZE_BURNS_S) as f32,
+        (rise + HAZE_GONE_S) as f32,
+        secs as f32,
+    );
+    settle * (1.0 - burn)
 }
 
 /// The game clock. Real time drives it at `speed`; the day of year rolls over at midnight.
@@ -608,6 +670,53 @@ mod tests {
             was = d.streetlights_on;
         }
         assert_eq!((ons, offs), (3, 3));
+    }
+
+    #[test]
+    fn the_lamp_clock_restarts_at_civil_dusk_and_at_dawn() {
+        let day = 265;
+        // Find the evening switch to a tenth of a second, then step through it.
+        let mut t = 18.0 * HOUR;
+        while !Daylight::compute(LAT, day, t).streetlights_on {
+            t += 0.1;
+        }
+        let d = Daylight::compute(LAT, day, t);
+        assert!(d.lamps_switched_s < 0.5, "{}", d.lamps_switched_s);
+        let later = Daylight::compute(LAT, day, t + 12.0);
+        assert!((later.lamps_switched_s - 12.0 - d.lamps_switched_s).abs() < 0.01);
+        assert!(Daylight::compute(LAT, day, t - 1.0).lamps_switched_s > 3600.0);
+        // On all night, off from the dawn switch.
+        assert!(Daylight::compute(LAT, day, 2.0 * HOUR).lamps_switched_s > 6.0 * HOUR);
+        let mut t = 4.0 * HOUR;
+        while Daylight::compute(LAT, day, t).streetlights_on {
+            t += 0.1;
+        }
+        assert!(Daylight::compute(LAT, day, t).lamps_switched_s < 0.5);
+    }
+
+    #[test]
+    fn morning_haze_settles_by_dawn_and_burns_off_by_mid_morning() {
+        let day = 265;
+        let at = |h: f32| Daylight::compute(LAT, day, h * HOUR);
+        let (rise, _) = sun_times(LAT, day);
+        let dawn = Daylight::compute(LAT, day, rise - 0.5 * HOUR);
+        assert!(dawn.haze > 0.99, "{}", dawn.haze);
+        for h in [10.0, 12.0, 17.0 + 40.0 / 60.0, 22.5, 0.5] {
+            assert_eq!(at(h).haze, 0.0, "{h}");
+        }
+        // Thicker fog and greyer air at dawn than the same light in the evening.
+        let dusk = at(19.0);
+        assert!(dawn.fog_density > 3.0 * dusk.fog_density);
+        assert!(dawn.turbidity > dusk.turbidity + 2.0);
+        // It thins steadily through the morning.
+        let mut prev = 1.0;
+        for k in 0..=24 {
+            let h = rise / HOUR + 0.25 * k as f32;
+            let haze = at(h).haze;
+            assert!(haze <= prev, "{h}");
+            prev = haze;
+        }
+        assert_eq!(prev, 0.0);
     }
 
     #[test]
