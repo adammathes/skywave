@@ -12,7 +12,7 @@ export const meta = {
 // One tick of the coordinator (docs/HANDOFF.md, "Work queue"). Each card is built by its own
 // cloud session (its own container), started here with create_session; that session builds,
 // verifies, opens the PR and drives CI to green, then pokes the coordinator through the `poke`
-// trigger. The coordinator merges a green PR (never a `hold` card's, nor one waiting on a pick).
+// trigger. The owner merges every PR: a green one moves to Needs you as "ready to merge".
 // Anything a card needs from the owner becomes a `blocked` card on the board; the owner answers
 // in its note. This script only reconciles and dispatches, so it is short and safe to run
 // again at any time: every wake of the coordinator runs it once.
@@ -96,12 +96,12 @@ function tell(session, text, label) {
 const pokeLine = (id) =>
   `Whenever your card reaches an outcome (PR green and ready to merge, waiting on the owner, or blocked), call ` +
   `mcp__claude-code-remote__fire_trigger with trigger_id "${POKE}" and text "${id}: <ready|waiting on owner|blocked> — <PR link and one line why>". ` +
-  `That wakes the coordinator, which merges ready PRs and starts the cards waiting on yours. Once per outcome, not per step.`
+  `That wakes the coordinator, which puts ready PRs in front of the owner to merge. Once per outcome, not per step.`
 
 function cardPrompt(c, branch) {
   const ship = c.hold
     ? 'The owner tests it first: leave it green and open, with exact test steps in the PR body.'
-    : 'Do not merge it: the coordinator merges it once CI is green. If the card asks for the owner to pick between variants, leave the PR open with the contact sheet and say what to pick.'
+    : 'Do not merge it: the owner merges it once CI is green. If the card asks for the owner to pick between variants, leave the PR open with the contact sheet and say what to pick.'
   return `Skywave board card ${c.id}: "${c.title}". Work on branch ${branch} from the latest main.\n\n` +
     `Card: ${c.what || c.title}\n${c.state ? `Card state so far: ${c.state}\n` : ''}\n` +
     `How to work: read CLAUDE.md, docs/MILESTONES.md, docs/HANDOFF.md and the doc for the area first, and follow the patterns of the surrounding code. ` +
@@ -155,22 +155,16 @@ for (const x of checks.filter(Boolean)) {
     await board(c.id, { status: 'blocked', pr: r.pr, state: `needs you: PR ${r.pr} was closed without merging` })
     report.push(`${c.id}: NEEDS YOU, its PR ${r.pr} was closed unmerged`)
   } else if (r.waitingOnOwner || (c.hold && r.prState === 'open')) {
-    const ask = r.waitingOnOwner || 'test the PR, then answer "merge" in the note'
+    const ask = r.waitingOnOwner || 'test the PR, then merge it'
     if (c.status !== 'blocked' || c.state !== `needs you: ${ask}`) {
-      await board(c.id, { status: 'blocked', pr: r.pr || c.pr || 0, state: `needs you: ${ask} (answer in the note)` })
+      await board(c.id, { status: 'blocked', pr: r.pr || c.pr || 0, state: `needs you: ${ask}` })
     }
     report.push(`${c.id}: NEEDS YOU, ${ask}${r.pr ? ` (PR ${r.pr})` : ''}`)
-  } else if (r.prState === 'open' && r.green && r.headSha && !A.dryRun) {
-    const m = await agent(
-      `Merge one GitHub PR with mcp__github__merge_pull_request (ToolSearch "select:mcp__github__merge_pull_request"): owner "${REPO.split('/')[0]}", repo "${REPO.split('/')[1]}", ` +
-      `pullNumber ${r.pr}, merge_method "merge", expectedHeadSha "${r.headSha}". Reply with "merged" or the error.`,
-      { label: `merge:${c.id}`, effort: 'low' })
-    if (/merged/i.test(String(m)) && !/error|fail|not/i.test(String(m))) {
-      merged.add(c.id)
-      await board(c.id, { status: 'merged', pr: r.pr, state: `merged (PR ${r.pr})` })
-      await tell(c.session, `From the coordinator (card ${c.id}): PR ${r.pr} is merged. Your card is done.`, `done:${c.id}`)
-      report.push(`${c.id}: merged, PR ${r.pr}`)
-    } else report.push(`${c.id}: green but the merge failed (${m})`)
+  } else if (r.prState === 'open' && r.green) {
+    if (c.status !== 'blocked' || !String(c.state || '').startsWith('ready to merge')) {
+      await board(c.id, { status: 'blocked', pr: r.pr, state: `ready to merge: PR ${r.pr} is green; merge it on GitHub` })
+    }
+    report.push(`${c.id}: NEEDS YOU, PR ${r.pr} is green: merge it`)
   } else if (r.failed || idleMin >= STALL_MIN) {
     const sinceNudge = c.nudgedAt ? Math.round((NOW_MS - Date.parse(c.nudgedAt)) / 60000) : -1
     if (sinceNudge >= GIVE_UP_MIN) {
@@ -179,7 +173,7 @@ for (const x of checks.filter(Boolean)) {
     } else if (sinceNudge < 0) {
       await tell(c.session,
         `From the coordinator (card ${c.id}): your session has been ${r.failed ? 'failed' : `idle ${idleMin} min`} without reaching an outcome (last: "${r.summary}"). ` +
-        `Check what you were waiting on and carry on to the PR and merge, or report blocked. ${pokeLine(c.id)}`, `nudge:${c.id}`)
+        `Check what you were waiting on and carry on to a green PR, or report blocked. ${pokeLine(c.id)}`, `nudge:${c.id}`)
       await board(c.id, { nudgedAt: NOW })
       report.push(`${c.id}: nudged (${r.failed ? 'failed' : `idle ${idleMin} min`})`)
     }
