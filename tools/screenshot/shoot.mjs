@@ -269,6 +269,9 @@ async function shoot(job) {
         requestAnimationFrame(tick);
       }),
     );
+    // The footer is page chrome, not the game, and SwiftShader always shows it (its
+    // WebGPU fallback note): its build version would differ in every golden.
+    await page.addStyleTag({ content: "footer { display: none !important; }" });
     const t0 = Date.now();
     const png = await page.screenshot({ type: "png", timeout: CAPTURE_TIMEOUT_MS });
     console.log(`shoot: ${job.name}: capture took ${Date.now() - t0} ms`);
