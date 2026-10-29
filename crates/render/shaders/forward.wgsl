@@ -143,17 +143,16 @@ struct MeshOut {
     @location(4) emissive: vec3<f32>,
     // Share of the frame's cabin light.
     @location(5) cabin: f32,
-    // x: lights in the instance's set (+256: no sun shadow), y, z: their indices, a byte
-    // each.
-    @location(6) @interpolate(flat) lights: vec3<u32>,
+    // x: lights in the instance's set (+16: no sun shadow), y: how far each is dimmed, 4
+    // bits a light (15 = off), z, w: their indices, a byte each.
+    @location(6) @interpolate(flat) lights: vec4<u32>,
 };
 
 // Depth pre-pass: depth only, with `vs_mesh`'s position math, so the forward pass's
 // less-or-equal test passes only for the nearest surface and each pixel shades once.
 @vertex
 fn vs_depth(v: VertexIn, i: InstanceIn) -> @invariant @builtin(position) vec4<f32> {
-    let world = instance_model(i) * vec4<f32>(v.pos, 1.0);
-    return frame.view_proj * world;
+    return frame.rel_view_proj * (instance_model(i) * vec4<f32>(v.pos, 1.0));
 }
 
 // Writes nothing (its target's write mask is empty); the pass needs a fragment stage.
@@ -175,11 +174,12 @@ fn cap_emissive(e: vec3<f32>) -> vec3<f32> {
 
 @vertex
 fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
-    let world = instance_model(i) * vec4<f32>(v.pos, 1.0);
+    // Camera relative (the instance's translation is), back in the world for lighting.
+    let rel = instance_model(i) * vec4<f32>(v.pos, 1.0);
     let normal_matrix = mat3x3<f32>(i.n0.xyz, i.n1.xyz, i.n2.xyz);
     var out: MeshOut;
-    out.clip = frame.view_proj * world;
-    out.world_pos = world.xyz;
+    out.clip = frame.rel_view_proj * rel;
+    out.world_pos = rel.xyz + frame.camera_pos.xyz;
     out.normal = normal_matrix * v.normal;
     out.color = v.color * i.color;
     out.uv = v.uv;
@@ -187,10 +187,11 @@ fn vs_mesh(v: VertexIn, i: InstanceIn) -> MeshOut {
     let a = u32(round(v.emissive.a * 255.0));
     let window = select(1.0, frame.emissive.y, (a & 128u) != 0u);
     let scale = f32(a & 127u) * (8.0 / 127.0);
-    let glow = bitcast<f32>(i.params.x);
+    let glow = unpack2x16float(i.params.x).x;
     out.emissive = cap_emissive(v.emissive.rgb * (scale * window * frame.emissive.x * glow));
-    out.cabin = f32(i.params.y & 0xffffu) * (1.0 / 65535.0);
-    out.lights = vec3<u32>(min((i.params.y >> 16u) & 255u, LIGHTS_PER_DRAW) | ((i.params.y >> 16u) & 256u), i.params.z, i.params.w);
+    out.cabin = f32((i.params.x >> 16u) & 255u) * (1.0 / 255.0);
+    let flags = (i.params.x >> 24u) & 31u;
+    out.lights = vec4<u32>(min(flags & 15u, LIGHTS_PER_DRAW) | (flags & 16u), i.params.y, i.params.z, i.params.w);
     return out;
 }
 
@@ -249,15 +250,15 @@ fn spot_cos(d: vec3<f32>, axis: vec3<f32>, squash: f32) -> f32 {
 }
 
 // Smooth inverse-square point lights (Karis 2013 window) of the instance's light set
-// (`light_set`: count, then the indices a byte each): illuminance in klux, reaching 0 at each
-// light's radius. The 0.1 m² floor stands for the bulb's size. A spot light also
-// fades from full intensity to nothing across its cone (smoothstep in the cosine off its
-// axis, optionally flattened vertically) and may soften the surface cosine (wrap); an omni
-// light's cone covers every direction.
-fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec3<u32>) -> vec3<f32> {
+// (`light_set`: count and how far each is dimmed, then the indices a byte each):
+// illuminance in klux, reaching 0 at each light's radius. The 0.1 m² floor stands for the
+// bulb's size. A spot light also fades from full intensity to nothing across its cone
+// (smoothstep in the cosine off its axis, optionally flattened vertically) and may soften
+// the surface cosine (wrap); an omni light's cone covers every direction.
+fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec4<u32>) -> vec3<f32> {
     var sum = vec3<f32>(0.0);
-    for (var k = 0u; k < (light_set.x & 255u); k++) {
-        let word = select(light_set.z, light_set.y, k < 4u);
+    for (var k = 0u; k < (light_set.x & 15u); k++) {
+        let word = select(light_set.w, light_set.z, k < 4u);
         let index = min((word >> ((k & 3u) * 8u)) & 255u, MAX_LIGHTS - 1u);
         let packed = frame.lights[index];
         let to_light = packed.pos_radius.xyz - world_pos;
@@ -272,7 +273,8 @@ fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec3<u32>) -> vec
             let off = spot_cos(-l, light.axis, light.squash);
             let c = clamp((off - light.cone_end) * light.cone_scale, 0.0, 1.0);
             let cone = c * c * (3.0 - 2.0 * c);
-            sum += light.color * (ndl * window * cone / (d2 + 0.1));
+            let weight = 1.0 - f32((light_set.y >> (4u * k)) & 15u) * (1.0 / 15.0);
+            sum += light.color * (weight * ndl * window * cone / (d2 + 0.1));
         }
     }
     return sum;
@@ -343,7 +345,7 @@ fn shade(in: MeshOut) -> vec3<f32> {
     let ndl = max(dot(n, frame.sun_dir.xyz), 0.0);
     // 1: unshadowed (it only ever scales ndl); bit 8 of the light count skips the test.
     var vis = 1.0;
-    if ndl > 0.0 && (in.lights.x & 256u) == 0u {
+    if ndl > 0.0 && (in.lights.x & 16u) == 0u {
         vis = sun_visibility(in.world_pos, n, ndl);
     }
     // Hemisphere ambient from the sky model: mean sky radiance above, lit ground below. A car's
