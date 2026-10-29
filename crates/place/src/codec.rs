@@ -779,7 +779,6 @@ fn poi_kind(v: u8) -> Option<PoiKind> {
         12 => PoiKind::GradeCrossing,
         13 => PoiKind::HillsideLetters,
         14 => PoiKind::WaterTower,
-        15 => PoiKind::DriveIn,
         _ => return None,
     })
 }

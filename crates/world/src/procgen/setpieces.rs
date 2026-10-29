@@ -19,14 +19,11 @@
 //! - **The channel ramps**: chain-link along both lips of the flood channel, open where a
 //!   road bridges it, around each ramp and at its top.
 //! - **The landmarks** built from kits ([`crate::landmarks`]; the variant each wears is the
-//!   owner's pick from the gallery's contact sheet, [`LETTERS`], [`WATER_TOWER`],
-//!   [`DRIVE_IN`]): the hillside letters on the slope of the hills [`LETTERS_RISE_M`] above
-//!   their foot, square to the slope and across from downtown, clear of every road; the
-//!   water tower on the industrial lot with the most industry round it, at least
-//!   [`TOWER_APART_M`] from the garage and the stand; the drive-in on the commercial,
-//!   strip, industrial or desert lot nearest the boulevard at least [`APART_M`] from the
-//!   other lots, its rows filling with cars after dark. A kit the grammar does not carry
-//!   is not sited.
+//!   owner's pick from the gallery's contact sheet, [`LETTERS`], [`WATER_TOWER`]): the
+//!   hillside letters on the slope of the hills [`LETTERS_RISE_M`] above their foot,
+//!   square to the slope and across from downtown, clear of every road; the water tower
+//!   on the industrial lot with the most industry round it, at least [`TOWER_APART_M`]
+//!   from the garage and the stand. A kit the grammar does not carry is not sited.
 //!
 //! Every draw is a pure function of the place; nothing here draws randomness but the
 //! signs' name seeds (`hash64(seed, [SETPIECES, ..])`).
@@ -42,7 +39,6 @@ use skywave_core::Seed;
 
 use super::macro_map::{MacroMap, MacroPoiKind};
 use crate::landmarks::Kit;
-use crate::lots::LOT_CAR;
 use crate::math::{abs, point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
 use crate::palette::Palette;
@@ -90,7 +86,6 @@ const RAIL_M: f32 = 18.0;
 pub const LETTERS: (&str, u8) = ("hillside_letters", 0);
 /// B, the pedestal (the owner's pick from the gallery sample).
 pub const WATER_TOWER: (&str, u8) = ("water_tower", 1);
-pub const DRIVE_IN: (&str, u8) = ("drive_in", 0);
 /// The letters stand where the hills have risen this far over the road along their foot,
 /// their faces this far back on their lot, their line level to within this, and no road
 /// comes within this of their lot, m.
@@ -102,10 +97,6 @@ const LETTERS_ROAD_CLEAR_M: f32 = 12.0;
 /// by the industry within this of it, m.
 pub const TOWER_APART_M: f32 = 200.0;
 const TOWER_REACH_M: f32 = 192.0;
-/// The drive-in's car rows in its kit's frame (`assets/landmarks/drive_in.ron`): `x` of
-/// each stall and `z` of each row, m, facing the screen.
-const DRIVE_IN_STALLS: [f32; 5] = [-12.0, -6.0, 0.0, 6.0, 12.0];
-const DRIVE_IN_ROWS: [f32; 3] = [-17.0, -25.0, -33.0];
 
 /// A site a set piece stands on: the middle of its front at the property line, the way
 /// into it from the road, the way along the road.
@@ -174,8 +165,8 @@ pub struct SetPieces {
     pub channel: Option<(V2, V2, f32)>,
     /// Where the rail line crosses a road at grade, in order along it.
     pub crossings: Vec<V2>,
-    /// The landmarks built from kits: the letters, the water tower, the drive-in, those
-    /// that found a site.
+    /// The landmarks built from kits: the letters and the water tower, those that found a
+    /// site.
     pub marks: Vec<Mark>,
 }
 
@@ -540,32 +531,6 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
             s.marks.push(Mark {
                 lot,
                 kind: PoiKind::WaterTower,
-                kit,
-                variant,
-                size,
-            });
-        }
-    }
-    if let Some((kit, variant, size)) = kit_of(kits, DRIVE_IN) {
-        let (w, d) = (size[0], size[1]);
-        let areas = s.footprints();
-        let mut taken = taken;
-        taken.extend(s.marks.iter().map(|k| k.lot.front));
-        let zones = [
-            ZoneId::Commercial,
-            ZoneId::Strip,
-            ZoneId::Industrial,
-            ZoneId::Farmland,
-        ];
-        let lot = lots(place, (w, d), &zones, &classes[..2])
-            .into_iter()
-            .filter(|l| !overlaps(l, (w, d), &areas))
-            .filter(|l| taken.iter().all(|&t| (t - l.front).length() >= APART_M))
-            .min_by(by_blvd);
-        if let Some(lot) = lot {
-            s.marks.push(Mark {
-                lot,
-                kind: PoiKind::DriveIn,
                 kit,
                 variant,
                 size,
@@ -1091,31 +1056,6 @@ pub fn dress(
             let base = V3::new(l.front.x, y, l.front.y);
             let v = usize::from(mark.variant);
             crate::landmarks::lights(kit, v, base, out, pal, &mut lights);
-        }
-        // The drive-in's rows fill after dark: each car from 19:00 or 20:00 to 23:00 or
-        // 01:00, by its stall.
-        if mark.kind == PoiKind::DriveIn {
-            let x = out.left();
-            let classes = [0x01u8, 0x14, 0x23, 0x31, 0x45, 0x52];
-            let mut k = 0usize;
-            for &z in &DRIVE_IN_ROWS {
-                for &sx in &DRIVE_IN_STALLS {
-                    let q = l.front + x * sx + out * z;
-                    let from = 19 + (k % 2) as u32;
-                    let to = if k.is_multiple_of(3) { 25 } else { 23 };
-                    let hours = (from..to).fold(0u32, |m, h| m | 1 << (h % 24));
-                    props.push(prop(
-                        q,
-                        ground(q),
-                        -out,
-                        PropKind::ParkedCar {
-                            vehicle_class: classes[k % classes.len()],
-                            hours: hours | LOT_CAR,
-                        },
-                    ));
-                    k += 1;
-                }
-            }
         }
     }
 

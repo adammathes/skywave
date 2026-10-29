@@ -16,8 +16,7 @@ const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 /// The landmark kits, in file-name order, as the game attaches them to the grammar.
-const KITS: [&str; 3] = [
-    include_str!("../../../assets/landmarks/drive_in.ron"),
+const KITS: [&str; 2] = [
     include_str!("../../../assets/landmarks/hillside_letters.ron"),
     include_str!("../../../assets/landmarks/water_tower.ron"),
 ];
@@ -291,20 +290,16 @@ fn landmark<'a>(p: &'a Place, id: &str) -> (&'a place::Prop, u8, [f32; 2]) {
 }
 
 #[test]
-fn every_basin_has_its_landmarks_on_open_ground_lit_and_filling_at_night() {
-    use world::procgen::setpieces::{DRIVE_IN, LETTERS, LETTERS_RISE_M, WATER_TOWER};
+fn every_basin_has_its_landmarks_on_open_ground_and_lit() {
+    use world::procgen::setpieces::{LETTERS, LETTERS_RISE_M, WATER_TOWER};
     for seed in 1..=4u64 {
         let p = basin(seed);
         let c = WorldCollider::build(&p, &grammar());
-        for kind in [
-            PoiKind::HillsideLetters,
-            PoiKind::WaterTower,
-            PoiKind::DriveIn,
-        ] {
+        for kind in [PoiKind::HillsideLetters, PoiKind::WaterTower] {
             assert_eq!(pois(&p, kind), 1, "seed {seed}: {kind:?}");
         }
         let mut fronts = Vec::new();
-        for (id, variant) in [LETTERS, WATER_TOWER, DRIVE_IN] {
+        for (id, variant) in [LETTERS, WATER_TOWER] {
             let (q, v, [w, d]) = landmark(&p, id);
             assert_eq!(v, variant, "seed {seed}: {id}");
             // No road and no building on its lot; the letters keep well clear of roads.
@@ -388,48 +383,28 @@ fn every_basin_has_its_landmarks_on_open_ground_lit_and_filling_at_night() {
             rise > 0.4 * LETTERS_RISE_M,
             "seed {seed}: letters {rise:.0} m up"
         );
-
-        // The drive-in's rows: empty at noon, full at nine at night.
-        let cars: Vec<u32> = p
-            .props
-            .items
-            .iter()
-            .filter_map(|r| match r.kind {
-                PropKind::ParkedCar { hours, .. } => Some((r, hours)),
-                _ => None,
-            })
-            .filter(|(r, _)| {
-                let (dq, _, [dw, dd]) = landmark(&p, DRIVE_IN.0);
-                world::math::point_in_polygon(at(r), &footprint(dq, dw, dd))
-            })
-            .map(|x| x.1)
-            .collect();
-        assert_eq!(cars.len(), 15, "seed {seed}");
-        assert!(cars.iter().all(|h| h >> 12 & 1 == 0 && h >> 21 & 1 == 1));
     }
 }
 
 #[test]
-fn the_water_tower_and_the_drive_in_screen_stop_a_car() {
-    use world::procgen::setpieces::{DRIVE_IN, WATER_TOWER};
+fn the_water_tower_stops_a_car() {
+    use world::procgen::setpieces::WATER_TOWER;
     let spec = halberd();
     let p = basin(1);
     let c = WorldCollider::build(&p, &grammar());
     let ground = |q: V2| [q.x, c.level_at([q.x, q.y]).0, q.y];
-    // From the road straight at the tower's column, and at the screen down an aisle of
-    // the drive-in (between its speaker posts, past its booth): each stops the car short.
-    for (id, aisle, depth) in [(WATER_TOWER.0, 0.0, 12.0), (DRIVE_IN.0, 6.0, 38.0)] {
-        let (q, _, _) = landmark(&p, id);
-        let out = dir_of_yaw(q.yaw);
-        let front = at(q);
-        // On the lot's front edge, clear of the cars parked at the curb.
-        let start = front - out * 0.5 + out.left() * aisle;
-        let mut s = VehicleState::spawn(&spec, ground(start), heading_of(-out));
-        drive(&spec, &mut s, &c, 10.0, |s| input(cruise(s, 8.0), 0.0, 0.0));
-        let into = (front - V2::new(s.pos[0], s.pos[2])).dot(out);
-        assert!(into < depth, "{id}: {into:.1} m into its lot of {depth}");
-        assert!(into > depth - 6.0, "{id}: only {into:.1} m in");
-        println!("{id}: stopped {into:.1} m in");
-        assert!(s.pos.iter().all(|v| v.is_finite()));
-    }
+    // From the road straight at the tower's column: it stops the car short.
+    let (id, depth) = (WATER_TOWER.0, 12.0);
+    let (q, _, _) = landmark(&p, id);
+    let out = dir_of_yaw(q.yaw);
+    let front = at(q);
+    // On the lot's front edge, clear of the cars parked at the curb.
+    let start = front - out * 0.5;
+    let mut s = VehicleState::spawn(&spec, ground(start), heading_of(-out));
+    drive(&spec, &mut s, &c, 10.0, |s| input(cruise(s, 8.0), 0.0, 0.0));
+    let into = (front - V2::new(s.pos[0], s.pos[2])).dot(out);
+    assert!(into < depth, "{id}: {into:.1} m into its lot of {depth}");
+    assert!(into > depth - 6.0, "{id}: only {into:.1} m in");
+    println!("{id}: stopped {into:.1} m in");
+    assert!(s.pos.iter().all(|v| v.is_finite()));
 }

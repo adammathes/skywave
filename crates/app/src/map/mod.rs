@@ -119,7 +119,6 @@ pub fn poi_color(kind: PoiKind) -> Rgb {
         PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing | PoiKind::WaterTower => {
             [120, 130, 140]
         }
-        PoiKind::DriveIn => [214, 60, 160],
         PoiKind::TacoStand => [222, 84, 60],
     }
 }

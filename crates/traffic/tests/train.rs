@@ -17,8 +17,7 @@ const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 /// The landmark kits, in file-name order, as the game attaches them to the grammar.
-const KITS: [&str; 3] = [
-    include_str!("../../../assets/landmarks/drive_in.ron"),
+const KITS: [&str; 2] = [
     include_str!("../../../assets/landmarks/hillside_letters.ron"),
     include_str!("../../../assets/landmarks/water_tower.ron"),
 ];

@@ -501,10 +501,8 @@ pub enum PoiKind {
     /// The landmarks built from kits (`docs/WORLD_GENERATION.md`, "Landmarks"), each at
     /// the middle of its lot: the valley's name in letters on the hillside...
     HillsideLetters = 13,
-    /// ...the water tower over the industrial district...
+    /// ...and the water tower over the industrial district.
     WaterTower = 14,
-    /// ...and a drive-in theater.
-    DriveIn = 15,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.

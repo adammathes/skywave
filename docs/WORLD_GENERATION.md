@@ -191,7 +191,7 @@ coast's Place is unchanged.
 - **The landmarks** built from kits ("Landmarks" below), each a `PropKind::Landmark` at its lot's front middle
   facing out, its kit's lamps as `Flood` lights, its lot's buildings and other props gone, and a point of
   interest at its lot's middle. The variant each wears is the owner's pick from the gallery's contact sheet
-  (`procgen::setpieces::{LETTERS, WATER_TOWER, DRIVE_IN}`); a kit the grammar does not carry is not sited.
+  (`procgen::setpieces::{LETTERS, WATER_TOWER}`); a kit the grammar does not carry is not sited.
   - **The hillside letters** (`hillside_letters`, `HillsideLetters`): from the road along the foot of the hills,
     every 16 m, up the slope until it has risen 50 m; there the lot faces down the local slope (within about
     45° of straight out over the valley), its letters' line level to within 3 m, the whole lot inside the
@@ -202,18 +202,12 @@ coast's Place is unchanged.
     deep over industrial lots on any road, at least 200 m from the garage and the stand, with the most
     industrial zone within 192 m of its middle (sampled every 32 m). Its column (not the bowl over it) blocks a
     car.
-  - **The drive-in** (`drive_in`, `DriveIn`): a 48 by 44 m site over commercial, strip, industrial or desert
-    lots on an arterial or collector, the nearest the boulevard at least 300 m from the garage, the stand and
-    the tower. Its screen faces the road over three rows of speaker posts; after dark (from 19:00 or 20:00 to
-    23:00 or 01:00, by stall) fifteen cars park in its rows facing the screen (lot cars, `LOT_CAR`). The screen
-    glows dusk to dawn.
-
-  On seeds 1–4 every basin has all three.
+  On seeds 1–4 every basin has both.
 
 Tests: `world/tests/setpieces.rs` (every set piece on seeds 1–4, clear of roads and buildings, the tunnel's
 walls hold a car to the freeway, a car drives through it and into the garage's middle bay; every landmark
-sited, lit, solid and clear of roads and buildings, the letters on the ground up the hills, the drive-in empty
-at noon and full at nine, the tower's column and the drive-in's screen stop a car), the meshes' and boxes'
+sited, lit, solid and clear of roads and buildings, the letters on the ground up the hills, the tower's column
+stops a car), the meshes' and boxes'
 unit tests in `world::setpieces`, `app::dragstrip`'s tests.
 
 ## Landmarks
@@ -224,9 +218,8 @@ road; the lot spans `x` -w/2..w/2 and `z` -d..0), with lettered variants that st
 add parts or repaint. A place stores one as `PropKind::Landmark { kit, variant }` at the middle of its lot's
 front edge facing the road; `kit` indexes the kits in file-name order. Parts that start within 2 m of the lot
 block a car (an upright lathe only as wide as it is within those 2 m, so a pedestal's bowl is not a wall
-under it); each `Lamp` is a `Flood` light. Three kits ship: `drive_in` (a drive-in theater's screen, speaker
-rows and marquee), `hillside_letters` (the valley's name on the hills) and `water_tower`; the basin sites one
-of each ("Set pieces" above).
+under it); each `Lamp` is a `Flood` light. Two kits ship: `hillside_letters` (the valley's name on the hills) and
+`water_tower`; the basin sites one of each ("Set pieces" above).
 
 Taste defaults until the owner overrules: mostly grounded (a real kind of structure a place would have),
 a few roadside-kitsch pieces (`tone: Kitsch`); signs only on landmarks and the main drag; a landmark shows
