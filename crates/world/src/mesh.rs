@@ -514,17 +514,23 @@ pub fn lathe(
                 }
                 continue;
             }
-            // Radial normals tilted by the profile slope.
-            let slope = (ra - rb) / (yb - ya).max(1e-6);
-            let (n0, n1) = (
-                (d0 + f.y * slope).normalize(),
-                (d1 + f.y * slope).normalize(),
-            );
+            // Radial normals tilted by the profile slope. A segment running back down the
+            // axis (the inside of a ring, a torus's inner half) faces the profile's right
+            // side, which is toward the axis there.
+            let (n0, n1, facing) = if yb < ya {
+                let (dr, dy) = (rb - ra, yb - ya);
+                let n = |d: V3| (d * dy - f.y * dr).normalize();
+                (n(d0), n(d1), n(mid))
+            } else {
+                let slope = (ra - rb) / (yb - ya).max(1e-6);
+                let n = |d: V3| (d + f.y * slope).normalize();
+                (n(d0), n(d1), mid)
+            };
             let normals = [n0, n1, n1, n0];
             let (u0, u1) = (k as f32 / sides as f32, (k + 1) as f32 / sides as f32);
             let uv = [[u0, ya], [u1, ya], [u1, yb], [u0, yb]];
             let flat = (q[2] - q[0]).cross(q[3] - q[1]);
-            let order = if flat.dot(mid) >= 0.0 {
+            let order = if flat.dot(facing) >= 0.0 {
                 [0, 1, 2, 3]
             } else {
                 [0, 3, 2, 1]
@@ -831,6 +837,27 @@ pub(crate) mod tests {
             P,
         );
         assert_well_formed(&smooth, 0.3);
+    }
+
+    #[test]
+    fn a_lathed_torus_faces_out_of_its_tube_all_round() {
+        // A ring of tube radius 1 round a circle of radius 3: the profile runs up its outer
+        // half and back down its inner half.
+        let profile: Vec<[f32; 2]> = (0..=12)
+            .map(|k| {
+                let (s, c) = sin_cos(TAU * (k as f32 / 12.0 - 0.25));
+                [3.0 + c, s]
+            })
+            .collect();
+        let mut m = WorldMesh::default();
+        lathe(&mut m, &Frame::at(V3::ZERO), &profile, 16, false, true, P);
+        assert_well_formed(&m, 0.3);
+        for v in &m.vertices {
+            let p = V3::new(v.pos[0], v.pos[1], v.pos[2]);
+            let ring = V3::new(p.x, 0.0, p.z).normalize() * 3.0;
+            let n = V3::new(v.normal[0], v.normal[1], v.normal[2]);
+            assert!((p - ring).normalize().dot(n) > 0.8, "{p:?} {n:?}");
+        }
     }
 
     #[test]
