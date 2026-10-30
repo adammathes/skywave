@@ -154,7 +154,7 @@ fn drive<S: ChunkSource>(
             d.busy_steps += 1;
             d.most_stages = d.most_stages.max(stages);
         }
-        d.max_overrun = d.max_overrun.max(took - budget.step_budget_s);
+        d.max_overrun = d.max_overrun.max(took - budget.frame_budget_s);
         if t >= warmup_s {
             d.allocs_after_warmup += allocs;
             if stages == 0 {

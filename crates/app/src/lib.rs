@@ -1626,9 +1626,9 @@ impl App {
         self.stream.as_ref().map(|s| s.streamer.stats())
     }
 
-    /// Runs `steps` streaming steps round the current view; `now` is the platform's clock
-    /// in seconds.
-    fn stream_steps(&mut self, steps: u32, alpha: f32, now: &dyn Fn() -> f64) {
+    /// Streams round the current view for one frame's budget; `now` is the platform's
+    /// clock in seconds.
+    fn stream(&mut self, alpha: f32, now: &dyn Fn() -> f64) {
         let (eye, forward) = if self.fly {
             let c = self.prev.lerp(&self.curr, alpha);
             let (s, co) = c.yaw.sin_cos();
@@ -1640,10 +1640,8 @@ impl App {
         let Some(s) = &mut self.stream else {
             return;
         };
-        for _ in 0..steps {
-            s.streamer
-                .step(&s.source, [eye.x, eye.z], [forward.x, forward.z], now);
-        }
+        s.streamer
+            .step(&s.source, [eye.x, eye.z], [forward.x, forward.z], now);
     }
 
     /// Writes the chunks built since the last call into `gpu` (the renderer's chunk pool)
@@ -2465,6 +2463,39 @@ mod tests {
         // whatever each world contains.
         assert_eq!(seen[2], seen[0]);
         assert_eq!(seen[3], seen[1]);
+    }
+
+    /// After a hitch a frame runs the most sim steps it may; streaming still spends one
+    /// budget on that frame, not one a step (a fake clock that moves 0.3 ms each read).
+    #[test]
+    fn a_frame_of_many_sim_steps_streams_within_one_budget() {
+        let mut app = App::from_setup(&SceneSetup::from_query("cam=cockpit").unwrap()).unwrap();
+        assert!(app.is_streamed());
+        let mut input = InputMapper::default();
+        let now = std::cell::Cell::new(0.0);
+        let tick = 0.0003;
+        let clock = || {
+            now.set(now.get() + tick);
+            now.get()
+        };
+        let dt = f64::from(skywave_core::MAX_STEPS_PER_FRAME) * skywave_core::SIM_DT;
+        let budget = StreamBudget::WEB.frame_budget_s;
+        for _ in 0..3 {
+            let before = app.stream_stats().unwrap();
+            let steps = app.frame(&mut input, dt, &clock);
+            let after = app.stream_stats().unwrap();
+            assert_eq!(steps.count, skywave_core::MAX_STEPS_PER_FRAME);
+            assert_eq!(after.steps - before.steps, 1, "{after:?}");
+            // Each piece reads the clock once before it runs: the budget holds
+            // `budget / tick` reads, plus the one piece a frame may overrun by.
+            let most = (budget / tick).ceil() as u64 + 1;
+            let pieces = after.stages - before.stages;
+            assert!(
+                pieces > 0 && pieces <= most,
+                "{pieces} pieces, at most {most}"
+            );
+            assert!(after.max_step_s <= budget + 2.0 * tick, "{after:?}");
+        }
     }
 
     #[test]

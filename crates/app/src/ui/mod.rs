@@ -45,7 +45,7 @@ use crate::settings::{FrameRate, GpuInfo, Handling, Overlay, Quality, Settings, 
 use crate::App;
 use audio::deck::Source;
 use render::{Hud, HudBuilder, HudLayout, RenderQuality, RenderStats, Sky};
-use skywave_core::{Steps, MAX_STEPS_PER_FRAME, SIM_DT};
+use skywave_core::Steps;
 
 /// Seconds a remap capture waits for an input before giving up.
 pub const CAPTURE_TIMEOUT: f32 = 8.0;
@@ -1313,10 +1313,9 @@ pub fn capture_binding(action: Action, sign: Sign, raw: RawInput, value: f32) ->
 
 impl App {
     /// One frame: samples `input`, runs the UI (menus, remapping, overlay toggle), steps
-    /// the simulation unless a menu has it paused, streams the town round the view (one
-    /// streaming step per sim step, at least one a frame even when the sim does not run,
-    /// each spending up to the budget as `now_seconds` measures it: the platform's clock,
-    /// any origin), and lays out the HUD for [`App::scene_view`]. This is the entry point
+    /// the simulation unless a menu has it paused, streams the town round the view (once a
+    /// frame, however many sim steps it holds, spending up to the frame's budget as
+    /// `now_seconds` measures it: the platform's clock, any origin), and lays out the HUD for [`App::scene_view`]. This is the entry point
     /// for platforms; [`App::update`] is the bare simulation step. Then call
     /// [`App::sync_chunks`].
     pub fn frame(
@@ -1387,14 +1386,7 @@ impl App {
         if std::mem::take(&mut self.camera_cycled) {
             self.ui.remember_camera(self.camera.selected());
         }
-        let stream_steps = if steps.count > 0 {
-            steps.count
-        } else {
-            (dt / SIM_DT)
-                .round()
-                .clamp(1.0, f64::from(MAX_STEPS_PER_FRAME)) as u32
-        };
-        self.stream_steps(stream_steps, steps.alpha, now_seconds);
+        self.stream(steps.alpha, now_seconds);
         self.ui.note_frame(dt as f32, steps.count);
         self.ui.speed_mph = if self.fly {
             None
