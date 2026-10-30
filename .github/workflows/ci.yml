@@ -23,7 +23,7 @@ jobs:
       - name: Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal \
-            --component rustfmt,clippy --target wasm32-unknown-unknown
+            --component rustfmt,clippy --target wasm32-unknown-unknown,i686-unknown-linux-gnu
           rustup default stable
 
       # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/.
@@ -31,8 +31,9 @@ jobs:
 
       # lavapipe (mesa-vulkan-drivers): a software Vulkan device for the renderer's
       # fragment-count test (`fragments_on_the_coast_at_deck`).
-      - name: Linux build deps (libudev for gilrs, ALSA for cpal, lavapipe)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers
+      # gcc-multilib links the 32-bit (i686) test binaries.
+      - name: Linux build deps (libudev for gilrs, ALSA for cpal, lavapipe, 32-bit libc)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers gcc-multilib
 
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
@@ -65,3 +66,20 @@ jobs:
           name: screenshots
           path: tools/screenshot/out/
           if-no-files-found: warn
+
+  # The macOS-only code (cfg(target_os = "macos") in platform-native) is otherwise built only
+  # after merge, by release.yml.
+  macos:
+    runs-on: macos-14 # Apple Silicon
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (platform-native)
+        run: cargo clippy --locked -p platform-native --all-targets -- -D warnings
