@@ -149,7 +149,7 @@ jobs:
           if-no-files-found: error
 
   macos:
-    runs-on: macos-14 # Apple Silicon
+    runs-on: macos-15 # Apple Silicon
     steps:
       - uses: actions/checkout@v5
         with:
