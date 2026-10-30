@@ -321,8 +321,10 @@
   // game's Audio settings (showDirectoryPicker where the browser has it, else a folder
   // input) or from dropping files or folders on the page. Picked or dropped folders join
   // one library, which the game indexes as Artist > Album from their layout and tags (loose
-  // dropped files: one "Mixtape" album). The files stay here: the game takes each folder's
-  // id, name, files' paths in it, sizes and first bytes (for tags) with takeFolder(), and
+  // dropped files: one "Mixtape" album). The files stay here: the game takes each file's
+  // path in its folder, size and first bytes (for tags) with take(), one at a time and a
+  // few each frame, then the folder (its id and name) once all its files are taken; the
+  // first bytes wait for it under a small budget (QUEUED) and are dropped once taken. It
   // plays a file through the radio player by its
   // key ("<folder id>/<path in it>"), so nothing is uploaded or sent anywhere. Picked
   // folders, and loose dropped files, are remembered as handles in IndexedDB (with a stable
@@ -336,13 +338,18 @@
   // music.
   (() => {
     const HEAD = 64 * 1024; // audio::music::HEAD_BYTES
+    const WINDOW = 6 * 1024; // audio::music::PROBE_WINDOW
     const MAX_FILES = 4096; // audio::music::MAX_TRACKS
+    const QUEUED = 2 * 1024 * 1024; // bytes read and not yet taken, at most (about)
     const AUDIO = /\.(mp3|m4a|aac|mp4|ogg|oga|opus|flac|wav|webm)$/i;
     const PICKED_KEY = "skywave.musicPicked";
     const tester = document.createElement("audio");
     const playable = (f) => AUDIO.test(f.name) && (!f.type || tester.canPlayType(f.type) !== "");
     const files = new Map(); // key -> File
-    const ready = []; // folders read, for takeFolder()
+    const ready = []; // files read, then their folder, for take()
+    let queued = 0; // bytes in `ready`
+    let drained = null; // wakes add() when take() has made room
+    let adding = Promise.resolve(); // one folder at a time: its files reach take() together
     let roots = []; // remembered folders: { id, handle, tape, granted, asked }
     let asking = false; // a permission prompt is up
     const storage = (fn) => { try { return fn(localStorage); } catch { return null; } };
@@ -362,28 +369,38 @@
       ? 10 + ((h[6] & 0x7f) << 21 | (h[7] & 0x7f) << 14 | (h[8] & 0x7f) << 7 | (h[9] & 0x7f)) + (h[5] & 0x10 ? 10 : 0)
       : 0);
 
+    // The bytes of `file` audio::music::probe reads: its first HEAD at most, cut
+    // WINDOW past where its audio starts, and the audio's start apart when cover art
+    // pushes it beyond that.
+    async function head(file) {
+      const bytes = async (from, to) => new Uint8Array(await file.slice(from, to).arrayBuffer());
+      const start = audioStart(await bytes(0, 10));
+      const head = await bytes(0, Math.min(HEAD, start + WINDOW));
+      const audio = start + 4 > head.length && start < file.size ? await bytes(start, start + 4096) : new Uint8Array(0);
+      return { head, audio };
+    }
+
     // One folder of the library: `id` called `name`, from [{rel, file}]; `mixtape`: loose
     // dropped files.
-    async function add(id, name, list, announce, kept, mixtape) {
+    function add(id, name, list, announce, kept, mixtape) {
+      adding = adding.then(() => addNow(id, name, list, announce, kept, mixtape))
+        .catch((e) => console.warn("skywave: music folder", e));
+      return adding;
+    }
+    async function addNow(id, name, list, announce, kept, mixtape) {
       const entries = list.filter((e) => playable(e.file)).sort((a, b) => a.rel.localeCompare(b.rel)).slice(0, MAX_FILES);
       for (const k of [...files.keys()]) if (k.startsWith(`${id}/`)) files.delete(k);
-      const out = [];
       for (const { rel, file } of entries) {
-        let head = new Uint8Array(0);
-        let audio = new Uint8Array(0);
-        try {
-          head = new Uint8Array(await file.slice(0, HEAD).arrayBuffer());
-          const start = audioStart(head);
-          if (start + 4 > head.length && start < file.size) {
-            audio = new Uint8Array(await file.slice(start, start + 4096).arrayBuffer());
-          }
-        } catch { /* unreadable: the file name will do */ }
+        while (queued > QUEUED) await new Promise((ok) => { drained = ok; });
+        let read = { head: new Uint8Array(0), audio: new Uint8Array(0) };
+        try { read = await head(file); } catch { /* unreadable: the file name will do */ }
         const key = `${id}/${rel}`;
         files.set(key, file);
-        out.push({ key, rel, size: file.size, head, audio });
+        queued += read.head.length + read.audio.length;
+        ready.push({ key, rel, size: file.size, head: read.head, audio: read.audio });
       }
-      if (out.length > 0 || announce) ready.push({ path: id, name, announce, kept, mixtape: !!mixtape, files: out });
-      if (out.length > 0) {
+      if (entries.length > 0 || announce) ready.push({ folder: true, path: id, name, announce, kept, mixtape: !!mixtape });
+      if (entries.length > 0) {
         if (kept) music.again = roots.some((r) => !r.granted);
         else storage((s) => s.setItem(PICKED_KEY, "1"));
       }
@@ -570,7 +587,15 @@
         pickNow();
         return true;
       },
-      takeFolder() { return ready.length ? ready.shift() : null; },
+      // The next file read ({key, rel, size, head, audio}), or the folder they were all
+      // in ({folder: true, path, name, announce, kept, mixtape}) after its last file.
+      take() {
+        const item = ready.shift();
+        if (!item) return null;
+        if (!item.folder) queued -= item.head.length + item.audio.length;
+        if (drained && queued <= QUEUED) { drained(); drained = null; }
+        return item;
+      },
       get tracks() { return files.size; }, // for tests
       file(key) { return files.get(String(key)) || null; },
       forget(id) {

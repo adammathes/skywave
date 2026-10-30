@@ -16,6 +16,10 @@
 /// Bytes of each file the platform reads for [`probe`]: enough for an ID3v2 tag without
 /// cover art in front of the text frames, and the first audio frame.
 pub const HEAD_BYTES: usize = 64 * 1024;
+/// Bytes past [`audio_start`] that [`probe`] looks at (the 4 KiB it searches for the first
+/// frame, the longest Layer III frame and the header after it): a head cut at
+/// `audio_start + PROBE_WINDOW` (at most [`HEAD_BYTES`]) probes the same as the whole one.
+pub const PROBE_WINDOW: usize = 6 * 1024;
 /// Length assumed for a track whose length [`probe`] cannot tell, s.
 pub const NOMINAL_TRACK_S: f32 = 240.0;
 /// Longest name kept for the HUD (artist, album or title), characters.
@@ -581,6 +585,36 @@ mod tests {
             "frames before the art still read"
         );
         assert_eq!(audio_start(b"not a tag at all"), 0);
+    }
+
+    #[test]
+    fn a_head_cut_after_the_probe_window_probes_the_same() {
+        let tagged = |art: usize| {
+            let mut f = id3(3, &[(b"TIT2", b"\0Cut"), (b"APIC", &vec![0; art])]);
+            f.extend(frames(400));
+            f
+        };
+        for file in [
+            frames(400),
+            tagged(1),
+            tagged(30 * 1024),
+            tagged(100 * 1024),
+        ] {
+            let len = file.len() as u64;
+            let head = &file[..HEAD_BYTES];
+            let start = audio_start(&file[..10]) as usize;
+            let audio = if start + 4 > head.len() {
+                &file[start..start + 4096]
+            } else {
+                &[][..]
+            };
+            let cut = &file[..HEAD_BYTES.min(start + PROBE_WINDOW)];
+            assert_eq!(
+                probe(cut, audio, len),
+                probe(head, audio, len),
+                "start {start}"
+            );
+        }
     }
 
     #[test]
