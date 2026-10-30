@@ -99,6 +99,9 @@ const SHIFT_HOLD_S: f32 = 0.6;
 const DOWNSHIFT_MARGIN: f32 = 0.8;
 /// Below this forward speed the auto box may switch between drive and reverse, m/s.
 const DIRECTION_SWITCH_SPEED: f32 = 0.8;
+/// Brake held this long at a stop before the auto box selects reverse, s, so waiting at a
+/// light with the brake down keeps the car still.
+const REVERSE_DWELL_S: f32 = 0.5;
 /// Steering lock reaches `max_deg * (1 - speed_sens)` at this speed, m/s.
 const STEER_SENS_SPEED: f32 = 60.0;
 /// Grip-limited steering (the `steering` assist) aims the front wheels this many times the
@@ -344,6 +347,9 @@ pub struct VehicleState {
     /// Counts down after a gear change, s: torque is cut for its first `shift_ms`, and the
     /// box holds the gear until it reaches 0.
     pub shift_timer: f32,
+    /// How long the brake has been held at a stop in a forward gear, s; reverse engages at
+    /// `REVERSE_DWELL_S`. Zero whenever the car moves or the brake is released.
+    pub reverse_hold_s: f32,
     /// Smoothed pedals in `[0, 1]` and the clamped steer input in `[-1, 1]`.
     pub throttle: f32,
     pub brake: f32,
@@ -366,7 +372,7 @@ pub struct VehicleState {
 }
 
 /// Number of 64-bit words [`VehicleState::hash`] absorbs.
-const HASH_WORDS: usize = 13 + 4 * 13 + 13;
+const HASH_WORDS: usize = 13 + 4 * 13 + 14;
 
 impl VehicleState {
     /// A car at rest: `ground` is the point on the ground under its center of mass, the body
@@ -400,6 +406,7 @@ impl VehicleState {
             engine_rpm: spec.engine.idle_rpm,
             gear: if spec.gears.is_empty() { 0 } else { 1 },
             shift_timer: 0.0,
+            reverse_hold_s: 0.0,
             throttle: 0.0,
             brake: 0.0,
             steer: 0.0,
@@ -463,6 +470,7 @@ impl VehicleState {
         put(self.engine_rpm);
         put(self.gear as f32);
         put(self.shift_timer);
+        put(self.reverse_hold_s);
         put(self.throttle);
         put(self.brake);
         put(self.steer);
@@ -639,7 +647,8 @@ pub fn step(
     state.steer_angle_rad += (target - state.steer_angle_rad) * chase;
 
     // 2. Gearbox and engine (automatic; `spec.auto == false` shifts the same until manual
-    // mode exists). Stopped + brake selects reverse; stopped + throttle selects drive.
+    // mode exists). Stopped + brake held `REVERSE_DWELL_S` selects reverse; stopped + throttle
+    // selects drive.
     let shift_s = spec.shift_ms * 0.001 + SHIFT_HOLD_S;
     let n_gears = spec.gears.len() as i8;
     if state.shift_timer > 0.0 {
@@ -648,8 +657,14 @@ pub fn step(
             state.shift_timer = 0.0;
         }
     }
-    if abs(fwd_speed) < DIRECTION_SWITCH_SPEED {
-        if state.gear >= 0 && state.brake > 0.2 && state.throttle < 0.05 {
+    let stopped = abs(fwd_speed) < DIRECTION_SWITCH_SPEED;
+    if stopped && state.gear >= 0 && state.brake > 0.2 && state.throttle < 0.05 {
+        state.reverse_hold_s += DT;
+    } else {
+        state.reverse_hold_s = 0.0;
+    }
+    if stopped {
+        if state.reverse_hold_s >= REVERSE_DWELL_S {
             state.gear = -1;
             state.shift_timer = shift_s;
         } else if state.gear <= 0 && state.throttle > 0.2 && state.brake < 0.05 && n_gears > 0 {

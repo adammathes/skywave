@@ -484,17 +484,31 @@ fn handbrake_with_steer_pivots_the_car() {
     }
 }
 
+/// Holding the brake at a stop keeps the car still in drive for the dwell (a light's wait),
+/// then selects reverse and backs up on the same held pedal.
 #[test]
 fn braking_at_a_standstill_selects_reverse() {
+    let dwell = STEPS_PER_S * 4 / 10;
     for spec in cars() {
         let mut s = spawn(&spec);
-        hold(
-            &spec,
-            &mut s,
-            input(0.0, 1.0, 0.0),
-            &Assists::default(),
-            3 * STEPS_PER_S,
-        );
+        for i in 0..3 * STEPS_PER_S {
+            step(
+                &spec,
+                &mut s,
+                &input(0.0, 1.0, 0.0),
+                &Assists::default(),
+                &GROUND,
+            );
+            if i < dwell {
+                assert!(s.gear >= 1, "{} reverse at step {i}", spec.id);
+                assert!(
+                    s.speed_mps.abs() < 0.05,
+                    "{} moved {} m/s at step {i}",
+                    spec.id,
+                    s.speed_mps
+                );
+            }
+        }
         assert_eq!(s.gear, -1, "{}", spec.id);
         assert!(
             s.speed_mps < -1.0,
