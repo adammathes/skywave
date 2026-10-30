@@ -1767,6 +1767,14 @@ enum Part {
 }
 
 fn convert(m: &WorldMesh, part: Part) -> Mesh {
+    let mut out = Mesh::default();
+    convert_into(m, part, &mut out);
+    out
+}
+
+/// Appends [`convert`] of `m` to `out`, as [`lighttiles::append`] would, without making it
+/// first.
+fn convert_into(m: &WorldMesh, part: Part, out: &mut Mesh) {
     let is = |v: &world::WorldVertex, g: Glow| v.emissive[3] == g as u8;
     let keep = |v: &world::WorldVertex| match part {
         Part::Base => !is(v, Glow::Lamp),
@@ -1805,16 +1813,15 @@ fn convert(m: &WorldMesh, part: Part) -> Mesh {
     let tris = m.indices.chunks_exact(3);
     if part == Part::Base {
         // Every vertex, without the triangles whose corners are all lamp lens.
-        return Mesh {
-            vertices: m.vertices.iter().map(vertex).collect(),
-            indices: tris
-                .filter(|t| !t.iter().all(|&i| is(&m.vertices[i as usize], Glow::Lamp)))
+        let base = out.vertices.len() as u32;
+        out.vertices.extend(m.vertices.iter().map(vertex));
+        out.indices.extend(
+            tris.filter(|t| !t.iter().all(|&i| is(&m.vertices[i as usize], Glow::Lamp)))
                 .flatten()
-                .copied()
-                .collect(),
-        };
+                .map(|&i| i + base),
+        );
+        return;
     }
-    let mut out = Mesh::default();
     for tri in tris {
         if tri.iter().all(|&i| keep(&m.vertices[i as usize])) {
             let base = out.vertices.len() as u32;
@@ -1824,7 +1831,6 @@ fn convert(m: &WorldMesh, part: Part) -> Mesh {
             out.indices.extend_from_slice(&[base, base + 1, base + 2]);
         }
     }
-    out
 }
 
 /// Street lamp heads from their lenses' vertices: each cluster of vertices within
