@@ -41,7 +41,7 @@ pure crates' tests at 32-bit `usize` (`i686-unknown-linux-gnu`, as on wasm32).
 GitHub issues are the backlog; labels are the state (`.claude/skills/issues/SKILL.md` has the
 table). Only the owner adds `approved`. Saying "work the issues" in a session on this repo runs
 one pass: it starts a cloud session per `approved` issue (one per `area:*` label at a time, up to
-4), labels it `in progress`, reports, and ends. Each session opens a draft PR that `Fixes #<n>`
+5), labels it `in progress`, reports, and ends. Each session opens a draft PR that `Fixes #<n>`
 and marks it ready for review once CI is green: **a PR that is not a draft is ready to merge.**
 A session that needs a decision comments on its issue and labels it `needs owner`. New ideas and
 follow-ups are filed as issues without `approved`.
