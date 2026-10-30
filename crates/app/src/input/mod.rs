@@ -289,6 +289,9 @@ impl Action {
 pub struct InputState {
     values: [f32; Action::COUNT],
     just_pressed: [bool; Action::COUNT],
+    /// Mouse motion this frame on each analog action, in seconds of full stick: a distance,
+    /// not a rate, and not clamped.
+    motion: [f32; Action::COUNT],
     /// Mouse wheel notches this frame, + away from the user.
     wheel: f32,
 }
@@ -298,6 +301,7 @@ impl Default for InputState {
         InputState {
             values: [0.0; Action::COUNT],
             just_pressed: [false; Action::COUNT],
+            motion: [0.0; Action::COUNT],
             wheel: 0.0,
         }
     }
@@ -326,6 +330,17 @@ impl InputState {
     /// frame was sampled.
     pub fn just_pressed(&self, action: Action) -> bool {
         self.just_pressed[action as usize]
+    }
+
+    /// Mouse motion since the last frame, in seconds of full stick (see
+    /// [`InputState::axis`] for the stick's rate). Not a rate: apply it once, whatever the
+    /// frame time.
+    pub fn motion(&self, action: Action) -> f32 {
+        self.motion[action as usize]
+    }
+
+    pub fn set_motion(&mut self, action: Action, value: f32) {
+        self.motion[action as usize] = if value.is_finite() { value } else { 0.0 };
     }
 
     /// Mouse wheel notches since the last frame, + away from the user (zooms in). Not an
