@@ -41,6 +41,7 @@ pub mod scenario;
 pub mod scene;
 pub mod selftest;
 mod settings;
+mod signals;
 pub mod sound;
 pub mod stream;
 pub mod ui;
@@ -244,6 +245,8 @@ pub struct App {
     drivethru: Option<drivethru::DriveThru>,
     /// The place's railway: its train and its crossings' gates.
     rail: Option<crossing::Rail>,
+    /// The junction lights' lit lenses.
+    signals: Option<signals::Signals>,
 }
 
 /// Seconds after a world loads before its train first warns at its crossings.
@@ -340,6 +343,12 @@ impl App {
         let mut drivethru = drivethru::DriveThru::of(&place, &grammar.landmarks, seed);
         let sound = sound::Sound::new(&place, &drive);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
+        let mut signals = signals::Signals::of(&place, &npcs.graph, |p| {
+            [
+                world::math::floor(p[0] / chunk_size) as i32,
+                world::math::floor(p[1] / chunk_size) as i32,
+            ]
+        });
         let wardrobe = driver::wardrobe_for(place.header.era);
         if let Some(r) = &rail {
             let line = &r.railway.train.line;
@@ -404,6 +413,16 @@ impl App {
                 .collect();
             r.set_ids(ids);
         }
+        if let Some(sg) = &mut signals {
+            let ids = signals::Signals::meshes(&palette)
+                .into_iter()
+                .map(|m| {
+                    meshes.push(m);
+                    MeshId(meshes.len() as u32 - 1)
+                })
+                .collect();
+            sg.set_ids(ids);
+        }
         if let Some(mq) = &mut marquees {
             let ids = mq
                 .meshes(&grammar.landmarks, &palette)
@@ -429,6 +448,7 @@ impl App {
         let extra = drive::MAX_CAR_INSTANCES
             + dragstrip::MAX_INSTANCES
             + rail.as_ref().map_or(0, |r| r.capacity())
+            + signals.as_ref().map_or(0, |s| s.capacity())
             + marquees.as_ref().map_or(0, |m| m.capacity())
             + drivethru::MAX_INSTANCES
             + usize::from(drivethru::MAX_BOXES)
@@ -501,6 +521,7 @@ impl App {
             marquees,
             drivethru,
             rail,
+            signals,
         })
     }
 
@@ -1272,6 +1293,12 @@ impl App {
         }
         if let Some(r) = &self.rail {
             r.push(alpha, eye, &self.lights, &mut self.instances);
+        }
+        if let Some(sg) = &self.signals {
+            let stream = self.stream.as_deref();
+            let live = |c: [i32; 2]| stream.is_none_or(|s| s.streamer.is_live(c));
+            let tick = self.npcs.signal_tick();
+            sg.push(&self.npcs.graph, tick, eye, live, &mut self.instances);
         }
         if let Some(m) = &self.marquees {
             m.push(eye, self.ticks, &mut self.instances);

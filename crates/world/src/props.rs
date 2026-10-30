@@ -14,7 +14,7 @@ use crate::mesh::{
     boxf, face, frustum, icosphere, lathe, polygon_cap, quad, rect, tri, Frame, Glow, Paint,
     Pattern, UnitSphere, WorldMesh,
 };
-use crate::palette::{mix, shade, Palette};
+use crate::palette::{mix, shade, Palette, Rgb};
 use crate::roads::Network;
 use crate::signs;
 use crate::signs::letters::{Finish, LetterStyle, Strokes};
@@ -805,7 +805,8 @@ fn crossbuck(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
         quad(m, [c - u - v, c + u - v, c + u + v, c - u + v], f.z, white);
         quad(m, [c - u - v, c - u + v, c + u + v, c + u - v], -f.z, post);
     }
-    // The lamps on a crossarm, glowing red (they flash when the set piece runs a train).
+    // The lamps on a crossarm, dark: a crossing with a train (`setpieces`' gates) flashes
+    // its own lamps.
     let arm = f.p(0.0, 2.6, 0.08);
     boxf(
         m,
@@ -815,7 +816,7 @@ fn crossbuck(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
         face::ALL,
         post,
     );
-    let lamp = Paint::new(pal.neon_red, Pattern::Glass).glowing(pal.neon_red, Glow::Signal);
+    let lamp = Paint::new(shade(pal.neon_red, 90), Pattern::Glass);
     for x in [-0.42f32, 0.42] {
         let q = arm + f.x * x + f.z * 0.04;
         let (u, v) = (f.x * 0.12, f.y * 0.12);
@@ -1291,7 +1292,22 @@ fn trash_can(m: &mut WorldMesh, base: V3, pal: &Palette) {
     );
 }
 
-/// Signal pole with a mast arm over the approach and two lit heads facing traffic.
+/// Where a signal's two heads hang along its mast arm, as shares of the arm's length.
+pub const SIGNAL_HEADS: [f32; 2] = [0.55, 0.92];
+
+/// A signal head's lens colors in `traffic::signal::Light` order: green, yellow, red.
+fn signal_colors(pal: &Palette) -> [Rgb; 3] {
+    [[40, 255, 140], [255, 176, 0], pal.neon_red]
+}
+
+/// Height of the middle of a signal head's lens showing light `light` (0 green, 1 yellow,
+/// 2 red: red on top, green at the bottom).
+fn signal_lens_y(light: usize) -> f32 {
+    5.6 - (2 - light.min(2)) as f32 * 0.31
+}
+
+/// Signal pole with a mast arm over the approach and two heads facing traffic, their
+/// lenses dark: the app lights one per head from the live signal ([`signal_lamp`]).
 fn signal(m: &mut WorldMesh, base: V3, arm: V2, arm_len: f32, pal: &Palette) {
     let metal = Paint::new(shade(pal.metal_dark, 300), Pattern::Metal);
     let housing = Paint::new(shade(pal.paint_yellow, 200), Pattern::Metal);
@@ -1308,9 +1324,8 @@ fn signal(m: &mut WorldMesh, base: V3, arm: V2, arm_len: f32, pal: &Palette) {
     );
     // The frame's +Z points into the junction; the heads face the other way, toward
     // drivers on the approach this pole serves.
-    let red = Paint::new(pal.neon_red, Pattern::Glass).glowing(pal.neon_red, Glow::Signal);
-    let off = Paint::new(shade(pal.metal_dark, 140), Pattern::Glass);
-    for t in [0.55, 0.92] {
+    let colors = signal_colors(pal);
+    for t in SIGNAL_HEADS {
         let x = arm_len * t;
         boxf(
             m,
@@ -1320,9 +1335,9 @@ fn signal(m: &mut WorldMesh, base: V3, arm: V2, arm_len: f32, pal: &Palette) {
             face::ALL & !face::POS_Y,
             housing,
         );
-        for (k, lit) in [(0, true), (1, false), (2, false)] {
-            let y = 5.6 - k as f32 * 0.31;
-            let paint = if lit { red } else { off };
+        for (k, &rgb) in colors.iter().enumerate() {
+            let y = signal_lens_y(k);
+            let paint = Paint::new(shade(rgb, 10), Pattern::Glass);
             let z = -0.152;
             quad(
                 m,
@@ -1337,6 +1352,27 @@ fn signal(m: &mut WorldMesh, base: V3, arm: V2, arm_len: f32, pal: &Palette) {
             );
         }
     }
+}
+
+/// The lit lens showing light `light` (0 green, 1 yellow, 2 red) of a signal head hung
+/// at the origin of a pole facing yaw 0 (its arm along [`dir_of_yaw`]`(0)`), just in front
+/// of the dark lens there; the app turns and moves it onto each head.
+pub fn signal_lamp(m: &mut WorldMesh, light: usize, pal: &Palette) {
+    let f = Frame::upright(V3::ZERO, dir_of_yaw(0.0));
+    let rgb = signal_colors(pal)[light.min(2)];
+    let lit = Paint::new(rgb, Pattern::Plain).glowing(rgb, Glow::Signal);
+    let (y, z) = (signal_lens_y(light), -0.162);
+    quad(
+        m,
+        [
+            f.p(-0.11, y - 0.11, z),
+            f.p(0.11, y - 0.11, z),
+            f.p(0.11, y + 0.11, z),
+            f.p(-0.11, y + 0.11, z),
+        ],
+        -f.z,
+        lit,
+    );
 }
 
 /// A two-tier fountain in a round basin.
