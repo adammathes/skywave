@@ -160,6 +160,7 @@ impl TerrainGrid {
     /// [`TerrainGrid::new`], plus the road each sample was graded to: `(edge, profile
     /// segment)`, `(u32::MAX, 0)` where none was (blend bands and junction fans aside).
     pub fn graded(place: &Place, net: &Network) -> (TerrainGrid, Vec<(u32, u32)>) {
+        crate::counted(&crate::GRIDS);
         let mut g = TerrainGrid::natural(place);
         let none = Pull {
             core_key: f32::INFINITY,

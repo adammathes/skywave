@@ -35,6 +35,7 @@ pub mod signs;
 pub mod template;
 
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use place::{Place, RegionId, ZoneId, SIDEWALK_WIDTH_M};
 
@@ -197,6 +198,35 @@ impl Stage {
     pub const ALL: [Stage; 4] = [Stage::Ground, Stage::Roads, Stage::Buildings, Stage::Props];
 }
 
+/// How many times this program has built each per-place structure. A load builds each
+/// once and hands it to whatever needs it; a test reads the counts before and after one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BuildCounts {
+    /// Graded terrains ([`TerrainGrid::graded`]).
+    pub grids: u32,
+    /// Parking lot plans ([`lots::plan`]).
+    pub lot_plans: u32,
+    /// [`ChunkPlan`]s.
+    pub chunk_plans: u32,
+}
+
+pub(crate) static GRIDS: AtomicU32 = AtomicU32::new(0);
+pub(crate) static LOT_PLANS: AtomicU32 = AtomicU32::new(0);
+static CHUNK_PLANS: AtomicU32 = AtomicU32::new(0);
+
+/// The counts so far.
+pub fn build_counts() -> BuildCounts {
+    BuildCounts {
+        grids: GRIDS.load(Ordering::Relaxed),
+        lot_plans: LOT_PLANS.load(Ordering::Relaxed),
+        chunk_plans: CHUNK_PLANS.load(Ordering::Relaxed),
+    }
+}
+
+pub(crate) fn counted(n: &AtomicU32) {
+    n.fetch_add(1, Ordering::Relaxed);
+}
+
 /// What every chunk of a place shares, worked out once per place: the road network, the
 /// blocks, every building's plan and every prop's placement. Building a chunk from it
 /// ([`ChunkPlan::build_stage`]) only meshes what lies in that chunk.
@@ -235,6 +265,7 @@ pub struct ChunkPlan {
 
 impl ChunkPlan {
     pub fn new(place: &Place, palette: &Palette, grammar: &Grammar) -> ChunkPlan {
+        counted(&CHUNK_PLANS);
         let seed = place.header.seed;
         let mut net = roads::Network::new(place);
         let side_zone = side_zones(place, &net);
@@ -297,13 +328,7 @@ impl ChunkPlan {
         let mut props = if terrain.is_none() {
             ground::build(place, &blocks, &fronts, palette, stall_w, seed, &mut none)
         } else {
-            place
-                .props
-                .items
-                .iter()
-                .filter(|p| !props::instanced(p.kind))
-                .map(|p| props::from_place(p, seed))
-                .collect()
+            place_props(place, seed)
         };
         let mut scratch = WorldMesh::default();
         for (i, (b, (env, plan))) in place.buildings.iter().zip(&plans).enumerate() {
@@ -331,17 +356,7 @@ impl ChunkPlan {
             props.extend(props::place(place, &net, &side_zone, &parks, seed));
         }
 
-        // Every blade sign a shop sign of the grammar's, no name repeated nearby.
-        let blades: Vec<usize> = (0..props.len())
-            .filter(|&i| matches!(props[i].kind, props::PropKind::NeonSign { .. }))
-            .collect();
-        let at: Vec<V2> = blades.iter().map(|&i| props[i].pos).collect();
-        let drawn =
-            signs::lexicon::assign(&grammar.signs, &grammar.lexicon, grammar.era, seed, &at);
-        let mut shop_signs = alloc::vec![None; props.len()];
-        for (&i, s) in blades.iter().zip(drawn) {
-            shop_signs[i] = Some(s);
-        }
+        let shop_signs = shop_signs(grammar, seed, &props);
 
         // The place's chunks and the terrain apron's.
         let o = place.header.chunk_origin;
@@ -381,6 +396,30 @@ impl ChunkPlan {
             chunk_range: [lo, hi],
             lots,
         }
+    }
+
+    /// Brings a terrain place's plan up to date after the detail pass ([`procgen::detail`])
+    /// filled in its props, and paints its terrain with `palette`: re-reads the props
+    /// table and recolors the cells. Everything else (the roads, the graded terrain, the
+    /// lots, the buildings' plans) the detail pass leaves as it was. Does nothing on the
+    /// test town, whose props are not in its table.
+    pub fn redetail(&mut self, place: &Place, palette: &Palette) {
+        let Some((g, colors)) = &mut self.terrain else {
+            return;
+        };
+        *colors = mesh::terrain::CellColors::new(place, g, palette, self.seed);
+        self.props = place_props(place, self.seed);
+        self.shop_signs = shop_signs(&self.grammar, self.seed, &self.props);
+    }
+
+    /// The place's road network, with the lots' curb cuts.
+    pub fn net(&self) -> &roads::Network {
+        &self.net
+    }
+
+    /// A terrain place's graded terrain; `None` on the test town.
+    pub fn grid(&self) -> Option<&TerrainGrid> {
+        self.terrain.as_ref().map(|(g, _)| g)
     }
 
     /// The place's parking lots.
@@ -581,6 +620,37 @@ impl ChunkPlan {
     }
 }
 
+/// A terrain place's props as the chunks mesh them: its `Props` table but for the kinds
+/// the app instances ([`props::instanced`]).
+fn place_props(place: &Place, seed: u64) -> Vec<props::Prop> {
+    place
+        .props
+        .items
+        .iter()
+        .filter(|p| !props::instanced(p.kind))
+        .map(|p| props::from_place(p, seed))
+        .collect()
+}
+
+/// Per prop, the shop sign a blade sign is lettered with: every blade sign a shop sign of
+/// the grammar's, no name repeated nearby.
+fn shop_signs(
+    grammar: &Grammar,
+    seed: u64,
+    props: &[props::Prop],
+) -> Vec<Option<signs::lexicon::ShopSign>> {
+    let blades: Vec<usize> = (0..props.len())
+        .filter(|&i| matches!(props[i].kind, props::PropKind::NeonSign { .. }))
+        .collect();
+    let at: Vec<V2> = blades.iter().map(|&i| props[i].pos).collect();
+    let drawn = signs::lexicon::assign(&grammar.signs, &grammar.lexicon, grammar.era, seed, &at);
+    let mut out = alloc::vec![None; props.len()];
+    for (&i, s) in blades.iter().zip(drawn) {
+        out[i] = Some(s);
+    }
+    out
+}
+
 /// Builds all meshes of `place`, grouped by chunk and [`MeshKind`], sorted by kind then
 /// chunk.
 pub fn build_chunk_meshes(place: &Place, palette: &Palette, grammar: &Grammar) -> Vec<ChunkMesh> {
@@ -610,7 +680,15 @@ pub fn build_with_stats(
     palette: &Palette,
     grammar: &Grammar,
 ) -> (Vec<ChunkMesh>, BuildStats) {
-    let plan = ChunkPlan::new(place, palette, grammar);
+    build_planned(place, palette, &ChunkPlan::new(place, palette, grammar))
+}
+
+/// [`build_with_stats`] from the place's plan, made already.
+pub fn build_planned(
+    place: &Place,
+    palette: &Palette,
+    plan: &ChunkPlan,
+) -> (Vec<ChunkMesh>, BuildStats) {
     let mut out = MeshSet::new(plan.chunk_size, Keep::All);
     let mut stats = BuildStats::default();
     for stage in Stage::ALL {
@@ -750,6 +828,9 @@ fn side_zones(place: &Place, net: &roads::Network) -> Vec<[Option<ZoneId>; 2]> {
         .collect()
 }
 
+/// Cell edge of [`Lookup`]'s building grid, m.
+const BIN_M: f32 = 32.0;
+
 /// Precomputed geometry for asking what is in front of each facade.
 /// A road segment for facade lookups: ends, bounds, half width plus sidewalk, edge index.
 type RoadSeg = (V2, V2, (V2, V2), f32, usize);
@@ -758,6 +839,11 @@ struct Lookup<'a> {
     place: &'a Place,
     footprints: Vec<Vec<V2>>,
     boxes: Vec<(V2, V2)>,
+    /// The buildings by [`BIN_M`] grid cell, from `bin_lo`, `bin_w` cells across: each
+    /// cell lists the buildings whose bounds reach into it.
+    bins: Vec<Vec<u32>>,
+    bin_lo: V2,
+    bin_w: usize,
     parcels: Vec<(Vec<V2>, (V2, V2))>,
     /// Road segments: ends, bounds, half width plus sidewalk, edge index. One per edge
     /// (node to node) on the test town; one per profile segment on a terrain place, whose
@@ -772,7 +858,31 @@ impl Lookup<'_> {
             .iter()
             .map(|b| ground::to_v2(&b.footprint))
             .collect();
-        let boxes = footprints.iter().map(|f| bounds(f)).collect();
+        let boxes: Vec<(V2, V2)> = footprints.iter().map(|f| bounds(f)).collect();
+        let (mut bin_lo, mut bin_hi) = (V2::new(f32::MAX, f32::MAX), V2::new(f32::MIN, f32::MIN));
+        for &(lo, hi) in &boxes {
+            bin_lo = V2::new(bin_lo.x.min(lo.x), bin_lo.y.min(lo.y));
+            bin_hi = V2::new(bin_hi.x.max(hi.x), bin_hi.y.max(hi.y));
+        }
+        let cell = |p: V2| {
+            let c = (p - bin_lo) * (1.0 / BIN_M);
+            [c.x.max(0.0) as usize, c.y.max(0.0) as usize]
+        };
+        let [bin_w, bin_h] = if boxes.is_empty() {
+            [0, 0]
+        } else {
+            let c = cell(bin_hi);
+            [c[0] + 1, c[1] + 1]
+        };
+        let mut bins = alloc::vec![Vec::new(); bin_w * bin_h];
+        for (j, &(lo, hi)) in boxes.iter().enumerate() {
+            let (a, b) = (cell(lo), cell(hi));
+            for z in a[1]..=b[1] {
+                for x in a[0]..=b[0] {
+                    bins[z * bin_w + x].push(j as u32);
+                }
+            }
+        }
         let parcels = place
             .parcels
             .iter()
@@ -804,9 +914,27 @@ impl Lookup<'_> {
             place,
             footprints,
             boxes,
+            bins,
+            bin_lo,
+            bin_w,
             parcels,
             roads,
         }
+    }
+
+    /// The buildings whose bounds may hold `p`: those of its grid cell.
+    fn near(&self, p: V2) -> &[u32] {
+        let c = (p - self.bin_lo) * (1.0 / BIN_M);
+        if c.x < 0.0 || c.y < 0.0 || self.bin_w == 0 {
+            return &[];
+        }
+        let (x, z) = (c.x as usize, c.y as usize);
+        if x >= self.bin_w {
+            return &[];
+        }
+        self.bins
+            .get(z * self.bin_w + x)
+            .map_or(&[], |v| v.as_slice())
     }
 
     /// What each facade of building `index` faces: nearest road ahead, whether that is the
@@ -844,8 +972,11 @@ impl Lookup<'_> {
                 }
                 let blocked = [0.2f32, 0.5, 0.8].iter().any(|&t| {
                     let p = a.lerp(b, t) + normal * 0.8;
-                    self.boxes.iter().enumerate().any(|(j, bb)| {
-                        j != index && inside(p, *bb) && point_in_polygon(p, &self.footprints[j])
+                    self.near(p).iter().any(|&j| {
+                        let j = j as usize;
+                        j != index
+                            && inside(p, self.boxes[j])
+                            && point_in_polygon(p, &self.footprints[j])
                     })
                 });
                 let frontage = match frontage_edge {

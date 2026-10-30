@@ -615,6 +615,25 @@ fn coast_chunks_build_as_slices_of_the_whole_build() {
     assert_eq!(total, all.len());
 }
 
+/// The plan the detail pass read, brought up to date ([`build_place_planned`]), is the plan
+/// made afresh from the finished place: the same place, meshes and collider. Painted with
+/// a palette other than the template's, so its terrain is recolored too.
+#[test]
+fn a_planned_place_builds_as_a_fresh_plan() {
+    use world::procgen::build_place_planned;
+    use world::{build_chunk_meshes, build_planned, mesh_hash, ChunkPlan, Palette, WorldCollider};
+    let (g, pal) = (grammar(), Palette::sodium_night());
+    let (p, plan) = build_place_planned(Seed(1), &template(), &g, &pal);
+    assert_eq!(p.content_hash(), GOLDEN[0]);
+    assert_eq!(
+        mesh_hash(&build_planned(&p, &pal, &plan).0),
+        mesh_hash(&build_chunk_meshes(&p, &pal, &g))
+    );
+    let fresh = ChunkPlan::new(&p, &pal, &g);
+    assert!(plan.far_terrain(&p, &pal) == fresh.far_terrain(&p, &pal));
+    assert!(WorldCollider::with_plan(&p, &g, &plan) == WorldCollider::build(&p, &g));
+}
+
 /// The far terrain of a procedural place covers it in one coarse mesh within its triangle
 /// budget and lies under the graded ground everywhere (by the drop at least), so the
 /// streamed chunks always draw over it.

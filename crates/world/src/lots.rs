@@ -277,6 +277,7 @@ struct Ctx<'a> {
 /// Every parking lot of `place` (none but on a terrain place), in a fixed order: the
 /// parcels' in parcel order, then the beach alleys' in edge order.
 pub fn plan(place: &Place, net: &Network, rules: &LotRules) -> Vec<ParkingLot> {
+    crate::counted(&crate::LOT_PLANS);
     let mut out = Vec::new();
     if !crate::is_terrain_place(place) || rules.occupancy.is_empty() {
         return out;

@@ -74,7 +74,7 @@ use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
 use render::{ChunkPoolConfig, ChunkStore, MAX_CHUNK_PARTS};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
 use stream::{ChunkSource, PartRole, PlaceSource, StreamBudget, StreamStats, Streamer};
-use world::{ChunkMesh, Glow, Palette, WorldMesh};
+use world::{ChunkMesh, ChunkPlan, Glow, Palette, WorldMesh};
 
 /// Free-fly speed, m/s.
 const FLY_SPEED: f32 = 24.0;
@@ -321,7 +321,7 @@ impl App {
             return Err(format!("`{vehicle_id}` has no paint {paint}"));
         }
         let model = CarModel::build_painted(&spec, &shape, paint)?;
-        let place: Place = places::build_in(key, seed, world)?;
+        let (place, plan) = places::load(key, seed, world)?;
         let (palette, grammar) = (places::palette_of(world), places::grammar_of(world));
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let start = (start.pos, start.heading);
@@ -332,7 +332,7 @@ impl App {
         drive.auto_headlights = ui.settings().headlights_auto;
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
-        let ground = drive::ground_in(&place, grammar);
+        let ground = world::WorldCollider::with_plan(&place, grammar, &plan);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
         let mut props =
@@ -369,8 +369,8 @@ impl App {
             npcs.crowd.set_rail(&pts, &xs);
         }
         let town = match stream {
-            None => resident_town(&place, &palette, grammar),
-            Some(budget) => streamed_town(place, budget, palette, grammar),
+            None => resident_town(&place, &palette, &plan),
+            Some(budget) => streamed_town(place, budget, palette, plan),
         };
         let mut meshes = town.meshes;
         let mut instances = town.instances;
@@ -1468,8 +1468,8 @@ struct Town {
 
 /// The whole town of `place` built at load ([`render_meshes`]): static meshes, one
 /// instance each.
-fn resident_town(place: &Place, palette: &Palette, grammar: &world::Grammar) -> Town {
-    let chunks = world::build_chunk_meshes(place, palette, grammar);
+fn resident_town(place: &Place, palette: &Palette, plan: &ChunkPlan) -> Town {
+    let chunks = world::build_planned(place, palette, plan).0;
     let place_lights: Vec<PointLight> = place
         .lights
         .items
@@ -1527,13 +1527,8 @@ fn world_instance(mesh: MeshId, role: PartRole) -> MeshInstance {
 /// terrain and horizon (drawn always, under the chunks, out to the horizon), every static
 /// light known
 /// (and off until its chunk is drawn), room for every part the resident chunks can have.
-fn streamed_town(
-    place: Place,
-    budget: StreamBudget,
-    palette: Palette,
-    grammar: &world::Grammar,
-) -> Town {
-    let source = PlaceSource::with_grammar(place, palette, grammar);
+fn streamed_town(place: Place, budget: StreamBudget, palette: Palette, plan: ChunkPlan) -> Town {
+    let source = PlaceSource::with_plan(place, palette, plan);
     let streamer = Streamer::new(&source, budget);
     let statics = source.static_lights();
     let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());

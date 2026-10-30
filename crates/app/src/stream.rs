@@ -339,6 +339,11 @@ impl PlaceSource {
     /// `place` dressed by `grammar`.
     pub fn with_grammar(place: Place, palette: Palette, grammar: &world::Grammar) -> PlaceSource {
         let plan = ChunkPlan::new(&place, &palette, grammar);
+        PlaceSource::with_plan(place, palette, plan)
+    }
+
+    /// `place` built from its plan, made already for meshes painted with `palette`.
+    pub fn with_plan(place: Place, palette: Palette, plan: ChunkPlan) -> PlaceSource {
         let mut statics: Vec<StaticLight> = place
             .lights
             .items

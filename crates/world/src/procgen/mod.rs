@@ -24,7 +24,7 @@ pub mod terrain;
 pub mod zones;
 
 pub use arterials::{arterials, hash_graph};
-pub use build::{build_place, place_from, PLACE_CHUNKS};
+pub use build::{build_place, build_place_planned, place_from, PLACE_CHUNKS};
 pub use buildings::{buildings, buildings_all, hash_buildings, lot_buildings};
 pub use detail::{detail, hash_detail};
 pub use macro_map::{
