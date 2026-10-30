@@ -4,9 +4,10 @@ use super::bindings::{Binding, Bindings, LONG_PRESS_S};
 use super::raw::{DeviceKind, MouseAxis, RawInput};
 use super::{Action, InputState};
 
-/// Mouse look: one unit of `LookX`/`LookY` per this many pixels of motion between samples
-/// (50 px in one frame is full deflection), before sensitivity.
-pub const MOUSE_LOOK_PER_PIXEL: f32 = 0.02;
+/// Mouse look: seconds of full stick per pixel of motion, before sensitivity. Mouse motion
+/// is a distance, not a rate (see [`InputState::motion`]); 3000 px turn as far as a second
+/// of full stick, as one pixel per frame did at 60 fps when it was a rate.
+pub const MOUSE_LOOK_PER_PIXEL: f32 = 1.0 / 3000.0;
 /// An analog input driving a button action (left stick up → MenuUp) counts only past this,
 /// so a resting stick does not creep the free-fly camera.
 const ANALOG_BUTTON_DEADZONE: f32 = 0.25;
@@ -289,10 +290,12 @@ impl InputMapper {
 
         for action in Action::ALL {
             let mut value = 0.0;
+            let mut motion = 0.0;
             let mut edge = false;
             for device in DeviceKind::ALL {
                 let mut digital = 0.0f32;
                 let mut analog = 0.0f32;
+                let mut mouse = 0.0f32;
                 for b in self.bindings.get(device, action) {
                     let Some((v, e)) = self.read_binding(b, &captured) else {
                         continue;
@@ -300,6 +303,9 @@ impl InputMapper {
                     edge |= e;
                     let v = if action.is_bipolar() { v } else { v.abs() };
                     match (b.raw.is_analog(), action.is_analog()) {
+                        // Motion is a distance: no deadzone or curve, which would make it
+                        // depend on how it is split across frames.
+                        (true, true) if matches!(b.raw, RawInput::MouseAxis(_)) => mouse += v,
                         (false, true) => digital += v,
                         (true, true) => analog += v,
                         // Buttons take their strongest input.
@@ -318,13 +324,14 @@ impl InputMapper {
                         }
                         None => target,
                     };
-                    value += self
-                        .bindings
-                        .axis_options(device, action)
-                        .apply(ramped + analog);
+                    let o = self.bindings.axis_options(device, action);
+                    value += o.apply(ramped + analog);
+                    let m = mouse * o.sensitivity;
+                    motion += if o.invert { -m } else { m };
                 }
             }
             self.state.set(action, value);
+            self.state.set_motion(action, motion);
             let pressed = self.state.pressed(action);
             self.state.set_just_pressed(
                 action,
@@ -460,10 +467,14 @@ mod tests {
                     Feed::Stick(a, v) => m.axis(pad(a), v),
                     Feed::Mouse(dx, dy) => m.mouse_delta(dx, dy),
                 }
-                let got = m.sample(1.0 / 60.0).axis(action);
+                let s = m.sample(1.0 / 60.0);
+                let got = match feed {
+                    Feed::Stick(..) => s.axis(action),
+                    Feed::Mouse(..) => s.motion(action),
+                };
                 let want = if inverted { -sign } else { sign };
                 assert!(
-                    got * want > 0.1,
+                    got * want > 0.0,
                     "{device:?} {action:?} {feed:?} invert={inverted}: {got}"
                 );
                 // The other look axis is untouched.
@@ -473,6 +484,7 @@ mod tests {
                     Action::LookX
                 };
                 assert_eq!(m.state().axis(other), 0.0);
+                assert_eq!(m.state().motion(other), 0.0);
             }
         }
     }
@@ -510,18 +522,30 @@ mod tests {
     fn mouse_look_needs_the_right_button_and_resets_each_sample() {
         let mut m = InputMapper::default();
         m.mouse_delta(10.0, 10.0);
-        assert_eq!(m.sample(0.01).axis(Action::LookX), 0.0);
+        assert_eq!(m.sample(0.01).motion(Action::LookX), 0.0);
         m.press(RawInput::MouseButton(MOUSE_RIGHT));
         m.mouse_delta(10.0, 0.0);
         m.mouse_delta(5.0, -2.5);
         let s = m.sample(0.01);
-        assert!((s.axis(Action::LookX) - 15.0 * MOUSE_LOOK_PER_PIXEL).abs() < 1e-6);
-        assert!((s.axis(Action::LookY) + 2.5 * MOUSE_LOOK_PER_PIXEL).abs() < 1e-6);
+        assert!((s.motion(Action::LookX) - 15.0 * MOUSE_LOOK_PER_PIXEL).abs() < 1e-9);
+        assert!((s.motion(Action::LookY) + 2.5 * MOUSE_LOOK_PER_PIXEL).abs() < 1e-9);
+        // Motion is not a rate: the look axes stay at rest.
+        assert_eq!(s.axis(Action::LookX), 0.0);
         // No motion since the last sample: no look.
-        assert_eq!(m.sample(0.01).axis(Action::LookX), 0.0);
-        // A huge flick clamps.
+        assert_eq!(m.sample(0.01).motion(Action::LookX), 0.0);
+        // A huge flick is not clamped; sensitivity scales it.
         m.mouse_delta(5000.0, 0.0);
-        assert_eq!(m.sample(0.01).axis(Action::LookX), 1.0);
+        let got = m.sample(0.01).motion(Action::LookX);
+        assert!((got - 5000.0 * MOUSE_LOOK_PER_PIXEL).abs() < 1e-6, "{got}");
+        let o = AxisOptions {
+            sensitivity: 2.0,
+            ..AxisOptions::IDENTITY
+        };
+        let mut m = with_options(KB, Action::LookX, o);
+        m.press(RawInput::MouseButton(MOUSE_RIGHT));
+        m.mouse_delta(30.0, 0.0);
+        let got = m.sample(0.01).motion(Action::LookX);
+        assert!((got - 60.0 * MOUSE_LOOK_PER_PIXEL).abs() < 1e-9, "{got}");
     }
 
     /// A scripted step: events, then a sample of `dt` seconds, then expected values.

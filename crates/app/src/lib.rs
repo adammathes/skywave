@@ -67,7 +67,7 @@ use camera::CameraRig;
 use car::{CarLayout, CarMeshes, CarModel};
 use drive::{Drive, DriveGround};
 use glam::camera::rh::{proj::directx, view};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use lighting::{Bounds, FrameLights, TimeOfDay};
 use place::Place;
 use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
@@ -114,10 +114,13 @@ struct FlyCamera {
 }
 
 impl FlyCamera {
-    fn step(&mut self, input: &InputState, dt: f32) {
-        self.yaw -= input.axis(Action::FlyLookX) * TURN_RATE * dt;
+    /// One step of `dt` seconds, turning by the look rate plus `look`: mouse motion in
+    /// seconds of full stick (see [`InputState::motion`]).
+    fn step(&mut self, input: &InputState, look: Vec2, dt: f32) {
+        self.yaw -= input.axis(Action::FlyLookX) * TURN_RATE * dt + look.x * TURN_RATE;
         // FlyLookY is screen space (+ looks down); pitch is + up.
-        self.pitch = (self.pitch - input.axis(Action::FlyLookY) * TURN_RATE * dt)
+        self.pitch = (self.pitch
+            - (input.axis(Action::FlyLookY) * TURN_RATE * dt + look.y * TURN_RATE))
             .clamp(-MAX_PITCH, MAX_PITCH);
         let (s, c) = self.yaw.sin_cos();
         let forward = Vec3::new(-s, 0.0, -c);
@@ -156,6 +159,8 @@ pub struct App {
     ticks: u64,
     /// The free-fly camera drives the view instead of the car's cameras.
     fly: bool,
+    /// Free-fly mouse look not yet applied (see [`CameraRig::add_look`]).
+    fly_look: Vec2,
     /// The simulation does not run (a still scene for screenshots).
     still: bool,
     /// The scene fixed the time of day: the clock stays stopped whatever the clock-speed
@@ -469,6 +474,7 @@ impl App {
             clock: FixedStep::new(),
             ticks: 0,
             fly: false,
+            fly_look: Vec2::ZERO,
             still: false,
             clock_frozen: false,
             prev: fly,
@@ -942,6 +948,14 @@ impl App {
                 self.camera_cycled = true;
             }
         }
+        // Mouse look is a distance: one step applies a frame's worth, and a frame with no
+        // steps carries it to the next.
+        let motion = |x, y| Vec2::new(input.motion(x), input.motion(y));
+        if self.fly {
+            self.fly_look += motion(Action::FlyLookX, Action::FlyLookY);
+        } else {
+            self.camera.add_look(motion(Action::LookX, Action::LookY));
+        }
         // Auto headlights switch when the NPC drivers' first lamps do.
         let dark = self.traffic_clock().dark(0.0);
         self.drive.frame(input, dark);
@@ -951,7 +965,8 @@ impl App {
         for _ in 0..steps.count {
             self.prev = self.curr;
             let car_input = if self.fly {
-                self.curr.step(input, dt);
+                self.curr
+                    .step(input, std::mem::take(&mut self.fly_look), dt);
                 vehicle::VehicleInput::default()
             } else {
                 drive::vehicle_input(input)
@@ -2059,6 +2074,70 @@ mod tests {
         // The car ignores the throttle while flying.
         let rolled = Vec3::from(app.drive.state.pos) - Vec3::from(car.pos);
         assert!(rolled.length() < 0.05, "{rolled}");
+    }
+
+    #[test]
+    fn mouse_look_turns_as_far_at_any_frame_rate() {
+        // 600 px right and 240 px down over half a second, split evenly across the frames,
+        // then a tenth of a second still (a 144 fps frame may run no step and carry it).
+        let turn = |fps: u32, fly: bool| {
+            let mut app = App::new(Seed(0));
+            app.set_fly(fly);
+            let mut b = Bindings::default();
+            b.set(
+                DeviceKind::KeyboardMouse,
+                Action::FlyLookX,
+                vec![Binding::new(RawInput::MouseAxis(MouseAxis::X), Sign::Full)
+                    .while_held(RawInput::MouseButton(MOUSE_RIGHT))],
+            );
+            b.set(
+                DeviceKind::KeyboardMouse,
+                Action::FlyLookY,
+                vec![Binding::new(RawInput::MouseAxis(MouseAxis::Y), Sign::Full)
+                    .while_held(RawInput::MouseButton(MOUSE_RIGHT))],
+            );
+            let mut m = InputMapper::new(b);
+            m.press(RawInput::MouseButton(MOUSE_RIGHT));
+            let start = (app.curr.yaw, app.curr.pitch);
+            let (dt, frames) = (1.0 / fps as f32, fps / 2);
+            for i in 0..frames + fps / 10 {
+                if i < frames {
+                    m.mouse_delta(600.0 / frames as f32, 240.0 / frames as f32);
+                }
+                app.update(m.sample(dt), dt as f64);
+            }
+            if fly {
+                (app.curr.yaw - start.0, app.curr.pitch - start.1)
+            } else {
+                (app.camera.look_yaw(1.0), 0.0)
+            }
+        };
+        for fly in [false, true] {
+            let rate = if fly {
+                TURN_RATE
+            } else {
+                camera::TUNING.look_rate
+            };
+            let want = (
+                -600.0 * MOUSE_LOOK_PER_PIXEL * rate,
+                -240.0 * MOUSE_LOOK_PER_PIXEL * rate,
+            );
+            for fps in [30, 60, 120, 144] {
+                let (yaw, pitch) = turn(fps, fly);
+                assert!(
+                    (yaw - want.0).abs() < 1e-4,
+                    "fly={fly} {fps} fps: yaw {yaw} vs {}",
+                    want.0
+                );
+                if fly {
+                    assert!(
+                        (pitch - want.1).abs() < 1e-4,
+                        "{fps} fps: pitch {pitch} vs {}",
+                        want.1
+                    );
+                }
+            }
+        }
     }
 
     #[test]

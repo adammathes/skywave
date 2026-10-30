@@ -11,7 +11,7 @@
 //! heading; look pitch is positive up.
 
 use core::f32::consts::{PI, TAU};
-use glam::{Mat3, Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
 use vehicle::Ground;
 
 use crate::drive::{mix, mix3, Drive};
@@ -378,6 +378,8 @@ pub struct CameraRig {
     idle_s: f32,
     /// Seconds since the last look input.
     look_idle_s: f32,
+    /// Mouse look not yet applied, seconds of full stick (see [`CameraRig::add_look`]).
+    look_carry: Vec2,
     /// Reset the chase springs onto their targets at the next step.
     snap: bool,
     prev: RigState,
@@ -408,6 +410,7 @@ impl CameraRig {
             look_back: false,
             idle_s: 0.0,
             look_idle_s: 0.0,
+            look_carry: Vec2::ZERO,
             snap: true,
             prev: s,
             curr: s,
@@ -491,6 +494,13 @@ impl CameraRig {
         )
     }
 
+    /// Adds a frame's mouse look (x, y in seconds of full stick, see
+    /// [`InputState::motion`]). The next step applies it all, so it turns as far whatever
+    /// the frame rate, and a frame that runs no steps carries it to the next.
+    pub fn add_look(&mut self, motion: Vec2) {
+        self.look_carry += motion;
+    }
+
     /// One fixed step of `dt` seconds, after the car's.
     pub fn step(&mut self, drive: &Drive, input: &InputState, dt: f32, ground: &impl Ground) {
         let t = self.tuning;
@@ -515,24 +525,27 @@ impl CameraRig {
             Action::TimeScrub,
         ]
         .iter()
-        .any(|&a| input.axis(a).abs() > 0.02);
+        .any(|&a| input.axis(a).abs() > 0.02)
+            || self.look_carry != Vec2::ZERO;
         if active || drive.state.speed_mps.abs() > t.idle_speed_mps {
             self.idle_s = 0.0;
         } else {
             self.idle_s += dt;
         }
 
-        // Look: rate input, held where it is, then eased back to center a while after it
-        // stops. The return is a critically damped spring starting from rest, so the view
-        // pulls away gently and settles without overshoot (a plain exponential leaves the
-        // hold at full speed: the snap). The stick's deadzone rescales from zero, so a small
-        // correction starts from zero too.
+        // Look: rate input (the stick) plus mouse motion (an angle, once per frame), held
+        // where it is, then eased back to center a while after it stops. The return is a
+        // critically damped spring starting from rest, so the view pulls away gently and
+        // settles without overshoot (a plain exponential leaves the hold at full speed: the
+        // snap). The stick's deadzone rescales from zero, so a small correction starts from
+        // zero too.
         self.look_back = input.pressed(Action::LookBack);
         let (lx, ly) = (input.axis(Action::LookX), input.axis(Action::LookY));
-        if lx != 0.0 || ly != 0.0 {
+        let m = std::mem::take(&mut self.look_carry);
+        if lx != 0.0 || ly != 0.0 || m != Vec2::ZERO {
             self.look_idle_s = 0.0;
-            s.look_yaw -= lx * t.look_rate * dt;
-            s.look_pitch -= ly * t.look_rate * dt;
+            s.look_yaw -= lx * t.look_rate * dt + m.x * t.look_rate;
+            s.look_pitch -= ly * t.look_rate * dt + m.y * t.look_rate;
             s.look_yaw_rate = 0.0;
             s.look_pitch_rate = 0.0;
         } else {
