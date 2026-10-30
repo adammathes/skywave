@@ -80,7 +80,8 @@ struct Frame {
     // xy: size of the scene's color and depth targets (px; the swapchain scaled by the
     // resolution scale), zw: its reciprocal.
     render_size: vec4<f32>,
-    // x: shadow cascades drawn (2 or 3), yzw: unused.
+    // x: shadow cascades drawn (2 or 3), y: 1 when the sun lights (else no cascade is
+    // drawn), zw: unused.
     shadow_params: vec4<f32>,
     lights: array<PackedLight, 256>,
 };

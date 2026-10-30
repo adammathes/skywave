@@ -112,6 +112,14 @@ pub const CASCADE_BLEND: f32 = 0.1;
 const TALL_CASTER: f32 = 50.0;
 /// Casters this far beyond a cascade toward the sun still cast into it, meters.
 const CASTER_MARGIN: f32 = 400.0;
+/// Every cascade's fit while the sun is down: nothing is culled or drawn into it.
+const NO_FIT: CascadeFit = CascadeFit {
+    view_proj: Mat4::ZERO,
+    center: Vec3::ZERO,
+    radius: 0.0,
+    texel: 0.0,
+    depth_range: [0.0; 2],
+};
 /// Shadow-receiver offsets, in texels of the receiving cascade.
 const SHADOW_NORMAL_OFFSET: f32 = 1.5;
 const SHADOW_SUN_OFFSET: f32 = 1.0;
@@ -2294,7 +2302,14 @@ impl Renderer {
         let sky = SkyModel::new(&scene.sun, &scene.sky);
         let n = self.quality.cascades as usize;
         let far = n - 1;
-        let mut fits = self.fit_shadows(view_m, proj, sky.sun_dir);
+        // Once the sun has stopped lighting, no cascade is fitted, culled or drawn, and the
+        // forward pass skips the shadow test.
+        let sun_lit = sky.sun_lit();
+        let mut fits = if sun_lit {
+            self.fit_shadows(view_m, proj, sky.sun_dir)
+        } else {
+            [NO_FIT; CASCADES]
+        };
         // A cascade whose kept map still covers its slice is kept when its casters have
         // not changed and the sun has not moved enough to shift a shadow by half a texel;
         // the farthest, between its frames ([`RenderQuality::far_cascade_interval`]), even
@@ -2306,21 +2321,28 @@ impl Renderer {
         let mut keepable = [false; CASCADES];
         let mut cull = [false; CASCADES];
         self.shadows_held = false;
-        for k in 0..n {
-            let held =
-                k == far && interval > 1 && !resumed && !self.stats.frames.is_multiple_of(interval);
-            match self.kept_map(k, &fits[k], sky.sun_dir) {
-                Some((kept, _)) if held => {
-                    fits[k] = kept.fit;
-                    self.shadows_held = true;
+        if sun_lit {
+            for k in 0..n {
+                let held = k == far
+                    && interval > 1
+                    && !resumed
+                    && !self.stats.frames.is_multiple_of(interval);
+                match self.kept_map(k, &fits[k], sky.sun_dir) {
+                    Some((kept, _)) if held => {
+                        fits[k] = kept.fit;
+                        self.shadows_held = true;
+                    }
+                    Some((kept, true)) => {
+                        fits[k] = kept.fit;
+                        keepable[k] = true;
+                        cull[k] = true;
+                    }
+                    _ => cull[k] = true,
                 }
-                Some((kept, true)) => {
-                    fits[k] = kept.fit;
-                    keepable[k] = true;
-                    cull[k] = true;
-                }
-                _ => cull[k] = true,
             }
+        } else {
+            // Nothing kept: the first sunlit frame draws every cascade.
+            self.kept = [None; CASCADES];
         }
         if n == 2 {
             fits[2] = fits[1];
@@ -3257,7 +3279,12 @@ impl Renderer {
                 1.0 / rs.0 as f32,
                 1.0 / rs.1 as f32,
             ],
-            shadow_params: [self.quality.cascades as f32, 0.0, 0.0, 0.0],
+            shadow_params: [
+                self.quality.cascades as f32,
+                f32::from(u8::from(sky.sun_lit())),
+                0.0,
+                0.0,
+            ],
             lights: std::array::from_fn(|i| {
                 scene
                     .lights
@@ -5799,6 +5826,33 @@ mod tests {
         .to_cols_array_2d();
         render_frames(&device, &mut r, FORMAT, &moved, &[(64, 48)]);
         assert_eq!(r.stats().cascades_drawn, 3);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// With the sun below the horizon no cascade is drawn and the shader is told to skip
+    /// the shadow test; the first frame after dawn draws every cascade again.
+    #[test]
+    fn no_shadow_pass_at_night() {
+        let (device, mut r) = full_renderer(RendererOptions::default());
+        let block = r.add_mesh(&Mesh::unit_block([255; 4]));
+        let instances = [at(block, Vec3::ZERO)];
+        let day = test_scene(&instances);
+        render_frames(&device, &mut r, FORMAT, &day, &[(64, 48)]);
+        assert_eq!(r.stats().cascades_drawn, 3);
+        assert_eq!(r.frame_uniforms(&day).0.shadow_params[1], 1.0);
+        let mut night = day;
+        night.sun.direction = [0.3, -0.2, 0.5];
+        for _ in 0..2 {
+            render_frames(&device, &mut r, FORMAT, &night, &[(64, 48)]);
+            let s = r.stats();
+            assert_eq!((s.shadow_draw_calls, s.cascades_drawn), (0, 0));
+            assert!(s.draw_calls > 0);
+        }
+        assert_eq!(r.frame_uniforms(&night).0.shadow_params[1], 0.0);
+        // Dawn on the same caster and camera: nothing kept from before the night.
+        render_frames(&device, &mut r, FORMAT, &day, &[(64, 48)]);
+        assert_eq!(r.stats().cascades_drawn, 3);
+        assert!(r.stats().shadow_draw_calls > 0);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 

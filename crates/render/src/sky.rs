@@ -117,6 +117,11 @@ pub(crate) struct SkyModel {
 }
 
 impl SkyModel {
+    /// Whether the sun lights anything: false once its disc has sunk below the horizon.
+    pub fn sun_lit(&self) -> bool {
+        self.sun_light.max_element() > 0.0
+    }
+
     pub fn new(sun: &Sun, sky: &Sky) -> SkyModel {
         let sun_dir = Vec3::from(sun.direction).normalize_or(Vec3::Y);
         let t = sky.turbidity.clamp(1.9, 10.0);
