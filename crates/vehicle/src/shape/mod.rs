@@ -187,6 +187,51 @@ pub fn era_1980s_paint(roll: u32) -> &'static str {
     ERA_1980S_PAINT[0].0
 }
 
+/// A paint no palette uses, one-tone and two-tone, which [`paint_base`] builds in: its colors
+/// mark the painted vertices so a cached build can be repainted ([`paint_colors`]).
+const PAINT_KEY: [&str; 2] = ["#ff00ff", "#ff00ff/#00ffff"];
+
+/// The build that has `opts`'s geometry in [`PAINT_KEY`]: the lowest palette entry with the
+/// same `color_details`, one- or two-tone as `opts`'s paint is. Every `opts` with the same
+/// base differs from it only in the [`paint_colors`] of its body, so one build of the base,
+/// recolored, stands for all of them.
+pub fn paint_base(spec: &ShapeSpec, opts: &BuildOptions) -> BuildOptions {
+    let n = spec.palette.len().max(1);
+    let details = |c: usize| {
+        spec.color_details
+            .iter()
+            .filter(move |&&(k, _)| k as usize == c % n)
+            .map(|&(_, d)| d)
+    };
+    let color_index = (0..n)
+        .find(|&c| details(c).eq(details(opts.color_index)))
+        .unwrap_or(0);
+    let hex = opts
+        .paint
+        .unwrap_or_else(|| &spec.palette[opts.color_index % n]);
+    let two_tone = parse_paint(hex).is_some_and(|p| p.1.is_some());
+    BuildOptions {
+        color_index,
+        paint: Some(PAINT_KEY[usize::from(two_tone)]),
+        ..*opts
+    }
+}
+
+/// Every color `opts`'s paint puts on [`CarMesh::body`], in a fixed order: the upper and
+/// lower paint, the seams, and a bed's walls, floor and ribs. No other mesh is painted.
+pub fn paint_colors(spec: &ShapeSpec, opts: &BuildOptions) -> [[u8; 4]; 6] {
+    let m = Materials::new(spec, opts.color_index, opts.paint);
+    let bed = bed::SHADES.map(|k| m.paint_low.shade(k).color);
+    [
+        m.paint.color,
+        m.paint_low.color,
+        m.seam.color,
+        bed[0],
+        bed[1],
+        bed[2],
+    ]
+}
+
 /// Builds the full-detail car in palette color `color_index`.
 pub fn build(spec: &ShapeSpec, color_index: usize) -> Result<CarMesh, ShapeError> {
     build_with(

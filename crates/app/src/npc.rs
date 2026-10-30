@@ -8,7 +8,7 @@
 //!   era street colors for it (`propinst::place_paints`, the parked cars' own) at levels
 //!   of detail 1 and 2, the
 //!   parked cars' meshes where the place parks that shape and paint, built
-//!   ([`car::parked_mesh`]) only where it does not; a session with traffic off never
+//!   ([`car::ParkedBuilds::mesh`]) only where it does not; a session with traffic off never
 //!   builds any. Lamps are built lit so the instance's glow switches them.
 //! - **Warm-up.** Whenever traffic is switched on, [`WARMUP_S`] of it runs with the player
 //!   and the view held still, so the streets round the car already have cars (then up to
@@ -230,7 +230,7 @@ pub struct Npcs {
     prev: Vec<Snap>,
     /// Mesh ids, `(shape * PAINTS + paint) * 2 + lod - 1`, once found or built.
     ids: Vec<MeshId>,
-    /// Brake lamp overlay mesh ids ([`car::brake_overlay_mesh`]), `shape * 2 + lod - 1`.
+    /// Brake lamp overlay mesh ids ([`car::ParkedBuilds::brake_overlay`]), `shape * 2 + lod - 1`.
     brakes: Vec<MeshId>,
     /// Bytes of the meshes built for the traffic alone (not shared with parked cars).
     built_bytes: usize,
@@ -357,13 +357,14 @@ impl Npcs {
                 + m.indices.len() * core::mem::size_of::<u32>()
         };
         for (&k, sh) in self.shapes.iter().zip(&shapes) {
-            heads.push(car::parked_headlamps(sh)?);
-            let (g, seat) = car::parked_cabin(sh)?;
+            let mut build = car::ParkedBuilds::new(sh);
+            heads.push(build.headlamps()?);
+            let (g, seat) = build.cabin()?;
             bytes += size(&g);
             glass.push(register(g));
             seats.push(seat);
             for lod in [1, 2] {
-                let m = car::brake_overlay_mesh(sh, lod)?;
+                let m = build.brake_overlay(lod)?;
                 bytes += size(&m);
                 brakes.push(register(m));
             }
@@ -374,7 +375,7 @@ impl Npcs {
                     continue;
                 }
                 for lod in [1, 2] {
-                    let m = car::parked_mesh(sh, 0, Some(shape::ERA_1980S_PAINT[e].0), lod)?;
+                    let m = build.mesh(0, Some(shape::ERA_1980S_PAINT[e].0), lod)?;
                     bytes += size(&m);
                     ids.push(register(m));
                 }
@@ -1380,7 +1381,7 @@ mod tests {
         for &k in &crate::vehicles::TRAFFIC_SHAPES {
             let sh = crate::vehicles::load_shape(crate::vehicles::BUILTIN_SHAPES[k].1).unwrap();
             for lod in [1, 2] {
-                let m = car::brake_overlay_mesh(&sh, lod).unwrap();
+                let m = car::ParkedBuilds::new(&sh).brake_overlay(lod).unwrap();
                 assert!(
                     !m.indices.is_empty(),
                     "shape {k} level {lod} has no tail lenses"

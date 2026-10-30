@@ -420,6 +420,39 @@ pub struct CarModel {
     /// interior (cabin and steering wheel).
     pub exterior_triangles: usize,
     pub interior_triangles: usize,
+    /// The paint and details its bodies are built in (level of detail 0, pop-ups down).
+    paint: BuildOptions,
+}
+
+/// Palette entry `paint` at level of detail 0, pop-ups down.
+fn paint_options(paint: usize) -> BuildOptions {
+    BuildOptions {
+        color_index: paint,
+        ..BuildOptions::default()
+    }
+}
+
+/// Whether recoloring `vertices` (a body built in a [`shape::paint_base`]) from `from`'s paint
+/// colors to `to`'s ([`shape::paint_colors`]) gives what a build in `to` gives. Welding is by
+/// color, so it does unless `to`'s colors are equal where `from`'s differ, or one of them is
+/// the color of some other vertex (or the grille, which conversion retints): a dark paint
+/// can meet the chassis' color, its faces then weld with the chassis'.
+fn repaints_exactly(vertices: &[Vertex], from: &[[u8; 4]; 6], to: &[[u8; 4]; 6]) -> bool {
+    let same = |c: &[[u8; 4]; 6], i: usize, j: usize| c[i] == c[j];
+    (0..6).all(|i| (0..6).all(|j| same(from, i, j) == same(to, i, j)))
+        && !to.contains(&grille_color())
+        && !vertices
+            .iter()
+            .any(|v| !from.contains(&v.color) && to.contains(&v.color))
+}
+
+/// Every vertex in one of `from`'s paint colors ([`shape::paint_colors`]) in `to`'s.
+fn repaint(vertices: &mut [Vertex], from: &[[u8; 4]; 6], to: &[[u8; 4]; 6]) {
+    for v in vertices {
+        if let Some(k) = from.iter().position(|&c| c == v.color) {
+            v.color = to[k];
+        }
+    }
 }
 
 impl CarModel {
@@ -428,22 +461,82 @@ impl CarModel {
         CarModel::build_painted(spec, shape, 0)
     }
 
-    /// Builds the car in palette entry `paint` (which wraps). Only the body (and so the
-    /// inside-out shell) depends on the paint.
+    /// Builds the car in palette entry `paint` (which wraps).
     pub fn build_painted(
         spec: &VehicleSpec,
         shape: &ShapeSpec,
         paint: usize,
+    ) -> Result<CarModel, String> {
+        CarModel::build_with(spec, shape, paint_options(paint))
+    }
+
+    /// The car in the paint base of palette entry `paint` ([`shape::paint_base`]), which
+    /// [`CarModel::repainted`] recolors into the paints that share it.
+    pub fn base(spec: &VehicleSpec, shape: &ShapeSpec, paint: usize) -> Result<CarModel, String> {
+        CarModel::build_with(spec, shape, shape::paint_base(shape, &paint_options(paint)))
+    }
+
+    /// The car in palette entry `paint`: `base` (a [`CarModel::base`] of the same car,
+    /// replaced by `paint`'s when it is another) recolored, or built when a recolor would
+    /// not be exact.
+    pub fn painted_from(
+        base: &mut CarModel,
+        spec: &VehicleSpec,
+        shape: &ShapeSpec,
+        paint: usize,
+    ) -> Result<CarModel, String> {
+        if base.paint != shape::paint_base(shape, &paint_options(paint)) {
+            *base = CarModel::base(spec, shape, paint)?;
+        }
+        match base.repainted(shape, paint) {
+            Some(m) => Ok(m),
+            None => CarModel::build_painted(spec, shape, paint),
+        }
+    }
+
+    /// This car, a [`CarModel::base`], in palette entry `paint`, which shares its base: the
+    /// bodies and the inside-out shells recolored, everything else as it is. `None` when the
+    /// recolor would differ from a build in that paint ([`repaints_exactly`]).
+    fn repainted(&self, shape: &ShapeSpec, paint: usize) -> Option<CarModel> {
+        let opts = paint_options(paint);
+        debug_assert_eq!(self.paint, shape::paint_base(shape, &opts));
+        let (from, to) = (
+            shape::paint_colors(shape, &self.paint),
+            shape::paint_colors(shape, &opts),
+        );
+        let exact = self.lods.iter().all(|l| {
+            l.body
+                .iter()
+                .all(|m| repaints_exactly(&m.vertices, &from, &to))
+        });
+        if !exact {
+            return None;
+        }
+        let mut out = self.clone();
+        for l in &mut out.lods {
+            for m in l.body.iter_mut().chain([&mut l.shell_inside]) {
+                repaint(&mut m.vertices, &from, &to);
+            }
+        }
+        out.paint = opts;
+        Some(out)
+    }
+
+    /// Builds the car with the paint and details of `paint` (its level of detail and pop-ups
+    /// are set here).
+    fn build_with(
+        spec: &VehicleSpec,
+        shape: &ShapeSpec,
+        paint: BuildOptions,
     ) -> Result<CarModel, String> {
         let popups = shape.front.lights == HeadLights::PopUp;
         let make = |lod: u8, up: bool| {
             shape::build_with(
                 shape,
                 &BuildOptions {
-                    color_index: paint,
                     lod,
                     popups_up: up,
-                    paint: None,
+                    ..paint
                 },
             )
             .map_err(|e| format!("shape `{}`: {e:?}", shape.id))
@@ -502,6 +595,7 @@ impl CarModel {
             interior_triangles: car0.interior_triangles(),
             layout,
             lods,
+            paint,
         })
     }
 
@@ -565,46 +659,123 @@ impl CarModel {
     }
 }
 
-/// A parked car: `shape` in palette color `paint` (or the `era` paint over it) at level of
-/// detail `lod` (1 near, 2 far), as one mesh (body, lamps and four wheels; near, the cabin
-/// and steering wheel, seen through the separate [`parked_cabin`] glass; far, the glass),
-/// its origin on the ground midway between the axles, nose toward `-z`. The lamps are built lit (head
-/// lamps as the shape has them, tail lamps at [`TAIL_GLOW`]): an instance's `glow` switches
-/// them, 0 for a parked car, the lamp glow for an NPC car driving with its lights on.
-pub fn parked_mesh(
-    shape: &ShapeSpec,
-    paint: usize,
-    era: Option<&'static str>,
-    lod: u8,
-) -> Result<Mesh, String> {
-    parked_mesh_and_lamps(shape, paint, era, lod).map(|(m, _)| m)
+/// One shape's parked and NPC car meshes: the shape is built once per level of detail and
+/// paint base ([`shape::paint_base`]) and every mesh is derived from those builds, a paint
+/// being a recolor (or, where a recolor would not be exact, a build of its own).
+pub struct ParkedBuilds<'a> {
+    shape: &'a ShapeSpec,
+    built: Vec<(BuildOptions, CarMesh)>,
 }
 
-/// The head lamps' centers of `shape`'s [`parked_mesh`], left and right, in its frame.
-pub fn parked_headlamps(shape: &ShapeSpec) -> Result<[Vec3; 2], String> {
-    parked_mesh_and_lamps(shape, 0, None, 2).map(|(_, h)| h)
-}
+impl<'a> ParkedBuilds<'a> {
+    pub fn new(shape: &'a ShapeSpec) -> ParkedBuilds<'a> {
+        ParkedBuilds {
+            shape,
+            built: Vec::new(),
+        }
+    }
 
-/// [`parked_mesh`] and its head lamps' centers, left and right, in the mesh's frame.
-fn parked_mesh_and_lamps(
-    shape: &ShapeSpec,
-    paint: usize,
-    era: Option<&'static str>,
-    lod: u8,
-) -> Result<(Mesh, [Vec3; 2]), String> {
-    let car = shape::build_with(
-        shape,
-        &BuildOptions {
+    /// The build in `opts`'s paint base and that base.
+    fn base(&mut self, opts: &BuildOptions) -> Result<(BuildOptions, &CarMesh), String> {
+        let base = shape::paint_base(self.shape, opts);
+        let k = match self.built.iter().position(|b| b.0 == base) {
+            Some(k) => k,
+            None => {
+                let car = shape::build_with(self.shape, &base)
+                    .map_err(|e| format!("shape `{}`: {e:?}", self.shape.id))?;
+                self.built.push((base, car));
+                self.built.len() - 1
+            }
+        };
+        Ok((base, &self.built[k].1))
+    }
+
+    /// A parked car: the shape in palette color `paint` (or the `era` paint over it) at
+    /// level of detail `lod` (1 near, 2 far), as one mesh (body, lamps and four wheels;
+    /// near, the cabin and steering wheel, seen through the separate
+    /// [`ParkedBuilds::cabin`] glass; far, the glass), its origin on the ground midway
+    /// between the axles, nose toward `-z`. The lamps are built lit (head lamps as the shape
+    /// has them, tail lamps at [`TAIL_GLOW`]): an instance's `glow` switches them, 0 for a
+    /// parked car, the lamp glow for an NPC car driving with its lights on.
+    pub fn mesh(
+        &mut self,
+        paint: usize,
+        era: Option<&'static str>,
+        lod: u8,
+    ) -> Result<Mesh, String> {
+        let opts = BuildOptions {
             color_index: paint,
             lod,
             popups_up: false,
             paint: era,
-        },
+        };
+        let shape = self.shape;
+        let (base, car) = self.base(&opts)?;
+        let (mut m, _, body) = parked_of(car, lod);
+        let (from, to) = (
+            shape::paint_colors(shape, &base),
+            shape::paint_colors(shape, &opts),
+        );
+        if !repaints_exactly(&m.vertices[..body], &from, &to) {
+            let car = shape::build_with(shape, &opts)
+                .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
+            return Ok(parked_of(&car, lod).0);
+        }
+        repaint(&mut m.vertices[..body], &from, &to);
+        Ok(m)
+    }
+
+    /// The head lamps' centers of the far [`ParkedBuilds::mesh`], left and right, in its
+    /// frame.
+    pub fn headlamps(&mut self) -> Result<[Vec3; 2], String> {
+        let (_, car) = self.base(&parked_options(2))?;
+        Ok(parked_of(car, 2).1)
+    }
+
+    /// The near [`ParkedBuilds::mesh`]'s glass (drawn see-through over its cabin) and where
+    /// its driver sits, in the same frame.
+    pub fn cabin(&mut self) -> Result<(Mesh, crate::driver::Seating), String> {
+        let shape = self.shape;
+        let (_, car) = self.base(&parked_options(1))?;
+        Ok(cabin_of(shape, car))
+    }
+
+    /// The brake lamps of the [`ParkedBuilds::mesh`] at level of detail `lod` (1 or 2),
+    /// lit: its tail lenses alone at [`BRAKE_GLOW`], each lifted off its lens along the
+    /// normal, in the same frame. Drawn over the car (with the car-lamp glow) while it
+    /// brakes, so the parked mesh needs no braking copy.
+    pub fn brake_overlay(&mut self, lod: u8) -> Result<Mesh, String> {
+        let (_, car) = self.base(&parked_options(lod))?;
+        Ok(brake_overlay_of(car, lod))
+    }
+}
+
+/// Palette color 0 at level of detail `lod`, pop-ups down: what the head lamps, the cabin
+/// and the brake overlay are built from.
+fn parked_options(lod: u8) -> BuildOptions {
+    BuildOptions {
+        lod,
+        ..BuildOptions::default()
+    }
+}
+
+/// The offset from `car`'s model space to the parked frame: origin midway between the
+/// axles.
+fn parked_offset(car: &CarMesh) -> Vec3 {
+    Vec3::new(
+        0.0,
+        0.0,
+        -0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]),
     )
-    .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
-    let mid = 0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]);
-    let offset = Vec3::new(0.0, 0.0, -mid);
+}
+
+/// [`ParkedBuilds::mesh`] of `car` built at `lod`, as built (not repainted), its head lamps'
+/// centers, left and right, in the mesh's frame, and how many vertices of the body (the
+/// only painted part) lead it.
+fn parked_of(car: &CarMesh, lod: u8) -> (Mesh, [Vec3; 2], usize) {
+    let offset = parked_offset(car);
     let mut out = convert(&car.body, offset, Surface::Body);
+    let body = out.vertices.len();
     let mut add = |m: &Mesh| {
         let base = out.vertices.len() as u32;
         out.vertices.extend_from_slice(&m.vertices);
@@ -643,31 +814,16 @@ fn parked_mesh_and_lamps(
         }
         add(&w);
     }
-    Ok((out, heads))
+    (out, heads, body)
 }
 
-/// The near [`parked_mesh`]'s glass (drawn see-through over its cabin) and where its driver
-/// sits, in the same frame.
-pub fn parked_cabin(shape: &ShapeSpec) -> Result<(Mesh, crate::driver::Seating), String> {
-    let car = shape::build_with(
-        shape,
-        &BuildOptions {
-            color_index: 0,
-            lod: 1,
-            popups_up: false,
-            paint: None,
-        },
-    )
-    .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
-    let offset = Vec3::new(
-        0.0,
-        0.0,
-        -0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]),
-    );
-    Ok((
+/// [`ParkedBuilds::cabin`] of `car`.
+fn cabin_of(shape: &ShapeSpec, car: &CarMesh) -> (Mesh, crate::driver::Seating) {
+    let offset = parked_offset(car);
+    (
         convert(&car.glass, offset, Surface::Glass),
-        crate::driver::Seating::of(shape, &car, offset),
-    ))
+        crate::driver::Seating::of(shape, car, offset),
+    )
 }
 
 /// How far a brake overlay's lenses stand off the parked mesh's, at levels of detail 1 and
@@ -675,23 +831,9 @@ pub fn parked_cabin(shape: &ShapeSpec) -> Result<(Mesh, crate::driver::Seating),
 /// is drawn.
 const BRAKE_OVERLAY_LIFT_M: [f32; 2] = [0.006, 0.06];
 
-/// The brake lamps of `shape`'s [`parked_mesh`] at level of detail `lod` (1 or 2), lit:
-/// its tail lenses alone at [`BRAKE_GLOW`], each lifted off its lens along the normal, in
-/// the same frame. Drawn over the car (with the car-lamp glow) while it brakes, so the
-/// parked mesh needs no braking copy.
-pub fn brake_overlay_mesh(shape: &ShapeSpec, lod: u8) -> Result<Mesh, String> {
-    let car = shape::build_with(
-        shape,
-        &BuildOptions {
-            color_index: 0,
-            lod,
-            popups_up: false,
-            paint: None,
-        },
-    )
-    .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
-    let mid = 0.5 * (car.wheel_centers[0][2] + car.wheel_centers[2][2]);
-    let lamps = convert(&car.lights, Vec3::new(0.0, 0.0, -mid), Surface::Plain);
+/// [`ParkedBuilds::brake_overlay`] of `car` built at `lod`.
+fn brake_overlay_of(car: &CarMesh, lod: u8) -> Mesh {
+    let lamps = convert(&car.lights, parked_offset(car), Surface::Plain);
     let lift = BRAKE_OVERLAY_LIFT_M[usize::from(lod.clamp(1, 2) - 1)];
     let tail = |v: &Vertex| lamp_group(v.emissive) == LampGroup::Tail;
     let mut out = Mesh::default();
@@ -712,7 +854,7 @@ pub fn brake_overlay_mesh(shape: &ShapeSpec, lod: u8) -> Result<Mesh, String> {
             out.indices.push(map[i as usize]);
         }
     }
-    Ok(out)
+    out
 }
 
 /// How a shape mesh's uvs map into the atlas.
@@ -1264,5 +1406,104 @@ mod tests {
         });
         assert_eq!(n, 2 * 11 + 6);
         assert_ne!(ids.lods[0].body[0], ids.lods[0].body[1]);
+    }
+
+    /// Every car in every paint, built from its paint base and recolored, is byte for byte
+    /// the car built in that paint.
+    #[test]
+    fn repainted_cars_match_their_direct_builds() {
+        for &(id, _) in vehicles::BUILTIN.iter() {
+            let spec = vehicles::builtin_spec(id).unwrap();
+            let shape = vehicles::builtin_shape(&spec).unwrap();
+            let mut base = CarModel::base(&spec, &shape, 0).unwrap();
+            for paint in 0..shape.palette.len() {
+                let cached = CarModel::painted_from(&mut base, &spec, &shape, paint).unwrap();
+                let direct = CarModel::build_painted(&spec, &shape, paint).unwrap();
+                assert!(cached == direct, "{id} in paint {paint}");
+            }
+        }
+    }
+
+    /// Every parked and NPC car mesh of every shape, level and paint (its own and the
+    /// era's), derived from one build per level and paint base, is byte for byte the mesh
+    /// built for it alone.
+    #[test]
+    fn parked_builds_match_their_direct_builds() {
+        let direct = |sh: &ShapeSpec, opts: BuildOptions| shape::build_with(sh, &opts).unwrap();
+        for &(id, src) in vehicles::BUILTIN_SHAPES.iter() {
+            let sh = vehicles::load_shape(src).unwrap();
+            let mut builds = ParkedBuilds::new(&sh);
+            for lod in [1, 2] {
+                let own = (0..sh.palette.len()).map(|k| (k, None));
+                let era = shape::ERA_1980S_PAINT.iter().map(|e| (0, Some(e.0)));
+                for (color_index, paint) in own.chain(era) {
+                    let opts = BuildOptions {
+                        color_index,
+                        lod,
+                        popups_up: false,
+                        paint,
+                    };
+                    let want = parked_of(&direct(&sh, opts), lod).0;
+                    let got = builds.mesh(color_index, paint, lod).unwrap();
+                    assert!(got == want, "{id} level {lod} in {color_index} {paint:?}");
+                }
+                let car = direct(&sh, parked_options(lod));
+                assert!(builds.brake_overlay(lod).unwrap() == brake_overlay_of(&car, lod));
+            }
+            let far = direct(&sh, parked_options(2));
+            assert_eq!(builds.headlamps().unwrap(), parked_of(&far, 2).1, "{id}");
+            let near = direct(&sh, parked_options(1));
+            assert!(builds.cabin().unwrap() == cabin_of(&sh, &near), "{id}");
+        }
+    }
+
+    /// The time a paint change and a traffic shape's meshes take: `cargo test --release -p
+    /// app paint_change_time -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn paint_change_time() {
+        let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1e3;
+        let (mut direct, mut cached, mut recolor) = (0.0, 0.0, 0.0);
+        let (mut n, mut recolored) = (0, 0);
+        for &(id, _) in vehicles::BUILTIN.iter() {
+            let spec = vehicles::builtin_spec(id).unwrap();
+            let shape = vehicles::builtin_shape(&spec).unwrap();
+            let mut base = CarModel::base(&spec, &shape, 0).unwrap();
+            for paint in 0..shape.palette.len() {
+                let t = std::time::Instant::now();
+                let _ = CarModel::build_painted(&spec, &shape, paint).unwrap();
+                direct += ms(t);
+                let t = std::time::Instant::now();
+                let _ = CarModel::painted_from(&mut base, &spec, &shape, paint).unwrap();
+                cached += ms(t);
+                let t = std::time::Instant::now();
+                if base.repainted(&shape, paint).is_some() {
+                    recolor += ms(t);
+                    recolored += 1;
+                }
+                n += 1;
+            }
+        }
+        println!(
+            "paint change, mean of {n}: {:.2} ms built, {:.2} ms from the last base \
+             ({recolored} recolors at {:.2} ms, the rest built)",
+            direct / n as f64,
+            cached / n as f64,
+            recolor / recolored as f64,
+        );
+        let t = std::time::Instant::now();
+        for &(_, src) in vehicles::BUILTIN_SHAPES.iter() {
+            let sh = vehicles::load_shape(src).unwrap();
+            let mut b = ParkedBuilds::new(&sh);
+            let _ = (b.headlamps().unwrap(), b.cabin().unwrap());
+            for lod in [1, 2] {
+                let _ = b.brake_overlay(lod).unwrap();
+                for e in &shape::ERA_1980S_PAINT[..3] {
+                    let _ = b.mesh(0, Some(e.0), lod).unwrap();
+                }
+            }
+        }
+        let shapes = vehicles::BUILTIN_SHAPES.len() as f64;
+        println!("traffic shape: {:.2} ms", ms(t) / shapes);
     }
 }
