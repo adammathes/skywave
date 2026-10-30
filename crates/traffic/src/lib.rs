@@ -48,7 +48,7 @@ pub mod wave;
 pub use cars::{
     Barrier, Car, Clock, Density, Inputs, Player, ShapeRule, Traffic, TrafficBudget, View,
 };
-pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, Turn, TurnKind, NONE};
+pub use lanes::{Control, Junction, Lane, LaneGraph, Pose, SignalHead, Turn, TurnKind, NONE};
 pub use reply::{Greet, Replies, ReplyInput};
 pub use signal::{Light, SignalClock};
 pub use wave::Streak;

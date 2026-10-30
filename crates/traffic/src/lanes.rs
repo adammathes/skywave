@@ -215,7 +215,23 @@ pub struct LaneGraph {
     pub stop_lines: Vec<StopLine>,
     /// One per road-graph node.
     pub junctions: Vec<Junction>,
+    /// One per signal pole of the place, in prop order: what its heads show.
+    pub heads: Vec<SignalHead>,
 }
+
+/// A signal pole of the place (a `Signal` prop) and the lane whose drivers its heads face:
+/// the heads show [`LaneGraph::light`] of that lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignalHead {
+    /// Index into the place's `props.items`.
+    pub prop: u32,
+    /// The signalled lane (slot 0) whose stop line is nearest the pole among those whose
+    /// drivers its heads face, or [`NONE`] when there is none within [`HEAD_REACH_M`].
+    pub lane: u32,
+}
+
+/// How far from a signal pole the stop line of the lane its heads show may be, m.
+pub const HEAD_REACH_M: f32 = 25.0;
 
 /// A road end at a node: the edge, whether it is the edge's `b` end, and the ground
 /// direction from the node along the road.
@@ -879,7 +895,37 @@ impl LaneGraph {
             })
             .collect();
         g.coordinate(&main);
+        g.heads = g.signal_heads(place);
         g
+    }
+
+    /// Each signal pole of `place` and the lane its heads face: the heads hang from the
+    /// arm facing back down the approach (the arm's right, as `world` builds them).
+    fn signal_heads(&self, place: &Place) -> Vec<SignalHead> {
+        let mut out = Vec::new();
+        for (i, p) in place.props.items.iter().enumerate() {
+            if !matches!(p.kind, place::PropKind::Signal { .. }) {
+                continue;
+            }
+            let (sn, cs) = crate::math::sin_cos(p.yaw);
+            let face = [-cs, sn];
+            let mut best = (HEAD_REACH_M, NONE);
+            for (id, l) in self.lanes.iter().enumerate() {
+                if l.control != Control::Signal || l.slot != 0 {
+                    continue;
+                }
+                let end = self.end_pose(id as u32);
+                let d = dist2(end.pos, p.pos);
+                if dot(face, end.dir) < -0.7 && d < best.0 {
+                    best = (d, id as u32);
+                }
+            }
+            out.push(SignalHead {
+                prop: i as u32,
+                lane: best.1,
+            });
+        }
+        out
     }
 
     /// The next signal down a main road from `first` (a main road's lane), through free
@@ -1131,6 +1177,7 @@ impl LaneGraph {
             + self.turns.len() * size_of::<Turn>()
             + self.stop_lines.len() * size_of::<StopLine>()
             + self.junctions.len() * size_of::<Junction>()
+            + self.heads.len() * size_of::<SignalHead>()
     }
 
     /// A hash of everything in the graph, bit for bit.

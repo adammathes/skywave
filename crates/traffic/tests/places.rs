@@ -673,6 +673,74 @@ fn control_matches_the_drawn_signs() {
     }
 }
 
+/// Every signal pole's heads show the light of a signalled approach beside it, facing the
+/// drivers on it, so the heads the app lights tell what the cars obey. Most signalled
+/// approaches have a pole showing their light (or their phase's, across the junction); the
+/// rest are alleys and approaches the detailing pass leaves without a pole (a bent end,
+/// no room on the corner), which a pole elsewhere at the node still signals.
+#[test]
+fn signal_heads_face_the_approach_whose_light_they_show() {
+    let (mut poles, mut dark, mut worst) = (0, 0, 0.0f32);
+    let (mut approaches, mut unshown) = (0, 0);
+    for b in places() {
+        let (place, g) = (&b.place, &b.graph);
+        let signals = place
+            .props
+            .items
+            .iter()
+            .filter(|p| matches!(p.kind, PropKind::Signal { .. }))
+            .count();
+        assert_eq!(g.heads.len(), signals, "{}", b.name);
+        for h in &g.heads {
+            let p = &place.props.items[h.prop as usize];
+            assert!(matches!(p.kind, PropKind::Signal { .. }));
+            poles += 1;
+            if h.lane == NONE {
+                dark += 1;
+                continue;
+            }
+            let l = &g.lanes[h.lane as usize];
+            assert_eq!((l.control, l.slot), (Control::Signal, 0), "{}", b.name);
+            let end = g.end_pose(h.lane);
+            let d = dist(p.pos, end.pos);
+            worst = worst.max(d);
+            assert!(d < 25.0, "{}: pole {d} m from its stop line", b.name);
+            // The heads face the arm's right (the pole frame's -Z): back down the approach.
+            let (sn, cs) = (p.yaw.sin(), p.yaw.cos());
+            let face = [-cs, sn];
+            let c = face[0] * end.dir[0] + face[1] * end.dir[1];
+            assert!(
+                c < -0.7,
+                "{}: a head faces away from its drivers ({c})",
+                b.name
+            );
+        }
+        for (id, l) in g.lanes.iter().enumerate() {
+            if l.control != Control::Signal || l.slot != 0 {
+                continue;
+            }
+            approaches += 1;
+            let lit = g.heads.iter().any(|h| {
+                h.lane == id as u32
+                    || h.lane != NONE && {
+                        let o = &g.lanes[h.lane as usize];
+                        o.end_node == l.end_node && o.phase == l.phase
+                    }
+            });
+            unshown += usize::from(!lit);
+        }
+    }
+    println!(
+        "signal poles {poles}, dark {dark}, farthest from its stop line {worst:.1} m; \
+         signalled approaches {approaches}, no head showing their light {unshown}"
+    );
+    assert!(dark * 50 <= poles, "{dark} of {poles} poles show nothing");
+    assert!(
+        unshown * 5 <= approaches,
+        "{unshown} of {approaches} lights unshown"
+    );
+}
+
 /// Every signed approach stops at the bar `world` paints: within 0.5 m but on a few bends,
 /// never more than 1.25 m off.
 #[test]
