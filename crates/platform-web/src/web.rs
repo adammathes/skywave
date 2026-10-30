@@ -67,6 +67,8 @@ struct State {
     music: Option<MusicGlue>,
     /// Whether the glue last said the folders must be picked again.
     music_again: bool,
+    /// Whether the glue last said a remembered folder waits for a key to reconnect.
+    music_reconnect: bool,
     /// The `Fullscreen` key toggled it in its keydown handler since the last frame: the
     /// app's toggle for that press is already done.
     keyed_fullscreen: bool,
@@ -136,6 +138,14 @@ impl MusicGlue {
     /// handles, or has not let us read them again yet).
     fn again(&self) -> bool {
         Self::get(&self.this, "again").as_bool().unwrap_or(false)
+    }
+
+    /// A remembered folder waits for the browser's permission, which the page asks for
+    /// on the next key or click.
+    fn reconnect(&self) -> bool {
+        Self::get(&self.this, "reconnect")
+            .as_bool()
+            .unwrap_or(false)
     }
 
     /// The next folder read, whether to announce it and whether the page will remember
@@ -783,6 +793,7 @@ pub async fn run(
         radio_reported: NOT_REPORTED,
         music,
         music_again: false,
+        music_reconnect: false,
         keyed_fullscreen: false,
         fullscreen_left_ms: f64::NEG_INFINITY,
     }));
@@ -1226,6 +1237,11 @@ impl State {
             if again != self.music_again {
                 self.music_again = again;
                 self.app.set_music_picker(true, again);
+            }
+            let reconnect = music.reconnect();
+            if reconnect != self.music_reconnect {
+                self.music_reconnect = reconnect;
+                self.app.music_reconnect(reconnect);
             }
         }
         let Some(glue) = &self.radio else {

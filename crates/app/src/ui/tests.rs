@@ -2231,6 +2231,21 @@ fn music_folders_are_picked_from_the_audio_page() {
     h.app.music_dialog_missing();
     h.frame();
     assert!(h.hud_text().contains("No folder dialog"));
+    // Remembered folders waiting for the browser's permission: the next key asks.
+    h.app.music_reconnect(true);
+    h.frame();
+    assert!(h
+        .hud_text()
+        .contains("Press any key to reconnect your music"));
+    h.app.music_reconnect(false);
+    assert_eq!(h.app.ui().toast(), None);
+    h.app.music_reconnect(true);
+    h.app.add_music_folder(library(), true, true);
+    h.app.music_reconnect(false);
+    assert!(
+        matches!(h.app.ui().toast(), Some(Toast::MusicAdded { .. })),
+        "the folder's toast stays"
+    );
 }
 
 impl Harness {
