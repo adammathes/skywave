@@ -26,7 +26,7 @@ New issues, follow-ups and review leftovers are filed without `approved`. Only t
    failed, or has ended with no PR, swap `in progress` for `needs owner` and comment one line
    saying what happened. Their `area:*` labels are busy.
 2. List open issues labeled `approved` that are neither `in progress` nor `needs owner`, oldest
-   first. Start each one whose area is not busy (then mark its area busy), up to 4 in flight in
+   first. Start each one whose area is not busy (then mark its area busy), up to 5 in flight in
    total. For each issue, run `create_session` with
    `source_url: "https://github.com/adammathes/skywave"`,
    `outcome_branch: "issue/<n>-<slug>"` (a session may push only to its outcome branch),
