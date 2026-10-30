@@ -34,27 +34,8 @@ jobs:
       - name: Linux build deps (libudev for gilrs, ALSA for cpal, lavapipe)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers
 
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Clippy (native)
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
-      - name: Clippy (web)
-        run: cargo clippy --locked --target wasm32-unknown-unknown -p platform-web --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test --locked --workspace
-        env:
-          SKYWAVE_ENFORCE_BUDGETS: "1"
-
-      - name: cargo deny
-        run: |
-          cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
-          cargo deny check
-
-      - name: Build web
-        run: tools/web-build.sh
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
 
       - uses: actions/setup-node@v4
         with:
@@ -65,12 +46,11 @@ jobs:
           npm install --global "playwright@$PLAYWRIGHT_VERSION"
           npx "playwright@$PLAYWRIGHT_VERSION" install --with-deps chromium
 
-      # One scene keeps CI time reasonable; the full golden set is `--all` (see docs/TESTING.md).
-      - name: Screenshot smoke test and wasm self-test (WebGL2 on SwiftShader)
-        run: |
-          export NODE_PATH="$(npm root --global)"
-          node tools/screenshot/shoot.mjs --selftest --music --scene strip-golden-chase
-          node tools/screenshot/diff.mjs --scene strip-golden-chase
+      # The checks themselves live in one script so sessions run exactly what CI runs:
+      # fmt, clippy (native and web), tests with budgets enforced, cargo deny, the web build,
+      # and the WebGL2/SwiftShader screenshot smoke test with the wasm self-test.
+      - name: Checks (tools/ci.sh)
+        run: tools/ci.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
