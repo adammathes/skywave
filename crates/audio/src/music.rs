@@ -200,7 +200,9 @@ pub fn probe(head: &[u8], audio: &[u8], file_len: u64) -> Probe {
             } else {
                 (be32(&head[10..14]) as usize).saturating_add(4)
             };
-            at = at.saturating_add(n);
+            // Compared against what is left, not added first: a junk size must not wrap a
+            // 32-bit `usize`. One that does not fit leaves no frames to read.
+            at = if n <= end - at { at + n } else { end };
         }
         let (id_len, header_len) = if major == 2 { (3, 6) } else { (4, 10) };
         while at + header_len <= end {
@@ -503,6 +505,22 @@ mod tests {
         tag[14..18].copy_from_slice(&[0xff, 0xff, 0xff, 0x00]);
         assert_eq!(probe(&tag, &[], 0).title, None);
         assert_eq!(probe(&id3(3, &[(b"TIT2", b"\x07abc")]), &[], 0).title, None);
+        // Extended-header sizes past the tag (v2.3 plain, v2.4 syncsafe), up to `u32::MAX`.
+        for major in [3, 4] {
+            for size in [
+                0xffff_ffffu32,
+                0xffff_fffc,
+                0x7fff_ffff,
+                0x0fff_ffff,
+                1 << 16,
+                15,
+            ] {
+                let mut tag = id3(major, &[(b"TIT2", b"\0abc")]);
+                tag[5] |= 0x40;
+                tag.splice(10..10, size.to_be_bytes());
+                assert_eq!(probe(&tag, &[], 0).title, None, "v2.{major} {size:#x}");
+            }
+        }
         // Every truncation of a tagged file.
         let mut file = id3(4, &[(b"TIT2", b"\0abc")]);
         file.extend(frames(3));
