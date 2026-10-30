@@ -484,17 +484,31 @@ fn handbrake_with_steer_pivots_the_car() {
     }
 }
 
+/// Holding the brake at a stop keeps the car still in drive for the dwell (a light's wait),
+/// then selects reverse and backs up on the same held pedal.
 #[test]
 fn braking_at_a_standstill_selects_reverse() {
+    let dwell = STEPS_PER_S * 4 / 10;
     for spec in cars() {
         let mut s = spawn(&spec);
-        hold(
-            &spec,
-            &mut s,
-            input(0.0, 1.0, 0.0),
-            &Assists::default(),
-            3 * STEPS_PER_S,
-        );
+        for i in 0..3 * STEPS_PER_S {
+            step(
+                &spec,
+                &mut s,
+                &input(0.0, 1.0, 0.0),
+                &Assists::default(),
+                &GROUND,
+            );
+            if i < dwell {
+                assert!(s.gear >= 1, "{} reverse at step {i}", spec.id);
+                assert!(
+                    s.speed_mps.abs() < 0.05,
+                    "{} moved {} m/s at step {i}",
+                    spec.id,
+                    s.speed_mps
+                );
+            }
+        }
         assert_eq!(s.gear, -1, "{}", spec.id);
         assert!(
             s.speed_mps < -1.0,
@@ -812,7 +826,7 @@ fn replay_is_deterministic_and_pinned() {
     // Pinned hashes of the 10 s scripted drive. A deliberate change to the sim, a spec or the
     // script moves them: run `cargo test -p vehicle --test sim replay -- --nocapture`, copy the
     // printed hashes here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0x90e4_6e3d_5a39_5dc1, 0xaa95_1912_809c_e63b];
+    const PINNED: [u64; 2] = [0xcfd7_ce3d_3279_f705, 0x060e_3bd8_ff15_9917];
     let specs = cars();
     let mut hashes = [0u64; 2];
     for (k, spec) in specs.iter().enumerate() {
