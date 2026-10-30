@@ -42,7 +42,8 @@
 //! Esc / Start opens the pause menu; settings and bindings are saved to
 //! `$XDG_CONFIG_HOME/skywave/settings.json` (see `settings`).
 //!
-//! Sound plays through the default output device at 48 kHz (`sfx`); without one the game
+//! Sound plays through the default output device, resampled from 48 kHz when it runs at
+//! another rate, and reopens when the device goes away (`sfx`); without one the game
 //! runs silent. The car radio's internet stations play through it too (`radio`); the
 //! window title shows the station and what it says is playing. The player's own MP3s are
 //! the deck's library: the music folder (`--music DIR`, else `music` beside the executable,
@@ -1116,7 +1117,8 @@ impl ApplicationHandler for Shell {
                 self.pads.poll(&mut self.input, self.focused);
                 let clock = || self.started.elapsed().as_secs_f64();
                 let steps = self.app.frame(&mut self.input, dt.as_secs_f64(), &clock);
-                if let Some(sfx) = &self.sfx {
+                if let Some(sfx) = &mut self.sfx {
+                    sfx.recover(now);
                     sfx.set_params(self.app.audio_params());
                 }
                 self.pump_radio();
