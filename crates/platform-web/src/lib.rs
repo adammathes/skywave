@@ -39,12 +39,14 @@
 //!
 //! The player's own music: `window.skywaveMusic` (the music block) holds the folders the
 //! user picked or dropped, the deck's library. The game calls `pick()` for "Music library"
-//! (false: no user activation to open a picker from, as after a gamepad press), takes each
-//! folder read with `takeFolder()` (`{path, name, announce, kept, mixtape, files: [{key,
-//! rel, size, head, audio}]}`: `path` the folder's stable id, `mixtape` for loose dropped
-//! files, `rel` the file's path in the folder, `head` the file's first
+//! (false: no user activation to open a picker from, as after a gamepad press), takes the
+//! files read with `take()`, probing a few each frame under a small time budget: each file
+//! as `{key, rel, size, head, audio}` (`rel` the file's path in its folder, `head` its
+//! first bytes up to `audio::music::PROBE_WINDOW` past where its audio starts, at most
 //! `audio::music::HEAD_BYTES`, `audio` a few KiB where its audio starts when a large tag
-//! hides it), calls `forget(path)` for a folder the user removed (`"*"`: all), and reads
+//! hides it), then their folder as `{folder: true, path, name, announce, kept, mixtape}`
+//! (`path` the folder's stable id, `mixtape` for loose dropped files); the page reads ahead
+//! only a couple of MiB. It calls `forget(path)` for a folder the user removed (`"*"`: all), and reads
 //! `again` (the folders of last session must be picked again). Files never leave the page.
 //!
 //! **Backends.** WebGPU is tried first where the browser offers it; if anything fails

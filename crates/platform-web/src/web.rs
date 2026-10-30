@@ -109,9 +109,16 @@ const NOT_REPORTED: (u8, Option<usize>, bool, bool, DeckKey) = (
 struct MusicGlue {
     this: JsValue,
     pick: js_sys::Function,
-    take_folder: js_sys::Function,
+    take: js_sys::Function,
     forget: js_sys::Function,
+    /// The files of the folder being taken, probed so far.
+    probed: Vec<audio::deck::FileInfo>,
 }
+
+/// Time a frame spends probing music files, ms.
+const MUSIC_PROBE_MS: f64 = 2.0;
+/// Most music files probed in a frame.
+const MUSIC_PROBE_FILES: usize = 64;
 
 impl MusicGlue {
     fn find(window: &web_sys::Window) -> Option<MusicGlue> {
@@ -124,9 +131,10 @@ impl MusicGlue {
         };
         Some(MusicGlue {
             pick: func("pick")?,
-            take_folder: func("takeFolder")?,
+            take: func("take")?,
             forget: func("forget")?,
             this,
+            probed: Vec::new(),
         })
     }
 
@@ -148,37 +156,37 @@ impl MusicGlue {
             .unwrap_or(false)
     }
 
-    /// The next folder read, whether to announce it and whether the page will remember
-    /// it.
-    fn take_folder(&self) -> Option<(audio::deck::Folder, bool, bool)> {
-        let f = self.take_folder.call0(&self.this).ok()?;
-        if f.is_null() || f.is_undefined() {
-            return None;
+    /// Probes the files the page has read until `more()` says stop; the folder they make
+    /// up once its last file is in, with whether to announce it and whether the page
+    /// will remember it.
+    fn take_folder(
+        &mut self,
+        more: &mut impl FnMut() -> bool,
+    ) -> Option<(audio::deck::Folder, bool, bool)> {
+        while more() {
+            let f = self.take.call0(&self.this).ok()?;
+            if f.is_null() || f.is_undefined() {
+                return None;
+            }
+            if Self::get(&f, "folder").as_bool().unwrap_or(false) {
+                let folder = audio::deck::Folder {
+                    id: Self::get(&f, "path").as_string().unwrap_or_default(),
+                    name: Self::get(&f, "name").as_string().unwrap_or_default(),
+                    mixtape: Self::get(&f, "mixtape").as_bool().unwrap_or(false),
+                    files: std::mem::take(&mut self.probed),
+                };
+                let announce = Self::get(&f, "announce").as_bool().unwrap_or(false);
+                let kept = Self::get(&f, "kept").as_bool().unwrap_or(false);
+                return Some((folder, announce, kept));
+            }
+            let key = Self::get(&f, "key").as_string().unwrap_or_default();
+            let path = Self::get(&f, "rel").as_string().unwrap_or_default();
+            let size = Self::get(&f, "size").as_f64().unwrap_or(0.0) as u64;
+            let bytes = |k| js_sys::Uint8Array::new(&Self::get(&f, k)).to_vec();
+            let probe = audio::music::probe(&bytes("head"), &bytes("audio"), size);
+            self.probed.push(audio::deck::FileInfo { key, path, probe });
         }
-        let id = Self::get(&f, "path").as_string().unwrap_or_default();
-        let name = Self::get(&f, "name").as_string().unwrap_or_default();
-        let announce = Self::get(&f, "announce").as_bool().unwrap_or(false);
-        let kept = Self::get(&f, "kept").as_bool().unwrap_or(false);
-        let mixtape = Self::get(&f, "mixtape").as_bool().unwrap_or(false);
-        let files = js_sys::Array::from(&Self::get(&f, "files"));
-        let files = files
-            .iter()
-            .map(|file| {
-                let key = Self::get(&file, "key").as_string().unwrap_or_default();
-                let path = Self::get(&file, "rel").as_string().unwrap_or_default();
-                let size = Self::get(&file, "size").as_f64().unwrap_or(0.0) as u64;
-                let bytes = |k| js_sys::Uint8Array::new(&Self::get(&file, k)).to_vec();
-                let probe = audio::music::probe(&bytes("head"), &bytes("audio"), size);
-                audio::deck::FileInfo { key, path, probe }
-            })
-            .collect();
-        let folder = audio::deck::Folder {
-            id,
-            name,
-            mixtape,
-            files,
-        };
-        Some((folder, announce, kept))
+        None
     }
 }
 
@@ -1218,7 +1226,7 @@ impl State {
             // Key releases during the modal prompt never arrived.
             self.input.release_all();
         }
-        if let Some(music) = &self.music {
+        if let Some(music) = &mut self.music {
             if self.app.take_music_request() {
                 // The menu key's or click's activation lets the page open its folder
                 // picker; a gamepad press gives none, and the page says so.
@@ -1230,7 +1238,19 @@ impl State {
             for path in self.app.take_forgotten_music() {
                 let _ = music.forget.call1(&music.this, &JsValue::from_str(&path));
             }
-            while let Some((folder, announce, kept)) = music.take_folder() {
+            // A few files a frame, so a big folder never stalls one.
+            let performance = &self.performance;
+            let now = || performance.as_ref().map(|p| p.now());
+            let (start, mut files) = (now(), 0);
+            let mut more = || {
+                files += 1;
+                files <= MUSIC_PROBE_FILES
+                    && match (start, now()) {
+                        (Some(s), Some(t)) => t - s < MUSIC_PROBE_MS,
+                        _ => true,
+                    }
+            };
+            while let Some((folder, announce, kept)) = music.take_folder(&mut more) {
                 self.app.add_music_folder(folder, announce, kept);
             }
             let again = music.again();
