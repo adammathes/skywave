@@ -807,6 +807,10 @@ pub struct RenderStats {
     pub shadow_draw_calls: u32,
     /// Of which in the bloom passes (0 with bloom off or in LDR mode).
     pub bloom_draw_calls: u32,
+    /// Mesh vertex and index buffer binds (a pair counts once) in the last frame's shadow
+    /// and forward passes: one per pass sweep for the chunk pool, plus one per run of a
+    /// standalone mesh, however many pool draws there are.
+    pub buffer_binds: u32,
     /// Lights in the last frame's scene (at most [`MAX_LIGHTS`]).
     pub lights_submitted: u32,
     /// Instances drawn in the forward pass with a full [`LightSet`] ([`LIGHTS_PER_DRAW`]
@@ -2428,6 +2432,7 @@ impl Renderer {
         let mut shadow_draws = 0;
         let mut shadow_instances = [0u32; CASCADES];
         let mut shadow_triangles = 0u64;
+        let mut buffer_binds = 0;
         // Every cascade kept: no shadow pass at all (a tiled GPU would still load and store
         // the whole atlas for an empty one).
         if drawn.iter().any(|&d| d) {
@@ -2478,7 +2483,7 @@ impl Renderer {
                 if let Some(t) = &mut timer {
                     t.begin_count(&mut pass, Some(k));
                 }
-                let (draws, tris) = self.draw_instances(&mut pass, scene.instances, range, None);
+                let (draws, tris, b) = self.draw_instances(&mut pass, scene.instances, range, None);
                 if let Some(t) = &mut timer {
                     if t.occlusion_set().is_some() {
                         pass.end_occlusion_query();
@@ -2487,6 +2492,7 @@ impl Renderer {
                 }
                 shadow_draws += draws;
                 shadow_triangles += tris;
+                buffer_binds += b;
             }
             drop(pass);
             timed |= 1 << timing::PASS_SHADOW;
@@ -2529,8 +2535,9 @@ impl Renderer {
                 }
                 pass.set_pipeline(&self.depth_pipeline);
                 let range = ranges[0].start..late_start;
-                let (d, _) = self.draw_instances(&mut pass, scene.instances, range, None);
+                let (d, _, b) = self.draw_instances(&mut pass, scene.instances, range, None);
                 forward_draws += d;
+                buffer_binds += b;
                 if let Some(t) = &mut timer {
                     t.part(&mut pass, timing::PART_DEPTH, false);
                 }
@@ -2547,12 +2554,14 @@ impl Renderer {
                 if let Some(t) = &mut timer {
                     t.part(&mut pass, part, true);
                 }
-                let (d, n) = self.draw_instances(&mut pass, scene.instances, range, timer.as_mut());
+                let (d, n, b) =
+                    self.draw_instances(&mut pass, scene.instances, range, timer.as_mut());
                 if let Some(t) = &mut timer {
                     t.part(&mut pass, part, false);
                 }
                 forward_draws += d;
                 tris += n;
+                buffer_binds += b;
             }
             triangles = tris;
             // The sky last, at the far plane: only the pixels no mesh covered shade it.
@@ -2571,7 +2580,7 @@ impl Renderer {
             // Glass over everything behind it, sky included.
             if glass_start < ranges[0].end {
                 pass.set_pipeline(&self.glass_pipeline);
-                let (d, n) = self.draw_instances(
+                let (d, n, b) = self.draw_instances(
                     &mut pass,
                     scene.instances,
                     glass_start..ranges[0].end,
@@ -2579,6 +2588,7 @@ impl Renderer {
                 );
                 forward_draws += d;
                 triangles += n;
+                buffer_binds += b;
             }
         }
         timed |= 1 << timing::PASS_FORWARD;
@@ -2702,6 +2712,7 @@ impl Renderer {
         self.stats.last_work = FrameWork::World;
         self.stats.shadow_draw_calls = shadow_draws;
         self.stats.bloom_draw_calls = bloom_draws;
+        self.stats.buffer_binds = buffer_binds;
         self.stats.draw_calls = shadow_draws + forward_draws + bloom_draws;
         self.stats.lights_submitted = lights as u32;
         self.stats.lights_used = used.iter().map(|w| w.count_ones()).sum();
@@ -3105,19 +3116,22 @@ impl Renderer {
     }
 
     /// Issues one instanced draw per run of consecutive packed instances in `range` (of
-    /// `order` and the instance buffer) sharing a mesh; returns the number of draws and
-    /// of triangles. With a `timer`, each draw counts its fragments.
+    /// `order` and the instance buffer) sharing a mesh; returns the number of draws, of
+    /// triangles and of buffer binds. The chunk pool's buffers are bound before its first
+    /// draw and again only after a standalone mesh bound its own. With a `timer`, each
+    /// draw counts its fragments.
     fn draw_instances(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         instances: &[MeshInstance],
         range: std::ops::Range<usize>,
         mut timer: Option<&mut GpuTimer>,
-    ) -> (u32, u64) {
+    ) -> (u32, u64, u32) {
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         let order = &self.order[range.clone()];
         let mesh_of = |k: usize| instances[order[k] as usize].mesh;
-        let (mut draws, mut triangles) = (0, 0u64);
+        let (mut draws, mut triangles, mut binds) = (0, 0u64, 0);
+        let mut pool_bound = false;
         let mut start = 0;
         while start < order.len() {
             let id = mesh_of(start);
@@ -3144,14 +3158,20 @@ impl Renderer {
                 )
             });
             if let Some([first, count]) = self.chunk_pool.draw_range(id) {
-                pass.set_vertex_buffer(0, self.chunk_vertices.slice(..));
-                pass.set_index_buffer(self.chunk_indices.slice(..), wgpu::IndexFormat::Uint32);
+                if !pool_bound {
+                    pass.set_vertex_buffer(0, self.chunk_vertices.slice(..));
+                    pass.set_index_buffer(self.chunk_indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pool_bound = true;
+                    binds += 1;
+                }
                 pass.draw_indexed(first..first + count, 0, packed);
                 draws += 1;
                 triangles += u64::from(count / 3) * copies;
             } else if let Some(mesh) = self.meshes.get(id.0 as usize) {
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pool_bound = false;
+                binds += 1;
                 pass.draw_indexed(0..mesh.index_count, 0, packed);
                 draws += 1;
                 triangles += u64::from(mesh.index_count / 3) * copies;
@@ -3161,7 +3181,7 @@ impl Renderer {
             }
             start = end;
         }
-        (draws, triangles)
+        (draws, triangles, binds)
     }
 
     /// The frame's uniforms with freshly fitted cascades (what `render` uses, without
@@ -5157,6 +5177,11 @@ mod tests {
         let (forward, shadow) = draws(&mut r, &instances);
         assert_eq!(forward, forward0 + 3, "one draw per run of a part");
         assert!(shadow > shadow0);
+        // The pool's buffers are bound once per sweep, not once per draw: a frame with one
+        // pool run binds as often as one with three.
+        let binds = r.stats().buffer_binds;
+        draws(&mut r, &[id, part(a, 0)]);
+        assert_eq!(r.stats().buffer_binds, binds);
         let stats = r.stats().chunk_pool;
         assert_eq!((stats.used, stats.peak, stats.writes), (2, 2, 2));
         assert_eq!(stats.pages_used, 2);
