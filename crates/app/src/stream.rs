@@ -16,7 +16,8 @@
 //!   [`Streamer::sync`], which writes them into the renderer's chunk slots
 //!   ([`render::ChunkStore`]) and frees the evicted ones'. After warmup nothing here
 //!   allocates per step; the stages themselves (the world builders) allocate while they
-//!   run.
+//!   run, but converting their meshes into render vertices does not (it works in the
+//!   build's scratch buffers).
 
 use place::Place;
 use render::{ChunkPoolConfig, ChunkStore, Mesh, PointLight, PoolError, SlotId, MAX_CHUNK_PARTS};
@@ -25,8 +26,8 @@ use world::{ChunkMesh, ChunkPlan, MeshKind, Palette, Pattern, Stage, WorldMesh};
 
 use crate::lighting::{self, Bounds};
 use crate::lighttiles::{self, Tiler};
-use crate::worldmesh::atlas_mesh;
-use crate::{convert, lamp_heads, Part};
+use crate::worldmesh::{atlas_mesh, atlas_mesh_into};
+use crate::{convert, convert_into, lamp_heads, Part};
 
 /// Stages of one chunk: the four world stages ([`Stage`]), then the light tiles.
 pub const STAGES: u8 = 5;
@@ -108,6 +109,9 @@ pub struct ChunkBuild {
     /// went in it (`u32::MAX`: not in it).
     part: WorldMesh,
     remap: Vec<u32>,
+    /// Scratch for a world mesh with its atlas uvs, on its way into `base`, `glow` and
+    /// `lamps`.
+    atlas: WorldMesh,
     /// The light tiles being cut.
     tiler: Tiler,
     tiling: bool,
@@ -136,10 +140,10 @@ impl ChunkBuild {
 
     /// Appends world meshes' render parts (patterned by [`atlas_mesh`]).
     pub fn add_world(&mut self, mesh: &WorldMesh, kind: MeshKind) {
-        let m = atlas_mesh(mesh, kind);
-        lighttiles::append(&mut self.base, &convert(&m, Part::Base));
-        lighttiles::append(&mut self.glow, &convert(&m, Part::Glow));
-        lighttiles::append(&mut self.lamps, &convert(&m, Part::Lamps));
+        atlas_mesh_into(mesh, kind, &mut self.atlas);
+        convert_into(&self.atlas, Part::Base, &mut self.base);
+        convert_into(&self.atlas, Part::Glow, &mut self.glow);
+        convert_into(&self.atlas, Part::Lamps, &mut self.lamps);
     }
 
     /// A piece of a world stage: converts about [`PIECE_RENDER_VERTICES`] of the meshes
@@ -1121,6 +1125,87 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Counts heap allocations made on the current thread.
+    struct CountingAlloc;
+
+    thread_local! {
+        static ALLOCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    // SAFETY: forwards to the system allocator; the counter is a const thread-local Cell,
+    // which needs no allocation of its own.
+    unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let _ = ALLOCS.try_with(|n| n.set(n.get() + 1));
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static GLOBAL: CountingAlloc = CountingAlloc;
+
+    /// Every world mesh of some test town chunks, all stages.
+    fn reference_meshes() -> Vec<ChunkMesh> {
+        let mut place = Place::test_grid();
+        place.header.seed = 1;
+        let pal = Palette::socal_1985();
+        let plan = ChunkPlan::new(&place, &pal, crate::places::grammar());
+        let mut meshes = Vec::new();
+        for chunk in [[0, 0], [-1, -2], [0, 1]] {
+            for stage in Stage::ALL {
+                meshes.extend(plan.build_stage(&place, &pal, chunk, stage));
+            }
+        }
+        meshes
+    }
+
+    /// Converting into the build's scratch makes exactly what converting each mesh on its
+    /// own and appending it does, however full the scratch was before.
+    #[test]
+    fn world_meshes_convert_in_scratch_as_on_their_own() {
+        let meshes = reference_meshes();
+        let mut b = ChunkBuild::default();
+        for c in meshes.iter().rev() {
+            b.add_world(&c.mesh, c.kind);
+        }
+        b.reset([0, 0]);
+        let mut want = [Mesh::default(), Mesh::default(), Mesh::default()];
+        for c in &meshes {
+            b.add_world(&c.mesh, c.kind);
+            let m = atlas_mesh(&c.mesh, c.kind);
+            for (w, part) in want.iter_mut().zip([Part::Base, Part::Glow, Part::Lamps]) {
+                lighttiles::append(w, &convert(&m, part));
+            }
+        }
+        assert!(want[0] == b.base && want[1] == b.glow && want[2] == b.lamps);
+    }
+
+    /// Once its buffers have grown, converting a chunk's world meshes a run of triangles at
+    /// a time, as the pieces do, allocates nothing.
+    #[test]
+    fn converting_a_chunk_allocates_nothing_after_warmup() {
+        let meshes = reference_meshes();
+        let mut b = ChunkBuild::default();
+        let convert_all = |b: &mut ChunkBuild| {
+            b.reset([0, 0]);
+            for c in &meshes {
+                let mut from = 0;
+                while from * 3 < c.mesh.indices.len() {
+                    from = b.add_world_part(&c.mesh, c.kind, from, CONVERT_RUN);
+                }
+            }
+        };
+        convert_all(&mut b);
+        let before = ALLOCS.with(|n| n.get());
+        convert_all(&mut b);
+        let allocs = ALLOCS.with(|n| n.get()) - before;
+        assert!(b.base.vertices.len() > 10_000);
+        assert_eq!(allocs, 0, "allocations converting a chunk after warmup");
     }
 
     /// The coast's chunks the same, and its far terrain: one mesh of the whole place within

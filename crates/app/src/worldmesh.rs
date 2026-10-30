@@ -146,25 +146,29 @@ fn look(pattern: u8, rgb: [u8; 3], kind: MeshKind) -> Look {
 /// its triangles cut so every repeating pattern repeats at its real-world size. Terrain
 /// and water (untiled, vertex colored, indexed with shared vertices) keep their indices.
 pub fn atlas_mesh(m: &WorldMesh, kind: MeshKind) -> WorldMesh {
+    let mut out = WorldMesh {
+        vertices: Vec::with_capacity(m.vertices.len() * 3 / 2),
+        indices: Vec::with_capacity(m.indices.len() * 3 / 2),
+    };
+    atlas_mesh_into(m, kind, &mut out);
+    out
+}
+
+/// [`atlas_mesh`] into `out`, cleared first, so a reused `out` keeps its capacity.
+pub fn atlas_mesh_into(m: &WorldMesh, kind: MeshKind, out: &mut WorldMesh) {
+    out.vertices.clear();
+    out.indices.clear();
     let untiled = |v: &WorldVertex| {
         v.color[3] == Pattern::Terrain as u8 || v.color[3] == Pattern::Water as u8
     };
     if kind == MeshKind::Ground && !m.vertices.is_empty() && m.vertices.iter().all(untiled) {
         let [u0, v0, u1, v1] = PLAIN.tile.rect();
         let uv = [(u0 + u1) * 0.5, (v0 + v1) * 0.5];
-        return WorldMesh {
-            vertices: m
-                .vertices
-                .iter()
-                .map(|v| WorldVertex { uv, ..*v })
-                .collect(),
-            indices: m.indices.clone(),
-        };
+        out.vertices
+            .extend(m.vertices.iter().map(|v| WorldVertex { uv, ..*v }));
+        out.indices.extend_from_slice(&m.indices);
+        return;
     }
-    let mut out = WorldMesh {
-        vertices: Vec::with_capacity(m.vertices.len() * 3 / 2),
-        indices: Vec::with_capacity(m.indices.len() * 3 / 2),
-    };
     let tris = &m.indices;
     let vert = |i: u32| m.vertices[i as usize];
     let mut k = 0;
@@ -176,15 +180,14 @@ pub fn atlas_mesh(m: &WorldMesh, kind: MeshKind) -> WorldMesh {
         if k + 6 <= tris.len() && tris[k + 3] == a && tris[k + 4] == c {
             let q = [vert(a), vert(b), vert(c), vert(tris[k + 5])];
             if mergeable(&q) {
-                emit(&mut out, &q, kind);
+                emit(out, &q, kind);
                 k += 6;
                 continue;
             }
         }
-        emit(&mut out, &[vert(a), vert(b), vert(c)], kind);
+        emit(out, &[vert(a), vert(b), vert(c)], kind);
         k += 3;
     }
-    out
 }
 
 /// Whether quad `q` is one flat parallelogram (in position and uv) of one surface.
