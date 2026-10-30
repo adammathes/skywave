@@ -34,7 +34,8 @@ visual work also run `node tools/screenshot/shoot.mjs --selftest --all && node
 tools/screenshot/diff.mjs --all` (software rendering, minutes per scene; run it once, not per
 subagent). Determinism hashes move only on purpose, in their own commit, with the reason;
 `cargo test -p app -- --ignored write_selftest` rewrites `tools/screenshot/selftest.json`.
-CI does not cover macOS-only code (only `release.yml` builds it, after merge).
+CI also runs clippy on a macOS runner (the `macos` job; `tools/ci.sh` cannot cover it) and the
+pure crates' tests at 32-bit `usize` (`i686-unknown-linux-gnu`, as on wasm32).
 
 ## Issues: the backlog and the queue
 GitHub issues are the backlog; labels are the state (`.claude/skills/issues/SKILL.md` has the

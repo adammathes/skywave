@@ -252,7 +252,7 @@ pub fn render(map: &MacroMap, scale: usize) -> (usize, usize, Vec<u8>) {
     (img.w, img.h, img.rgb)
 }
 
-/// Road color and line width in meters by class; ramps (one-way collectors) are drawn
+/// Road color and line width in meters by class; ramps (one-way edges) are drawn
 /// in their own color.
 fn road_style(class: RoadClass, oneway: bool) -> ([u8; 3], f32) {
     if oneway {
@@ -529,11 +529,16 @@ fn main() {
         let start = Instant::now();
         let g = arterials(Seed(seed), &t, &map);
         let ms = start.elapsed().as_secs_f64() * 1000.0;
+        // One-way edges are ramps whatever their class, and drawn as ramps, so count them apart.
         let mut count = [0usize; 7];
+        let mut ramps = 0;
         for e in &g.edges {
-            count[e.class as usize] += 1;
+            if e.oneway {
+                ramps += 1;
+            } else {
+                count[e.class as usize] += 1;
+            }
         }
-        let ramps = g.edges.iter().filter(|e| e.oneway).count();
         println!(
             "roads: {} nodes, {} edges in {ms:.1} ms, hash {:016x}",
             g.nodes.len(),
@@ -544,7 +549,7 @@ fn main() {
             "  highway {} (red), arterial {} (white), collector {} (yellow), ramps {ramps} (orange), beachfront {} (cyan), rural {} (brown)",
             count[RoadClass::Highway as usize],
             count[RoadClass::Arterial as usize],
-            count[RoadClass::Collector as usize] - ramps,
+            count[RoadClass::Collector as usize],
             count[RoadClass::Beachfront as usize],
             count[RoadClass::Rural as usize],
         );
