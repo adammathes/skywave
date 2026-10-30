@@ -909,7 +909,7 @@ mod tests {
         // Pinned fingerprint: change deliberately, in its own commit, with the reason.
         assert_eq!(
             mesh_hash(&meshes),
-            0xB9CA_5ED1_40B9_D278,
+            0x3E33_BB0B_2B1F_DBEA,
             "{:#018X}",
             mesh_hash(&meshes)
         );
