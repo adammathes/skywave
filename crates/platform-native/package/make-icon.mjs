@@ -1,36 +1,82 @@
-// Renders the Skywave icon (the sun over the horizon from crates/platform-web/web/index.html)
-// to a 256x256 RGBA PNG. Plain Node, no dependencies; the output is committed as skywave.png
-// and only needs regenerating when the drawing changes:
+// The Skywave icon: a low-poly car in silhouette on a coast road at sunset. One list of
+// flat-shaded polygons on a 32 x 32 grid draws both the 256x256 RGBA PNG (committed as
+// skywave.png, used by the AppImage and the Deck install) and the SVG favicon that
+// crates/platform-web/web/index.html inlines as a data URL (the loading screen's logo).
+// Plain Node, no dependencies; rerun both when the drawing changes:
 //
 //   node crates/platform-native/package/make-icon.mjs crates/platform-native/package/skywave.png
+//   node crates/platform-native/package/make-icon.mjs --svg   # paste into index.html's <link rel=icon>
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 const SIZE = 256;
 const SUB = 8; // SUB x SUB samples per pixel
-const K = SIZE / 32; // the drawing is on a 32 x 32 grid
+const K = SIZE / 32;
+
+// Regular n-gon (low-poly circle), flat side down.
+const ngon = (cx, cy, r, n) =>
+  Array.from({ length: n }, (_, k) => {
+    const a = Math.PI / 2 + Math.PI / n + (2 * Math.PI * k) / n;
+    return [+(cx + r * Math.cos(a)).toFixed(2), +(cy + r * Math.sin(a)).toFixed(2)];
+  });
+
+// Painted in order; later shapes cover earlier ones. Everything is clipped to the rounded square.
+const SHAPES = [
+  // Sky in three faceted bands, dusk blue down to orange at the horizon.
+  ["#1b2140", [[0, 0], [32, 0], [32, 9], [0, 12]]],
+  ["#4a2f5c", [[0, 12], [32, 9], [32, 15], [0, 16]]],
+  ["#c0504a", [[0, 16], [32, 15], [32, 19], [0, 19]]],
+  ["#f08a4b", [[0, 19], [32, 19], [32, 21], [0, 21]]],
+  // Low-poly sun sitting on the horizon (the ground below covers its lower half).
+  ["#ffb23e", ngon(16, 21, 8, 10)],
+  // Sea / far ground, then the road.
+  ["#2a2440", [[0, 21], [32, 21], [32, 32], [0, 32]]],
+  ["#3a3550", [[0, 27.2], [32, 27.2], [32, 32], [0, 32]]],
+  ["#eeeade", [[2, 29.4], [7, 29.4], [7, 30.2], [2, 30.2]]],
+  ["#eeeade", [[13.5, 29.4], [18.5, 29.4], [18.5, 30.2], [13.5, 30.2]]],
+  ["#eeeade", [[25, 29.4], [30, 29.4], [30, 30.2], [25, 30.2]]],
+  // The car, side on: a long, low coupe with a wedge nose.
+  ["#10131f", [[3.5, 26], [4, 23.2], [9.5, 22.2], [12.8, 19.2], [20.2, 19.2], [23.6, 22], [28.4, 23], [28.8, 26]]],
+  // Glass, lit by the sunset through it.
+  ["#f08a4b", [[13.4, 20], [16.3, 20], [16.3, 22], [11.2, 22]]],
+  ["#f08a4b", [[17.1, 20], [19.8, 20], [21.9, 22], [17.1, 22]]],
+  // Wheels.
+  ["#05070d", ngon(9, 26.2, 2.3, 8)],
+  ["#05070d", ngon(23.2, 26.2, 2.3, 8)],
+  ["#6a6a78", ngon(9, 26.2, 0.9, 6)],
+  ["#6a6a78", ngon(23.2, 26.2, 0.9, 6)],
+];
 
 const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-const NIGHT = rgb("#141a2c");
-const SUN = rgb("#ffb23e");
-const LINE = rgb("#eeeade");
+const FILLS = SHAPES.map(([c]) => rgb(c));
 
-// Colour of the drawing at (x, y) in grid units, or null outside it. Shapes paint in order.
+function inside(poly, x, y) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
+// Colour of the drawing at (x, y) in grid units, or null outside the rounded square (rx 6).
 function shade(x, y) {
-  // Rounded square, rx 6.
   const cx = Math.min(Math.max(x, 6), 26);
   const cy = Math.min(Math.max(y, 6), 26);
   if (x < 0 || y < 0 || x > 32 || y > 32 || (x - cx) ** 2 + (y - cy) ** 2 > 36) return null;
-  let c = NIGHT;
-  // Half sun: radius 9 around (16, 20), above y = 20.
-  if (y <= 20 && (x - 16) ** 2 + (y - 20) ** 2 <= 81) c = SUN;
-  // Two bands cut through the sun, 1.3 wide.
-  if (Math.abs(y - 16.6) <= 0.65 && x >= 8.6 && x <= 23.4) c = NIGHT;
-  if (Math.abs(y - 13.4) <= 0.65 && x >= 10.4 && x <= 21.6) c = NIGHT;
-  // Horizon: 1.8 wide, round caps, from x 4.5 to 27.5 at y 23.
-  const hx = Math.min(Math.max(x, 4.5), 27.5);
-  if ((x - hx) ** 2 + (y - 23) ** 2 <= 0.81) c = LINE;
+  let c = null;
+  for (let s = 0; s < SHAPES.length; s++) if (inside(SHAPES[s][1], x, y)) c = FILLS[s];
   return c;
+}
+
+if (process.argv[2] === "--svg") {
+  const body = SHAPES.map(([c, p]) => `<path d='M${p.map((q) => q.join(" ")).join("L")}z' fill='${c}'/>`).join("");
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><clipPath id='r'><rect width='32' height='32' rx='6'/></clipPath>` +
+    `<g clip-path='url(#r)'>${body}</g></svg>`;
+  console.log("data:image/svg+xml," + svg.replace(/</g, "%3C").replace(/>/g, "%3E").replace(/#/g, "%23"));
+  process.exit(0);
 }
 
 const px = Buffer.alloc(SIZE * SIZE * 4);
