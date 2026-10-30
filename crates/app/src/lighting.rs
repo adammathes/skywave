@@ -10,7 +10,8 @@
 //! out), then for each instance the lights that light its bounds most, each fading out as
 //! the first left out closes on it, so none pops off when they swap. Fixed arrays and
 //! buffers sized at load: nothing allocates per frame, and the cost is one box-to-sphere
-//! test per light and instance.
+//! test per light and instance near it: the frame's lights are binned into a coarse grid
+//! once, and each instance scores only the lights in the cells it overlaps.
 //!
 //! Units: `Daylight` gives illuminance in lux and luminance in cd/m²; the renderer takes
 //! kilolux and kcd/m². Directions agree (world X east, Y up, Z south).
@@ -510,6 +511,17 @@ pub fn light_set_ranked(
     bounds: &Bounds,
     second: impl Fn(usize) -> bool,
 ) -> LightSet {
+    light_set_among(lights, 0..lights.len().min(MAX_LIGHTS), bounds, second)
+}
+
+/// [`light_set_ranked`] over the lights `candidates` names, in ascending order; the same set
+/// whenever they include every light that reaches `bounds`.
+fn light_set_among(
+    lights: &[PointLight],
+    candidates: impl IntoIterator<Item = usize>,
+    bounds: &Bounds,
+    second: impl Fn(usize) -> bool,
+) -> LightSet {
     // Insertion into a short sorted array (best first) holding one more than a set: most
     // boxes are reached by a handful of lights. Ties keep the earlier light.
     const KEEP: usize = LIGHTS_PER_DRAW + 1;
@@ -518,8 +530,8 @@ pub fn light_set_ranked(
     // `a` ranks above `b`: not a beam when `b` is, else the higher score.
     type Key = (bool, f32, usize);
     let above = |a: &Key, b: &Key| if a.0 == b.0 { a.1 > b.1 } else { b.0 };
-    for (i, l) in lights.iter().enumerate().take(MAX_LIGHTS) {
-        let key = (second(i), light_score(l, bounds), i);
+    for i in candidates {
+        let key = (second(i), light_score(&lights[i], bounds), i);
         if key.1 <= 0.0 || (n == KEEP && !above(&key, &best[n - 1])) {
             continue;
         }
@@ -550,6 +562,114 @@ pub fn light_set_ranked(
     set
 }
 
+/// Cells a side of the grid the frame's lights are binned into...
+const GRID: usize = 32;
+/// ...each at least this square, m (wider when the lights spread farther than the grid).
+const GRID_CELL_M: f32 = 32.0;
+/// A light is binned this much beyond its reach, m, so rounding never drops one.
+const GRID_PAD_M: f32 = 0.05;
+const MASK_WORDS: usize = MAX_LIGHTS.div_ceil(64);
+/// One bit per light of the frame.
+type LightMask = [u64; MASK_WORDS];
+
+/// The frame's lights binned by reach into a grid on the ground (X, Z), so a box scores only
+/// the lights in the cells it overlaps: a light that reaches a box reaches its nearest point,
+/// which is in a cell both cover. Sized at load.
+struct LightGrid {
+    cells: Vec<LightMask>,
+    origin: [f32; 2],
+    cell: f32,
+    /// Off when there is nothing to bin or a light's reach is not finite: every box then
+    /// scores every light.
+    on: bool,
+}
+
+impl LightGrid {
+    fn new() -> LightGrid {
+        LightGrid {
+            cells: vec![[0; MASK_WORDS]; GRID * GRID],
+            origin: [0.0; 2],
+            cell: GRID_CELL_M,
+            on: false,
+        }
+    }
+
+    /// The cell holding `x` along axis `a` (0 X, 1 Z), clamped to the grid.
+    fn index(&self, a: usize, x: f32) -> usize {
+        (((x - self.origin[a]) / self.cell).max(0.0) as usize).min(GRID - 1)
+    }
+
+    /// The cells `lo..=hi` covers, as index ranges along X and Z.
+    fn span(&self, lo: [f32; 2], hi: [f32; 2]) -> [core::ops::RangeInclusive<usize>; 2] {
+        [0, 1].map(|a| self.index(a, lo[a])..=self.index(a, hi[a]))
+    }
+
+    fn bin(&mut self, lights: &[PointLight]) {
+        self.on = false;
+        let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+        for l in lights
+            .iter()
+            .filter(|l| l.radius.is_nan() || l.radius > 0.0)
+        {
+            let r = l.radius + GRID_PAD_M;
+            let p = [l.position[0], l.position[2]];
+            if !(r.is_finite() && p[0].is_finite() && p[1].is_finite()) {
+                return;
+            }
+            for a in 0..2 {
+                lo[a] = lo[a].min(p[a] - r);
+                hi[a] = hi[a].max(p[a] + r);
+            }
+        }
+        if !lo[0].is_finite() {
+            return;
+        }
+        let extent = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        self.origin = lo;
+        self.cell = GRID_CELL_M.max(extent / GRID as f32);
+        self.cells.fill([0; MASK_WORDS]);
+        for (i, l) in lights.iter().enumerate().filter(|(_, l)| l.radius > 0.0) {
+            let r = l.radius + GRID_PAD_M;
+            let p = [l.position[0], l.position[2]];
+            let [xs, zs] = self.span([p[0] - r, p[1] - r], [p[0] + r, p[1] + r]);
+            for z in zs {
+                for x in xs.clone() {
+                    self.cells[z * GRID + x][i / 64] |= 1 << (i % 64);
+                }
+            }
+        }
+        self.on = true;
+    }
+
+    /// The lights that may reach `bounds`, or `None` when every light may.
+    fn candidates(&self, bounds: &Bounds) -> Option<LightMask> {
+        if !(self.on && bounds.min.is_finite() && bounds.max.is_finite()) {
+            return None;
+        }
+        let [xs, zs] = self.span([bounds.min.x, bounds.min.z], [bounds.max.x, bounds.max.z]);
+        let mut mask = [0; MASK_WORDS];
+        for z in zs {
+            for c in &self.cells[z * GRID..][xs.clone()] {
+                for (m, w) in mask.iter_mut().zip(c) {
+                    *m |= w;
+                }
+            }
+        }
+        Some(mask)
+    }
+}
+
+/// The lights `mask` names, in ascending order.
+fn mask_lights(mask: LightMask) -> impl Iterator<Item = usize> {
+    mask.into_iter().enumerate().flat_map(|(w, mut bits)| {
+        core::iter::from_fn(move || {
+            let b = bits.trailing_zeros() as usize;
+            bits &= bits.wrapping_sub(1);
+            (b < 64).then_some(w * 64 + b)
+        })
+    })
+}
+
 /// The frame's lights and the light set of every instance (see the module docs).
 pub struct FrameLights {
     /// The place's static lights: street lamps, neon, storefront fill.
@@ -569,6 +689,7 @@ pub struct FrameLights {
     /// every one from `dim`, the statics still striking or warming up.
     second: core::ops::Range<usize>,
     dim: usize,
+    grid: LightGrid,
 }
 
 impl FrameLights {
@@ -595,6 +716,7 @@ impl FrameLights {
             len: 0,
             second: 0..0,
             dim: MAX_LIGHTS,
+            grid: LightGrid::new(),
         }
     }
 
@@ -629,6 +751,11 @@ impl FrameLights {
     /// (each at its moment in the dusk wave, dimmed by its level), all of them when they
     /// fit, else those nearest `eye`, the farthest fading out toward the first left out.
     pub fn gather(&mut self, eye: Vec3, lamps: LampClock, dynamic: &[PointLight]) {
+        self.collect(eye, lamps, dynamic);
+        self.grid.bin(&self.lights[..self.len]);
+    }
+
+    fn collect(&mut self, eye: Vec3, lamps: LampClock, dynamic: &[PointLight]) {
         self.second = 0..0;
         self.dim = MAX_LIGHTS;
         let n = dynamic.len().min(MAX_LIGHTS);
@@ -707,7 +834,11 @@ impl FrameLights {
     /// The light set of an instance covering `bounds` ([`light_set_ranked`]).
     pub fn set_for(&self, bounds: &Bounds) -> LightSet {
         let (second, dim) = (self.second.clone(), self.dim);
-        light_set_ranked(self.lights(), bounds, |i| second.contains(&i) || i >= dim)
+        let second = |i| second.contains(&i) || i >= dim;
+        match self.grid.candidates(bounds) {
+            Some(mask) => light_set_among(self.lights(), mask_lights(mask), bounds, second),
+            None => light_set_ranked(self.lights(), bounds, second),
+        }
     }
 
     /// Sets each instance's light set from its bounds (`None`: lit by the sun and sky only).
@@ -1113,6 +1244,55 @@ mod tests {
         assert_eq!(instances[0].lights.len(), 4);
         assert!(instances[1].lights.is_empty());
         assert_eq!(instances[2].lights, LightSet::EMPTY);
+    }
+
+    /// The grid of lights picks exactly what scoring every light picks: every piece of the
+    /// coast at night with busy traffic (the NPC cars' beams ranking second), frame after
+    /// frame as the car drives up the strip.
+    #[test]
+    fn the_light_grid_picks_what_scoring_every_light_picks() {
+        use crate::{App, InputState, SceneSetup};
+        let query = "place=coast&t=22:30&lights=1&stream=0&car=gannet_gt&traffic=busy";
+        let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        let mut input = InputState::default();
+        input.set(Action::Throttle, 0.6);
+        let (mut lit, mut full, mut frames) = (0, 0, 0);
+        let (mut scoring, mut binned) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        for frame in 0..240 {
+            app.update(&input, 1.0 / 60.0);
+            app.scene_view(1.0, 16.0 / 9.0);
+            if frame % 20 != 0 {
+                continue;
+            }
+            let l = &app.lights;
+            assert!(l.grid.on && l.lights().len() > 100, "{}", l.lights().len());
+            let (second, dim) = (l.second.clone(), l.dim);
+            let second = |i| second.contains(&i) || i >= dim;
+            let started = std::time::Instant::now();
+            let brute: Vec<_> = app
+                .bounds
+                .iter()
+                .flatten()
+                .map(|b| light_set_ranked(l.lights(), b, second))
+                .collect();
+            scoring += started.elapsed();
+            let started = std::time::Instant::now();
+            let grid: Vec<_> = app.bounds.iter().flatten().map(|b| l.set_for(b)).collect();
+            binned += started.elapsed();
+            for ((g, s), b) in grid.iter().zip(&brute).zip(app.bounds.iter().flatten()) {
+                assert_eq!(g, s, "{b:?}");
+                lit += usize::from(!s.is_empty());
+                full += usize::from(s.len() == LIGHTS_PER_DRAW);
+            }
+            frames += 1;
+        }
+        eprintln!(
+            "{} boxes: every light {:?}, the grid {:?} a frame",
+            app.bounds.iter().flatten().count(),
+            scoring / frames,
+            binned / frames
+        );
+        assert!(lit > 1000 && full > 100, "{lit} lit, {full} full");
     }
 
     /// The weight each of `count` lights has in `set` (0 out of it).
