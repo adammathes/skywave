@@ -8,10 +8,10 @@
 //!   world stages in pieces of about [`PIECE_VERTICES`] vertices and the light tiles a cut
 //!   pass at a time, so no piece takes much more than a couple of milliseconds.
 //! - The [`Streamer`] keeps the chunks within [`StreamBudget::radius`] of the camera's
-//!   chunk resident, nearest first and those ahead before those behind; each sim step it
-//!   runs pieces until [`StreamBudget::step_budget_s`] is spent (measured with the clock
-//!   the platform passes in, checked before each piece, so a step overruns by at most one
-//!   piece), and evicts chunks more than one chunk past the radius. Resident chunks live in
+//!   chunk resident, nearest first and those ahead before those behind; once a frame
+//!   (however many sim steps the frame holds) it runs pieces until
+//!   [`StreamBudget::frame_budget_s`] is spent (measured with the clock the platform passes
+//!   in, checked before each piece, so a frame overruns by at most one piece), and evicts chunks more than one chunk past the radius. Resident chunks live in
 //!   a fixed [`Pool`]; finished builds wait in a few staging buffers for
 //!   [`Streamer::sync`], which writes them into the renderer's chunk slots
 //!   ([`render::ChunkStore`]) and frees the evicted ones'. After warmup nothing here
@@ -445,14 +445,14 @@ impl ChunkSource for PlaceSource {
 pub struct StreamBudget {
     /// Chunks kept resident each way from the camera's chunk: `(2r + 1)²` in all.
     pub radius: i32,
-    /// Time each sim step may spend building chunks, seconds.
-    pub step_budget_s: f64,
+    /// Time each frame may spend building chunks, seconds.
+    pub frame_budget_s: f64,
     /// Vertices the renderer's chunk pool holds, all slots together.
     pub pool_vertices: u32,
 }
 
 impl StreamBudget {
-    /// 9×9 chunks, 2 ms a step; a pool for 4.96M vertices, 208 MB of buffers. With its
+    /// 9×9 chunks, 2 ms a frame; a pool for 4.96M vertices, 208 MB of buffers. With its
     /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
     /// stroke-lettered signs and the light tiles its street lamps cut, the coast's densest
     /// 11×11 chunks (the ring and the chunks waiting to be evicted) take 1100 pages of 4096
@@ -460,14 +460,14 @@ impl StreamBudget {
     /// furniture are instances, outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
-        step_budget_s: 0.002,
+        frame_budget_s: 0.002,
         pool_vertices: 4_960_000,
     };
-    /// 13×13 chunks, 4 ms a step; 6.62M vertices, 278 MB: room for the whole coast (1470
+    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for the whole coast (1470
     /// pages on seed 1) and a tenth more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
-        step_budget_s: 0.004,
+        frame_budget_s: 0.004,
         pool_vertices: 6_620_000,
     };
 
@@ -518,6 +518,7 @@ struct Work {
 /// Streaming counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StreamStats {
+    /// Calls of [`Streamer::step`]: one a frame.
     pub steps: u64,
     /// Pieces of stages run.
     pub stages: u64,
@@ -527,7 +528,7 @@ pub struct StreamStats {
     /// Resident chunks now and at most.
     pub resident: usize,
     pub peak_resident: usize,
-    /// Longest step, and most a step went past its budget, seconds.
+    /// Longest step, and most a step went past its frame budget, seconds.
     pub max_step_s: f64,
     pub max_overrun_s: f64,
     /// Chunks the GPU pool could not take (left undrawn), and the last reason.
@@ -730,9 +731,9 @@ impl Streamer {
         best.map(|(_, _, c)| c)
     }
 
-    /// One sim step: follows the camera at ground point `eye` (`[x, z]`) looking along
-    /// `heading`, then builds pieces of stages of the nearest missing chunks until the
-    /// step's budget is spent, as `now` (seconds, any origin) measures it. Returns the
+    /// One frame's streaming (call it once a frame, not once a sim step): follows the
+    /// camera at ground point `eye` (`[x, z]`) looking along `heading`, then builds pieces
+    /// of stages of the nearest missing chunks until the frame's budget is spent, as `now` (seconds, any origin) measures it. Returns the
     /// pieces run.
     pub fn step(
         &mut self,
@@ -748,7 +749,7 @@ impl Streamer {
             self.recenter(center);
         }
         let mut stages = 0;
-        while now() - start < self.budget.step_budget_s {
+        while now() - start < self.budget.frame_budget_s {
             let work = match self.current {
                 Some(w) => w,
                 None => {
@@ -812,7 +813,7 @@ impl Streamer {
         self.stats.max_overrun_s = self
             .stats
             .max_overrun_s
-            .max(took - self.budget.step_budget_s);
+            .max(took - self.budget.frame_budget_s);
         self.stats.resident = self.residents.len();
         self.stats.peak_resident = self.stats.peak_resident.max(self.stats.resident);
         stages
