@@ -26,38 +26,24 @@ a PR into main when CI is green." That is the whole handoff; no chat history is 
 Claude Project, put `CLAUDE.md` and this file in the project instructions and start sessions from it.
 
 ## Verification before a PR
-`cargo fmt --all --check`; `cargo clippy --all-targets --all-features -- -D warnings`;
-`cargo clippy --target wasm32-unknown-unknown -p platform-web --all-targets -- -D warnings`;
-`cargo test --workspace`; `cargo deny check`; `tools/web-build.sh`; for visual work
-`node tools/screenshot/shoot.mjs --selftest --all && node tools/screenshot/diff.mjs --all` (software
-rendering, minutes per scene; run it once, not per subagent). Determinism hashes move only on
-purpose, in their own commit, with the reason; `cargo test -p app -- --ignored write_selftest`
-rewrites `tools/screenshot/selftest.json`. Budget tests assert only under `SKYWAVE_ENFORCE_BUDGETS`.
+`tools/ci.sh` runs exactly what CI runs (`ci.yml` calls it): fmt, clippy native and web, tests
+with budgets enforced, `cargo deny`, the web build and the WebGL2 screenshot smoke test. Run
+`tools/ci.sh --setup` once in a fresh container (it installs the Linux deps, the wasm target,
+cargo-deny and Playwright), then `tools/ci.sh` before every push; push only when it passes. For
+visual work also run `node tools/screenshot/shoot.mjs --selftest --all && node
+tools/screenshot/diff.mjs --all` (software rendering, minutes per scene; run it once, not per
+subagent). Determinism hashes move only on purpose, in their own commit, with the reason;
+`cargo test -p app -- --ignored write_selftest` rewrites `tools/screenshot/selftest.json`.
+CI does not cover macOS-only code (only `release.yml` builds it, after merge).
 
-## The owner's board
-A live board of every task lives at https://claude.ai/artifact/17baWQ1hwt3R194YbzjpWS (private to
-the owner); its `items` collection is the queue of record. **Proposed** cards are ideas and
-follow-ups: nothing in Proposed is worked. **Queued** means the owner pressed Approve: work those
-top first, without asking again. Only the owner moves a card from Proposed to Queued. New ideas,
-follow-ups and review leftovers go in as Proposed. Read `items` where status is `queued`, ordered
-by `order`, before dispatching; update status as sessions start, PRs open and merge.
-
-## Work queue (how approved work runs now)
-Open a Claude Code session on the repo and say "run the work queue". That session becomes the
-**coordinator** (`.claude/skills/work-queue/SKILL.md`). It builds nothing itself: each Queued card
-gets its own cloud session and container, which builds, verifies, opens the PR and drives CI to
-green. The owner merges every PR: a green one shows in Needs you as ready to merge. Anything for the owner goes on the board's Needs you column, answered in the card's
-note. The
-coordinator runs one tick of `.claude/workflows/work-queue.js` whenever it wakes:
-1. reads the board (never Proposed);
-2. checks each in-flight card's session and PR: marks merges, moves green PRs (ready to merge) and
-   anything else that needs the owner to Needs you, reports the owner's answers in notes, nudges a
-   session idle 30 min once and hands it to the owner an hour later;
-3. starts each Queued card whose `after` cards have merged, up to 8 in flight.
-It wakes on a card session's poke (each session fires the coordinator's "Skywave queue: event"
-trigger at its outcome), on a card session failing, and hourly ("Skywave queue: hourly") for what
-pokes miss. It tells the owner only what needs them, and stops (deleting both triggers) when
-nothing is in flight or Queued. A new coordinator takes over by running a tick.
+## Issues: the backlog and the queue
+GitHub issues are the backlog; labels are the state (`.claude/skills/issues/SKILL.md` has the
+table). Only the owner adds `approved`. Saying "work the issues" in a session on this repo runs
+one pass: it starts a cloud session per `approved` issue (one per `area:*` label at a time, up to
+4), labels it `in progress`, reports, and ends. Each session opens a draft PR that `Fixes #<n>`
+and marks it ready for review once CI is green: **a PR that is not a draft is ready to merge.**
+A session that needs a decision comments on its issue and labels it `needs owner`. New ideas and
+follow-ups are filed as issues without `approved`.
 
 ## Where things stand (keep current)
 
@@ -66,8 +52,8 @@ Nothing is running. Since the previous coordinator stopped: #42 (the Deck), #44 
 #47 (its revert), #37 (parking lots), #45 (2001 traffic cars), #20 (map edges), #46 (hero cars
 part 2), #48 and #49 (Mirage Valley), #50 and #52 (set pieces parts 1 and 2: static places, grade
 crossings and a freight train), #53 (music folders in the native app) merged.
-- **How work runs now:** the owner approves cards on the board (Proposed → Queued); a session told
-  "run the work queue" becomes the coordinator for them (see "Work queue" above).
+- **How work runs now (2026-10-30):** GitHub issues replaced the board and the work queue (see
+  "Issues" above). The 2026-10-30 audit is filed as issues.
 - **Queued (approved 22:10):** seven "game feel" cards: the landmark gallery first, then pilot
   landmarks, vista siting, quiet the filler, the roadside set, downtown anchors, dusk moments.
 - **Needs the owner:** drive the reverted handling (then decide feel pass 3, board `feel-3`);
@@ -154,8 +140,7 @@ crossings and a freight train), #53 (music folders in the native app) merged.
   the Deck's "Skywave
   Update" launcher written by `tools/install-deck.sh` (a08324f).
 - Open PRs: none; building: set pieces (see "Resume here"). Paused: NPC cars see
-  pedestrians (`m4/npc-sees-peds`). The owner's board (above) is the queue of record for what
-  comes next.
+  pedestrians (`m4/npc-sees-peds`). GitHub issues are the queue of record for what comes next.
 - Owner feedback not yet acted on: mobile (NOTES #5, after Deck verification); the owner's Deck
   `--stats` output; NOTES 4(a) beyond traffic and pedestrians (window lights, parked cars that
   come and go); buildings B7, B11-B15.
