@@ -270,7 +270,7 @@ block a car (an upright lathe only as wide as it is within those 2 m, so a pedes
 under it); each `Lamp` is a `Flood` light. 
 The kits so far: `water_tower` (the gallery's sample; the owner picked B) and the roadside set for Mirage
 Valley's boulevards (the roadside card, 2026-10-29), each in three variants awaiting the owner's pick:
-`donut_shop` (kitsch: a giant iced donut on the roof or over a walk-up stand, a drive-thru window and lane),
+`donut_shop` (kitsch: a giant iced donut on the roof or over a walk-up stand, a drive-thru window, its lane looping round the back to the street),
 `coffee_shop` (a glass dining room under a roof swooping up toward the road, or a butterfly roof; a
 canted pole sign with a starburst), `motel` (rooms round a kidney pool lit from below behind a low wall,
 an office, a pole sign with a neon arrow bending down to the drive) and `drive_in` (a screen facing the
