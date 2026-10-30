@@ -280,7 +280,7 @@ struct Entry {
     reach2: f32,
     /// A parked car: it sways when knocked ([`world::collide::Rocking`]).
     car: bool,
-    /// A parked car's see-through glass, drawn over its near level ([`car::parked_cabin`]);
+    /// A parked car's see-through glass, drawn over its near level ([`car::ParkedBuilds::cabin`]);
     /// `u16::MAX` for every other prop.
     glass: u16,
     /// A parking lot's car: its index into the collider's lot cars
@@ -379,6 +379,8 @@ impl PropInstances {
             .map(|s| vec![None; s.palette.len() + shape::ERA_1980S_PAINT.len()])
             .collect();
         let mut glass_mesh: Vec<Option<u16>> = vec![None; shapes.len()];
+        let mut builds: Vec<car::ParkedBuilds> =
+            shapes.iter().map(car::ParkedBuilds::new).collect();
         let mut entries = Vec::with_capacity(items.len());
         let mut lots = 0u32;
         for p in items {
@@ -429,7 +431,7 @@ impl PropInstances {
                             let own = if era.is_some() { 0 } else { paint };
                             // Level 1, then level 2 right after it (`far` is `mesh + 1`).
                             for lod in [1, 2] {
-                                meshes.push(car::parked_mesh(&shapes[s], own, era, lod)?);
+                                meshes.push(builds[s].mesh(own, era, lod)?);
                             }
                             let id = (meshes.len() - 2) as u16;
                             car_mesh[s][paint] = Some(id);
@@ -440,7 +442,7 @@ impl PropInstances {
                     glass = match glass_mesh[s] {
                         Some(g) => g,
                         None => {
-                            meshes.push(car::parked_cabin(&shapes[s])?.0);
+                            meshes.push(builds[s].cabin()?.0);
                             let g = (meshes.len() - 1) as u16;
                             glass_mesh[s] = Some(g);
                             g

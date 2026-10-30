@@ -18,6 +18,9 @@ const CAP_W: f32 = 0.05;
 /// Floor depth under the rail, m.
 const DEPTH: f32 = 0.46;
 
+/// The lower paint's shades on the bed's walls, floor and ribs.
+pub(crate) const SHADES: [f32; 3] = [0.8, 0.62, 0.74];
+
 /// Lines the bed into `out`, if the body has one.
 pub fn build(b: &Body, m: &Materials, out: &mut Soup) {
     let Some((s0, s1)) = b.bed else {
@@ -53,7 +56,7 @@ pub fn build(b: &Body, m: &Materials, out: &mut Soup) {
     }
     let over_tub = |s: f32| s > t0 + 1e-4 && s < t1 - 1e-4;
     let paint = m.paint_low;
-    let wall = paint.shade(0.8);
+    let wall = paint.shade(SHADES[0]);
     let p = |s: f32, z: f32, y: f32| b.p(s, z, y);
 
     // Rail caps and inner walls, down to the floor or the tub top.
@@ -101,7 +104,7 @@ pub fn build(b: &Body, m: &Materials, out: &mut Soup) {
     }
 
     // Floor: full width ahead of and behind the tubs, between them in the middle.
-    let floor = paint.shade(0.62);
+    let floor = paint.shade(SHADES[1]);
     let zi = |s: f32| b.frame(s).z_ledge - CAP_W;
     for (a, c, za, zc) in [
         (s0, t0, zi(s0), zi(t0)),
@@ -131,7 +134,7 @@ pub fn build(b: &Body, m: &Materials, out: &mut Soup) {
         return;
     }
     // Raised ribs along the floor, clear of the tubs.
-    let rib = paint.shade(0.74);
+    let rib = paint.shade(SHADES[2]);
     let n = 5;
     for k in 0..n {
         let z = lerp(-zt + 0.08, zt - 0.08, k as f32 / (n - 1) as f32);

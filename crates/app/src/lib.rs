@@ -185,6 +185,9 @@ pub struct App {
     /// Every car and paint registered so far (the one driven among them), for switching
     /// back and for the turntable.
     cars: Vec<RegisteredCar>,
+    /// The car last built, in its paint base: another paint of it is a recolor
+    /// ([`CarModel::painted_from`]), not a rebuild.
+    paint_base: (&'static str, CarModel),
     /// The Vehicle page's turntable this frame: the car and its stage (virtual HUD units).
     preview: Option<(RegisteredCar, [f32; 4])>,
     /// The turntable's disc and its turn, radians.
@@ -320,7 +323,8 @@ impl App {
         if paint >= shape.palette.len() {
             return Err(format!("`{vehicle_id}` has no paint {paint}"));
         }
-        let model = CarModel::build_painted(&spec, &shape, paint)?;
+        let mut base = CarModel::base(&spec, &shape, paint)?;
+        let model = CarModel::painted_from(&mut base, &spec, &shape, paint)?;
         let (place, plan) = places::load(key, seed, world)?;
         let (palette, grammar) = (places::palette_of(world), places::grammar_of(world));
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
@@ -493,6 +497,7 @@ impl App {
             car_meshes,
             drivers,
             cars,
+            paint_base: (vehicles::BUILTIN[vehicle_index].0, base),
             preview: None,
             turntable,
             spin: preview::STILL_SPIN_RAD,
@@ -851,7 +856,11 @@ impl App {
             return Ok(*car);
         }
         let spec = vehicles::builtin_spec(id)?;
-        let model = CarModel::build_painted(&spec, &vehicles::builtin_shape(&spec)?, paint)?;
+        let shape = vehicles::builtin_shape(&spec)?;
+        if self.paint_base.0 != id {
+            self.paint_base = (id, CarModel::base(&spec, &shape, paint)?);
+        }
+        let model = CarModel::painted_from(&mut self.paint_base.1, &spec, &shape, paint)?;
         let (pending, mut next) = (&mut self.pending_meshes, self.mesh_count);
         let mut add = |m: &Mesh| {
             pending.push(m.clone());
