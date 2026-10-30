@@ -68,8 +68,8 @@ crossings and a freight train), #53 (music folders in the native app) merged.
   person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
   remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
   17.5 m semi, a 7.4 m box truck), so seeing people must use each car's length, not 4.6 m.
-- Everything else is deferred on the board. Costs so far: coordinator $1,035 (the expensive
-  part: a 400k-token context woken 100+ times a day), builders $10–90 each.
+- Everything else was deferred on the old board; ideas from it not yet filed as issues still live
+  there.
 
 - Done on `main` (2026-10-27 23:50 UTC): M0; M1; M2; M3 part 1 (synthesized sound; web radio with
   ad-free stations per era (the aggregator presets were dropped for their pre-roll ads) and NO SIGNAL auto-skip; car reset key; dial-sweep tune sound); feel
