@@ -28,8 +28,10 @@ New issues, follow-ups and review leftovers are filed without `approved`. Only t
 2. List open issues labeled `approved` that are neither `in progress` nor `needs owner`, oldest
    first. Start each one whose area is not busy (then mark its area busy), up to 4 in flight in
    total. For each issue, run `create_session` with
-   `source_url: "https://github.com/adammathes/skywave"`, `title: "#<n> <title>"`, and the prompt
-   below. Then add `in progress` and comment `Started: https://claude.ai/code/<session id>`.
+   `source_url: "https://github.com/adammathes/skywave"`,
+   `outcome_branch: "issue/<n>-<slug>"` (a session may push only to its outcome branch),
+   `title: "#<n> <title>"`, and the prompt below. Then add `in progress` and comment
+   `Started: https://claude.ai/code/<session id>`.
 3. Tell the owner in a few lines what started, what is waiting on a busy area, and what is in
    `needs owner`. Then stop.
 
