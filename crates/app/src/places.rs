@@ -10,7 +10,7 @@ use place::Place;
 use skywave_core::Seed;
 use world::landmarks::Kit;
 use world::template::RegionTemplate;
-use world::{Grammar, Palette};
+use world::{ChunkPlan, Grammar, Palette};
 
 use crate::scenario::Scenario;
 use crate::scene::PlaceKey;
@@ -132,6 +132,33 @@ pub fn build(key: PlaceKey, seed: Seed) -> Result<Place, String> {
     build_in(key, seed, crate::scenario::get(0))
 }
 
+/// [`build_in`] and the place's [`ChunkPlan`] for meshes painted with [`palette_of`]`(s)`,
+/// made once: a procedural place's is the one its detail pass read.
+pub fn load(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan), String> {
+    if key == PlaceKey::Coast {
+        let t = template_of(s)?;
+        let pal = palette_of(s);
+        return Ok(world::procgen::build_place_planned(
+            seed,
+            &t,
+            grammar_of(s),
+            &pal,
+        ));
+    }
+    let place = build_in(key, seed, s)?;
+    let plan = ChunkPlan::new(&place, &palette_of(s), grammar_of(s));
+    Ok((place, plan))
+}
+
+/// Scenario `s`'s region template, checked.
+fn template_of(s: &Scenario) -> Result<RegionTemplate, String> {
+    let text = region_text(&s.region).ok_or("no such region template")?;
+    let t: RegionTemplate = ron::from_str(text).map_err(|e| format!("region template: {e}"))?;
+    t.validate()
+        .map_err(|e| format!("region template: {e:?}"))?;
+    Ok(t)
+}
+
 /// The place `key` names for `seed`: the test town, scenario `s`'s procedural place, or the
 /// landmark gallery dressed as `s`'s world.
 pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String> {
@@ -142,14 +169,11 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
             place.header.seed = seed.0;
             Ok(place)
         }
-        PlaceKey::Coast => {
-            let text = region_text(&s.region).ok_or("no such region template")?;
-            let t: RegionTemplate =
-                ron::from_str(text).map_err(|e| format!("region template: {e}"))?;
-            t.validate()
-                .map_err(|e| format!("region template: {e:?}"))?;
-            Ok(world::procgen::build_place(seed, &t, grammar_of(s)))
-        }
+        PlaceKey::Coast => Ok(world::procgen::build_place(
+            seed,
+            &template_of(s)?,
+            grammar_of(s),
+        )),
         PlaceKey::Gallery => {
             let text = region_text(&s.region).ok_or("no such region template")?;
             let t: RegionTemplate =

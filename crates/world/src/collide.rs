@@ -49,7 +49,7 @@ use crate::mesh::terrain::TerrainGrid;
 use crate::mesh::WorldMesh;
 use crate::props::{self, Prop, PropKind};
 use crate::roads::Network;
-use crate::{MeshSet, Palette, CURB_M, LOT_Y, TERRAIN_Y};
+use crate::{ChunkPlan, MeshSet, Palette, CURB_M, LOT_Y, TERRAIN_Y};
 
 /// Grid cell edge, m.
 pub const CELL_M: f32 = 16.0;
@@ -403,23 +403,47 @@ impl WorldCollider {
         let mut net = Network::new(place);
         let lots = crate::lots::plan(place, &net, &grammar.lots);
         net.cuts = crate::lots::cuts(&lots);
+        let terrain = crate::is_terrain_place(place).then(|| TerrainGrid::new(place, &net));
+        WorldCollider::of(place, grammar, &net, &lots, terrain)
+    }
+
+    /// [`WorldCollider::build`] from the place's [`ChunkPlan`], made already: the roads,
+    /// lots and graded terrain are the meshes' own, not built again.
+    pub fn with_plan(place: &Place, grammar: &Grammar, plan: &ChunkPlan) -> WorldCollider {
+        WorldCollider::of(
+            place,
+            grammar,
+            plan.net(),
+            plan.lots(),
+            plan.grid().cloned(),
+        )
+    }
+
+    /// The collider of `place` on its road network `net` (with the lots' curb cuts), its
+    /// parking lots and a terrain place's graded terrain.
+    fn of(
+        place: &Place,
+        grammar: &Grammar,
+        net: &Network,
+        lots: &[crate::lots::ParkingLot],
+        terrain: Option<TerrainGrid>,
+    ) -> WorldCollider {
         let mut shapes = Shapes {
             points: Vec::new(),
             patches: Vec::new(),
         };
         // Patches in priority order: asphalt, then dropped curbs and sidewalks, then
         // parking lots (their raised pieces first), then lot pads.
-        road_patches(place, &net, &mut shapes);
+        road_patches(place, net, &mut shapes);
         let terrain_place = crate::is_terrain_place(place);
-        let terrain = terrain_place.then(|| TerrainGrid::new(place, &net));
         let mut lot_walls = Vec::new();
         if let Some(g) = &terrain {
-            lot_patches(&lots, &net, g, &mut shapes, &mut lot_walls);
+            lot_patches(lots, net, g, &mut shapes, &mut lot_walls);
         }
         let blocks = if terrain_place {
             Vec::new()
         } else {
-            ground::blocks(&net)
+            ground::blocks(net)
         };
         for b in &blocks {
             let surface = match ground::block_surface(place, b) {
@@ -436,7 +460,7 @@ impl WorldCollider {
         let (posts, mut boxes, lot_cars) = if terrain_place {
             place_prop_solids(place, &grammar.landmarks)
         } else {
-            let props = props_of(place, grammar, &net, &blocks);
+            let props = props_of(place, grammar, net, &blocks);
             let (posts, boxes) = prop_solids(&props, &grammar.landmarks);
             (posts, boxes, Vec::new())
         };

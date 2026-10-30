@@ -126,7 +126,8 @@ const NEON_RADIUS_M: f32 = 8.0;
 const WINDOW_RADIUS_M: f32 = 7.0;
 
 /// Fills `place.props` and `place.lights` (see the module docs). `m` is the macro map the
-/// place was built from (for the pier), `sites` where its set pieces go. Leaves the tables unsorted; the caller sorts the
+/// place was built from (for the pier), `sites` where its set pieces go, `plan` the
+/// place's [`ChunkPlan`] (its roads, graded terrain, lots and buildings). Leaves the tables unsorted; the caller sorts the
 /// place by chunk.
 pub fn detail(
     seed: Seed,
@@ -134,13 +135,13 @@ pub fn detail(
     grammar: &Grammar,
     m: &MacroMap,
     sites: &super::setpieces::SetPieces,
+    plan: &ChunkPlan,
     place: &mut Place,
 ) {
     // The template's own palette where it names a built-in one (the coast's names none).
     let pal = Palette::named(&template.era.palette).unwrap_or_else(Palette::socal_1985);
-    let plan = ChunkPlan::new(place, &pal, grammar);
     let (props, lights) = {
-        let mut d = Detailer::new(place, &plan, template, &grammar.lots, seed);
+        let mut d = Detailer::new(place, plan, template, &grammar.lots, seed);
         d.street = grammar.street.clone();
         if let Some(b) = &m.basin {
             d.keep_basin_clear(b);

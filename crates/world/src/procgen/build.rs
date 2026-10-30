@@ -26,6 +26,7 @@ use super::{RES_PER_CHUNK, ZONE_SAMPLES};
 use crate::grammar::Grammar;
 use crate::math::{atan2, segment_distance, V2};
 use crate::template::RegionTemplate;
+use crate::{ChunkPlan, Palette};
 
 /// Chunks along each side of a v1 place (2 km square).
 pub const PLACE_CHUNKS: [u16; 2] = [16, 16];
@@ -56,6 +57,26 @@ pub fn era_of(year: u16) -> Era {
 /// A skeleton Place for `(seed, template)`: see the module docs. `template` must have
 /// passed [`RegionTemplate::validate`], `grammar` [`Grammar::validate`]. Deterministic.
 pub fn build_place(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> Place {
+    build_detailed(seed, template, grammar).0
+}
+
+/// [`build_place`] and its [`ChunkPlan`], the one the detail pass read, brought up to date
+/// for meshes painted with `palette` ([`ChunkPlan::redetail`]). A load hands the plan on to
+/// the collider and the meshes instead of making it again.
+pub fn build_place_planned(
+    seed: Seed,
+    template: &RegionTemplate,
+    grammar: &Grammar,
+    palette: &Palette,
+) -> (Place, ChunkPlan) {
+    let (place, mut plan) = build_detailed(seed, template, grammar);
+    plan.redetail(&place, palette);
+    (place, plan)
+}
+
+/// The Place and the plan its detail pass read (props and terrain colors as they were
+/// before it).
+fn build_detailed(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> (Place, ChunkPlan) {
     let m = MacroMap::generate(seed, template, PLACE_CHUNKS);
     let arterials = arterials(seed, template, &m);
     // The start is found on the arterials as they are, before the streets split them.
@@ -79,9 +100,13 @@ pub fn build_place(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> 
     place.pois.extend(sites.pois(seed));
     // Stage 7 reads the buildings where the meshes will find them.
     place.sort_by_chunk();
-    detail(seed, template, grammar, &m, &sites, &mut place);
+    // The template's own palette where it names a built-in one (the coast's names none).
+    let pal = Palette::named(&template.era.palette).unwrap_or_else(Palette::socal_1985);
+    let plan = ChunkPlan::new(&place, &pal, grammar);
+    detail(seed, template, grammar, &m, &sites, &plan, &mut place);
+    // Only the props and lights move: every table the plan read is in chunk order already.
     place.sort_by_chunk();
-    place
+    (place, plan)
 }
 
 /// The Place skeleton for a macro map and its road graph, the start on its arterials.
