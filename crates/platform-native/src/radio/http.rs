@@ -279,7 +279,7 @@ fn connect(url: &Url, deadline: Instant, wanted: &impl Fn() -> bool) -> Result<C
     let (host, port) = proxy
         .as_ref()
         .map_or((url.host.as_str(), url.port), |(h, p)| (h.as_str(), *p));
-    let tcp = tcp(host, port)?;
+    let tcp = tcp(host, port, deadline, wanted)?;
     if !wanted() {
         return Err("no longer wanted".into());
     }
@@ -319,11 +319,42 @@ fn handshake(
     Ok(())
 }
 
-fn tcp(host: &str, port: u16) -> Result<TcpStream, String> {
-    let addrs = lookup(host, port)?;
+/// Connects to `host`, trying its addresses with IPv6 and IPv4 alternating. Each attempt
+/// gets an even share of the time left before `deadline` (at most [`CONNECT_TIMEOUT`]), so
+/// a dead first address cannot use it all, and the whole connect ends by `deadline`.
+fn tcp(
+    host: &str,
+    port: u16,
+    deadline: Instant,
+    wanted: &impl Fn() -> bool,
+) -> Result<TcpStream, String> {
+    dial(
+        host,
+        &interleave(lookup(host, port, deadline)?),
+        deadline,
+        wanted,
+    )
+}
+
+/// Tries `addrs` in order, sharing the time left before `deadline` between them and
+/// checking `wanted` between attempts; `host` names them in errors.
+fn dial(
+    host: &str,
+    addrs: &[SocketAddr],
+    deadline: Instant,
+    wanted: &impl Fn() -> bool,
+) -> Result<TcpStream, String> {
     let mut last = format!("{host} has no address");
-    for addr in addrs {
-        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+    for (i, addr) in addrs.iter().enumerate() {
+        if !wanted() {
+            return Err("no longer wanted".into());
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(format!("connecting to {host} timed out"));
+        }
+        let share = (left / (addrs.len() - i) as u32).min(CONNECT_TIMEOUT);
+        match TcpStream::connect_timeout(addr, share.max(Duration::from_millis(1))) {
             Ok(s) => {
                 s.set_read_timeout(Some(READ_TIMEOUT))
                     .and_then(|()| s.set_write_timeout(Some(CONNECT_TIMEOUT)))
@@ -337,9 +368,28 @@ fn tcp(host: &str, port: u16) -> Result<TcpStream, String> {
     Err(last)
 }
 
-/// Resolves `host` on a helper thread, giving up after [`CONNECT_TIMEOUT`] (the system
-/// resolver has no timeout of its own; a hung lookup's thread ends when the resolver does).
-fn lookup(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+/// Reorders `addrs` so the families alternate, starting with the resolver's first choice;
+/// within a family the resolver's order is kept.
+fn interleave(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let Some(first) = addrs.first() else {
+        return addrs;
+    };
+    let v6 = first.is_ipv6();
+    let (mut a, mut b): (Vec<_>, Vec<_>) = addrs.into_iter().partition(|x| x.is_ipv6() == v6);
+    a.reverse();
+    b.reverse();
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    while !a.is_empty() || !b.is_empty() {
+        out.extend(a.pop());
+        out.extend(b.pop());
+    }
+    out
+}
+
+/// Resolves `host` on a helper thread, giving up after [`CONNECT_TIMEOUT`] or at `deadline`
+/// (the system resolver has no timeout of its own; a hung lookup's thread ends when the
+/// resolver does).
+fn lookup(host: &str, port: u16, deadline: Instant) -> Result<Vec<SocketAddr>, String> {
     let (tx, rx) = mpsc::channel();
     let name = host.to_string();
     thread::Builder::new()
@@ -349,7 +399,11 @@ fn lookup(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
             let _ = tx.send(found.map(Iterator::collect::<Vec<_>>));
         })
         .map_err(|e| e.to_string())?;
-    match rx.recv_timeout(CONNECT_TIMEOUT) {
+    match rx.recv_timeout(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .min(CONNECT_TIMEOUT),
+    ) {
         Ok(Ok(addrs)) => Ok(addrs),
         Ok(Err(e)) => Err(format!("looking up {host}: {e}")),
         Err(_) => Err(format!("looking up {host} timed out")),
@@ -584,6 +638,53 @@ mod tests {
         let e = connect(&url, t0 + Duration::from_millis(800), &|| true).err();
         assert_eq!(e.as_deref(), Some("timed out in the TLS handshake"));
         drop(listener);
+    }
+
+    /// A dead first address does not use up the deadline: the next one still connects in
+    /// time. 192.0.2.1 (TEST-NET-1) is never routed; it either hangs or fails at once.
+    #[test]
+    fn a_dead_first_address_leaves_time_for_the_next() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let live = listener.local_addr().unwrap();
+        let dead: SocketAddr = "192.0.2.1:80".parse().unwrap();
+        let t0 = Instant::now();
+        let deadline = t0 + Duration::from_secs(2);
+        dial("test", &[dead, live], deadline, &|| true).unwrap();
+        assert!(Instant::now() <= deadline, "took {:?}", t0.elapsed());
+    }
+
+    /// With every address dead the connect ends by the deadline, not after one full
+    /// timeout per address; and a connect that is no longer wanted stops at once.
+    #[test]
+    fn dead_addresses_give_up_by_the_deadline() {
+        let dead: Vec<SocketAddr> = (1..=4)
+            .map(|i| format!("192.0.2.{i}:80").parse().unwrap())
+            .collect();
+        let t0 = Instant::now();
+        let deadline = t0 + Duration::from_millis(1200);
+        assert!(dial("test", &dead, deadline, &|| true).is_err());
+        assert!(
+            t0.elapsed() < Duration::from_millis(1500),
+            "took {:?}",
+            t0.elapsed()
+        );
+        let e = dial("test", &dead, Instant::now() + CONNECT_TIMEOUT, &|| false).err();
+        assert_eq!(e.as_deref(), Some("no longer wanted"));
+    }
+
+    #[test]
+    fn addresses_alternate_families() {
+        let p = |s: &str| s.parse::<SocketAddr>().unwrap();
+        let got = interleave(vec![
+            p("[::1]:1"),
+            p("[::2]:1"),
+            p("[::3]:1"),
+            p("10.0.0.1:1"),
+        ]);
+        let want = [p("[::1]:1"), p("10.0.0.1:1"), p("[::2]:1"), p("[::3]:1")];
+        assert_eq!(got, want);
+        assert!(interleave(Vec::new()).is_empty());
     }
 
     #[test]
