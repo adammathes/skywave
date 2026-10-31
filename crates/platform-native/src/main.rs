@@ -578,6 +578,9 @@ impl Gpu {
             .find(|f| f.is_srgb())
         {
             config.format = srgb;
+        } else {
+            // The HUD draws through an sRGB view (see `render::Renderer::new`).
+            config.view_formats = vec![config.format.add_srgb_suffix()];
         }
         config.present_mode = if opts.no_vsync {
             wgpu::PresentMode::AutoNoVsync

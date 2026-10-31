@@ -556,7 +556,8 @@ impl Renderer {
     }
 
     /// Uploads the quads in `hud_staging` and draws them over `view`, if there are any;
-    /// returns how many.
+    /// returns how many. They blend in linear light: through an sRGB view of `view`'s
+    /// texture when `view` itself is not sRGB (see [`Renderer::new`]).
     pub(crate) fn draw_hud(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -569,9 +570,19 @@ impl Renderer {
                 .write_buffer(&self.hud_buffer, 0, bytemuck::cast_slice(&self.hud_staging));
             let groups = [&self.frame_group, &self.hud_group];
             let (pipeline, buffer) = (&self.hud_pipeline, &self.hud_buffer);
+            let srgb_view;
+            let target = if self.surface_format.is_srgb() {
+                view
+            } else {
+                srgb_view = view.texture().create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.surface_format.add_srgb_suffix()),
+                    ..Default::default()
+                });
+                &srgb_view
+            };
             hud_pass(
                 encoder,
-                view,
+                target,
                 pipeline,
                 groups,
                 buffer,

@@ -136,32 +136,21 @@ impl TextureAtlas {
             .map(|l| vec![0u8; ((ATLAS_SIZE >> l) * (ATLAS_SIZE >> l) * 4) as usize])
             .collect();
         let n = TILE_SIZE as usize;
-        let mut lin = vec![[0f32; 3]; n * n];
         for tile in Tile::ALL {
+            let mut lin = vec![[0f32; 4]; n * n];
             for y in 0..n {
                 for x in 0..n {
-                    lin[y * n + x] = texel(tile, x as u32, y as u32).map(|c| c.clamp(0.0, 1.0));
+                    let [r, g, b] = texel(tile, x as u32, y as u32).map(|c| c.clamp(0.0, 1.0));
+                    lin[y * n + x] = [r, g, b, 1.0];
                 }
             }
             let (ox, oy) = tile.origin();
             let mut size = n;
             for (l, level) in levels.iter_mut().enumerate() {
                 if l > 0 {
-                    // 2×2 box filter in place, in linear light; stays inside the tile.
-                    let half = size / 2;
-                    for y in 0..half {
-                        for x in 0..half {
-                            let mut sum = [0f32; 3];
-                            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                                let p = lin[(2 * y + dy) * size + 2 * x + dx];
-                                for k in 0..3 {
-                                    sum[k] += p[k] * 0.25;
-                                }
-                            }
-                            lin[y * half + x] = sum;
-                        }
-                    }
-                    size = half;
+                    // Stays inside the tile: tiles are a power of two on a side.
+                    lin = halve(&lin, size as u32, size as u32);
+                    size /= 2;
                 }
                 let stride = (ATLAS_SIZE >> l) as usize;
                 let (bx, by) = ((ox >> l) as usize, (oy >> l) as usize);
@@ -194,7 +183,42 @@ impl TextureAtlas {
     }
 }
 
-fn srgb8(c: f32) -> u8 {
+/// The mip level below a `w × h` image of linear (premultiplied, if it has alpha) texels:
+/// half the size (rounded down, at least 1), each texel the mean of a 2×2 block (an odd
+/// last row or column is dropped). The atlas's and the HUD images' mips share it, so every
+/// mip is filtered in linear light.
+pub(crate) fn halve(src: &[[f32; 4]], w: u32, h: u32) -> Vec<[f32; 4]> {
+    let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+    let mut out = vec![[0f32; 4]; (nw * nh) as usize];
+    for y in 0..nh {
+        for x in 0..nw {
+            let mut sum = [0f32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let sx = (2 * x + dx).min(w - 1);
+                let sy = (2 * y + dy).min(h - 1);
+                let p = src[(sy * w + sx) as usize];
+                for k in 0..4 {
+                    sum[k] += p[k] * 0.25;
+                }
+            }
+            out[(y * nw + x) as usize] = sum;
+        }
+    }
+    out
+}
+
+/// An sRGB-encoded 8-bit value decoded to linear light.
+pub(crate) fn linear(e: u8) -> f32 {
+    let s = f32::from(e) / 255.0;
+    if s <= 0.040_45 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Linear light in `[0, 1]` encoded as an 8-bit sRGB value.
+pub(crate) fn srgb8(c: f32) -> u8 {
     let s = if c <= 0.003_130_8 {
         c * 12.92
     } else {

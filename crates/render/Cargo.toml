@@ -15,7 +15,8 @@ bytemuck.workspace = true
 [dev-dependencies]
 # Headless device for pipeline/limit validation without a GPU, and naga's GLSL ES, MSL and
 # SPIR-V writers to prove every shader translates for WebGL2, Metal (Safari, macOS) and
-# Vulkan. All are already in wgpu's dependency tree.
-wgpu = { workspace = true, features = ["noop"] }
+# Vulkan. All are already in wgpu's dependency tree. Vulkan (lavapipe on CI) for the tests
+# that read pixels back.
+wgpu = { workspace = true, features = ["noop", "vulkan"] }
 naga = { workspace = true, features = ["wgsl-in", "glsl-out", "msl-out", "spv-out"] }
 pollster.workspace = true

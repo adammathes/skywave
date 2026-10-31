@@ -596,7 +596,7 @@ fn render_frames(
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
+            view_formats: &[format.add_srgb_suffix()],
         });
         r.render(&target.create_view(&Default::default()), scene);
     }
@@ -1113,6 +1113,106 @@ fn hud_draws_text_and_rects_in_one_call() {
             assert_eq!(stats.resources_created, 0);
             assert_eq!(r.hud_staging.capacity(), MAX_HUD_QUADS);
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        }
+    }
+}
+
+/// A Vulkan device (lavapipe in a container, or a real GPU), or `None` without one.
+fn vulkan_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::VULKAN,
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    pollster::block_on(adapter.request_device(&Default::default())).ok()
+}
+
+/// A `[0, 0, 0, 160]` HUD panel over an encoded 0.5 background blends in linear light on
+/// an sRGB target and on a plain one (the web's WebGPU canvas) alike. Skipped without a
+/// Vulkan device, except on CI.
+#[test]
+fn hud_blends_the_same_on_srgb_and_plain_targets() {
+    let Some((device, queue)) = vulkan_device() else {
+        assert!(std::env::var_os("CI").is_none(), "no Vulkan device on CI");
+        eprintln!("skipped: no Vulkan device (install mesa-vulkan-drivers)");
+        return;
+    };
+    let size = (16, 16);
+    let mut hud = HudBuilder::new();
+    hud.begin(1.0);
+    hud.rect(-100.0, -100.0, 10_000.0, 10_000.0, [0, 0, 0, 160]);
+    let mut scene = test_scene(&[]);
+    scene.hud = hud.view();
+    let bg = 128u8;
+    // Linear light: the background's light times the panel's transmittance, encoded.
+    let expected = atlas::srgb8(atlas::linear(bg) * (1.0 - 160.0 / 255.0));
+    for format in [
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Rgba8Unorm,
+    ] {
+        let mut r = Renderer::new(&device, &queue, format, size);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[format.add_srgb_suffix()],
+        });
+        let view = texture.create_view(&Default::default());
+        // A whole frame sets the uniforms; then the background is replaced and the HUD
+        // drawn over it alone.
+        r.render(&view, &scene);
+        queue.write_texture(
+            texture.as_image_copy(),
+            &vec![bg; (4 * size.0 * size.1) as usize],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * size.0),
+                rows_per_image: None,
+            },
+            texture.size(),
+        );
+        r.build_hud(&scene);
+        let row = (4 * size.0).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(row * size.1),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        assert_eq!(r.draw_hud(&mut encoder, &view, None), 1);
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: None,
+                },
+            },
+            texture.size(),
+        );
+        queue.submit([encoder.finish()]);
+        buffer.map_async(wgpu::MapMode::Read, .., |r| r.unwrap());
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let data = buffer.get_mapped_range(..).unwrap();
+        let px = &data[(8 * row + 8 * 4) as usize..][..3];
+        for &c in px {
+            assert!(
+                c.abs_diff(expected) <= 1,
+                "{format:?}: {px:?}, want {expected}"
+            );
         }
     }
 }
