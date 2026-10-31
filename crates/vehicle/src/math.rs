@@ -1,8 +1,8 @@
 //! The sim's vector, quaternion and scalar math, built from `+ - * /` only.
 //!
 //! `vehicle` is `no_std`, so `f32::sqrt`/`sin`/`atan2` are not available; the versions here
-//! are also bit-identical on every target (no libm, no `mul_add`), which keeps replays
-//! deterministic. Accuracy is ~1e-6, plenty for a car.
+//! are also bit-identical on every target (no libm, no `mul_add`, IEEE basic operations
+//! only), which keeps replays deterministic. Accuracy is ~1e-6 or better, plenty for a car.
 
 pub type V3 = [f32; 3];
 /// Unit quaternion `[x, y, z, w]` rotating body space into world space.
@@ -125,7 +125,7 @@ pub fn unit(x: f32) -> f32 {
     }
 }
 
-/// Square root; 0 for zero, negative or NaN input. Bit-trick guess plus three Newton steps.
+/// Square root by Newton iteration in f64; `0.0` for zero, negative or NaN input.
 pub fn sqrt(x: f32) -> f32 {
     if x.is_nan() || x <= 0.0 {
         return 0.0;
@@ -133,37 +133,50 @@ pub fn sqrt(x: f32) -> f32 {
     if x == f32::INFINITY {
         return x;
     }
-    let mut y = f32::from_bits((x.to_bits() >> 1) + 0x1fbd_1df5);
-    y = 0.5 * (y + x / y);
-    y = 0.5 * (y + x / y);
-    0.5 * (y + x / y)
+    let xd = x as f64;
+    // Halving the exponent bits gives a guess within a factor of ~1.5.
+    let mut y = f64::from_bits((xd.to_bits() >> 1) + 0x1ff8_0000_0000_0000);
+    for _ in 0..6 {
+        y = 0.5 * (y + xd / y);
+    }
+    y as f32
 }
 
-/// Sine. Reduced to `[-pi/2, pi/2]`, then an 11th-order Taylor polynomial (error < 1e-7).
-pub fn sin(x: f32) -> f32 {
-    let turns = x * (0.5 / PI);
-    let whole = (if turns < 0.0 {
-        turns - 0.5
+/// `sin` and `cos` of `x` radians, by range reduction to [-pi/4, pi/4] and Taylor series in
+/// f64 (error well below f32 precision).
+pub fn sin_cos(x: f32) -> (f32, f32) {
+    let xd = x as f64;
+    let half_pi = core::f64::consts::FRAC_PI_2;
+    // Quadrant k: x = k * pi/2 + r with |r| <= pi/4.
+    let kf = xd / half_pi;
+    let k = if kf >= 0.0 {
+        (kf + 0.5) as i64
     } else {
-        turns + 0.5
-    }) as i32 as f32;
-    let mut r = x - whole * (2.0 * PI);
-    if r > 0.5 * PI {
-        r = PI - r;
-    } else if r < -0.5 * PI {
-        r = -PI - r;
-    }
+        (kf - 0.5) as i64
+    };
+    let r = xd - (k as f64) * half_pi;
     let r2 = r * r;
-    let p = 1.0 / 39_916_800.0;
-    let p = 1.0 / 362_880.0 - r2 * p;
-    let p = 1.0 / 5040.0 - r2 * p;
-    let p = 1.0 / 120.0 - r2 * p;
-    let p = 1.0 / 6.0 - r2 * p;
-    r * (1.0 - r2 * p)
+    let s = r
+        * (1.0
+            - r2 / 6.0
+                * (1.0 - r2 / 20.0 * (1.0 - r2 / 42.0 * (1.0 - r2 / 72.0 * (1.0 - r2 / 110.0)))));
+    let c = 1.0
+        - r2 / 2.0 * (1.0 - r2 / 12.0 * (1.0 - r2 / 30.0 * (1.0 - r2 / 56.0 * (1.0 - r2 / 90.0))));
+    let (s, c) = match k.rem_euclid(4) {
+        0 => (s, c),
+        1 => (c, -s),
+        2 => (-s, -c),
+        _ => (-c, s),
+    };
+    (s as f32, c as f32)
+}
+
+pub fn sin(x: f32) -> f32 {
+    sin_cos(x).0
 }
 
 pub fn cos(x: f32) -> f32 {
-    sin(x + 0.5 * PI)
+    sin_cos(x).1
 }
 
 /// Arctangent on `[-1, 1]`, a minimax polynomial (error < 2e-6 rad).

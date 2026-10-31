@@ -887,7 +887,7 @@ fn replay_is_deterministic_and_pinned() {
     // Pinned hashes of the 10 s scripted drive. A deliberate change to the sim, a spec or the
     // script moves them: run `cargo test -p vehicle --test sim replay -- --nocapture`, copy the
     // printed hashes here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0xd373_13ea_741a_aaaa, 0x8077_0b56_56ed_3d3b];
+    const PINNED: [u64; 2] = [0xc04b_fb7b_66b8_8405, 0x33d2_0d44_2325_51a6];
     let specs = cars();
     let mut hashes = [0u64; 2];
     for (k, spec) in specs.iter().enumerate() {
