@@ -2803,6 +2803,10 @@ mod tests {
             app.drive.state.pos[0] += 400.0;
             app.drive.prev = app.drive.state;
             app.settle_camera();
+            // One step there, so the camera is following (not about to snap).
+            let none = InputState::default();
+            app.camera
+                .step(&app.drive, &none, SIM_DT as f32, &app.ground);
             let away = app.camera.pose(&app.drive, 1.0).eye;
             assert!(away.distance(home) > 300.0, "{what}");
             break_car(&mut app.drive.state);
