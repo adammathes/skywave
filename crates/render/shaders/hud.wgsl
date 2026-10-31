@@ -141,9 +141,6 @@ fn fs_hud(in: HudOut) -> @location(0) vec4<f32> {
         let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
         alpha *= clamp(0.5 - d, 0.0, 1.0);
     }
-    // An sRGB target encodes in hardware, so hand it linear values.
-    if frame.params.y < 0.5 {
-        rgb = srgb_to_linear(rgb);
-    }
-    return vec4<f32>(rgb, alpha);
+    // The target is always an sRGB view (encoded in hardware, blended in linear light).
+    return vec4<f32>(srgb_to_linear(rgb), alpha);
 }

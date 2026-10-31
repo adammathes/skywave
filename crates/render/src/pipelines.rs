@@ -4,7 +4,9 @@ use super::*;
 
 impl Renderer {
     /// Creates all pipelines and targets with default options. `size` is the swapchain
-    /// size in pixels.
+    /// size in pixels. A target that is not sRGB (`Bgra8Unorm`, `Rgba8Unorm`) must list
+    /// its sRGB format in its `view_formats`: the HUD draws through an sRGB view of it, so
+    /// it blends in linear light on every target.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -36,6 +38,10 @@ impl Renderer {
             HdrMode::Float16 => true,
             HdrMode::Ldr => false,
         };
+        assert!(
+            surface_format.add_srgb_suffix().is_srgb(),
+            "{surface_format:?} has no sRGB view for the HUD"
+        );
         let color_format = if hdr { HDR_FORMAT } else { surface_format };
         // Three cascades side by side must fit the device's widest texture.
         let max_cascade_size = device.limits().max_texture_dimension_2d / 3;
@@ -506,7 +512,7 @@ impl Renderer {
                 entry_point: Some("fs_hud"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
+                    format: surface_format.add_srgb_suffix(),
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],

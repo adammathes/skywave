@@ -483,6 +483,11 @@ pub(crate) fn surface_config(
     config.present_mode = wgpu::PresentMode::AutoVsync;
     config.alpha_mode = wgpu::CompositeAlphaMode::Auto;
     config.view_formats.clear();
+    // A WebGPU canvas is never sRGB; the HUD draws through an sRGB view of it (see
+    // `render::Renderer::new`), so it blends in linear light as on an sRGB target.
+    if !config.format.is_srgb() {
+        config.view_formats.push(config.format.add_srgb_suffix());
+    }
     Some(config)
 }
 

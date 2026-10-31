@@ -28,6 +28,7 @@ use std::fmt::{self, Write as _};
 
 use bytemuck::{Pod, Zeroable};
 
+use crate::atlas;
 use crate::font::{self, CELL_H, CELL_W, GLYPH_H, LINE_HEIGHT, SOLID_CELL};
 
 /// Virtual HUD width at `ui_scale` 1.
@@ -545,31 +546,41 @@ pub(crate) fn build_quads(
     dropped
 }
 
-/// The mip levels below a `width × height` RGBA8 image, each half the size of the one above
-/// (rounded down, at least 1) by averaging 2×2 blocks (an odd last row or column is
-/// dropped), down to 1×1. Load-time only: it allocates every level.
+/// The mip levels below a `width × height` RGBA8 image (sRGB-encoded, straight alpha), each
+/// half the size of the one above (rounded down, at least 1), down to 1×1. Filtered like the
+/// texture atlas ([`atlas::halve`]): in linear light with premultiplied alpha, so a minified
+/// image keeps its brightness and transparent texels do not darken its edges; each level is
+/// stored encoded with straight alpha again. Load-time only: it allocates every level.
 pub(crate) fn mip_chain(width: u32, height: u32, rgba: &[u8]) -> Vec<(u32, u32, Vec<u8>)> {
-    let mut levels: Vec<(u32, u32, Vec<u8>)> = Vec::new();
     let (mut w, mut h) = (width.max(1), height.max(1));
+    let mut lin: Vec<[f32; 4]> = rgba
+        .chunks_exact(4)
+        .take((w * h) as usize)
+        .map(|p| {
+            let a = f32::from(p[3]) / 255.0;
+            [
+                atlas::linear(p[0]) * a,
+                atlas::linear(p[1]) * a,
+                atlas::linear(p[2]) * a,
+                a,
+            ]
+        })
+        .collect();
+    let mut levels = Vec::new();
     while w > 1 || h > 1 {
-        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
-        let src: &[u8] = levels.last().map_or(rgba, |l| &l.2);
-        let mut out = vec![0u8; (nw * nh * 4) as usize];
-        for y in 0..nh {
-            for x in 0..nw {
-                for c in 0..4 {
-                    let mut sum = 0u32;
-                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                        let sx = (2 * x + dx).min(w - 1);
-                        let sy = (2 * y + dy).min(h - 1);
-                        sum += u32::from(src[((sy * w + sx) * 4 + c) as usize]);
-                    }
-                    out[((y * nw + x) * 4 + c) as usize] = ((sum + 2) / 4) as u8;
-                }
-            }
+        lin = atlas::halve(&lin, w, h);
+        (w, h) = ((w / 2).max(1), (h / 2).max(1));
+        let mut out = Vec::with_capacity(lin.len() * 4);
+        for p in &lin {
+            let inv = if p[3] > 0.0 { 1.0 / p[3] } else { 0.0 };
+            out.extend_from_slice(&[
+                atlas::srgb8((p[0] * inv).min(1.0)),
+                atlas::srgb8((p[1] * inv).min(1.0)),
+                atlas::srgb8((p[2] * inv).min(1.0)),
+                (p[3] * 255.0).round() as u8,
+            ]);
         }
-        levels.push((nw, nh, out));
-        (w, h) = (nw, nh);
+        levels.push((w, h, out));
     }
     levels
 }
@@ -592,9 +603,34 @@ mod tests {
         let sizes: Vec<_> = levels.iter().map(|l| (l.0, l.1)).collect();
         assert_eq!(sizes, [(2, 1), (1, 1)]);
         assert_eq!(levels[0].2, [0, 0, 0, 255, 255, 255, 255, 255]);
-        assert_eq!(levels[1].2, [128, 128, 128, 255]);
+        // Half black, half white is half the light: 188 encoded, not 128.
+        assert_eq!(levels[1].2, [188, 188, 188, 255]);
         assert!(mip_chain(1, 1, &[1, 2, 3, 4]).is_empty());
         assert_eq!(mip_chain(1024, 1024, &vec![0; 1024 * 1024 * 4]).len(), 10);
+    }
+
+    #[test]
+    fn mip_chain_filters_in_linear_light_with_premultiplied_alpha() {
+        // A one-texel black and white checker minifies to 50% linear gray.
+        let mut checker = Vec::new();
+        for y in 0..8 {
+            for x in 0..8 {
+                let v = if (x + y) % 2 == 0 { 0 } else { 255 };
+                checker.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        for (w, h, px) in mip_chain(8, 8, &checker) {
+            for p in px.chunks_exact(4) {
+                assert_eq!(p, [188, 188, 188, 255], "{w}×{h}");
+            }
+        }
+        // An opaque orange texel beside a transparent black one: the edge mip keeps the
+        // orange (transparent texels carry no colour) at half coverage.
+        let edge = [255, 128, 0, 255, 0, 0, 0, 0];
+        assert_eq!(mip_chain(2, 1, &edge), [(1, 1, vec![255, 128, 0, 128])]);
+        // Half-covered gray over a transparent texel stays that gray.
+        let soft = [100, 100, 100, 128, 0, 0, 0, 0];
+        assert_eq!(mip_chain(2, 1, &soft)[0].2, [100, 100, 100, 64]);
     }
 
     #[test]
