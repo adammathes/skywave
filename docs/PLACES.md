@@ -11,7 +11,7 @@ A **Place** is the runtime's only description of the world. The procedural gener
 ```
 PlaceHeader { magic "SKYW", version u32, seed u64, chunk_size_m f32, size_chunks [u16;2],
               region: RegionId, era: Era, origin_geo: Option<[f64;2]> (lat/lon, compiled places) }
-Terrain      { res_per_chunk u16 (default 32 → 4 m), heights: Vec<f32> row-major whole-place,
+Terrain      { res_per_chunk u16 (default 32 → 4 m, at most 64), heights: Vec<f32> row-major whole-place,
                water_level f32, water: Vec<WaterBody { polygon, kind: Ocean|Lake|River|Canal }>,
                edges: [EdgeKind; 4] [north, east, south, west] = Open | Ocean | Lake | Bay | Mountains |
                       Hills | Forest | HighwayLoop | RailYards (what bounds each side; Open for the test town) }

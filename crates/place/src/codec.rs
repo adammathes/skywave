@@ -79,7 +79,8 @@ use crate::{
     GroundFloor, Lane, Lanes, Light, LightKind, Lights, LotKind, Node, Parcel, Place, PlaceError,
     PlaceHeader, Poi, PoiKind, Prop, PropKind, Props, RegionId, RoadClass, RoadGraph, Roof,
     Sidewalk, Sidewalks, Spawn, SpawnKind, StopLine, StyleTag, Table, TableRange, Terrain, Turn,
-    WaterBody, WaterKind, ZoneId, Zones, MAX_SIZE_CHUNKS, PLACE_MAGIC, PLACE_VERSION, TABLE_COUNT,
+    WaterBody, WaterKind, ZoneId, Zones, MAX_RES_PER_CHUNK, MAX_SIZE_CHUNKS, PLACE_MAGIC,
+    PLACE_VERSION, TABLE_COUNT,
 };
 
 /// Length of the fixed header.
@@ -336,7 +337,21 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                     w.push(variant);
                 }
                 PropKind::LotLabel { letter } => w.push(letter),
-                _ => {}
+                PropKind::StreetLight
+                | PropKind::PalmTree
+                | PropKind::Oak
+                | PropKind::Bench
+                | PropKind::Hydrant
+                | PropKind::Mailbox
+                | PropKind::Billboard
+                | PropKind::PowerPole
+                | PropKind::Eucalyptus
+                | PropKind::TrashCan
+                | PropKind::StopSign
+                | PropKind::Crossbuck
+                | PropKind::StartTree
+                | PropKind::TimingBoard
+                | PropKind::PicnicTable => {}
             }
         }
         Table::Lights => {
@@ -876,7 +891,11 @@ fn read_head(bytes: &[u8]) -> Result<Head, PlaceError> {
         origin_geo: geo.then_some(ll),
     };
     let entries = header.chunk_count();
-    if index_offset < HEADER_LEN || index_offset + 8 + entries * ENTRY_LEN != file_len {
+    let end = entries
+        .checked_mul(ENTRY_LEN)
+        .and_then(|n| n.checked_add(8))
+        .and_then(|n| n.checked_add(index_offset));
+    if index_offset < HEADER_LEN || end != Some(file_len) {
         return Err(PlaceError::Layout);
     }
     Ok(Head {
@@ -1124,8 +1143,11 @@ pub fn decode(bytes: &[u8]) -> Result<Place, PlaceError> {
         *e = r.tag(edge_kind)?;
     }
     let water_level = r.f32()?;
+    if !(1..=MAX_RES_PER_CHUNK).contains(&res_per_chunk) {
+        return Err(PlaceError::TerrainSize);
+    }
     let [sw, sd] = Terrain::samples(&h, res_per_chunk);
-    if res_per_chunk == 0 || r.u32()? as usize != sw * sd {
+    if r.u32()? as usize != sw * sd {
         return Err(PlaceError::TerrainSize);
     }
     let heights_at = r.pos;
@@ -1262,15 +1284,22 @@ pub fn decode_chunk(bytes: &[u8], chunk: [u16; 2]) -> Result<ChunkData, PlaceErr
         pos: HEADER_LEN,
     };
     let res_per_chunk = g.u16()?;
+    if !(1..=MAX_RES_PER_CHUNK).contains(&res_per_chunk) {
+        return Err(PlaceError::TerrainSize);
+    }
     let res = usize::from(res_per_chunk);
     let [sw, sd] = Terrain::samples(&h, res_per_chunk);
     let [zw, zd] = Zones::cells_per_side(&h, res_per_chunk);
     // res_per_chunk, the edges, water_level, the height count.
     let heights_at = HEADER_LEN + 14;
-    let zones_at = heights_at + 4 * sw * sd + 4;
-    if res == 0 || zones_at + zw * zd > bytes.len() {
-        return Err(PlaceError::TerrainSize);
-    }
+    let zones_at = (sw * sd)
+        .checked_mul(4)
+        .and_then(|n| n.checked_add(heights_at + 4));
+    let zones_end = zones_at.and_then(|z| z.checked_add(zw * zd));
+    let zones_at = match (zones_at, zones_end) {
+        (Some(z), Some(e)) if e <= bytes.len() => z,
+        _ => return Err(PlaceError::TerrainSize),
+    };
     let (cx, cz) = (usize::from(chunk[0]), usize::from(chunk[1]));
     let mut hashed = Vec::new();
     let mut heights = Vec::with_capacity((res + 1) * (res + 1));
@@ -1842,6 +1871,30 @@ mod tests {
             decode_chunk(&b, c),
             Err(E::IndexRange { chunk: slot as u32 })
         );
+    }
+
+    /// Header counts chosen so the size math wraps a 32-bit `usize` (CI runs these at
+    /// i686) must fail cleanly, not panic or pass.
+    #[test]
+    fn decode_rejects_sizes_that_overflow_32_bits() {
+        use PlaceError as E;
+        let good = encode(&synthetic(3));
+        // 256x256 chunks of 256-byte entries is 2^24 bytes; an index at u32::MAX - 7 makes
+        // `index_offset + 8` wrap to 0, so a 2^24-byte file would match in wrapping math.
+        let mut b = good[..HEADER_LEN].to_vec();
+        b.resize(1 << 24, 0);
+        b[20..24].copy_from_slice(&[0, 1, 0, 1]);
+        b[48..52].copy_from_slice(&(u32::MAX - 7).to_le_bytes());
+        b[52..56].copy_from_slice(&(1u32 << 24).to_le_bytes());
+        assert_eq!(decode(&b), Err(E::Layout));
+        assert_eq!(decode_chunk(&b, [0, 0]), Err(E::Layout));
+        // A resolution past the bound: u16::MAX would wrap `sw * sd` on 32 bits.
+        for res in [0, MAX_RES_PER_CHUNK + 1, u16::MAX] {
+            let mut b = good.clone();
+            b[HEADER_LEN..HEADER_LEN + 2].copy_from_slice(&res.to_le_bytes());
+            assert_eq!(decode(&b), Err(E::TerrainSize), "res {res}");
+            assert_eq!(decode_chunk(&b, [0, 0]), Err(E::TerrainSize), "res {res}");
+        }
     }
 
     fn h_chunk(p: &Place, slot: usize) -> [u16; 2] {
