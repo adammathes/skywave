@@ -80,6 +80,9 @@ const LOAD_FACTOR_MAX: f32 = 1.25;
 /// Share of the force that would stop a contact's sliding in one step that the tire may
 /// apply. Below 1 the contact cannot overshoot, which makes it act as static friction at rest.
 const CONTACT_CAP: f32 = 0.5;
+/// Below this speed along the ground, m/s, a braked car is held by static friction: the
+/// tire model's force fades to nothing with slip, so on its own a parked car creeps downhill.
+const STATIC_SPEED: f32 = 0.2;
 /// Closed-throttle engine braking: the drag it puts on the driven wheels through whatever
 /// gear is in, as a share of the car's weight (g), at idle rpm and at the redline (linear
 /// between). With aero and rolling resistance on top, every car coasts down at about
@@ -814,6 +817,12 @@ pub fn step(
     let mut force = ZERO;
     let mut torque = ZERO;
     let mut total_load = 0.0;
+    // What the tires could hold the body with at rest (step 10): the brakes' grip along the
+    // ground, every tire's grip across it, and the mean ground normal.
+    let mut tire_force = ZERO;
+    let mut hold_long = 0.0;
+    let mut hold_lat = 0.0;
+    let mut normal_sum = ZERO;
     for i in 0..4 {
         let w = &mut state.wheels[i];
         if !w.grounded {
@@ -862,6 +871,7 @@ pub fn step(
         if !front {
             brake += handbrake;
         }
+        let held = brake - abs(drive);
         brake += ROLLING_RESISTANCE * w.load * radius;
 
         if !(w.grounded && w.load > 0.0) {
@@ -947,6 +957,18 @@ pub fn step(
         let f = add(scale(f_axis, fx), scale(s_axis, fy));
         force = add(force, f);
         torque = add(torque, cross(sub(w.contact, state.pos), f));
+
+        tire_force = add(tire_force, f);
+        if held > 0.0 {
+            let grip = tire.mu_x * tire.load;
+            hold_long += if held / radius < grip {
+                held / radius
+            } else {
+                grip
+            };
+        }
+        hold_lat += tire.mu_y * tire.load;
+        normal_sum = add(normal_sum, n);
     }
 
     // 5. Body corners against the ground: lets a rolled car land and slide instead of
@@ -1060,6 +1082,25 @@ pub fn step(
         w_body[a] += t_body[a] / inertia[a] * DT;
     }
     state.ang_vel = rotate(q, w_body);
+
+    // 10. Static friction. Near rest a braked car's tires hold it: if stopping its motion
+    // along the ground this step (before the tires' own force) needs no more than the brakes
+    // and tires can give, it stops; otherwise it slides on the tire model as before.
+    // A pressed throttle asks the car to move, so the hold lets go (the handbrake declutches).
+    if hold_long > 0.0 && (declutched || drive_pedal < 0.05) && length(normal_sum) > 0.0 {
+        let n = normalize(normal_sum);
+        let v_pre = add_scaled(state.vel, tire_force, -DT / mass);
+        let v_t = add_scaled(v_pre, n, -dot(v_pre, n));
+        if length(v_t) < STATIC_SPEED {
+            let f_axis = normalize(add_scaled(fwd, n, -dot(fwd, n)));
+            let s_axis = cross(f_axis, n);
+            let need_long = mass * dot(v_t, f_axis) / DT / hold_long;
+            let need_lat = mass * dot(v_t, s_axis) / DT / hold_lat;
+            if need_long * need_long + need_lat * need_lat <= 1.0 {
+                state.vel = sub(state.vel, add_scaled(state.vel, n, -dot(state.vel, n)));
+            }
+        }
+    }
     state.pos = add_scaled(state.pos, state.vel, DT);
     state.rot = q_integrate(q, state.ang_vel, DT);
     state.speed_mps = dot(state.vel, rotate(state.rot, [0.0, 0.0, -1.0]));
@@ -1364,6 +1405,79 @@ mod tests {
         );
         let v = add(s.vel, cross(s.ang_vel, corner));
         assert!(abs(-v[0] - 1000.0 * k) < 1e-5);
+    }
+
+    /// A plane rising `grade` m per m toward +z: a car at heading 0 faces downhill.
+    struct Slope {
+        grade: f32,
+        friction: f32,
+    }
+
+    impl Ground for Slope {
+        fn probe(&self, origin: [f32; 3], dir: [f32; 3], max_len: f32) -> Option<Hit> {
+            let n = normalize([0.0, 1.0, -self.grade]);
+            let d_n = dot(dir, n);
+            if d_n > -1e-6 {
+                return None;
+            }
+            let t = dot(origin, n) / -d_n;
+            if t > max_len {
+                return None;
+            }
+            Some(Hit {
+                t: if t < 0.0 { 0.0 } else { t },
+                normal: n,
+                friction: self.friction,
+            })
+        }
+    }
+
+    /// (A brake held at a stop selects reverse after `REVERSE_DWELL_S`, so parking is the
+    /// handbrake's job.) How far a car parked on `slope` with `input` held moves in 30 s after 3 s to settle, m.
+    #[cfg(feature = "serde")]
+    fn parked_drift(slope: &Slope, input: &VehicleInput) -> f32 {
+        let spec = gannet();
+        let mut s = VehicleState::spawn(&spec, [0.0; 3], 0.0);
+        for _ in 0..360 {
+            step(&spec, &mut s, input, &Assists::OFF, slope);
+        }
+        let start = s.pos;
+        for _ in 0..3600 {
+            step(&spec, &mut s, input, &Assists::OFF, slope);
+        }
+        length(sub(s.pos, start))
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn a_braked_car_holds_on_a_grade_until_it_beats_the_grip() {
+        let handbrake = VehicleInput {
+            handbrake: true,
+            ..VehicleInput::default()
+        };
+        let dry = Slope {
+            grade: 0.1,
+            friction: 1.0,
+        };
+        let d = parked_drift(&dry, &handbrake);
+        assert!(d < 0.01, "handbrake on 10%: crept {d} m");
+        // Ice: the rears' grip is less than the grade asks for, so the car slides.
+        let ice = Slope {
+            grade: 0.1,
+            friction: 0.1,
+        };
+        let d = parked_drift(&ice, &handbrake);
+        assert!(d > 1.0, "handbrake on icy 10%: slid only {d} m");
+        // Dry but steeper than the locked rears can hold.
+        let steep = Slope {
+            grade: 0.8,
+            friction: 1.0,
+        };
+        let d = parked_drift(&steep, &handbrake);
+        assert!(d > 1.0, "handbrake on 80%: slid only {d} m");
+        // Nothing held: it rolls away.
+        let d = parked_drift(&dry, &VehicleInput::default());
+        assert!(d > 1.0, "free on 10%: rolled only {d} m");
     }
 
     #[test]
