@@ -143,9 +143,10 @@ impl Renderer {
                 sampler_entry(3, wgpu::SamplerBindingType::Filtering),
             ],
         });
-        let (shadow_view, forward_group) = create_shadow_atlas(
+        let (shadow_atlas, shadow_view, forward_group) = create_shadow_atlas(
             &device,
             cascade_size,
+            quality.cascades,
             &forward_layout,
             &shadow_sampler,
             &atlas_view,
@@ -672,6 +673,7 @@ impl Renderer {
             frame_group,
             cascade_buffer,
             cascade_groups,
+            shadow_atlas,
             shadow_view,
             forward_group,
             forward_layout,
@@ -947,32 +949,32 @@ pub(crate) fn upload_map_texture(
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-/// The shadow atlas (three `size`² cascades side by side) and the forward bind group that
-/// samples it.
+/// The shadow atlas (`cascades` `size`² cascades side by side) and the forward bind group
+/// that samples it.
 pub(crate) fn create_shadow_atlas(
     device: &wgpu::Device,
     size: u32,
+    cascades: u32,
     layout: &wgpu::BindGroupLayout,
     shadow_sampler: &wgpu::Sampler,
     atlas_view: &wgpu::TextureView,
     atlas_sampler: &wgpu::Sampler,
-) -> (wgpu::TextureView, wgpu::BindGroup) {
-    let shadow_view = device
-        .create_texture(&wgpu::TextureDescriptor {
-            label: Some("sun shadow cascades"),
-            size: wgpu::Extent3d {
-                width: size * CASCADES as u32,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: SHADOW_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        })
-        .create_view(&wgpu::TextureViewDescriptor::default());
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
+    let shadow_atlas = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sun shadow cascades"),
+        size: wgpu::Extent3d {
+            width: size * cascades,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: SHADOW_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let shadow_view = shadow_atlas.create_view(&wgpu::TextureViewDescriptor::default());
     let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("forward"),
         layout,
@@ -995,7 +997,7 @@ pub(crate) fn create_shadow_atlas(
             },
         ],
     });
-    (shadow_view, group)
+    (shadow_atlas, shadow_view, group)
 }
 
 pub(crate) fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {

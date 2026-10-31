@@ -889,6 +889,40 @@ fn a_player_waiting_at_a_red_does_not_stop_the_green() {
     assert!(crossed >= 10);
 }
 
+/// Whether a northbound car at the crossing's green goes through while the player stands
+/// on lane 1, 7.9 m east of the cross traffic's path, facing `heading` at `speed`.
+fn cross_traffic_goes(heading: f32, speed: f32) -> bool {
+    let g = crossing();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(3));
+    // Lane 2 is green from tick 3600.
+    let start = 3600;
+    let len = g.lanes[2].length_m;
+    let c = t.spawn_at(&g, 2, len - 30.0, 8.0).expect("pool");
+    let player = Player {
+        pos: [12.0, 0.0, 1.8],
+        heading,
+        speed,
+        half_len: 2.3,
+        half_w: 0.9,
+    };
+    for tick in start..start + 8 * HZ as u64 {
+        t.step(&g, &scripted(tick, player));
+    }
+    t.cars().iter().find(|x| x.id == c).expect("car").seg != 2
+}
+
+/// A reversing player's reach is behind the tail: the cross traffic waits for a player
+/// backing toward its path, and does not wait for one backing away from it.
+#[test]
+fn cross_traffic_yields_behind_a_reversing_player_not_ahead() {
+    let _quiet = shared();
+    let west = EAST + std::f32::consts::PI;
+    assert!(cross_traffic_goes(EAST, 0.0), "a standing player is clear");
+    assert!(!cross_traffic_goes(EAST, -5.0), "backing toward the path");
+    assert!(cross_traffic_goes(west, -5.0), "backing away, nose first");
+    assert!(!cross_traffic_goes(west, 5.0), "driving toward the path");
+}
+
 #[test]
 fn a_claim_held_up_behind_a_car_is_given_back() {
     let _quiet = shared();

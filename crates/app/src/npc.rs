@@ -1004,14 +1004,15 @@ pub fn clock(seconds_of_day: f64, latitude_deg: f32, day_of_year: u16) -> Clock 
     }
 }
 
-/// The player's car as the traffic sees it: at `pose`, `speed` m/s, `dims` m long and wide.
+/// The player's car as the traffic sees it: at `pose`, `speed` m/s (signed, negative
+/// reversing), `dims` m long and wide.
 pub fn player(pose: &drive::Pose, speed: f32, dims: [f32; 3]) -> Player {
     let f = pose.forward();
     Player {
         pos: pose.pos.to_array(),
         // The traffic crate's own trig, so the traffic stays bit-identical everywhere.
         heading: traffic::math::atan2(-f.x, -f.z),
-        speed: speed.abs(),
+        speed,
         half_len: 0.5 * dims[0],
         half_w: 0.5 * dims[1],
     }

@@ -1914,6 +1914,10 @@ fn half_resolution_scale_keeps_the_hud_at_full_size() {
 fn quality_changes_apply_on_the_next_frame() {
     let (device, mut r) = full_renderer(RendererOptions::default());
     assert_eq!(r.shadow_cascade_size(), SHADOW_CASCADE_SIZE);
+    assert_eq!(
+        r.shadow_atlas_size(),
+        (3 * SHADOW_CASCADE_SIZE, SHADOW_CASCADE_SIZE)
+    );
     let block = r.add_mesh(&Mesh::unit_block([255; 4]));
     let instances = [at(block, Vec3::ZERO)];
     let mut scene = test_scene(&instances);
@@ -1927,6 +1931,11 @@ fn quality_changes_apply_on_the_next_frame() {
     render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
     let s = r.stats();
     assert_eq!(r.shadow_cascade_size(), 1024);
+    assert_eq!(
+        r.shadow_atlas_size(),
+        (2 * 1024, 1024),
+        "two cascades, two slices"
+    );
     assert_eq!((s.shadow_size, s.cascades, s.cascades_drawn), (1024, 2, 2));
     assert_eq!(s.shadow_instances[2], 0);
     assert_eq!(s.bloom_draw_calls, 7);
@@ -2129,4 +2138,69 @@ fn cull_cost() {
     }
     let ms = t.elapsed().as_secs_f64() * 1000.0 / f64::from(runs);
     eprintln!("  the same packing everything into every pass (no culling): {ms:.3} ms");
+}
+
+/// CPU port of `agx` in common.wgsl, step for step (matrices are column-major there).
+fn agx_cpu(color: Vec3) -> (Vec3, Vec3) {
+    let inset = glam::Mat3::from_cols(
+        Vec3::new(0.842_479_06, 0.042_328_242, 0.042_375_655),
+        Vec3::new(0.078_433_6, 0.878_468_6, 0.078_433_6),
+        Vec3::new(0.079_223_745, 0.079_166_13, 0.879_142_96),
+    );
+    let outset = glam::Mat3::from_cols(
+        Vec3::new(1.196_879, -0.052_896_85, -0.052_971_636),
+        Vec3::new(-0.098_020_88, 1.151_903_1, -0.098_043_45),
+        Vec3::new(-0.099_029_74, -0.098_961_18, 1.151_073_7),
+    );
+    let (min_ev, max_ev) = (-12.47393_f32, 4.026069_f32);
+    let mut v = inset * color.max(Vec3::splat(1e-10));
+    v = (Vec3::new(v.x.log2(), v.y.log2(), v.z.log2())
+        .clamp(Vec3::splat(min_ev), Vec3::splat(max_ev))
+        - min_ev)
+        / (max_ev - min_ev);
+    let x2 = v * v;
+    let x4 = x2 * x2;
+    v = 15.5 * x4 * x2 - 40.14 * x4 * v + 31.96 * x4 - 6.868 * x2 * v + 0.4298 * x2 + 0.1191 * v
+        - Vec3::splat(0.00232);
+    let luma = v.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+    v = v.max(Vec3::ZERO).powf(1.25);
+    v = (luma + 1.2 * (v - luma)).max(Vec3::ZERO);
+    let pre = outset * v;
+    (
+        pre,
+        pre.max(Vec3::ZERO).powf(2.2).clamp(Vec3::ZERO, Vec3::ONE),
+    )
+}
+
+/// Saturated inputs push the AgX outset below zero; the tonemap must clamp before pow()
+/// (undefined for a negative base) so every output stays finite and in [0, 1].
+#[test]
+fn agx_never_pows_a_negative() {
+    let src = include_str!("../shaders/common.wgsl");
+    assert!(src.contains("let display = max(outset * v, vec3<f32>(0.0));"));
+    assert!(src.contains("pow(display, vec3<f32>(2.2))"));
+    let mut negative = 0;
+    for hue in [
+        Vec3::X,
+        Vec3::Y,
+        Vec3::Z,
+        Vec3::new(1.0, 1.0, 0.0),
+        Vec3::new(0.0, 1.0, 1.0),
+        Vec3::new(1.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.02, 0.0),
+    ] {
+        for ev in -12..=8 {
+            let (pre, out) = agx_cpu(hue * 2f32.powi(ev));
+            negative += usize::from(pre.min_element() < 0.0);
+            assert!(out.is_finite(), "{hue} at {ev} EV -> {out}");
+            assert!(
+                out.min_element() >= 0.0 && out.max_element() <= 1.0,
+                "{out}"
+            );
+        }
+    }
+    assert!(
+        negative > 0,
+        "no input reached a negative outset; the test proves nothing"
+    );
 }
