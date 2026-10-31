@@ -778,7 +778,7 @@ mod tests {
     /// Re-pin deliberately, in its own commit, when the synth changes.
     #[test]
     fn scripted_drive_renders_deterministically() {
-        const PINNED: u64 = 0xa0b5_ad55_4d1a_fe81;
+        const PINNED: u64 = 0x3016_fe04_3a75_434b;
         let mut m = Mixer::new();
         let out = render_script(&mut m, 720 * 5, |_, _| {});
         let bytes = wav(&out);
