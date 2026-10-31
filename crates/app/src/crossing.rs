@@ -535,4 +535,31 @@ mod tests {
         assert_eq!(t.hard_stops, 0);
         assert!(app.drive.state.speed_mps.abs() < 0.1, "never touched");
     }
+
+    /// A gate's lamps are dark while its crossing is quiet, and alternate once a train
+    /// comes: the only lit crossing lamps (a crossbuck's are baked dark).
+    #[test]
+    fn the_gate_lamps_flash_only_while_the_crossing_warns() {
+        // Which of the two lit lamp meshes gate 0 draws now.
+        fn lit(app: &mut App, clock: f32) -> Vec<usize> {
+            let r = app.rail.as_mut().unwrap();
+            r.clock = clock;
+            let eye = glam::Vec3::from(r.railway.gates[0].pos);
+            let mut out = Vec::new();
+            r.push(0.0, eye, &app.lights, &mut out);
+            let id = |k: usize| r.ids[usize::from(r.lamp_mesh[k])];
+            out.iter()
+                .filter_map(|i| (0..2).find(|&k| i.mesh == id(k)))
+                .collect()
+        }
+        let mut app = basin();
+        let (_, _, c) = approach(&app, 0);
+        assert!(lit(&mut app, 0.25).is_empty(), "lit with no train");
+        running(&mut app, c, 230.0, 0.0);
+        run(&mut app, 1.0, false);
+        assert!(app.rail.as_ref().unwrap().closed()[c]);
+        let (a, b) = (lit(&mut app, 0.25), lit(&mut app, 0.75));
+        assert!(a.contains(&0) && !a.contains(&1), "{a:?}");
+        assert!(b.contains(&1) && !b.contains(&0), "{b:?}");
+    }
 }

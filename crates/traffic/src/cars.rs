@@ -673,6 +673,18 @@ fn repick_m(v: f32) -> f32 {
     REPICK_M.max(commit_m(v) + 10.0)
 }
 
+/// Whether car `c`, `d` meters from its signal's stop line, goes on through it: it commits
+/// only to what clears the line before red.
+fn signal_open(g: &LaneGraph, c: &Car, d: f32, tick: u64) -> bool {
+    let left = g.until_red(c.seg, tick).unwrap_or(0) as f32 * DT;
+    let makes_it = time_to(d, c.speed) + RED_MARGIN_S < left;
+    match g.light(c.seg, tick) {
+        Some(Light::Green) => makes_it || d > commit_m(c.speed),
+        Some(Light::Yellow) => makes_it && d <= commit_m(c.speed),
+        _ => false,
+    }
+}
+
 /// Seconds to cover `d` meters from `v`, gathering speed at half the maximum.
 fn time_to(d: f32, v: f32) -> f32 {
     let a = 0.5 * A_MAX;
@@ -1214,7 +1226,7 @@ impl Traffic {
     }
 
     /// Ranks a car about to cross its junction for the right of way, lower first, or
-    /// `None` when it does not contend (red light, stop not yet made, still far off).
+    /// `None` when it does not contend (it will stop for its signal, stop not yet made).
     fn rank(&self, g: &LaneGraph, c: &Car, d: f32, tick: u64) -> Option<(u8, u8, f32, u32)> {
         let lane = c.seg;
         let t = &g.turns[c.next_turn as usize];
@@ -1224,7 +1236,8 @@ impl Traffic {
             Control::Stop => {
                 (c.stop == StopState::Done).then(|| (1, 0, -((tick - c.stop_tick) as f32), c.id))
             }
-            Control::Signal if g.light(lane, tick) == Some(Light::Red) => None,
+            // A car that will stop for its light never comes: nobody yields to it.
+            Control::Signal if !signal_open(g, c, d, tick) => None,
             _ => Some((0, left, eta, c.id)),
         }
     }
@@ -1267,16 +1280,7 @@ impl Traffic {
         let c = &self.cars[i];
         let lane = c.seg;
         let ok = match g.lanes[lane as usize].control {
-            Control::Signal => {
-                // Commit only to what clears the line before red.
-                let left = g.until_red(lane, inp.tick).unwrap_or(0) as f32 * DT;
-                let makes_it = time_to(d, c.speed) + RED_MARGIN_S < left;
-                match g.light(lane, inp.tick) {
-                    Some(Light::Green) => makes_it || d > commit_m(c.speed),
-                    Some(Light::Yellow) => makes_it && d <= commit_m(c.speed),
-                    _ => false,
-                }
-            }
+            Control::Signal => signal_open(g, c, d, inp.tick),
             Control::Stop => c.stop == StopState::Done,
             Control::Free | Control::DeadEnd => true,
         };

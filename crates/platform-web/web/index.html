@@ -217,11 +217,12 @@
   // (the game shows "Press any key for radio") and retried on the next key, click or touch.
   // A stream that neither plays nor errors within STALL_MS is reported as failed, so the
   // game moves on instead of sitting in silence (files report their errors, and a slow
-  // machine may take longer to start one). "file" plays one of the player's own music
-  // files (window.skywaveMusic below) by its key from `value` seconds in, through the same
-  // element: it streams the file from disk and decodes as it plays, where decodeAudioData
-  // would hold a whole track as PCM (~100 MB for five minutes); its end is reported as
-  // "ended".
+  // machine may take longer to start one); so is one that drops mid-play (it waits or
+  // stalls for STALL_MS without playing again, or ends: a live stream has no end). "file"
+  // plays one of the player's own music files (window.skywaveMusic below) by its key from
+  // `value` seconds in, through the same element: it streams the file from disk and decodes
+  // as it plays, where decodeAudioData would hold a whole track as PCM (~100 MB for five
+  // minutes); its end is reported as "ended".
   // Registered once per page: after a WebGL2 restart the new app instance finds this same
   // player. Debugging: skywaveRadio.log (recent commands, events, states), .state, .audio.
   (() => {
@@ -246,7 +247,12 @@
     };
     audio.addEventListener("playing", () => { clearTimeout(stall); emit("started", token); });
     audio.addEventListener("error", () => { if (audio.getAttribute("src")) emit("failed", token); });
-    audio.addEventListener("ended", () => { if (blobUrl) emit("ended", token); });
+    // A live stream has no end: one that ends has dropped.
+    audio.addEventListener("ended", () => emit(blobUrl ? "ended" : "failed", token));
+    // A stream that drops mid-play waits for data: fail it unless it plays again in time.
+    for (const e of ["waiting", "stalled"]) audio.addEventListener(e, () => { if (token && !blobUrl) arm(token); });
+    // Still playing from its buffer after a stall: not dropped (yet).
+    audio.addEventListener("timeupdate", () => { if (!audio.paused && audio.readyState > 2) clearTimeout(stall); });
     audio.addEventListener("loadedmetadata", () => {
       if (blobUrl && startAt > 0 && startAt < audio.duration - 1) audio.currentTime = startAt;
     });

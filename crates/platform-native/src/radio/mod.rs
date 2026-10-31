@@ -160,47 +160,101 @@ impl Player {
     }
 }
 
+/// Frames (~5 ms at 48 kHz) over which the radio ramps from its last sample to silence when
+/// the ring runs dry or the station is cut, so it never clicks.
+const FADE_FRAMES: u32 = 240;
+
 /// The audio callback's side: adds the radio to the mixer's output.
 pub struct Tap {
     out: Arc<Output>,
     buf: Vec<f32>,
-    /// Waiting for [`PREBUFFER_SECONDS`] of audio before playing (at the start, and after
-    /// the ring ran dry).
+    /// Waiting for [`PREBUFFER_SECONDS`] of audio before playing (at the start, after
+    /// the ring ran dry and after a cut).
     starved: bool,
     gain: f32,
+    /// The ring's epoch last seen: a new one means the station was cut.
+    epoch: u32,
+    /// The last sample added per channel (left, right).
+    last: [f32; 2],
+    /// The level the fade-out starts from per channel, and the frames of it left.
+    tail: [f32; 2],
+    fade: u32,
 }
 
 impl Tap {
     /// A tap for callbacks of at most `max_samples` interleaved stereo samples.
     pub fn new(out: Arc<Output>, max_samples: usize) -> Tap {
+        let epoch = out.ring.epoch();
         Tap {
             out,
             buf: vec![0.0; max_samples],
             starved: true,
             gain: 0.0,
+            epoch,
+            last: [0.0; 2],
+            tail: [0.0; 2],
+            fade: 0,
         }
+    }
+
+    /// Stops playing: ramps out from the last sample and waits for a prebuffer, then
+    /// ramps back in from zero gain.
+    fn starve(&mut self) {
+        self.starved = true;
+        self.gain = 0.0;
+        self.tail = self.last;
+        self.last = [0.0; 2];
+        self.fade = FADE_FRAMES;
     }
 
     /// Adds the radio to `stereo` (interleaved, 48 kHz) at its volume, softly limited.
     /// Allocates nothing and never waits.
     pub fn mix_into(&mut self, stereo: &mut [f32]) {
+        let epoch = self.out.ring.epoch();
+        if epoch != self.epoch {
+            // The station was cut (stopped or switched): fade out what was playing.
+            self.epoch = epoch;
+            if !self.starved {
+                self.starve();
+            }
+        }
         let ring = &self.out.ring;
         let prebuffer = (PREBUFFER_SECONDS * decode::RATE as f32) as usize * 2;
-        if self.starved && ring.available() < prebuffer {
+        let len = stereo.len().min(self.buf.len());
+        let n = if self.starved && ring.available() < prebuffer {
+            0
+        } else {
+            let n = ring.pop(&mut self.buf[..len]);
+            self.starved = false;
+            n
+        };
+        // The ring ran dry: play what there was, then fade out and wait for more.
+        let dry = n < len && !self.starved;
+        if n == 0 && !dry && self.fade == 0 {
             return;
         }
-        let len = stereo.len().min(self.buf.len());
-        let n = ring.pop(&mut self.buf[..len]);
-        self.starved = n < len;
-        if self.starved {
-            // The ring ran dry: play what there was and wait for more.
-            self.gain = 0.0;
-        }
         let target = self.out.volume();
-        for (o, &r) in stereo.iter_mut().zip(&self.buf[..n]) {
-            // ~5 ms to follow a volume change, so a slider never zippers.
-            self.gain += (target - self.gain) * 0.004;
-            *o = soft_clip(*o + r * self.gain);
+        for (i, o) in stereo.iter_mut().enumerate() {
+            let ch = i & 1;
+            if i == n && dry {
+                self.starve();
+            }
+            let mut x = 0.0;
+            if i < n {
+                // ~5 ms to follow a volume change, so a slider never zippers.
+                self.gain += (target - self.gain) * 0.004;
+                x = self.buf[i] * self.gain;
+                self.last[ch] = x;
+            }
+            if self.fade > 0 {
+                x += self.tail[ch] * (self.fade as f32 / FADE_FRAMES as f32);
+                if ch == 1 {
+                    self.fade -= 1;
+                }
+            } else if i >= n {
+                break;
+            }
+            *o = soft_clip(*o + x);
         }
     }
 }
@@ -239,11 +293,65 @@ mod tests {
         }
         // The gain has settled at the volume: 0.1 + 0.4 × 0.5.
         assert!((mix[511] - 0.3).abs() < 1e-3, "{}", mix[511]);
-        // A stop silences at once.
+        // A stop fades out within ~5 ms, then adds nothing.
         player.command(&RadioCommand::Stop);
         mix = [0.1; 512];
         tap.mix_into(&mut mix);
+        assert!(mix[0] > 0.29, "{}", mix[0]);
+        assert_eq!(mix[2 * FADE_FRAMES as usize..], [0.1; 32]);
+        mix = [0.1; 512];
+        tap.mix_into(&mut mix);
         assert_eq!(mix, [0.1; 512]);
+    }
+
+    /// A full-scale tone through an underrun (mid-callback, near a peak), its resumption
+    /// and a stop never steps further from one sample to the next than the tone itself.
+    #[test]
+    fn the_tap_never_clicks_on_an_underrun_or_a_stop() {
+        let out = Arc::new(Output::new());
+        let mut player = Player::new(Arc::clone(&out));
+        let mut tap = Tap::new(Arc::clone(&out), 512);
+        let e = out.ring.epoch();
+        // 375 Hz: a period of exactly 128 frames, peaks at frame 32 + 128k.
+        let mut phase = 0usize;
+        let mut tone = |frames: usize| {
+            let mut v = Vec::with_capacity(frames * 2);
+            for _ in 0..frames {
+                let s = (core::f32::consts::TAU * (phase % 128) as f32 / 128.0).sin();
+                v.extend_from_slice(&[s, -s]);
+                phase += 1;
+            }
+            v
+        };
+        let mut played = Vec::new();
+        let mut run = |tap: &mut Tap, callbacks: usize| {
+            for _ in 0..callbacks {
+                let mut mix = [0.0f32; 512];
+                tap.mix_into(&mut mix);
+                played.extend_from_slice(&mix);
+            }
+        };
+        // 12 064 frames end on a peak, 0.125 into a 256-frame callback: an underrun.
+        out.ring.push(e, &tone(94 * 128 + 32)).unwrap();
+        run(&mut tap, 60);
+        // It comes back, then is stopped mid-tone.
+        out.ring.push(e, &tone(94 * 128)).unwrap();
+        run(&mut tap, 30);
+        player.command(&RadioCommand::Stop);
+        run(&mut tap, 10);
+        let peak = played.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(peak > 0.95, "the tone played at full scale: {peak}");
+        // The tone's own step is 2π/128 ≈ 0.05.
+        let step = played
+            .windows(3)
+            .map(|w| (w[2] - w[0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(step < 0.06, "largest step {step}");
+        assert_eq!(
+            played[played.len() - 512..],
+            [0.0; 512],
+            "silent at the end"
+        );
     }
 
     /// Plays a file through the player and the real callback tap (fed in callback-sized

@@ -785,7 +785,7 @@ fn track(m: &mut WorldMesh, base: V3, along: V2, len: f32, bed: u8, pal: &Palett
     }
 }
 
-/// A white crossed pair of blades on a post over two red lamps, facing `facing`.
+/// A white crossed pair of blades on a post over two dark red lamps, facing `facing`.
 fn crossbuck(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
     let post = Paint::new(pal.metal_light, Pattern::Metal);
     let f = Frame::upright(base, facing.left());
@@ -3463,6 +3463,18 @@ mod tests {
         }
         // Every sign has room for its word.
         assert_eq!(worded, n, "{worded} of {n} signs lettered");
+    }
+
+    /// A crossbuck's lamps are baked dark: the crossing gates' own lamps flash at runtime,
+    /// so nothing on it may glow steady.
+    #[test]
+    fn crossbuck_lamps_are_baked_dark() {
+        let m = build_one(PropKind::Crossbuck, 3, &PropKit::new());
+        assert!(m.triangle_count() > 0);
+        assert!(m
+            .vertices
+            .iter()
+            .all(|v| v.emissive == [0, 0, 0, Glow::None as u8]));
     }
 
     /// The full-detail kit changes only the instanced kinds, and a street light's lens (the

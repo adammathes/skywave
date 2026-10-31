@@ -51,7 +51,8 @@ Chunk index  { per chunk: byte ranges into every table above, plus bounds and a 
 `Track` is a length of railway centered on `pos` along its facing, on its `bed`: `TRACK_BALLAST` (on a
 ballast prism over the ground), `TRACK_CROSSING` (flush panels in a road it crosses at grade, `pos` on the
 road's surface), `TRACK_BRIDGE` (a girder deck, `pos` at its top) or `TRACK_END` (ballast ending at a bumper), with `TRACK_SPUR` set on a spur's pieces;
-a `Crossbuck` faces the drivers it warns. A `FaceBillboard`'s lit face is blank (`face` 0) or one big pictogram
+a `Crossbuck` faces the drivers it warns, its two lamps baked dark (nothing lights them; a `CrossingGate`'s
+lamps are the ones the game flashes while a train comes). A `FaceBillboard`'s lit face is blank (`face` 0) or one big pictogram
 (`face` - 1, a pictogram index); a `BusShelter` opens toward its facing (the road) and carries an ad box of the
 same faces. The POI kinds from `DragStrip` on are a basin's set-piece landmarks and the props from `TunnelPiece`
 on are theirs (`docs/WORLD_GENERATION.md`, "Set pieces"): a `TunnelPiece` is a length of a road tunnel's box
