@@ -157,7 +157,8 @@ fn busy(start: u64, tick: u64) -> bool {
 /// Seconds into an answer that started at `start`, at `alpha` of the way through `tick`'s
 /// step (negative before it starts).
 fn since(start: u64, tick: u64, alpha: f32) -> f32 {
-    (tick as f32 - start as f32 + alpha) / SIM_HZ as f32
+    // Subtract in integers: ticks pass f32's exact range after 39 h of play.
+    ((tick as i64 - start as i64) as f32 + alpha) / SIM_HZ as f32
 }
 
 /// Ease in and out over an answer `len` s long, `s` s in: 0–1.
@@ -669,5 +670,16 @@ mod tests {
             assert!(e >= last);
             last = e;
         }
+    }
+
+    #[test]
+    fn since_is_exact_late_in_play() {
+        // Tick 2^26 is about 155 h in, past f32's exact integers.
+        let start = 1u64 << 26;
+        for k in 0..240u64 {
+            let s = since(start, start + k, 0.5);
+            assert_eq!(s, (k as f32 + 0.5) / SIM_HZ as f32, "{k} ticks in");
+        }
+        assert_eq!(since(start + 3, start, 0.0), -3.0 / SIM_HZ as f32);
     }
 }
