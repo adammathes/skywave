@@ -232,7 +232,7 @@ fn run_up(app: &mut App, lane: u32, ticks: u32, mut each: impl FnMut(&App)) {
     }
 }
 
-/// The player takes a busy signalized junction at 60 mph against the light, some 4–9 s
+/// The player takes a busy signalized junction at 60 mph against the light, 2–3.5 s
 /// into its red, while the cross traffic has its green. Every NPC car yields or is
 /// missed: none ever overlaps the player's footprint, and a cross-traffic car at the head
 /// of its queue holds on its green until the player has cleared the junction, then goes.
@@ -265,8 +265,11 @@ fn sixty_through_a_red_light_touches_no_car() {
     );
 
     // Busy traffic, the player waiting at the lane's start for a moment to go: its own
-    // lane clear ahead, a cross-traffic car waiting at its line, and the line reached 4–9 s
-    // into the red.
+    // lane clear ahead, a cross-traffic car waiting at its line, and the line reached 2–3.5 s
+    // into the red. The cross green starts `ALL_RED_TICKS` (1.5 s) into the red, so the
+    // player is then at most 2 s out: inside the reach NPC cars yield to (`PLAYER_ETA_S`).
+    // Later in the red the head of the cross queue has left before the player is near, and
+    // whether a later car arrives to hold is luck (it was, up to #94).
     let mut app = app_at(start.pos, start.heading, "t=12:00&traffic=busy");
     let red = |t: u64| g.light(lane, t) == Some(traffic::Light::Red);
     let (node, phase) = (
@@ -287,7 +290,7 @@ fn sixty_through_a_red_light_touches_no_car() {
             .iter()
             .all(|c| c.seg != lane && c.prev != lane);
         let waiting = app.npcs.cars().iter().any(|c| at_line(c) && c.speed < 0.5);
-        if clear && waiting && red(t) && red(t - 4 * 120) && !red(t - 9 * 120) {
+        if clear && waiting && red(t) && red(t - 2 * 120) && !red(t - 7 * 60) {
             break;
         }
         let hold = follow(&app, start.pos, start.dir, 0.0);
@@ -370,7 +373,7 @@ fn sixty_through_a_red_light_touches_no_car() {
     );
     assert!(red(tick), "the player ran the red");
     assert!(speed > MPH_60 - 1.0, "{speed} m/s");
-    assert!(!near.is_empty(), "the junction had traffic");
+    // A car that held on its green also shows the junction had traffic.
     assert!(
         yielded > 0,
         "no cross traffic yielded to the player: {held:?}"
