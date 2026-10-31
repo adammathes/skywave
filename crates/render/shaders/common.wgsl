@@ -154,7 +154,10 @@ fn agx(color: vec3<f32>) -> vec3<f32> {
     let luma = dot(v, LUMA);
     v = pow(max(v, vec3<f32>(0.0)), vec3<f32>(1.25));
     v = max(luma + 1.2 * (v - luma), vec3<f32>(0.0));
-    return clamp(pow(outset * v, vec3<f32>(2.2)), vec3<f32>(0.0), vec3<f32>(1.0));
+    // The outset has negative entries, so a saturated colour can land just below zero
+    // here, and pow() of a negative base is undefined (NaN on some GPUs).
+    let display = max(outset * v, vec3<f32>(0.0));
+    return clamp(pow(display, vec3<f32>(2.2)), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
