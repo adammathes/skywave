@@ -325,7 +325,12 @@ pub struct Score {
     pub noise_scale_m: f32,
 }
 
-/// Street furniture and planting densities. A spacing of 0 means none.
+/// The smallest nonzero prop spacing a template may ask for: the detail pass steps along every
+/// street side by it.
+pub const MIN_PROP_SPACING_M: f32 = 1.0;
+
+/// Street furniture and planting densities. A spacing of 0 means none, otherwise at least
+/// [`MIN_PROP_SPACING_M`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -1115,10 +1120,17 @@ fn validate_zone(zone: ZoneId, rule: &ZoneRule) -> Result<(), TemplateError> {
         ("street_tree_m", p.street_tree_m),
         ("hydrant_m", p.hydrant_m),
         ("power_pole_m", p.power_pole_m),
+    ];
+    for (field, x) in spacings {
+        if !(x.is_finite() && (x == 0.0 || x >= MIN_PROP_SPACING_M)) {
+            return Err(TemplateError::BadProps { zone, field });
+        }
+    }
+    let densities = [
         ("bench_per_km", p.bench_per_km),
         ("billboard_per_km", p.billboard_per_km),
     ];
-    for (field, x) in spacings {
+    for (field, x) in densities {
         if !(x.is_finite() && x >= 0.0) {
             return Err(TemplateError::BadProps { zone, field });
         }
