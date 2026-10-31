@@ -1355,10 +1355,8 @@ impl Traffic {
     }
 
     /// Whether the end of car `i`'s current lane, `d` meters ahead, lets it through:
-    /// claims the turn when the gate is open and the car is within its commit distance,
-    /// gives a claim back on red when the car can still stop at its normal braking (claims
-    /// clear the line before red, so only a car slowed on its way loses one); a car too
-    /// close to stop keeps it and goes through.
+    /// claims the turn when the gate is open and the car is within its commit distance. A
+    /// claim still held goes through ([`Traffic::plan_car`] already gave back any it must).
     fn current_gate(
         &mut self,
         g: &LaneGraph,
@@ -1373,11 +1371,6 @@ impl Traffic {
             return false;
         }
         if c.held == turn {
-            if g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed) {
-                self.unclaim(turn, c.len);
-                self.cars[i].held = NONE;
-                return false;
-            }
             return true;
         }
         let open = self.gate(g, inp, ps, i, turn, d);
