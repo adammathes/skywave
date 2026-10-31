@@ -39,6 +39,7 @@
 //! Everything is a pure function of `(seed, template, macro map)`: plain loops in index
 //! order, no hash maps, `crate::math` for square roots.
 
+use alloc::collections::BTreeSet;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -3199,67 +3200,83 @@ fn remove_stubs(ctx: &Ctx<'_>, g: &mut Graph) {
 }
 
 /// Joins edges at degree-2 nodes when both have the same class and kind.
+///
+/// Merges at the lowest-numbered node that can merge, then again, until none can: the same
+/// order as rescanning from node 0 after every merge. Only the merge's two far ends can
+/// change their answer, so they are queued for another look if the scan has passed them.
 fn merge_chains(g: &mut Graph) {
-    loop {
-        let deg = degrees(g);
-        let mut changed = false;
-        for (n, &dn) in deg.iter().enumerate() {
-            if dn != 2 || g.hw_arc[n].is_some() {
-                continue;
+    // Live edges at each node, in edge order (a loop once).
+    let mut inc: Vec<Vec<usize>> = vec![Vec::new(); g.nodes.len()];
+    for (k, e) in g.edges.iter().enumerate() {
+        if e.alive {
+            inc[e.a as usize].push(k);
+            if e.b != e.a {
+                inc[e.b as usize].push(k);
             }
-            let inc: Vec<usize> = (0..g.edges.len())
-                .filter(|&i| {
-                    g.edges[i].alive && (g.edges[i].a as usize == n || g.edges[i].b as usize == n)
-                })
-                .collect();
-            if inc.len() != 2 {
-                continue;
-            }
-            let (i, j) = (inc[0], inc[1]);
-            let (ei, ej) = (&g.edges[i], &g.edges[j]);
-            if ei.class != ej.class
-                || ei.kind != ej.kind
-                || matches!(ei.kind, Kind::Highway | Kind::Ramp)
-                || ei.oneway
-                || ej.oneway
-            {
-                continue;
-            }
-            // Orient i to end at n and j to start at n.
-            let mut pi = ei.pts.clone();
-            let mut ai = ei.a;
-            if ei.a as usize == n {
-                pi.reverse();
-                ai = ei.b;
-            }
-            let mut pj = ej.pts.clone();
-            let mut bj = ej.b;
-            if ej.b as usize == n {
-                pj.reverse();
-                bj = ej.a;
-            }
-            if ai == bj {
-                continue;
-            }
-            let dup = g.edges.iter().enumerate().any(|(k, e)| {
-                e.alive
-                    && k != i
-                    && k != j
-                    && ((e.a == ai && e.b == bj) || (e.a == bj && e.b == ai))
-            });
-            if dup {
-                continue;
-            }
-            pi.extend_from_slice(&pj[1..]);
-            g.edges[i].pts = pi;
-            g.edges[i].a = ai;
-            g.edges[i].b = bj;
-            g.edges[j].alive = false;
-            changed = true;
-            break;
         }
-        if !changed {
-            break;
+    }
+    let mut again = BTreeSet::new();
+    let mut next = 0usize;
+    loop {
+        let n = match again.pop_first() {
+            Some(n) => n,
+            None if next < inc.len() => {
+                next += 1;
+                next - 1
+            }
+            None => break,
+        };
+        // Degree 2: two edges, neither a loop.
+        if inc[n].len() != 2 || g.hw_arc[n].is_some() {
+            continue;
+        }
+        let (i, j) = (inc[n][0], inc[n][1]);
+        let (ei, ej) = (&g.edges[i], &g.edges[j]);
+        if ei.a == ei.b
+            || ej.a == ej.b
+            || ei.class != ej.class
+            || ei.kind != ej.kind
+            || matches!(ei.kind, Kind::Highway | Kind::Ramp)
+            || ei.oneway
+            || ej.oneway
+        {
+            continue;
+        }
+        // Orient i to end at n and j to start at n.
+        let ai = if ei.a as usize == n { ei.b } else { ei.a };
+        let bj = if ej.b as usize == n { ej.a } else { ej.b };
+        if ai == bj {
+            continue;
+        }
+        let dup = inc[ai as usize].iter().any(|&k| {
+            let e = &g.edges[k];
+            k != i && k != j && ((e.a == ai && e.b == bj) || (e.a == bj && e.b == ai))
+        });
+        if dup {
+            continue;
+        }
+        let mut pi = ei.pts.clone();
+        if ei.a as usize == n {
+            pi.reverse();
+        }
+        let mut pj = ej.pts.clone();
+        if ej.b as usize == n {
+            pj.reverse();
+        }
+        pi.extend_from_slice(&pj[1..]);
+        g.edges[i].pts = pi;
+        g.edges[i].a = ai;
+        g.edges[i].b = bj;
+        g.edges[j].alive = false;
+        inc[n].clear();
+        let at_b = &mut inc[bj as usize];
+        at_b.retain(|&k| k != j);
+        let at = at_b.partition_point(|&k| k < i);
+        at_b.insert(at, i);
+        for end in [ai as usize, bj as usize] {
+            if end < next {
+                again.insert(end);
+            }
         }
     }
 }
