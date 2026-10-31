@@ -2716,6 +2716,37 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert_eq!((next.scenario, next.place), (1, crate::PlaceKey::Coast));
 }
 
+/// The mixer outlives a world switch and plays a one-shot whenever a counter moves: the
+/// new world's counters go on from what it last saw, so nothing sounds on the switch, and
+/// the next real event still does.
+#[test]
+fn a_world_switch_fires_no_one_shot_sounds() {
+    let mut h = Harness::new();
+    h.key(Key::BracketRight);
+    h.key(Key::BracketRight);
+    assert_eq!(h.app.audio_params().tunes, 2);
+    // What the mixer last saw: a few of every other kind too, one about to wrap.
+    h.app.audio.hits = 3;
+    h.app.audio.curb_kicks = u32::MAX;
+    h.app.audio.deck_clicks = 5;
+    h.app.audio.waves = 7;
+    let counts =
+        |p: &audio::synth::AudioParams| (p.hits, p.curb_kicks, p.tunes, p.deck_clicks, p.waves);
+    let seen = counts(h.app.audio_params());
+    for world in [1, 0] {
+        h.app
+            .switch_world(&crate::SceneSetup::default(), world)
+            .unwrap();
+        for _ in 0..30 {
+            h.frame();
+            assert_eq!(counts(h.app.audio_params()), seen, "world {world}");
+        }
+    }
+    // A tune in the new world still sweeps the dial: one step on, from there.
+    h.key(Key::BracketRight);
+    assert_eq!(h.app.audio_params().tunes, seen.2 + 1);
+}
+
 #[test]
 fn the_world_page_pages_one_card_at_a_tv_scale() {
     let mut h = Harness::new();

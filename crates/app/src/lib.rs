@@ -234,6 +234,8 @@ pub struct App {
     /// The sound's view of the game, and what it made of the last frame.
     sound: sound::Sound,
     audio: audio::synth::AudioParams,
+    /// Keeps the one-shot sound counters running on across a world switch.
+    counters: sound::Counters,
     /// Width over height of the last frame drawn (for placing the dash's radio text).
     aspect: f32,
     /// The target's size in pixels, if the platform said ([`App::set_target_size`]).
@@ -522,6 +524,7 @@ impl App {
             traffic_scene: Some(traffic::Density::Off),
             sound,
             audio: audio::synth::AudioParams::default(),
+            counters: sound::Counters::default(),
             aspect: 16.0 / 9.0,
             target: None,
             water_toast: 0.0,
@@ -772,6 +775,8 @@ impl App {
         }
         next.target = self.target;
         next.aspect = self.aspect;
+        // The mixer outlives this app: the new one's counters go on from what it last saw.
+        next.counters = self.counters.for_next(&self.audio);
         next.ui.carry_platform(&self.ui);
         // A store-less app (a test) carries its settings in memory.
         let store = self.ui.take_store().unwrap_or_else(|| {

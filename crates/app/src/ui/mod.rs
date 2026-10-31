@@ -1435,6 +1435,7 @@ impl App {
             audio::deck::Kind::Cd => 1,
             audio::deck::Kind::Mp3 => 2,
         };
+        self.counters.apply(&mut self.audio);
         // The listener is the camera, moving with the car.
         let velocity = glam::Vec3::from(self.drive.state.vel);
         let (eye, forward) = if self.fly {
