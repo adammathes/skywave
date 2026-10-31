@@ -386,6 +386,7 @@ mod tests {
     use crate::App;
     use place::Prop;
     use vehicle::VehicleInput;
+    use world::math::V2;
 
     const DT: f32 = skywave_core::SIM_DT as f32;
 
@@ -433,6 +434,49 @@ mod tests {
             assert!((w.out - Vec2::new(-1.0, 0.0)).length() < 1e-5, "{w:?}");
             assert_eq!((w.floor_y, w.sill.y), (2.0, 3.0));
             assert!((w.sill.z - 20.0).abs() < 1e-4, "{w:?}");
+        }
+    }
+
+    /// The lane goes somewhere: in every variant a car 2 m wide fits the loop in past the
+    /// window, round behind the shop and out up the left side, inside the lot, and a curb
+    /// closes the lot's back.
+    #[test]
+    fn every_variant_loops_the_lane_round_the_back() {
+        let kits = crate::places::landmarks();
+        let kit = kits.iter().find(|k| k.id == "donut_shop").unwrap();
+        let [w, d] = kit.lot;
+        // Facing +z, so the kit frame is the world's.
+        let (pos, facing) = (V2::new(0.0, 0.0), V2::new(0.0, 1.0));
+        for v in 0..kit.variants.len() {
+            let mut slabs = Vec::new();
+            world::landmarks::slabs(kit, v, pos, 0.0, facing, &mut slabs);
+            let sill = world::landmarks::windows(kit, v, V3::new(0.0, 0.0, 0.0), facing)[0].0;
+            let (right, back, left) = (sill.x + 1.9, -29.0, -11.25);
+            let legs = [
+                ([right, 0.0], [right, back]),
+                ([right, back], [left, back]),
+                ([left, back], [left, 0.0]),
+            ];
+            let r = 1.0;
+            for (a, b) in legs {
+                for k in 0..=200 {
+                    let t = k as f32 / 200.0;
+                    let p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                    assert!(
+                        p[0].abs() + r <= 0.5 * w && p[1] - r >= -d,
+                        "variant {v}: {p:?}"
+                    );
+                    for s in &slabs {
+                        let clear = (p[0] - s.c.x).abs() >= s.half[0] + r
+                            || (p[1] - s.c.y).abs() >= s.half[1] + r;
+                        assert!(clear, "variant {v}: {p:?} hits {s:?}");
+                    }
+                }
+            }
+            let curb = slabs
+                .iter()
+                .any(|s| s.half[0] >= 0.5 * w - 0.01 && s.c.y - s.half[1] <= -d + 0.01);
+            assert!(curb, "variant {v}");
         }
     }
 

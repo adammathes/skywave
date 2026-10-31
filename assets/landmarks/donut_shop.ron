@@ -1,5 +1,6 @@
 // A donut shop with a giant donut on the roof: roadside kitsch, built to be seen from the
-// boulevard. A drive-thru window on its right side, the lane marked beside it. Kit format:
+// boulevard. A drive-thru window on its right side, the lane marked past it and round the
+// back of the shop to the street again. Kit format:
 // crates/world/src/landmarks.rs and docs/adr/0007-landmark-kits.md. Kit frame, m: x across
 // the lot (to the right seen from the road), y up, z toward the road; the lot spans x -15..15
 // and z -32..0, parking in front of the shop.
@@ -12,6 +13,7 @@ Kit(
     paints: [
         ("pad", (color: Pal(Asphalt), surface: Asphalt)),
         ("stripe", (color: Pal(PaintWhite), surface: Paint)),
+        ("curb", (color: Pal(Concrete), surface: Concrete)),
         ("wall", (color: Pal(StuccoWhite), surface: Stucco)),
         ("trim", (color: Pal(MetalLight), surface: Metal)),
         ("glass", (color: Pal(Glass), surface: Glass, glow: Some((Pal(WindowWarm), Window)))),
@@ -64,7 +66,7 @@ Kit(
                 Strut(a: (-13.5, 0.0, -3.0), b: (-13.5, 6.5, -3.0), w: 0.18, paint: "pole"),
                 Lamp(at: (-13.5, 6.7, -3.0), color: Srgb(0xFFE2B0), radius: 20.0),
                 // Stalls in front, the drive-thru lane's dashed line down the right side and its stop
-                // bar, a car's nose ahead of the window.
+                // bar, a car's nose past the window.
                 Box(lo: (-7.56, 0.06, -13.5), hi: (-7.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-4.56, 0.06, -13.5), hi: (-4.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-1.56, 0.06, -13.5), hi: (-1.44, 0.08, -8.0), paint: "stripe"),
@@ -72,8 +74,6 @@ Kit(
                 Box(lo: (4.44, 0.06, -13.5), hi: (4.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (7.44, 0.06, -13.5), hi: (7.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (8.3, 0.06, -23.05), hi: (11.85, 0.08, -22.75), paint: "stripe"),
-                Box(lo: (12.0, 0.06, -30.0), hi: (12.14, 0.08, -28.5), paint: "stripe"),
-                Box(lo: (12.0, 0.06, -27.0), hi: (12.14, 0.08, -25.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -24.0), hi: (12.14, 0.08, -22.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -21.0), hi: (12.14, 0.08, -19.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -18.0), hi: (12.14, 0.08, -16.5), paint: "stripe"),
@@ -82,6 +82,18 @@ Kit(
                 Box(lo: (12.0, 0.06, -9.0), hi: (12.14, 0.08, -7.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -6.0), hi: (12.14, 0.08, -4.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -3.0), hi: (12.14, 0.08, -1.5), paint: "stripe"),
+                // The lane loops: in down the right side past the window, round behind the shop and
+                // out up the left side to the street, an arrow on each leg; a curb along the back.
+                Box(lo: (9.85, 0.06, -5.9), hi: (10.15, 0.08, -3.5), paint: "stripe"),
+                Panel(a: (10.0, 0.07, -6.5), b: (10.8, 0.07, -5.6), c: (10.0, 0.07, -6.05), t: 0.02, paint: "stripe"),
+                Panel(a: (10.0, 0.07, -6.5), b: (9.2, 0.07, -5.6), c: (10.0, 0.07, -6.05), t: 0.02, paint: "stripe"),
+                Box(lo: (-1.4, 0.06, -29.15), hi: (1.0, 0.08, -28.85), paint: "stripe"),
+                Panel(a: (-2.0, 0.07, -29.0), b: (-1.1, 0.07, -29.8), c: (-1.55, 0.07, -29.0), t: 0.02, paint: "stripe"),
+                Panel(a: (-2.0, 0.07, -29.0), b: (-1.1, 0.07, -28.2), c: (-1.55, 0.07, -29.0), t: 0.02, paint: "stripe"),
+                Box(lo: (-11.4, 0.06, -19.5), hi: (-11.1, 0.08, -17.1), paint: "stripe"),
+                Panel(a: (-11.25, 0.07, -16.5), b: (-12.05, 0.07, -17.4), c: (-11.25, 0.07, -16.95), t: 0.02, paint: "stripe"),
+                Panel(a: (-11.25, 0.07, -16.5), b: (-10.45, 0.07, -17.4), c: (-11.25, 0.07, -16.95), t: 0.02, paint: "stripe"),
+                Box(lo: (-15.0, 0.0, -32.0), hi: (15.0, 0.3, -31.7), paint: "curb"),
             ],
         ),
         Variant(
@@ -127,7 +139,7 @@ Kit(
                 Strut(a: (-13.5, 0.0, -3.0), b: (-13.5, 6.5, -3.0), w: 0.18, paint: "pole"),
                 Lamp(at: (-13.5, 6.7, -3.0), color: Srgb(0xFFE2B0), radius: 20.0),
                 // Stalls in front, the drive-thru lane's dashed line down the right side and its stop
-                // bar, a car's nose ahead of the window.
+                // bar, a car's nose past the window.
                 Box(lo: (-7.56, 0.06, -13.5), hi: (-7.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-4.56, 0.06, -13.5), hi: (-4.44, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (-1.56, 0.06, -13.5), hi: (-1.44, 0.08, -8.0), paint: "stripe"),
@@ -135,8 +147,6 @@ Kit(
                 Box(lo: (4.44, 0.06, -13.5), hi: (4.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (7.44, 0.06, -13.5), hi: (7.56, 0.08, -8.0), paint: "stripe"),
                 Box(lo: (6.3, 0.06, -23.05), hi: (11.85, 0.08, -22.75), paint: "stripe"),
-                Box(lo: (12.0, 0.06, -30.0), hi: (12.14, 0.08, -28.5), paint: "stripe"),
-                Box(lo: (12.0, 0.06, -27.0), hi: (12.14, 0.08, -25.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -24.0), hi: (12.14, 0.08, -22.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -21.0), hi: (12.14, 0.08, -19.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -18.0), hi: (12.14, 0.08, -16.5), paint: "stripe"),
@@ -145,6 +155,18 @@ Kit(
                 Box(lo: (12.0, 0.06, -9.0), hi: (12.14, 0.08, -7.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -6.0), hi: (12.14, 0.08, -4.5), paint: "stripe"),
                 Box(lo: (12.0, 0.06, -3.0), hi: (12.14, 0.08, -1.5), paint: "stripe"),
+                // The lane loops: in down the right side past the window, round behind the shop and
+                // out up the left side to the street, an arrow on each leg; a curb along the back.
+                Box(lo: (9.85, 0.06, -5.9), hi: (10.15, 0.08, -3.5), paint: "stripe"),
+                Panel(a: (10.0, 0.07, -6.5), b: (10.8, 0.07, -5.6), c: (10.0, 0.07, -6.05), t: 0.02, paint: "stripe"),
+                Panel(a: (10.0, 0.07, -6.5), b: (9.2, 0.07, -5.6), c: (10.0, 0.07, -6.05), t: 0.02, paint: "stripe"),
+                Box(lo: (-1.4, 0.06, -29.15), hi: (1.0, 0.08, -28.85), paint: "stripe"),
+                Panel(a: (-2.0, 0.07, -29.0), b: (-1.1, 0.07, -29.8), c: (-1.55, 0.07, -29.0), t: 0.02, paint: "stripe"),
+                Panel(a: (-2.0, 0.07, -29.0), b: (-1.1, 0.07, -28.2), c: (-1.55, 0.07, -29.0), t: 0.02, paint: "stripe"),
+                Box(lo: (-11.4, 0.06, -19.5), hi: (-11.1, 0.08, -17.1), paint: "stripe"),
+                Panel(a: (-11.25, 0.07, -16.5), b: (-12.05, 0.07, -17.4), c: (-11.25, 0.07, -16.95), t: 0.02, paint: "stripe"),
+                Panel(a: (-11.25, 0.07, -16.5), b: (-10.45, 0.07, -17.4), c: (-11.25, 0.07, -16.95), t: 0.02, paint: "stripe"),
+                Box(lo: (-15.0, 0.0, -32.0), hi: (15.0, 0.3, -31.7), paint: "curb"),
             ],
         ),
         Variant(
