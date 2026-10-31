@@ -109,6 +109,9 @@ pub struct AudioParams {
     pub speed_mps: f32,
     /// Front-left, front-right, rear-left, rear-right.
     pub wheels: [WheelParams; 4],
+    /// No roof over the front seats (a convertible or a targa): the wind is heard in the
+    /// open rather than through the cabin.
+    pub open_top: bool,
     /// Counts every curb kick so far, and how fast the latest wheel hit its curb, m/s.
     pub curb_kicks: u32,
     pub curb_speed_mps: f32,
@@ -164,6 +167,7 @@ impl Default for AudioParams {
             engine: EngineParams::default(),
             speed_mps: 0.0,
             wheels: [wheel; 4],
+            open_top: false,
             curb_kicks: 0,
             curb_speed_mps: 0.0,
             hits: 0,

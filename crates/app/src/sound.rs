@@ -172,6 +172,7 @@ impl Sound {
             },
             speed_mps: s.speed_mps,
             wheels,
+            open_top: drive.layout.open_top,
             curb_kicks: self.curb_kicks,
             curb_speed_mps: self.curb_speed,
             hits: self.hits,

@@ -570,9 +570,9 @@ mod tests {
         let sounding = ((crate::TUNE_SECONDS - 0.08) * SAMPLE_RATE as f32) as usize * 2;
         let level = rms(&burst[..sounding]);
         let ratio = level / idle;
-        assert!((1.2..2.5).contains(&ratio), "{ratio}");
-        // About +4 dB over the idle; and it ends silent, 20 ms after the click, for the
-        // station.
+        assert!((2.0..3.2).contains(&ratio), "{ratio}");
+        // About +8 dB over the (quiet) idle; and it ends silent, 20 ms after the click, for
+        // the station.
         let tail = &burst[sounding + 2 * 960..];
         assert!(tail.iter().all(|v| v.abs() < 1e-3));
     }
@@ -659,13 +659,126 @@ mod tests {
         assert_eq!(hash, PINNED, "chime hash changed: {hash:#018x}");
     }
 
+    /// A radio station at the default mix, RMS: a track mastered to -14 dBFS RMS, times
+    /// the radio volume (0.8) and the master (0.8) it plays at outside the mixer.
+    const RADIO_RMS: f32 = 0.2 * 0.8 * 0.8;
+
+    /// `x` relative to the radio, dB.
+    fn under_radio_db(x: &[f32]) -> f32 {
+        20.0 * (rms(x) / RADIO_RMS).log10()
+    }
+
+    /// The default mix with the radio on (so the engine and world are ducked under it).
+    fn radio_mix() -> AudioParams {
+        AudioParams {
+            radio: 0.8,
+            ..default_mix()
+        }
+    }
+
+    /// The last two thirds of `seconds` of a fresh mixer at `p` (the gains settled).
+    fn settled(p: &AudioParams, seconds: f32) -> Vec<f32> {
+        let out = render_for(&mut Mixer::new(), p, seconds);
+        out[out.len() / 3..].to_vec()
+    }
+
+    /// `SKYWAVE_MIX_WAV_DIR=dir` writes `name` there for listening.
+    fn save(name: &str, x: &[f32]) {
+        if let Ok(dir) = std::env::var("SKYWAVE_MIX_WAV_DIR") {
+            std::fs::write(format!("{dir}/{name}"), wav(x)).expect("write the WAV");
+        }
+    }
+
+    /// Wind alone at highway speed (30 m/s, about 67 mph) sits far under the radio: a soft
+    /// wash with the top down, quieter still through a closed cabin, and growing with speed.
+    #[test]
+    fn wind_sits_under_the_radio() {
+        let wind = |speed: f32, open_top: bool| {
+            let mut p = AudioParams {
+                engine_volume: 0.0,
+                speed_mps: speed,
+                open_top,
+                ..radio_mix()
+            };
+            // Wheels in the air: no road noise, only the wind.
+            p.wheels.iter_mut().for_each(|w| w.grounded = false);
+            settled(&p, 6.0)
+        };
+        let open = wind(30.0, true);
+        let closed = wind(30.0, false);
+        save("wind_open_30.wav", &open);
+        save("wind_closed_30.wav", &closed);
+        let (o, c) = (under_radio_db(&open), under_radio_db(&closed));
+        println!("wind at 30 m/s vs the radio: open {o:.1} dB, closed {c:.1} dB");
+        assert!((-30.0..-23.0).contains(&o), "open {o}");
+        assert!(c < o - 4.0, "closed {c} open {o}");
+        assert!(under_radio_db(&wind(40.0, true)) > o + 3.0);
+        assert!(under_radio_db(&wind(40.0, true)) < -18.0);
+    }
+
+    /// Idle is a low, steady hum well under the radio for every engine, and steady: its
+    /// level in 50 ms windows barely moves.
+    #[test]
+    fn idle_sits_under_the_radio_and_is_steady() {
+        let mut all = Vec::new();
+        for profile in crate::synth::EngineProfile::ALL {
+            let mut p = AudioParams {
+                world_volume: 0.0,
+                ..radio_mix()
+            };
+            p.engine.profile = profile;
+            let x = settled(&p, 4.5);
+            let db = under_radio_db(&x);
+            let env: Vec<f32> = x.chunks(4800).map(rms).collect();
+            let mean = env.iter().sum::<f32>() / env.len() as f32;
+            let var = env.iter().map(|e| (e - mean) * (e - mean)).sum::<f32>() / env.len() as f32;
+            let wobble = var.sqrt() / mean;
+            println!("idle {profile:?} vs the radio: {db:.1} dB, envelope wobble {wobble:.3}");
+            assert!((-28.0..-20.0).contains(&db), "{profile:?} {db}");
+            assert!(wobble < 0.07, "{profile:?} {wobble}");
+            all.extend(x);
+        }
+        save("idle.wav", &all);
+        // Driving still has life: a pull at 4000 rpm is ~12 dB over the idle.
+        let mut p = AudioParams {
+            world_volume: 0.0,
+            ..radio_mix()
+        };
+        let idle = rms(&settled(&p, 1.5));
+        p.engine.rpm = 4000.0;
+        p.engine.throttle = 0.7;
+        p.engine.gear = 3;
+        let pull = rms(&settled(&p, 1.5));
+        assert!(pull > 3.0 * idle, "{pull} {idle}");
+    }
+
+    /// Highway cruising with the top down, everything playing, for listening
+    /// (`SKYWAVE_MIX_WAV_DIR`): the whole mix stays well under the radio.
+    #[test]
+    fn open_top_cruise_sits_under_the_radio() {
+        let mut p = AudioParams {
+            speed_mps: 30.0,
+            open_top: true,
+            ..radio_mix()
+        };
+        p.engine.rpm = 2600.0;
+        p.engine.throttle = 0.25;
+        p.engine.gear = 4;
+        p.wheels.iter_mut().for_each(|w| w.speed_mps = 30.0);
+        let x = settled(&p, 6.0);
+        save("cruise_open_30.wav", &x);
+        let db = under_radio_db(&x);
+        println!("open-top cruise at 30 m/s vs the radio: {db:.1} dB");
+        assert!((-16.0..-9.0).contains(&db), "{db}");
+    }
+
     /// The scripted drive (12 s per engine profile, all five) renders bit-identically
     /// everywhere. `SKYWAVE_AUDIO_WAV=path` also writes it out for listening.
     ///
     /// Re-pin deliberately, in its own commit, when the synth changes.
     #[test]
     fn scripted_drive_renders_deterministically() {
-        const PINNED: u64 = 0xa0b5_ad55_4d1a_fe81;
+        const PINNED: u64 = 0x3016_fe04_3a75_434b;
         let mut m = Mixer::new();
         let out = render_script(&mut m, 720 * 5, |_, _| {});
         let bytes = wav(&out);

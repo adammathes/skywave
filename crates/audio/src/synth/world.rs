@@ -9,8 +9,9 @@
 //! - **Rolling**: brown noise low-passed by speed, voiced per surface under the grounded
 //!   wheels: asphalt smooth, concrete brighter with an expansion-joint knock every
 //!   [`JOINT_SPACING_M`], grass a swishing hiss.
-//! - **Wind**: band-passed noise, independent per ear, rising with the square of speed,
-//!   with a slow gust.
+//! - **Wind**: low-passed noise, independent per ear, rising with the square of speed,
+//!   with a slow, gentle gust: a soft wash with the top down, quieter and darker through a
+//!   closed cabin.
 //! - **Curb kick** and **wall hit**: a low thump, louder the faster the bump and leaning
 //!   toward the side of the car it was on; the hit adds a short, soft crunch.
 //! - **Horn**: two tones a minor third apart (410 and 500 Hz), brassy through a band-pass,
@@ -27,6 +28,9 @@ use super::{AudioParams, Surface, TRAFFIC_VOICES};
 const TICK: usize = 32;
 /// Concrete slabs are this long, m.
 pub const JOINT_SPACING_M: f32 = 4.6;
+/// Wind level at full speed with the top down, and through a closed cabin.
+pub const WIND_OPEN: f32 = 0.65;
+pub const WIND_CLOSED: f32 = 0.45;
 /// Horn pitches, Hz.
 pub const HORN_HZ: [f32; 2] = [410.0, 500.0];
 
@@ -302,12 +306,15 @@ impl WorldSynth {
         let v = unit(speed / 45.0);
         self.gust_phase[0] = fract(self.gust_phase[0] + 0.13 * dt);
         self.gust_phase[1] = fract(self.gust_phase[1] + 0.31 * dt);
-        let gust =
-            1.0 + 0.22 * sin_turns(self.gust_phase[0]) + 0.12 * sin_turns(self.gust_phase[1]);
-        self.wind_target = 0.4 * v * v * gust;
-        let wind_hz = 200.0 + 9.0 * speed;
-        self.wind_l.set(wind_hz, 0.6);
-        self.wind_r.set(wind_hz * 1.07, 0.6);
+        let gust = 1.0 + 0.1 * sin_turns(self.gust_phase[0]) + 0.05 * sin_turns(self.gust_phase[1]);
+        let (level, hz) = if p.open_top {
+            (WIND_OPEN, 250.0 + 14.0 * speed)
+        } else {
+            (WIND_CLOSED, 150.0 + 7.0 * speed)
+        };
+        self.wind_target = level * v * v * gust;
+        self.wind_l.set(hz, 0.6);
+        self.wind_r.set(hz * 1.07, 0.6);
 
         // Ocean swell.
         self.swell_phase[0] = fract(self.swell_phase[0] + 0.083 * dt);
@@ -388,8 +395,8 @@ impl WorldSynth {
         // Wind.
         let wind = self.wind.step(self.wind_target);
         if wind > 1e-5 {
-            l += self.wind_l.band(w) * wind * 3.0;
-            r += self.wind_r.band(w2) * wind * 3.0;
+            l += self.wind_l.low(w) * wind;
+            r += self.wind_r.low(w2) * wind;
         }
 
         // Curb thump.
