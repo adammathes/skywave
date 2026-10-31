@@ -529,14 +529,17 @@ impl Npcs {
             }
         }
         let [len, wid, _] = spec.dims_m;
-        let reach = 0.5 * (len + wid) + 4.0;
+        let player_reach = 0.5 * (len + wid) + 4.0;
         let mut hardest: Option<world::Bump> = None;
         for i in 0..self.traffic.cars().len() {
             let c = self.traffic.cars()[i];
+            let b = self.bodies[usize::from(c.shape)];
+            // Past the player's reach by the farthest the car's own box gets from its ground
+            // point, so a semi's trailer is in reach as soon as a hatchback's would be.
+            let reach = player_reach + b.back.abs() + b.half[0] + b.half[1];
             if (c.pos[0] - state.pos[0]).abs() > reach || (c.pos[2] - state.pos[2]).abs() > reach {
                 continue;
             }
-            let b = self.bodies[usize::from(c.shape)];
             let other = world::collide::OtherCar {
                 body: b.solid(&c),
                 vel: [
@@ -1212,6 +1215,73 @@ mod tests {
         let new: usize = per[25..].iter().sum();
         assert!(old > 0 && old < new, "{old} old, {new} new");
         assert_eq!(hash, BASIN_2001_TRAFFIC_HASH);
+    }
+
+    /// How far (m) the player's car, closing at 3 m/s and nudged 1 cm closer each try, is
+    /// past the face of a semi-length car standing in the town when it first touches:
+    /// from behind (`side == false`) or square on to its left side beside the trailer's
+    /// back end. Negative is short of the face.
+    fn semi_first_contact(side: bool) -> f32 {
+        let mut app = app("place=town&t=12:00&still=1&stream=0");
+        let semi = vehicles::BUILTIN_SHAPES
+            .iter()
+            .position(|b| b.0 == "anvil_semi.shape.ron")
+            .unwrap();
+        let semi =
+            CarBody::of(&vehicles::load_shape(vehicles::BUILTIN_SHAPES[semi].1).unwrap()).unwrap();
+        assert!(semi.half[0] > 8.0, "a semi's length: {:?}", semi.half);
+        let graph = app.npcs.graph.clone();
+        let lane = (0..graph.lanes.len() as u32)
+            .max_by(|&a, &b| {
+                let len = |l: u32| graph.lanes[l as usize].length_m;
+                len(a).total_cmp(&len(b))
+            })
+            .unwrap();
+        let s = 0.5 * graph.lanes[lane as usize].length_m;
+        let id = app.npcs.traffic.spawn_at(&graph, lane, s, 0.0).unwrap();
+        let c = *app.npcs.cars().iter().find(|c| c.id == id).unwrap();
+        assert_eq!(app.npcs.count(), 1, "only the semi");
+        app.npcs.bodies[usize::from(c.shape)] = semi;
+        let spec = app.drive.spec.clone();
+        let half_len = 0.5 * spec.dims_m[0];
+        let mid = [
+            c.pos[0] - c.dir[0] * semi.back,
+            c.pos[2] - c.dir[1] * semi.back,
+        ];
+        let (toward, face, along) = if side {
+            let r = [-c.dir[1], c.dir[0]];
+            // From its left, a little in from the trailer's back end.
+            let tail = -(semi.half[0] - 1.5);
+            (r, semi.half[1], [c.dir[0] * tail, c.dir[1] * tail])
+        } else {
+            (c.dir, semi.half[0], [0.0; 2])
+        };
+        for k in 0..200 {
+            let gap = 1.0 - 0.01 * k as f32;
+            let back = face + half_len + gap;
+            let at = [
+                mid[0] + along[0] - toward[0] * back,
+                c.pos[1],
+                mid[1] + along[1] - toward[1] * back,
+            ];
+            let mut ram = vehicle::VehicleState::spawn(&spec, at, (-toward[0]).atan2(-toward[1]));
+            ram.vel = [toward[0] * 3.0, 0.0, toward[1] * 3.0];
+            if app.npcs.collide(&mut ram, &spec, &app.ground).is_some() {
+                return -gap;
+            }
+        }
+        panic!("never touched the semi");
+    }
+
+    /// A long car is in the broad phase's reach in time: the player's car touches a
+    /// semi's trailer at its surface, from behind and from the side, not meters inside it.
+    #[test]
+    fn the_player_touches_a_semi_at_its_surface() {
+        for side in [false, true] {
+            let depth = semi_first_contact(side);
+            eprintln!("side {side}: first contact {depth:.2} m past the face");
+            assert!(depth.abs() <= 0.05, "side {side}: {depth:.2} m");
+        }
     }
 
     #[test]
