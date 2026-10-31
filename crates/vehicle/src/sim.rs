@@ -144,6 +144,11 @@ const BODY_FRICTION: f32 = 0.6;
 const BODY_LOW_CORNER_M: f32 = 0.25;
 /// How far above a body corner its ground probe starts, m.
 const BODY_PROBE_M: f32 = 0.5;
+/// The upper body corners are probed only while up·world-up is below this (tilted past ~45°).
+/// Each upper corner sits the body's height along its up from a lower one, so it can reach
+/// the ground only where the ground is steeper than 90° minus the tilt; 0.7 covers ground up
+/// to 44°, steeper than any a car can stand on.
+const BODY_UPPER_UP: f32 = 0.7;
 /// Auto-right: seconds upset before it starts, the up·world-up below which the car counts as
 /// upset, the value at which righting stops, the target roll rate (rad/s), its gain (1/s),
 /// and the share of the car's weight lifted while righting.
@@ -978,7 +983,11 @@ pub fn step(
     let [len, wid, hgt] = spec.dims_m;
     let low = -spec.cg_height_m + BODY_LOW_CORNER_M;
     let high = -spec.cg_height_m + BODY_LOW_CORNER_M + hgt;
+    let upper = up[1] < BODY_UPPER_UP;
     for c in 0..8 {
+        if c & 2 != 0 && !upper {
+            continue;
+        }
         let corner = [
             if c & 1 == 0 { -0.48 * wid } else { 0.48 * wid },
             if c & 2 == 0 { low } else { high },

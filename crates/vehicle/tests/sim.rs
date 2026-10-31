@@ -665,6 +665,38 @@ fn dropped_car_lands_and_settles() {
     }
 }
 
+/// A car on its roof rests on its upper body corners instead of falling through the ground
+/// (before the auto-right starts).
+#[test]
+fn upside_down_car_lands_on_its_roof() {
+    for spec in cars() {
+        let mut s = VehicleState::spawn(&spec, [0.0, 2.0, 0.0], 0.0);
+        s.rot = [0.0, 0.0, 1.0, 0.0];
+        hold(
+            &spec,
+            &mut s,
+            VehicleInput::default(),
+            &Assists::default(),
+            2 * STEPS_PER_S,
+        );
+        assert_finite(&s);
+        // The roof corners are `dims_m[2] + 0.25 - cg_height_m` above the center of mass.
+        let roof = spec.dims_m[2] + 0.25 - spec.cg_height_m;
+        println!(
+            "{:15} on its roof at {:.3} m (roof {roof:.3} m)",
+            spec.id, s.pos[1]
+        );
+        assert!(s.up()[1] < -0.95, "{} rolled off its roof", spec.id);
+        assert!(
+            (s.pos[1] - roof).abs() < 0.1 && len(s.vel) < 0.05,
+            "{} rests at {} m, moving {} m/s",
+            spec.id,
+            s.pos[1],
+            len(s.vel)
+        );
+    }
+}
+
 #[test]
 fn upside_down_car_rights_itself() {
     for spec in cars() {
