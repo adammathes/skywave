@@ -178,7 +178,8 @@ const PLAYER_NODE_M: f32 = 60.0;
 const SPAWN_CLEAR_M: f32 = 12.0;
 /// Lanes checked for a spawn per step.
 const SCAN_LANES: usize = 48;
-/// Despawn a hidden car that has not moved for this long (s): longer than any red.
+/// Despawn a hidden car that has not moved for this long (s), not counting time it faces a
+/// red: a red can be longer (91.5 s at a four-phase junction).
 const STUCK_S: u32 = 90;
 /// Head lights come on this long after dusk at the latest (s): drivers differ.
 const LIGHT_DELAY_S: f32 = 900.0;
@@ -1987,16 +1988,20 @@ impl Traffic {
         let pp = inp.player.pos;
         let mut excess = self.cars.len() > target;
         let hidden_ticks = (b.hidden_s * SIM_HZ as f32) as u32;
+        let nl = self.lanes;
         let mut i = self.cars.len();
         while i > 0 {
             i -= 1;
             let c = &mut self.cars[i];
             let seen = inp.view.sees(c.pos, c.len);
             c.hidden = if seen { 0 } else { c.hidden.saturating_add(1) };
-            c.stuck = if c.speed < STOPPED_MPS {
-                c.stuck.saturating_add(1)
-            } else {
+            let red = c.seg < nl && g.light(c.seg, inp.tick) == Some(Light::Red);
+            c.stuck = if c.speed >= STOPPED_MPS {
                 0
+            } else if red {
+                c.stuck
+            } else {
+                c.stuck.saturating_add(1)
             };
             if seen {
                 continue;
