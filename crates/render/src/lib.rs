@@ -26,7 +26,7 @@
 //! 5. **Tonemap**: a bilinear upscale when the HDR target is scaled, exposure, bloom, AgX,
 //!    a light vignette and an 8-bit dither from the HDR target to the swapchain.
 //! 6. **HUD**: text, rectangles and images (the map uploaded once with
-//!    [`Renderer::upload_map`], discs, the player arrow) from [`SceneView::hud`] as
+//!    [`Renderer::upload_hud_image`], discs, the player arrow) from [`SceneView::hud`] as
 //!    alpha-blended quads straight onto the swapchain, in one instanced draw: the HUD bind
 //!    group holds the font atlas and the map, and each quad picks one (see [`HudLayout`]
 //!    for the layout rules and [`font`] for the bitmap face). Skipped when there is
@@ -67,8 +67,9 @@ pub use atlas::{
     TILE_SIZE,
 };
 pub use hud::{
-    clamp_ui_scale, Hud, HudBuilder, HudImage, HudItem, HudLayout, HudMask, HudTexture, TextRange,
-    HUD_HEIGHT, HUD_SAFE_MARGIN, HUD_WIDTH, MAX_HUD_QUADS, UI_SCALE_MAX, UI_SCALE_MIN,
+    clamp_ui_scale, Hud, HudBuilder, HudImage, HudImageTarget, HudItem, HudLayout, HudMask,
+    HudTexture, TextRange, HUD_HEIGHT, HUD_SAFE_MARGIN, HUD_WIDTH, MAX_HUD_QUADS, UI_SCALE_MAX,
+    UI_SCALE_MIN,
 };
 pub use light::{
     camera_depth_range, fit_cascades, slice_corners, sun_view_proj, CascadeFit, CASCADES,
@@ -174,7 +175,7 @@ const ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const FONT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 /// The HUD map: sRGB-encoded texels read as plain unorm, like the HUD's colors.
 const MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// Widest map [`Renderer::upload_map`] takes: WebGL2's guaranteed texture size.
+/// Widest map [`Renderer::upload_hud_image`] takes: WebGL2's guaranteed texture size.
 pub const MAX_MAP_SIZE: u32 = 2048;
 /// Stride of the per-cascade uniform slots; the largest offset alignment WebGPU allows.
 const CASCADE_UNIFORM_STRIDE: u64 = 256;
@@ -1280,9 +1281,9 @@ pub struct Renderer {
     /// The map and the stills the HUD group holds, kept to rebuild it when one changes.
     map_view: wgpu::TextureView,
     stills_view: wgpu::TextureView,
-    /// Texels of the uploaded map (1×1 transparent until [`Renderer::upload_map`]).
+    /// Texels of the uploaded map (1×1 transparent until [`Renderer::upload_hud_image`]).
     map_size: [u32; 2],
-    /// Texels of the uploaded stills (1×1 transparent until [`Renderer::upload_stills`]).
+    /// Texels of the uploaded stills (1×1 transparent until [`Renderer::upload_hud_image`]).
     stills_size: [u32; 2],
     /// Room for [`MAX_HUD_QUADS`] quads, allocated once.
     hud_buffer: wgpu::Buffer,
@@ -2203,12 +2204,18 @@ impl Renderer {
         }
     }
 
-    /// Uploads the map that [`HudTexture::Map`] quads show: `width × height` RGBA8 texels,
-    /// sRGB-encoded, row-major from the top-left, with straight alpha. Mipmaps are built
-    /// here. Call it once while loading (it creates a texture); a later call replaces the
-    /// map. Sizes are clamped to 1..=[`MAX_MAP_SIZE`]; data of the wrong length uploads a
-    /// transparent map.
-    pub fn upload_map(&mut self, width: u32, height: u32, rgba: &[u8]) {
+    /// Uploads the image `target`'s quads show: `width × height` RGBA8 texels, sRGB-encoded,
+    /// row-major from the top-left, with straight alpha; for [`HudImageTarget::Stills`] the
+    /// pictures side by side in one image. Mipmaps are built here. Call it once per target
+    /// while loading (it creates a texture); a later call replaces the image. Sizes are
+    /// clamped to 1..=[`MAX_MAP_SIZE`]; data of the wrong length uploads a transparent image.
+    pub fn upload_hud_image(
+        &mut self,
+        target: HudImageTarget,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) {
         let (w, h) = (width.clamp(1, MAX_MAP_SIZE), height.clamp(1, MAX_MAP_SIZE));
         let empty = [0; 4];
         let (w, h, rgba) = if (w, h) == (width, height) && rgba.len() == (w * h * 4) as usize {
@@ -2216,28 +2223,15 @@ impl Renderer {
         } else {
             (1, 1, &empty[..])
         };
-        self.map_view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
-        self.map_size = [w, h];
+        let view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
+        match target {
+            HudImageTarget::Map => (self.map_view, self.map_size) = (view, [w, h]),
+            HudImageTarget::Stills => (self.stills_view, self.stills_size) = (view, [w, h]),
+        }
         self.rebuild_hud_group();
     }
 
-    /// Uploads the pictures [`HudTexture::Still`] quads show, side by side in one `width ×
-    /// height` image (RGBA8, sRGB-encoded, row-major from the top-left, straight alpha),
-    /// with mipmaps, under the same rules as [`Renderer::upload_map`].
-    pub fn upload_stills(&mut self, width: u32, height: u32, rgba: &[u8]) {
-        let (w, h) = (width.clamp(1, MAX_MAP_SIZE), height.clamp(1, MAX_MAP_SIZE));
-        let empty = [0; 4];
-        let (w, h, rgba) = if (w, h) == (width, height) && rgba.len() == (w * h * 4) as usize {
-            (w, h, rgba)
-        } else {
-            (1, 1, &empty[..])
-        };
-        self.stills_view = upload_map_texture(&self.device, &self.queue, w, h, rgba);
-        self.stills_size = [w, h];
-        self.rebuild_hud_group();
-    }
-
-    /// Size in texels of the stills [`Renderer::upload_stills`] last uploaded (1×1 before).
+    /// Size in texels of the stills [`Renderer::upload_hud_image`] last uploaded (1×1 before).
     pub fn stills_size(&self) -> [u32; 2] {
         self.stills_size
     }
@@ -2253,7 +2247,7 @@ impl Renderer {
         self.hud_valid = false;
     }
 
-    /// Size in texels of the map [`Renderer::upload_map`] last uploaded (1×1 before).
+    /// Size in texels of the map [`Renderer::upload_hud_image`] last uploaded (1×1 before).
     pub fn map_size(&self) -> [u32; 2] {
         self.map_size
     }
@@ -2297,6 +2291,13 @@ impl Renderer {
     /// assertion failure after [`WARMUP_FRAMES`]. A changed [`SceneView::quality`] may
     /// rebuild targets first (counted in [`RenderStats::rebuilds`]).
     pub fn render(&mut self, view: &wgpu::TextureView, scene: &SceneView) {
+        let hud_dropped = self.build_hud(scene);
+        self.render_built(view, scene, hud_dropped);
+    }
+
+    /// [`Renderer::render`] with `scene`'s HUD quads already in `hud_staging`
+    /// ([`Renderer::build_hud`], which dropped `hud_dropped`).
+    fn render_built(&mut self, view: &wgpu::TextureView, scene: &SceneView, hud_dropped: u32) {
         self.set_quality(scene.quality);
         if let Some(t) = &mut self.timer {
             t.begin_frame(&self.device);
@@ -2666,28 +2667,8 @@ impl Renderer {
             forward_draws += 1;
             timed |= 1 << timing::PASS_TONEMAP;
         }
-        self.hud_staging.clear();
-        let hud_dropped = hud::build_quads(
-            &scene.hud,
-            self.size,
-            self.map_size,
-            self.stills_size,
-            &mut self.hud_staging,
-            MAX_HUD_QUADS,
-        );
-        let hud_quads = self.hud_staging.len() as u32;
+        let hud_quads = self.draw_hud(&mut encoder, view, ts(&timer, timing::PASS_HUD, true, true));
         if hud_quads > 0 {
-            self.queue
-                .write_buffer(&self.hud_buffer, 0, bytemuck::cast_slice(&self.hud_staging));
-            hud_pass(
-                &mut encoder,
-                view,
-                &self.hud_pipeline,
-                [&self.frame_group, &self.hud_group],
-                &self.hud_buffer,
-                hud_quads,
-                ts(&timer, timing::PASS_HUD, true, true),
-            );
             forward_draws += 1;
             timed |= 1 << timing::PASS_HUD;
         }
@@ -2756,26 +2737,24 @@ impl Renderer {
     /// HDR target, else [`FrameWork::World`]. Costs a compare of the instances (tens of
     /// microseconds for a few thousand) and building the HUD's quads.
     pub fn plan(&mut self, scene: &SceneView) -> FrameWork {
+        self.plan_built(scene).0
+    }
+
+    /// [`Renderer::plan`], leaving `scene`'s HUD quads in `hud_staging` for the frame to
+    /// draw; also returns how many quads were dropped.
+    fn plan_built(&mut self, scene: &SceneView) -> (FrameWork, u32) {
+        let dropped = self.build_hud(scene);
         let coronas = self.coronas_on(scene.quality);
-        if self.shadows_held || !self.kept_world.same(scene, coronas) {
-            return FrameWork::World;
-        }
-        self.hud_staging.clear();
-        hud::build_quads(
-            &scene.hud,
-            self.size,
-            self.map_size,
-            self.stills_size,
-            &mut self.hud_staging,
-            MAX_HUD_QUADS,
-        );
-        if self.hud_valid && self.hud_staging == self.hud_drawn {
+        let work = if self.shadows_held || !self.kept_world.same(scene, coronas) {
+            FrameWork::World
+        } else if self.hud_valid && self.hud_staging == self.hud_drawn {
             FrameWork::Skip
         } else if self.post.is_some() && self.targets.post.is_some() {
             FrameWork::Ui
         } else {
             FrameWork::World
-        }
+        };
+        (work, dropped)
     }
 
     /// Draws `scene` with no more work than [`Renderer::plan`] says it takes, into the
@@ -2787,7 +2766,7 @@ impl Renderer {
         scene: &SceneView,
         acquire: impl FnOnce() -> Option<(F, wgpu::TextureView)>,
     ) -> (FrameWork, Option<F>) {
-        let work = self.plan(scene);
+        let (work, hud_dropped) = self.plan_built(scene);
         if work == FrameWork::Skip {
             self.stats.skipped_frames += 1;
             self.stats.last_work = work;
@@ -2797,8 +2776,8 @@ impl Renderer {
             return (work, None);
         };
         match work {
-            FrameWork::Ui => self.render_ui(&view, scene),
-            _ => self.render(&view, scene),
+            FrameWork::Ui => self.render_ui_built(&view, scene, hud_dropped),
+            _ => self.render_built(&view, scene, hud_dropped),
         }
         (work, Some(frame))
     }
@@ -2807,10 +2786,16 @@ impl Renderer {
     /// `scene`'s HUD over it ([`FrameWork::Ui`]). Draws the whole frame instead when no
     /// world is kept (none drawn yet, or no HDR target to keep it in).
     pub fn render_ui(&mut self, view: &wgpu::TextureView, scene: &SceneView) {
+        let hud_dropped = self.build_hud(scene);
+        self.render_ui_built(view, scene, hud_dropped);
+    }
+
+    /// [`Renderer::render_ui`] with `scene`'s HUD quads already in `hud_staging`.
+    fn render_ui_built(&mut self, view: &wgpu::TextureView, scene: &SceneView, hud_dropped: u32) {
         let (Some(post), Some(targets), Some(_)) =
             (&self.post, &self.targets.post, &self.kept_world.head)
         else {
-            return self.render(view, scene);
+            return self.render_built(view, scene, hud_dropped);
         };
         let mut encoder = self
             .device
@@ -2818,29 +2803,53 @@ impl Renderer {
         let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
         let groups = [&self.frame_group, &targets.tonemap_group];
         fullscreen_pass(&mut encoder, view, clear, &post.tonemap, groups, None);
+        let quads = self.draw_hud(&mut encoder, view, None);
+        self.queue.submit([encoder.finish()]);
+        self.note_hud_drawn();
+        self.stats.ui_frames += 1;
+        self.stats.last_work = FrameWork::Ui;
+        self.stats.hud_quads = quads;
+        self.stats.hud_quads_dropped = hud_dropped;
+    }
+
+    /// Builds `scene`'s HUD quads into `hud_staging`; returns how many were dropped.
+    fn build_hud(&mut self, scene: &SceneView) -> u32 {
         self.hud_staging.clear();
-        let dropped = hud::build_quads(
+        hud::build_quads(
             &scene.hud,
             self.size,
             self.map_size,
             self.stills_size,
             &mut self.hud_staging,
             MAX_HUD_QUADS,
-        );
+        )
+    }
+
+    /// Uploads the quads in `hud_staging` and draws them over `view`, if there are any;
+    /// returns how many.
+    fn draw_hud(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
+    ) -> u32 {
         let quads = self.hud_staging.len() as u32;
         if quads > 0 {
             self.queue
                 .write_buffer(&self.hud_buffer, 0, bytemuck::cast_slice(&self.hud_staging));
             let groups = [&self.frame_group, &self.hud_group];
             let (pipeline, buffer) = (&self.hud_pipeline, &self.hud_buffer);
-            hud_pass(&mut encoder, view, pipeline, groups, buffer, quads, None);
+            hud_pass(
+                encoder,
+                view,
+                pipeline,
+                groups,
+                buffer,
+                quads,
+                timestamp_writes,
+            );
         }
-        self.queue.submit([encoder.finish()]);
-        self.note_hud_drawn();
-        self.stats.ui_frames += 1;
-        self.stats.last_work = FrameWork::Ui;
-        self.stats.hud_quads = quads;
-        self.stats.hud_quads_dropped = dropped;
+        quads
     }
 
     /// The screen no longer shows the last frame (the window was exposed, or nothing was
@@ -4587,7 +4596,7 @@ mod tests {
                 FrameWork::World,
                 "a chunk streamed in"
             );
-            r.upload_map(1, 1, &[1, 2, 3, 4]);
+            r.upload_hud_image(HudImageTarget::Map, 1, 1, &[1, 2, 3, 4]);
             assert_eq!(draw(&mut r, &scene), ui, "a new map");
             let quality = RenderQuality {
                 resolution_scale: 0.5,
@@ -5056,7 +5065,7 @@ mod tests {
 
         // A 64×32 map with its mip chain; a wrong-sized buffer falls back to 1×1.
         let rgba: Vec<u8> = (0..64 * 32 * 4).map(|i| (i % 251) as u8).collect();
-        r.upload_map(64, 32, &rgba);
+        r.upload_hud_image(HudImageTarget::Map, 64, 32, &rgba);
         assert_eq!(r.map_size(), [64, 32]);
         let sizes = [(128, 72); WARMUP_FRAMES as usize + 2];
         render_frames(&device, &mut r, format, &scene, &sizes);
@@ -5064,13 +5073,13 @@ mod tests {
         assert_eq!(stats.draw_calls, base + 1);
         assert_eq!(stats.hud_quads, 4);
         assert_eq!(stats.resources_created, 0);
-        r.upload_map(64, 32, &rgba[..10]);
+        r.upload_hud_image(HudImageTarget::Map, 64, 32, &rgba[..10]);
         assert_eq!(r.map_size(), [1, 1]);
-        r.upload_map(MAX_MAP_SIZE + 1, 1, &[]);
+        r.upload_hud_image(HudImageTarget::Map, MAX_MAP_SIZE + 1, 1, &[]);
         assert_eq!(r.map_size(), [1, 1]);
         // Stills likewise, drawn in the same call.
         assert_eq!(r.stills_size(), [1, 1]);
-        r.upload_stills(32, 16, &rgba[..32 * 16 * 4]);
+        r.upload_hud_image(HudImageTarget::Stills, 32, 16, &rgba[..32 * 16 * 4]);
         assert_eq!(r.stills_size(), [32, 16]);
         let still = HudImage {
             x: 300.0,
@@ -5094,7 +5103,7 @@ mod tests {
         render_frames(&device, &mut r, format, &with_stills, &[(128, 72)]);
         assert_eq!(r.stats().draw_calls, base + 1);
         assert_eq!(r.stats().hud_quads, 2, "the transparent still is skipped");
-        r.upload_stills(32, 16, &[]);
+        r.upload_hud_image(HudImageTarget::Stills, 32, 16, &[]);
         assert_eq!(r.stills_size(), [1, 1]);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }

@@ -698,13 +698,13 @@ impl App {
         }
     }
 
-    /// Every world's still for `render::Renderer::upload_stills`: width, height, RGBA8.
+    /// Every world's still for `render::Renderer::upload_hud_image`: width, height, RGBA8.
     pub fn stills(&self) -> (u32, u32, &'static [u8]) {
         let s = scenario::stills();
         (s.w, s.h, &s.rgba)
     }
 
-    /// The map image for `render::Renderer::upload_map`, made once at load.
+    /// The map image for `render::Renderer::upload_hud_image`, made once at load.
     pub fn map_image(&self) -> &map::MapImage {
         &self.map
     }

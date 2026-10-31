@@ -42,7 +42,7 @@ get bars, so nothing stretches), shrunk to `1280/ui_scale × 720/ui_scale` for t
 instanced quads in one draw from a fixed 4096-quad buffer (extra quads are dropped and counted). The font is
 our own bold 7×9 pixel face for ASCII 32–126 (`render::font`, `const` bit rows rasterized at startup); text
 is drawn at a whole number of pixels per font pixel with nearest sampling, so it is crisp at any resolution.
-Image quads (`HudImage`) show the map texture (`Renderer::upload_map`, once at load: RGBA8 with a CPU-built
+Image quads (`HudImage`) show the map texture (`Renderer::upload_hud_image`, once at load: RGBA8 with a CPU-built
 mip chain, sampled trilinearly at a per-quad mip level), a flat fill or the player arrow (a dart evaluated
 in the shader), with the content rotated by any angle and an optional circle or rounded-rectangle mask, all
 edges anti-aliased in the fragment shader. The HUD bind group holds the font atlas and the map (two textures,
