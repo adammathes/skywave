@@ -241,6 +241,8 @@ pub struct App {
     /// Seconds the deep-water toast has left, and the car's water resets it has shown.
     water_toast: f32,
     water_resets_seen: u32,
+    /// [`Drive::respawns`] when the camera was last settled behind the car.
+    respawns_seen: u32,
     /// The ui's HUD with the deep-water toast over it, on the frames that show it.
     overlay: render::HudBuilder,
     /// The world the World page picked, for the platform to load ([`App::take_world_pick`]).
@@ -526,6 +528,7 @@ impl App {
             target: None,
             water_toast: 0.0,
             water_resets_seen: 0,
+            respawns_seen: 0,
             overlay: render::HudBuilder::new(),
             world_pick: None,
             strip,
@@ -981,6 +984,12 @@ impl App {
                 drive::vehicle_input(input)
             };
             self.drive.step(car_input, &self.ground);
+            // A car that went back to its start on its own takes the camera with it,
+            // rather than the chase camera flying across the map to it.
+            if self.drive.respawns != self.respawns_seen {
+                self.respawns_seen = self.drive.respawns;
+                self.settle_camera();
+            }
             if let Some(hit) =
                 self.npcs
                     .collide(&mut self.drive.state, &self.drive.spec, &self.ground)
@@ -2751,12 +2760,58 @@ mod tests {
             })
         };
         assert!(has_toast(&mut app));
-        // Back at the scene's start point, and the toast goes after its time.
+        // Back at the scene's start point, the camera already behind it, and the toast
+        // goes after its time.
         let pos = app.drive.pose(1.0).pos;
         assert!((pos.x - 440.0).abs() < 1e-3 && (pos.z - 940.0).abs() < 1e-3);
+        assert_camera_settled(&app);
         for _ in 0..(WATER_TOAST_S * 30.0) as usize + 2 {
             app.update(&InputState::default(), 1.0 / 30.0);
         }
         assert!(!app.water_toast() && !has_toast(&mut app));
+    }
+
+    /// The camera at the frame's either end is where a camera newly placed behind the car
+    /// would be: no flight from where the car was.
+    fn assert_camera_settled(app: &App) {
+        let fresh = CameraRig::new(app.camera.selected(), &app.drive);
+        let want = fresh.pose(&app.drive, 1.0).eye;
+        for alpha in [0.0, 1.0] {
+            let eye = app.camera.pose(&app.drive, alpha).eye;
+            assert!(
+                eye.distance(want) < 0.5,
+                "camera at {eye} (alpha {alpha}), settled at {want}"
+            );
+        }
+    }
+
+    /// A car below the world's floor or gone non-finite goes back to its start, and the
+    /// chase camera goes with it instead of flying across the map.
+    #[test]
+    fn automatic_respawns_settle_the_camera() {
+        let query = "?seed=1&place=coast&pos=440,940&yaw=270";
+        let start = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+        let home = start.drive.pose(1.0).pos;
+        type Break = fn(&mut vehicle::VehicleState);
+        let breaks: [(&str, Break); 2] = [
+            ("below the floor", |s| s.pos[1] = -500.0),
+            ("non-finite", |s| s.vel[0] = f32::NAN),
+        ];
+        for (what, break_car) in breaks {
+            let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
+            // Far from the start, with the camera behind the car there.
+            app.drive.state.pos[0] += 400.0;
+            app.drive.prev = app.drive.state;
+            app.settle_camera();
+            let away = app.camera.pose(&app.drive, 1.0).eye;
+            assert!(away.distance(home) > 300.0, "{what}");
+            break_car(&mut app.drive.state);
+            app.drive.prev = app.drive.state;
+            app.update(&InputState::default(), 1.0 / 30.0);
+            assert_eq!(app.drive.respawns, 1, "{what}");
+            let pos = app.drive.pose(1.0).pos;
+            assert!(pos.distance(home) < 1.0, "{what}: car at {pos}");
+            assert_camera_settled(&app);
+        }
     }
 }

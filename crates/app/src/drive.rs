@@ -285,6 +285,9 @@ pub struct Drive {
     deep_s: f32,
     /// Times deep water has put the car back at its start (the app toasts each).
     pub water_resets: u32,
+    /// Times the car went back to its start on its own: deep water, below the world's
+    /// floor or non-finite (the app settles the camera behind it at each).
+    pub respawns: u32,
 }
 
 impl Drive {
@@ -334,6 +337,7 @@ impl Drive {
             start_heading: heading_rad,
             deep_s: 0.0,
             water_resets: 0,
+            respawns: 0,
         }
     }
 
@@ -375,6 +379,7 @@ impl Drive {
         if self.deep_s >= DEEP_RESET_S {
             self.respawn();
             self.water_resets += 1;
+            self.respawns += 1;
         }
     }
 
@@ -444,6 +449,7 @@ impl Drive {
         next.start_ground = self.start_ground;
         next.start_heading = self.start_heading;
         next.water_resets = self.water_resets;
+        next.respawns = self.respawns;
         let speed = self.state.speed_mps;
         if speed.abs() < KEEP_SPEED_MPS {
             next.state.vel = self.state.vel;
@@ -529,6 +535,7 @@ impl Drive {
             .all(|v| v.is_finite());
         if !finite || s.pos[1] < FLOOR_Y {
             self.respawn();
+            self.respawns += 1;
             return;
         }
         self.wade(ground);
