@@ -144,6 +144,11 @@ const BODY_FRICTION: f32 = 0.6;
 const BODY_LOW_CORNER_M: f32 = 0.25;
 /// How far above a body corner its ground probe starts, m.
 const BODY_PROBE_M: f32 = 0.5;
+/// The upper body corners are probed only while up·world-up is below this (tilted past ~45°).
+/// Each upper corner sits the body's height along its up from a lower one, so it can reach
+/// the ground only where the ground is steeper than 90° minus the tilt; 0.7 covers ground up
+/// to 44°, steeper than any a car can stand on.
+const BODY_UPPER_UP: f32 = 0.7;
 /// Auto-right: seconds upset before it starts, the up·world-up below which the car counts as
 /// upset, the value at which righting stops, the target roll rate (rad/s), its gain (1/s),
 /// and the share of the car's weight lifted while righting.
@@ -706,8 +711,10 @@ pub fn step(
     }
     let shifting = state.shift_timer > SHIFT_HOLD_S;
     let launch_rpm = idle + drive_pedal * STALL_FRACTION * rpm_span;
-    // The handbrake declutches, so it locks the rears instead of fighting the engine.
-    let declutched = shifting || state.handbrake;
+    // The handbrake locks the rears, so it declutches a car that drives them instead of
+    // fighting the engine; a front-drive car keeps its drive.
+    let rear_driven = shares[REAR_LEFT] + shares[REAR_RIGHT] > 0.0;
+    let declutched = shifting || (state.handbrake && rear_driven);
     let coupled = state.gear != 0 && !declutched && wheel_rpm >= launch_rpm;
     if coupled {
         state.engine_rpm = wheel_rpm;
@@ -976,7 +983,11 @@ pub fn step(
     let [len, wid, hgt] = spec.dims_m;
     let low = -spec.cg_height_m + BODY_LOW_CORNER_M;
     let high = -spec.cg_height_m + BODY_LOW_CORNER_M + hgt;
+    let upper = up[1] < BODY_UPPER_UP;
     for c in 0..8 {
+        if c & 2 != 0 && !upper {
+            continue;
+        }
         let corner = [
             if c & 1 == 0 { -0.48 * wid } else { 0.48 * wid },
             if c & 2 == 0 { low } else { high },

@@ -4,9 +4,9 @@
 //! the rear tires.
 
 use super::body::Body;
-use super::math::*;
 use super::mesh::Soup;
 use super::Materials;
+use crate::math::*;
 use alloc::vec::Vec;
 
 const UP: V3 = [0.0, 1.0, 0.0];

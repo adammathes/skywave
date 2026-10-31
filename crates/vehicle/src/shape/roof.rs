@@ -5,10 +5,10 @@
 //! (`Body::open_cut`).
 
 use super::body::{Body, Slot};
-use super::math::*;
 use super::mesh::{Mat, Soup, Uv};
 use super::params::{Detail, Top};
 use super::Materials;
+use crate::math::*;
 use alloc::vec::Vec;
 
 const UP: V3 = [0.0, 1.0, 0.0];

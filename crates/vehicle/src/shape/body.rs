@@ -10,10 +10,10 @@
 //! V-grooves made by extra stations (door gaps, hood and trunk edges) or extra ring slots
 //! (hood/trunk sides, creases).
 
-use super::math::*;
 use super::mesh::{Mat, Soup};
 use super::params::{Detail, ShapeSpec};
 use super::Materials;
+use crate::math::*;
 use alloc::vec::Vec;
 
 /// Half-width of a seam groove, m.

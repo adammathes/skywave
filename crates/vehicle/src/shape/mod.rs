@@ -16,7 +16,6 @@
 mod bed;
 mod body;
 mod interior;
-mod math;
 mod mesh;
 mod params;
 mod parts;
@@ -26,6 +25,7 @@ mod wheel;
 #[cfg(all(test, feature = "serde"))]
 mod tests;
 
+pub use crate::math::polyline_at;
 pub use mesh::MeshData;
 pub use params::{
     Antenna, Applique, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles,
@@ -117,8 +117,8 @@ impl CarMesh {
         self.interior.triangle_count() + self.steering_wheel.triangle_count()
     }
 
-    /// Every mesh, for iteration (wheels once each).
-    pub fn meshes(&self) -> [&MeshData; 9] {
+    /// Every mesh, for iteration (wheels once each, underglow last).
+    pub fn meshes(&self) -> [&MeshData; 10] {
         [
             &self.body,
             &self.glass,
@@ -129,6 +129,7 @@ impl CarMesh {
             &self.wheels[1],
             &self.wheels[2],
             &self.wheels[3],
+            &self.underglow,
         ]
     }
 }
@@ -329,7 +330,7 @@ fn append_wheel(body: &mut MeshData, w: &MeshData, at: [f32; 3], left: bool) {
 fn lin(c: u8) -> u8 {
     let x = c as f32 / 255.0;
     let y = x * (x * (x * 0.305_306_01 + 0.682_171_1) + 0.012_522_878);
-    math::clamp(y * 255.0 + 0.5, 0.0, 255.0) as u8
+    crate::math::clamp(y * 255.0 + 0.5, 0.0, 255.0) as u8
 }
 
 fn rgb(hex: [u8; 3]) -> [u8; 4] {

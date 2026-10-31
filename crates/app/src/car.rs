@@ -284,7 +284,7 @@ impl CarLayout {
         CarLayout {
             offset,
             eye: at(c.eye),
-            belt_y: polyline_at(&shape.belt, eye_x) + offset.y,
+            belt_y: shape::polyline_at(&shape.belt, eye_x) + offset.y,
             dash_y: shape.interior.dash_height + offset.y,
             wheel_centers: car.wheel_centers.map(at),
             wheel_radius: car.wheel_radius,
@@ -325,23 +325,6 @@ fn hex_rgb(s: &str) -> Option<[u8; 3]> {
     }
     let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
     Some([byte(0)?, byte(2)?, byte(4)?])
-}
-
-/// `y` of the polyline `pts` (`x` increasing) at `x`, held flat beyond its ends.
-fn polyline_at(pts: &[(f32, f32)], x: f32) -> f32 {
-    let Some(&(x0, y0)) = pts.first() else {
-        return 0.0;
-    };
-    if x <= x0 {
-        return y0;
-    }
-    for w in pts.windows(2) {
-        let ((xa, ya), (xb, yb)) = (w[0], w[1]);
-        if x <= xb {
-            return ya + (yb - ya) * (x - xa) / (xb - xa);
-        }
-    }
-    pts[pts.len() - 1].1
 }
 
 /// Centers of the left (`x < 0`) and right lenses of `group` in `lights`, model space.

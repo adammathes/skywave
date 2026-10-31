@@ -2,9 +2,9 @@
 
 extern crate std;
 
-use super::math::{cross, dot, sub};
 use super::params::parse_paint;
 use super::*;
+use crate::math::{cross, dot, sub};
 use crate::VehicleSpec;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -120,7 +120,7 @@ fn hash(car: &CarMesh) -> u64 {
             h = h.wrapping_mul(0x0000_0100_0000_01b3);
         }
     };
-    for m in car.meshes().into_iter().chain([&car.underglow]) {
+    for m in car.meshes() {
         for p in &m.positions {
             for v in p {
                 eat(&v.to_bits().to_le_bytes());
@@ -149,12 +149,20 @@ fn hash(car: &CarMesh) -> u64 {
 
 #[test]
 fn shapes_build_with_sane_meshes() {
+    let mut glows = 0;
     for spec in shapes() {
         for lod in 0..3 {
             let car = build_lod(&spec, 0, lod).unwrap();
+            glows += car.underglow.triangle_count();
             for (k, m) in car.meshes().iter().enumerate() {
                 let n = m.positions.len();
-                assert!(n > 0 && !m.indices.is_empty(), "{} mesh {k} empty", spec.id);
+                // Only cars with the underglow detail have one.
+                let optional = core::ptr::eq(*m, &car.underglow);
+                assert!(
+                    optional || (n > 0 && !m.indices.is_empty()),
+                    "{} mesh {k} empty",
+                    spec.id
+                );
                 assert_eq!(m.normals.len(), n);
                 assert_eq!(m.uvs.len(), n);
                 assert_eq!(m.colors.len(), n);
@@ -192,6 +200,7 @@ fn shapes_build_with_sane_meshes() {
             assert!(car.lights.emissive.iter().any(|e| e[3] > 0));
         }
     }
+    assert!(glows > 0, "no shape has underglow to check");
 }
 
 #[test]
@@ -575,7 +584,7 @@ fn builds_are_deterministic() {
 /// and above the rail.
 fn over_the_bed(spec: &ShapeSpec, m: &MeshData) -> usize {
     let (s0, s1) = spec.bed().unwrap();
-    let rail = super::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
+    let rail = crate::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
     let ax = spec.wheels.front_x;
     m.positions
         .iter()
@@ -596,7 +605,7 @@ fn a_pickup_bed_is_open_and_lined() {
         assert_eq!(over_the_bed(&spec, &car.body), 0, "lod{lod}: bed covered");
         // The floor is down in the bed, well under the rail (and over the underside).
         let ax = spec.wheels.front_x;
-        let rail = super::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
+        let rail = crate::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
         let floor = car
             .body
             .positions

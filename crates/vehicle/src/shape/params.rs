@@ -665,8 +665,8 @@ impl ShapeSpec {
         let mut bottom: Vec<(f32, f32)> = side[tail + 1..].to_vec();
         bottom.reverse();
         for &(x, y) in side {
-            let t = super::math::polyline_at(&top, x);
-            let b = super::math::polyline_at(&bottom, x);
+            let t = crate::math::polyline_at(&top, x);
+            let b = crate::math::polyline_at(&bottom, x);
             if t <= b + 0.05 || y < 0.0 {
                 return Err(ShapeError::SideInverted);
             }
@@ -742,7 +742,7 @@ impl ShapeSpec {
         }
         for (k, &x) in self.axles.iter().enumerate() {
             let clear = |o: f32| (x - o).abs() > 2.0 * w.radius + 0.05;
-            let under = super::math::polyline_at(&bottom, x);
+            let under = crate::math::polyline_at(&bottom, x);
             if !(x - ra > 0.0 && x + ra < length)
                 || !clear(w.front_x)
                 || !clear(w.rear_x)
@@ -837,7 +837,7 @@ impl ShapeSpec {
             // The cabin opens from the header back to the boot well; the rear seat sits
             // ahead of the well and the deck behind the header is at the belt (there is no
             // greenhouse to fold away).
-            let at = super::math::polyline_at;
+            let at = crate::math::polyline_at;
             let header_y = at(&top, g.windshield.1);
             let mid = (g.windshield.1 + g.backlight.0) * 0.5;
             let ok = g.side.is_empty()
@@ -851,7 +851,7 @@ impl ShapeSpec {
             }
         }
         if let Some((s0, s1)) = self.bed() {
-            let at = super::math::polyline_at;
+            let at = crate::math::polyline_at;
             let flat = (0..=8).all(|k| {
                 let x = s0 + (s1 - s0) * k as f32 / 8.0;
                 (at(&top, x) - at(&self.belt, x)).abs() < 0.05
