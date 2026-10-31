@@ -774,9 +774,9 @@ fn build_renderer(
     }
     renderer.reserve_instances(app.max_instances());
     let map = app.map_image();
-    renderer.upload_map(map.w, map.h, &map.rgba);
+    renderer.upload_hud_image(render::HudImageTarget::Map, map.w, map.h, &map.rgba);
     let (w, h, rgba) = app.stills();
-    renderer.upload_stills(w, h, rgba);
+    renderer.upload_hud_image(render::HudImageTarget::Stills, w, h, rgba);
     let timing = opts.stats && renderer.enable_gpu_timing();
     (renderer, timing)
 }

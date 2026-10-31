@@ -106,9 +106,10 @@ struct InstanceIn {
     @location(10) n1: vec4<f32>,
     @location(11) n2: vec4<f32>,
     @location(12) color: vec4<f32>,
-    // x: emissive multiplier (glow) as f32 bits, y: cabin-light share (unorm16, low half)
-    // and the number of lights in its set (high half), zw: indices of those lights in
-    // `frame.lights`, one byte each, little end first.
+    // x: emissive multiplier (glow) as f16 bits (bits 0-15), cabin-light share as unorm8
+    // (bits 16-23), the number of lights in its set (bits 24-27) and the no-sun-shadow flag
+    // (bit 28); y: how far each light of the set is dimmed, 4 bits a light, the first
+    // lowest; zw: indices of those lights in `frame.lights`, one byte each, low byte first.
     @location(13) params: vec4<u32>,
 };
 

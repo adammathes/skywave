@@ -343,8 +343,8 @@ fn shade(in: MeshOut) -> vec3<f32> {
     let albedo = in.color.rgb * texel.rgb;
     let n = normalize(in.normal);
     let ndl = max(dot(n, frame.sun_dir.xyz), 0.0);
-    // 1: unshadowed (it only ever scales ndl); bit 8 of the light count skips the test, as
-    // does a sun below the horizon (no cascades are drawn).
+    // 1: unshadowed (it only ever scales ndl); the no-sun-shadow flag (16 in lights.x, bit 28
+    // of params.x) skips the test, as does a sun below the horizon (no cascades are drawn).
     var vis = 1.0;
     if ndl > 0.0 && frame.shadow_params.y > 0.0 && (in.lights.x & 16u) == 0u {
         vis = sun_visibility(in.world_pos, n, ndl);
