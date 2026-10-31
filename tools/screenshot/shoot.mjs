@@ -30,7 +30,9 @@
 // values native tests pin. `--music` drops a short MP3 (silence with an ID3 tag, generated
 // here) on a running game and picks a generated two-album library (Artist/Album/NN
 // Title.mp3) through the folder input, then plays it on the deck (play, next track, next
-// album, mode, pause) and checks the corner readout's text and the page player's log. Compare captures with goldens using `diff.mjs`.
+// album, mode, pause) and checks the corner readout's text and the page player's log; with
+// "Mute in background" on, hiding the page silences the player at once and showing it
+// restores it. Compare captures with goldens using `diff.mjs`.
 //
 // Uses an already-installed `playwright` package (global/NODE_PATH or tools/screenshot/
 // node_modules); it does not download browsers.
@@ -206,9 +208,11 @@ const browser = await chromium.launch({
 });
 
 /// Opens `query` and waits until the page is ready. Returns the page, the console problems
-/// list (filled as they come) and every `console.log` text.
-async function open(tag, query) {
+/// list (filled as they come) and every `console.log` text. `init`, if given, runs in the
+/// page before its own scripts.
+async function open(tag, query, init) {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
+  if (init) await page.addInitScript(init);
   const problems = [];
   const logs = [];
   page.on("console", (msg) => {
@@ -366,7 +370,18 @@ async function writeLibrary() {
 }
 
 async function runMusic() {
-  const { page, problems } = await open("music", "?stream=0");
+  // "Mute in background" on, and a page the test can hide: `skywaveTestHidden(true)`
+  // emulates a tab switch (`document.hidden` and a `visibilitychange` event).
+  const { page, problems } = await open("music", "?stream=0", () => {
+    localStorage.setItem("skywave.settings", JSON.stringify({ version: 1, audio: { mute_radio_unfocused: true } }));
+    let hidden = false;
+    Object.defineProperty(Document.prototype, "hidden", { get: () => hidden });
+    Object.defineProperty(Document.prototype, "visibilityState", { get: () => (hidden ? "hidden" : "visible") });
+    window.skywaveTestHidden = (h) => {
+      hidden = h;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+  });
   const frames = (n) =>
     page.evaluate(
       (n) => new Promise((ok) => {
@@ -418,6 +433,20 @@ async function runMusic() {
       timeout: 120_000,
       polling: 250,
     });
+    // A hidden page gets no animation frames: the player goes quiet at the event itself,
+    // and comes back the same way.
+    const volumes = await page.evaluate(() => {
+      const a = window.skywaveRadio.audio;
+      const front = a.volume;
+      window.skywaveTestHidden(true);
+      const hidden = a.volume;
+      window.skywaveTestHidden(false);
+      return { front, hidden, back: a.volume };
+    });
+    if (!(volumes.front > 0 && volumes.hidden === 0 && volumes.back === volumes.front)) {
+      throw new Error(`mute in background: volumes ${JSON.stringify(volumes)}`);
+    }
+    console.log(`shoot: music: muted while hidden: ${JSON.stringify(volumes)}`);
     await press("BracketRight");
     await waitReadout(/^TAPE >\nNight Shift\nCoastline\nPalm Shadows$/, "next");
     await press("KeyP");

@@ -807,6 +807,7 @@ pub async fn run(
     }));
     listen_keys(&window, &state)?;
     listen_mouse(&window, &state)?;
+    listen_visibility(&window, &state)?;
     listen_gamepads(&window)?;
     start_frame_loop(&window, state)?;
     Ok(())
@@ -1110,6 +1111,41 @@ fn listen_mouse(window: &web_sys::Window, state: &Rc<RefCell<State>>) -> Result<
     Ok(())
 }
 
+/// Hands the app's queued radio commands to the page's glue (`cmds` is scratch).
+fn send_radio_commands(app: &mut App, glue: &RadioGlue, cmds: &mut Vec<RadioCommand>) {
+    cmds.extend(app.radio_commands());
+    let name = match app.source() {
+        audio::deck::Source::Radio => app.radio().channel().map_or("", |c| c.name.as_str()),
+        audio::deck::Source::Deck => app.deck().track().map_or("", |t| t.label.as_str()),
+    };
+    for cmd in cmds.iter() {
+        glue.send(cmd, name);
+    }
+    cmds.clear();
+}
+
+/// Whether the page is shown (the game is in front only then).
+fn page_visible() -> bool {
+    !web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| d.hidden())
+}
+
+/// A hidden page gets no animation frames, so the frame loop never sees it go: the page's
+/// own event pauses the game and applies "Mute in background" to the radio at once.
+fn listen_visibility(window: &web_sys::Window, state: &Rc<RefCell<State>>) -> Result<(), JsValue> {
+    let Some(document) = window.document() else {
+        return Ok(());
+    };
+    let state = state.clone();
+    let change = Closure::<dyn FnMut()>::new(move || state.borrow_mut().visibility_changed());
+    document
+        .add_event_listener_with_callback("visibilitychange", change.as_ref().unchecked_ref())?;
+    // The listener lives as long as the page.
+    change.forget();
+    Ok(())
+}
+
 /// Logs gamepads as they come and go; the state itself is polled every frame.
 fn listen_gamepads(window: &web_sys::Window) -> Result<(), JsValue> {
     for (event, what) in [
@@ -1272,17 +1308,7 @@ impl State {
         while let Some(event) = glue.take_event() {
             self.app.radio_event(event);
         }
-        self.radio_cmds.extend(self.app.radio_commands());
-        let name = match self.app.source() {
-            audio::deck::Source::Radio => {
-                self.app.radio().channel().map_or("", |c| c.name.as_str())
-            }
-            audio::deck::Source::Deck => self.app.deck().track().map_or("", |t| t.label.as_str()),
-        };
-        for cmd in &self.radio_cmds {
-            glue.send(cmd, name);
-        }
-        self.radio_cmds.clear();
+        send_radio_commands(&mut self.app, glue, &mut self.radio_cmds);
         let r = self.app.radio();
         let kind = match r.state() {
             audio::RadioState::Off => 0,
@@ -1312,6 +1338,16 @@ impl State {
         }
     }
 
+    /// The page went to the background or came back: the game follows at once, without
+    /// waiting for a frame (a hidden page gets none).
+    fn visibility_changed(&mut self) {
+        self.app.set_focused(page_visible());
+        match &self.radio {
+            Some(glue) => send_radio_commands(&mut self.app, glue, &mut self.radio_cmds),
+            None => self.app.radio_commands().for_each(drop),
+        }
+    }
+
     /// One animation frame: skipped unless it is the Nth since the last one processed
     /// (the frame-rate cap: every Nth refresh); else the game's frame, drawing only what
     /// changed (nothing at all when nothing did: the canvas keeps the last frame). The
@@ -1327,10 +1363,7 @@ impl State {
             }
         }
         self.last_tick_ms = Some(now_ms);
-        let hidden = web_sys::window()
-            .and_then(|w| w.document())
-            .is_some_and(|d| d.hidden());
-        self.app.set_focused(!hidden);
+        self.app.set_focused(page_visible());
         if self.skipped + 1 < self.app.frame_rate().divisor() {
             self.skipped += 1;
             return;
