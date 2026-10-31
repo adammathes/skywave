@@ -957,16 +957,17 @@ impl Traffic {
     /// Gap from car `c`'s front along its path to the nearest barrier it is heading into,
     /// when one crosses its path within `look`.
     fn barrier_gap(&self, g: &LaneGraph, c: &Car, path: &Path, look: f32) -> Option<f32> {
-        let mut best: Option<f32> = None;
-        for bar in &self.barriers {
-            if dot(c.dir, bar.facing) >= 0.0 {
-                continue;
-            }
+        let near = |bar: &Barrier| {
             let mid = [0.5 * (bar.a[0] + bar.b[0]), 0.5 * (bar.a[1] + bar.b[1])];
-            if len2([mid[0] - c.pos[0], mid[1] - c.pos[2]]) > look + 40.0 {
-                continue;
-            }
-            let mut test = |p: [f32; 2], q: [f32; 2], start: f32, len: f32| {
+            dot(c.dir, bar.facing) < 0.0
+                && len2([mid[0] - c.pos[0], mid[1] - c.pos[2]]) <= look + 40.0
+        };
+        if !self.barriers.iter().any(near) {
+            return None;
+        }
+        let mut best: Option<f32> = None;
+        let mut test = |p: [f32; 2], q: [f32; 2], start: f32, len: f32| {
+            for bar in self.barriers.iter().filter(|b| near(b)) {
                 if let Some(t) = cross_at(p, q, bar.a, bar.b) {
                     let along = start + len * t;
                     // A car whose front is past the line already drives on.
@@ -974,9 +975,9 @@ impl Traffic {
                         best = Some(best.map_or(along, |b: f32| b.min(along)));
                     }
                 }
-            };
-            self.walk_path(g, path, look, &mut test);
-        }
+            }
+        };
+        self.walk_path(g, path, look, &mut test);
         best
     }
 
