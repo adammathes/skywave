@@ -67,7 +67,7 @@ impl Rng {
         }
     }
 
-    /// Uniform float in `[lo, hi)`. Returns `lo` if the range is empty.
+    /// Uniform float in `[lo, hi)`.
     pub fn range_f32(&mut self, lo: f32, hi: f32) -> f32 {
         scale_below(lo, hi, self.next_f32())
     }
