@@ -1127,28 +1127,6 @@ mod tests {
         }
     }
 
-    /// Counts heap allocations made on the current thread.
-    struct CountingAlloc;
-
-    thread_local! {
-        static ALLOCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
-    // SAFETY: forwards to the system allocator; the counter is a const thread-local Cell,
-    // which needs no allocation of its own.
-    unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
-        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
-            let _ = ALLOCS.try_with(|n| n.set(n.get() + 1));
-            unsafe { std::alloc::System.alloc(layout) }
-        }
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
-            unsafe { std::alloc::System.dealloc(ptr, layout) }
-        }
-    }
-
-    #[global_allocator]
-    static GLOBAL: CountingAlloc = CountingAlloc;
-
     /// Every world mesh of some test town chunks, all stages.
     fn reference_meshes() -> Vec<ChunkMesh> {
         let mut place = Place::test_grid();
@@ -1201,9 +1179,9 @@ mod tests {
             }
         };
         convert_all(&mut b);
-        let before = ALLOCS.with(|n| n.get());
+        let before = crate::tests::allocations();
         convert_all(&mut b);
-        let allocs = ALLOCS.with(|n| n.get()) - before;
+        let allocs = crate::tests::allocations() - before;
         assert!(b.base.vertices.len() > 10_000);
         assert_eq!(allocs, 0, "allocations converting a chunk after warmup");
     }

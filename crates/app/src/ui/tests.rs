@@ -2769,3 +2769,37 @@ fn the_vehicle_page_lists_this_worlds_cars() {
 }
 
 mod controls;
+
+/// Once warmed up, laying out the HUD allocates nothing: driving with the full overlay,
+/// and a menu page.
+#[test]
+fn hud_frames_allocate_nothing_after_warmup() {
+    let mut app = App::new(Seed(1));
+    app.ui.settings_mut().overlay = Overlay::Full;
+    let daylight = app.time.daylight();
+    let ctx = draw::DrawCtx {
+        daylight: &daylight,
+        clock: &app.time.clock,
+        camera: [0.0; 3],
+        ticks: 0,
+        car: [0.0; 2],
+        heading: 0.0,
+        radio_display: None,
+    };
+    for menu in [false, true] {
+        if menu {
+            app.ui.open(Page::Pause, &InputState::default());
+        }
+        app.ui.draw(&ctx);
+        assert!(!app.ui.hud().items.is_empty(), "menu {menu}");
+        let before = crate::tests::allocations();
+        for _ in 0..8 {
+            app.ui.draw(&ctx);
+        }
+        assert_eq!(
+            crate::tests::allocations() - before,
+            0,
+            "menu {menu}: HUD frames allocated"
+        );
+    }
+}
