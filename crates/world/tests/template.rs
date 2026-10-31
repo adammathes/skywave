@@ -155,6 +155,34 @@ fn other_bad_fields_are_rejected() {
         })
     );
 
+    for field in [
+        "street_light_m",
+        "street_tree_m",
+        "hydrant_m",
+        "power_pole_m",
+    ] {
+        let mut t = parse(CALIFORNIA);
+        let p = &mut t.zones.residential.props;
+        let x = match field {
+            "street_light_m" => &mut p.street_light_m,
+            "street_tree_m" => &mut p.street_tree_m,
+            "hydrant_m" => &mut p.hydrant_m,
+            _ => &mut p.power_pole_m,
+        };
+        *x = 1e-5;
+        assert_eq!(
+            t.validate(),
+            Err(TemplateError::BadProps {
+                zone: ZoneId::Residential,
+                field
+            }),
+            "{field}"
+        );
+    }
+    let mut t = parse(CALIFORNIA);
+    t.zones.residential.props.hydrant_m = 0.0;
+    assert_eq!(t.validate(), Ok(()), "a zero spacing means none");
+
     let mut t = parse(CALIFORNIA);
     t.zones.beach.block_m.1 = (0.0, 10.0);
     assert_eq!(

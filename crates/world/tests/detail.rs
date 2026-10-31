@@ -12,7 +12,7 @@ use world::procgen::detail::{MAX_CARS_PER_CHUNK, MAX_LOT_CARS_PER_CHUNK};
 use world::procgen::{build_place, hash_detail};
 use world::props::{dir_of_yaw, PIER_HEAD_HALF_WIDTH_M, PIER_HEAD_M};
 use world::roads::Network;
-use world::template::RegionTemplate;
+use world::template::{RegionTemplate, MIN_PROP_SPACING_M};
 use world::WorldCollider;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
@@ -510,4 +510,35 @@ fn rural_and_hill_roads_are_dark_but_their_junctions() {
         }
     }
     println!("{lone} lamps at rural junctions");
+}
+
+#[test]
+fn the_minimum_prop_spacing_builds_promptly() {
+    let mut t = template();
+    let z = &mut t.zones;
+    for r in [
+        &mut z.downtown,
+        &mut z.strip,
+        &mut z.residential,
+        &mut z.suburb,
+        &mut z.industrial,
+        &mut z.commercial,
+        &mut z.park,
+        &mut z.beach,
+        &mut z.farmland,
+        &mut z.hills,
+        &mut z.highway,
+    ] {
+        let p = &mut r.props;
+        p.street_light_m = MIN_PROP_SPACING_M;
+        p.street_tree_m = MIN_PROP_SPACING_M;
+        p.hydrant_m = MIN_PROP_SPACING_M;
+        p.power_pole_m = MIN_PROP_SPACING_M;
+    }
+    t.validate().expect("the minimum spacing is valid");
+    let t0 = Instant::now();
+    let p = build_place(Seed(1), &t, &grammar());
+    let s = t0.elapsed().as_secs_f64();
+    println!("minimum spacing: {} props in {s:.1} s", p.props.items.len());
+    assert!(s < 60.0, "took {s:.1} s");
 }
