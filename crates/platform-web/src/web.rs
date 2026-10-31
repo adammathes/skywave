@@ -653,9 +653,9 @@ fn load_renderer(renderer: &mut Renderer, app: &App) {
     }
     renderer.reserve_instances(app.max_instances());
     let map = app.map_image();
-    renderer.upload_map(map.w, map.h, &map.rgba);
+    renderer.upload_hud_image(render::HudImageTarget::Map, map.w, map.h, &map.rgba);
     let (w, h, rgba) = app.stills();
-    renderer.upload_stills(w, h, rgba);
+    renderer.upload_hud_image(render::HudImageTarget::Stills, w, h, rgba);
 }
 
 /// Starts the game on `canvas` in the scene the URL query describes (`app::scene`).

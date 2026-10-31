@@ -442,7 +442,7 @@ pub fn still_uv(index: usize) -> [f32; 4] {
 }
 
 /// Every scenario's still in an atlas ([`atlas_size`], [`still_uv`]), read once, for
-/// `render::Renderer::upload_stills`. A still of the wrong size (never a built-in one,
+/// `render::Renderer::upload_hud_image`. A still of the wrong size (never a built-in one,
 /// which a test reads) is grey.
 pub fn stills() -> &'static Image {
     static STILLS_IMAGE: OnceLock<Image> = OnceLock::new();

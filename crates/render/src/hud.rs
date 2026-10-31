@@ -14,8 +14,8 @@
 //! pixel-snapped origin, so it is always crisp; widths therefore differ from
 //! `font::text_width(text) * scale` by under half a font pixel per glyph.
 //!
-//! Image items ([`HudImage`]) draw the map texture ([`crate::Renderer::upload_map`]), the
-//! stills texture ([`crate::Renderer::upload_stills`]) or a flat shape (a disc, the player
+//! Image items ([`HudImage`]) draw the map texture ([`crate::Renderer::upload_hud_image`]), the
+//! stills texture ([`crate::Renderer::upload_hud_image`]) or a flat shape (a disc, the player
 //! arrow) with an arbitrary rotation of their content and an optional circular or
 //! rounded-rectangle mask, anti-aliased in the shader. They are not pixel-snapped.
 //! Everything, images included, goes out in the same single instanced draw: the HUD bind
@@ -79,7 +79,7 @@ pub enum HudItem {
 /// What an image quad shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HudTexture {
-    /// The map texture from [`crate::Renderer::upload_map`], tinted by the item's color.
+    /// The map texture from [`crate::Renderer::upload_hud_image`], tinted by the item's color.
     /// Transparent outside uv 0..1, and everywhere before a map is uploaded.
     Map,
     /// A flat fill in the item's color (uv unused).
@@ -88,10 +88,19 @@ pub enum HudTexture {
     /// The player arrow: a dart pointing up (toward -y) in the quad, before rotation, in
     /// the item's color (uv unused).
     Arrow,
-    /// The stills texture from [`crate::Renderer::upload_stills`] (pictures side by side:
+    /// The stills texture from [`crate::Renderer::upload_hud_image`] (pictures side by side:
     /// `uv` picks one), tinted by the item's color; content rotation is ignored.
     /// Transparent outside uv 0..1, and everywhere before stills are uploaded.
     Still,
+}
+
+/// Which HUD image [`crate::Renderer::upload_hud_image`] replaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HudImageTarget {
+    /// The map [`HudTexture::Map`] quads show.
+    Map,
+    /// The stills [`HudTexture::Still`] quads show.
+    Stills,
 }
 
 /// The outline an image quad is cut to. Masks are not rotated with the content.
