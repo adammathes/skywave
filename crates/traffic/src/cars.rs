@@ -322,6 +322,7 @@ pub struct Car {
 pub struct Player {
     pub pos: [f32; 3],
     pub heading: f32,
+    /// Signed along `heading`: negative reversing.
     pub speed: f32,
     pub half_len: f32,
     pub half_w: f32,
@@ -1246,13 +1247,15 @@ impl Traffic {
     /// across it within the next few seconds.
     fn player_on_turn(g: &LaneGraph, turn: u32, ps: &PlayerShape, node: [f32; 2]) -> bool {
         let p = ps.pts[1];
-        let reach = ps.speed * PLAYER_ETA_S;
+        let reach = ps.speed.abs() * PLAYER_ETA_S;
         if len2([node[0] - p[0], node[1] - p[1]]) > PLAYER_NODE_M + reach + ps.half_len {
             return false;
         }
+        // The reach goes the way the car moves: past the tail when reversing.
         let d = ps.dir;
-        let back = [p[0] - d[0] * ps.half_len, p[1] - d[1] * ps.half_len];
+        let behind = ps.half_len + if ps.speed < -1.0 { reach } else { 0.0 };
         let ahead = ps.half_len + if ps.speed > 1.0 { reach } else { 0.0 };
+        let back = [p[0] - d[0] * behind, p[1] - d[1] * behind];
         let front = [p[0] + d[0] * ahead, p[1] + d[1] * ahead];
         let clear = ps.r + CAR_HALF_W_M + 0.5;
         let curve = &g.turns[turn as usize].curve;
