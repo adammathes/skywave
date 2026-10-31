@@ -921,6 +921,62 @@ fn a_claim_held_up_behind_a_car_is_given_back() {
     assert!((3600..6600).contains(&went));
 }
 
+/// A signalized junction at the origin on one phase: lane 0 eastbound carries on as
+/// lane 1; lane 2 westbound turns left across it into lane 3, southbound.
+fn left_across() -> LaneGraph {
+    let mut b = Builder::new(5);
+    b.lane([-400.0, -1.8], [-12.0, -1.8], [1, 0], Control::Signal, 0);
+    b.lane([12.0, -1.8], [2000.0, -1.8], [0, 2], Control::Free, 0);
+    b.lane([400.0, 1.8], [12.0, 1.8], [3, 0], Control::Signal, 0);
+    b.lane([-1.8, -12.0], [-1.8, -2000.0], [0, 4], Control::Free, 0);
+    b.turn(0, 1);
+    b.turn(2, 3);
+    let mut g = b.build();
+    for t in &mut g.turns {
+        if t.from == 2 {
+            t.kind = TurnKind::Left;
+        }
+    }
+    g.junctions[0] = Junction {
+        degree: 4,
+        phases: 2,
+        offset: 0,
+    };
+    g
+}
+
+/// A left turner waiting at the line when the yellow comes does not yield to an oncoming
+/// car too far off to clear before red: that car stops, so the turner goes in the
+/// clearance interval instead of waiting out the cycle.
+#[test]
+fn a_left_turner_goes_on_the_yellow_ahead_of_a_car_that_stops() {
+    let _quiet = shared();
+    let g = left_across();
+    let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(5));
+    let (l0, l2) = (g.lanes[0].length_m, g.lanes[2].length_m);
+    // Lanes 0 and 2 are green until tick 3000, yellow to 3420, red after.
+    let yellow = 3000u64;
+    assert_eq!(g.light(0, yellow), Some(Light::Yellow));
+    let turner = t.spawn_at(&g, 2, l2 - 1.0, 0.0).expect("pool");
+    let oncoming = t.spawn_at(&g, 0, l0 - 50.0, 12.0).expect("pool");
+    let lane_of = |t: &Traffic, id: u32| t.cars().iter().find(|c| c.id == id).map(|c| c.seg);
+    let mut turned = None;
+    for tick in yellow..yellow + 1200 {
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        assert_no_contact(t.cars(), "left on yellow");
+        if turned.is_none() && lane_of(&t, turner) != Some(2) {
+            turned = Some(tick);
+        }
+    }
+    assert_eq!(lane_of(&t, oncoming), Some(0), "the oncoming car stopped");
+    let went = turned.expect("the turner went");
+    println!("left on yellow: turner left its lane at tick {went}");
+    assert!(
+        went < yellow + 420,
+        "the turner went in the yellow, not at {went}"
+    );
+}
+
 #[test]
 fn off_spawns_nothing() {
     let _quiet = shared();
