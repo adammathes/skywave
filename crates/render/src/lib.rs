@@ -5,10 +5,10 @@
 //!
 //! 1. **Shadow**: depth-only renders of the shadow-casting instances from the sun into
 //!    three cascades (0–40 m, 40–160 m, 160–600 m by default; two at low quality) side by
-//!    side in one 3×1 depth atlas, each an orthographic projection fitted to a slice of the
-//!    camera frustum and snapped to texels. A cascade is kept from an earlier frame while
-//!    its map covers the view, its casters have not changed and the sun has hardly moved;
-//!    the farthest also between its frames ([`RenderQuality::far_cascade_interval`]).
+//!    side in one 3×1 (or 2×1) depth atlas, each an orthographic projection fitted to a
+//!    slice of the camera frustum and snapped to texels. A cascade is kept from an earlier
+//!    frame while its map covers the view, its casters have not changed and the sun has
+//!    hardly moved; the farthest also between its frames ([`RenderQuality::far_cascade_interval`]).
 //! 2. **Forward**: optionally the meshes' depth first ([`RenderQuality::depth_prepass`]),
 //!    then the meshes: vertex color × atlas texel, Lambert sun with 3×3 PCF
 //!    cascaded shadows, hemisphere sky ambient, the point and spot lights of each
@@ -1242,6 +1242,9 @@ pub struct Renderer {
     frame_group: wgpu::BindGroup,
     cascade_buffer: wgpu::Buffer,
     cascade_groups: [wgpu::BindGroup; CASCADES],
+    /// [`RenderQuality::cascades`] cascades side by side, rebuilt when that count or the
+    /// cascade size changes.
+    shadow_atlas: wgpu::Texture,
     shadow_view: wgpu::TextureView,
     forward_group: wgpu::BindGroup,
     /// What the forward bind group is rebuilt from when the shadow atlas is.
@@ -1343,24 +1346,26 @@ impl Renderer {
     }
 
     /// Switches to `quality` (also done by [`Renderer::render`] from
-    /// [`SceneView::quality`]). Rebuilds the shadow atlas when the cascade size changes and
-    /// the scene's targets when the resolution scale does; otherwise free.
+    /// [`SceneView::quality`]). Rebuilds the shadow atlas when the cascade size or count
+    /// changes and the scene's targets when the resolution scale does; otherwise free.
     pub fn set_quality(&mut self, quality: RenderQuality) {
         let q = quality.sanitized(self.max_cascade_size);
         if q == self.quality {
             return;
         }
         let old = std::mem::replace(&mut self.quality, q);
-        if q.shadow_size != old.shadow_size {
+        if (q.shadow_size, q.cascades) != (old.shadow_size, old.cascades) {
             self.cascade_size = q.shadow_size;
-            let (view, group) = create_shadow_atlas(
+            let (atlas, view, group) = create_shadow_atlas(
                 &self.device,
                 self.cascade_size,
+                q.cascades,
                 &self.forward_layout,
                 &self.shadow_sampler,
                 &self.atlas_view,
                 &self.atlas_sampler,
             );
+            self.shadow_atlas = atlas;
             self.shadow_view = view;
             self.forward_group = group;
             self.stats.rebuilds += 1;
@@ -1414,6 +1419,12 @@ impl Renderer {
     /// devices whose widest texture is under 3× that).
     pub fn shadow_cascade_size(&self) -> u32 {
         self.cascade_size
+    }
+
+    /// Width and height of the shadow atlas in texels: [`RenderQuality::cascades`] cascades
+    /// side by side.
+    pub fn shadow_atlas_size(&self) -> (u32, u32) {
+        (self.shadow_atlas.width(), self.shadow_atlas.height())
     }
 
     /// Far view depth of each shadow cascade, meters.

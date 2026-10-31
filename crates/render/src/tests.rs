@@ -1914,6 +1914,10 @@ fn half_resolution_scale_keeps_the_hud_at_full_size() {
 fn quality_changes_apply_on_the_next_frame() {
     let (device, mut r) = full_renderer(RendererOptions::default());
     assert_eq!(r.shadow_cascade_size(), SHADOW_CASCADE_SIZE);
+    assert_eq!(
+        r.shadow_atlas_size(),
+        (3 * SHADOW_CASCADE_SIZE, SHADOW_CASCADE_SIZE)
+    );
     let block = r.add_mesh(&Mesh::unit_block([255; 4]));
     let instances = [at(block, Vec3::ZERO)];
     let mut scene = test_scene(&instances);
@@ -1927,6 +1931,11 @@ fn quality_changes_apply_on_the_next_frame() {
     render_frames(&device, &mut r, FORMAT, &scene, &[(64, 48)]);
     let s = r.stats();
     assert_eq!(r.shadow_cascade_size(), 1024);
+    assert_eq!(
+        r.shadow_atlas_size(),
+        (2 * 1024, 1024),
+        "two cascades, two slices"
+    );
     assert_eq!((s.shadow_size, s.cascades, s.cascades_drawn), (1024, 2, 2));
     assert_eq!(s.shadow_instances[2], 0);
     assert_eq!(s.bloom_draw_calls, 7);

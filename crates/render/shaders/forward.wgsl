@@ -281,7 +281,7 @@ fn point_lights(world_pos: vec3<f32>, n: vec3<f32>, light_set: vec4<u32>) -> vec
 }
 
 // 3×3 PCF with hardware 2×2 comparison filtering (an effective 4×4 texel kernel) in one
-// cascade of the 3×1 shadow atlas. 1 = lit.
+// cascade of the shadow atlas (`shadow_params.x` cascades side by side). 1 = lit.
 fn cascade_visibility(index: i32, world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) -> f32 {
     let texel = frame.cascade_texel[index];
     // Normal offset (bigger at grazing light) plus a push toward the sun, both in texels of
@@ -291,11 +291,12 @@ fn cascade_visibility(index: i32, world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) 
     let p = frame.cascade_view_proj[index] * vec4<f32>(world_pos + offset, 1.0);
     let ndc = p.xyz / p.w;
     let res = frame.cascade_texel.w;
-    // Keep the 4×4 kernel inside this cascade's third of the atlas.
+    // Keep the 4×4 kernel inside this cascade's slice of the atlas.
     let margin = 2.0 / res;
     let local = clamp(vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5), vec2<f32>(margin), vec2<f32>(1.0 - margin));
-    let uv = vec2<f32>((local.x + f32(index)) / 3.0, local.y);
-    let step = vec2<f32>(1.0 / (3.0 * res), 1.0 / res);
+    let cascades = frame.shadow_params.x;
+    let uv = vec2<f32>((local.x + f32(index)) / cascades, local.y);
+    let step = vec2<f32>(1.0 / (cascades * res), 1.0 / res);
     var sum = 0.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
