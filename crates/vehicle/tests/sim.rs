@@ -12,6 +12,7 @@ use vehicle::{step, Assists, FlatGround, VehicleInput, VehicleSpec, VehicleState
 
 const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
 const HOMESTEAD: &str = include_str!("../../../assets/vehicles/homestead_wagon.ron");
+const LINNET: &str = include_str!("../../../assets/vehicles/linnet_hatch.ron");
 const MPH: f32 = 0.447_04;
 const STEPS_PER_S: usize = 120;
 const GROUND: FlatGround = FlatGround {
@@ -441,6 +442,34 @@ fn handbrake_locks_the_rear() {
             spec.id
         );
     }
+}
+
+/// The handbrake locks the rears only, so a front-drive car keeps its drive: full throttle
+/// with the handbrake held still pulls it off the line, while a rear-drive car declutches
+/// and stays put.
+#[test]
+fn handbrake_keeps_front_drive_driving() {
+    let pull = VehicleInput {
+        throttle: 1.0,
+        handbrake: true,
+        ..VehicleInput::default()
+    };
+    let front = load(LINNET);
+    assert_eq!(front.drive, vehicle::Drive::Front);
+    let mut s = spawn(&front);
+    hold(&front, &mut s, pull, &Assists::default(), 2 * STEPS_PER_S);
+    println!("front drive on the handbrake: {:.2} m/s", s.speed_mps);
+    assert!(
+        s.speed_mps > 1.0,
+        "front drive declutched: {} m/s",
+        s.speed_mps
+    );
+    assert!(s.wheels[0].spin > 1.0 && s.wheels[2].spin == 0.0);
+
+    let rear = load(GANNET);
+    let mut s = spawn(&rear);
+    hold(&rear, &mut s, pull, &Assists::default(), 2 * STEPS_PER_S);
+    assert!(s.speed_mps < 0.1, "rear drive pulled against the handbrake");
 }
 
 /// Heading change, degrees (positive left), over 1 s of handbrake with the stick half left

@@ -706,8 +706,10 @@ pub fn step(
     }
     let shifting = state.shift_timer > SHIFT_HOLD_S;
     let launch_rpm = idle + drive_pedal * STALL_FRACTION * rpm_span;
-    // The handbrake declutches, so it locks the rears instead of fighting the engine.
-    let declutched = shifting || state.handbrake;
+    // The handbrake locks the rears, so it declutches a car that drives them instead of
+    // fighting the engine; a front-drive car keeps its drive.
+    let rear_driven = shares[REAR_LEFT] + shares[REAR_RIGHT] > 0.0;
+    let declutched = shifting || (state.handbrake && rear_driven);
     let coupled = state.gear != 0 && !declutched && wheel_rpm >= launch_rpm;
     if coupled {
         state.engine_rpm = wheel_rpm;
