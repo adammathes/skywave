@@ -17,7 +17,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::{
-    Place, PlaceError, SpawnKind, Table, Terrain, Zones, MAX_SIZE_CHUNKS, SIDEWALK_WIDTH_M,
+    Place, PlaceError, SpawnKind, Table, Terrain, Zones, MAX_RES_PER_CHUNK, MAX_SIZE_CHUNKS,
+    SIDEWALK_WIDTH_M,
 };
 
 /// How far an edge profile sample may be above or below the terrain, meters.
@@ -80,7 +81,7 @@ fn header(place: &Place) -> Result<(), PlaceError> {
 fn grids(place: &Place) -> Result<(), PlaceError> {
     let (h, t) = (&place.header, &place.terrain);
     let [w, d] = Terrain::samples(h, t.res_per_chunk);
-    if t.res_per_chunk == 0 || t.heights.len() != w * d {
+    if !(1..=MAX_RES_PER_CHUNK).contains(&t.res_per_chunk) || t.heights.len() != w * d {
         return Err(PlaceError::TerrainSize);
     }
     let [zw, zd] = Zones::cells_per_side(h, t.res_per_chunk);

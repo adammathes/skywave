@@ -48,6 +48,10 @@ pub const MAX_SIZE_CHUNKS: u16 = 256;
 /// Terrain cells per chunk edge unless a producer asks otherwise: 4 m cells.
 pub const DEFAULT_RES_PER_CHUNK: u16 = 32;
 
+/// Most terrain cells per chunk edge (2 m cells). Keeps a full-size place's height grid
+/// under 2^30 bytes, so its size math fits a 32-bit `usize`.
+pub const MAX_RES_PER_CHUNK: u16 = 64;
+
 /// Width of each sidewalk of an [`Edge`] with `sidewalk: true`, in meters. Sidewalks lie
 /// outside `width_m`, one on each side; the outer sidewalk edge is the property line.
 pub const SIDEWALK_WIDTH_M: f32 = 2.5;
