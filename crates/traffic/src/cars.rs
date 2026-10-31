@@ -1565,11 +1565,21 @@ impl Traffic {
             } else {
                 self.tail[seg as usize]
             };
-            if k == 0 && self.ghosts > 0 {
-                for (j, o) in self.cars.iter().enumerate() {
-                    let nearer = leader == NONE || o.s < self.cars[leader as usize].s;
-                    if o.ghost == seg && o.s > c.s && nearer {
-                        leader = j as u32;
+            if k == 0 && self.ghosts > 0 && seg < nl {
+                // A car changing lanes away from this one is on a lane beside it.
+                for m in [seg.wrapping_sub(1), seg + 1] {
+                    if m >= nl {
+                        continue;
+                    }
+                    let mut j = self.tail[m as usize];
+                    while j != NONE {
+                        let o = &self.cars[j as usize];
+                        let nearer = leader == NONE || o.s < self.cars[leader as usize].s;
+                        if o.ghost == seg && o.s > c.s && nearer {
+                            leader = j;
+                            break;
+                        }
+                        j = self.ahead[j as usize];
                     }
                 }
             }
