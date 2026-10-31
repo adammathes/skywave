@@ -453,8 +453,10 @@ pub struct Traffic {
     /// Per car slot, the planned acceleration, the most it may move this step, and the gap
     /// to the player when the player is on its path.
     plan: Vec<(f32, f32, f32)>,
-    /// Claims held per turn.
+    /// Claims held per turn, and the room they reserve past it: each claimant's length plus
+    /// [`S0`], m.
     claims: Vec<u16>,
+    claim_m: Vec<f32>,
     /// Per turn, the turns it conflicts with (sorted), as offsets into `conflicts`.
     conflict_first: Vec<u32>,
     conflicts: Vec<u32>,
@@ -517,6 +519,7 @@ impl Clone for Traffic {
             behind: self.behind.clone(),
             plan: self.plan.clone(),
             claims: self.claims.clone(),
+            claim_m: self.claim_m.clone(),
             conflict_first: self.conflict_first.clone(),
             conflicts: self.conflicts.clone(),
             incoming_first: self.incoming_first.clone(),
@@ -881,6 +884,7 @@ impl Traffic {
             behind: alloc::vec![NONE; cap],
             plan: alloc::vec![(0.0, 0.0, f32::INFINITY); cap],
             claims: alloc::vec![0; nt],
+            claim_m: alloc::vec![0.0; nt],
             conflict_first,
             conflicts,
             incoming_first,
@@ -1307,7 +1311,7 @@ impl Traffic {
             let l = &self.cars[last as usize];
             l.s - l.len
         };
-        room -= f32::from(self.claims[turn as usize]) * (CAR_LEN_M + S0);
+        room -= self.claim_m[turn as usize];
         if room < (c.len + 1.0).min(to_len) {
             return false;
         }
@@ -1370,7 +1374,7 @@ impl Traffic {
         }
         if c.held == turn {
             if g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed) {
-                self.claims[turn as usize] -= 1;
+                self.unclaim(turn, c.len);
                 self.cars[i].held = NONE;
                 return false;
             }
@@ -1378,10 +1382,28 @@ impl Traffic {
         }
         let open = self.gate(g, inp, ps, i, turn, d);
         if open && d <= commit_m(c.speed) {
-            self.claims[turn as usize] += 1;
+            self.claim(turn, c.len);
             self.cars[i].held = turn;
         }
         open
+    }
+
+    /// Car of length `len` claims `turn`.
+    fn claim(&mut self, turn: u32, len: f32) {
+        self.claims[turn as usize] += 1;
+        self.claim_m[turn as usize] += len + S0;
+    }
+
+    /// Car of length `len` gives its claim on `turn` back (the last one leaves exactly no
+    /// room reserved).
+    fn unclaim(&mut self, turn: u32, len: f32) {
+        let k = turn as usize;
+        self.claims[k] -= 1;
+        self.claim_m[k] = if self.claims[k] == 0 {
+            0.0
+        } else {
+            self.claim_m[k] - (len + S0)
+        };
     }
 
     /// Whether a lane the car has not reached yet lets it through, as far as it can tell.
@@ -1500,7 +1522,7 @@ impl Traffic {
                 // for a red; one too close to stop at its normal braking goes through.
                 let red = g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed);
                 if c.held != NONE && (red || d > commit_m(c.speed) + 2.0) {
-                    self.claims[c.held as usize] -= 1;
+                    self.unclaim(c.held, c.len);
                     self.cars[i].held = NONE;
                 }
                 if l.control == Control::Stop {
@@ -1696,7 +1718,7 @@ impl Traffic {
         }
         for t in release {
             if t != NONE {
-                self.claims[t as usize] -= 1;
+                self.unclaim(t, c.len);
             }
         }
         if c.offset == [0.0; 2] && c.ghost != NONE {
@@ -1972,7 +1994,7 @@ impl Traffic {
         }
         for t in [c.held, c.clearing] {
             if t != NONE {
-                self.claims[t as usize] -= 1;
+                self.unclaim(t, c.len);
             }
         }
     }

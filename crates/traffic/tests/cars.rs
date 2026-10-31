@@ -1635,3 +1635,43 @@ fn a_car_waiting_out_a_long_red_is_not_despawned() {
         assert_eq!(c.seg, 0, "waits at the red");
     }
 }
+
+/// A semi's claim on a turn reserves its own length past it: a car behind it does not
+/// claim the turn onto a lane too short for both (20 m: room for the semi, not for a
+/// 4.6 m car after it), and both get through.
+#[test]
+fn a_semis_claim_reserves_its_own_length() {
+    let _quiet = shared();
+    let mut b = Builder::new(4);
+    b.lane([-400.0, 0.0], [-12.0, 0.0], [0, 1], Control::Free, 0);
+    b.lane([12.0, 0.0], [32.0, 0.0], [1, 2], Control::Free, 0);
+    b.lane([32.0, 0.0], [3000.0, 0.0], [2, 3], Control::Free, 0);
+    b.turn(0, 1);
+    b.turn(1, 2);
+    let mut g = b.build();
+    for l in &mut g.lanes {
+        l.freeway = true;
+        l.zone = place::ZoneId::Highway;
+    }
+    let len = g.lanes[0].length_m;
+    let budget = TrafficBudget {
+        shapes: 2,
+        ..TrafficBudget::default()
+    };
+    let mut t = Traffic::new(&g, budget, Seed(1));
+    t.set_shape_rules(&semi_rules());
+    t.set_shape_weights(&[0, 1]);
+    let semi = t.spawn_at(&g, 0, len - 40.0, 10.0).expect("pool");
+    t.set_shape_weights(&[1, 0]);
+    let car = t.spawn_at(&g, 0, len - 70.0, 10.0).expect("pool");
+    let find = |t: &Traffic, id: u32| *t.cars().iter().find(|c| c.id == id).expect("car");
+    assert_eq!(find(&t, semi).len, 17.5);
+    assert_eq!(find(&t, car).len, CAR_LEN_M);
+    for tick in 0..60 * HZ as u64 {
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        let (s, c) = (find(&t, semi), find(&t, car));
+        let on = |c: &Car| c.held == 0 || c.clearing == 0;
+        assert!(!(on(&s) && on(&c)), "tick {tick}: both claim the turn");
+    }
+    assert_eq!(find(&t, car).seg, 2, "the car got through");
+}
