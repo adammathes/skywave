@@ -122,8 +122,8 @@ lies under all ground. The macro stage, in the frame of the hills' side:
 - **Rail.** Between the first two cross lines, edge to edge (into the bands' walls), at grade with every road
   it crosses; `rail.spurs` sidings 4.5 m beside it (off a 30 m turnout, ending at a bumper) between the out
   lines in industrial land; its right of way (`row_m`) is `Highway` zone. The detailing lays it as
-  `PropKind::Track` pieces (ballast; flush crossing panels where it crosses a road, with a `Crossbuck` on
-  each approach, on the right; a girder deck over the channel; a bumper at a spur's end).
+  `PropKind::Track` pieces (ballast; flush crossing panels where it crosses a road, with a `CrossingGate` on
+  each approach (see "The grade crossings" below); a girder deck over the channel; a bumper at a spur's end).
 - **Airfield.** Between the last cross line and the far band, past the channel: a `Park`-zone field
   `airfield.width_m` across and `length_m` long (no trees), its runway (`runway_m` wide, no sidewalks; the
   future drag strip) and a taxiway to the last cross line.
