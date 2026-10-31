@@ -1433,36 +1433,7 @@ impl Traffic {
                 }
             }
         };
-        for &(seg, start) in path {
-            if seg == NONE || start > look {
-                break;
-            }
-            if seg < self.lanes {
-                let l = &g.lanes[seg as usize];
-                let r = l.first_point as usize..(l.first_point + l.point_count) as usize;
-                let (pts, arc) = (&g.points[r.clone()], &g.arc[r]);
-                let from = (-start).max(0.0);
-                let k0 = arc[1..].partition_point(|&v| v < from).min(pts.len() - 2);
-                for k in k0..pts.len() - 1 {
-                    let s = start + arc[k];
-                    if s > look {
-                        break;
-                    }
-                    test(xz(pts[k]), xz(pts[k + 1]), s, arc[k + 1] - arc[k]);
-                }
-            } else {
-                let curve = &g.turns[(seg - self.lanes) as usize].curve;
-                let mut prev = curve[0];
-                let mut acc = start;
-                for k in 1..=CURVE_STEPS {
-                    let p = bezier(curve, k as f32 / CURVE_STEPS as f32);
-                    let len = dist2(prev, p);
-                    test(xz(prev), xz(p), acc, len);
-                    acc += len;
-                    prev = p;
-                }
-            }
-        }
+        self.walk_path(g, path, look, &mut test);
         best
     }
 
