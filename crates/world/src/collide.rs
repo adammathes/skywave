@@ -46,10 +46,9 @@ use crate::grammar::Grammar;
 use crate::ground::{self, Surface as LotSurface};
 use crate::math::{floor, signed_area, sqrt, V2};
 use crate::mesh::terrain::TerrainGrid;
-use crate::mesh::WorldMesh;
 use crate::props::{self, Prop, PropKind};
 use crate::roads::Network;
-use crate::{ChunkPlan, MeshSet, Palette, CURB_M, LOT_Y, TERRAIN_Y};
+use crate::{ChunkPlan, Palette, CURB_M, LOT_Y, TERRAIN_Y};
 
 /// Grid cell edge, m.
 pub const CELL_M: f32 = 16.0;
@@ -238,6 +237,18 @@ struct Bins {
     /// `start[cell]..start[cell + 1]` indexes `items`; `cells + 1` entries.
     start: Vec<u32>,
     items: Vec<u32>,
+    /// Per shape, the lowest `[x, z]` cell it is binned in (`u32::MAX` if in none).
+    first: Vec<[u32; 2]>,
+}
+
+impl Bins {
+    /// Whether a query over cells `q` (as [`WorldCollider::cell_range`] gives them) that
+    /// visits cell `[x, z]`, rows of `x` in `z` order, meets shape `i` there first: a shape
+    /// binned in several cells is tested once per query, not once per cell.
+    fn first_in(&self, i: u32, x: u32, z: u32, q: [u32; 4]) -> bool {
+        let [fx, fz] = self.first[i as usize];
+        x == fx.max(q[0]) && z == fz.max(q[2])
+    }
 }
 
 /// Static collision shapes of a place. Built once; every query is allocation-free.
@@ -400,34 +411,16 @@ const MAX_STEP_UP_M: f32 = 0.5;
 impl WorldCollider {
     /// Collision shapes of `place`, consistent with what [`crate::build_chunk_meshes`] draws.
     pub fn build(place: &Place, grammar: &Grammar) -> WorldCollider {
-        let mut net = Network::new(place);
-        let lots = crate::lots::plan(place, &net, &grammar.lots);
-        net.cuts = crate::lots::cuts(&lots);
-        let terrain = crate::is_terrain_place(place).then(|| TerrainGrid::new(place, &net));
-        WorldCollider::of(place, grammar, &net, &lots, terrain)
+        let plan = ChunkPlan::new(place, &Palette::socal_1985(), grammar);
+        WorldCollider::with_plan(place, grammar, &plan)
     }
 
     /// [`WorldCollider::build`] from the place's [`ChunkPlan`], made already: the roads,
-    /// lots and graded terrain are the meshes' own, not built again.
+    /// lots, graded terrain and the test town's props are the meshes' own, not built again.
     pub fn with_plan(place: &Place, grammar: &Grammar, plan: &ChunkPlan) -> WorldCollider {
-        WorldCollider::of(
-            place,
-            grammar,
-            plan.net(),
-            plan.lots(),
-            plan.grid().cloned(),
-        )
-    }
-
-    /// The collider of `place` on its road network `net` (with the lots' curb cuts), its
-    /// parking lots and a terrain place's graded terrain.
-    fn of(
-        place: &Place,
-        grammar: &Grammar,
-        net: &Network,
-        lots: &[crate::lots::ParkingLot],
-        terrain: Option<TerrainGrid>,
-    ) -> WorldCollider {
+        let net = plan.net();
+        let lots = plan.lots();
+        let terrain = plan.grid().cloned();
         let mut shapes = Shapes {
             points: Vec::new(),
             patches: Vec::new(),
@@ -460,8 +453,7 @@ impl WorldCollider {
         let (posts, mut boxes, lot_cars) = if terrain_place {
             place_prop_solids(place, &grammar.landmarks)
         } else {
-            let props = props_of(place, grammar, net, &blocks);
-            let (posts, boxes) = prop_solids(&props, &grammar.landmarks);
+            let (posts, boxes) = prop_solids(plan.props(), &grammar.landmarks);
             (posts, boxes, Vec::new())
         };
         boxes.extend(lot_walls);
@@ -596,6 +588,13 @@ impl WorldCollider {
         for i in 0..n_cells {
             count[i + 1] += count[i];
         }
+        let first = boxes
+            .iter()
+            .map(|b| match range(b) {
+                Some([x0, _, z0, _]) => [x0, z0],
+                None => [u32::MAX; 2],
+            })
+            .collect();
         let mut fill = count.clone();
         let mut items = alloc::vec![0u32; count[n_cells] as usize];
         for (i, b) in boxes.iter().enumerate() {
@@ -612,6 +611,7 @@ impl WorldCollider {
         Bins {
             start: count,
             items,
+            first,
         }
     }
 
@@ -1240,63 +1240,6 @@ fn building_walls(place: &Place) -> Vec<Wall> {
         }
     }
     walls
-}
-
-/// Every prop [`crate::build_chunk_meshes`] places, in the same passes: parked cars in
-/// strip-mall lots, house sites, then street and park furniture. The meshes those passes
-/// also emit go to scratch buffers and are dropped.
-fn props_of(
-    place: &Place,
-    grammar: &Grammar,
-    net: &Network,
-    blocks: &[ground::Block],
-) -> Vec<Prop> {
-    let seed = place.header.seed;
-    let pal = Palette::socal_1985();
-    let lookup = crate::Lookup::new(place, net);
-    let mut scratch = MeshSet::new(place.header.chunk_size_m, crate::Keep::Nothing);
-    let mut mesh = WorldMesh::default();
-    let mut out = Vec::new();
-    let mut house = Vec::new();
-    for (i, b) in place.buildings.iter().enumerate() {
-        let env = lookup.facade_envs(i);
-        let door_pick = skywave_core::hash64(seed, &[0x444F_4F52, i as u64]) as u32;
-        let zone = crate::building_zone(place, b);
-        let plan = buildings::plan_building(b, zone, &env, door_pick, grammar);
-        if b.style == place::StyleTag::StripMall {
-            let fp = ground::to_v2(&b.footprint);
-            let c = ground::centroid(&fp);
-            if let Some(blk) = blocks
-                .iter()
-                .find(|blk| crate::math::point_in_polygon(c, &blk.poly))
-            {
-                ground::parking_lot(
-                    &fp,
-                    plan.frontage,
-                    blk,
-                    &pal,
-                    grammar.lots.stall_w,
-                    seed ^ i as u64,
-                    &mut scratch,
-                    &mut out,
-                );
-            }
-        }
-        mesh.vertices.clear();
-        mesh.indices.clear();
-        house.extend(buildings::house_site(
-            &mut mesh, b, &plan, &env, &pal, seed, i as u32, None,
-        ));
-    }
-    out.extend(house);
-    let side_zone = crate::side_zones(place, net);
-    let parks: Vec<Vec<V2>> = blocks
-        .iter()
-        .filter(|b| ground::is_park(place, b))
-        .map(|b| b.poly.clone())
-        .collect();
-    out.extend(props::place(place, net, &side_zone, &parks, seed));
-    out
 }
 
 /// Collision shapes of props: radius and height of each post, half extents of each box.
@@ -1933,12 +1876,12 @@ pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCol
         + 1.0;
     let lo = [state.pos[0] - reach, state.pos[2] - reach];
     let hi = [state.pos[0] + reach, state.pos[2] + reach];
-    if let Some([x0, x1, z0, z1]) = collider.cell_range(lo, hi) {
+    if let Some(q) = collider.cell_range(lo, hi) {
+        let [x0, x1, z0, z1] = q;
         for _ in 0..CONTACT_PASSES {
             let mut touched = false;
             for z in z0..=z1 {
                 for x in x0..=x1 {
-                    let cell = (z * collider.cells[0] + x) as usize;
                     let mut on = |hit: Option<Bump>, parked: Option<u32>| {
                         touched = true;
                         let Some(hit) = hit else {
@@ -1952,7 +1895,7 @@ pub fn resolve(state: &mut VehicleState, spec: &VehicleSpec, collider: &WorldCol
                             impact.parked_hit = hit;
                         }
                     };
-                    resolve_cell(state, spec, collider, cell, moved, &mut on);
+                    resolve_cell(state, spec, collider, [x, z], q, moved, &mut on);
                 }
             }
             if !touched {
@@ -2179,23 +2122,32 @@ fn bin_slice(bins: &Bins, cell: usize) -> &[u32] {
     &bins.items[bins.start[cell] as usize..bins.start[cell + 1] as usize]
 }
 
-/// One pass over the solids binned in `cell`: `on` hears of every contact, with the hit if
+/// One pass over the solids binned in cell `[x, z]` of a query over cells `q` that the
+/// query meets there first ([`Bins::first_in`]): `on` hears of every contact, with the hit if
 /// it was one and the box's index if it is a parked car.
 fn resolve_cell(
     state: &mut VehicleState,
     spec: &VehicleSpec,
     collider: &WorldCollider,
-    cell: usize,
+    [x, z]: [u32; 2],
+    q: [u32; 4],
     moved: V3,
     on: &mut impl FnMut(Option<Bump>, Option<u32>),
 ) {
+    let cell = (z * collider.cells[0] + x) as usize;
     for &i in bin_slice(&collider.wall_bins, cell) {
+        if !collider.wall_bins.first_in(i, x, z, q) {
+            continue;
+        }
         let fp = Footprint::new(state, spec);
         if let Some(c) = wall_contact(&fp, &collider.walls[i as usize]) {
             on(respond(state, spec, &c), None);
         }
     }
     for &i in bin_slice(&collider.post_bins, cell) {
+        if !collider.post_bins.first_in(i, x, z, q) {
+            continue;
+        }
         let fp = Footprint::new(state, spec);
         let post = &collider.posts[i as usize];
         let l = fp.local(post.c);
@@ -2208,6 +2160,9 @@ fn resolve_cell(
         }
     }
     for &i in bin_slice(&collider.box_bins, cell) {
+        if !collider.box_bins.first_in(i, x, z, q) {
+            continue;
+        }
         let fp = Footprint::new(state, spec);
         let b = &collider.boxes[i as usize];
         if !collider.present(b) {
@@ -2229,15 +2184,19 @@ fn sweep_walls(state: &mut VehicleState, prev: V3, collider: &WorldCollider) {
         return;
     }
     let (lo, hi) = bounds_of(&[p0, p1]);
-    let Some([x0, x1, z0, z1]) = collider.cell_range(lo, hi) else {
+    let Some(q) = collider.cell_range(lo, hi) else {
         return;
     };
+    let [x0, x1, z0, z1] = q;
     let mut first = 1.0f32;
     let mut normal = [0.0, 0.0];
     for z in z0..=z1 {
         for x in x0..=x1 {
             let cell = (z * collider.cells[0] + x) as usize;
             for &i in bin_slice(&collider.wall_bins, cell) {
+                if !collider.wall_bins.first_in(i, x, z, q) {
+                    continue;
+                }
                 let w = &collider.walls[i as usize];
                 if state.pos[1] < w.y0 || state.pos[1] > w.y1 {
                     continue;
