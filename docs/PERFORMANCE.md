@@ -28,7 +28,7 @@ triangles and shaded fragments (format below). Send both files.
 
 ## Cost model
 
-Per frame, in order (`crates/render/src/lib.rs`):
+Per frame, in order (`crates/render/src/frame.rs`):
 
 | Pass | Work | Scales with |
 |---|---|---|
