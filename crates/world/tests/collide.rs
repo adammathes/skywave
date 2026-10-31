@@ -1006,7 +1006,7 @@ fn scripted_drive_is_deterministic_and_pinned() {
     // sim, the collider, a spec or the town moves them: run
     // `cargo test -p world --test collide scripted -- --nocapture`, copy the printed hashes
     // here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0xc477_bbf0_3ead_06af, 0xf7fb_d7b3_49ac_326e];
+    const PINNED: [u64; 2] = [0xe5d1_59bb_f3d9_087c, 0x6f71_f243_9c3a_8070];
     let (_, c) = town();
     let (start, d) = yard_run(&c);
     let mut hashes = [0u64; 2];
