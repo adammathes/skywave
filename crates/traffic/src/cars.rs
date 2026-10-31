@@ -105,7 +105,7 @@ const STANDING_MPS: f32 = 0.05;
 /// (m/s²), jam distance behind a car, a stop line and the player (m).
 const A_MAX: f32 = 1.4;
 const B_COMF: f32 = 2.5;
-const B_MAX: f32 = 8.0;
+pub const B_MAX: f32 = 8.0;
 const S0: f32 = 2.0;
 const LINE_S0: f32 = 0.6;
 const PLAYER_S0: f32 = 3.0;
@@ -663,9 +663,14 @@ fn free_accel(v: f32, v0: f32) -> f32 {
     }
 }
 
+/// Distance in which a car at `v` stops at its normal braking.
+fn stop_m(v: f32) -> f32 {
+    v * v / (2.0 * B_COMF)
+}
+
 /// Distance in which a car at `v` stops comfortably, plus a margin: where it commits.
 fn commit_m(v: f32) -> f32 {
-    v * v / (2.0 * B_COMF) + 3.0
+    stop_m(v) + 3.0
 }
 
 /// Within this of its lane's end a car stops trying to reach another lane for its turn:
@@ -1346,8 +1351,9 @@ impl Traffic {
 
     /// Whether the end of car `i`'s current lane, `d` meters ahead, lets it through:
     /// claims the turn when the gate is open and the car is within its commit distance,
-    /// gives a claim back on red (claims clear the line before red, so only a car held up
-    /// on its way loses one).
+    /// gives a claim back on red when the car can still stop at its normal braking (claims
+    /// clear the line before red, so only a car slowed on its way loses one); a car too
+    /// close to stop keeps it and goes through.
     fn current_gate(
         &mut self,
         g: &LaneGraph,
@@ -1362,7 +1368,7 @@ impl Traffic {
             return false;
         }
         if c.held == turn {
-            if g.light(c.seg, inp.tick) == Some(Light::Red) {
+            if g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed) {
                 self.claims[turn as usize] -= 1;
                 self.cars[i].held = NONE;
                 return false;
@@ -1489,8 +1495,9 @@ impl Traffic {
                     self.cars[i].next_turn = self.pick(g, c.seg, true, fw);
                 }
                 // A claim stands only while the car is committed: a car held up (a car
-                // ahead, a slowdown) gives it back, and nobody keeps one on red.
-                let red = g.light(c.seg, inp.tick) == Some(Light::Red);
+                // ahead, a slowdown) gives it back, and so does one that can still stop
+                // for a red; one too close to stop at its normal braking goes through.
+                let red = g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed);
                 if c.held != NONE && (red || d > commit_m(c.speed) + 2.0) {
                     self.claims[c.held as usize] -= 1;
                     self.cars[i].held = NONE;

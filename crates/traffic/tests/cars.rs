@@ -1539,3 +1539,60 @@ fn a_car_behind_a_semi_keeps_clear_of_its_tail() {
     println!("closest gap behind the semi {closest:.2} m");
     assert!(closest > 1.0, "{closest}");
 }
+
+/// A car holding its claim when its light turns red too close to the line to stop at its
+/// normal braking keeps the claim and clears the junction instead of stopping dead at the
+/// line; one that has not claimed stops. None brakes harder than the emergency limit.
+#[test]
+fn a_car_too_close_to_stop_at_the_red_goes_on_through() {
+    let _quiet = shared();
+    let mut g = crossing();
+    // A tight turn: a car that claimed on the last of the green slows for it so much that
+    // the red finds it just short of the line.
+    g.turns[0].min_radius_m = 4.0;
+    let len = g.lanes[0].length_m;
+    // Lane 0 is green until tick 3000, yellow to 3420, red after.
+    let red = 3420u64;
+    assert_eq!(g.light(0, red - 1), Some(Light::Yellow));
+    assert_eq!(g.light(0, red), Some(Light::Red));
+    let (mut went, mut stopped, mut worst) = (0, 0, 0.0f32);
+    for start in (2940..3000u64).step_by(4) {
+        for d0 in [16.0, 24.0, 28.0, 31.0, 40.0] {
+            let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(start));
+            let id = t.spawn_at(&g, 0, len - d0, 12.0).expect("pool");
+            let car = |t: &Traffic| *t.cars().iter().find(|c| c.id == id).expect("car");
+            let mut claimed_at_red = false;
+            for tick in start..red + 600 {
+                let before = car(&t);
+                t.step(&g, &scripted(tick, Player::ABSENT));
+                if before.seg != 0 {
+                    continue;
+                }
+                if tick == red {
+                    claimed_at_red = before.held != NONE;
+                }
+                let decel = (before.speed - car(&t).speed) * HZ as f32;
+                worst = worst.max(decel);
+                assert!(
+                    decel <= traffic::cars::B_MAX + 0.01,
+                    "start {start}, {d0} m out: braked at {decel:.1} m/s² {:.2} m short \
+                     of the line at {:.2} m/s",
+                    len - before.s,
+                    before.speed
+                );
+            }
+            if claimed_at_red {
+                assert_ne!(
+                    car(&t).seg,
+                    0,
+                    "start {start}, {d0} m out: kept a claim, stayed"
+                );
+                went += 1;
+            } else if car(&t).seg == 0 {
+                stopped += 1;
+            }
+        }
+    }
+    println!("red claim: {went} went on through, {stopped} stopped, hardest {worst:.2} m/s²");
+    assert!(went > 0 && stopped > 0, "the sweep met both cases");
+}
