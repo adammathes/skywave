@@ -208,13 +208,20 @@ pub struct HudBuilder {
     ui_scale: f32,
 }
 
+/// Empty and unallocated, so `std::mem::take` of a builder costs nothing; [`HudBuilder::new`]
+/// is the pre-sized one.
 impl Default for HudBuilder {
     fn default() -> Self {
-        HudBuilder::new()
+        HudBuilder {
+            items: Vec::new(),
+            text: String::new(),
+            ui_scale: 1.0,
+        }
     }
 }
 
 impl HudBuilder {
+    /// Pre-sized for a busy frame.
     pub fn new() -> HudBuilder {
         HudBuilder {
             items: Vec::with_capacity(1024),

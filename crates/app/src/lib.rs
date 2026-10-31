@@ -1872,6 +1872,33 @@ mod tests {
     /// Meshes the player's preset drivers add at setup.
     const DRIVER_MESHES: usize = traffic::figure::PRESETS * traffic::figure::PARTS;
 
+    /// Counts heap allocations made on the current thread.
+    struct CountingAlloc;
+
+    thread_local! {
+        static ALLOCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    // SAFETY: forwards to the system allocator; the counter is a const thread-local Cell,
+    // which needs no allocation of its own.
+    unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let _ = ALLOCS.try_with(|n| n.set(n.get() + 1));
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static GLOBAL: CountingAlloc = CountingAlloc;
+
+    /// Heap allocations made on the current thread so far.
+    pub(crate) fn allocations() -> usize {
+        ALLOCS.with(|n| n.get())
+    }
+
     /// Seconds since the first call: the platform clock tests pass to [`App::frame`].
     pub(crate) fn wall_clock() -> f64 {
         static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
