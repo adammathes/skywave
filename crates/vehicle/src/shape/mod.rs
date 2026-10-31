@@ -117,8 +117,8 @@ impl CarMesh {
         self.interior.triangle_count() + self.steering_wheel.triangle_count()
     }
 
-    /// Every mesh, for iteration (wheels once each).
-    pub fn meshes(&self) -> [&MeshData; 9] {
+    /// Every mesh, for iteration (wheels once each, underglow last).
+    pub fn meshes(&self) -> [&MeshData; 10] {
         [
             &self.body,
             &self.glass,
@@ -129,6 +129,7 @@ impl CarMesh {
             &self.wheels[1],
             &self.wheels[2],
             &self.wheels[3],
+            &self.underglow,
         ]
     }
 }

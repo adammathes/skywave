@@ -120,7 +120,7 @@ fn hash(car: &CarMesh) -> u64 {
             h = h.wrapping_mul(0x0000_0100_0000_01b3);
         }
     };
-    for m in car.meshes().into_iter().chain([&car.underglow]) {
+    for m in car.meshes() {
         for p in &m.positions {
             for v in p {
                 eat(&v.to_bits().to_le_bytes());
@@ -149,12 +149,20 @@ fn hash(car: &CarMesh) -> u64 {
 
 #[test]
 fn shapes_build_with_sane_meshes() {
+    let mut glows = 0;
     for spec in shapes() {
         for lod in 0..3 {
             let car = build_lod(&spec, 0, lod).unwrap();
+            glows += car.underglow.triangle_count();
             for (k, m) in car.meshes().iter().enumerate() {
                 let n = m.positions.len();
-                assert!(n > 0 && !m.indices.is_empty(), "{} mesh {k} empty", spec.id);
+                // Only cars with the underglow detail have one.
+                let optional = core::ptr::eq(*m, &car.underglow);
+                assert!(
+                    optional || (n > 0 && !m.indices.is_empty()),
+                    "{} mesh {k} empty",
+                    spec.id
+                );
                 assert_eq!(m.normals.len(), n);
                 assert_eq!(m.uvs.len(), n);
                 assert_eq!(m.colors.len(), n);
@@ -192,6 +200,7 @@ fn shapes_build_with_sane_meshes() {
             assert!(car.lights.emissive.iter().any(|e| e[3] > 0));
         }
     }
+    assert!(glows > 0, "no shape has underglow to check");
 }
 
 #[test]
