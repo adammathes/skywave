@@ -33,6 +33,7 @@ use skywave_core::{Rng, Seed};
 
 use crate::grammar::{pick, Awning, Base, Fascia, Grammar, GroundBays, SignRules, StyleRules};
 use crate::math::{abs, clamp, floor, offset_polygon, V2, V3};
+use crate::mesh::terrain::TerrainGrid;
 use crate::mesh::{
     boxf, face, frustum, lathe, polygon_cap, quad, rect, ring_band, tri, Frame, Glow, Paint,
     Pattern, WorldMesh,
@@ -3924,8 +3925,18 @@ fn pitched_roof(
     }
 }
 
+/// Length of the pieces a walk or driveway is laid in on sloped ground.
+const YARD_STEP_M: f32 = 1.0;
+/// How far a walk or driveway on sloped ground sits above it.
+const YARD_LIFT_M: f32 = 0.03;
+
 /// A house's front yard: a walkway from the door to the sidewalk, a driveway beside the
 /// house, and maybe a shade tree and a car in the driveway (returned as props).
+///
+/// On a terrain place `ground` is its grid and the house's floor base (the mesh is lifted by
+/// `base` afterwards): the walk and driveway are laid along the ground in short pieces, so
+/// they run from the street level up or down to the door. Without it they lie flat on the lot.
+#[allow(clippy::too_many_arguments)]
 pub fn house_site(
     m: &mut WorldMesh,
     b: &Building,
@@ -3934,6 +3945,7 @@ pub fn house_site(
     pal: &Palette,
     seed: u64,
     index: u32,
+    ground: Option<(&TerrainGrid, f32)>,
 ) -> Vec<Prop> {
     let mut props = Vec::new();
     let i = plan.frontage;
@@ -3954,17 +3966,35 @@ pub fn house_site(
     let walk = Paint::new(pal.concrete, Pattern::Concrete);
     let drive = Paint::new(shade(pal.concrete, 230), Pattern::Concrete);
     let flat = |m: &mut WorldMesh, x0: f32, x1: f32, z0: f32, z1: f32, paint: Paint| {
-        quad(
-            m,
-            [
-                f.p(x0, y, z0),
-                f.p(x1, y, z0),
-                f.p(x1, y, z1),
-                f.p(x0, y, z1),
-            ],
-            V3::Y,
-            paint,
-        );
+        let Some((g, base)) = ground else {
+            quad(
+                m,
+                [
+                    f.p(x0, y, z0),
+                    f.p(x1, y, z0),
+                    f.p(x1, y, z1),
+                    f.p(x0, y, z1),
+                ],
+                V3::Y,
+                paint,
+            );
+            return;
+        };
+        let at = |x: f32, z: f32| {
+            let q = f.p(x, 0.0, z);
+            q.xz().at(g.height_at(q.x, q.z) - base + YARD_LIFT_M)
+        };
+        let pieces = ((z1 - z0) / YARD_STEP_M) as usize + 1;
+        for k in 0..pieces {
+            let za = z0 + (z1 - z0) * k as f32 / pieces as f32;
+            let zb = z0 + (z1 - z0) * (k + 1) as f32 / pieces as f32;
+            quad(
+                m,
+                [at(x0, za), at(x1, za), at(x1, zb), at(x0, zb)],
+                V3::Y,
+                paint,
+            );
+        }
     };
     flat(m, cx - 0.6, cx + 0.6, 0.9, yard, walk);
     // Driveway up to the garage, or along the side away from the door.

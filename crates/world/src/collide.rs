@@ -1285,7 +1285,7 @@ fn props_of(
         mesh.vertices.clear();
         mesh.indices.clear();
         house.extend(buildings::house_site(
-            &mut mesh, b, &plan, &env, &pal, seed, i as u32,
+            &mut mesh, b, &plan, &env, &pal, seed, i as u32, None,
         ));
     }
     out.extend(house);
