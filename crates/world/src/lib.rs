@@ -345,6 +345,7 @@ impl ChunkPlan {
                 palette,
                 seed,
                 i as u32,
+                None,
             ));
         }
         if terrain.is_none() {
@@ -568,7 +569,8 @@ impl ChunkPlan {
                     let mark = m.vertices.len();
                     let s = buildings::build_on(m, b, plan, palette, seed, i as u32, drop);
                     // Its props are in `props` already.
-                    buildings::house_site(m, b, plan, env, palette, seed, i as u32);
+                    let ground = self.terrain.as_ref().map(|(g, _)| (g, base));
+                    buildings::house_site(m, b, plan, env, palette, seed, i as u32, ground);
                     if base != 0.0 {
                         for v in &mut m.vertices[mark..] {
                             v.pos[1] += base;
@@ -1001,6 +1003,85 @@ mod tests {
 
     /// Whole test town budget (`docs/RENDERING.md`: one ~1 km place).
     const TOWN_TRIANGLE_BUDGET: usize = 600_000;
+
+    /// On the coast's slopes every house's front walk and driveway lies on the graded
+    /// ground outside the house, on uphill and downhill yards alike, and a door above the
+    /// ground has steps that climb to the floor from the ground (#100).
+    #[test]
+    fn house_walks_lie_on_sloped_ground() {
+        let text = include_str!("../../../assets/regions/california_coast.ron");
+        let t: template::RegionTemplate = ron::from_str(text).expect("parse");
+        let grammar = grammar::coast_80s();
+        let place = procgen::build_place(skywave_core::Seed(1), &t, &grammar);
+        let pal = Palette::socal_1985();
+        let plan = ChunkPlan::new(&place, &pal, &grammar);
+        let g = plan.grid().expect("a terrain place");
+        let step = mesh::Paint::new(
+            palette::shade(pal.concrete, buildings::STEP_SHADE),
+            Pattern::Concrete,
+        )
+        .color;
+        let (mut checked, mut uphill, mut downhill, mut worst) = (0, 0, 0, 0.0f32);
+        let mut stepped = 0;
+        for (i, b) in place.buildings.iter().enumerate() {
+            let (env, bp) = &plan.plans[i];
+            let base = plan.footings[i].0;
+            let mut m = WorldMesh::default();
+            buildings::house_site(
+                &mut m,
+                b,
+                bp,
+                env,
+                &pal,
+                place.header.seed,
+                i as u32,
+                Some((g, base)),
+            );
+            let fp = ground::to_v2(&b.footprint);
+            let floor = base + LOT_Y;
+            let (mut top, mut low) = (f32::MIN, f32::MAX);
+            for v in &m.vertices {
+                let [x, y, z] = v.pos;
+                if math::point_in_polygon(V2::new(x, z), &fp) {
+                    continue;
+                }
+                let h = g.height_at(x, z);
+                if v.color == step {
+                    // A step rises no higher than the floor and stands in the ground.
+                    assert!(y + base <= floor + 1e-3, "a step above the floor");
+                    top = top.max(y + base);
+                    low = low.min(y + base - h);
+                    continue;
+                }
+                let off = (y + base - h).abs();
+                worst = worst.max(off);
+                checked += 1;
+                if h > floor + 0.3 {
+                    uphill += 1;
+                } else if h < floor - 0.3 {
+                    downhill += 1;
+                }
+            }
+            if top > f32::MIN {
+                assert!(
+                    (top - floor).abs() < 1e-3,
+                    "steps that stop short of the floor"
+                );
+                assert!(low < 0.0, "steps that float over the ground");
+                stepped += 1;
+            }
+        }
+        std::println!(
+            "{checked} walk vertices, {uphill} uphill, {downhill} downhill, worst {worst} m, \
+             {stepped} houses with door steps"
+        );
+        assert!(
+            uphill > 0 && downhill > 0,
+            "{uphill} uphill, {downhill} downhill"
+        );
+        assert!(worst < 0.05, "a walk vertex is {worst} m off the ground");
+        assert!(stepped > 0, "no house has door steps");
+    }
 
     #[test]
     fn test_town_is_deterministic_and_within_budgets() {
