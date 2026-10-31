@@ -3929,13 +3929,21 @@ fn pitched_roof(
 const YARD_STEP_M: f32 = 1.0;
 /// How far a walk or driveway on sloped ground sits above it.
 const YARD_LIFT_M: f32 = 0.03;
+/// Most a door step rises: a walk whose ground is lower than this below the floor reaches
+/// the door by steps.
+const STEP_RISE_M: f32 = 0.18;
+/// A door step's tread, where the yard is deep enough for it.
+const STEP_TREAD_M: f32 = 0.3;
+/// The door steps' shade of the walk's concrete.
+pub const STEP_SHADE: u32 = 215;
 
 /// A house's front yard: a walkway from the door to the sidewalk, a driveway beside the
 /// house, and maybe a shade tree and a car in the driveway (returned as props).
 ///
 /// On a terrain place `ground` is its grid and the house's floor base (the mesh is lifted by
 /// `base` afterwards): the walk and driveway are laid along the ground in short pieces, so
-/// they run from the street level up or down to the door. Without it they lie flat on the lot.
+/// they run from the street level up or down to the house, and steps climb from the walk to
+/// a door above the ground. Without it they lie flat on the lot.
 #[allow(clippy::too_many_arguments)]
 pub fn house_site(
     m: &mut WorldMesh,
@@ -3996,7 +4004,38 @@ pub fn house_site(
             );
         }
     };
-    flat(m, cx - 0.6, cx + 0.6, 0.9, yard, walk);
+    // On ground below the floor the walk climbs to the door by steps out from the wall.
+    let mut walk_z0 = 0.9;
+    if let Some((g, base)) = ground {
+        let at = |x: f32, z: f32| {
+            let q = f.p(x, 0.0, z);
+            g.height_at(q.x, q.z) - base
+        };
+        let rise = LOT_Y - at(cx, walk_z0);
+        if rise > STEP_RISE_M {
+            let n = (rise / STEP_RISE_M) as usize + 1;
+            let tread = STEP_TREAD_M.min((yard - 1.0) / n as f32);
+            let riser = rise / n as f32;
+            let step = Paint::new(shade(pal.concrete, STEP_SHADE), Pattern::Concrete);
+            for k in 0..n {
+                let (z0, z1) = (k as f32 * tread, (k + 1) as f32 * tread);
+                let top = LOT_Y - k as f32 * riser;
+                let (xa, xb) = (cx - 0.6, cx + 0.6);
+                let low = at(xa, z0).min(at(xb, z0)).min(at(xa, z1)).min(at(xb, z1));
+                let bottom = low - 0.2;
+                boxf(
+                    m,
+                    &f,
+                    [xa, bottom, z0],
+                    [xb, top, z1],
+                    face::NO_BOTTOM,
+                    step,
+                );
+            }
+            walk_z0 = n as f32 * tread;
+        }
+    }
+    flat(m, cx - 0.6, cx + 0.6, walk_z0, yard, walk);
     // Driveway up to the garage, or along the side away from the door.
     let right = door * 2 < fp.columns;
     let (x0, x1, z0) = match fp.garage {
