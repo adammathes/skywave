@@ -1174,14 +1174,14 @@ impl<'a> Detailer<'a> {
             let (env, plan) = &plans[i];
             scratch.vertices.clear();
             scratch.indices.clear();
-            let site = buildings::house_site(&mut scratch, b, plan, env, &pal, self.seed, i as u32);
-            let base = self.footings[i].0;
+            let site =
+                buildings::house_site(&mut scratch, b, plan, env, &pal, self.seed, i as u32, None);
             let mut rng = self.rng(PART_HOUSE, i as u64);
             for p in site {
                 match p.kind {
                     props::PropKind::ParkedCar { .. } => {
-                        // On the drive slab or the ground, whichever is higher.
-                        let y = (base + p.y).max(self.ground(p.pos));
+                        // On the drive slab, which lies on the ground.
+                        let y = self.ground(p.pos);
                         let roll = rng.range(0, 100);
                         let q = p.pos;
                         if !self.near_building(q, 0.3) && !self.on_asphalt(q, 1.0) {

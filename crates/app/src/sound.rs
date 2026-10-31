@@ -234,6 +234,50 @@ impl Sound {
     }
 }
 
+/// The mixer's one-shot counters in [`AudioParams`] (wall hits, curb kicks, radio tunes,
+/// deck clicks, green-wave chimes), shifted so they run on across a world switch: the
+/// mixer outlives the app, and plays a sound whenever a counter changes, so the new
+/// app's counters (restarting at 0) must not look like new events.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counters {
+    /// Added (wrapping) to each counter this app makes.
+    base: [u32; 5],
+    /// What the mixer last saw from the previous app, until this app's first frame.
+    carried: Option<[u32; 5]>,
+}
+
+fn counts(p: &AudioParams) -> [u32; 5] {
+    [p.hits, p.curb_kicks, p.tunes, p.deck_clicks, p.waves]
+}
+
+impl Counters {
+    /// For the next app, after this one whose last frame's sound was `last` (or, if it
+    /// never made a frame, what it carried in).
+    pub fn for_next(&self, last: &AudioParams) -> Counters {
+        Counters {
+            base: [0; 5],
+            carried: Some(self.carried.unwrap_or(counts(last))),
+        }
+    }
+
+    /// Shifts this frame's counters in `p`: on the first frame they read what the mixer
+    /// last saw, and every later event moves them on from there.
+    pub fn apply(&mut self, p: &mut AudioParams) {
+        let now = counts(p);
+        if let Some(last) = self.carried.take() {
+            for i in 0..5 {
+                self.base[i] = last[i].wrapping_sub(now[i]);
+            }
+        }
+        let b = self.base;
+        p.hits = p.hits.wrapping_add(b[0]);
+        p.curb_kicks = p.curb_kicks.wrapping_add(b[1]);
+        p.tunes = p.tunes.wrapping_add(b[2]);
+        p.deck_clicks = p.deck_clicks.wrapping_add(b[3]);
+        p.waves = p.waves.wrapping_add(b[4]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +356,36 @@ mod tests {
             ..sound()
         };
         assert_eq!(none.ambience([0.0, 0.0]), (0.0, 0.0));
+    }
+
+    #[test]
+    fn counters_go_on_from_the_last_app() {
+        let mut last = AudioParams::default();
+        (last.hits, last.curb_kicks, last.tunes) = (4, u32::MAX, 2);
+        (last.deck_clicks, last.waves) = (9, 1);
+        let mut c = Counters::default().for_next(&last);
+        let counts = |p: &AudioParams| [p.hits, p.curb_kicks, p.tunes, p.deck_clicks, p.waves];
+        // The new app's first frame (a click already counted) reads what the mixer saw...
+        let mut p = AudioParams {
+            deck_clicks: 1,
+            ..AudioParams::default()
+        };
+        c.apply(&mut p);
+        assert_eq!(counts(&p), counts(&last));
+        // ...and its next events move on from there, wrapping.
+        let mut p = AudioParams {
+            curb_kicks: 1,
+            deck_clicks: 2,
+            ..AudioParams::default()
+        };
+        c.apply(&mut p);
+        assert_eq!(counts(&p), [4, 0, 2, 10, 1]);
+        // A switch before the new app made a frame carries the same values on.
+        let mut next = Counters::default()
+            .for_next(&last)
+            .for_next(&AudioParams::default());
+        let mut p = AudioParams::default();
+        next.apply(&mut p);
+        assert_eq!(counts(&p), counts(&last));
     }
 }

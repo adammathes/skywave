@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(t.place_content_hash, 0x324D_158F_EC2A_D198);
         assert_eq!(t.town_mesh_hash, 0x3E33_BB0B_2B1F_DBEA);
         assert_eq!(t.map_image_hash, 0x8a97_cf1e_db61_56ae);
-        assert_eq!(t.basin_content_hash, 0xD82F_1ACE_8C68_0B8C);
+        assert_eq!(t.basin_content_hash, 0x3B13_D4A4_9865_4242);
         assert_eq!(t.drive_hash, 0xc543_26c6_80e8_0ac1);
         assert_eq!(
             t.replay_hashes,
