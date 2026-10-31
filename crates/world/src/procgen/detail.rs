@@ -61,7 +61,7 @@ use crate::props::{
 };
 use crate::roads::{EdgePath, Network};
 use crate::signs::pictogram::Pictogram;
-use crate::template::{RegionTemplate, Tree};
+use crate::template::{RegionTemplate, Tree, MIN_PROP_SPACING_M};
 use crate::{ChunkPlan, CURB_M};
 
 /// Parked cars at the curbs and in driveways a chunk holds at most...
@@ -893,7 +893,7 @@ impl<'a> Detailer<'a> {
                         taken.push((s, t, 0.6));
                     }
                 }
-                s += rule.hydrant_m;
+                s += rule.hydrant_m.max(MIN_PROP_SPACING_M);
             }
         }
 
@@ -959,7 +959,7 @@ impl<'a> Detailer<'a> {
                         }
                     }
                 }
-                s += rule.street_tree_m * rng.range_f32(0.85, 1.2);
+                s += (rule.street_tree_m * rng.range_f32(0.85, 1.2)).max(MIN_PROP_SPACING_M);
             }
         }
 
@@ -982,7 +982,7 @@ impl<'a> Detailer<'a> {
                         taken.push((s, t, 1.0));
                     }
                 }
-                s += rule.power_pole_m;
+                s += rule.power_pole_m.max(MIN_PROP_SPACING_M);
             }
         }
 
