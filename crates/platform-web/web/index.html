@@ -102,6 +102,7 @@
   // reports { state, worklet, sampleRate, pushed, consumed, underruns, queued, error }.
   (() => {
     const RATE = 48000, BLOCK = 256, RING = 16384; // frames; the ring holds ~340 ms
+    const LEAD = 2400; // frames (50 ms) kept queued on top of a frame's worth, to ride out stalls
     const processor = `
       class SkywaveSfx extends AudioWorkletProcessor {
         constructor(options) {
@@ -110,6 +111,7 @@
           this.write = 0; this.read = 0; this.queued = 0; this.frac = 0;
           this.step = options.processorOptions.step; // 48 kHz frames per output frame
           this.consumed = 0; this.underruns = 0; this.fed = false; this.reported = 0;
+          this.gain = 0; this.rise = 1 / (0.005 * sampleRate); // fade in over 5 ms after running dry
           this.port.onmessage = (e) => this.take(e.data);
         }
         take(x) {
@@ -130,10 +132,11 @@
           const l = outputs[0][0], r = outputs[0][1] || l, ring = this.ring;
           let starved = false;
           for (let i = 0; i < l.length; i++) {
-            if (this.queued < 2) { l[i] = 0; r[i] = 0; starved = true; continue; }
-            const a = this.read, b = (a + 1) % ${RING}, f = this.frac;
-            l[i] = ring[2 * a] + (ring[2 * b] - ring[2 * a]) * f;
-            r[i] = ring[2 * a + 1] + (ring[2 * b + 1] - ring[2 * a + 1]) * f;
+            if (this.queued < 2) { l[i] = 0; r[i] = 0; starved = true; this.gain = 0; continue; }
+            const a = this.read, b = (a + 1) % ${RING}, f = this.frac, g = this.gain;
+            l[i] = g * (ring[2 * a] + (ring[2 * b] - ring[2 * a]) * f);
+            r[i] = g * (ring[2 * a + 1] + (ring[2 * b + 1] - ring[2 * a + 1]) * f);
+            this.gain = Math.min(1, g + this.rise);
             this.frac += this.step;
             const whole = Math.floor(this.frac);
             this.frac -= whole;
@@ -180,13 +183,14 @@
       if (ctx.state === "suspended") ctx.resume().catch(() => {});
       return starting;
     }
-    // 48 kHz frames the game should render now: enough for two blocks plus one animation
-    // frame (dt seconds, capped) queued ahead of what the context has played.
+    // 48 kHz frames the game should render now: enough for LEAD plus one animation frame
+    // (dt seconds, capped) queued ahead of what the context has played, so a frame spike of
+    // up to ~50 ms does not starve the worklet.
     function wanted(dt) {
       if (!node || ctx.state !== "running") return 0;
       const played = ctx.currentTime * RATE;
       if (written < played) written = played; // ran dry, or just started
-      const lead = Math.min(RING / 2, 2 * BLOCK + Math.ceil(Math.min(dt, 0.1) * RATE));
+      const lead = Math.min(RING / 2, LEAD + Math.ceil(Math.min(dt, 0.1) * RATE));
       const need = lead - (written - played);
       return need > 0 ? Math.ceil(need / BLOCK) * BLOCK : 0;
     }

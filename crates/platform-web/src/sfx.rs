@@ -3,7 +3,7 @@
 //! glue (the `sfx` script in `web/index.html`), whose AudioWorklet plays them from a ring.
 //!
 //! Each frame `skywaveSfx.wanted(dt)` says how many frames to render (0 until the first
-//! gesture has started the AudioContext): enough to keep two blocks plus one animation
+//! gesture has started the AudioContext): enough to keep 50 ms plus one animation
 //! frame queued. The blocks go to `skywaveSfx.push` as a view into wasm memory, which the
 //! glue copies at once. Without the glue (another page) the game is silent.
 
