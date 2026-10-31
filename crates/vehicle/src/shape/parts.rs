@@ -2,13 +2,13 @@
 //! exhaust, antenna, arch lips and the `details` list.
 
 use super::body::Body;
-use super::math::*;
 use super::mesh::{emissive, Mat, Soup, Uv};
 use super::params::{
     BadgeShape, Bumper, Detail, Exhaust, Grille, Handles, HeadLights, Mirrors, Spoiler, TailLights,
     TubeColor,
 };
 use super::Materials;
+use crate::math::*;
 use alloc::vec::Vec;
 
 const UP: V3 = [0.0, 1.0, 0.0];
@@ -1511,7 +1511,7 @@ impl<'a, 'b> Parts<'a, 'b> {
             let nrm = if nrm[1] < 0.0 { scale(nrm, -1.0) } else { nrm };
             let fin = norm(add(nrm, t));
             let up = norm(cross(fin, [1.0, 0.0, 0.0]));
-            let c = madd(self.p(s, 0.0, f.top_y(0.0)), fin, 0.022);
+            let c = add_scaled(self.p(s, 0.0, f.top_y(0.0)), fin, 0.022);
             self.body
                 .beam([-x, c[1], c[2]], [x, c[1], c[2]], up, 0.022, 0.004, m);
         }

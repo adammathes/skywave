@@ -2,9 +2,9 @@
 
 extern crate std;
 
-use super::math::{cross, dot, sub};
 use super::params::parse_paint;
 use super::*;
+use crate::math::{cross, dot, sub};
 use crate::VehicleSpec;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -584,7 +584,7 @@ fn builds_are_deterministic() {
 /// and above the rail.
 fn over_the_bed(spec: &ShapeSpec, m: &MeshData) -> usize {
     let (s0, s1) = spec.bed().unwrap();
-    let rail = super::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
+    let rail = crate::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
     let ax = spec.wheels.front_x;
     m.positions
         .iter()
@@ -605,7 +605,7 @@ fn a_pickup_bed_is_open_and_lined() {
         assert_eq!(over_the_bed(&spec, &car.body), 0, "lod{lod}: bed covered");
         // The floor is down in the bed, well under the rail (and over the underside).
         let ax = spec.wheels.front_x;
-        let rail = super::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
+        let rail = crate::math::polyline_at(&spec.belt, (s0 + s1) * 0.5);
         let floor = car
             .body
             .positions

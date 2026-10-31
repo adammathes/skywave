@@ -6,7 +6,7 @@
 //! angle of its own face. Rounded panels come out smooth, seams, creases and box edges
 //! hard. Identical corners are then welded into indexed vertices.
 
-use super::math::*;
+use crate::math::*;
 use alloc::vec::Vec;
 
 /// One mesh as plain arrays, one entry per vertex, plus a triangle list.
@@ -186,9 +186,9 @@ impl Soup {
     /// Box with center `c`, unit axes `ax, ay, az` and half extents `h`.
     pub fn obox(&mut self, c: V3, axes: [V3; 3], h: V3, mat: Mat) {
         let corner = |sx: f32, sy: f32, sz: f32| {
-            let p = madd(c, axes[0], sx * h[0]);
-            let p = madd(p, axes[1], sy * h[1]);
-            madd(p, axes[2], sz * h[2])
+            let p = add_scaled(c, axes[0], sx * h[0]);
+            let p = add_scaled(p, axes[1], sy * h[1]);
+            add_scaled(p, axes[2], sz * h[2])
         };
         for (axis, other) in [(0usize, (1usize, 2usize)), (1, (2, 0)), (2, (0, 1))] {
             for sgn in [-1.0f32, 1.0] {
@@ -224,7 +224,7 @@ impl Soup {
     /// `(hw, hh)`; `up` picks the orientation of the `hh` side.
     pub fn beam(&mut self, a: V3, b: V3, up: V3, hw: f32, hh: f32, mat: Mat) {
         let d = sub(b, a);
-        let l = len(d);
+        let l = length(d);
         if l < 1e-6 {
             return;
         }
@@ -246,7 +246,7 @@ impl Soup {
             .map(|i| {
                 let a = phase + 2.0 * PI * i as f32 / segs as f32;
                 let (s, co) = sin_cos(a);
-                madd(madd(c, u, co * r), v, s * r)
+                add_scaled(add_scaled(c, u, co * r), v, s * r)
             })
             .collect()
     }
@@ -316,7 +316,7 @@ impl Soup {
         let (u, v) = basis(axis);
         let pt = |along: f32, r: f32, a: f32| {
             let (s, co) = sin_cos(a);
-            madd(madd(madd(c, axis, along), u, co * r), v, s * r)
+            add_scaled(add_scaled(add_scaled(c, axis, along), u, co * r), v, s * r)
         };
         for k in 0..profile.len().saturating_sub(1) {
             let (a0, r0) = profile[k];
@@ -356,9 +356,9 @@ impl Soup {
             let (sa, ca) = sin_cos(a);
             let (sb, cb) = sin_cos(b);
             let radial = add(scale(u, ca), scale(v, sa));
-            let center = madd(c, radial, big);
+            let center = add_scaled(c, radial, big);
             (
-                madd(madd(center, radial, cb * small), axis, sb * small),
+                add_scaled(add_scaled(center, radial, cb * small), axis, sb * small),
                 center,
             )
         };
@@ -393,7 +393,7 @@ impl Soup {
         let ring = |k: usize| -> Vec<V3> {
             profile
                 .iter()
-                .map(|&(a, b)| madd(madd(path[k], us[k], a), vs[k], b))
+                .map(|&(a, b)| add_scaled(add_scaled(path[k], us[k], a), vs[k], b))
                 .collect()
         };
         // Profile centroid, so the outward test works for an offset profile.
@@ -404,7 +404,7 @@ impl Soup {
         }
         cu /= n as f32;
         cv /= n as f32;
-        let center = |k: usize| madd(madd(path[k], us[k], cu), vs[k], cv);
+        let center = |k: usize| add_scaled(add_scaled(path[k], us[k], cu), vs[k], cv);
         let mut prev = ring(0);
         for k in 1..path.len() {
             let cur = ring(k);
