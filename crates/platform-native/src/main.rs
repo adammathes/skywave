@@ -2345,6 +2345,30 @@ mod tests {
         }
     }
 
+    /// Every preset's shadow atlas holds exactly its cascades side by side, from the start
+    /// and after switching to it from another preset.
+    #[test]
+    fn shadow_atlas_is_sized_by_each_presets_cascades() {
+        let (device, queue) = noop_device();
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        for from in Quality::ALL {
+            let options = render::RendererOptions {
+                quality: from.render(1.0),
+                ..Default::default()
+            };
+            let mut r = render::Renderer::with_options(&device, &queue, format, (64, 48), options);
+            for q in Quality::ALL {
+                r.set_quality(q.render(1.0));
+                let k = q.render(1.0);
+                assert_eq!(
+                    r.shadow_atlas_size(),
+                    (k.shadow_size * k.cascades, k.shadow_size),
+                    "{from:?} -> {q:?}"
+                );
+            }
+        }
+    }
+
     /// The native shell's device limits, with room for full-size cascades.
     fn render_limits() -> wgpu::Limits {
         wgpu::Limits {

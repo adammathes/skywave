@@ -28,6 +28,8 @@ pub const MAX_CYLINDERS: usize = 8;
 const TICK: usize = 32;
 /// Overall engine level at full throttle and redline, before the bus gain.
 const LEVEL: f32 = 0.55;
+/// How far a closed throttle at idle turns the engine down (0.45: to 55%, -5 dB).
+const IDLE_CUT: f32 = 0.45;
 
 /// The engine sounds a car spec may name in `feel.engine_sound`.
 #[repr(u8)]
@@ -117,7 +119,7 @@ const V8_FLATPLANE: Voice = Voice {
     n_harmonics: 10,
     sub: 0.18,
     pattern: [1.0, 0.96, 1.03, 0.98, 1.02, 0.97, 1.04, 1.0],
-    jitter: 0.14,
+    jitter: 0.05,
     exhaust: 1.0,
     intake: 0.7,
     lp_base_hz: 900.0,
@@ -132,8 +134,8 @@ const V8_LAZY: Voice = Voice {
     harmonics: [1.0, 0.42, 0.24, 0.15, 0.1, 0.06, 0.04, 0.0, 0.0, 0.0],
     n_harmonics: 7,
     sub: 0.6,
-    pattern: [1.2, 0.78, 1.05, 0.88, 1.18, 0.82, 0.95, 1.12],
-    jitter: 0.2,
+    pattern: [1.1, 0.89, 1.03, 0.94, 1.09, 0.91, 0.97, 1.06],
+    jitter: 0.07,
     exhaust: 0.8,
     intake: 0.35,
     lp_base_hz: 480.0,
@@ -149,7 +151,7 @@ const I4: Voice = Voice {
     n_harmonics: 10,
     sub: 0.12,
     pattern: [1.0, 0.97, 1.02, 0.99, 1.0, 1.0, 1.0, 1.0],
-    jitter: 0.12,
+    jitter: 0.04,
     exhaust: 0.8,
     intake: 1.0,
     lp_base_hz: 1100.0,
@@ -165,7 +167,7 @@ const V6: Voice = Voice {
     n_harmonics: 8,
     sub: 0.28,
     pattern: [1.04, 0.95, 1.02, 0.97, 1.05, 0.96, 1.0, 1.0],
-    jitter: 0.13,
+    jitter: 0.045,
     exhaust: 0.85,
     intake: 0.65,
     lp_base_hz: 750.0,
@@ -333,7 +335,7 @@ impl EngineSynth {
         } else {
             self.limiter_phase = 0.0;
         }
-        self.idle_phase = fract(self.idle_phase + 0.8 * dt);
+        self.idle_phase = fract(self.idle_phase + 0.5 * dt);
 
         // Pops after a lift-off, and an occasional crackle on a closed throttle up high.
         if self.pops_left > 0 {
@@ -354,12 +356,15 @@ impl EngineSynth {
 
         let dip = self.dip.value;
         let lp_hz =
-            (v.lp_base_hz * (0.8 + 1.6 * rpm_n) + v.lp_open_hz * thr * thr) * (0.45 + 0.55 * dip);
+            (v.lp_base_hz * (0.6 + 1.8 * rpm_n) + v.lp_open_hz * thr * thr) * (0.45 + 0.55 * dip);
         self.lp.set(lp_hz, 0.8);
         self.exhaust.set(300.0 + 1500.0 * rpm_n, 1.0);
         self.intake.set(1200.0 + 2800.0 * rpm_n, 1.5);
-        self.tone_amp = (0.5 + 0.5 * thr) * (0.75 + 0.25 * rpm_n);
-        self.exhaust_amp = 1.6 * v.exhaust * (0.2 + 0.8 * thr) * (0.35 + 0.65 * rpm_n);
+        // Idle (closed throttle, low rpm) is held down: a low, steady hum under the mix.
+        let idle = (1.0 - thr) * (1.0 - unit(rpm_n / 0.15));
+        let calm = 1.0 - IDLE_CUT * idle;
+        self.tone_amp = calm * (0.5 + 0.5 * thr) * (0.75 + 0.25 * rpm_n);
+        self.exhaust_amp = calm * 1.6 * v.exhaust * (0.1 + 0.9 * thr) * (0.35 + 0.65 * rpm_n);
         self.intake_amp = 1.8 * v.intake * thr * thr * (0.3 + 0.7 * rpm_n);
         self.jitter = v.jitter * (1.0 - 0.67 * rpm_n);
     }
@@ -380,7 +385,7 @@ impl EngineSynth {
         let v = &self.voice;
         // Targets with the idle hunt and the limiter's rpm sag.
         let idle_hunt = if t.throttle < 0.1 && t.rpm < 1.15 * t.idle_rpm {
-            1.0 + 0.012 * sin_turns(self.idle_phase)
+            1.0 + 0.004 * sin_turns(self.idle_phase)
         } else {
             1.0
         };

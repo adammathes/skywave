@@ -78,7 +78,7 @@ surf on the water: a foam band at the waterline and, at sea, a broken line of br
 
 Meshes are drawn camera relative: each instance's translation goes to the GPU minus the camera's position (on the CPU) and the vertex shader projects with the view's rotation alone, adding the camera back only for lighting. In world coordinates a vertex 1–2.5 km from the origin was rounded by 0.2–0.6 mm on the GPU, and layers half a millimetre apart (a radio display on its face, mirror glass, a sign's plate) swapped in patches every frame while moving (`render::camera_relative`).
 
-WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas 3×1). Everything above fits. WebGPU/native get larger light lists and SSAO.
+WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas, cascades side by side: 3×1, or 2×1 in the two-cascade presets). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky
 A `Daylight` struct is derived from `(latitude 34°N, day-of-year, seconds)`: sun elevation/azimuth, sun color/intensity (through a simple atmosphere: scattering tint by air mass), sky model params (turbidity by weather), moon phase/position, exposure, fog density/color, streetlight on/off (civil dusk) and the game seconds since that photocell last switched, the morning haze, window emissive scale, star brightness. Default clock runs at 10× real time (24 h in 2.4 h); configurable 0× (frozen), 1×, 10×, 60×, and a scrub control. Golden hour and blue hour are the showpieces; tune there first.
@@ -116,7 +116,7 @@ A resolution-scale setting (50–100%) and a quality preset keep the Deck at its
 
 ## Quality presets
 Settings → Video → Quality; `app::Quality` maps each to a `render::RenderQuality` carried in every `SceneView` (the
-renderer rebuilds the shadow atlas or the scaled targets when their size changes). Unchosen, the game picks **Deck**
+renderer rebuilds the shadow atlas when its cascade size or count changes and the scaled targets when their size does; a two-cascade preset allocates a 2×1 atlas). Unchosen, the game picks **Deck**
 on the Deck's APU / an AMD integrated GPU / a 1280×800 Linux surface and **Medium** elsewhere; the choice is saved.
 **Battery** is Deck at 85% resolution that also sets Frame rate to every other refresh.
 

@@ -1023,27 +1023,21 @@ impl App {
             }
             if self.npcs.crowd.active() {
                 let t = now();
-                // Signed: a reversing car's danger zone is behind it (the cars' is not).
-                let player = traffic::Player {
-                    speed: self.drive.state.speed_mps,
-                    ..self.traffic_player()
+                let inp = npc::StepInputs {
+                    player: self.traffic_player(),
+                    ..inputs
                 };
-                let inp = npc::StepInputs { player, ..inputs };
                 self.npcs.step_peds(&inp);
                 peds_s += now() - t;
             }
             let player = self.traffic_player();
-            let signed = traffic::Player {
-                speed: self.drive.state.speed_mps,
-                ..player
-            };
             self.wave
-                .step(&self.npcs.graph, self.npcs.signal_tick(), &signed, dt);
+                .step(&self.npcs.graph, self.npcs.signal_tick(), &player, dt);
             self.npcs.step_replies(&traffic::ReplyInput {
                 horn: self.drive.horn,
                 flash: self.drive.flash,
                 throttle: self.drive.input.throttle,
-                player: signed,
+                player,
             });
             if let Some(r) = &mut self.rail {
                 r.step(&player, self.npcs.cars(), self.npcs.crowd.pool(), dt);
