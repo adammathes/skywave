@@ -1596,3 +1596,82 @@ fn a_car_too_close_to_stop_at_the_red_goes_on_through() {
     println!("red claim: {went} went on through, {stopped} stopped, hardest {worst:.2} m/s²");
     assert!(went > 0 && stopped > 0, "the sweep met both cases");
 }
+
+/// A car waiting out a four-phase red (91.5 s, longer than the 90 s stuck limit) out of
+/// view is not despawned as stuck.
+#[test]
+fn a_car_waiting_out_a_long_red_is_not_despawned() {
+    let _quiet = shared();
+    let mut g = crossing();
+    g.junctions[0].phases = 4;
+    let len = g.lanes[0].length_m;
+    // Lane 0 (phase 0) turns red at tick 3420 and green again at 14400: 91.5 s.
+    let (red, green) = (3420u64, 14400u64);
+    assert_eq!(g.light(0, red - 1), Some(Light::Yellow));
+    assert_eq!(g.light(0, red), Some(Light::Red));
+    assert_eq!(g.light(0, green - 1), Some(Light::Red));
+    assert_eq!(g.light(0, green), Some(Light::Green));
+    assert!(green - red > 90 * HZ as u64);
+    // A pool of one, kept full, with the player beside the queue: only a stuck car goes.
+    let budget = TrafficBudget {
+        cars: 1,
+        ..TrafficBudget::default()
+    };
+    let mut t = Traffic::new(&g, budget, Seed(1));
+    let id = t.spawn_at(&g, 0, len - 3.0, 0.0).expect("pool");
+    let player = Player {
+        pos: [-30.0, 0.0, 30.0],
+        heading: 0.0,
+        speed: 0.0,
+        half_len: 2.3,
+        half_w: 0.9,
+    };
+    for tick in red..green {
+        let inp = inputs(tick, player, NO_VIEW, Density::Busy);
+        t.step(&g, &inp);
+        t.populate(&g, &inp);
+        let c = t.cars().iter().find(|c| c.id == id);
+        let c = c.unwrap_or_else(|| panic!("despawned at tick {tick} waiting at the red"));
+        assert_eq!(c.seg, 0, "waits at the red");
+    }
+}
+
+/// A semi's claim on a turn reserves its own length past it: a car behind it does not
+/// claim the turn onto a lane too short for both (20 m: room for the semi, not for a
+/// 4.6 m car after it), and both get through.
+#[test]
+fn a_semis_claim_reserves_its_own_length() {
+    let _quiet = shared();
+    let mut b = Builder::new(4);
+    b.lane([-400.0, 0.0], [-12.0, 0.0], [0, 1], Control::Free, 0);
+    b.lane([12.0, 0.0], [32.0, 0.0], [1, 2], Control::Free, 0);
+    b.lane([32.0, 0.0], [3000.0, 0.0], [2, 3], Control::Free, 0);
+    b.turn(0, 1);
+    b.turn(1, 2);
+    let mut g = b.build();
+    for l in &mut g.lanes {
+        l.freeway = true;
+        l.zone = place::ZoneId::Highway;
+    }
+    let len = g.lanes[0].length_m;
+    let budget = TrafficBudget {
+        shapes: 2,
+        ..TrafficBudget::default()
+    };
+    let mut t = Traffic::new(&g, budget, Seed(1));
+    t.set_shape_rules(&semi_rules());
+    t.set_shape_weights(&[0, 1]);
+    let semi = t.spawn_at(&g, 0, len - 40.0, 10.0).expect("pool");
+    t.set_shape_weights(&[1, 0]);
+    let car = t.spawn_at(&g, 0, len - 70.0, 10.0).expect("pool");
+    let find = |t: &Traffic, id: u32| *t.cars().iter().find(|c| c.id == id).expect("car");
+    assert_eq!(find(&t, semi).len, 17.5);
+    assert_eq!(find(&t, car).len, CAR_LEN_M);
+    for tick in 0..60 * HZ as u64 {
+        t.step(&g, &scripted(tick, Player::ABSENT));
+        let (s, c) = (find(&t, semi), find(&t, car));
+        let on = |c: &Car| c.held == 0 || c.clearing == 0;
+        assert!(!(on(&s) && on(&c)), "tick {tick}: both claim the turn");
+    }
+    assert_eq!(find(&t, car).seg, 2, "the car got through");
+}

@@ -178,7 +178,8 @@ const PLAYER_NODE_M: f32 = 60.0;
 const SPAWN_CLEAR_M: f32 = 12.0;
 /// Lanes checked for a spawn per step.
 const SCAN_LANES: usize = 48;
-/// Despawn a hidden car that has not moved for this long (s): longer than any red.
+/// Despawn a hidden car that has not moved for this long (s), not counting time it faces a
+/// red: a red can be longer (91.5 s at a four-phase junction).
 const STUCK_S: u32 = 90;
 /// Head lights come on this long after dusk at the latest (s): drivers differ.
 const LIGHT_DELAY_S: f32 = 900.0;
@@ -452,8 +453,10 @@ pub struct Traffic {
     /// Per car slot, the planned acceleration, the most it may move this step, and the gap
     /// to the player when the player is on its path.
     plan: Vec<(f32, f32, f32)>,
-    /// Claims held per turn.
+    /// Claims held per turn, and the room they reserve past it: each claimant's length plus
+    /// [`S0`], m.
     claims: Vec<u16>,
+    claim_m: Vec<f32>,
     /// Per turn, the turns it conflicts with (sorted), as offsets into `conflicts`.
     conflict_first: Vec<u32>,
     conflicts: Vec<u32>,
@@ -516,6 +519,7 @@ impl Clone for Traffic {
             behind: self.behind.clone(),
             plan: self.plan.clone(),
             claims: self.claims.clone(),
+            claim_m: self.claim_m.clone(),
             conflict_first: self.conflict_first.clone(),
             conflicts: self.conflicts.clone(),
             incoming_first: self.incoming_first.clone(),
@@ -880,6 +884,7 @@ impl Traffic {
             behind: alloc::vec![NONE; cap],
             plan: alloc::vec![(0.0, 0.0, f32::INFINITY); cap],
             claims: alloc::vec![0; nt],
+            claim_m: alloc::vec![0.0; nt],
             conflict_first,
             conflicts,
             incoming_first,
@@ -952,16 +957,17 @@ impl Traffic {
     /// Gap from car `c`'s front along its path to the nearest barrier it is heading into,
     /// when one crosses its path within `look`.
     fn barrier_gap(&self, g: &LaneGraph, c: &Car, path: &Path, look: f32) -> Option<f32> {
-        let mut best: Option<f32> = None;
-        for bar in &self.barriers {
-            if dot(c.dir, bar.facing) >= 0.0 {
-                continue;
-            }
+        let near = |bar: &Barrier| {
             let mid = [0.5 * (bar.a[0] + bar.b[0]), 0.5 * (bar.a[1] + bar.b[1])];
-            if len2([mid[0] - c.pos[0], mid[1] - c.pos[2]]) > look + 40.0 {
-                continue;
-            }
-            let mut test = |p: [f32; 2], q: [f32; 2], start: f32, len: f32| {
+            dot(c.dir, bar.facing) < 0.0
+                && len2([mid[0] - c.pos[0], mid[1] - c.pos[2]]) <= look + 40.0
+        };
+        if !self.barriers.iter().any(near) {
+            return None;
+        }
+        let mut best: Option<f32> = None;
+        let mut test = |p: [f32; 2], q: [f32; 2], start: f32, len: f32| {
+            for bar in self.barriers.iter().filter(|b| near(b)) {
                 if let Some(t) = cross_at(p, q, bar.a, bar.b) {
                     let along = start + len * t;
                     // A car whose front is past the line already drives on.
@@ -969,9 +975,9 @@ impl Traffic {
                         best = Some(best.map_or(along, |b: f32| b.min(along)));
                     }
                 }
-            };
-            self.walk_path(g, path, look, &mut test);
-        }
+            }
+        };
+        self.walk_path(g, path, look, &mut test);
         best
     }
 
@@ -1306,7 +1312,7 @@ impl Traffic {
             let l = &self.cars[last as usize];
             l.s - l.len
         };
-        room -= f32::from(self.claims[turn as usize]) * (CAR_LEN_M + S0);
+        room -= self.claim_m[turn as usize];
         if room < (c.len + 1.0).min(to_len) {
             return false;
         }
@@ -1350,10 +1356,8 @@ impl Traffic {
     }
 
     /// Whether the end of car `i`'s current lane, `d` meters ahead, lets it through:
-    /// claims the turn when the gate is open and the car is within its commit distance,
-    /// gives a claim back on red when the car can still stop at its normal braking (claims
-    /// clear the line before red, so only a car slowed on its way loses one); a car too
-    /// close to stop keeps it and goes through.
+    /// claims the turn when the gate is open and the car is within its commit distance. A
+    /// claim still held goes through ([`Traffic::plan_car`] already gave back any it must).
     fn current_gate(
         &mut self,
         g: &LaneGraph,
@@ -1368,19 +1372,32 @@ impl Traffic {
             return false;
         }
         if c.held == turn {
-            if g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed) {
-                self.claims[turn as usize] -= 1;
-                self.cars[i].held = NONE;
-                return false;
-            }
             return true;
         }
         let open = self.gate(g, inp, ps, i, turn, d);
         if open && d <= commit_m(c.speed) {
-            self.claims[turn as usize] += 1;
+            self.claim(turn, c.len);
             self.cars[i].held = turn;
         }
         open
+    }
+
+    /// Car of length `len` claims `turn`.
+    fn claim(&mut self, turn: u32, len: f32) {
+        self.claims[turn as usize] += 1;
+        self.claim_m[turn as usize] += len + S0;
+    }
+
+    /// Car of length `len` gives its claim on `turn` back (the last one leaves exactly no
+    /// room reserved).
+    fn unclaim(&mut self, turn: u32, len: f32) {
+        let k = turn as usize;
+        self.claims[k] -= 1;
+        self.claim_m[k] = if self.claims[k] == 0 {
+            0.0
+        } else {
+            self.claim_m[k] - (len + S0)
+        };
     }
 
     /// Whether a lane the car has not reached yet lets it through, as far as it can tell.
@@ -1417,36 +1434,7 @@ impl Traffic {
                 }
             }
         };
-        for &(seg, start) in path {
-            if seg == NONE || start > look {
-                break;
-            }
-            if seg < self.lanes {
-                let l = &g.lanes[seg as usize];
-                let r = l.first_point as usize..(l.first_point + l.point_count) as usize;
-                let (pts, arc) = (&g.points[r.clone()], &g.arc[r]);
-                let from = (-start).max(0.0);
-                let k0 = arc[1..].partition_point(|&v| v < from).min(pts.len() - 2);
-                for k in k0..pts.len() - 1 {
-                    let s = start + arc[k];
-                    if s > look {
-                        break;
-                    }
-                    test(xz(pts[k]), xz(pts[k + 1]), s, arc[k + 1] - arc[k]);
-                }
-            } else {
-                let curve = &g.turns[(seg - self.lanes) as usize].curve;
-                let mut prev = curve[0];
-                let mut acc = start;
-                for k in 1..=CURVE_STEPS {
-                    let p = bezier(curve, k as f32 / CURVE_STEPS as f32);
-                    let len = dist2(prev, p);
-                    test(xz(prev), xz(p), acc, len);
-                    acc += len;
-                    prev = p;
-                }
-            }
-        }
+        self.walk_path(g, path, look, &mut test);
         best
     }
 
@@ -1499,7 +1487,7 @@ impl Traffic {
                 // for a red; one too close to stop at its normal braking goes through.
                 let red = g.light(c.seg, inp.tick) == Some(Light::Red) && d >= stop_m(c.speed);
                 if c.held != NONE && (red || d > commit_m(c.speed) + 2.0) {
-                    self.claims[c.held as usize] -= 1;
+                    self.unclaim(c.held, c.len);
                     self.cars[i].held = NONE;
                 }
                 if l.control == Control::Stop {
@@ -1542,11 +1530,21 @@ impl Traffic {
             } else {
                 self.tail[seg as usize]
             };
-            if k == 0 && self.ghosts > 0 {
-                for (j, o) in self.cars.iter().enumerate() {
-                    let nearer = leader == NONE || o.s < self.cars[leader as usize].s;
-                    if o.ghost == seg && o.s > c.s && nearer {
-                        leader = j as u32;
+            if k == 0 && self.ghosts > 0 && seg < nl {
+                // A car changing lanes away from this one is on a lane beside it.
+                for m in [seg.wrapping_sub(1), seg + 1] {
+                    if m >= nl {
+                        continue;
+                    }
+                    let mut j = self.tail[m as usize];
+                    while j != NONE {
+                        let o = &self.cars[j as usize];
+                        let nearer = leader == NONE || o.s < self.cars[leader as usize].s;
+                        if o.ghost == seg && o.s > c.s && nearer {
+                            leader = j;
+                            break;
+                        }
+                        j = self.ahead[j as usize];
                     }
                 }
             }
@@ -1695,7 +1693,7 @@ impl Traffic {
         }
         for t in release {
             if t != NONE {
-                self.claims[t as usize] -= 1;
+                self.unclaim(t, c.len);
             }
         }
         if c.offset == [0.0; 2] && c.ghost != NONE {
@@ -1971,7 +1969,7 @@ impl Traffic {
         }
         for t in [c.held, c.clearing] {
             if t != NONE {
-                self.claims[t as usize] -= 1;
+                self.unclaim(t, c.len);
             }
         }
     }
@@ -1987,16 +1985,20 @@ impl Traffic {
         let pp = inp.player.pos;
         let mut excess = self.cars.len() > target;
         let hidden_ticks = (b.hidden_s * SIM_HZ as f32) as u32;
+        let nl = self.lanes;
         let mut i = self.cars.len();
         while i > 0 {
             i -= 1;
             let c = &mut self.cars[i];
             let seen = inp.view.sees(c.pos, c.len);
             c.hidden = if seen { 0 } else { c.hidden.saturating_add(1) };
-            c.stuck = if c.speed < STOPPED_MPS {
-                c.stuck.saturating_add(1)
-            } else {
+            let red = c.seg < nl && g.light(c.seg, inp.tick) == Some(Light::Red);
+            c.stuck = if c.speed >= STOPPED_MPS {
                 0
+            } else if red {
+                c.stuck
+            } else {
+                c.stuck.saturating_add(1)
             };
             if seen {
                 continue;

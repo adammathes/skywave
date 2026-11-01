@@ -609,6 +609,41 @@ impl Train {
     }
 }
 
+/// Pieces of track from the train's tail to its stopping distance ahead, for
+/// [`Train::track_ahead`]: short enough to follow any curve within a meter.
+const TRACK_PIECES: usize = 16;
+
+impl Train {
+    /// Ground points along the track from its tail to [`Train::stopping_m`] past its head,
+    /// [`TRACK_PIECES`] pieces apart.
+    pub fn track_ahead(&self) -> [[f32; 2]; TRACK_PIECES + 1] {
+        let (u0, u1) = (self.tail(), self.head + self.stopping_m());
+        let mut pts = [[0.0; 2]; TRACK_PIECES + 1];
+        for (k, p) in pts.iter_mut().enumerate() {
+            let u = u0 + (u1 - u0) * k as f32 / TRACK_PIECES as f32;
+            let (q, _) = self.line.at(self.s_of(u));
+            *p = [q[0], q[2]];
+        }
+        pts
+    }
+}
+
+/// Whether obstacle `o` comes within a few meters of the train's width of the track
+/// `pts` ([`Train::track_ahead`]).
+pub fn near_track(pts: &[[f32; 2]], o: &Obstacle) -> bool {
+    let r = o.half[0].max(o.half[1]);
+    let reach = HALF_W_M + r + 4.0;
+    let p = o.c;
+    pts.windows(2).any(|w| {
+        let (a, b) = (w[0], w[1]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let l2 = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
+        let k = (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0);
+        let e = [p[0] - a[0] - d[0] * k, p[1] - a[1] - d[1] * k];
+        e[0] * e[0] + e[1] * e[1] < reach * reach
+    })
+}
+
 /// How far beyond [`WARN_M`] from the train people start keeping off a crossing: ten
 /// seconds at its cruise, longer than anyone takes to walk off the track, m.
 pub const PEOPLE_LEAD_M: f32 = 110.0;
@@ -674,19 +709,9 @@ impl Railway {
     pub fn step(&mut self, player: &Player, cars: &[Car], peds: &Pedestrians, dt: f32) {
         self.obs.clear();
         let t = &self.train;
-        // Only what could be near the train or the track ahead of it.
-        let (head, _) = t.line.at(t.s_of(t.head + t.stopping_m()));
-        let (tail, _) = t.line.at(t.s_of(t.tail()));
-        let near = |o: &Obstacle| {
-            let r = o.half[0].max(o.half[1]);
-            let p = o.c;
-            let d = [head[0] - tail[0], head[2] - tail[2]];
-            let l2 = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
-            let k = (((p[0] - tail[0]) * d[0] + (p[1] - tail[2]) * d[1]) / l2).clamp(0.0, 1.0);
-            let q = [tail[0] + d[0] * k, tail[2] + d[1] * k];
-            let e = [p[0] - q[0], p[1] - q[1]];
-            e[0] * e[0] + e[1] * e[1] < (HALF_W_M + r + 4.0) * (HALF_W_M + r + 4.0)
-        };
+        // Only what could be near the train or the track ahead of it, along the track.
+        let track = t.track_ahead();
+        let near = |o: &Obstacle| near_track(&track, o);
         let mut push = |o: Obstacle| {
             if self.obs.len() < MAX_OBSTACLES && near(&o) {
                 self.obs.push(o);
@@ -846,5 +871,37 @@ mod tests {
         let o = Obstacle::car([mid, HALF_W_M + reach + 0.3], u, hl, hw);
         t2.step(&[o], DT);
         assert!(t2.speed > 0.0);
+    }
+
+    #[test]
+    fn on_a_curve_it_sees_someone_on_the_track_at_its_stopping_distance() {
+        // A half circle of radius 200 m.
+        let pts = (0..=96)
+            .map(|k| {
+                let (sn, cs) = sin_cos(core::f32::consts::PI * k as f32 / 96.0);
+                [200.0 * sn, 0.5, 200.0 - 200.0 * cs]
+            })
+            .collect::<Vec<_>>();
+        let line = TrainLine::new(pts, &[[0.0, 400.0]]);
+        let mut t = Train::new(line, 0.0);
+        while t.head < 300.0 {
+            t.step(&[], DT);
+        }
+        assert!(t.speed > 10.0);
+        let track = t.track_ahead();
+        let tail = track[0];
+        let end = track[TRACK_PIECES];
+        for ahead in [0.5, 1.0] {
+            let (p, _) = t.line.at(t.s_of(t.head + t.stopping_m() * ahead - 1.0));
+            let o = Obstacle::person([p[0], p[2]]);
+            assert!(
+                near_track(&track, &o),
+                "{ahead} of its stopping distance ahead"
+            );
+            // The straight chord from tail to the end of its look misses it on the curve.
+            if ahead < 1.0 {
+                assert!(!near_track(&[tail, end], &o));
+            }
+        }
     }
 }
