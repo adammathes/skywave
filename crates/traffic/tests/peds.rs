@@ -498,8 +498,13 @@ fn people_cross_only_on_the_walk_phase() {
             if now && !*was {
                 let c = &b.walks.crossings[peds.crossing_of(&b.walks, i).unwrap() as usize];
                 if c.signal {
-                    let light = b.lanes.light(c.lane, k);
-                    assert_eq!(light, Some(Light::Red), "stepped out against the light");
+                    for l in c.lane..c.lane + c.lane_count {
+                        let light = b.lanes.light(l, k);
+                        assert!(
+                            light.is_none_or(|v| v == Light::Red),
+                            "stepped out against the light"
+                        );
+                    }
                     signal_starts += 1;
                 } else {
                     other_starts += 1;
@@ -510,6 +515,42 @@ fn people_cross_only_on_the_walk_phase() {
     }
     println!("{signal_starts} crossings started on walk, {other_starts} at unsignalized ones");
     assert!(signal_starts >= 5 && other_starts >= 5);
+}
+
+/// A signalized crossing over a road with two lanes arriving shows *walk* only while both
+/// are red: with the second lane put on another phase of the junction, the walk follows
+/// both lights, never the first alone.
+#[test]
+fn walk_waits_for_every_approach_lane() {
+    let _quiet = shared();
+    let b = coast();
+    let (k, x) = b
+        .walks
+        .crossings
+        .iter()
+        .enumerate()
+        .find(|(_, x)| {
+            x.signal
+                && x.lane_count >= 2
+                && b.lanes.junctions[x.node as usize].phases >= 2
+                && (x.lane..x.lane + x.lane_count).all(|l| b.lanes.light(l, 0).is_some())
+        })
+        .expect("a signalized crossing over two approach lanes");
+    let mut lanes = b.lanes.clone();
+    let phases = lanes.junctions[x.node as usize].phases;
+    let second = &mut lanes.lanes[x.lane as usize + 1];
+    second.phase = (second.phase + 1) % phases;
+    let period = 120 * 600;
+    let (mut walks, mut first_only) = (0, 0);
+    for t in (0..period).step_by(30) {
+        let red = |l: u32| lanes.light(l, t) == Some(Light::Red);
+        let both = red(x.lane) && red(x.lane + 1);
+        assert_eq!(b.walks.walk(&lanes, k as u32, t, 0), both, "tick {t}");
+        walks += usize::from(both);
+        first_only += usize::from(red(x.lane) && !red(x.lane + 1));
+    }
+    println!("{walks} walk samples, {first_only} with only the first lane red");
+    assert!(walks > 0 && first_only > 0, "{walks} {first_only}");
 }
 
 /// A car driving straight from `start` along `dir` at `speed` for `secs`.
