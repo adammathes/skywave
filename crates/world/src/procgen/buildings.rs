@@ -46,7 +46,7 @@ use skywave_core::{hash_bytes, Rng, Seed};
 use super::macro_map::MacroMap;
 use super::{stage, CHUNK_M};
 use crate::grammar::LotRules;
-use crate::math::{abs, floor, segment_distance, V2};
+use crate::math::{abs, segment_distance, V2};
 use crate::template::{BuildingStyle, Lots, Massing, RegionTemplate, ZoneRule};
 
 /// Smallest footprint kept.
@@ -90,9 +90,9 @@ pub fn buildings(
     out
 }
 
-/// The buildings of every parcel of the place (as [`super::parcels_all`] gives them),
-/// stably sorted by the chunk of their footprint's vertex mean, z major: the order
-/// `place::Place::sort_by_chunk` keeps.
+/// The buildings of every parcel of the place (as [`super::parcels_all`] gives them), in
+/// parcel order less the overlapping ones; `place::Place::sort_by_chunk` puts them in
+/// chunk order.
 pub fn buildings_all(
     seed: Seed,
     template: &RegionTemplate,
@@ -101,26 +101,16 @@ pub fn buildings_all(
     parcels: &[Parcel],
     roads: &RoadGraph,
 ) -> Vec<Building> {
-    let all = without_overlaps(buildings(seed, template, lots, macro_map, parcels, roads));
-    let sx = i64::from(macro_map.size_chunks[0]);
-    let key = |b: &Building| {
-        let n = b.footprint.len() as f32;
-        let (mut x, mut z) = (0.0f32, 0.0f32);
-        for p in &b.footprint {
-            x += p[0];
-            z += p[1];
-        }
-        let (cx, cz) = (floor(x / n / CHUNK_M) as i64, floor(z / n / CHUNK_M) as i64);
-        cz * sx + cx
-    };
-    let mut keyed: Vec<(i64, Building)> = all.into_iter().map(|b| (key(&b), b)).collect();
-    keyed.sort_by_key(|k| k.0);
-    keyed.into_iter().map(|k| k.1).collect()
+    without_overlaps(buildings(seed, template, lots, macro_map, parcels, roads))
 }
+
+/// Cell of the grid [`without_overlaps`] files kept footprints' bounds in, m.
+const OVERLAP_CELL_M: f32 = 64.0;
 
 /// `all` less every building whose footprint overlaps one kept before it by more than half
 /// of what `place::validate` tolerates: two lots a degenerate block cut from the same
-/// frontage never both build.
+/// frontage never both build. Kept buildings are filed by bounds in a grid, so each is
+/// checked against its neighbours only.
 fn without_overlaps(all: Vec<Building>) -> Vec<Building> {
     let bbox = |b: &Building| {
         let mut r = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
@@ -143,16 +133,66 @@ fn without_overlaps(all: Vec<Building>) -> Vec<Building> {
         }
         0.5 * a.abs()
     };
+    let boxes: Vec<[f32; 4]> = all.iter().map(bbox).collect();
+    // The grid over every footprint's bounds. A footprint without bounds (no points)
+    // clashes with nothing; it is kept and not filed.
+    let filed = |r: &[f32; 4]| r[0] <= r[2] && r[1] <= r[3];
+    let mut lo = [f32::MAX, f32::MAX];
+    let mut hi = [f32::MIN, f32::MIN];
+    for r in boxes.iter().filter(|r| filed(r)) {
+        lo = [lo[0].min(r[0]), lo[1].min(r[1])];
+        hi = [hi[0].max(r[2]), hi[1].max(r[3])];
+    }
+    let cell = |v: f32, k: usize| ((v - lo[k]) / OVERLAP_CELL_M) as usize;
+    let nx = if lo[0] <= hi[0] {
+        cell(hi[0], 0) + 1
+    } else {
+        0
+    };
+    let nz = if lo[1] <= hi[1] {
+        cell(hi[1], 1) + 1
+    } else {
+        0
+    };
+    let mut grid: Vec<Vec<u32>> = vec![Vec::new(); nx * nz];
+    // Per kept building, the last building checked against it: one check per pair.
+    let mut seen: Vec<u32> = Vec::new();
     let mut kept: Vec<(Building, [f32; 4], f64)> = Vec::with_capacity(all.len());
-    for b in all {
-        let (r, a) = (bbox(&b), area(&b));
-        let clash = kept.iter().any(|(k, kr, ka)| {
-            let apart = r[0] >= kr[2] || kr[0] >= r[2] || r[1] >= kr[3] || kr[1] >= r[3];
-            !apart
-                && place::validate::overlap_area(&b.footprint, &k.footprint)
-                    > 0.5 * place::validate::MAX_BUILDING_OVERLAP * a.min(*ka)
-        });
+    for (bi, (b, r)) in all.into_iter().zip(boxes).enumerate() {
+        let a = area(&b);
+        let mut clash = false;
+        if filed(&r) {
+            'cells: for z in cell(r[1], 1)..=cell(r[3], 1) {
+                for x in cell(r[0], 0)..=cell(r[2], 0) {
+                    for &k in &grid[z * nx + x] {
+                        if seen[k as usize] == bi as u32 {
+                            continue;
+                        }
+                        seen[k as usize] = bi as u32;
+                        let (kb, kr, ka) = &kept[k as usize];
+                        let apart =
+                            r[0] >= kr[2] || kr[0] >= r[2] || r[1] >= kr[3] || kr[1] >= r[3];
+                        if !apart
+                            && place::validate::overlap_area(&b.footprint, &kb.footprint)
+                                > 0.5 * place::validate::MAX_BUILDING_OVERLAP * a.min(*ka)
+                        {
+                            clash = true;
+                            break 'cells;
+                        }
+                    }
+                }
+            }
+        }
         if !clash {
+            if filed(&r) {
+                let k = kept.len() as u32;
+                for z in cell(r[1], 1)..=cell(r[3], 1) {
+                    for x in cell(r[0], 0)..=cell(r[2], 0) {
+                        grid[z * nx + x].push(k);
+                    }
+                }
+            }
+            seen.push(u32::MAX);
             kept.push((b, r, a));
         }
     }
