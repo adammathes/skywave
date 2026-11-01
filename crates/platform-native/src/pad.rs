@@ -13,8 +13,13 @@
 //!   trigger feeds both the L2/R2 button and the L2/R2 axis. `LeftTrigger`/`RightTrigger`
 //!   are the bumpers (L1/R1), `Mode` is the guide button, `LeftThumb`/`RightThumb` are the
 //!   stick clicks.
-//! - `LeftZ`/`RightZ` (generic axes of unmapped devices) and `C`/`Z` are ignored;
-//!   `DPadX`/`DPadY` hat axes become d-pad buttons in gilrs's default filters.
+//! - `LeftZ`/`RightZ` (generic axes of unmapped devices) and `C`/`Z` are ignored, except
+//!   as below; `DPadX`/`DPadY` hat axes become d-pad buttons in gilrs's default filters.
+//! - gilrs matches SDL mappings by exact GUID, firmware version included, so a pad whose
+//!   firmware is newer than the database falls back to raw evdev codes on Linux. There we
+//!   follow SDL's own fallback for unmapped Linux pads ([`Quirks`]): `BTN_X` (which evdev
+//!   also calls `BTN_NORTH`) is the left face button except on Sony and Nintendo pads, and
+//!   `ABS_Z`/`ABS_RZ` are the analog triggers when the right stick is on `ABS_RX`/`ABS_RY`.
 //!
 //! The first connected pad is "the" pad; others are ignored until it disconnects. On macOS a
 //! controller Apple's Game Controller framework knows takes precedence (`pad_mac`).
@@ -64,6 +69,63 @@ fn axis_index(a: Axis) -> Option<(usize, f32)> {
         .map(|i| (i, AXES[i].1))
 }
 
+/// How the active pad's readings are corrected before they reach the mapper: only for
+/// Linux pads gilrs found no SDL mapping for (see the module docs).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Quirks {
+    /// `North` and `West` are swapped: evdev's `BTN_X` is the left face button.
+    pub swap_xy: bool,
+    /// `LeftZ`/`RightZ` are the analog triggers, `-1` released to `1` fully pulled.
+    pub z_triggers: bool,
+}
+
+/// USB vendors whose Linux drivers name the face buttons by position.
+const POSITIONAL_VENDORS: [u16; 2] = [0x054c, 0x057e];
+
+/// The trigger value past which a `z_triggers` trigger counts as pressed (gilrs's own
+/// axis-to-button threshold).
+const TRIGGER_PRESSED: f32 = 0.75;
+
+impl Quirks {
+    fn of(pad: &gilrs::Gamepad) -> Quirks {
+        if !cfg!(target_os = "linux") || pad.mapping_source() != MappingSource::Driver {
+            return Quirks::default();
+        }
+        let has = |a| pad.axis_code(a).is_some();
+        Quirks {
+            swap_xy: !pad
+                .vendor_id()
+                .is_some_and(|v| POSITIONAL_VENDORS.contains(&v)),
+            z_triggers: has(Axis::LeftZ)
+                && has(Axis::RightZ)
+                && has(Axis::RightStickX)
+                && has(Axis::RightStickY),
+        }
+    }
+
+    /// `ev` as the standard mapping means it.
+    pub fn fix(self, ev: PadEvent) -> PadEvent {
+        match ev {
+            PadEvent::Button(Button::North, v, p) if self.swap_xy => {
+                PadEvent::Button(Button::West, v, p)
+            }
+            PadEvent::Button(Button::West, v, p) if self.swap_xy => {
+                PadEvent::Button(Button::North, v, p)
+            }
+            PadEvent::Axis(a @ (Axis::LeftZ | Axis::RightZ), v) if self.z_triggers => {
+                let b = if a == Axis::LeftZ {
+                    Button::LeftTrigger2
+                } else {
+                    Button::RightTrigger2
+                };
+                let v = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
+                PadEvent::Button(b, v, v >= TRIGGER_PRESSED)
+            }
+            ev => ev,
+        }
+    }
+}
+
 /// One gamepad reading, apart from gilrs's `EventType` (whose `Code` cannot be built
 /// outside gilrs) so the conversion can be tested without hardware.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,19 +171,39 @@ pub(crate) fn note(verbose: bool, msg: std::fmt::Arguments) {
     }
 }
 
-/// How gilrs names a pad's buttons.
-fn mapping(pad: &gilrs::Gamepad) -> &'static str {
+/// How gilrs names a pad's buttons. Without an SDL mapping the GUID is included, so a
+/// field report says what to add to `SDL_GAMECONTROLLERCONFIG`.
+fn mapping(pad: &gilrs::Gamepad) -> String {
     match pad.mapping_source() {
-        MappingSource::SdlMappings => "SDL mapping",
-        MappingSource::Driver => "driver mapping",
-        MappingSource::None => "no mapping",
+        MappingSource::SdlMappings => "SDL mapping".to_string(),
+        source => {
+            let kind = if source == MappingSource::Driver {
+                "driver"
+            } else {
+                "no"
+            };
+            let mut s = format!("{kind} mapping, GUID ");
+            for b in pad.uuid() {
+                let _ = write!(s, "{b:02x}");
+            }
+            s
+        }
     }
+}
+
+/// A button's value and pressed state from gilrs's cached state. Looked up by code, not by
+/// [`gilrs::Gamepad::button_data`], which misses d-pad buttons gilrs made from a hat.
+fn button_state(pad: &gilrs::Gamepad, code: Option<gilrs::ev::Code>) -> (f32, bool) {
+    code.and_then(|c| pad.state().button_data(c))
+        .map_or((0.0, false), |d| (d.value(), d.is_pressed()))
 }
 
 /// The gamepad backend and which pad is active.
 pub struct Pads {
     gilrs: Option<Gilrs>,
     active: Option<GamepadId>,
+    /// Corrections for the active pad's readings.
+    quirks: Quirks,
     /// Print hot-plug messages to stderr (`--stats`) instead of the info log.
     verbose: bool,
     /// The controller the Game Controller framework knows, which overrides gilrs.
@@ -143,16 +225,34 @@ impl Pads {
                 None
             }
         };
-        let active = gilrs
-            .as_ref()
-            .and_then(|g| g.gamepads().next().map(|(id, _)| id));
-        Pads {
+        let mut pads = Pads {
             gilrs,
-            active,
+            active: None,
+            quirks: Quirks::default(),
             verbose,
             #[cfg(target_os = "macos")]
             mac: crate::pad_mac::GameControllers::new(verbose),
-        }
+        };
+        let first = pads
+            .gilrs
+            .as_ref()
+            .and_then(|g| g.gamepads().next().map(|(id, _)| id));
+        pads.activate(first);
+        pads
+    }
+
+    /// Makes `id` the active pad, with its quirks.
+    fn activate(&mut self, id: Option<GamepadId>) {
+        self.active = id;
+        self.quirks = match (&self.gilrs, id) {
+            (Some(g), Some(id)) => Quirks::of(&g.gamepad(id)),
+            _ => Quirks::default(),
+        };
+    }
+
+    /// Feeds one reading of the active pad.
+    fn apply(&self, input: &mut InputMapper, ev: PadEvent) {
+        apply(input, self.quirks.fix(ev));
     }
 
     /// One line naming the backend and the detected pads, e.g. `gamepads (gilrs evdev): 0
@@ -228,7 +328,7 @@ impl Pads {
                     // which may already be active.
                     let adopt = self.active.is_none_or(|a| a == id);
                     if adopt {
-                        self.active = Some(id);
+                        self.activate(Some(id));
                     }
                     let role = if adopt { "active" } else { "ignored" };
                     self.note(format_args!("gamepad connected: {id} {name} ({role})"));
@@ -242,8 +342,9 @@ impl Pads {
                         if !overridden {
                             pad_table::release_gamepad(input);
                         }
-                        self.active = g.gamepads().map(|(other, _)| other).find(|&x| x != id);
-                        if let Some(next) = self.active {
+                        let next = g.gamepads().map(|(other, _)| other).find(|&x| x != id);
+                        self.activate(next);
+                        if let Some(next) = next {
                             self.note(format_args!("gamepad {next} is now active"));
                             if focused {
                                 self.resync(input);
@@ -252,18 +353,17 @@ impl Pads {
                     }
                 }
                 _ if !focused || overridden || Some(id) != self.active => {}
-                EventType::ButtonPressed(b, _)
-                | EventType::ButtonReleased(b, _)
-                | EventType::ButtonChanged(b, _, _) => {
+                EventType::ButtonPressed(b, code)
+                | EventType::ButtonReleased(b, code)
+                | EventType::ButtonChanged(b, _, code) => {
                     // The state gilrs just updated carries both the value and its own
                     // pressed threshold, whichever of the two events this was.
-                    let (value, pressed) = g
-                        .gamepad(id)
-                        .button_data(b)
-                        .map_or((0.0, false), |d| (d.value(), d.is_pressed()));
-                    apply(input, PadEvent::Button(b, value, pressed));
+                    let (value, pressed) = button_state(&g.gamepad(id), Some(code));
+                    self.apply(input, PadEvent::Button(b, value, pressed));
                 }
-                EventType::AxisChanged(a, value, _) => apply(input, PadEvent::Axis(a, value)),
+                EventType::AxisChanged(a, value, _) => {
+                    self.apply(input, PadEvent::Axis(a, value));
+                }
                 _ => {}
             }
         }
@@ -282,14 +382,20 @@ impl Pads {
             return;
         };
         for b in BUTTONS {
-            let (value, pressed) = pad
-                .button_data(b)
-                .map_or((0.0, false), |d| (d.value(), d.is_pressed()));
-            apply(input, PadEvent::Button(b, value, pressed));
+            let code = pad.button_code(b).or_else(|| b.to_nec());
+            let (value, pressed) = button_state(&pad, code);
+            self.apply(input, PadEvent::Button(b, value, pressed));
         }
         for (a, _) in AXES {
             let value = pad.axis_data(a).map_or(0.0, |d| d.value());
-            apply(input, PadEvent::Axis(a, value));
+            self.apply(input, PadEvent::Axis(a, value));
+        }
+        if self.quirks.z_triggers {
+            // An untouched trigger has no reading yet: it is released.
+            for a in [Axis::LeftZ, Axis::RightZ] {
+                let value = pad.axis_data(a).map_or(-1.0, |d| d.value());
+                self.apply(input, PadEvent::Axis(a, value));
+            }
         }
     }
 }
@@ -383,6 +489,52 @@ mod tests {
         // Start pauses on release: held, it is the controls card.
         let s = feed(&[PadEvent::Button(Button::Start, 0.0, false)]);
         assert!(s.just_pressed(Action::Pause));
+    }
+
+    #[test]
+    fn an_unmapped_linux_pad_reads_like_its_sdl_mapping() {
+        let none = Quirks::default();
+        let ev = PadEvent::Axis(Axis::LeftZ, 1.0);
+        assert_eq!(none.fix(ev), ev);
+        assert_eq!(
+            none.fix(PadEvent::Button(Button::North, 1.0, true)),
+            PadEvent::Button(Button::North, 1.0, true)
+        );
+
+        let q = Quirks {
+            swap_xy: true,
+            z_triggers: true,
+        };
+        // evdev's BTN_X (gilrs North) is the left face button; Y is the top one.
+        assert_eq!(
+            q.fix(PadEvent::Button(Button::North, 1.0, true)),
+            PadEvent::Button(Button::West, 1.0, true)
+        );
+        assert_eq!(
+            q.fix(PadEvent::Button(Button::West, 0.0, false)),
+            PadEvent::Button(Button::North, 0.0, false)
+        );
+        // ABS_Z/ABS_RZ run -1 (released) to 1 (pulled) and become the trigger buttons.
+        assert_eq!(
+            q.fix(PadEvent::Axis(Axis::LeftZ, -1.0)),
+            PadEvent::Button(Button::LeftTrigger2, 0.0, false)
+        );
+        assert_eq!(
+            q.fix(PadEvent::Axis(Axis::RightZ, 1.0)),
+            PadEvent::Button(Button::RightTrigger2, 1.0, true)
+        );
+        assert_eq!(
+            q.fix(PadEvent::Axis(Axis::RightZ, 0.0)),
+            PadEvent::Button(Button::RightTrigger2, 0.5, false)
+        );
+        // Sticks pass through.
+        let ev = PadEvent::Axis(Axis::LeftStickX, 0.3);
+        assert_eq!(q.fix(ev), ev);
+
+        // ...so the right trigger drives the throttle.
+        let mut m = InputMapper::default();
+        apply(&mut m, q.fix(PadEvent::Axis(Axis::RightZ, 1.0)));
+        assert_eq!(m.sample(0.01).axis(Action::Throttle), 1.0);
     }
 
     #[test]
