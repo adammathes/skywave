@@ -259,6 +259,17 @@ impl Crowd {
         self.peds.hash()
     }
 
+    /// The sidewalk graph.
+    pub fn walks(&self) -> &WalkGraph {
+        &self.walks
+    }
+
+    /// The NPC `cars` the people keep clear of in the next step, and the crossings a car is
+    /// on or too close to stop for (`traffic::Pedestrians::see_cars`).
+    pub fn see_cars(&mut self, cars: &[traffic::peds::OtherCar], taken: &[u8]) {
+        self.peds.see_cars(cars, taken);
+    }
+
     /// The people, for the train to keep clear of.
     pub fn pool(&self) -> &Pedestrians {
         &self.peds
@@ -453,11 +464,6 @@ impl Crowd {
     /// The live people.
     pub fn people(&self) -> impl Iterator<Item = &traffic::peds::Pedestrian> {
         self.peds.iter()
-    }
-
-    /// The sidewalk graph.
-    pub fn walks(&self) -> &WalkGraph {
-        &self.walks
     }
 
     pub fn density(&self) -> Density {

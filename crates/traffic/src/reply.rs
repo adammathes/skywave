@@ -400,6 +400,7 @@ mod tests {
             heading: 0.0,
             dir,
             speed,
+            yaw_rate: 0.0,
             shape: 0,
             paint: 0,
             len: 4.6,

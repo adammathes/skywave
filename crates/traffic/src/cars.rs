@@ -42,6 +42,7 @@ use skywave_core::{hash64, Rng, Seed, SIM_HZ};
 use crate::lanes::{bezier, heading, Control, LaneGraph, Pose, TurnKind, CURVE_STEPS, NONE};
 use crate::math::{dist2, dot, len2, right, sin_cos, sqrt, unit2};
 use crate::signal::Light;
+use crate::walks::WalkGraph;
 
 /// Bumper-to-bumper length an NPC car is simulated with unless its shape's [`ShapeRule`]
 /// says otherwise, meters.
@@ -183,6 +184,29 @@ const SCAN_LANES: usize = 48;
 const STUCK_S: u32 = 90;
 /// Head lights come on this long after dusk at the latest (s): drivers differ.
 const LIGHT_DELAY_S: f32 = 900.0;
+/// People ([`Traffic::see_people`]): each a circle this wide; a car keeps this far from
+/// one beside its path, more while it creeps (nobody stands up against a car edging on),
+/// stops at least this short of one and models the gap with this jam distance.
+const PERSON_R_M: f32 = 0.3;
+const PERSON_SIDE_M: f32 = 0.5;
+const PERSON_CREEP_M: f32 = 1.0;
+const PERSON_GAP: f32 = 0.5;
+const PERSON_S0: f32 = 1.5;
+/// A crossing reaches this far either side of its curb-to-curb line (the people on it
+/// keep within 1.6 m): a car's front or a front corner within it is on the crossing.
+const XING_HALF_M: f32 = 1.9;
+/// How far from a lane's end its crossings lie, and the step they are found at.
+const XING_REACH_M: f32 = 16.0;
+const XING_STEP_M: f32 = 0.25;
+/// A car closer to a crossing than its comfortable stopping distance plus this goes on
+/// over it: it marks the crossing taken and the people at the curb wait for it.
+const XING_COMMIT_M: f32 = 1.0;
+/// Most people near one car tested against its path (all of them past it).
+const NEAR_PEOPLE: usize = 32;
+/// Most people off the sidewalks the cars see.
+const PEOPLE_MAX: usize = 256;
+/// No car spawns this close to a person off the sidewalks.
+const SPAWN_PEOPLE_M: f32 = 20.0;
 /// Hash key of the traffic generator.
 const KEY_TRAFFIC: u64 = 0x5452_4146_4649_4300;
 
@@ -261,6 +285,8 @@ pub struct Car {
     pub dir: [f32; 2],
     /// m/s, along the path.
     pub speed: f32,
+    /// How fast the heading turned over the last step, rad/s (positive left).
+    pub yaw_rate: f32,
     /// Vehicle shape index, below [`TrafficBudget::shapes`].
     pub shape: u8,
     /// Seed for the paint color.
@@ -392,6 +418,24 @@ impl Clock {
     }
 }
 
+/// What the cars see of the pedestrians after their step
+/// ([`crate::peds::Pedestrians::seen`]), for [`Traffic::see_people`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct People<'a> {
+    /// Per crossing of the walk graph: [`XING_ON`] while anyone is on its road (and a
+    /// moment after the last one leaves it), [`XING_WAITING`] while someone at its curb
+    /// may step out.
+    pub crossings: &'a [u8],
+    /// Ground points of everyone off the sidewalks: on a crossing's road, in a lane or in
+    /// a turn's sweep.
+    pub on_road: &'a [[f32; 3]],
+}
+
+/// [`People::crossings`]: someone is on the crossing's road.
+pub const XING_ON: u8 = 1;
+/// [`People::crossings`]: someone at the crossing's curb may step out.
+pub const XING_WAITING: u8 = 2;
+
 /// What the caller feeds every step.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Inputs {
@@ -482,6 +526,17 @@ pub struct Traffic {
     max_len: f32,
     /// The lines the cars must not cross now ([`Traffic::set_barriers`]).
     barriers: Vec<Barrier>,
+    /// Per segment (lanes, then turns), the walk graph's crossings it runs over
+    /// ([`Traffic::see_walks`]) as offsets into `xings`: the crossing, and the span of
+    /// front-bumper distances over which the car's front is on it.
+    xing_first: Vec<u32>,
+    xings: Vec<(u32, f32, f32)>,
+    /// Per crossing, what the people showed ([`People::crossings`]) and whether a car is
+    /// on it or too close to stop for it this step ([`Traffic::crossings_taken`]).
+    xing_people: Vec<u8>,
+    xing_cars: Vec<u8>,
+    /// [`People::on_road`], at most [`PEOPLE_MAX`].
+    people: Vec<[f32; 3]>,
 }
 
 /// Most [`Barrier`]s at once.
@@ -507,6 +562,8 @@ impl Clone for Traffic {
         cars.extend_from_slice(&self.cars);
         let mut by_x = Vec::with_capacity(cap);
         by_x.extend_from_slice(&self.by_x);
+        let mut people = Vec::with_capacity(PEOPLE_MAX);
+        people.extend_from_slice(&self.people);
         Traffic {
             budget: self.budget,
             cars,
@@ -538,6 +595,11 @@ impl Clone for Traffic {
                 b.extend_from_slice(&self.barriers);
                 b
             },
+            xing_first: self.xing_first.clone(),
+            xings: self.xings.clone(),
+            xing_people: self.xing_people.clone(),
+            xing_cars: self.xing_cars.clone(),
+            people,
         }
     }
 }
@@ -899,6 +961,11 @@ impl Traffic {
             rules: alloc::vec![ShapeRule::default(); usize::from(budget.shapes)],
             max_len: CAR_LEN_M,
             barriers: Vec::with_capacity(MAX_BARRIERS),
+            xing_first: Vec::new(),
+            xings: Vec::new(),
+            xing_people: Vec::new(),
+            xing_cars: Vec::new(),
+            people: Vec::with_capacity(PEOPLE_MAX),
         }
     }
 
@@ -944,6 +1011,95 @@ impl Traffic {
         self.shape_weights.clear();
         self.shape_weights
             .extend((0..n).map(|k| weights.get(k).copied().unwrap_or(0)));
+    }
+
+    /// Finds where the crossings of `walks` (built over `graph`) lie on every lane and
+    /// turn, so the cars yield to the people on them ([`Traffic::see_people`]). Allocates:
+    /// call it once, after [`Traffic::new`] and [`Traffic::set_shape_rules`] (a crossing
+    /// is reached as soon as the widest shape's front corner reaches it) and before
+    /// cloning.
+    pub fn see_walks(&mut self, graph: &LaneGraph, walks: &WalkGraph) {
+        let g = graph;
+        let half_w = self
+            .rules
+            .iter()
+            .fold(CAR_HALF_W_M, |m, r| m.max(r.half_w_m));
+        let nseg = g.lanes.len() + g.turns.len();
+        let mut first = Vec::with_capacity(nseg + 1);
+        let mut list = Vec::new();
+        for seg in 0..nseg as u32 {
+            first.push(list.len() as u32);
+            let len = self.seg_len(g, seg);
+            // A lane's crossings are at its ends' junctions, near those ends; a turn's at
+            // its junction, anywhere along it.
+            let (n0, n1, near) = if seg < self.lanes {
+                let l = &g.lanes[seg as usize];
+                (l.start_node, l.end_node, XING_REACH_M)
+            } else {
+                let t = &g.turns[(seg - self.lanes) as usize];
+                (t.node, t.node, len)
+            };
+            for (k, x) in walks.crossings.iter().enumerate() {
+                let at_start = x.node == n0;
+                if !at_start && x.node != n1 {
+                    continue;
+                }
+                let a = walks.nodes[x.curbs[0] as usize].pos;
+                let b = walks.nodes[x.curbs[1] as usize].pos;
+                let (lo, hi) = if seg >= self.lanes || (at_start && x.node == n1) {
+                    (0.0, len)
+                } else if at_start {
+                    (0.0, near.min(len))
+                } else {
+                    ((len - near).max(0.0), len)
+                };
+                let (mut s0, mut s1) = (f32::INFINITY, f32::NEG_INFINITY);
+                let n = ((hi - lo) / XING_STEP_M) as u32 + 1;
+                for i in 0..=n {
+                    let s = lo + (hi - lo) * i as f32 / n as f32;
+                    let p = self.seg_pose(g, seg, s);
+                    if (p.pos[1] - a[1]).abs() > 2.0 {
+                        continue;
+                    }
+                    let r = right(p.dir);
+                    let on = [0.0, 1.0, -1.0].iter().any(|&k| {
+                        let w = k * half_w;
+                        let q = [p.pos[0] + r[0] * w, p.pos[2] + r[1] * w];
+                        point_seg(q, xz(a), xz(b)).0 < XING_HALF_M
+                    });
+                    if on {
+                        s0 = s0.min(s);
+                        s1 = s1.max(s);
+                    }
+                }
+                if s0 <= s1 {
+                    list.push((k as u32, s0, s1));
+                }
+            }
+        }
+        first.push(list.len() as u32);
+        self.xing_first = first;
+        self.xings = list;
+        self.xing_people = alloc::vec![0; walks.crossings.len()];
+        self.xing_cars = alloc::vec![0; walks.crossings.len()];
+    }
+
+    /// What the pedestrians showed after their last step, for the next [`Traffic::step`]:
+    /// the crossings people are on or about to step onto (once [`Traffic::see_walks`] has
+    /// placed them) and where everyone off the sidewalks is (the first [`PEOPLE_MAX`]).
+    pub fn see_people(&mut self, people: People) {
+        if people.crossings.len() == self.xing_people.len() {
+            self.xing_people.copy_from_slice(people.crossings);
+        }
+        self.people.clear();
+        let n = people.on_road.len().min(self.people.capacity());
+        self.people.extend_from_slice(&people.on_road[..n]);
+    }
+
+    /// Per crossing of the walk graph ([`Traffic::see_walks`]), 1 while a car is on it or
+    /// too close to stop for it, as of the last step: people wait at its curb.
+    pub fn crossings_taken(&self) -> &[u8] {
+        &self.xing_cars
     }
 
     /// The lines the cars must not cross from now on (at most [`MAX_BARRIERS`]; the rest
@@ -1084,6 +1240,7 @@ impl Traffic {
             heading: 0.0,
             dir: [0.0, 0.0],
             speed,
+            yaw_rate: 0.0,
             shape,
             paint,
             len: rule.len_m,
@@ -1438,6 +1595,103 @@ impl Traffic {
         best
     }
 
+    /// Gap from car `c`'s front to the nearest person off the sidewalks on its path
+    /// ahead (or beside its front half): within its own half width, a person's and
+    /// [`PERSON_SIDE_M`] of the path, [`PERSON_CREEP_M`] while it creeps.
+    fn people_gap(&self, g: &LaneGraph, c: &Car, path: &Path, look: f32) -> Option<f32> {
+        let reach_box = look + c.len;
+        let mut near = [[0.0f32; 2]; NEAR_PEOPLE];
+        let mut n = 0;
+        let mut all = false;
+        for p in &self.people {
+            let rel = [p[0] - c.pos[0], p[2] - c.pos[2]];
+            if rel[0].abs() > reach_box || rel[1].abs() > reach_box || (p[1] - c.pos[1]).abs() > 3.0
+            {
+                continue;
+            }
+            if n == NEAR_PEOPLE {
+                all = true;
+                break;
+            }
+            near[n] = [p[0], p[2]];
+            n += 1;
+        }
+        if n == 0 {
+            return None;
+        }
+        let margin = if c.speed < STOPPED_MPS {
+            PERSON_CREEP_M
+        } else {
+            PERSON_SIDE_M
+        };
+        let reach = c.half_w + PERSON_R_M + margin;
+        let mut best: Option<f32> = None;
+        let mut test = |q: [f32; 2], a: [f32; 2], b: [f32; 2], start: f32, len: f32| {
+            let (d, t) = point_seg(q, a, b);
+            let along = start + len * t;
+            if d < reach && along > -c.len * 0.5 && along < look {
+                let gap = along - PERSON_R_M;
+                best = Some(best.map_or(gap, |b: f32| b.min(gap)));
+            }
+        };
+        let mut chord = |a: [f32; 2], b: [f32; 2], start: f32, len: f32| {
+            if all {
+                for p in &self.people {
+                    test([p[0], p[2]], a, b, start, len);
+                }
+            } else {
+                for &q in &near[..n] {
+                    test(q, a, b, start, len);
+                }
+            }
+        };
+        self.walk_path(g, path, look, &mut chord);
+        best
+    }
+
+    /// The crossings car `c` is on or comes to along its path (or its rear, its own
+    /// length behind its front, is still leaving): marks those it is on or too close to
+    /// stop for taken, and returns the distance to the nearest one it must stop short of:
+    /// one with people on its road, or one with someone at its curb about to step out that
+    /// it can stop for comfortably.
+    fn crossing_stop(&mut self, g: &LaneGraph, c: &Car, path: &Path, look: f32) -> Option<f32> {
+        let v = c.speed;
+        let stop = v * v / (2.0 * B_COMF) + XING_COMMIT_M;
+        let prev = if c.prev == NONE {
+            (NONE, 0.0)
+        } else {
+            (c.prev, -c.s - self.seg_len(g, c.prev))
+        };
+        let mut best: Option<f32> = None;
+        for &(seg, start) in core::iter::once(&prev).chain(path.iter()) {
+            if seg == NONE {
+                continue;
+            }
+            if start > look {
+                break;
+            }
+            let r =
+                self.xing_first[seg as usize] as usize..self.xing_first[seg as usize + 1] as usize;
+            for k in r {
+                let (x, s0, s1) = self.xings[k];
+                let (d_in, d_out) = (start + s0, start + s1 + c.len);
+                if d_out <= 0.0 || d_in > look {
+                    continue;
+                }
+                let x = x as usize;
+                let people = self.xing_people[x];
+                if d_in <= 0.0 {
+                    self.xing_cars[x] = 1;
+                } else if people & XING_ON != 0 || (people & XING_WAITING != 0 && stop < d_in) {
+                    best = Some(best.map_or(d_in, |b: f32| b.min(d_in)));
+                } else if stop >= d_in {
+                    self.xing_cars[x] = 1;
+                }
+            }
+        }
+        best
+    }
+
     /// The rearmost car ahead of `after` on another turn from the same lane as turn
     /// segment `seg`, while it is still in the mouth the turns share, or [`NONE`].
     fn mouth_leader(&self, g: &LaneGraph, seg: u32, after: f32) -> u32 {
@@ -1599,6 +1853,16 @@ impl Traffic {
             max_ds = max_ds.min(gap);
         }
         let player = player.unwrap_or(f32::INFINITY);
+        if let Some(gap) = self.people_gap(g, &c, &path, look) {
+            a = a.min(idm(v, v0, c.headway, gap, v, PERSON_S0));
+            max_ds = max_ds.min(gap - PERSON_GAP);
+        }
+        if !self.xings.is_empty() {
+            if let Some(d) = self.crossing_stop(g, &c, &path, look) {
+                a = a.min(idm(v, v0, c.headway, d, v, LINE_S0));
+                max_ds = max_ds.min(d);
+            }
+        }
         if c.hold > 0 {
             a = -B_MAX;
         }
@@ -1682,6 +1946,7 @@ impl Traffic {
             if self.bumps(i, &old, &c, ps) {
                 self.cars[i] = Car {
                     speed: 0.0,
+                    yaw_rate: 0.0,
                     slide: [0.0; 2],
                     spin: 0.0,
                     hold: c.hold,
@@ -1701,6 +1966,14 @@ impl Traffic {
             self.ghosts -= 1;
         }
         c.braking = brake_lamps(&old, c.speed);
+        let mut dh = c.heading - old.heading;
+        while dh > core::f32::consts::PI {
+            dh -= core::f32::consts::TAU;
+        }
+        while dh < -core::f32::consts::PI {
+            dh += core::f32::consts::TAU;
+        }
+        c.yaw_rate = dh / DT;
         self.cars[i] = c;
     }
 
@@ -1925,6 +2198,7 @@ impl Traffic {
     pub fn step(&mut self, graph: &LaneGraph, inp: &Inputs) {
         let g = graph;
         let ps = PlayerShape::new(&inp.player);
+        self.xing_cars.fill(0);
         self.link();
         for i in 0..self.cars.len() {
             self.plan[i] = self.plan_car(g, inp, &ps, i);
@@ -2058,6 +2332,10 @@ impl Traffic {
                     }
                 }
             }
+            clear &= self
+                .people
+                .iter()
+                .all(|q| len2([q[0] - p.pos[0], q[2] - p.pos[2]]) >= SPAWN_PEOPLE_M);
             if !clear {
                 continue;
             }

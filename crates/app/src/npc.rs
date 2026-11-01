@@ -35,7 +35,8 @@
 //! - **Pedestrians.** [`Npcs`] also owns the place's people ([`crate::peds`]): built at
 //!   setup, at the same density, warmed up with the cars (and while a scene loads,
 //!   [`PEDS_PREROLL_S`] before them), stepped after the cars at the signal tick they
-//!   reached.
+//!   reached. The cars and the people see each other (`docs/NPCS.md`): each traffic step
+//!   takes what the people showed after theirs, each pedestrian step every car's body.
 //!
 //! Every per-frame path writes into buffers sized at setup: nothing allocates after it
 //! but switching traffic off, which drops the cars and the people.
@@ -261,6 +262,8 @@ pub struct Npcs {
     voice_ids: [u32; TRAFFIC_VOICES],
     /// The place's pedestrians, at the same density.
     pub(crate) crowd: peds::Crowd,
+    /// Scratch: every car as the people keep clear of it, each step.
+    others: Vec<traffic::peds::OtherCar>,
 }
 
 /// What a step needs from the game.
@@ -296,6 +299,7 @@ impl Npcs {
         let cap = budget.cars;
         let mut crowd = peds::Crowd::new(place, &graph, seed);
         crowd.reserve_seated(cap);
+        traffic.see_walks(&graph, crowd.walks());
         let bodies = specs
             .iter()
             .map(CarBody::of)
@@ -326,6 +330,7 @@ impl Npcs {
             extra: 0,
             voice_ids: [u32::MAX; TRAFFIC_VOICES],
             crowd,
+            others: Vec::with_capacity(cap),
         }
     }
 
@@ -492,6 +497,7 @@ impl Npcs {
             clock: inp.clock,
             density: self.density,
         };
+        self.traffic.see_people(self.crowd.pool().seen());
         self.traffic.step(&self.graph, &inputs);
         self.traffic.populate(&self.graph, &inputs);
     }
@@ -573,6 +579,14 @@ impl Npcs {
     /// One pedestrian step after [`Npcs::step`], at the signal tick it reached.
     pub fn step_peds(&mut self, inp: &StepInputs) {
         let tick = self.signals.tick;
+        self.others.clear();
+        for c in self.traffic.cars() {
+            let b = &self.bodies[usize::from(c.shape)];
+            self.others
+                .push(traffic::peds::OtherCar::npc(c, b.back, b.half));
+        }
+        self.crowd
+            .see_cars(&self.others, self.traffic.crossings_taken());
         self.crowd.step(&self.graph, tick, inp.player, inp.view);
     }
 

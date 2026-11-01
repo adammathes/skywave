@@ -132,10 +132,12 @@ pub struct WalkNode {
 pub struct Crossing {
     pub node: u32,
     pub edge: u32,
-    /// A lane arriving at `node` on `edge`: the light it faces gates the crossing.
-    /// [`NONE`] when no lane arrives there (a one-way road leaving the junction).
+    /// The first of the lanes arriving at `node` on `edge` (`lane..lane + lane_count`,
+    /// one per slot): the lights they face gate the crossing. [`NONE`] when no lane
+    /// arrives there (a one-way road leaving the junction).
     pub lane: u32,
-    /// The junction is signalized and `lane` is one of its approaches.
+    pub lane_count: u32,
+    /// The junction is signalized and one of those lanes is one of its approaches.
     pub signal: bool,
     /// The two curb vertices where pedestrians wait.
     pub curbs: [u32; 2],
@@ -803,12 +805,24 @@ impl WalkGraph {
                 let hw = e.width_m * 0.5;
                 let node = if end == 0 { e.a } else { e.b };
                 let at_b = end == 1;
+                let arrives = |l: &crate::lanes::Lane| {
+                    l.end_node == node && l.edge == i as u32 && l.forward == at_b
+                };
                 let lane = lanes
                     .lanes
                     .iter()
-                    .position(|l| l.end_node == node && l.edge == i as u32 && l.forward == at_b)
+                    .position(arrives)
                     .map_or(NONE, |k| k as u32);
-                let signal = lane != NONE && lanes.lanes[lane as usize].control == Control::Signal;
+                let lane_count = if lane == NONE {
+                    0
+                } else {
+                    lanes.lanes[lane as usize..]
+                        .iter()
+                        .take_while(|l| arrives(l))
+                        .count() as u32
+                };
+                let signal = (lane..lane + lane_count)
+                    .any(|l| lanes.lanes[l as usize].control == Control::Signal);
                 // Where people wait: behind the curb top, and farther back where any lane
                 // (as the lane graph lays it, which can stray from the drawn curb near a
                 // junction) comes closer than `WAIT_CLEAR_M`.
@@ -837,6 +851,7 @@ impl WalkGraph {
                     node,
                     edge,
                     lane,
+                    lane_count,
                     signal,
                     curbs: [curb0, curb1],
                     length_m: 2.0 * (hw + CURB_STEP_M),
@@ -1004,15 +1019,16 @@ impl WalkGraph {
     }
 
     /// Whether crossing `c` shows *walk* at signal `tick`: on a signalized junction while
-    /// the road's own approach is red now and still red `clear_ticks` later (red is one
-    /// unbroken stretch of the cycle, so it stays red throughout); always without a signal.
+    /// every signalized lane arriving on the road is red now and still red `clear_ticks`
+    /// later (red is one unbroken stretch of the cycle, so it stays red throughout);
+    /// always without a signal.
     pub fn walk(&self, lanes: &LaneGraph, c: u32, tick: u64, clear_ticks: u64) -> bool {
         let x = &self.crossings[c as usize];
         if !x.signal {
             return true;
         }
-        lanes.light(x.lane, tick) == Some(Light::Red)
-            && lanes.light(x.lane, tick + clear_ticks) == Some(Light::Red)
+        let red = |l: u32, t: u64| lanes.light(l, t).is_none_or(|v| v == Light::Red);
+        (x.lane..x.lane + x.lane_count).all(|l| red(l, tick) && red(l, tick + clear_ticks))
     }
 
     /// Total walk length, m.
