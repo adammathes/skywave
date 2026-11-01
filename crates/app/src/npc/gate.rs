@@ -284,11 +284,13 @@ fn sixty_through_a_red_light_touches_no_car() {
     let mut waited = 0;
     loop {
         let t = app.npcs.signals.tick + u64::from(arrive);
+        // Clear ahead: a car queued behind the waiting player does not count.
+        let me = along(g, lane, app.traffic_player().pos);
         let clear = app
             .npcs
             .cars()
             .iter()
-            .all(|c| c.seg != lane && c.prev != lane);
+            .all(|c| (c.seg != lane || c.s < me) && c.prev != lane);
         let waiting = app.npcs.cars().iter().any(|c| at_line(c) && c.speed < 0.5);
         if clear && waiting && red(t) && red(t - 2 * 120) && !red(t - 7 * 60) {
             break;
@@ -697,9 +699,10 @@ fn reversing_into_a_queue_stops_against_it() {
 /// at its lane's line), and nobody standing on a sidewalk is ever inside it.
 #[test]
 fn rams_never_push_an_npc_onto_the_sidewalk() {
-    // The busiest block of the strip at seed 1 (`peds::tests::STRIP`).
+    // The busiest block of the strip at seed 1 (`peds::tests::STRIP`), warmed up at normal
+    // density so the pool has room for the car placed below, then busy.
     let mut app = app(
-        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5&t=12:00&traffic=busy",
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=1056.7,1055.3&yaw=102.5&t=12:00&traffic=normal",
     );
     let me = app.traffic_player();
     let hold = InputState::default();
@@ -733,6 +736,7 @@ fn rams_never_push_an_npc_onto_the_sidewalk() {
         .traffic
         .spawn_at(&graph, lane, best.2, 0.0)
         .expect("room in the pool");
+    app.npcs.set_density(Density::Busy);
     let spec = app.drive.spec.clone();
     let (mut rams, mut off_road, mut inside, mut widest) = (0, 0, 0, 0.0f32);
     let mut room = [0.0f32; 3];

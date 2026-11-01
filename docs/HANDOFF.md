@@ -64,11 +64,10 @@ crossings and a freight train), #53 (music folders in the native app) merged.
   speed-sensitive lock, a more progressive tire tail in the assisted presets, gentler stability
   that does not fight the counter-steer assist.
 - **Set pieces part 3** (race line, truck convoy) is Proposed. Moving set pieces must guarantee
-  zero violence themselves (NPC cars do not see people in general); review them with probes.
-- **Paused with WIP:** `m4/npc-sees-peds` (156d224): cars stop for people in `traffic`, 122 → 0
-  person-steps inside NPC cars in a scratch run; app wiring, sweeps, re-pins, goldens and docs
-  remain. Resume from the board when the owner says; since #45 NPC cars have their own lengths (a
-  17.5 m semi, a 7.4 m box truck), so seeing people must use each car's length, not 4.6 m.
+  zero violence themselves (NPC cars see people on crosswalks and in their path, #130, but a
+  set piece is not traffic); review them with probes.
+- **NPC cars see pedestrians** (#130, from the paused `m4/npc-sees-peds` WIP): each car's own
+  length and width; `docs/NPCS.md`, "NPC cars and people see each other".
 - Everything else was deferred on the old board; ideas from it not yet filed as issues still live
   there.
 
@@ -148,8 +147,8 @@ crossings and a freight train), #53 (music folders in the native app) merged.
 - M4 gate facts for the owner (from #25): NPC cars yield at junctions; player–NPC collision
   (`m4/car-collision`, NOTES 14: reversing into a queue stops against it, the gate test is on); NPC cars do not see
   pedestrians; static wheels, no brake lights; traffic sparse near the start.
-- Next: the owner's drive of the reverted handling; set pieces (M8 #7, three PRs); NPC cars see
-  pedestrians; music folders in the Mac app; M8 #8 (the 2001 radio preset); B7 facade sign bands on the
+- Next: the owner's drive of the reverted handling; set pieces (M8 #7, three PRs);
+  music folders in the Mac app; M8 #8 (the 2001 radio preset); B7 facade sign bands on the
   lexicon; player–NPC collision; M5 (release polish, Deck verification); M6 place compiler.
 - Conventions learned this run: reviews are read-only Opus subagents over `git diff
   origin/main...origin/<branch>` with probe tests on an exported copy, and for zero-violence code
