@@ -443,27 +443,33 @@ impl Soup {
             face_n.push(fnrm);
             face_u.push(norm(fnrm));
         }
-        // Corners sorted by exact position; ties keep triangle order (stable sort).
-        let key = |p: V3| [p[0].to_bits(), p[1].to_bits(), p[2].to_bits()];
-        let mut corners: Vec<(u32, u8)> = Vec::with_capacity(n * 3);
-        for (ti, _) in tris.iter().enumerate() {
-            for c in 0..3u8 {
-                corners.push((ti as u32, c));
+        // Corners sorted by exact position, ties in triangle order: each key packs the
+        // position's bits over the corner's index, so keys are unique and sort as plain
+        // integers (far faster than comparing through `tris`).
+        let mut keyed: Vec<u128> = Vec::with_capacity(n * 3);
+        for (ti, t) in tris.iter().enumerate() {
+            for (c, p) in t.p.iter().enumerate() {
+                keyed.push(
+                    (u128::from(p[0].to_bits()) << 96)
+                        | (u128::from(p[1].to_bits()) << 64)
+                        | (u128::from(p[2].to_bits()) << 32)
+                        | (ti * 3 + c) as u128,
+                );
             }
         }
-        corners.sort_by(|a, b| {
-            key(tris[a.0 as usize].p[a.1 as usize]).cmp(&key(tris[b.0 as usize].p[b.1 as usize]))
-        });
+        keyed.sort_unstable();
+        let corners: Vec<(u32, u8)> = keyed
+            .iter()
+            .map(|&k| ((k as u32) / 3, ((k as u32) % 3) as u8))
+            .collect();
 
         let mut out = MeshData::default();
         let mut index_of = alloc::vec![0u32; n * 3];
         let mut start = 0;
         while start < corners.len() {
-            let k0 = key(tris[corners[start].0 as usize].p[corners[start].1 as usize]);
+            let at = keyed[start] >> 32;
             let mut end = start + 1;
-            while end < corners.len()
-                && key(tris[corners[end].0 as usize].p[corners[end].1 as usize]) == k0
-            {
+            while end < corners.len() && keyed[end] >> 32 == at {
                 end += 1;
             }
             let first_vertex = out.positions.len();
