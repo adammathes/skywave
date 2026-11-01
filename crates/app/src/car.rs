@@ -664,7 +664,16 @@ impl CarModel {
 /// being a recolor (or, where a recolor would not be exact, a build of its own).
 pub struct ParkedBuilds<'a> {
     shape: &'a ShapeSpec,
-    built: Vec<(BuildOptions, CarMesh)>,
+    built: Vec<ParkedBase>,
+}
+
+/// A paint base ([`shape::paint_base`]) of a [`ParkedBuilds`] and its build.
+struct ParkedBase {
+    opts: BuildOptions,
+    car: CarMesh,
+    /// The build's [`parked_of`] mesh and its body's vertex count, made when first asked
+    /// for: every paint on the base copies and recolors it.
+    parked: Option<(Mesh, usize)>,
 }
 
 impl<'a> ParkedBuilds<'a> {
@@ -677,17 +686,24 @@ impl<'a> ParkedBuilds<'a> {
 
     /// The build in `opts`'s paint base and that base.
     fn base(&mut self, opts: &BuildOptions) -> Result<(BuildOptions, &CarMesh), String> {
+        let k = self.index(opts)?;
+        Ok((self.built[k].opts, &self.built[k].car))
+    }
+
+    /// Where in `built` the build in `opts`'s paint base is, built if it was not.
+    fn index(&mut self, opts: &BuildOptions) -> Result<usize, String> {
         let base = shape::paint_base(self.shape, opts);
-        let k = match self.built.iter().position(|b| b.0 == base) {
-            Some(k) => k,
-            None => {
-                let car = shape::build_with(self.shape, &base)
-                    .map_err(|e| format!("shape `{}`: {e:?}", self.shape.id))?;
-                self.built.push((base, car));
-                self.built.len() - 1
-            }
-        };
-        Ok((base, &self.built[k].1))
+        if let Some(k) = self.built.iter().position(|b| b.opts == base) {
+            return Ok(k);
+        }
+        let car = shape::build_with(self.shape, &base)
+            .map_err(|e| format!("shape `{}`: {e:?}", self.shape.id))?;
+        self.built.push(ParkedBase {
+            opts: base,
+            car,
+            parked: None,
+        });
+        Ok(self.built.len() - 1)
     }
 
     /// A parked car: the shape in palette color `paint` (or the `era` paint over it) at
@@ -710,10 +726,19 @@ impl<'a> ParkedBuilds<'a> {
             paint: era,
         };
         let shape = self.shape;
-        let (base, car) = self.base(&opts)?;
-        let (mut m, _, body) = parked_of(car, lod);
+        let k = self.index(&opts)?;
+        let ParkedBase {
+            opts: base,
+            car,
+            parked,
+        } = &mut self.built[k];
+        let (m, body) = parked.get_or_insert_with(|| {
+            let (m, _, body) = parked_of(car, lod);
+            (m, body)
+        });
+        let body = *body;
         let (from, to) = (
-            shape::paint_colors(shape, &base),
+            shape::paint_colors(shape, base),
             shape::paint_colors(shape, &opts),
         );
         if !repaints_exactly(&m.vertices[..body], &from, &to) {
@@ -721,6 +746,7 @@ impl<'a> ParkedBuilds<'a> {
                 .map_err(|e| format!("shape `{}`: {e:?}", shape.id))?;
             return Ok(parked_of(&car, lod).0);
         }
+        let mut m = m.clone();
         repaint(&mut m.vertices[..body], &from, &to);
         Ok(m)
     }
