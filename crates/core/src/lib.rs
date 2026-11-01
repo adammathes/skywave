@@ -2,8 +2,7 @@
 //!
 //! Everything here is `no_std` and bit-identical on every platform: integer hashing, a
 //! seeded PCG32 generator, the fixed-timestep accumulator that drives the 120 Hz simulation,
-//! and fixed-capacity containers. The only heap allocation is an `Arena`'s buffer, made once
-//! when the arena is built.
+//! and a fixed-capacity pool.
 #![no_std]
 
 extern crate alloc;
@@ -14,7 +13,7 @@ mod rng;
 mod step;
 
 pub use hash::{hash64, hash_bytes, mix64};
-pub use pool::{Arena, FixedVec, Handle, Pool, PoolIter, ARENA_MAX_ALIGN};
+pub use pool::{Handle, Pool, PoolIter};
 pub use rng::Rng;
 pub use step::{FixedStep, Steps, MAX_STEPS_PER_FRAME, SIM_DT, SIM_HZ};
 

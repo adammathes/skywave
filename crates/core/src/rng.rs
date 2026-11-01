@@ -69,7 +69,18 @@ impl Rng {
 
     /// Uniform float in `[lo, hi)`.
     pub fn range_f32(&mut self, lo: f32, hi: f32) -> f32 {
-        lo + (hi - lo) * self.next_f32()
+        scale_below(lo, hi, self.next_f32())
+    }
+}
+
+/// `lo + (hi - lo) * t` for `t` in `[0, 1)`, kept below `hi`: with `t` near 1 the product can
+/// round up to exactly `hi`, and then `lo` is returned instead.
+fn scale_below(lo: f32, hi: f32, t: f32) -> f32 {
+    let x = lo + (hi - lo) * t;
+    if x < hi || hi <= lo {
+        x
+    } else {
+        lo
     }
 }
 
@@ -136,5 +147,19 @@ mod tests {
         assert!(seen.iter().all(|&s| s));
         assert_eq!(r.range(5, 5), 5);
         assert_eq!(r.range(9, 3), 9);
+    }
+
+    #[test]
+    fn range_f32_never_rounds_up_to_hi() {
+        // The largest `next_f32`: 1 - 2^-24.
+        let t_max = 16_777_215.0 / 16_777_216.0;
+        // 8 + 12 * t_max and 0.9 + 0.2 * t_max round to exactly `hi` in f32.
+        assert_eq!(8.0f32 + (20.0f32 - 8.0) * t_max, 20.0);
+        assert_eq!(scale_below(8.0, 20.0, t_max), 8.0);
+        assert_eq!(0.9f32 + (1.1f32 - 0.9) * t_max, 1.1);
+        assert_eq!(scale_below(0.9, 1.1, t_max), 0.9);
+        assert!(scale_below(-2.0, 5.0, t_max) < 5.0);
+        assert_eq!(scale_below(2.0, 2.0, t_max), 2.0);
+        assert_eq!(scale_below(3.0, 1.0, 0.5), 2.0);
     }
 }
