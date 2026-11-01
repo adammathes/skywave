@@ -12,6 +12,7 @@ use vehicle::{step, Assists, FlatGround, VehicleInput, VehicleSpec, VehicleState
 
 const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
 const HOMESTEAD: &str = include_str!("../../../assets/vehicles/homestead_wagon.ron");
+const LINNET: &str = include_str!("../../../assets/vehicles/linnet_hatch.ron");
 const MPH: f32 = 0.447_04;
 const STEPS_PER_S: usize = 120;
 const GROUND: FlatGround = FlatGround {
@@ -443,6 +444,34 @@ fn handbrake_locks_the_rear() {
     }
 }
 
+/// The handbrake locks the rears only, so a front-drive car keeps its drive: full throttle
+/// with the handbrake held still pulls it off the line, while a rear-drive car declutches
+/// and stays put.
+#[test]
+fn handbrake_keeps_front_drive_driving() {
+    let pull = VehicleInput {
+        throttle: 1.0,
+        handbrake: true,
+        ..VehicleInput::default()
+    };
+    let front = load(LINNET);
+    assert_eq!(front.drive, vehicle::Drive::Front);
+    let mut s = spawn(&front);
+    hold(&front, &mut s, pull, &Assists::default(), 2 * STEPS_PER_S);
+    println!("front drive on the handbrake: {:.2} m/s", s.speed_mps);
+    assert!(
+        s.speed_mps > 1.0,
+        "front drive declutched: {} m/s",
+        s.speed_mps
+    );
+    assert!(s.wheels[0].spin > 1.0 && s.wheels[2].spin == 0.0);
+
+    let rear = load(GANNET);
+    let mut s = spawn(&rear);
+    hold(&rear, &mut s, pull, &Assists::default(), 2 * STEPS_PER_S);
+    assert!(s.speed_mps < 0.1, "rear drive pulled against the handbrake");
+}
+
 /// Heading change, degrees (positive left), over 1 s of handbrake with the stick half left
 /// from 15 m/s.
 fn handbrake_turn(spec: &VehicleSpec, assists: &Assists) -> f32 {
@@ -636,6 +665,38 @@ fn dropped_car_lands_and_settles() {
     }
 }
 
+/// A car on its roof rests on its upper body corners instead of falling through the ground
+/// (before the auto-right starts).
+#[test]
+fn upside_down_car_lands_on_its_roof() {
+    for spec in cars() {
+        let mut s = VehicleState::spawn(&spec, [0.0, 2.0, 0.0], 0.0);
+        s.rot = [0.0, 0.0, 1.0, 0.0];
+        hold(
+            &spec,
+            &mut s,
+            VehicleInput::default(),
+            &Assists::default(),
+            2 * STEPS_PER_S,
+        );
+        assert_finite(&s);
+        // The roof corners are `dims_m[2] + 0.25 - cg_height_m` above the center of mass.
+        let roof = spec.dims_m[2] + 0.25 - spec.cg_height_m;
+        println!(
+            "{:15} on its roof at {:.3} m (roof {roof:.3} m)",
+            spec.id, s.pos[1]
+        );
+        assert!(s.up()[1] < -0.95, "{} rolled off its roof", spec.id);
+        assert!(
+            (s.pos[1] - roof).abs() < 0.1 && len(s.vel) < 0.05,
+            "{} rests at {} m, moving {} m/s",
+            spec.id,
+            s.pos[1],
+            len(s.vel)
+        );
+    }
+}
+
 #[test]
 fn upside_down_car_rights_itself() {
     for spec in cars() {
@@ -826,7 +887,7 @@ fn replay_is_deterministic_and_pinned() {
     // Pinned hashes of the 10 s scripted drive. A deliberate change to the sim, a spec or the
     // script moves them: run `cargo test -p vehicle --test sim replay -- --nocapture`, copy the
     // printed hashes here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0xd373_13ea_741a_aaaa, 0x8077_0b56_56ed_3d3b];
+    const PINNED: [u64; 2] = [0xc04b_fb7b_66b8_8405, 0x33d2_0d44_2325_51a6];
     let specs = cars();
     let mut hashes = [0u64; 2];
     for (k, spec) in specs.iter().enumerate() {

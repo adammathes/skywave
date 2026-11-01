@@ -5,10 +5,10 @@
 //! Left-hand drive: the driver sits at `x = -driver_offset`.
 
 use super::body::{Body, Slot};
-use super::math::*;
 use super::mesh::{Mat, Soup};
 use super::params::Applique;
 use super::{Cockpit, Dial, Materials};
+use crate::math::*;
 use alloc::vec::Vec;
 
 const UP: V3 = [0.0, 1.0, 0.0];
@@ -102,7 +102,7 @@ impl<'a, 'b> Interior<'a, 'b> {
                 prof.push((ou + cs * r, ov + sn * r));
             }
         }
-        let path = [madd(c, axes[0], -h[0]), madd(c, axes[0], h[0])];
+        let path = [add_scaled(c, axes[0], -h[0]), add_scaled(c, axes[0], h[0])];
         self.soup
             .sweep(&path, &[axes[2]; 2], &[axes[1]; 2], &prof, true, mat);
     }
@@ -117,7 +117,7 @@ impl<'a, 'b> Interior<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     fn vent(&mut self, c: V3, u: V3, v: V3, n: V3, hu: f32, hv: f32, rim: Mat) {
         let m = self.m;
-        let at = |a: f32, b: f32, d: f32| madd(madd(madd(c, u, a), v, b), n, d);
+        let at = |a: f32, b: f32, d: f32| add_scaled(add_scaled(add_scaled(c, u, a), v, b), n, d);
         self.soup.quad_dir(
             at(-hu, -hv, 0.0),
             at(hu, -hv, 0.0),
@@ -133,8 +133,8 @@ impl<'a, 'b> Interior<'a, 'b> {
             (-hu - t, -hv, -hu, hv),
             (hu, -hv, hu + t, hv),
         ] {
-            let lo = madd(madd(madd(c, u, a0), v, b0), n, -0.004);
-            let hi = madd(madd(madd(c, u, a1), v, b1), n, 0.004);
+            let lo = add_scaled(add_scaled(add_scaled(c, u, a0), v, b0), n, -0.004);
+            let hi = add_scaled(add_scaled(add_scaled(c, u, a1), v, b1), n, 0.004);
             self.soup.obox(
                 scale(add(lo, hi), 0.5),
                 [u, v, n],
@@ -521,10 +521,10 @@ impl<'a, 'b> Interior<'a, 'b> {
         let face_c = [xd, dh - 0.005, zc];
         let (fu, fv) = (RIGHT, cross(tilt, RIGHT));
         let fq = [
-            madd(madd(face_c, fu, -hw + 0.012), fv, -0.065),
-            madd(madd(face_c, fu, hw - 0.012), fv, -0.065),
-            madd(madd(face_c, fu, hw - 0.012), fv, 0.065),
-            madd(madd(face_c, fu, -hw + 0.012), fv, 0.065),
+            add_scaled(add_scaled(face_c, fu, -hw + 0.012), fv, -0.065),
+            add_scaled(add_scaled(face_c, fu, hw - 0.012), fv, -0.065),
+            add_scaled(add_scaled(face_c, fu, hw - 0.012), fv, 0.065),
+            add_scaled(add_scaled(face_c, fu, -hw + 0.012), fv, 0.065),
         ];
         self.soup
             .quad_dir(fq[0], fq[1], fq[2], fq[3], m.cluster, tilt);
@@ -535,7 +535,7 @@ impl<'a, 'b> Interior<'a, 'b> {
         let mut dials = [Dial::default(); 3];
         for (k, dial) in dials.iter_mut().enumerate().take(n_dials) {
             let off = (k as f32 - (n_dials as f32 - 1.0) * 0.5) * (2.0 * r + 0.024);
-            let c = madd(madd(face_c, fu, off), tilt, 0.004);
+            let c = add_scaled(add_scaled(face_c, fu, off), tilt, 0.004);
             self.soup.disc(c, tilt, r, segs, m.dial);
             if lod0 {
                 // A chrome bezel ring standing toward the driver, a dark inner wall and an
@@ -556,7 +556,7 @@ impl<'a, 'b> Interior<'a, 'b> {
                     m.bezel,
                 );
                 self.soup.annulus(
-                    madd(c, tilt, 0.0005),
+                    add_scaled(c, tilt, 0.0005),
                     tilt,
                     r * 0.93,
                     r,
@@ -564,20 +564,20 @@ impl<'a, 'b> Interior<'a, 'b> {
                     m.cluster.shade(1.4),
                 );
                 if k == 0 {
-                    let oc = madd(madd(c, fv, -0.42 * r), tilt, 0.0012);
+                    let oc = add_scaled(add_scaled(c, fv, -0.42 * r), tilt, 0.0012);
                     let (ow, oh) = (0.36 * r, 0.09 * r);
                     self.soup.quad_dir(
-                        madd(madd(oc, fu, -ow), fv, -oh),
-                        madd(madd(oc, fu, ow), fv, -oh),
-                        madd(madd(oc, fu, ow), fv, oh),
-                        madd(madd(oc, fu, -ow), fv, oh),
+                        add_scaled(add_scaled(oc, fu, -ow), fv, -oh),
+                        add_scaled(add_scaled(oc, fu, ow), fv, -oh),
+                        add_scaled(add_scaled(oc, fu, ow), fv, oh),
+                        add_scaled(add_scaled(oc, fu, -ow), fv, oh),
                         m.cluster,
                         tilt,
                     );
                 }
             }
             *dial = Dial {
-                center: madd(c, tilt, 0.001),
+                center: add_scaled(c, tilt, 0.001),
                 normal: tilt,
                 up: fv,
                 radius: r,
@@ -686,45 +686,45 @@ impl<'a, 'b> Interior<'a, 'b> {
         let y = -0.056;
         for k in 0..n {
             let x = lerp(-hw + 0.04, hw - 0.04, k as f32 / (n - 1) as f32);
-            let c = madd(madd(madd(face_c, fu, x), fv, y), tilt, 0.0015);
+            let c = add_scaled(add_scaled(add_scaled(face_c, fu, x), fv, y), tilt, 0.0015);
             let (a, b) = (0.009, 0.004);
             self.soup.quad_dir(
-                madd(madd(c, fu, -a), fv, -b),
-                madd(madd(c, fu, a), fv, -b),
-                madd(madd(c, fu, a), fv, b),
-                madd(madd(c, fu, -a), fv, b),
+                add_scaled(add_scaled(c, fu, -a), fv, -b),
+                add_scaled(add_scaled(c, fu, a), fv, -b),
+                add_scaled(add_scaled(c, fu, a), fv, b),
+                add_scaled(add_scaled(c, fu, -a), fv, b),
                 m.warn[k % 4],
                 tilt,
             );
         }
         if n_dials == 1 {
             for sx in [-1.0f32, 1.0] {
-                let c = madd(madd(face_c, fu, sx * (r + 0.065)), tilt, 0.003);
+                let c = add_scaled(add_scaled(face_c, fu, sx * (r + 0.065)), tilt, 0.003);
                 let h = 0.04;
                 self.soup.quad_dir(
-                    madd(madd(c, fu, -h), fv, -h),
-                    madd(madd(c, fu, h), fv, -h),
-                    madd(madd(c, fu, h), fv, h),
-                    madd(madd(c, fu, -h), fv, h),
+                    add_scaled(add_scaled(c, fu, -h), fv, -h),
+                    add_scaled(add_scaled(c, fu, h), fv, -h),
+                    add_scaled(add_scaled(c, fu, h), fv, h),
+                    add_scaled(add_scaled(c, fu, -h), fv, h),
                     m.dial,
                     tilt,
                 );
-                let rim = madd(c, tilt, 0.003);
+                let rim = add_scaled(c, tilt, 0.003);
                 self.soup.obox(
-                    madd(rim, fv, h + 0.003),
+                    add_scaled(rim, fv, h + 0.003),
                     [fu, fv, tilt],
                     [h + 0.006, 0.003, 0.004],
                     m.bezel,
                 );
                 self.soup.obox(
-                    madd(rim, fv, -h - 0.003),
+                    add_scaled(rim, fv, -h - 0.003),
                     [fu, fv, tilt],
                     [h + 0.006, 0.003, 0.004],
                     m.bezel,
                 );
                 for e in [-1.0f32, 1.0] {
                     self.soup.obox(
-                        madd(rim, fu, e * (h + 0.003)),
+                        add_scaled(rim, fu, e * (h + 0.003)),
                         [fu, fv, tilt],
                         [0.003, h, 0.004],
                         m.bezel,
@@ -921,9 +921,15 @@ impl<'a, 'b> Interior<'a, 'b> {
             (0.03, 0.0),
             m.int_trim.shade(0.7),
         );
-        let knob_c = madd(base, up, 0.15);
-        self.soup
-            .beam(madd(base, up, 0.07), knob_c, BACK, 0.007, 0.007, m.bezel);
+        let knob_c = add_scaled(base, up, 0.15);
+        self.soup.beam(
+            add_scaled(base, up, 0.07),
+            knob_c,
+            BACK,
+            0.007,
+            0.007,
+            m.bezel,
+        );
         let knob = if i.applique == Applique::Wood {
             m.applique
         } else {
@@ -1003,8 +1009,8 @@ impl<'a, 'b> Interior<'a, 'b> {
         for &a in spokes {
             let (s, c) = sin_cos(a);
             let dir = add(scale(right, c), scale(up, s));
-            let p0 = madd(madd(p, axis, -0.03), dir, 0.05);
-            let p1 = madd(p, dir, r - 0.008);
+            let p0 = add_scaled(add_scaled(p, axis, -0.03), dir, 0.05);
+            let p1 = add_scaled(p, dir, r - 0.008);
             self.wheel.beam(
                 p0,
                 p1,
@@ -1016,8 +1022,8 @@ impl<'a, 'b> Interior<'a, 'b> {
             if lod0 {
                 // A bright insert along the spoke.
                 self.wheel.beam(
-                    madd(madd(p0, axis, 0.0075), dir, 0.01),
-                    madd(madd(p1, axis, 0.0075), dir, -0.02),
+                    add_scaled(add_scaled(p0, axis, 0.0075), dir, 0.01),
+                    add_scaled(add_scaled(p1, axis, 0.0075), dir, -0.02),
                     axis,
                     if two { 0.008 } else { 0.005 },
                     0.0015,
@@ -1045,7 +1051,7 @@ impl<'a, 'b> Interior<'a, 'b> {
                 m.wheel_spoke,
             );
             self.wheel.annulus(
-                madd(p, axis, -0.0128),
+                add_scaled(p, axis, -0.0128),
                 scale(axis, -1.0),
                 0.012,
                 0.018,
@@ -1054,8 +1060,8 @@ impl<'a, 'b> Interior<'a, 'b> {
             );
         } else {
             self.wheel.cylinder(
-                madd(p, axis, -0.07),
-                madd(p, axis, -0.02),
+                add_scaled(p, axis, -0.07),
+                add_scaled(p, axis, -0.02),
                 hub_r,
                 6,
                 true,
@@ -1065,8 +1071,8 @@ impl<'a, 'b> Interior<'a, 'b> {
         }
         // Column, shroud and stalks (fixed).
         self.soup.cylinder(
-            madd(p, axis, -0.07),
-            madd(p, axis, -0.42),
+            add_scaled(p, axis, -0.07),
+            add_scaled(p, axis, -0.42),
             0.03,
             if lod0 { 12 } else { 8 },
             false,
@@ -1075,27 +1081,38 @@ impl<'a, 'b> Interior<'a, 'b> {
         );
         if lod0 {
             self.pillow(
-                madd(p, axis, -0.12),
+                add_scaled(p, axis, -0.12),
                 [right, up, axis],
                 [0.06, 0.05, 0.05],
                 0.02,
                 m.int_trim,
             );
             // Ignition lock on the shroud's right side.
-            let ig = madd(madd(madd(p, axis, -0.12), right, 0.06), up, -0.01);
-            self.soup
-                .cylinder(ig, madd(ig, right, 0.008), 0.012, 10, true, false, m.bezel);
+            let ig = add_scaled(
+                add_scaled(add_scaled(p, axis, -0.12), right, 0.06),
+                up,
+                -0.01,
+            );
+            self.soup.cylinder(
+                ig,
+                add_scaled(ig, right, 0.008),
+                0.012,
+                10,
+                true,
+                false,
+                m.bezel,
+            );
             for sx in [-1.0f32, 1.0] {
-                let a = madd(madd(p, axis, -0.11), right, sx * 0.05);
-                let bb = madd(madd(a, right, sx * 0.12), up, -0.02);
+                let a = add_scaled(add_scaled(p, axis, -0.11), right, sx * 0.05);
+                let bb = add_scaled(add_scaled(a, right, sx * 0.12), up, -0.02);
                 self.soup
                     .beam(a, bb, up, 0.006, 0.006, m.int_trim.shade(0.7));
-                let tip = madd(bb, right, sx * 0.035);
+                let tip = add_scaled(bb, right, sx * 0.035);
                 self.soup.cylinder(bb, tip, 0.01, 10, true, false, m.switch);
             }
         } else {
             self.soup.obox(
-                madd(p, axis, -0.12),
+                add_scaled(p, axis, -0.12),
                 [right, up, axis],
                 [0.06, 0.05, 0.05],
                 m.int_trim,
@@ -1127,7 +1144,7 @@ impl<'a, 'b> Interior<'a, 'b> {
         let hinge = [cx, y_h - 0.02, z(s_h + 0.05)];
         let ax = [RIGHT, d, nb];
         self.soup.obox(
-            madd(madd(hinge, d, 0.3), nb, 0.05),
+            add_scaled(add_scaled(hinge, d, 0.3), nb, 0.05),
             ax,
             [cw, 0.29, 0.05],
             m.seat,
@@ -1135,7 +1152,7 @@ impl<'a, 'b> Interior<'a, 'b> {
         // A convertible shows its headrests over the doors even at LOD1.
         if self.b.convertible {
             self.soup.obox(
-                madd(madd(hinge, d, 0.62), nb, 0.06),
+                add_scaled(add_scaled(hinge, d, 0.62), nb, 0.06),
                 ax,
                 [0.12, 0.085, 0.045],
                 m.seat,
@@ -1178,22 +1195,26 @@ impl<'a, 'b> Interior<'a, 'b> {
         for sx in [-1.0f32, 1.0] {
             let c = [cx + sx * (cw + bw), y_h - 0.03, z(s_h - 0.17)];
             self.pillow(c, cush_ax, [bw, 0.065, 0.245], 0.04, m.seat);
-            let a = madd(madd([cx + sx * cw, cc[1], cc[2]], cu, 0.048), cf, -0.23);
-            self.pipe(a, madd(a, cf, 0.46), cu, m.piping);
+            let a = add_scaled(
+                add_scaled([cx + sx * cw, cc[1], cc[2]], cu, 0.048),
+                cf,
+                -0.23,
+            );
+            self.pipe(a, add_scaled(a, cf, 0.46), cu, m.piping);
         }
         // The front roll's piping and pleats across the insert.
-        let front = madd(madd(cc, cu, 0.04), cf, -0.24);
+        let front = add_scaled(add_scaled(cc, cu, 0.04), cf, -0.24);
         self.pipe(
-            madd(front, RIGHT, -half_w + 0.01),
-            madd(front, RIGHT, half_w - 0.01),
+            add_scaled(front, RIGHT, -half_w + 0.01),
+            add_scaled(front, RIGHT, half_w - 0.01),
             cu,
             m.piping,
         );
         for k in 0..4 {
-            let c = madd(madd(cc, cu, 0.046), cf, -0.16 + k as f32 * 0.1);
+            let c = add_scaled(add_scaled(cc, cu, 0.046), cf, -0.16 + k as f32 * 0.1);
             self.pipe(
-                madd(c, RIGHT, -cw + 0.008),
-                madd(c, RIGHT, cw - 0.008),
+                add_scaled(c, RIGHT, -cw + 0.008),
+                add_scaled(c, RIGHT, cw - 0.008),
                 cu,
                 m.seat_insert.shade(0.72),
             );
@@ -1204,48 +1225,59 @@ impl<'a, 'b> Interior<'a, 'b> {
         let nb = [0.0, -rs, rc];
         let hinge = [cx, y_h - 0.02, z(s_h + 0.05)];
         let ax = [RIGHT, d, nb];
-        let bc = madd(madd(hinge, d, 0.3), nb, 0.05);
+        let bc = add_scaled(add_scaled(hinge, d, 0.3), nb, 0.05);
         self.pillow(bc, ax, [cw, 0.29, 0.05], 0.03, m.seat_insert);
         for sx in [-1.0f32, 1.0] {
-            let c = madd(
-                madd([cx + sx * (cw + bw), hinge[1], hinge[2]], d, 0.28),
+            let c = add_scaled(
+                add_scaled([cx + sx * (cw + bw), hinge[1], hinge[2]], d, 0.28),
                 nb,
                 0.035,
             );
             self.pillow(c, ax, [bw, 0.27, 0.07], 0.04, m.seat);
-            let a = madd(madd([cx + sx * cw, bc[1], bc[2]], nb, -0.051), d, -0.27);
-            self.pipe(a, madd(a, d, 0.54), nb, m.piping);
+            let a = add_scaled(
+                add_scaled([cx + sx * cw, bc[1], bc[2]], nb, -0.051),
+                d,
+                -0.27,
+            );
+            self.pipe(a, add_scaled(a, d, 0.54), nb, m.piping);
         }
         for k in 0..5 {
-            let c = madd(madd(bc, nb, -0.049), d, -0.2 + k as f32 * 0.09);
+            let c = add_scaled(add_scaled(bc, nb, -0.049), d, -0.2 + k as f32 * 0.09);
             self.pipe(
-                madd(c, RIGHT, -cw + 0.008),
-                madd(c, RIGHT, cw - 0.008),
+                add_scaled(c, RIGHT, -cw + 0.008),
+                add_scaled(c, RIGHT, cw - 0.008),
                 nb,
                 m.seat_insert.shade(0.72),
             );
         }
         // Back of the seat: a hard shell in the trim color.
         self.soup.obox(
-            madd(madd(hinge, d, 0.28), nb, 0.11),
+            add_scaled(add_scaled(hinge, d, 0.28), nb, 0.11),
             ax,
             [half_w - 0.01, 0.27, 0.008],
             m.int_trim,
         );
         // Head restraint on two posts, low enough that the driver's head shows over it from
         // the chase cameras.
-        let hc = madd(madd(hinge, d, 0.64), nb, 0.06);
+        let hc = add_scaled(add_scaled(hinge, d, 0.64), nb, 0.06);
         self.pillow(hc, ax, [0.12, 0.08, 0.045], 0.035, m.seat);
         self.pipe(
-            madd(madd(hc, nb, -0.047), RIGHT, -0.1),
-            madd(madd(hc, nb, -0.047), RIGHT, 0.1),
+            add_scaled(add_scaled(hc, nb, -0.047), RIGHT, -0.1),
+            add_scaled(add_scaled(hc, nb, -0.047), RIGHT, 0.1),
             nb,
             m.piping,
         );
         for e in [-0.06f32, 0.06] {
-            let top = madd(madd(hc, d, -0.075), RIGHT, e);
-            self.soup
-                .cylinder(top, madd(top, d, -0.07), 0.006, 6, false, false, m.bezel);
+            let top = add_scaled(add_scaled(hc, d, -0.075), RIGHT, e);
+            self.soup.cylinder(
+                top,
+                add_scaled(top, d, -0.07),
+                0.006,
+                6,
+                false,
+                false,
+                m.bezel,
+            );
         }
         // Recliner knob.
         let kc = [cx + so * half_w * 0.82, y_h - 0.1, z(s_h + 0.02)];
@@ -1327,7 +1359,7 @@ impl<'a, 'b> Interior<'a, 'b> {
             self.soup
                 .aabb([-w, fl, z(sr - 0.42)], [w, y, z(sr + 0.02)], m.seat);
             self.soup.obox(
-                madd(madd(hinge, d, 0.27), nb, 0.05),
+                add_scaled(add_scaled(hinge, d, 0.27), nb, 0.05),
                 ax,
                 [w, 0.27, 0.06],
                 m.seat,
@@ -1343,7 +1375,7 @@ impl<'a, 'b> Interior<'a, 'b> {
         );
         let cc = [0.0, y - 0.05, z(sr - 0.2)];
         self.pillow(cc, [RIGHT, UP, BACK], [w, 0.05, 0.215], 0.035, m.seat);
-        let bc = madd(madd(hinge, d, 0.27), nb, 0.05);
+        let bc = add_scaled(add_scaled(hinge, d, 0.27), nb, 0.05);
         self.pillow(bc, ax, [w, 0.27, 0.06], 0.035, m.seat);
         for sx in [-1.0f32, 1.0] {
             let cx = sx * off;
@@ -1355,23 +1387,23 @@ impl<'a, 'b> Interior<'a, 'b> {
                 0.03,
                 m.seat_insert,
             );
-            let ib = madd(madd([cx, bc[1], bc[2]], nb, -0.004), d, -0.01);
+            let ib = add_scaled(add_scaled([cx, bc[1], bc[2]], nb, -0.004), d, -0.01);
             self.pillow(ib, ax, [0.17, 0.24, 0.06], 0.03, m.seat_insert);
             for e in [-0.17f32, 0.17] {
-                let a = madd(madd([cx + e, bc[1], bc[2]], nb, -0.062), d, -0.24);
-                self.pipe(a, madd(a, d, 0.48), nb, m.piping);
+                let a = add_scaled(add_scaled([cx + e, bc[1], bc[2]], nb, -0.062), d, -0.24);
+                self.pipe(a, add_scaled(a, d, 0.48), nb, m.piping);
                 let a = [cx + e, y + 0.002, z(sr - 0.39)];
                 self.pipe(a, add(a, [0.0, 0.0, 0.38]), UP, m.piping);
             }
             for k in 0..4 {
-                let c = madd(
-                    madd([cx, bc[1], bc[2]], nb, -0.063),
+                let c = add_scaled(
+                    add_scaled([cx, bc[1], bc[2]], nb, -0.063),
                     d,
                     -0.18 + k as f32 * 0.1,
                 );
                 self.pipe(
-                    madd(c, RIGHT, -0.16),
-                    madd(c, RIGHT, 0.16),
+                    add_scaled(c, RIGHT, -0.16),
+                    add_scaled(c, RIGHT, 0.16),
                     nb,
                     m.seat_insert.shade(0.72),
                 );
@@ -1390,7 +1422,7 @@ impl<'a, 'b> Interior<'a, 'b> {
             for sx in [-1.0f32, 1.0] {
                 let cx = sx * off;
                 self.pillow(
-                    madd(madd([cx, hinge[1], hinge[2]], d, 0.6), nb, 0.07),
+                    add_scaled(add_scaled([cx, hinge[1], hinge[2]], d, 0.6), nb, 0.07),
                     ax,
                     [0.11, 0.075, 0.04],
                     0.03,
@@ -1405,7 +1437,7 @@ impl<'a, 'b> Interior<'a, 'b> {
                     m.door_card.shade(0.85),
                 );
             }
-            let c = madd(madd(hinge, d, 0.2), nb, 0.0);
+            let c = add_scaled(add_scaled(hinge, d, 0.2), nb, 0.0);
             self.pillow(c, ax, [0.09, 0.2, 0.05], 0.03, m.seat_bolster);
         }
     }
@@ -1504,14 +1536,27 @@ impl<'a, 'b> Interior<'a, 'b> {
             let cxp = sx * (self.card_x(cs, cy) - 0.004);
             let hub = [cxp, cy, self.z(cs)];
             let inw = [-sx, 0.0, 0.0];
-            self.soup
-                .cylinder(hub, madd(hub, inw, 0.018), 0.014, 10, true, false, m.bezel);
-            let arm_end = add(madd(hub, inw, 0.02), [0.0, -0.045, 0.03]);
-            self.soup
-                .beam(madd(hub, inw, 0.018), arm_end, inw, 0.006, 0.003, m.bezel);
+            self.soup.cylinder(
+                hub,
+                add_scaled(hub, inw, 0.018),
+                0.014,
+                10,
+                true,
+                false,
+                m.bezel,
+            );
+            let arm_end = add(add_scaled(hub, inw, 0.02), [0.0, -0.045, 0.03]);
+            self.soup.beam(
+                add_scaled(hub, inw, 0.018),
+                arm_end,
+                inw,
+                0.006,
+                0.003,
+                m.bezel,
+            );
             self.soup.cylinder(
                 arm_end,
-                madd(arm_end, inw, 0.03),
+                add_scaled(arm_end, inw, 0.03),
                 0.009,
                 8,
                 true,
@@ -1526,11 +1571,17 @@ impl<'a, 'b> Interior<'a, 'b> {
             ];
             self.soup.disc(c, inw, 0.06, 16, m.vent);
             for (r0, r1) in [(0.02, 0.026), (0.038, 0.044)] {
-                self.soup
-                    .annulus(madd(c, inw, 0.001), inw, r0, r1, 16, m.vent.shade(1.8));
+                self.soup.annulus(
+                    add_scaled(c, inw, 0.001),
+                    inw,
+                    r0,
+                    r1,
+                    16,
+                    m.vent.shade(1.8),
+                );
             }
             self.soup.annulus(
-                madd(c, inw, 0.002),
+                add_scaled(c, inw, 0.002),
                 inw,
                 0.06,
                 0.068,
@@ -1709,7 +1760,7 @@ impl<'a, 'b> Interior<'a, 'b> {
             let cx = sx * spec.interior.driver_offset;
             let hx = (0.17f32).min(ft.z_re * 0.5);
             let c = [cx, ft.yt, self.z(s_top)];
-            let c = madd(madd(c, along, 0.045), inward, 0.03);
+            let c = add_scaled(add_scaled(c, along, 0.045), inward, 0.03);
             self.pillow(
                 c,
                 [RIGHT, along, inward],

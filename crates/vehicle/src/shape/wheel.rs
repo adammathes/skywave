@@ -3,10 +3,10 @@
 //! Local frame: origin at the hub center, axle along `+x` with the outer face toward `+x`
 //! (a right-side wheel). Left wheels are the same mesh turned 180° about `y`.
 
-use super::math::*;
 use super::mesh::{Mat, Soup};
 use super::params::{Parts, Rims, Wheels};
 use super::Materials;
+use crate::math::*;
 
 const AXIS: V3 = [1.0, 0.0, 0.0];
 
@@ -209,7 +209,7 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
                 let a = 2.0 * PI * k as f32 / 8.0;
                 let (sn, cs) = sin_cos(a);
                 let dir = [0.0, cs, sn];
-                let c = madd([hub_x + 0.006, 0.0, 0.0], dir, rr * 0.57);
+                let c = add_scaled([hub_x + 0.006, 0.0, 0.0], dir, rr * 0.57);
                 let t = [0.0, -sn, cs];
                 s.obox(c, [AXIS, dir, t], [0.002, 0.012, 0.025], m.chassis);
             }
@@ -220,8 +220,8 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
                 let a = 2.0 * PI * k as f32 / 5.0;
                 let (sn, cs) = sin_cos(a);
                 let dir = [0.0, cs, sn];
-                let p0 = madd([hub_x + 0.01, 0.0, 0.0], dir, 0.05);
-                let p1 = madd([face - 0.006, 0.0, 0.0], dir, rr - 0.012);
+                let p0 = add_scaled([hub_x + 0.01, 0.0, 0.0], dir, 0.05);
+                let p1 = add_scaled([face - 0.006, 0.0, 0.0], dir, rr - 0.012);
                 s.beam(p0, p1, AXIS, 0.026, 0.013, m.rim);
             }
             s.cylinder(
@@ -293,8 +293,8 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
                 // Blade twisted about its radial axis.
                 let (ts, tc) = sin_cos(deg(38.0));
                 let up = add(scale(AXIS, tc), scale(t, ts));
-                let p0 = madd([hub_x + 0.012, 0.0, 0.0], dir, 0.07);
-                let p1 = madd([face - 0.008, 0.0, 0.0], dir, rr - 0.016);
+                let p0 = add_scaled([hub_x + 0.012, 0.0, 0.0], dir, 0.07);
+                let p1 = add_scaled([face - 0.008, 0.0, 0.0], dir, rr - 0.016);
                 s.beam(p0, p1, up, 0.003, 0.03, m.rim);
             }
             s.lathe(
@@ -389,7 +389,7 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
                 let (sn, cs) = sin_cos(a);
                 let dir = [0.0, cs, sn];
                 let t = [0.0, -sn, cs];
-                let c = madd([fx + 0.001, 0.0, 0.0], dir, rr * 0.66);
+                let c = add_scaled([fx + 0.001, 0.0, 0.0], dir, rr * 0.66);
                 s.obox(c, [AXIS, dir, t], [0.002, rr * 0.17, 0.014], m.liner);
             }
             s.disc(
