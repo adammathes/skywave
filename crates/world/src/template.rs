@@ -615,7 +615,26 @@ pub struct RegionTemplate {
     pub layout: Option<Layout>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub basin: Option<Basin>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub air: Option<Air>,
     pub zones: Zones,
+}
+
+/// A layer of haze that lies low over a place (a basin's smog, a bay's marine layer): the
+/// renderer thickens the view through it on top of the weather's even fog, so distance
+/// reads in bands and the hills rise out of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Air {
+    /// Density at and below `floor_m`, 1/m (about 3.9 / visibility).
+    pub density: f32,
+    /// World height of the layer's floor, m.
+    pub floor_m: f32,
+    /// Height over which the density falls by e above the floor, m.
+    pub height_m: f32,
+    /// Its color as a multiple of the horizon sky's, linear RGB.
+    pub tint: [f32; 3],
 }
 
 impl RegionTemplate {

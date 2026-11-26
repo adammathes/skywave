@@ -25,13 +25,13 @@ struct Frame {
     cascade_view_proj: array<mat4x4<f32>, 3>,
     // xyz: camera position (m), w: fog density (1/m).
     camera_pos: vec4<f32>,
-    // xyz: unit view direction, w: unused.
+    // xyz: unit view direction, w: smog floor height (m).
     camera_fwd: vec4<f32>,
     // xyz: far view depth of each cascade (m), w: blend band as a fraction of a cascade.
     cascade_far: vec4<f32>,
     // xyz: world size of one shadow texel per cascade (m), w: cascade edge in texels.
     cascade_texel: vec4<f32>,
-    // xyz: unit vector toward the sun, w: unused.
+    // xyz: unit vector toward the sun, w: smog scale height (m).
     sun_dir: vec4<f32>,
     // rgb: sun illuminance / pi, i.e. luminance of a white Lambertian surface facing the sun.
     sun_light: vec4<f32>,
@@ -47,13 +47,14 @@ struct Frame {
     perez_c: vec4<f32>,
     perez_d: vec4<f32>,
     perez_e: vec4<f32>,
-    // xyz: zenith (Y, x, y) / F(0, theta_s), w: unused.
+    // xyz: zenith (Y, x, y) / F(0, theta_s), w: smog tint green.
     zenith: vec4<f32>,
-    // xyz: toward the sun clamped to the horizon (Perez gamma), w: unused.
+    // xyz: toward the sun clamped to the horizon (Perez gamma), w: smog tint red.
     sun_sky: vec4<f32>,
-    // x: twilight luminance fade, y: twilight blue shift, z: horizon haze, w: unused.
+    // x: twilight luminance fade, y: twilight blue shift, z: horizon haze, w: smog density
+    // at its floor (1/m, 0 for none).
     sky_params: vec4<f32>,
-    // rgb: night sky floor radiance.
+    // rgb: night sky floor radiance, w: smog tint blue.
     night_sky: vec4<f32>,
     // rgb: cosine-weighted mean sky radiance (ambient from above).
     sky_up: vec4<f32>,
@@ -225,6 +226,30 @@ fn yxy_to_rgb(yxy: vec3<f32>) -> vec3<f32> {
         vec3<f32>(-0.498531, 0.041556, 1.057225),
     );
     return max(m * xyz, vec3<f32>(0.0));
+}
+
+// Optical depth of the smog layer along a ray `dist` m long from height `y0` to `y1`: its
+// density falls by e every scale height above its floor and holds below it.
+fn smog_depth(y0: f32, y1: f32, dist: f32) -> f32 {
+    let rho = frame.sky_params.w;
+    if rho <= 0.0 {
+        return 0.0;
+    }
+    let h = frame.sun_dir.w;
+    let a = max(y0 - frame.camera_fwd.w, 0.0);
+    let b = max(y1 - frame.camera_fwd.w, 0.0);
+    let dy = b - a;
+    var mean = exp(-0.5 * (a + b) / h);
+    if abs(dy) > 0.5 {
+        mean = h * (exp(-a / h) - exp(-b / h)) / dy;
+    }
+    return rho * dist * mean;
+}
+
+// The smog's in-scatter: the horizon sky's radiance, tinted.
+fn smog_color() -> vec3<f32> {
+    let tint = vec3<f32>(frame.sun_sky.w, frame.zenith.w, frame.night_sky.w);
+    return frame.sky_horizon.rgb * tint;
 }
 
 // Diffuse sky radiance toward unit `dir`: Preetham with twilight fade and blue shift, the

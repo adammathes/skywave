@@ -157,6 +157,8 @@ impl FlyCamera {
 }
 
 pub struct App {
+    /// The low haze layer over the place (a basin's smog), if its region has one.
+    air: Option<world::template::Air>,
     clock: FixedStep,
     ticks: u64,
     /// The free-fly camera drives the view instead of the car's cameras.
@@ -478,6 +480,11 @@ impl App {
         }];
         let mesh_count = meshes.len() as u32;
         Ok(App {
+            air: if key == PlaceKey::Coast {
+                places::air_of(world)
+            } else {
+                None
+            },
             clock: FixedStep::new(),
             ticks: 0,
             fly: false,
@@ -1400,7 +1407,9 @@ impl App {
                 proj: proj.to_cols_array_2d(),
             },
             sun: lighting::sun(&daylight),
-            sky: self.ui.video_sky(lighting::sky(&daylight)),
+            sky: self
+                .ui
+                .video_sky(lighting::sky(&daylight, self.air.as_ref())),
             instances: &self.instances,
             lights: self.lights.lights(),
             hud: match (self.water_toast > 0.0)
