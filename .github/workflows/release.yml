@@ -42,10 +42,9 @@ jobs:
       - name: Check the tag
         run: '[[ "$TAG" =~ ^[A-Za-z0-9._+-]+$ ]] || { echo "unusable tag: $TAG" >&2; exit 1; }'
 
+      # Installs the version, components and targets in rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
-          rustup default stable
+        run: rustup toolchain install
 
       # Also caches the wasm-bindgen-cli that web-build.sh installs with `cargo install`.
       - uses: Swatinem/rust-cache@v2
@@ -94,10 +93,9 @@ jobs:
       - name: Check the tag
         run: '[[ "$TAG" =~ ^[A-Za-z0-9._+-]+$ ]] || { echo "unusable tag: $TAG" >&2; exit 1; }'
 
+      # Installs the version, components and targets in rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -158,10 +156,9 @@ jobs:
       - name: Check the tag
         run: '[[ "$TAG" =~ ^[A-Za-z0-9._+-]+$ ]] || { echo "unusable tag: $TAG" >&2; exit 1; }'
 
+      # Installs the version, components and targets in rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
