@@ -772,13 +772,13 @@ mod tests {
         assert!((-16.0..-9.0).contains(&db), "{db}");
     }
 
-    /// The scripted drive (12 s per engine profile, all five) renders bit-identically
+    /// The scripted drive (12 s per engine profile, the first five) renders bit-identically
     /// everywhere. `SKYWAVE_AUDIO_WAV=path` also writes it out for listening.
     ///
     /// Re-pin deliberately, in its own commit, when the synth changes.
     #[test]
     fn scripted_drive_renders_deterministically() {
-        const PINNED: u64 = 0x3016_fe04_3a75_434b;
+        const PINNED: u64 = 0xb69d_07bb_7562_4c34;
         let mut m = Mixer::new();
         let out = render_script(&mut m, 720 * 5, |_, _| {});
         let bytes = wav(&out);
