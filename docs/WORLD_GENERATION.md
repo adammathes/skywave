@@ -461,8 +461,10 @@ building, from an `Rng` keyed by the building's door pick):
   does not fit gives way to the trade, then to block capitals; the pictogram's neon goes
   before the pictogram. Blades carry no second line (the carriers of B7 will).
 - **Pole signs** (`props::pole_signs`, never in a Place). A strip mall or motel set back
-  behind at least 7 m of forecourt from a boulevard or collector gets one: at one end of
-  its front, 1.6 m behind the sidewalk, its head across the forecourt so traffic both ways
+  behind 7-40 m of forecourt gets one: its front is the wall facing a boulevard or
+  collector across the forecourt, else (a corner mall facing its side street) one facing
+  any street but an alley; the sign goes at the end of the front nearer a boulevard (none
+  without one within 30 m), 1.6 m behind the sidewalk, its head across the forecourt so traffic both ways
   reads it, 8.5-12.5 m tall (motels taller), none within 28 m of another. Four heads: a lit
   box on one pole, a disc, a strip mall's pylon (the center's name over its tenants' lit
   panels, on two legs) and a tilted slab. `ChunkPlan` gives each a shop sign like a blade's

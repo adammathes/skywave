@@ -4056,6 +4056,7 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
         .roads
         .edges
         .iter()
+        .filter(|e| !matches!(e.class, RoadClass::Highway | RoadClass::Alley))
         .flat_map(|e| {
             let hw = 0.5 * e.width_m
                 + if e.sidewalk {
@@ -4068,11 +4069,11 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
                 .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
         })
         .collect();
-    // The nearest boulevard or collector to `q`: its distance past the sidewalk and the
-    // unit direction toward it.
-    let nearest = |q: V2| {
+    // The nearest road of `set` to `q`: its distance past the sidewalk and the unit
+    // direction toward it.
+    let nearest = |set: &[(V2, V2, f32)], q: V2| {
         let mut best: Option<(f32, V2)> = None;
-        for &(a, b, hw) in &roads {
+        for &(a, b, hw) in set {
             let (d, t) = crate::math::segment_distance(q, a, b);
             let on = a + (b - a) * t;
             if d > 1e-3 && best.is_none_or(|x| d - hw < x.0) {
@@ -4088,40 +4089,51 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
             continue;
         }
         let fp: Vec<V2> = b.footprint.iter().map(|&p| V2::from_array(p)).collect();
-        // The front: the wall whose middle is nearest a boulevard and faces it.
-        let mut front: Option<(f32, V2, V2, V2)> = None;
+        // The front: the wall facing a boulevard across a forecourt, else (a corner mall
+        // facing its side street, its parking along it) one facing a street.
+        let mut front: Option<(f32, f32, V2, V2, V2)> = None;
         for k in 0..fp.len() {
             let (a, c) = (fp[k], fp[(k + 1) % fp.len()]);
-            let mid = (a + c) * 0.5;
-            let Some((yard, toward)) = nearest(mid) else {
-                continue;
-            };
             let along = c - a;
             if along.length() < 8.0 {
                 continue;
             }
             let along = along * (1.0 / along.length());
-            if toward.dot(along).abs() > 0.3 {
-                continue;
-            }
-            if front.is_none_or(|f| yard < f.0) {
-                front = Some((yard, a, c, toward));
+            for (set, rank) in [(&roads, 0.0), (&any_road, 1000.0)] {
+                let Some((yard, toward)) = nearest(set, (a + c) * 0.5) else {
+                    continue;
+                };
+                if !(POLE_SIGN_MIN_YARD_M..=40.0).contains(&yard) || toward.dot(along).abs() > 0.3 {
+                    continue;
+                }
+                if front.is_none_or(|f| rank + yard < f.0) {
+                    front = Some((rank + yard, yard, a, c, toward));
+                }
             }
         }
-        let Some((yard, a, c, toward)) = front else {
+        let Some((_, yard, a, c, toward)) = front else {
             continue;
         };
-        if !(POLE_SIGN_MIN_YARD_M..=60.0).contains(&yard) {
-            continue;
-        }
+        // At the end of the front nearer the boulevard, out at the street edge of the
+        // forecourt; only where a boulevard or collector passes near.
         let h = mix64(place.header.seed ^ 0x504F_4C45 ^ ((i as u64) << 20));
-        // At one end of the front, out at the street edge of the forecourt.
-        let end = if h & 1 == 0 { 0.12 } else { 0.88 };
-        let at = a + (c - a) * end;
-        let Some((gap, toward)) = nearest(at).filter(|n| n.1.dot(toward) > 0.9) else {
-            continue;
+        let (ea, ec) = (a + (c - a) * 0.12, a + (c - a) * 0.88);
+        let far = |q: V2| nearest(&roads, q).map_or(f32::MAX, |n| n.0);
+        let at = match far(ea).total_cmp(&far(ec)) {
+            core::cmp::Ordering::Less => ea,
+            core::cmp::Ordering::Greater => ec,
+            core::cmp::Ordering::Equal => {
+                if h & 1 == 0 {
+                    ea
+                } else {
+                    ec
+                }
+            }
         };
-        let q = at + toward * (gap - POLE_SIGN_BACK_M);
+        if far(at) > 30.0 {
+            continue;
+        }
+        let q = at + toward * (yard - POLE_SIGN_BACK_M);
         let clear = !any_road
             .iter()
             .any(|&(ra, rb, hw)| crate::math::segment_distance(q, ra, rb).0 < hw + 1.0);
