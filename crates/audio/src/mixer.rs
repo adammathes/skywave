@@ -717,7 +717,7 @@ mod tests {
     }
 
     /// Idle is a low, steady hum well under the radio for every engine, and steady: its
-    /// level in 50 ms windows barely moves.
+    /// level in 200 ms windows (several firings of even a four) barely moves.
     #[test]
     fn idle_sits_under_the_radio_and_is_steady() {
         let mut all = Vec::new();
@@ -729,7 +729,7 @@ mod tests {
             p.engine.profile = profile;
             let x = settled(&p, 4.5);
             let db = under_radio_db(&x);
-            let env: Vec<f32> = x.chunks(4800).map(rms).collect();
+            let env: Vec<f32> = x.chunks(19_200).map(rms).collect();
             let mean = env.iter().sum::<f32>() / env.len() as f32;
             let var = env.iter().map(|e| (e - mean) * (e - mean)).sum::<f32>() / env.len() as f32;
             let wobble = var.sqrt() / mean;

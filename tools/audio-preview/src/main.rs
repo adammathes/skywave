@@ -7,6 +7,11 @@
 //! pops) and `squeal.wav` (a slide on asphalt). For each it prints the peak and RMS level,
 //! the DC offset, and where the energy is: the firing frequency and its harmonics for the
 //! engine, the squeal band for the tires. Also prints the synth's cost per 256-frame block.
+//!
+//! `audio-preview drive [OUT_DIR] [CAR_ID...]` renders real cars driven through the sim
+//! instead (see [`drive`]).
+
+mod drive;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -130,6 +135,11 @@ fn engine_line(label: &str, x: &[f32], rpm: f32, cylinders: f32) {
 }
 
 fn main() -> std::io::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("drive") {
+        let dir = args.get(1).map_or("audio-preview-out", String::as_str);
+        return drive::run(Path::new(dir), args.get(2..).unwrap_or(&[]));
+    }
     let out_dir = PathBuf::from(
         std::env::args()
             .nth(1)
