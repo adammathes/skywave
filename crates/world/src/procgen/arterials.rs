@@ -49,6 +49,7 @@ use skywave_core::{hash_bytes, Rng, Seed};
 use super::macro_map::{BasinPlan, MacroMap, MacroPoiKind};
 use super::terrain::{box_blur, bump, smoothstep};
 use super::{stage, CELL_M, ZONE_CELL_M};
+pub(crate) use crate::math::seg_intersect;
 use crate::math::{abs, clamp, lerp, segment_distance, sin_cos, sqrt, PI as PI_F, TAU, V2};
 use crate::template::{DrivingSide, RegionTemplate, StreetPattern};
 
@@ -1932,24 +1933,6 @@ fn truncate_tail(ctx: &Ctx<'_>, lines: &[Line], index: &Index, pts: &mut Vec<V2>
             pts.push(x);
             return;
         }
-    }
-}
-
-/// Segment intersection parameters `(t, u)` along `p1→p2` and `q1→q2`, both in `[0, 1]`.
-pub(crate) fn seg_intersect(p1: V2, p2: V2, q1: V2, q2: V2) -> Option<(f32, f32)> {
-    let r = p2 - p1;
-    let s = q2 - q1;
-    let den = r.x * s.y - r.y * s.x;
-    if abs(den) < 1e-9 {
-        return None;
-    }
-    let w = q1 - p1;
-    let t = (w.x * s.y - w.y * s.x) / den;
-    let u = (w.x * r.y - w.y * r.x) / den;
-    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
-        Some((t, u))
-    } else {
-        None
     }
 }
 
