@@ -544,17 +544,18 @@ impl StreamBudget {
     /// 9×9 chunks, 2 ms a frame; a pool for 4.96M vertices, 208 MB of buffers. With its
     /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
     /// stroke-lettered signs and the light tiles its street lamps cut, the densest 11×11
-    /// chunks (the ring and the chunks waiting to be evicted) take, on seed 1, 978 pages of
-    /// 4096 vertices on the coast, 1096 in the basin and 1063 in Lake City; this is 1211, a
-    /// tenth more than the most (trees, cars, lamps and small furniture are instances,
+    /// chunks (the ring and the chunks waiting to be evicted) take, on seed 1, 912 pages of
+    /// 4096 vertices on the coast, 1051 in the basin and 1034 in Lake City; this is 1211, a
+    /// sixth more than the most (trees, cars, lamps and small furniture are instances,
     /// outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         frame_budget_s: 0.002,
         pool_vertices: 4_960_000,
     };
-    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for a whole place (on seed
-    /// 1 the coast takes 1217 pages, the basin 1491, Lake City 1542) and some more, 1617.
+    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for the densest 15×15 chunks
+    /// it keeps resident (on seed 1 the coast's take 1109 pages, the basin's 1402, Lake
+    /// City's 1490) and some more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         frame_budget_s: 0.004,
