@@ -68,6 +68,7 @@ pub enum RegionId {
     GreatLakesCity = 2,
     NorthShoreSuburb = 3,
     SocalBasin = 4,
+    BayArea = 5,
 }
 
 /// The decade a place is dressed for; selects the detailing palette (`docs/PLACES.md`, "Era
