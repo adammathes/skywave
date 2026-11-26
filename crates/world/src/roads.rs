@@ -266,12 +266,28 @@ pub fn profile_height(pts: &[V2], ys: &[f32], p: V2) -> f32 {
     if n < 2 {
         return ys.first().copied().unwrap_or(0.0);
     }
+    // The squared distance from `p` to segment `k`'s bounds: no more than its distance
+    // to the segment, so a segment whose bounds lie beyond a reach (with a margin for
+    // rounding) is beyond it too and is skipped without the square root. The result is
+    // the same as testing every segment.
+    let beyond = |k: usize, reach: f32| {
+        let (a, b) = (pts[k], pts[k + 1]);
+        let dx = (a.x.min(b.x) - p.x).max(p.x - a.x.max(b.x)).max(0.0);
+        let dz = (a.y.min(b.y) - p.y).max(p.y - a.y.max(b.y)).max(0.0);
+        let r = reach + 0.01;
+        dx * dx + dz * dz > r * r
+    };
     let mut d_min = f32::INFINITY;
     for k in 0..n - 1 {
-        d_min = d_min.min(segment_distance(p, pts[k], pts[k + 1]).0);
+        if !beyond(k, d_min) {
+            d_min = d_min.min(segment_distance(p, pts[k], pts[k + 1]).0);
+        }
     }
     let (mut sum, mut wsum) = (0.0f32, 0.0f32);
     for k in 0..n - 1 {
+        if beyond(k, d_min + BEND_BLEND_M) {
+            continue;
+        }
         let (a, b) = (pts[k], pts[k + 1]);
         let (d, _) = segment_distance(p, a, b);
         let x = (d - d_min) / BEND_BLEND_M;

@@ -98,3 +98,13 @@ codegen-units = 1
 # wasm32-unknown-unknown always aborts on panic; we make native release builds match so
 # the shipped game behaves the same everywhere. Tests ignore this setting.
 panic = "abort"
+
+# The app's build script generates each world's place (crates/app/build.rs); build
+# dependencies are unoptimized by default, which makes that take half a minute.
+# Naming the generation crates optimizes them there too, without the proc macros.
+[profile.release.package.world]
+opt-level = 3
+[profile.release.package.place]
+opt-level = 3
+[profile.release.package.skywave-core]
+opt-level = 3
