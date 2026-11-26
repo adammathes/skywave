@@ -2,7 +2,7 @@
 # Runs exactly the checks CI runs (.github/workflows/ci.yml calls this script), so a green run
 # here means a green PR, wall-clock budget noise on shared runners and macOS-only code aside
 # (ci.yml's macos job checks that). With no argument it runs every stage in turn; CI runs
-# one stage per job, side by side: `tools/ci.sh lint|test-app|test-rest|test-i686|web`.
+# one stage per job, side by side: `tools/ci.sh lint|test-app|test-traffic|test-rest|test-i686|web`.
 # --setup first installs what a fresh cloud container lacks: the Linux build deps, rustfmt,
 # clippy, the wasm and i686 targets, cargo-deny and Playwright (wasm-bindgen-cli comes with
 # web-build.sh).
@@ -40,8 +40,13 @@ test-app() {
     SKYWAVE_ENFORCE_BUDGETS=1 step cargo test --locked -p app
 }
 
+# The traffic simulations are the next slowest, so they get one too.
+test-traffic() {
+    SKYWAVE_ENFORCE_BUDGETS=1 step cargo test --locked -p traffic
+}
+
 test-rest() {
-    SKYWAVE_ENFORCE_BUDGETS=1 step cargo test --locked --workspace --exclude app
+    SKYWAVE_ENFORCE_BUDGETS=1 step cargo test --locked --workspace --exclude app --exclude traffic
 }
 
 # The pure crates at 32-bit usize, as on wasm32, where an overflow the 64-bit run misses panics.
@@ -61,8 +66,8 @@ web() {
 stage="${1:-all}"
 [[ "$stage" == "--setup" ]] && stage="${2:-all}"
 case "$stage" in
-    all) lint; test-app; test-rest; test-i686; web ;;
-    lint | test-app | test-rest | test-i686 | web) "$stage" ;;
+    all) lint; test-app; test-traffic; test-rest; test-i686; web ;;
+    lint | test-app | test-traffic | test-rest | test-i686 | web) "$stage" ;;
     *) echo "unknown stage: $stage" >&2; exit 2 ;;
 esac
 echo "== ci.sh $stage: all checks passed" >&2
