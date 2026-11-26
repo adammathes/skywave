@@ -8,9 +8,11 @@
 //! A release build bakes each world's place for [`builtin::BAKED_SEED`] at build time
 //! (`build.rs`), so the default start decodes it instead of generating it; any other seed,
 //! and every debug build, generates at load. Generation is deterministic, so the two are
-//! the same place.
+//! the same place. Native builds carry the baked places in the binary; the web build ships
+//! them as files beside the page, one per world, and the platform fetches a world's before
+//! loading it and hands it over with [`provide_baked`].
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use place::Place;
 use skywave_core::Seed;
@@ -21,20 +23,34 @@ use crate::builtin::{self, GRAMMARS};
 use crate::scenario::Scenario;
 use crate::scene::PlaceKey;
 
-/// `(region template id, layout id or "", grammar file, encoded Place)` for every world,
-/// baked by `build.rs` (empty in a debug build).
-const BAKED: &[(&str, &str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/baked.rs"));
+/// `(scenario id, encoded Place)` for every world, baked into the binary by `build.rs`
+/// (empty in a debug build and on the web).
+const BAKED: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/baked.rs"));
 
-/// Scenario `s`'s place for `seed` as the build baked it, if it did.
+/// Baked places the platform fetched, by scenario id ([`provide_baked`]).
+static PROVIDED: Mutex<Vec<(String, &'static [u8])>> = Mutex::new(Vec::new());
+
+/// Hands over scenario `id`'s baked place (the file `build.rs` wrote as `<id>.place`), for
+/// the next load of that world at [`builtin::BAKED_SEED`]. It is kept for the session.
+pub fn provide_baked(id: &str, bytes: Vec<u8>) {
+    let mut provided = PROVIDED.lock().unwrap_or_else(|e| e.into_inner());
+    if !provided.iter().any(|(p, _)| p == id) {
+        provided.push((id.to_owned(), Vec::leak(bytes)));
+    }
+}
+
+/// Scenario `s`'s place for `seed` as the build baked it, if it is at hand.
 fn baked(seed: Seed, s: &Scenario) -> Option<&'static [u8]> {
     if seed != builtin::BAKED_SEED {
         return None;
     }
-    let layout = s.layout.as_deref().unwrap_or("");
+    let provided = PROVIDED.lock().unwrap_or_else(|e| e.into_inner());
     BAKED
         .iter()
-        .find(|(r, l, g, _)| *r == s.region && *l == layout && *g == s.grammar)
-        .map(|(_, _, _, bytes)| *bytes)
+        .copied()
+        .chain(provided.iter().map(|(id, b)| (id.as_str(), *b)))
+        .find(|(id, _)| *id == s.id)
+        .map(|(_, bytes)| bytes)
 }
 
 /// The palette named `id`.

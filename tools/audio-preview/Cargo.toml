@@ -9,3 +9,5 @@ rust-version.workspace = true
 
 [dependencies]
 audio.workspace = true
+ron.workspace = true
+vehicle.workspace = true

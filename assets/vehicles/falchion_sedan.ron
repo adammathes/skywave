@@ -37,7 +37,7 @@ VehicleSpec(
     steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 11.0),
     brakes: Brakes(max_nm: 3500, bias_front: 0.62, abs: true, handbrake_nm: 2900),
     aero: Aero(cd: 0.34, frontal_m2: 2.05, downforce_coef: 0.02),
-    feel: Feel(oversteer_bias: -0.05, body_roll: 0.3, engine_sound: "default", shift_jerk: 0.2),
+    feel: Feel(oversteer_bias: -0.05, body_roll: 0.3, engine_sound: "i6", shift_jerk: 0.2),
     interior: Interior(
         dash: "sport_90s",
         gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
