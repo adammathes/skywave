@@ -12,6 +12,7 @@ use place::Place;
 use render::{Corona, MeshId, MeshInstance, PointLight};
 use vehicle::sim::{DT, FRONT_LEFT, FRONT_RIGHT, REAR_LEFT};
 use vehicle::{Assists, VehicleInput, VehicleSpec, VehicleState};
+use world::math::atan2;
 
 use traffic::figure::PARTS;
 
@@ -416,7 +417,7 @@ impl Drive {
             Some(h) => {
                 let [x, y, z] = h.pos;
                 let (y, _) = ground.level_from([x, z], y + 0.5);
-                let heading = (-h.dir[0]).atan2(-h.dir[1]);
+                let heading = atan2(-h.dir[0], -h.dir[1]);
                 self.state = VehicleState::spawn(&self.spec, [x, y, z], heading);
                 self.prev = self.state;
                 self.roll = [0.0; 4];
@@ -435,7 +436,7 @@ impl Drive {
     pub fn switch_car(&mut self, spec: VehicleSpec, layout: CarLayout, ground: &DriveGround) {
         let pose = self.pose(1.0);
         let f = pose.forward();
-        let heading = (-f.x).atan2(-f.z);
+        let heading = atan2(-f.x, -f.z);
         let p = pose.pos;
         // Seen from the body's height, so the car stays on the deck it is on.
         let (y, _) = ground.level_from([p.x, p.z], p.y + 0.5);
