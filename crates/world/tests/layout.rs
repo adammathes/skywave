@@ -156,3 +156,45 @@ fn a_road_to_nowhere_is_refused() {
         Err(LayoutError::RoadToNowhere("old highway".into()))
     );
 }
+
+/// Steepest grade a Bay Loop street may have over any 8 m or more: about the steepest
+/// real city streets, so every car can climb it.
+const MAX_GRADE: f32 = 0.30;
+
+#[test]
+fn no_bay_loop_street_is_steeper_than_a_real_one() {
+    let (l, t, g) = (layout(), template(), grammar());
+    let p = authored::build_place(Seed(1), &l, &t, &g);
+    let mut worst = (0.0f32, RoadClass::Local, [0.0f32; 2]);
+    for e in &p.roads.edges {
+        // Grade over runs of at least 8 m, so a profile's tiny steps do not count alone.
+        let pts = &e.profile;
+        for i in 0..pts.len() {
+            let mut run = 0.0;
+            for j in i + 1..pts.len() {
+                let (a, b) = (pts[j - 1], pts[j]);
+                run += ((b[0] - a[0]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+                if run >= 8.0 {
+                    let grade = (pts[j][1] - pts[i][1]).abs() / run;
+                    if grade > worst.0 {
+                        worst = (grade, e.class, [pts[i][0], pts[i][2]]);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    println!(
+        "steepest street: {:.1}% ({:?} at {:?})",
+        worst.0 * 100.0,
+        worst.1,
+        worst.2
+    );
+    assert!(
+        worst.0 <= MAX_GRADE,
+        "{:.1}% {:?} at {:?}",
+        worst.0 * 100.0,
+        worst.1,
+        worst.2
+    );
+}
