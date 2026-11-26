@@ -23,6 +23,7 @@ pub mod grammar;
 pub mod ground;
 pub mod landmarks;
 pub mod lanes;
+pub mod layout;
 pub mod lots;
 pub mod math;
 pub mod mesh;

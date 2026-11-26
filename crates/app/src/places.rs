@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use place::Place;
 use skywave_core::Seed;
 use world::landmarks::Kit;
+use world::layout::Layout;
 use world::template::RegionTemplate;
 use world::{ChunkPlan, Grammar, Palette};
 
@@ -17,6 +18,8 @@ use crate::scene::PlaceKey;
 
 const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
 const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
+const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
@@ -31,10 +34,13 @@ const LANDMARKS: [(&str, &str); 9] = world::landmarks::BUILTIN;
 const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-const REGIONS: [(&str, &str); 2] = [
+const REGIONS: [(&str, &str); 3] = [
     ("california_coast", CALIFORNIA_COAST),
     ("socal_basin", SOCAL_BASIN),
+    ("bay_area", BAY_AREA),
 ];
+/// The authored layouts compiled into the game, as `(id, RON text)`.
+const LAYOUTS: [(&str, &str); 1] = [("bay_loop", BAY_LOOP)];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
 const GRAMMARS: [(&str, &str); 2] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
@@ -44,6 +50,22 @@ const GRAMMARS: [(&str, &str); 2] = [
 /// The text of the built-in region template `id`.
 pub fn region_text(id: &str) -> Option<&'static str> {
     REGIONS.iter().find(|(r, _)| *r == id).map(|(_, t)| *t)
+}
+
+/// The text of the built-in authored layout `id`.
+pub fn layout_text(id: &str) -> Option<&'static str> {
+    LAYOUTS.iter().find(|(l, _)| *l == id).map(|(_, t)| *t)
+}
+
+/// Scenario `s`'s authored layout, checked; `None` for a scenario without one.
+fn layout_of(s: &Scenario) -> Result<Option<Layout>, String> {
+    let Some(id) = &s.layout else {
+        return Ok(None);
+    };
+    let text = layout_text(id).ok_or("no such layout")?;
+    let l: Layout = ron::from_str(text).map_err(|e| format!("layout: {e}"))?;
+    l.validate().map_err(|e| format!("layout {id}: {e}"))?;
+    Ok(Some(l))
 }
 
 /// The text of the built-in grammar file `file`.
@@ -138,6 +160,15 @@ pub fn load(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan
     if key == PlaceKey::Coast {
         let t = template_of(s)?;
         let pal = palette_of(s);
+        if let Some(l) = layout_of(s)? {
+            return Ok(world::procgen::authored::build_place_planned(
+                seed,
+                &l,
+                &t,
+                grammar_of(s),
+                &pal,
+            ));
+        }
         return Ok(world::procgen::build_place_planned(
             seed,
             &t,
@@ -169,11 +200,19 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
             place.header.seed = seed.0;
             Ok(place)
         }
-        PlaceKey::Coast => Ok(world::procgen::build_place(
-            seed,
-            &template_of(s)?,
-            grammar_of(s),
-        )),
+        PlaceKey::Coast => match layout_of(s)? {
+            Some(l) => Ok(world::procgen::authored::build_place(
+                seed,
+                &l,
+                &template_of(s)?,
+                grammar_of(s),
+            )),
+            None => Ok(world::procgen::build_place(
+                seed,
+                &template_of(s)?,
+                grammar_of(s),
+            )),
+        },
         PlaceKey::Gallery => {
             let text = region_text(&s.region).ok_or("no such region template")?;
             let t: RegionTemplate =
