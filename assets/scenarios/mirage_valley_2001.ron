@@ -17,5 +17,6 @@ Scenario(
     heroes: [
         "halberd_coupe", "halberd_targa", "tanager_awd", "destrier_coupe", "siskin_coupe",
         "shrike_coupe", "glaive_turbo", "falchion_sedan", "courser_v8",
+        "dunlin_roadster", "palfrey_roadster",
     ],
 )

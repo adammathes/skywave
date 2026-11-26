@@ -22,6 +22,7 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Underglow (`Underglow`) | button | U | — |
 | Horn | button | B (H until the controls card took it) | Left stick click |
 | Flash brights (`Flash`) | button (held) | N | B / Circle |
+| Nitrous (`Nitrous`): burns a charge a donut and a burger made | button | Left Shift | X / Square |
 | Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
 | Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
 | Map toggle | button | M | Back / Share |

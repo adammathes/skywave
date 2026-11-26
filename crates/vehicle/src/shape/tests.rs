@@ -34,7 +34,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 32] = [
+const ROSTER: [(&str, &str); 34] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -67,6 +67,8 @@ const ROSTER: [(&str, &str); 32] = [
     car!("glaive_turbo"),
     car!("falchion_sedan"),
     car!("courser_v8"),
+    car!("dunlin_roadster"),
+    car!("palfrey_roadster"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -531,7 +533,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 36] = [
+    let expected: [u64; 38] = [
         0x9e71_38d8_2c5a_1c12,
         0x8317_bf4a_12a7_08d1,
         0x4cd1_db4a_3a7f_0bb3,
@@ -568,8 +570,10 @@ fn builds_are_deterministic() {
         0x8880_90e1_3e30_1431,
         0x491f_72c9_e888_4907,
         0x1506_5dae_2def_33ed,
+        0xfbe5_f01e_3cd7_617b,
+        0xd819_7860_a355_a930,
     ];
-    let mut got = [0u64; 36];
+    let mut got = [0u64; 38];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();

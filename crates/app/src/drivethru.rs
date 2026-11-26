@@ -3,7 +3,9 @@
 //! donut shop's) and hold still a moment, and the person inside leans out over the sill and
 //! hands over a box, which lands on the passenger seat and rides there for the rest of the
 //! drive (up to [`MAX_BOXES`] stacked). No menu, no money, no UI; the radio plays on.
-//! Driving [`LEAVE_M`] off lets the window serve again.
+//! Driving [`LEAVE_M`] off lets the window serve again. A donut shop's box is pink, a burger
+//! stand's bag red and white ([`Food`]); the moment the seat holds one of each, the driver
+//! eats them and they make a charge of nitrous ([`DriveThru::meals`], `crate::nitrous`).
 //!
 //! [`DriveThru::of`] reads the windows off the place's landmark props; [`DriveThru::step`]
 //! runs with the 120 Hz sim; the server, the box in hand or in the air are drawn near the
@@ -57,13 +59,33 @@ pub const MAX_INSTANCES: usize = PARTS + 1;
 /// Hash key of the server's figure seed.
 const KEY_SERVER: u64 = 0x5345_5256_4552;
 
-/// A service window: the sill's middle on the wall's face, the way it faces out and the
-/// height of the floor inside (its landmark's lot).
+/// What a window hands over.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Food {
+    #[default]
+    Donut,
+    Burger,
+}
+
+impl Food {
+    /// What the landmark kit `id`'s windows serve.
+    fn of(id: &str) -> Food {
+        if id == "burger_stand" {
+            Food::Burger
+        } else {
+            Food::Donut
+        }
+    }
+}
+
+/// A service window: the sill's middle on the wall's face, the way it faces out, the
+/// height of the floor inside (its landmark's lot) and what it serves.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Window {
     pub sill: Vec3,
     pub out: Vec2,
     pub floor_y: f32,
+    pub food: Food,
 }
 
 /// Where the window stands with the player's car.
@@ -94,8 +116,11 @@ pub struct Car {
 pub struct DriveThru {
     pub windows: Vec<Window>,
     pub phase: Phase,
-    /// Boxes on the passenger seat.
+    /// Boxes on the passenger seat, bottom first: `seat[..boxes]`.
     pub boxes: u8,
+    pub seat: [Food; MAX_BOXES as usize],
+    /// A donut and a burger eaten since [`DriveThru::meals`] last took them.
+    meals: u8,
     /// The server (their part meshes until [`DriveThru::meshes`] takes them).
     server: Figure,
     ids: Vec<MeshId>,
@@ -125,6 +150,7 @@ impl DriveThru {
                         sill: Vec3::new(sill.x, sill.y, sill.z),
                         out: Vec2::new(out.x, out.y),
                         floor_y: p.pos[1],
+                        food: Food::of(&k.id),
                     });
                 }
             }
@@ -141,17 +167,21 @@ impl DriveThru {
             windows,
             phase: Phase::Idle,
             boxes: 0,
+            seat: [Food::Donut; MAX_BOXES as usize],
+            meals: 0,
             server: figure(hash64(seed.0, &[KEY_SERVER]), era),
             ids: Vec::new(),
         })
     }
 
-    /// The meshes its instances draw, in order (the server's parts, then the box);
+    /// The meshes its instances draw, in order (the server's parts, the donut box, the
+    /// burger bag);
     /// [`DriveThru::set_ids`] takes their ids.
     pub fn meshes(&mut self) -> Vec<Mesh> {
         let parts = core::mem::take(&mut self.server.parts);
         let mut out: Vec<Mesh> = parts.iter().map(car::plain_mesh).collect();
-        out.push(box_mesh());
+        out.push(box_mesh([150, 30, 62, 255], [118, 100, 88, 255]));
+        out.push(box_mesh([140, 12, 10, 255], [190, 186, 176, 255]));
         out
     }
 
@@ -198,7 +228,7 @@ impl DriveThru {
             Phase::Serving { at, t } => {
                 let next = t + dt;
                 if t < LAND_S && next >= LAND_S {
-                    self.boxes = (self.boxes + 1).min(MAX_BOXES);
+                    self.land(self.windows[usize::from(at)].food);
                 }
                 if next >= SERVE_S {
                     Phase::Served { at }
@@ -215,6 +245,30 @@ impl DriveThru {
                 }
             }
         };
+    }
+
+    /// A box of `food` lands on the seat: with the other kind on it, the driver eats one of
+    /// each (a meal); else it stacks (a full seat drops it). So the seat holds one kind.
+    fn land(&mut self, food: Food) {
+        let n = usize::from(self.boxes);
+        if let Some(i) = self.seat[..n].iter().position(|&f| f != food) {
+            self.seat.copy_within(i + 1..n, i);
+            self.boxes -= 1;
+            self.meals += 1;
+        } else if self.boxes < MAX_BOXES {
+            self.seat[n] = food;
+            self.boxes += 1;
+        }
+    }
+
+    /// The meals eaten since the last call (each a charge of nitrous).
+    pub fn meals(&mut self) -> u8 {
+        core::mem::take(&mut self.meals)
+    }
+
+    /// Empties the seat (a new car).
+    pub fn clear_seat(&mut self) {
+        self.boxes = 0;
     }
 
     /// The server's pose `t` seconds into a serve: how far out they lean and hold the box
@@ -252,7 +306,7 @@ impl DriveThru {
         let Phase::Serving { at, t } = self.phase else {
             return;
         };
-        if self.ids.len() < PARTS + 1 {
+        if self.ids.len() < PARTS + 2 {
             return;
         }
         let w = &self.windows[usize::from(at)];
@@ -297,19 +351,24 @@ impl DriveThru {
         };
         out.push(MeshInstance {
             lights: set,
-            ..MeshInstance::new(self.ids[PARTS], transform.to_cols_array_2d())
+            ..MeshInstance::new(food_mesh(&self.ids, w.food), transform.to_cols_array_2d())
         });
     }
 
     /// Appends the boxes on the passenger seat of the car at `body` (its body-to-world
     /// matrix) whose bottom box sits at `seat`, body space; `cabin` as the car's interior.
     pub fn push_seat(&self, body: Mat4, seat: Vec3, cabin: f32, out: &mut Vec<MeshInstance>) {
-        if self.ids.len() < PARTS + 1 {
+        if self.ids.len() < PARTS + 2 {
             return;
         }
         // The cushion tips back a little; each box sits a little askew on the one below.
         const TURN: [f32; MAX_BOXES as usize] = [0.04, -0.09, 0.07];
-        for (k, &turn) in TURN.iter().enumerate().take(usize::from(self.boxes)) {
+        for (k, (&turn, &food)) in TURN
+            .iter()
+            .zip(&self.seat)
+            .enumerate()
+            .take(usize::from(self.boxes))
+        {
             let local = Mat4::from_rotation_translation(
                 Quat::from_rotation_x(0.1) * Quat::from_rotation_y(turn),
                 seat + Vec3::Y * (k as f32 * BOX_M[1]),
@@ -317,10 +376,18 @@ impl DriveThru {
             out.push(MeshInstance {
                 cabin,
                 casts_shadow: false,
-                ..MeshInstance::new(self.ids[PARTS], (body * local).to_cols_array_2d())
+                ..MeshInstance::new(
+                    food_mesh(&self.ids, food),
+                    (body * local).to_cols_array_2d(),
+                )
             });
         }
     }
+}
+
+/// The mesh of a box of `food` among [`DriveThru::meshes`]' `ids`.
+fn food_mesh(ids: &[MeshId], food: Food) -> MeshId {
+    ids[PARTS + food as usize]
 }
 
 /// A part's transform in the figure frame as a matrix.
@@ -335,13 +402,11 @@ fn part_matrix(x: &Xform) -> Mat4 {
     )
 }
 
-/// The box: pink card centered on its middle, a cream lid band round its top edge (vertex
-/// colors linear, as the figures' and the cars').
-fn box_mesh() -> Mesh {
+/// A box: `card` centered on its middle, a `lid` band round its top edge (vertex colors
+/// linear, as the figures' and the cars').
+fn box_mesh(card: [u8; 4], lid: [u8; 4]) -> Mesh {
     let mut m = MeshData::default();
     let [w, h, d] = BOX_M.map(|v| 0.5 * v);
-    let card = [150, 30, 62, 255];
-    let lid = [118, 100, 88, 255];
     let band = 0.6 * h;
     for (lo, hi, color) in [(-h, band, card), (band, h, lid)] {
         // Each face: its normal axis and sign, then its four corners counter-clockwise.
@@ -390,10 +455,18 @@ mod tests {
 
     const DT: f32 = skywave_core::SIM_DT as f32;
 
-    /// The donut shop's kit index and the window of a test lot with it in `variant`.
+    /// The kits with a drive-thru.
+    const SHOPS: [&str; 2] = ["donut_shop", "burger_stand"];
+
+    /// The donut shop's window on a test lot with it in `variant`.
     fn shop(variant: u8) -> DriveThru {
+        shop_of("donut_shop", variant)
+    }
+
+    /// Kit `id`'s window on a test lot with it in `variant`.
+    fn shop_of(id: &str, variant: u8) -> DriveThru {
         let kits = crate::places::landmarks();
-        let kit = kits.iter().position(|k| k.id == "donut_shop").unwrap();
+        let kit = kits.iter().position(|k| k.id == id).unwrap();
         let mut place = Place::test_grid();
         place.props.items = vec![Prop {
             pos: [0.0, 2.0, 0.0],
@@ -425,10 +498,13 @@ mod tests {
     #[test]
     fn every_variant_has_its_window_on_the_right_side_at_its_lot_level() {
         let kits = crate::places::landmarks();
-        let kit = kits.iter().find(|k| k.id == "donut_shop").unwrap();
-        for v in 0..kit.variants.len() {
-            let d = shop(v as u8);
-            assert_eq!(d.windows.len(), 1, "variant {v}");
+        for (id, kit, v) in SHOPS.iter().flat_map(|&id| {
+            let kit = kits.iter().find(|k| k.id == id).unwrap();
+            (0..kit.variants.len()).map(move |v| (id, kit, v))
+        }) {
+            let d = shop_of(id, v as u8);
+            assert_eq!(d.windows.len(), 1, "{id} variant {v}");
+            assert_eq!(d.windows[0].food, Food::of(&kit.id));
             let w = d.windows[0];
             // Yaw 0 faces -z; the kit's +x (the right seen from the road) is world -x.
             assert!((w.out - Vec2::new(-1.0, 0.0)).length() < 1e-5, "{w:?}");
@@ -443,11 +519,13 @@ mod tests {
     #[test]
     fn every_variant_loops_the_lane_round_the_back() {
         let kits = crate::places::landmarks();
-        let kit = kits.iter().find(|k| k.id == "donut_shop").unwrap();
-        let [w, d] = kit.lot;
-        // Facing +z, so the kit frame is the world's.
-        let (pos, facing) = (V2::new(0.0, 0.0), V2::new(0.0, 1.0));
-        for v in 0..kit.variants.len() {
+        for (kit, v) in SHOPS.iter().flat_map(|&id| {
+            let kit = kits.iter().find(|k| k.id == id).unwrap();
+            (0..kit.variants.len()).map(move |v| (kit, v))
+        }) {
+            let [w, d] = kit.lot;
+            // Facing +z, so the kit frame is the world's.
+            let (pos, facing) = (V2::new(0.0, 0.0), V2::new(0.0, 1.0));
             let mut slabs = Vec::new();
             world::landmarks::slabs(kit, v, pos, 0.0, facing, &mut slabs);
             let sill = world::landmarks::windows(kit, v, V3::new(0.0, 0.0, 0.0), facing)[0].0;
@@ -504,6 +582,27 @@ mod tests {
     }
 
     #[test]
+    fn a_donut_and_a_burger_on_the_seat_are_a_meal() {
+        let mut d = shop(0);
+        d.land(Food::Donut);
+        d.land(Food::Donut);
+        assert_eq!((d.boxes, d.meals()), (2, 0));
+        d.land(Food::Burger);
+        assert_eq!((d.boxes, d.seat[0]), (1, Food::Donut), "one donut left");
+        assert_eq!((d.meals(), d.meals()), (1, 0), "taken once");
+        d.land(Food::Burger);
+        assert_eq!((d.boxes, d.meals()), (0, 1));
+        // Burgers alone stack up until a donut comes.
+        for _ in 0..4 {
+            d.land(Food::Burger);
+        }
+        assert_eq!((d.boxes, d.meals()), (MAX_BOXES, 0));
+        d.land(Food::Donut);
+        assert_eq!((d.boxes, d.meals()), (MAX_BOXES - 1, 1));
+        assert!(d.seat[..2].iter().all(|&f| f == Food::Burger));
+    }
+
+    #[test]
     fn passing_by_or_stopping_wrong_orders_nothing() {
         let mut d = shop(0);
         let w = d.windows[0];
@@ -541,7 +640,18 @@ mod tests {
         let q = "seed=1&scenario=mirage_valley_2001&cam=chase-mid&t=12:00&still=1";
         let mut app = scene(&format!("{q}&donut=1.0"));
         let d = app.drivethru.as_ref().unwrap();
-        assert_eq!(d.windows.len(), 1, "the donut shop's");
+        let count = |f: Food| d.windows.iter().filter(|w| w.food == f).count();
+        // Way more donut shops than one, and the burger chain's stands.
+        assert!(
+            count(Food::Donut) >= 5,
+            "{} donut windows",
+            count(Food::Donut)
+        );
+        assert!(
+            count(Food::Burger) >= 2,
+            "{} burger windows",
+            count(Food::Burger)
+        );
         assert!(matches!(d.phase, Phase::Serving { .. }), "{:?}", d.phase);
         let (bx, server) = (box_id(&app), d.ids[0]);
         let view = app.scene_view(1.0, 16.0 / 9.0);
@@ -584,11 +694,21 @@ mod tests {
             crate::scenario::get(app.scenario()),
         )
         .unwrap();
+        // The owner's donut shop: the first donut shop sited (its point of interest first).
+        let poi = place
+            .pois
+            .iter()
+            .find(|p| p.kind == place::PoiKind::DonutShop)
+            .unwrap();
         let prop = place
             .props
             .items
             .iter()
-            .find(|p| matches!(p.kind, PropKind::Landmark { kit: k, .. } if k == kit))
+            .filter(|p| matches!(p.kind, PropKind::Landmark { kit: k, .. } if k == kit))
+            .min_by(|a, b| {
+                let d = |p: &Prop| Vec2::new(p.pos[0], p.pos[2]).distance(Vec2::from(poi.pos));
+                d(a).total_cmp(&d(b))
+            })
             .unwrap();
         let f = world::props::dir_of_yaw(prop.yaw);
         let road = Vec2::new(f.x, f.y);
@@ -603,13 +723,35 @@ mod tests {
         }
         for id in &ids {
             app.switch_vehicle(id).unwrap();
-            let w = app.drivethru.as_ref().unwrap().windows[0];
+            // The window of that shop: the nearest its lot's front.
+            let front = Vec2::new(prop.pos[0], prop.pos[2]);
+            let w = *app
+                .drivethru
+                .as_ref()
+                .unwrap()
+                .windows
+                .iter()
+                .min_by(|a, b| {
+                    let d = |w: &Window| Vec2::new(w.sill.x, w.sill.z).distance(front);
+                    d(a).total_cmp(&d(b))
+                })
+                .unwrap();
             let hip = app.drive.layout.seating.hip;
             let [len, width, _] = app.drive.spec.dims_m;
-            // 24 m out toward the street, nose in, 2.5 m wide of the lane's middle (clear of
-            // the sidewalk's hydrant at its mouth at seed 1); the driver steers into it.
+            // 24 m out toward the street, nose in, beside the lane's middle where the
+            // sidewalk has nothing standing (a hydrant, a tree); the driver steers into it.
             let lane = 0.5 * width + 1.0;
-            let start = Vec2::new(w.sill.x, w.sill.z) + w.out * (lane + 2.5) + road * 24.0;
+            let start = [2.5, 0.0, 5.0, 7.5]
+                .map(|wide| Vec2::new(w.sill.x, w.sill.z) + w.out * (lane + wide) + road * 24.0)
+                .into_iter()
+                .find(|s| {
+                    place
+                        .props
+                        .items
+                        .iter()
+                        .all(|q| Vec2::new(q.pos[0], q.pos[2]).distance(*s) > 3.5)
+                })
+                .unwrap();
             let (y, _) = app.ground.level_at([start.x, start.y]);
             let heading = (road.x).atan2(road.y);
             app.drive = crate::drive::Drive::with_layout(
@@ -648,7 +790,11 @@ mod tests {
                 };
                 app.drive.step(input, &app.ground);
                 let c = app.drive_thru_car();
-                worst_gap = worst_gap.min((c.door - Vec2::new(w.sill.x, w.sill.z)).dot(w.out));
+                // Beside the shop's wall (its 11 m round the window), the door stays off it.
+                let d = c.door - Vec2::new(w.sill.x, w.sill.z);
+                if d.perp_dot(w.out).abs() < 6.0 {
+                    worst_gap = worst_gap.min(d.dot(w.out));
+                }
                 app.drivethru.as_mut().unwrap().step(&c, DT);
             }
             let boxes = app.drivethru.as_ref().unwrap().boxes;
