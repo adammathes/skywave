@@ -3503,8 +3503,12 @@ const SOUND_WALL_CLEAR_M: f32 = 6.0;
 /// the side streets that stop short of it stop at a wall, as they do in the basin's real
 /// counterparts. A run is left out near every other road (ramps, the streets crossing
 /// over or under it, frontage streets), near the tunnel, where the freeway stands more
-/// than a little off the ground (bridges, cuts) and outside the place.
+/// than a little off the ground (bridges, cuts) and outside the place. The Bay's freeways
+/// run open between grass shoulders, so it has none.
 pub fn sound_walls(place: &Place) -> Vec<Prop> {
+    if place.header.region == place::RegionId::BayArea {
+        return Vec::new();
+    }
     let mut deg = alloc::vec![0u32; place.roads.nodes.len()];
     for e in &place.roads.edges {
         deg[e.a as usize] += 1;

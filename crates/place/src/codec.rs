@@ -663,6 +663,7 @@ fn region(v: u8) -> Option<RegionId> {
         2 => RegionId::GreatLakesCity,
         3 => RegionId::NorthShoreSuburb,
         4 => RegionId::SocalBasin,
+        5 => RegionId::BayArea,
         _ => return None,
     })
 }

@@ -49,7 +49,7 @@ fn layout() -> Layout {
 /// Pinned `Place::content_hash` of the Bay Loop for seed 1. It moves whenever the layout,
 /// the zone rules or any shared stage changes: regenerate with `--nocapture` and commit it
 /// on its own with the reason.
-const GOLDEN: u64 = 0xdaaa48aca467eaaf;
+const GOLDEN: u64 = 0xf8484787c7b196c7;
 
 #[test]
 fn the_bay_loop_validates_and_is_deterministic() {
@@ -146,7 +146,12 @@ fn main_roads_are_one_network_with_bridges_over_water() {
         on + deck > all * 97 / 100,
         "roads sit on the ground ({on} of {all})"
     );
-    assert!(g.edges.iter().all(|e| e.class != RoadClass::Highway));
+    // The freeways round the bay, and the bayshore's two interchanges' ramps.
+    assert!(g.edges.iter().any(|e| e.class == RoadClass::Highway));
+    assert!(
+        g.edges.iter().filter(|e| e.oneway).count() >= 8,
+        "two diamonds of four ramps"
+    );
 }
 
 #[test]
