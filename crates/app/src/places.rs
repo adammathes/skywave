@@ -1,13 +1,14 @@
 //! The places a scene can be in ([`PlaceKey`]): the hand-laid test town, a procedural place
-//! built at load from its seed and its scenario's region template, or the landmark gallery.
-//! A scenario names its facade grammar ([`grammar_of`]; the test town uses the first
-//! scenario's, [`grammar`]); every grammar letters its shop signs from one lexicon and
-//! carries the landmark kits ([`landmarks`]).
+//! built at load from its seed and its scenario's region template (and authored layout, if
+//! it has one), or the landmark gallery. A scenario names its facade grammar
+//! ([`grammar_of`]; the test town uses the first scenario's, [`grammar`]); every grammar
+//! letters its shop signs from one lexicon and carries the landmark kits
+//! ([`builtin::landmarks`]).
 //!
-//! A release build bakes each world's place for [`builtin::BAKED_SEED`] at build time (`build.rs`),
-//! so the default start decodes it instead of generating it; any other seed, and every
-//! debug build, generates at load. Generation is deterministic, so the two are the same
-//! place.
+//! A release build bakes each world's place for [`builtin::BAKED_SEED`] at build time
+//! (`build.rs`), so the default start decodes it instead of generating it; any other seed,
+//! and every debug build, generates at load. Generation is deterministic, so the two are
+//! the same place.
 
 use std::sync::OnceLock;
 
@@ -17,27 +18,23 @@ use world::template::RegionTemplate;
 use world::{ChunkPlan, Grammar, Palette};
 
 use crate::builtin::{self, GRAMMARS};
-#[cfg(test)]
-use crate::builtin::{
-    grammar_text, landmarks, load_builtin_grammar, load_grammar, parse_kit, region_text,
-    CALIFORNIA_COAST_80S, LANDMARKS, LEXICON, SOCAL_BASIN_2001,
-};
 use crate::scenario::Scenario;
 use crate::scene::PlaceKey;
 
-/// `(region template id, grammar file, encoded Place)` for every world, baked by `build.rs`
-/// (empty in a debug build).
-const BAKED: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/baked.rs"));
+/// `(region template id, layout id or "", grammar file, encoded Place)` for every world,
+/// baked by `build.rs` (empty in a debug build).
+const BAKED: &[(&str, &str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/baked.rs"));
 
 /// Scenario `s`'s place for `seed` as the build baked it, if it did.
 fn baked(seed: Seed, s: &Scenario) -> Option<&'static [u8]> {
     if seed != builtin::BAKED_SEED {
         return None;
     }
+    let layout = s.layout.as_deref().unwrap_or("");
     BAKED
         .iter()
-        .find(|(r, g, _)| *r == s.region && *g == s.grammar)
-        .map(|(_, _, bytes)| *bytes)
+        .find(|(r, l, g, _)| *r == s.region && *l == layout && *g == s.grammar)
+        .map(|(_, _, _, bytes)| *bytes)
 }
 
 /// The palette named `id`.
@@ -84,21 +81,31 @@ pub fn build(key: PlaceKey, seed: Seed) -> Result<Place, String> {
 
 /// [`build_in`] and the place's [`ChunkPlan`] for meshes painted with [`palette_of`]`(s)`,
 /// made once: a generated procedural place's is the one its detail pass read, a baked
-/// one's is made afresh (the same plan: `world`'s `a_planned_place_builds_as_a_fresh_plan`).
+/// one's is made afresh (the same plan: the test `fresh_plans_are_the_planned_ones`).
 pub fn load(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan), String> {
     if key == PlaceKey::Coast && baked(seed, s).is_none() {
-        let t = template_of(s)?;
-        let pal = palette_of(s);
-        return Ok(world::procgen::build_place_planned(
-            seed,
-            &t,
-            grammar_of(s),
-            &pal,
-        ));
+        return generate_planned(seed, s);
     }
     let place = build_in(key, seed, s)?;
     let plan = ChunkPlan::new(&place, &palette_of(s), grammar_of(s));
     Ok((place, plan))
+}
+
+/// Scenario `s`'s procedural place for `seed`, generated, with the plan its detail pass
+/// read brought up to date for [`palette_of`]`(s)`.
+fn generate_planned(seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan), String> {
+    let t = template_of(s)?;
+    let pal = palette_of(s);
+    Ok(match &s.layout {
+        Some(id) => world::procgen::authored::build_place_planned(
+            seed,
+            &builtin::layout(id)?,
+            &t,
+            grammar_of(s),
+            &pal,
+        ),
+        None => world::procgen::build_place_planned(seed, &t, grammar_of(s), &pal),
+    })
 }
 
 /// Scenario `s`'s region template, checked.
@@ -118,7 +125,7 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
         }
         PlaceKey::Coast => match baked(seed, s) {
             Some(bytes) => place::decode(bytes).map_err(|e| format!("baked place: {e:?}")),
-            None => builtin::generate(seed, &s.region, grammar_of(s)),
+            None => builtin::generate(seed, &s.region, s.layout.as_deref(), grammar_of(s)),
         },
         PlaceKey::Gallery => {
             let t = template_of(s)?;
@@ -139,6 +146,34 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtin::{
+        grammar_text, landmarks, load_builtin_grammar, load_grammar, parse_kit, region_text,
+        CALIFORNIA_COAST_80S, LANDMARKS, LEXICON, SOCAL_BASIN_2001,
+    };
+
+    /// A plan made afresh from the finished place (a baked load) builds as the plan its
+    /// detail pass read (a generated load), in every world, and the place survives its
+    /// encoding.
+    #[test]
+    fn fresh_plans_are_the_planned_ones() {
+        for s in crate::scenario::all() {
+            let (p, plan) = generate_planned(Seed(1), s).unwrap();
+            let (pal, g) = (palette_of(s), grammar_of(s));
+            let fresh = ChunkPlan::new(&p, &pal, g);
+            assert!(
+                plan.far_terrain(&p, &pal) == fresh.far_terrain(&p, &pal),
+                "{}",
+                s.id
+            );
+            assert!(
+                world::WorldCollider::with_plan(&p, g, &plan)
+                    == world::WorldCollider::with_plan(&p, g, &fresh),
+                "{}",
+                s.id
+            );
+            assert_eq!(place::decode(&place::encode(&p)).unwrap(), p, "{}", s.id);
+        }
+    }
 
     #[test]
     fn the_built_in_grammar_loads_and_round_trips() {
@@ -172,8 +207,9 @@ mod tests {
         for s in crate::scenario::all() {
             assert!(region_text(&s.region).is_some());
             assert!(core::ptr::eq(grammar_of(s), grammar_of(s)), "parsed once");
-            // A world still being built may dress in another's grammar.
-            if !s.stub {
+            // A world still being built, or one from an authored layout that has no grammar of
+            // its own yet, may dress in another's grammar.
+            if !s.stub && s.layout.is_none() {
                 assert_eq!(grammar_of(s).template, s.region);
             }
             assert!(palette(&s.palette).is_some());

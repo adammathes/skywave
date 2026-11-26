@@ -74,7 +74,12 @@ mountains, rolling hills behind hills and highway loops, a low forest, flat rail
 bay, the sea floor (left out) past the coast, where the water plane runs on 3 km to the camera's far plane.
 Past a corner the two sides blend by angle, so headlands taper into the sea. The distance fog carries the
 ridgelines into the sky's haze; there is no rectangle to see. Chunks with an ocean or lake shore draw the
-surf on the water: a foam band at the waterline and, at sea, a broken line of breakers further out.
+surf on the water: a foam band at the waterline and, at sea, a broken line of breakers further out. Every other street lamp also
+gets a small sodium point in the far terrain, 7 m up and lit only at night, so from a hill the flat beyond the
+streamed chunks reads as a carpet of lights (8 triangles a lamp; untextured, so the far terrain keeps
+its shared vertices).
+
+![The basin from a hill at 21:30 and 14:00](images/la-night-carpet.jpg)
 
 Meshes are drawn camera relative: each instance's translation goes to the GPU minus the camera's position (on the CPU) and the vertex shader projects with the view's rotation alone, adding the camera back only for lighting. In world coordinates a vertex 1–2.5 km from the origin was rounded by 0.2–0.6 mm on the GPU, and layers half a millimetre apart (a radio display on its face, mirror glass, a sign's plate) swapped in patches every frame while moving (`render::camera_relative`).
 
@@ -100,7 +105,7 @@ First person cockpit (eye position from the spec; head sways with suspension and
 | Player car exterior (LOD0) | 8–14k |
 | Player car interior | 4–8k |
 | Parked / NPC cars | 3–5k within 80 m (LOD1), ~2k beyond (LOD2) |
-| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300; a shop's blade sign (frame, word, pictogram, both faces) ≤ 360 (`props::BLADE_TRIANGLES`) |
+| Props | 300–2500 (trees 600–1200, lamps ~150); small street items (mailboxes, signs, hydrants) 50–300; a shop's blade sign (frame, word, pictogram, both faces) ≤ 360 (`props::BLADE_TRIANGLES`); a pole sign (pole, head, name on both faces) ≤ 900 (`props::POLE_SIGN_TRIANGLES`) |
 | Buildings | ≤ 3.5k (ceiling): `world::buildings` plans each to 2,000 and adds what a street front's base band costs, up to the ceiling |
 | Chunk vertex cap | 256k vertices (384k comes with the building pass, when a chunk needs it) |
 

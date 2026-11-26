@@ -12,6 +12,7 @@
 //! changing one stage's draws never shifts another's.
 
 pub mod arterials;
+pub mod authored;
 pub mod basin;
 pub mod build;
 pub mod buildings;

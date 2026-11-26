@@ -9,11 +9,14 @@ use place::Place;
 use skywave_core::Seed;
 
 use world::landmarks::Kit;
+use world::layout::Layout;
 use world::template::RegionTemplate;
 use world::Grammar;
 
 pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
 pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
+pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 pub const CALIFORNIA_COAST_80S: &str =
     include_str!("../../../assets/grammar/california_coast_80s.ron");
 pub const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
@@ -29,10 +32,13 @@ pub const LANDMARKS: [(&str, &str); 9] = world::landmarks::BUILTIN;
 pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-pub const REGIONS: [(&str, &str); 2] = [
+pub const REGIONS: [(&str, &str); 3] = [
     ("california_coast", CALIFORNIA_COAST),
     ("socal_basin", SOCAL_BASIN),
+    ("bay_area", BAY_AREA),
 ];
+/// The authored layouts compiled into the game, as `(id, RON text)`.
+pub const LAYOUTS: [(&str, &str); 1] = [("bay_loop", BAY_LOOP)];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
 pub const GRAMMARS: [(&str, &str); 2] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
@@ -44,6 +50,11 @@ pub fn region_text(id: &str) -> Option<&'static str> {
     REGIONS.iter().find(|(r, _)| *r == id).map(|(_, t)| *t)
 }
 
+/// The text of the built-in authored layout `id`.
+pub fn layout_text(id: &str) -> Option<&'static str> {
+    LAYOUTS.iter().find(|(l, _)| *l == id).map(|(_, t)| *t)
+}
+
 /// The text of the built-in grammar file `file`.
 pub fn grammar_text(file: &str) -> Option<&'static str> {
     GRAMMARS.iter().find(|(g, _)| *g == file).map(|(_, t)| *t)
@@ -51,7 +62,7 @@ pub fn grammar_text(file: &str) -> Option<&'static str> {
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them (`crate::scenario::BUILTIN`).
-pub const SCENARIOS: [(&str, &str); 2] = [
+pub const SCENARIOS: [(&str, &str); 3] = [
     (
         "socal_beach_1984",
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
@@ -59,6 +70,10 @@ pub const SCENARIOS: [(&str, &str); 2] = [
     (
         "mirage_valley_2001",
         include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
+    ),
+    (
+        "bay_loop_2005",
+        include_str!("../../../assets/scenarios/bay_loop_2005.ron"),
     ),
 ];
 
@@ -115,13 +130,27 @@ pub fn template(id: &str) -> Result<RegionTemplate, String> {
 /// The seed whose places a release build bakes (`build.rs`): a scene's default.
 pub const BAKED_SEED: Seed = Seed(1);
 
-/// The procedural place of region template `region` for `seed`, its buildings planned by
-/// `grammar`: what the build bakes and what a load generates (`crate::places`), so a new
-/// way to make a world changes both.
-pub fn generate(seed: Seed, region: &str, grammar: &Grammar) -> Result<Place, String> {
-    Ok(world::procgen::build_place(
-        seed,
-        &template(region)?,
-        grammar,
-    ))
+/// Parses the built-in authored layout `id` and checks it.
+pub fn layout(id: &str) -> Result<Layout, String> {
+    let text = layout_text(id).ok_or("no such layout")?;
+    let l: Layout = ron::from_str(text).map_err(|e| format!("layout: {e}"))?;
+    l.validate().map_err(|e| format!("layout {id}: {e}"))?;
+    Ok(l)
+}
+
+/// The procedural place for `seed` of authored layout `layout` dressed by region template
+/// `region`'s zone rules, or without one of the region template alone, its buildings
+/// planned by `grammar`: what the build bakes and what a load generates
+/// (`crate::places`), so a new way to make a world changes both.
+pub fn generate(
+    seed: Seed,
+    region: &str,
+    layout: Option<&str>,
+    grammar: &Grammar,
+) -> Result<Place, String> {
+    let t = template(region)?;
+    Ok(match layout {
+        Some(id) => world::procgen::authored::build_place(seed, &self::layout(id)?, &t, grammar),
+        None => world::procgen::build_place(seed, &t, grammar),
+    })
 }
