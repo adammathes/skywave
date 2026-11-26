@@ -11,7 +11,7 @@ use world::layout::{Layout, LayoutError};
 use world::procgen::authored;
 use world::template::RegionTemplate;
 
-const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+const GRAMMAR: &str = include_str!("../../../assets/grammar/bay_area_2005.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
@@ -42,7 +42,7 @@ fn layout() -> Layout {
 /// Pinned `Place::content_hash` of the Bay Loop for seed 1. It moves whenever the layout,
 /// the zone rules or any shared stage changes: regenerate with `--nocapture` and commit it
 /// on its own with the reason.
-const GOLDEN: u64 = 0x0b16667d58f79b12;
+const GOLDEN: u64 = 0xa0918de6431f0211;
 
 #[test]
 fn the_bay_loop_validates_and_is_deterministic() {
