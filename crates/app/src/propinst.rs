@@ -80,6 +80,10 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("sorrel_utility", 1),
         ("wren_minivan", 1),
         ("percheron_pickup", 1),
+        ("heron_sedan", 3),
+        ("tern_compact", 3),
+        ("egret_hybrid", 2),
+        ("ibis_crossover", 1),
     ], // Sedan
     &[
         ("homestead_wagon", 3),
@@ -90,6 +94,7 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("wren_minivan", 3),
         ("plover_sedan", 1),
         ("percheron_pickup", 1),
+        ("ibis_crossover", 3),
     ], // Wagon
     &[
         ("seabreeze_convertible", 3),
@@ -103,12 +108,13 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("drayman_van", 1),
         ("wren_minivan", 1),
     ], // Van
-    &[("pipit_hatch", 1), ("linnet_hatch", 1)],          // Hatch
+    &[("pipit_hatch", 1), ("linnet_hatch", 1), ("egret_hybrid", 1)], // Hatch
     &[("seabreeze_convertible", 1)],                     // Convertible
     &[
         ("regent_coupe_cabrio", 1),
         ("bancroft_sedan", 1),
         ("plover_sedan", 1),
+        ("heron_sedan", 1),
     ], // Luxury
     &[("gannet_gt", 1), ("halcyon_turbo", 1), ("appaloosa_gt", 1)], // Muscle
 ];

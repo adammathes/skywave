@@ -1,0 +1,46 @@
+// Heron Sedan: an early-2000s front-drive mid-size family sedan with a 2.4 L four.
+//
+// Intent: the commuter in every office-park lot. Roomy, smooth and soft: a torquey four
+// through a five-speed automatic, light steering, comfortable springs, safe understeer and
+// ABS. A little quicker and stiffer than the family sedans of the late 90s, never sporty.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "heron_sedan",
+    name: "Heron Sedan",
+    era: Aughts,
+    year: 2003,
+    class: Sedan,
+
+    mass_kg: 1450,
+    dims_m: (4.82, 1.82, 1.48),    // length, width, height
+    wheelbase_m: 2.72,
+    track_m: 1.56,
+    cg_height_m: 0.53,
+    cg_fore_aft: 0.40,
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 6200,
+        torque_nm: [(1000, 170), (2500, 205), (4000, 220), (5200, 210), (6200, 185)],
+    ),
+    gears: [3.30, 1.90, 1.25, 0.90, 0.70],
+    final_drive: 3.6,
+    reverse: 2.6,
+    shift_ms: 320,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 1.0, grip_long: 0.99, load_sens: 0.1, slip_peak_deg: 8.0),
+    suspension: Susp(spring_n_m: 27000, damper: 2500, travel_m: 0.17, antiroll: 0.30),
+    steering: Steer(max_deg: 34, speed_sens: 0.55, return_rate: 7.5),
+    brakes: Brakes(max_nm: 3400, bias_front: 0.68, abs: true, handbrake_nm: 2200),
+    aero: Aero(cd: 0.30, frontal_m2: 2.2, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.15, body_roll: 0.5, engine_sound: "i4_soft", shift_jerk: 0.08),
+    interior: Interior(
+        dash: "sport_00s",
+        gauges: [Speedo(0, 140, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "heron_sedan.shape.ron",
+)

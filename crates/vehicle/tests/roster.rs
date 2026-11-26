@@ -31,7 +31,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 41] = [
+const ROSTER: [Entry; 45] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -71,6 +71,11 @@ const ROSTER: [Entry; 41] = [
     (car!("tulwar_sedan"), (7.3, 8.3)),
     (car!("petrel_roadster"), (5.3, 6.2)),
     (car!("lipizzan_sedan"), (5.3, 6.0)),
+    // The 2005 traffic cars: the hybrid, the family sedan, the compact and the crossover.
+    (car!("egret_hybrid"), (9.5, 11.5)),
+    (car!("heron_sedan"), (8.0, 9.5)),
+    (car!("tern_compact"), (8.8, 10.5)),
+    (car!("ibis_crossover"), (7.8, 9.5)),
     // The 2001 traffic cars (the semi, which only traffic drives, is not driven here).
     (car!("plover_sedan"), (9.3, 10.3)),
     (car!("sorrel_utility"), (9.9, 10.9)),

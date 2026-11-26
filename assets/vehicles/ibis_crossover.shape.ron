@@ -1,0 +1,59 @@
+// Ibis Crossover body: a mid-2000s car-based crossover.
+//
+// Intent: a tall wagon on a sedan's bones, not a truck. A rounded nose with swept lamps and
+// a wide bright grille, a raked windshield, a long flat roof with rails, a steep rear hatch,
+// a high beltline, gray lower cladding round the arches, wrapped tail lamps and big
+// five-spoke alloys. Mostly silver and dark metallics. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "ibis_crossover",
+    side: [
+        (0.00, 0.72), (0.04, 0.82), (0.16, 0.90), (0.50, 0.96), (1.10, 1.04), (1.18, 1.06),
+        (1.75, 1.50), (2.00, 1.64), (2.20, 1.68), (4.10, 1.66), (4.48, 1.52),
+        (4.58, 1.10), (4.60, 1.04),
+        (4.60, 0.46), (4.48, 0.36), (4.00, 0.30), (0.85, 0.28), (0.14, 0.34), (0.00, 0.48),
+    ],
+    plan: [
+        (0.00, 0.74), (0.08, 0.85), (0.30, 0.90), (0.80, 0.91), (4.30, 0.91), (4.52, 0.89),
+        (4.60, 0.85),
+    ],
+    belt: [(1.18, 1.07), (3.00, 1.11), (4.40, 1.16)],
+    section: Section(shoulder: 0.88, tumblehome_deg: 16, greenhouse_frac: 0.80, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.20, 1.96),
+        backlight: (4.38, 4.55),
+        side: [(1.75, 2.70), (2.80, 3.60), (3.72, 4.30)],
+    ),
+    wheels: Wheels(radius: 0.35, width: 0.225, arch_clearance: 0.045, front_x: 0.95, rear_x: 3.57, track: 1.56),
+    front: Front(lights: Swept, grille: Wide, bumper: Body, bumper_y: (0.34, 0.56)),
+    rear: Rear(lights: Wrap, spoiler: Lip, bumper: Body, bumper_y: (0.38, 0.60)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.84, creases: [(0.20, 0.56, 4.56, 0.60)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 3, exhaust: Single, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, RoofRack, Badge(Chevron)],
+    // Silver, dark gray, champagne, black, dark green, white, deep red; each over gray cladding.
+    palette: ["#b8bcc0/#55585c", "#55585d/#3e4044", "#cbc2aa/#5a5650", "#18191c/#3e4044", "#2a3c34/#55585c", "#eeede8/#55585c", "#5a1a22/#55585c"],
+    accent: "#2a2b2e",
+    interior: InteriorShape(
+        dash_height: 1.04,
+        dash_x: 1.56,
+        wheel_pos: (2.00, 0.92),
+        wheel_radius: 0.19,
+        column_angle_deg: 22,
+        mirror_pos: (1.88, 1.50),
+        seat: (2.50, 0.64),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: dark gray plastic, tan cloth with a
+        // matching insert, dark carpet, a light headliner and blue-white dials.
+        colors: ["#2e3034", "#a89a80", "#3a3a3c", "#c6c2b8", "#4a4c50", "#a8c8ff"],
+        display: "#a8c8ff",
+        insert: "#9a8c72",
+        piping: "#5a5448",
+        dash_top: "#2e3034",
+        applique: None,
+        manual: false,
+    ),
+)

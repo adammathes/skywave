@@ -1,0 +1,59 @@
+// Tern Compact body: an early-2000s compact four-door sedan.
+//
+// Intent: small, neat and tall for its size. A short rounded nose with swept lamps and a
+// small bright grille, a raked windshield into an arched roof, a short high deck, a soft
+// rising beltline, wrapped tail lamps, body-colored bumpers and plastic wheel covers on
+// most of them. Mostly silver. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "tern_compact",
+    side: [
+        (0.00, 0.58), (0.04, 0.68), (0.14, 0.75), (0.40, 0.80), (0.95, 0.89), (1.02, 0.91),
+        (1.55, 1.28), (1.85, 1.41), (2.05, 1.43), (2.60, 1.43), (3.00, 1.36), (3.35, 1.15),
+        (3.60, 1.07), (3.68, 1.06), (4.28, 1.05), (4.38, 1.00), (4.42, 0.92),
+        (4.42, 0.35), (4.30, 0.25), (3.85, 0.19), (0.75, 0.18), (0.14, 0.22), (0.00, 0.35),
+    ],
+    plan: [
+        (0.00, 0.66), (0.08, 0.78), (0.30, 0.84), (0.80, 0.85), (3.95, 0.85), (4.25, 0.83),
+        (4.42, 0.76),
+    ],
+    belt: [(1.02, 0.92), (2.30, 0.96), (3.60, 1.05)],
+    section: Section(shoulder: 0.86, tumblehome_deg: 20, greenhouse_frac: 0.78, crown: 0.06, tuck: 0.06),
+    glass: Glass(
+        windshield: (1.04, 1.88),
+        backlight: (3.02, 3.62),
+        side: [(1.38, 2.45), (2.55, 3.20)],
+    ),
+    wheels: Wheels(radius: 0.30, width: 0.195, arch_clearance: 0.04, front_x: 0.86, rear_x: 3.48, track: 1.48),
+    front: Front(lights: Swept, grille: Egg, bumper: Body, bumper_y: (0.24, 0.44)),
+    rear: Rear(lights: Wrap, spoiler: None, bumper: Body, bumper_y: (0.30, 0.50)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.78, creases: [(0.25, 0.66, 4.36, 0.72)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true),
+    details: [BlackTrim, Badge(Circle)],
+    // Silver, light silver, white, black, dark blue, red, gold-beige.
+    palette: ["#b8bcc0", "#cdd0d2", "#eeede8", "#18191c", "#1e2c4a", "#8a1c22", "#c2b48e"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 0.88,
+        dash_x: 1.42,
+        wheel_pos: (1.88, 0.74),
+        wheel_radius: 0.18,
+        column_angle_deg: 26,
+        mirror_pos: (1.74, 1.28),
+        seat: (2.40, 0.46),
+        driver_offset: 0.36,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: dark gray plastic, gray cloth with a
+        // dotted insert, gray carpet, a pale headliner and amber-lit dials.
+        colors: ["#2e3034", "#5e6064", "#3e4044", "#c2c0ba", "#4a4c50", "#ffb050"],
+        display: "#ffb050",
+        insert: "#6a6c72",
+        piping: "#45474b",
+        dash_top: "#2e3034",
+        applique: None,
+        manual: false,
+    ),
+)

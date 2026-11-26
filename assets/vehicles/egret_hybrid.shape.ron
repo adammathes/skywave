@@ -1,0 +1,59 @@
+// Egret Hybrid body: a mid-2000s hybrid hatchback shaped for the wind.
+//
+// Intent: one arc from nose to tail. A short low nose with swept lamps and almost no
+// grille, a long raked windshield, the roof's peak over the front seats, a long falling
+// roof into a chopped tail with a split rear window, a rising beltline, covered
+// aero wheels and a smooth body-colored skin. Mostly silver. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "egret_hybrid",
+    side: [
+        (0.00, 0.58), (0.04, 0.67), (0.14, 0.73), (0.40, 0.79), (0.84, 0.88), (0.92, 0.90),
+        (1.50, 1.30), (1.90, 1.46), (2.25, 1.49), (2.60, 1.48), (3.20, 1.40), (3.70, 1.27),
+        (4.08, 1.15), (4.38, 1.00), (4.45, 0.92),
+        (4.45, 0.36), (4.32, 0.26), (3.80, 0.20), (0.75, 0.18), (0.14, 0.22), (0.00, 0.36),
+    ],
+    plan: [
+        (0.00, 0.66), (0.08, 0.78), (0.30, 0.84), (0.80, 0.86), (3.90, 0.86), (4.25, 0.84),
+        (4.45, 0.76),
+    ],
+    belt: [(0.92, 0.90), (2.40, 0.98), (4.00, 1.08)],
+    section: Section(shoulder: 0.84, tumblehome_deg: 22, greenhouse_frac: 0.76, crown: 0.06, tuck: 0.07),
+    glass: Glass(
+        windshield: (0.94, 1.84),
+        backlight: (3.22, 4.06),
+        side: [(1.30, 2.20), (2.30, 3.00), (3.08, 3.62)],
+    ),
+    wheels: Wheels(radius: 0.30, width: 0.185, arch_clearance: 0.04, front_x: 0.86, rear_x: 3.56, track: 1.50),
+    front: Front(lights: Swept, grille: Slot, bumper: Body, bumper_y: (0.24, 0.44)),
+    rear: Rear(lights: Wrap, spoiler: Lip, bumper: Body, bumper_y: (0.30, 0.50)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.78, creases: [(0.30, 0.66, 4.40, 0.72)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: None, rims: Turbine, hubcaps: true),
+    details: [BlackTrim, Badge(Circle)],
+    // Silver, light silver, pale blue-silver, white, dark gray, deep blue, sage.
+    palette: ["#b8bcc0", "#cdd0d2", "#a9b4bc", "#eeede8", "#5a5d62", "#2a3a5c", "#8e9a88"],
+    accent: "#1c1c1e",
+    interior: InteriorShape(
+        dash_height: 0.92,
+        dash_x: 1.32,
+        wheel_pos: (1.80, 0.76),
+        wheel_radius: 0.18,
+        column_angle_deg: 26,
+        mirror_pos: (1.66, 1.30),
+        seat: (2.34, 0.50),
+        driver_offset: 0.36,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: a light gray two-tone dash, gray
+        // cloth with a blue-gray insert, gray carpet, a pale headliner and a blue display.
+        colors: ["#6a6c70", "#5e6064", "#45474b", "#c8c6c0", "#8a8c90", "#7ac8ff"],
+        display: "#7ac8ff",
+        insert: "#5a6878",
+        piping: "#4a4c50",
+        dash_top: "#4a4c50",
+        applique: None,
+        manual: false,
+    ),
+)
