@@ -14,8 +14,7 @@ if [[ "${1:-}" == "--setup" ]]; then
     [[ "$(id -u)" == 0 ]] || sudo="sudo"
     $sudo apt-get update
     $sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers gcc-multilib
-    rustup component add rustfmt clippy
-    rustup target add wasm32-unknown-unknown i686-unknown-linux-gnu
+    rustup toolchain install # rust-toolchain.toml: version, components, targets
     deny="$(awk -F'"' '/CARGO_DENY_VERSION:/ { print $2 }' .github/workflows/ci.yml)"
     if [[ "$(cargo deny --version 2>/dev/null || true)" != "cargo-deny $deny" ]]; then
         cargo install cargo-deny --locked --version "$deny"

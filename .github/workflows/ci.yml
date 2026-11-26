@@ -20,11 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Installs the version, components and targets in rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal \
-            --component rustfmt,clippy --target wasm32-unknown-unknown,i686-unknown-linux-gnu
-          rustup default stable
+        run: rustup toolchain install
 
       # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/.
       - uses: Swatinem/rust-cache@v2
@@ -74,10 +72,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Installs the version, components and targets in rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
 

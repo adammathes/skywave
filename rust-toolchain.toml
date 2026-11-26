@@ -1,0 +1,8 @@
+# One Rust for CI, release builds and every session. A floating `stable` broke CI on every
+# branch when 1.100 shipped (new clippy lints) and invalidated every build cache at once.
+# Bump it on purpose, in its own PR.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown", "i686-unknown-linux-gnu"]
