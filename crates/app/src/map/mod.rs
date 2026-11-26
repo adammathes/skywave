@@ -11,6 +11,7 @@
 //! centers. Everything is plain f32 arithmetic in a fixed order (no `mul_add`, no hashing
 //! order), so the same Place gives bit-identical pixels on every platform.
 
+pub mod districts;
 pub mod names;
 pub mod view;
 
