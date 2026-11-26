@@ -171,8 +171,10 @@ fn plan(layout: &Layout, m: &MacroMap, g: &RoadGraph, bridge_heights: Vec<f32>) 
         let (a, b) = (node(line[0]), node(line[1]));
         let (mid, side) = (a.lerp(b, 0.5), (b - a).normalize().right());
         for out in [side, -side] {
-            let rise = h(mid - out * FOOT_REACH_M) - h(mid);
-            if rise > foot.0 {
+            let up = mid - out * FOOT_REACH_M;
+            let rise = h(up) - h(mid);
+            // A slope inside the place: one you can stand below and look up at.
+            if rise > foot.0 && m.in_playable(up.x, up.y, 0.0) {
                 foot = (rise, lines.len(), out);
             }
         }

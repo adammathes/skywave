@@ -160,7 +160,7 @@ fn a_road_to_nowhere_is_refused() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0xddb7258b7cb4d1ee;
+const BOWL_GOLDEN: u64 = 0xdd11a1ff36ab000e;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.
@@ -201,11 +201,11 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
     // The freeway across the floor.
     assert!(p.roads.edges.iter().any(|e| e.class == RoadClass::Highway));
     // The set pieces found their places: the drag strip on the runway, gates where the
-    // rail line crosses the avenues, the tunnel, the garage, the hall, the letters.
+    // rail line crosses the avenues, the garage, the hall, the letters. (No tunnel: a street
+    // bridges the freeway every block, and a tunnel wants 128 m of it to itself.)
     let count = |k: PoiKind| p.pois.iter().filter(|q| q.kind == k).count();
     for k in [
         PoiKind::DragStrip,
-        PoiKind::Tunnel,
         PoiKind::CrewGarage,
         PoiKind::TacoStand,
         PoiKind::CityHall,
@@ -216,6 +216,7 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
     ] {
         assert_eq!(count(k), 1, "{k:?}");
     }
+    assert_eq!(count(PoiKind::Tunnel), 0);
     assert_eq!(count(PoiKind::Overlook), 4);
     assert!(count(PoiKind::GradeCrossing) >= 5);
     assert!(count(PoiKind::DonutShop) >= 2 && count(PoiKind::BurgerStand) >= 2);

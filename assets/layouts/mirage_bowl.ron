@@ -1,4 +1,4 @@
-// Mirage Bowl (docs/LAYOUTS.md; the LA direction in docs/SCENARIOS.md, "Mirage Valley 2001"):
+// Mirage Bowl (docs/LAYOUTS.md; the LA direction in docs/SCENARIOS.md, "Mirage Bowl 2001"):
 // a city made to be seen from a car, in a bowl you can always see the rim of. A flat floor of
 // one-story sheds and bungalows, a long mountain front across the north with one high summit
 // that the main avenue drives straight at, lower ranges east and west, rail yards to the
@@ -18,10 +18,12 @@ Layout(
         // The mountain front: the rim you see down every north-south street.
         Ridge(name: "front range", line: [(0, 230), (700, 200), (1500, 170), (2300, 190), (3072, 240)],
               heights_m: [150, 210, 250, 220, 170], falloff_m: 460, relief_m: 18),
+        // The side ranges rise from the edge of the flats: a foot reaching in under the
+        // avenues would leave a step where the floor is levelled.
         Ridge(name: "east range", line: [(3010, 300), (2990, 1200), (3020, 2400)],
-              heights_m: [170, 120, 70], falloff_m: 330, relief_m: 12),
+              heights_m: [170, 120, 70], falloff_m: 190, relief_m: 12),
         Ridge(name: "west hills", line: [(60, 400), (90, 1400), (70, 2500)],
-              heights_m: [110, 80, 50], falloff_m: 250, relief_m: 10),
+              heights_m: [110, 80, 50], falloff_m: 150, relief_m: 10),
     ],
     peaks: [
         Peak(name: "summit", at: (1900, 110), height_m: 300, falloff_m: 520),
