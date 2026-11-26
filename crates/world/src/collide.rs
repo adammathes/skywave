@@ -1379,6 +1379,18 @@ fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Ve
                 kind: p.kind,
                 lot: NO_LOT,
             }),
+            PropKind::PoleSign { look, .. } => {
+                if look == 2 {
+                    for s in [-1.3f32, 1.3] {
+                        posts.push(Post {
+                            c: arr(p.pos + p.dir * s),
+                            ..post(0.18, 2.6)
+                        });
+                    }
+                } else {
+                    posts.push(post(0.25, 6.0));
+                }
+            }
             PropKind::Barricade { width_dm } => boxes.push(BoxSolid {
                 c: arr(p.pos),
                 u: arr(p.dir.right()),
