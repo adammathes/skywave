@@ -11,8 +11,13 @@
 //!   zones then smooth the ground under them (the procedural stages' rule) except in
 //!   `hilly` districts, and the land edges raise their walls and paint their bands.
 //! - **Arterials**: each road's line, its free ends snapped onto the road they meet,
-//!   split into edges at every crossing (all at grade), with a profile that follows the
-//!   ground at most `max_grade` steep and rides `deck_m` over the water on bridges.
+//!   split into edges at every crossing, with a profile that follows the ground at most
+//!   `max_grade` steep and rides `deck_m` over the water on bridges. A `Highway` is
+//!   grade-separated: a road crossing it meets nothing and rises to a deck
+//!   [`OVERPASS_LIFT_M`] over it; the roads its `ramps` name get a diamond of one-way
+//!   ramps; its right of way is zoned `Highway`, which keeps streets and lots off it.
+//! - **Channels** ([`channels`]): cut into the ground after the roads are laid, so the
+//!   roads that cross one bridge it; zoned `Highway` (dry) or `Water` (wet).
 //!
 //! Deterministic: the seed only roughens the terrain; the structure is the layout's.
 
@@ -22,17 +27,17 @@ use alloc::vec::Vec;
 use place::{Edge, Node, Place, RoadClass, RoadGraph, Spawn, SpawnKind, ZoneId};
 use skywave_core::Seed;
 
-use super::arterials::{grade_limit, seg_intersect};
+use super::arterials::grade_limit;
 use super::macro_map::{
     ccw, flatten_by_zone, paint_bands, raise_walls, Frame, MacroMap, Strip, WaterBody, WaterKind,
 };
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
-use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_SAMPLES};
+use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};
 use crate::edges;
 use crate::grammar::Grammar;
-use crate::layout::{self, Layout, MAX_GRADE, SNAP_M};
-use crate::math::{abs, atan2, lerp, point_in_polygon, segment_distance, V2};
+use crate::layout::{self, point_at, Layout, MAX_GRADE, RAMP_RUN_M, SNAP_M};
+use crate::math::{abs, atan2, clamp, lerp, point_in_polygon, seg_intersect, segment_distance, V2};
 use crate::template::{CoastSide, RegionTemplate};
 use crate::{ChunkPlan, Palette};
 
@@ -54,6 +59,23 @@ const CARVE_BLEND_M: f32 = 36.0;
 const CARVE_UNDER_M: f32 = 0.05;
 /// Nodes this close merge.
 const MERGE_M: f32 = 2.0;
+/// A road crossing a highway rides this far over it...
+pub const OVERPASS_LIFT_M: f32 = 7.0;
+/// ... level for this far past the highway's edge, then down at this grade.
+const OVERPASS_FLAT_M: f32 = 9.0;
+const APPROACH_GRADE: f32 = 0.04;
+/// Steepest highway grade unless the road says otherwise.
+const HIGHWAY_GRADE: f32 = 0.05;
+/// A ramp meets its crossing road where the approach has come down this far from the deck.
+const RAMP_FOOT_DROP_M: f32 = 1.0;
+/// A ramp stays level with the highway this far from where it leaves it.
+const RAMP_MERGE_M: f32 = 30.0;
+/// A one-lane ramp with shoulders.
+const RAMP_WIDTH_M: f32 = 8.0;
+/// The right of way reaches this far past a highway's or a ramp's edge.
+const RIGHT_OF_WAY_M: f32 = 10.0;
+/// A channel fades in over this length at an end that lies inside the place.
+const CHANNEL_HEAD_M: f32 = 40.0;
 /// Hash key of the layout's terrain noise.
 const KEY: u64 = 0x4c41_594f_5554;
 
@@ -87,8 +109,7 @@ fn build_detailed(
     template: &RegionTemplate,
     grammar: &Grammar,
 ) -> (Place, ChunkPlan) {
-    let mut m = macro_map(seed, layout);
-    let (roads, start) = arterials(layout, &mut m);
+    let (m, roads, start) = skeleton(seed, layout);
     let (mut place, plan) = super::build::fill(seed, template, grammar, &m, &roads, start);
     let towers = towers(layout, &m);
     if !towers.is_empty() {
@@ -96,6 +117,15 @@ fn build_detailed(
         place.sort_by_chunk();
     }
     (place, plan)
+}
+
+/// Everything the layout says: its macro map with the roads laid and the channels cut,
+/// the main roads and the start.
+pub fn skeleton(seed: Seed, layout: &Layout) -> (MacroMap, RoadGraph, Option<Spawn>) {
+    let mut m = macro_map(seed, layout);
+    let (roads, start) = arterials(layout, &mut m);
+    channels(layout, &mut m);
+    (m, roads, start)
 }
 
 /// A suspension bridge's towers stand this share of its crossing in from each shore.
@@ -353,6 +383,71 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
     }
 }
 
+/// What a line of the road network is: a layout road, a highway, or one of its ramps.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Road,
+    Highway,
+    Ramp,
+}
+
+/// Half the width of a highway with `lanes` each way.
+fn highway_half(lanes: u8) -> f32 {
+    0.5 * (f32::from(lanes) * 7.4 + 7.2)
+}
+
+/// The diamond ramps of every highway's interchanges: each a line from the highway
+/// [`RAMP_RUN_M`] before or after the crossing to the crossing road where its approach is
+/// nearly at deck height, with the layout road (the highway) it belongs to. Off-ramps run
+/// highway to road and leave on the right before the crossing; on-ramps run road to highway.
+fn ramps(layout: &Layout, lines: &[Vec<V2>]) -> Vec<(usize, Vec<V2>)> {
+    let mut out = Vec::new();
+    for (i, r) in layout.roads.iter().enumerate() {
+        let foot = highway_half(r.lanes) + OVERPASS_FLAT_M + RAMP_FOOT_DROP_M / APPROACH_GRADE;
+        for name in &r.ramps {
+            let Some(j) = layout.roads.iter().position(|q| &q.name == name) else {
+                continue;
+            };
+            let Some((si, sj, c)) = layout::crossing(&lines[i], &lines[j]) else {
+                continue;
+            };
+            let tan = point_at(&lines[i], si).1;
+            let right = tan.right();
+            for along in [foot, -foot] {
+                let (f, _) = point_at(&lines[j], sj + along);
+                if (f - c).length() < 0.9 * foot {
+                    continue;
+                }
+                let side = if (f - c).dot(right) >= 0.0 { 1.0 } else { -1.0 };
+                for delta in [-1.0f32, 1.0] {
+                    let (h, _) = point_at(&lines[i], si + delta * RAMP_RUN_M);
+                    let p1 = h - tan * (delta * 60.0) + right * (side * 10.0);
+                    let p2 = f + tan * (delta * 40.0);
+                    let mut pts = bezier(h, p1, p2, f);
+                    if delta != -side {
+                        pts.reverse();
+                    }
+                    out.push((i, pts));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A cubic Bézier from `p0` to `p3` in steps of about [`STEP_M`].
+fn bezier(p0: V2, p1: V2, p2: V2, p3: V2) -> Vec<V2> {
+    let est = (p1 - p0).length() + (p2 - p1).length() + (p3 - p2).length();
+    let n = ((est / STEP_M) as usize).max(4);
+    (0..=n)
+        .map(|k| {
+            let t = k as f32 / n as f32;
+            let u = 1.0 - t;
+            p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)
+        })
+        .collect()
+}
+
 /// The layout's roads as a graph (see the module docs) and the player's start on them.
 pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>) {
     let wl = m.water_level;
@@ -403,6 +498,21 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
             }
         }
     }
+    // Each line's layout road and kind; the ramps follow the layout's own roads.
+    let mut road: Vec<usize> = (0..lines.len()).collect();
+    let mut kind: Vec<Kind> = layout
+        .roads
+        .iter()
+        .map(|r| match r.class {
+            RoadClass::Highway => Kind::Highway,
+            _ => Kind::Road,
+        })
+        .collect();
+    for (i, pts) in ramps(layout, &lines) {
+        road.push(i);
+        kind.push(Kind::Ramp);
+        lines.push(pts);
+    }
 
     // Nodes: every crossing and every end.
     let mut nodes: Vec<V2> = Vec::new();
@@ -421,8 +531,14 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
         cuts[i].push((0.0, a));
         cuts[i].push((layout::line_length(&lines[i]), b));
     }
+    // Where a road passes over a highway: (line, arc along it, the highway's line, point).
+    let mut over: Vec<(usize, f32, usize, V2)> = Vec::new();
     for i in 0..lines.len() {
         for j in i..lines.len() {
+            // Ramps meet roads only at their ends.
+            if kind[i] == Kind::Ramp || kind[j] == Kind::Ramp {
+                continue;
+            }
             let mut si = 0.0;
             for (ki, a) in lines[i].windows(2).enumerate() {
                 let la = (a[1] - a[0]).length();
@@ -436,9 +552,15 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                     }
                     if let Some((t, u)) = seg_intersect(a[0], a[1], b[0], b[1]) {
                         let p = a[0].lerp(a[1], t);
-                        let nd = node_at(&mut nodes, p);
-                        cuts[i].push((si + t * la, nd));
-                        cuts[j].push((sj + u * lb, nd));
+                        match (kind[i], kind[j]) {
+                            (Kind::Road, Kind::Highway) => over.push((i, si + t * la, j, p)),
+                            (Kind::Highway, Kind::Road) => over.push((j, sj + u * lb, i, p)),
+                            _ => {
+                                let nd = node_at(&mut nodes, p);
+                                cuts[i].push((si + t * la, nd));
+                                cuts[j].push((sj + u * lb, nd));
+                            }
+                        }
                     }
                     sj += lb;
                 }
@@ -467,12 +589,20 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
             }
         }
     }
+    // A road that ends on a highway meets it at grade; one passing through does not.
+    over.retain(|&(i, s, _, p)| {
+        !cuts[i]
+            .iter()
+            .any(|&(c, nd)| abs(c - s) < 1.0 && (nodes[nd] - p).length() < MERGE_M)
+    });
 
     // Edges between consecutive cuts.
     struct Piece {
-        road: usize,
+        line: usize,
         a: usize,
         b: usize,
+        /// Arc length along the line at `a`.
+        s0: f32,
         pts: Vec<V2>,
     }
     let mut pieces: Vec<Piece> = Vec::new();
@@ -485,7 +615,13 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                 continue;
             }
             let pts = densify(&sub_line(&lines[i], s0, s1, nodes[a], nodes[b]), STEP_M);
-            pieces.push(Piece { road: i, a, b, pts });
+            pieces.push(Piece {
+                line: i,
+                a,
+                b,
+                s0,
+                pts,
+            });
         }
     }
 
@@ -495,32 +631,145 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     let over_water = |p: V2| ground(p) < wl + 0.3;
     let target = |p: V2, deck: f32| if over_water(p) { wl + deck } else { ground(p) };
     let mut elev: Vec<Option<f32>> = vec![None; nodes.len()];
+    let mut on_highway = vec![false; nodes.len()];
     for pc in &pieces {
-        let deck = layout.roads[pc.road].deck_m;
+        let deck = layout.roads[road[pc.line]].deck_m;
         for nd in [pc.a, pc.b] {
             let y = target(nodes[nd], deck);
             elev[nd] = Some(elev[nd].map_or(y, |e: f32| e.max(y)));
+            on_highway[nd] |= kind[pc.line] == Kind::Highway;
         }
     }
-    let node_y: Vec<f32> = elev.iter().map(|e| e.unwrap_or(0.0)).collect();
+    let mut node_y: Vec<f32> = elev.iter().map(|e| e.unwrap_or(0.0)).collect();
+
+    // The highways first: the roads over them and the ramps beside them take their heights.
+    let mut ys: Vec<Vec<f32>> = vec![Vec::new(); pieces.len()];
+    let mut highway: Vec<([f32; 3], [f32; 3])> = Vec::new();
+    for (pc, ys) in pieces.iter().zip(&mut ys) {
+        if kind[pc.line] != Kind::Highway {
+            continue;
+        }
+        let r = &layout.roads[road[pc.line]];
+        let tgt: Vec<f32> = pc.pts.iter().map(|&p| target(p, r.deck_m)).collect();
+        *ys = grade_limit(
+            &tgt,
+            &arcs(&pc.pts),
+            r.max_grade.unwrap_or(HIGHWAY_GRADE),
+            Some(node_y[pc.a]),
+            Some(node_y[pc.b]),
+            None,
+        );
+        for k in 0..pc.pts.len() - 1 {
+            let (p, q) = (pc.pts[k], pc.pts[k + 1]);
+            highway.push(([p.x, ys[k], p.y], [q.x, ys[k + 1], q.y]));
+        }
+    }
+    // The highway's height beside `p`.
+    let highway_y = |p: V2| {
+        let mut best = (f32::INFINITY, 0.0);
+        for (a, b) in &highway {
+            let (d, t) = segment_distance(p, V2::new(a[0], a[2]), V2::new(b[0], b[2]));
+            if d < best.0 {
+                best = (d, lerp(a[1], b[1], t));
+            }
+        }
+        best.1
+    };
+    // Overpasses per line: (arc, deck height, half the level span).
+    let mut decks: Vec<Vec<(f32, f32, f32)>> = vec![Vec::new(); lines.len()];
+    for &(i, s, j, p) in &over {
+        let flat = highway_half(layout.roads[road[j]].lanes) + OVERPASS_FLAT_M;
+        decks[i].push((s, highway_y(p) + OVERPASS_LIFT_M, flat));
+    }
+    // The height an overpass asks of its road at arc `s`: the deck, falling away either side.
+    let lift = |line: usize, s: f32| {
+        decks[line]
+            .iter()
+            .map(|&(c, top, flat)| top - APPROACH_GRADE * (abs(s - c) - flat).max(0.0))
+            .fold(f32::NEG_INFINITY, f32::max)
+    };
+    for (i, c) in cuts.iter().enumerate() {
+        for &(s, nd) in c {
+            if !on_highway[nd] {
+                node_y[nd] = node_y[nd].max(lift(i, s));
+            }
+        }
+    }
+
     let mut bridged: Vec<Vec<bool>> = Vec::new();
     let edges: Vec<Edge> = pieces
         .iter()
-        .map(|pc| {
-            let r = &layout.roads[pc.road];
+        .zip(ys)
+        .map(|(pc, hy)| {
+            let r = &layout.roads[road[pc.line]];
             let s = arcs(&pc.pts);
-            let tgt: Vec<f32> = pc.pts.iter().map(|&p| target(p, r.deck_m)).collect();
-            bridged.push(pc.pts.iter().map(|&p| over_water(p)).collect());
-            let ys = grade_limit(
-                &tgt,
-                &s,
-                r.max_grade.unwrap_or(MAX_GRADE),
-                Some(node_y[pc.a]),
-                Some(node_y[pc.b]),
-                None,
+            let total = s[s.len() - 1];
+            // A deck spans the water, and the highway's bed under an overpass.
+            let spans = |k: usize| {
+                let at = pc.s0 + s[k];
+                decks[pc.line]
+                    .iter()
+                    .any(|&(c, _, flat)| abs(at - c) < flat - 1.0)
+            };
+            bridged.push(
+                (0..pc.pts.len())
+                    .map(|k| over_water(pc.pts[k]) || spans(k))
+                    .collect(),
             );
+            let ys = match kind[pc.line] {
+                Kind::Highway => hy,
+                // Level with the highway to past the gore, then up (or down) to the road.
+                Kind::Ramp => {
+                    let merge = RAMP_MERGE_M.min(0.4 * total);
+                    let from_highway = on_highway[pc.a];
+                    let foot = if from_highway {
+                        node_y[pc.b]
+                    } else {
+                        node_y[pc.a]
+                    };
+                    (0..pc.pts.len())
+                        .map(|k| {
+                            let d = if from_highway { s[k] } else { total - s[k] };
+                            lerp(highway_y(pc.pts[k]), foot, smoothstep(merge, total, d))
+                        })
+                        .collect()
+                }
+                Kind::Road => {
+                    let tgt: Vec<f32> = (0..pc.pts.len())
+                        .map(|k| target(pc.pts[k], r.deck_m).max(lift(pc.line, pc.s0 + s[k])))
+                        .collect();
+                    grade_limit(
+                        &tgt,
+                        &s,
+                        r.max_grade.unwrap_or(MAX_GRADE),
+                        Some(node_y[pc.a]),
+                        Some(node_y[pc.b]),
+                        None,
+                    )
+                }
+            };
             let (speed, half_w) = road_width(r);
             let width_m = 2.0 * half_w;
+            let profile = pc
+                .pts
+                .iter()
+                .zip(&ys)
+                .map(|(p, &y)| [p.x, y, p.y])
+                .collect();
+            if kind[pc.line] == Kind::Ramp {
+                return Edge {
+                    a: pc.a as u32,
+                    b: pc.b as u32,
+                    class: RoadClass::Collector,
+                    lanes_fwd: 1,
+                    lanes_back: 0,
+                    width_m: RAMP_WIDTH_M,
+                    sidewalk: false,
+                    speed_kph: 60,
+                    oneway: true,
+                    profile,
+                };
+            }
             Edge {
                 a: pc.a as u32,
                 b: pc.b as u32,
@@ -531,16 +780,13 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                 sidewalk: r.sidewalk && r.class != RoadClass::Highway,
                 speed_kph: r.speed_kph.unwrap_or(speed),
                 oneway: false,
-                profile: pc
-                    .pts
-                    .iter()
-                    .zip(&ys)
-                    .map(|(p, &y)| [p.x, y, p.y])
-                    .collect(),
+                profile,
             }
         })
         .collect();
-    carve(m, &edges, &bridged);
+    let rank: Vec<Kind> = pieces.iter().map(|pc| kind[pc.line]).collect();
+    carve(m, &edges, &bridged, &rank);
+    right_of_way(m, &edges, &rank);
     let graph = RoadGraph {
         nodes: nodes
             .iter()
@@ -559,7 +805,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
 /// A layout road's default speed (km/h) and half its width (m), by class and lanes.
 fn road_width(r: &layout::Road) -> (u8, f32) {
     let (w, speed) = match (r.class, r.lanes) {
-        (RoadClass::Highway, l) => (f32::from(l) * 7.4 + 7.2, 100),
+        (RoadClass::Highway, l) => (2.0 * highway_half(l), 100),
         (RoadClass::Rural, _) => (8.0, 70),
         (_, 1) => (12.0, 50),
         (_, 2) => (14.0, 60),
@@ -570,13 +816,17 @@ fn road_width(r: &layout::Road) -> (u8, f32) {
 
 /// Cuts and fills the ground to meet the roads: under a road and its shoulders the ground
 /// is the road's profile (a hair under it); beyond, it blends back to the ground over
-/// [`CARVE_BLEND_M`]. Where two roads' reaches overlap the one with the firmer hold wins.
-/// Bridge spans (`bridged`, per profile point) leave the water's bed alone.
-fn carve(m: &mut MacroMap, edges: &[Edge], bridged: &[Vec<bool>]) {
+/// [`CARVE_BLEND_M`]. Where two roads' reaches overlap the one with the firmer hold wins,
+/// a highway before any other. Bridge spans (`bridged`, per profile point) leave the
+/// ground under them alone.
+fn carve(m: &mut MacroMap, edges: &[Edge], bridged: &[Vec<bool>], kind: &[Kind]) {
     let (w, h) = (m.width as usize, m.height as usize);
     let mut hold = vec![0.0f32; w * h];
     let mut at = vec![0.0f32; w * h];
-    for (e, br) in edges.iter().zip(bridged) {
+    let highways = (0..edges.len()).filter(|&i| kind[i] == Kind::Highway);
+    let rest = (0..edges.len()).filter(|&i| kind[i] != Kind::Highway);
+    for i in highways.chain(rest) {
+        let (e, br) = (&edges[i], &bridged[i]);
         let core = 0.5 * e.width_m + CARVE_SHOULDER_M;
         let reach = core + CARVE_BLEND_M;
         for k in 0..e.profile.len().saturating_sub(1) {
@@ -610,6 +860,135 @@ fn carve(m: &mut MacroMap, edges: &[Edge], bridged: &[Vec<bool>]) {
         if hold[i] > 0.0 {
             m.heights[i] = lerp(m.heights[i], at[i], hold[i]);
         }
+    }
+}
+
+/// Zones the land under the highways and their ramps `Highway`, and the land between a
+/// ramp and its highway with it, so no street or lot is laid there.
+fn right_of_way(m: &mut MacroMap, edges: &[Edge], kind: &[Kind]) {
+    let highway: Vec<(V2, V2)> = edges
+        .iter()
+        .zip(kind)
+        .filter(|(_, &k)| k == Kind::Highway)
+        .flat_map(|(e, _)| e.profile.windows(2))
+        .map(|s| (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2])))
+        .collect();
+    for (e, &k) in edges.iter().zip(kind) {
+        if k == Kind::Road {
+            continue;
+        }
+        let reach = 0.5 * e.width_m + RIGHT_OF_WAY_M;
+        for s in e.profile.windows(2) {
+            let (a, b) = (V2::new(s[0][0], s[0][2]), V2::new(s[1][0], s[1][2]));
+            paint(m, a, b, reach, ZoneId::Highway);
+            if k == Kind::Ramp {
+                // Across to the highway beside it.
+                let mut best = (f32::INFINITY, a);
+                for &(p, q) in &highway {
+                    let (d, t) = segment_distance(a, p, q);
+                    if d < best.0 {
+                        best = (d, p.lerp(q, t));
+                    }
+                }
+                paint(m, a, best.1, RIGHT_OF_WAY_M, ZoneId::Highway);
+            }
+        }
+    }
+}
+
+/// Zones every land cell whose center lies within `reach` of segment `a`-`b` as `zone`.
+fn paint(m: &mut MacroMap, a: V2, b: V2, reach: f32, zone: ZoneId) {
+    let (zw, zh) = (m.zone_width as usize, m.zone_height as usize);
+    let cell = ZONE_CELL_M;
+    let x0 = ((a.x.min(b.x) - reach) / cell).max(0.0) as usize;
+    let z0 = ((a.y.min(b.y) - reach) / cell).max(0.0) as usize;
+    let x1 = (((a.x.max(b.x) + reach) / cell) as usize).min(zw - 1);
+    let z1 = (((a.y.max(b.y) + reach) / cell) as usize).min(zh - 1);
+    for cz in z0..=z1 {
+        for cx in x0..=x1 {
+            let (x, z) = cell_center(cx, cz);
+            let i = cz * zw + cx;
+            if m.zones[i] != ZoneId::Water && segment_distance(V2::new(x, z), a, b).0 <= reach {
+                m.zones[i] = zone;
+            }
+        }
+    }
+}
+
+/// Cuts the layout's channels into the ground (see the module docs) and adds each as a
+/// body of "water": dry concrete, or a river at the water level.
+pub fn channels(layout: &Layout, m: &mut MacroMap) {
+    let (w, h) = (m.width as usize, m.height as usize);
+    let ext = layout.extent();
+    for c in &layout.channels {
+        let line = pts(&c.line);
+        let total = layout::line_length(&line);
+        let (bed, lip) = (0.5 * c.width_m, c.lip_half_m());
+        // An end inside the place is a headwall the channel deepens from.
+        let inside = |p: V2| p.x > 1.0 && p.y > 1.0 && p.x < ext[0] - 1.0 && p.y < ext[1] - 1.0;
+        let heads = [inside(line[0]), inside(line[line.len() - 1])];
+        let bb = bbox(&line, lip);
+        for iz in 0..h {
+            for ix in 0..w {
+                let p = V2::new(ix as f32 * CELL_M, iz as f32 * CELL_M);
+                if !in_box(p, &bb) {
+                    continue;
+                }
+                // The nearest point of the centerline and the arc length there.
+                let (mut d, mut s, mut run) = (f32::INFINITY, 0.0, 0.0);
+                for seg in line.windows(2) {
+                    let len = (seg[1] - seg[0]).length();
+                    let (ds, t) = segment_distance(p, seg[0], seg[1]);
+                    if ds < d {
+                        (d, s) = (ds, run + t * len);
+                    }
+                    run += len;
+                }
+                let mut k = clamp((lip - d) / (lip - bed), 0.0, 1.0);
+                if heads[0] {
+                    k *= smoothstep(0.0, CHANNEL_HEAD_M, s);
+                }
+                if heads[1] {
+                    k *= smoothstep(0.0, CHANNEL_HEAD_M, total - s);
+                }
+                let i = iz * w + ix;
+                m.heights[i] = if c.wet {
+                    lerp(m.heights[i], m.heights[i].min(m.water_level - c.depth_m), k)
+                } else {
+                    m.heights[i] - c.depth_m * k
+                };
+            }
+        }
+        let zone = if c.wet {
+            ZoneId::Water
+        } else {
+            ZoneId::Highway
+        };
+        // A zone cell past the lips too, so no lot backs onto the wall.
+        for seg in line.windows(2) {
+            paint(m, seg[0], seg[1], lip + ZONE_CELL_M, zone);
+        }
+        // The outline at the lips: down one side and back up the other.
+        let n = line.len();
+        let side = |sign: f32| -> Vec<[f32; 2]> {
+            (0..n)
+                .map(|i| {
+                    let dir = (line[(i + 1).min(n - 1)] - line[i.saturating_sub(1)]).normalize();
+                    let p = line[i] + dir.right() * (sign * lip);
+                    [p.x, p.y]
+                })
+                .collect()
+        };
+        let mut polygon = side(1.0);
+        polygon.extend(side(-1.0).into_iter().rev());
+        m.water.push(WaterBody {
+            kind: if c.wet {
+                WaterKind::Canal
+            } else {
+                WaterKind::Channel
+            },
+            polygon: ccw(polygon),
+        });
     }
 }
 
