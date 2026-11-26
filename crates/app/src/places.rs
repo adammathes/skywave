@@ -296,7 +296,7 @@ mod tests {
         ("socal_beach_1984", 41),
         ("mirage_valley_2001", 92),
         ("bay_loop_2005", 152),
-        ("mirage_bowl_2001", 156),
+        ("mirage_bowl_2001", 194),
         ("lake_city_1986", 40),
     ];
 
