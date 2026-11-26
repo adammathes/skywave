@@ -3650,6 +3650,20 @@ impl<'a> StreetPlan<'a> {
             stitch_rail(&nodes, &mut edges, &plan.rail, rule.rail.row_m);
             prune_stubs(&mut nodes, &mut edges);
         }
+        if self.t.through_streets {
+            let dead_ends_ok = |p: [f32; 2]| {
+                let rule = self.t.zones.get(self.m.zone_at(p[0], p[1]));
+                rule.is_some_and(|r| {
+                    matches!(
+                        r.streets,
+                        StreetPattern::Curvy
+                            | StreetPattern::Switchback
+                            | StreetPattern::Beachfront
+                    )
+                })
+            };
+            cut_back_dead_ends(&mut nodes, &mut edges, dead_ends_ok);
+        }
         RoadGraph { nodes, edges }
     }
 }
@@ -3789,6 +3803,30 @@ const ARTERIAL_STUB_M: f32 = 25.0;
 /// the nodes no edge uses. The arterials' own nodes come first in `nodes` and keep their
 /// indices: an arterial node always has an edge left.
 fn prune_stubs(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
+    drop_dead(nodes, edges, |e, _, len| match e.class {
+        RoadClass::Local | RoadClass::Alley => len < MERGED_STUB_M,
+        RoadClass::Arterial => len < ARTERIAL_STUB_M,
+        _ => false,
+    });
+}
+
+/// Cuts every side street and alley that dead-ends where `ok` says it may not back to its
+/// last crossing ([`RegionTemplate::through_streets`]), then drops the nodes no edge uses.
+fn cut_back_dead_ends(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>, ok: impl Fn([f32; 2]) -> bool) {
+    drop_dead(nodes, edges, |e, dead, _| {
+        matches!(e.class, RoadClass::Local | RoadClass::Alley) && !ok(dead)
+    });
+}
+
+/// Drops dead-end edges `drop(edge, dead-end position, length)` picks until none is left
+/// (an edge dead at both ends stays), then the nodes no edge uses. The arterials' own
+/// nodes come first in `nodes` and keep their indices: an arterial node always has an edge
+/// left.
+fn drop_dead(
+    nodes: &mut Vec<Node>,
+    edges: &mut Vec<Edge>,
+    drop: impl Fn(&Edge, [f32; 2], f32) -> bool,
+) {
     loop {
         let mut deg = vec![0u32; nodes.len()];
         for e in edges.iter() {
@@ -3797,14 +3835,12 @@ fn prune_stubs(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
         }
         let before = edges.len();
         edges.retain(|e| {
-            let max = match e.class {
-                RoadClass::Local | RoadClass::Alley => MERGED_STUB_M,
-                RoadClass::Arterial => ARTERIAL_STUB_M,
-                _ => return true,
-            };
-            let dead = deg[e.a as usize] == 1 || deg[e.b as usize] == 1;
-            let both = deg[e.a as usize] == 1 && deg[e.b as usize] == 1;
-            both || !dead || profile_length(&e.profile) >= max
+            let (da, db) = (deg[e.a as usize] == 1, deg[e.b as usize] == 1);
+            if da == db {
+                return true;
+            }
+            let dead = nodes[if da { e.a } else { e.b } as usize].pos;
+            !drop(e, dead, profile_length(&e.profile))
         });
         if edges.len() == before {
             break;
