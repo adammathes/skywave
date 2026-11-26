@@ -460,6 +460,15 @@ building, from an `Rng` keyed by the building's door pick):
   words get one. A sign spends at most 360 triangles (`props::BLADE_TRIANGLES`): a word that
   does not fit gives way to the trade, then to block capitals; the pictogram's neon goes
   before the pictogram. Blades carry no second line (the carriers of B7 will).
+- **Pole signs** (`props::pole_signs`, never in a Place). A strip mall or motel set back
+  behind at least 7 m of forecourt from a boulevard or collector gets one: at one end of
+  its front, 1.6 m behind the sidewalk, its head across the forecourt so traffic both ways
+  reads it, 8.5-12.5 m tall (motels taller), none within 28 m of another. Four heads: a lit
+  box on one pole, a disc, a strip mall's pylon (the center's name over its tenants' lit
+  panels, on two legs) and a tilted slab. `ChunkPlan` gives each a shop sign like a blade's
+  and letters its full text, else its word, else its trade, dark on the lit face, both
+  sides; a pole sign spends at most 900 triangles (`props::POLE_SIGN_TRIANGLES`). The
+  faces glow at night.
 - **Letterforms** (`signs::letters`): stroke polylines on a 20-unit cap grid, ours, in four
   styles (block capitals, condensed sans, connected script, slab serif), built as neon tubes,
   dark strokes on a backlit box, extruded channel letters or flat paint. The sign bands and

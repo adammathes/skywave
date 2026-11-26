@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use place::{Place, RoadClass, ZoneId};
+use place::{Place, RoadClass, StyleTag, ZoneId};
 use skywave_core::{mix64, Rng, Seed};
 
 use crate::math::{atan2, point_in_polygon, sin_cos, TAU, V2, V3};
@@ -152,6 +152,13 @@ pub enum PropKind {
     /// ([`sound_walls`]; never in a Place).
     SoundWall {
         len_dm: u16,
+    },
+    /// A shop's pole sign at the street edge of its forecourt, `height_dm` decimeters to
+    /// the top of its head, the head's faces toward ±`dir.left()` (up and down the
+    /// street); `look` picks the head ([`pole_signs`]; never in a Place).
+    PoleSign {
+        height_dm: u8,
+        look: u8,
     },
 }
 
@@ -512,6 +519,18 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
             barricade(m, base, p.dir, f32::from(width_dm) * 0.1, pal)
         }
         PropKind::SoundWall { len_dm } => sound_wall(m, base, p.dir, f32::from(len_dm) * 0.1, pal),
+        PropKind::PoleSign { height_dm, look } => {
+            pole_sign(
+                m,
+                base,
+                p.dir,
+                f32::from(height_dm) * 0.1,
+                look,
+                pal,
+                p.seed,
+                None,
+            );
+        }
         PropKind::ExitSign { width_dm, street } => {
             exit_sign(m, base, p.dir, f32::from(width_dm) * 0.1, street, pal)
         }
@@ -1984,9 +2003,16 @@ fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
 /// Builds a blade sign prop `p` lettered as the shop sign `sign` with words from `lex`
 /// (`p` must be a [`PropKind::NeonSign`]).
 pub fn shop_sign(m: &mut WorldMesh, p: &Prop, pal: &Palette, sign: &ShopSign, lex: &Lexicon) {
-    if let PropKind::NeonSign { palette } = p.kind {
-        let base = p.pos.at(p.y);
-        neon_sign(m, base, p.dir, palette, pal, p.seed, Some((sign, lex)));
+    let base = p.pos.at(p.y);
+    match p.kind {
+        PropKind::NeonSign { palette } => {
+            neon_sign(m, base, p.dir, palette, pal, p.seed, Some((sign, lex)));
+        }
+        PropKind::PoleSign { height_dm, look } => {
+            let h = f32::from(height_dm) * 0.1;
+            pole_sign(m, base, p.dir, h, look, pal, p.seed, Some((sign, lex)));
+        }
+        _ => {}
     }
 }
 
@@ -3991,6 +4017,356 @@ fn full_stop_sign(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
     street_blades(m, &f, 2.62, pal);
 }
 
+/// How far behind the sidewalk a pole sign stands, m.
+const POLE_SIGN_BACK_M: f32 = 1.6;
+/// Least forecourt (sidewalk to front wall) a shop needs for a pole sign, m.
+const POLE_SIGN_MIN_YARD_M: f32 = 7.0;
+/// Least distance between two pole signs, m.
+const POLE_SIGN_SPACING_M: f32 = 28.0;
+/// Most triangles a pole sign spends, its lettering on both faces included
+/// (`docs/RENDERING.md`, "Mesh and instance budgets").
+pub const POLE_SIGN_TRIANGLES: usize = 900;
+/// How many pole sign heads there are ([`pole_sign`]).
+const POLE_SIGN_LOOKS: u32 = 4;
+
+/// The pole signs of the shops set back behind a forecourt on the boulevards and
+/// collectors (strip malls and motels): each at one end of its front, a little behind the
+/// sidewalk, its head across the forecourt so the street reads it from both ways. This is
+/// the strip read from a moving car: the buildings are plain sheds back behind their
+/// parking, the signs out at the curb carry the street.
+pub fn pole_signs(place: &Place) -> Vec<Prop> {
+    let roads: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .filter(|e| matches!(e.class, RoadClass::Arterial | RoadClass::Collector) && !e.oneway)
+        .flat_map(|e| {
+            let hw = 0.5 * e.width_m
+                + if e.sidewalk {
+                    place::SIDEWALK_WIDTH_M
+                } else {
+                    0.0
+                };
+            e.profile
+                .windows(2)
+                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
+        })
+        .collect();
+    let any_road: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .flat_map(|e| {
+            let hw = 0.5 * e.width_m
+                + if e.sidewalk {
+                    place::SIDEWALK_WIDTH_M
+                } else {
+                    0.0
+                };
+            e.profile
+                .windows(2)
+                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
+        })
+        .collect();
+    // The nearest boulevard or collector to `q`: its distance past the sidewalk and the
+    // unit direction toward it.
+    let nearest = |q: V2| {
+        let mut best: Option<(f32, V2)> = None;
+        for &(a, b, hw) in &roads {
+            let (d, t) = crate::math::segment_distance(q, a, b);
+            let on = a + (b - a) * t;
+            if d > 1e-3 && best.is_none_or(|x| d - hw < x.0) {
+                best = Some((d - hw, (on - q) * (1.0 / d)));
+            }
+        }
+        best
+    };
+    let ground = |q: V2| place.terrain.height_at(&place.header, [q.x, q.y]);
+    let mut out: Vec<Prop> = Vec::new();
+    for (i, b) in place.buildings.iter().enumerate() {
+        if !matches!(b.style, StyleTag::StripMall | StyleTag::Motel) || b.footprint.len() < 3 {
+            continue;
+        }
+        let fp: Vec<V2> = b.footprint.iter().map(|&p| V2::from_array(p)).collect();
+        // The front: the wall whose middle is nearest a boulevard and faces it.
+        let mut front: Option<(f32, V2, V2, V2)> = None;
+        for k in 0..fp.len() {
+            let (a, c) = (fp[k], fp[(k + 1) % fp.len()]);
+            let mid = (a + c) * 0.5;
+            let Some((yard, toward)) = nearest(mid) else {
+                continue;
+            };
+            let along = c - a;
+            if along.length() < 8.0 {
+                continue;
+            }
+            let along = along * (1.0 / along.length());
+            if toward.dot(along).abs() > 0.3 {
+                continue;
+            }
+            if front.is_none_or(|f| yard < f.0) {
+                front = Some((yard, a, c, toward));
+            }
+        }
+        let Some((yard, a, c, toward)) = front else {
+            continue;
+        };
+        if !(POLE_SIGN_MIN_YARD_M..=60.0).contains(&yard) {
+            continue;
+        }
+        let h = mix64(place.header.seed ^ 0x504F_4C45 ^ ((i as u64) << 20));
+        // At one end of the front, out at the street edge of the forecourt.
+        let end = if h & 1 == 0 { 0.12 } else { 0.88 };
+        let at = a + (c - a) * end;
+        let Some((gap, toward)) = nearest(at).filter(|n| n.1.dot(toward) > 0.9) else {
+            continue;
+        };
+        let q = at + toward * (gap - POLE_SIGN_BACK_M);
+        let clear = !any_road
+            .iter()
+            .any(|&(ra, rb, hw)| crate::math::segment_distance(q, ra, rb).0 < hw + 1.0);
+        if !clear
+            || out
+                .iter()
+                .any(|p| (p.pos - q).length() < POLE_SIGN_SPACING_M)
+        {
+            continue;
+        }
+        let Some(y) = ground(q) else {
+            continue;
+        };
+        let height = if b.style == StyleTag::Motel {
+            11.0
+        } else {
+            8.5
+        } + ((h >> 8) % 40) as f32 * 0.1;
+        out.push(Prop {
+            pos: q,
+            y,
+            dir: -toward,
+            kind: PropKind::PoleSign {
+                height_dm: (height * 10.0) as u8,
+                look: ((h >> 16) % u64::from(POLE_SIGN_LOOKS)) as u8,
+            },
+            seed: (h >> 32) as u32,
+        });
+    }
+    out
+}
+
+/// A convex outline `poly` (local x, y) in frame `f` as a slab from `z0` to `z1`.
+fn slab(m: &mut WorldMesh, f: &Frame, poly: &[[f32; 2]], z0: f32, z1: f32, paint: Paint) {
+    let n = poly.len();
+    for (z, facing) in [(z1, f.z), (z0, -f.z)] {
+        for k in 1..n - 1 {
+            let p = |i: usize| f.p(poly[i][0], poly[i][1], z);
+            tri(m, p(0), p(k), p(k + 1), facing, paint);
+        }
+    }
+    let cx = poly.iter().map(|p| p[0]).sum::<f32>() / n as f32;
+    let cy = poly.iter().map(|p| p[1]).sum::<f32>() / n as f32;
+    for k in 0..n {
+        let (a, b) = (poly[k], poly[(k + 1) % n]);
+        let out = f.v((a[0] + b[0]) * 0.5 - cx, (a[1] + b[1]) * 0.5 - cy, 0.0);
+        quad(
+            m,
+            [
+                f.p(a[0], a[1], z0),
+                f.p(b[0], b[1], z0),
+                f.p(b[0], b[1], z1),
+                f.p(a[0], a[1], z1),
+            ],
+            out,
+            paint,
+        );
+    }
+}
+
+/// The shop's name lettered across `x0..x1` and `y0..y1` of both faces (at `±z`) of a
+/// head in frame `f`: its full text if that fits big enough, else its main word, else
+/// its trade; nothing if none does in `budget` triangles.
+#[allow(clippy::too_many_arguments)]
+fn head_word(
+    m: &mut WorldMesh,
+    f: &Frame,
+    (s, lex): (&ShopSign, &Lexicon),
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    z: f32,
+    ink: Paint,
+    budget: usize,
+) {
+    let style = s.style;
+    let trade = lex.trades[usize::from(s.trade)].as_bytes().to_vec();
+    for text in [s.text(lex), s.word(lex), trade] {
+        let mut w = signs::letters::layout(&text, style);
+        let cap = ((y1 - y0) * 0.8).min((x1 - x0) / w.ink_w().max(1e-3));
+        if cap < 0.45 || 8 * w.segments() > budget {
+            continue;
+        }
+        let cx = (x0 + x1) * 0.5;
+        w.place(cap, cx - w.ink_w() * cap * 0.5, (y0 + y1) * 0.5 - cap * 0.5);
+        for back in [false, true] {
+            let mut q = w.clone();
+            if back {
+                q.mirror(cx);
+            }
+            let zz = if back { -z } else { z };
+            signs::letters::build(m, f, &q, Finish::Backlit, zz, back, ink, ink, 0.0);
+        }
+        return;
+    }
+}
+
+/// A pole sign `h` m tall at `base`, its head across `out` (from the street toward the
+/// shop) so its faces look up and down the street. Four heads by `look`: a lit box on one
+/// pole, a disc, a strip mall's pylon (the center's name over its tenants' panels on two
+/// legs) and a tilted slab. The face is lit at night; lettered with the shop's name when
+/// it has one.
+#[allow(clippy::too_many_arguments)]
+fn pole_sign(
+    m: &mut WorldMesh,
+    base: V3,
+    out: V2,
+    h: f32,
+    look: u8,
+    pal: &Palette,
+    seed: u32,
+    sign: Option<(&ShopSign, &Lexicon)>,
+) {
+    let start = m.triangle_count();
+    let f = Frame::upright(base, out);
+    let colors = [
+        pal.salmon,
+        pal.mint,
+        pal.sky_blue,
+        pal.paint_yellow,
+        pal.peach,
+        pal.teal,
+        pal.terracotta,
+        pal.neon_red,
+        pal.lavender,
+        pal.pastel_pink,
+    ];
+    let hs = mix64(u64::from(seed) ^ 0x4845_4144);
+    let body_c = colors[(hs % colors.len() as u64) as usize];
+    let body = Paint::new(body_c, Pattern::Paint);
+    let lit_c = mix(body_c, [255, 246, 222], 80);
+    let lit = Paint::new(lit_c, Pattern::Plain).glowing(shade(lit_c, 50), Glow::Neon);
+    let ink = Paint::new(shade(mix(body_c, pal.navy, 170), 110), Pattern::Plain);
+    let steel = Paint::new(shade(pal.metal_light, 200), Pattern::Metal);
+    let word = |m: &mut WorldMesh, x0: f32, x1: f32, y0: f32, y1: f32, z: f32| {
+        if let Some(s) = sign {
+            let left = POLE_SIGN_TRIANGLES.saturating_sub(m.triangle_count() - start);
+            head_word(m, &f, s, x0, x1, y0, y1, z, ink, left);
+        }
+    };
+    let pole = |m: &mut WorldMesh, x: f32, top: f32, r: f32| {
+        boxf(
+            m,
+            &f,
+            [x - r, -0.5, -r],
+            [x + r, top, r],
+            face::NO_BOTTOM,
+            steel,
+        );
+    };
+    let t = 0.3;
+    match look % POLE_SIGN_LOOKS as u8 {
+        // A lit box on one pole.
+        0 => {
+            let (w, hh) = (3.0, 2.6);
+            pole(m, 0.0, h - hh, 0.25);
+            boxf(m, &f, [-w, h - hh, -t], [w, h, t], face::ALL, body);
+            for back in [false, true] {
+                let z = if back { -t - 0.01 } else { t + 0.01 };
+                rect(
+                    m,
+                    &f,
+                    -w + 0.22,
+                    h - hh + 0.22,
+                    w - 0.22,
+                    h - 0.22,
+                    z,
+                    back,
+                    lit,
+                );
+            }
+            word(m, -w + 0.4, w - 0.4, h - hh + 0.35, h - 0.35, t + 0.02);
+        }
+        // A disc: a colored ring round a lit face.
+        1 => {
+            let r = 2.0;
+            let cy = h - r;
+            pole(m, 0.0, cy, 0.25);
+            let ring = |r: f32| -> Vec<[f32; 2]> {
+                (0..16)
+                    .map(|k| {
+                        let (s, c) = sin_cos(k as f32 * TAU / 16.0);
+                        [c * r, cy + s * r]
+                    })
+                    .collect()
+            };
+            slab(m, &f, &ring(r), -t, t, body);
+            slab(m, &f, &ring(r - 0.3), -t - 0.02, t + 0.02, lit);
+            word(m, -r + 0.5, r - 0.5, cy - 0.7, cy + 0.7, t + 0.04);
+        }
+        // A strip mall's pylon: the center's name over its tenants' panels, on two legs.
+        2 => {
+            let (w, foot) = (1.6, 2.6);
+            for x in [-w + 0.3, w - 0.3] {
+                pole(m, x, foot, 0.18);
+            }
+            boxf(m, &f, [-w, foot, -t], [w, h, t], face::ALL, body);
+            let head = h - 2.0;
+            for back in [false, true] {
+                let z = if back { -t - 0.01 } else { t + 0.01 };
+                rect(m, &f, -w + 0.15, head, w - 0.15, h - 0.15, z, back, lit);
+            }
+            word(m, -w + 0.25, w - 0.25, head + 0.2, h - 0.35, t + 0.02);
+            // The tenants: lit panels in turn of two colors.
+            let other = colors[((hs >> 8) % colors.len() as u64) as usize];
+            let mut y = head - 0.25;
+            let mut k = 0;
+            while y - 0.9 > foot + 0.2 {
+                let c = if k % 2 == 0 {
+                    mix(other, [255, 250, 236], 150)
+                } else {
+                    lit_c
+                };
+                let p = Paint::new(c, Pattern::Plain).glowing(shade(c, 110), Glow::Neon);
+                for back in [false, true] {
+                    let z = if back { -t - 0.01 } else { t + 0.01 };
+                    rect(m, &f, -w + 0.15, y - 0.9, w - 0.15, y, z, back, p);
+                }
+                y -= 1.15;
+                k += 1;
+            }
+        }
+        // A tilted slab, lit, with a lit board for the name.
+        _ => {
+            let hh = 3.2;
+            pole(m, 0.0, h - hh + 0.4, 0.25);
+            let tilt = [
+                [-3.0, h - hh],
+                [2.4, h - hh + 0.7],
+                [3.0, h],
+                [-2.4, h - 0.7],
+            ];
+            let glow = Paint::new(body_c, Pattern::Paint).glowing(shade(body_c, 45), Glow::Neon);
+            slab(m, &f, &tilt, -t, t, glow);
+            let (y0, y1) = (h - hh + 0.8, h - 0.8);
+            for back in [false, true] {
+                let z = if back { -t - 0.02 } else { t + 0.02 };
+                rect(m, &f, -2.0, y0, 2.0, y1, z, back, lit);
+            }
+            word(m, -1.8, 1.8, y0 + 0.15, y1 - 0.15, t + 0.03);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4062,6 +4438,45 @@ mod tests {
                 assert!(budget.contains(&n), "{kind:?} seed {seed}: {n}");
             }
         }
+    }
+
+    /// Every pole sign head builds within its budget, lettered or not, and most of them
+    /// carry the shop's name.
+    #[test]
+    fn pole_signs_keep_their_budget() {
+        let g = crate::grammar::coast_80s();
+        let pal = Palette::socal_1985();
+        let mut lettered = 0;
+        let n = 400u64;
+        for h in 0..n {
+            let s = ShopSign::draw(&g.signs, &g.lexicon, g.era, mix64(h));
+            let look = (h % u64::from(POLE_SIGN_LOOKS)) as u8;
+            let base = V3::new(3.0, 1.0, 4.0);
+            let dir = V2::new(0.6, 0.8);
+            let mut bare = WorldMesh::default();
+            pole_sign(&mut bare, base, dir, 10.0, look, &pal, h as u32, None);
+            let mut m = WorldMesh::default();
+            pole_sign(
+                &mut m,
+                base,
+                dir,
+                10.0,
+                look,
+                &pal,
+                h as u32,
+                Some((&s, &g.lexicon)),
+            );
+            assert!(bare.triangle_count() > 20, "look {look}");
+            assert!(
+                m.triangle_count() <= POLE_SIGN_TRIANGLES,
+                "look {look}: {}",
+                m.triangle_count()
+            );
+            if m.triangle_count() > bare.triangle_count() {
+                lettered += 1;
+            }
+        }
+        assert!(lettered * 10 > n * 8, "{lettered} of {n} lettered");
     }
 
     /// Every shop sign the coast grammar draws keeps to the sign budget, letters its words
