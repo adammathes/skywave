@@ -1217,13 +1217,24 @@ mod tests {
             eprintln!("  {file}: {}", per[k]);
         }
         assert!(freeway > 0, "the coast has a freeway");
-        for &k in &vehicles::TRAFFIC_SHAPES[14..] {
+        for &k in &vehicles::TRAFFIC_SHAPES[14..21] {
             assert!(
                 per[k] > 0,
                 "{} never drives in 2001",
                 vehicles::BUILTIN_SHAPES[k].0
             );
         }
+        // The hero cars drive too, rarer than the everyday cars (the Destrier, a 1969 car,
+        // rarer still by its age).
+        let heroes: usize = vehicles::TRAFFIC_SHAPES[21..].iter().map(|&k| per[k]).sum();
+        let everyday: usize = vehicles::TRAFFIC_SHAPES[14..21]
+            .iter()
+            .map(|&k| per[k])
+            .sum();
+        assert!(
+            heroes > 0 && heroes < everyday,
+            "{heroes} heroes, {everyday} everyday"
+        );
         assert!(on_freeway, "a semi started off the freeway");
         // The 1980s cars still drive, at their age weight: fewer than the 2001 cars.
         let old: usize = per[..14].iter().sum();

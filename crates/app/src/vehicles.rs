@@ -364,12 +364,13 @@ pub const BUILTIN_SHAPES: [(&str, &str); 38] = [
 ];
 
 /// The [`BUILTIN_SHAPES`] NPC traffic draws from, by index: the twelve everyday cars of the
-/// 1980s and their two common sports cars, then the seven 2001 traffic cars. A world drives
-/// those of its cars ([`crate::scenario::Lineup::shapes`]), so the 1984 coast drives the
-/// first fourteen alone. The exotics, the new convertibles and the 2001 hero cars are the
-/// player's to drive.
-pub const TRAFFIC_SHAPES: [usize; 21] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 25, 26, 27, 28, 29, 30, 31,
+/// 1980s and their two common sports cars, then the seven 2001 traffic cars, then the eleven
+/// 2001 hero cars. A world drives those of its cars ([`crate::scenario::Lineup::shapes`]),
+/// so the 1984 coast drives the first fourteen alone. The 1980s exotics and open sports cars
+/// are the player's to drive.
+pub const TRAFFIC_SHAPES: [usize; 32] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 25, 26, 27, 28, 29, 30, 31, 20, 21, 22, 23, 24,
+    32, 33, 34, 35, 36, 37,
 ];
 
 /// Where each traffic shape is seen, as weights per zone (`place::ZoneId` order: downtown,
@@ -377,8 +378,9 @@ pub const TRAFFIC_SHAPES: [usize; 21] = [
 /// highway (the freeway lanes), water), for traffic (`traffic::ShapeRule::zones`) and parked
 /// cars alike. A shape not listed weighs [`ZONES_ALIKE`]: the 1980s cars weigh by their
 /// age alone. SUVs and minivans in the residential and strip zones, pickups and box trucks
-/// in the industrial ones, the semi on the freeway alone.
-pub const ZONE_WEIGHTS: [(&str, [u8; 12]); 7] = [
+/// in the industrial ones, the semi on the freeway alone; the 2001 hero cars at half an
+/// everyday car's weight everywhere, so they turn up without crowding the street.
+pub const ZONE_WEIGHTS: [(&str, [u8; 12]); 18] = [
     ("plover_sedan", [3, 3, 3, 3, 2, 3, 2, 2, 2, 2, 3, 2]),
     ("sorrel_utility", [2, 4, 4, 4, 1, 2, 2, 2, 2, 3, 2, 2]),
     ("wren_minivan", [1, 4, 4, 4, 1, 2, 2, 2, 1, 2, 2, 1]),
@@ -386,6 +388,17 @@ pub const ZONE_WEIGHTS: [(&str, [u8; 12]); 7] = [
     ("linnet_hatch", [3, 3, 2, 2, 1, 3, 2, 2, 1, 1, 2, 2]),
     ("sledge_box_truck", [2, 1, 1, 1, 5, 2, 1, 1, 1, 1, 1, 1]),
     ("anvil_semi", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0]),
+    ("halberd_coupe", [1; 12]),
+    ("halberd_targa", [1; 12]),
+    ("tanager_awd", [1; 12]),
+    ("destrier_coupe", [1; 12]),
+    ("siskin_coupe", [1; 12]),
+    ("shrike_coupe", [1; 12]),
+    ("glaive_turbo", [1; 12]),
+    ("falchion_sedan", [1; 12]),
+    ("courser_v8", [1; 12]),
+    ("dunlin_roadster", [1; 12]),
+    ("palfrey_roadster", [1; 12]),
 ];
 
 /// The zone weights of a shape [`ZONE_WEIGHTS`] does not list.

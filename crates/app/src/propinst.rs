@@ -665,7 +665,7 @@ mod tests {
     const Z: place::ZoneId = place::ZoneId::Residential;
 
     /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
-    /// the 2001 hero cars, which only the player drives, and the two trucks too long for a
+    /// the 2001 hero cars, which only the player and traffic drive, and the two trucks too long for a
     /// stall, which only traffic drives.
     const UNPARKED: [&str; 19] = [
         "basilisk_v12",
@@ -695,10 +695,11 @@ mod tests {
             .iter()
             .map(|(_, text)| vehicles::load_shape(text).unwrap())
             .collect();
-        // The shapes that never park are the ones traffic leaves out, and its two trucks.
-        let unparked: Vec<&str> = (0..shapes.len())
-            .filter(|k| !vehicles::TRAFFIC_SHAPES.contains(k) || shapes[*k].length() > 7.0)
-            .map(|k| shapes[k].id.as_str())
+        // The shapes that never park are the ones no class lists.
+        let unparked: Vec<&str> = shapes
+            .iter()
+            .map(|s| s.id.as_str())
+            .filter(|id| PARKED.iter().all(|l| l.iter().all(|e| e.0 != *id)))
             .collect();
         assert_eq!(unparked, UNPARKED);
         let mut parked = vec![false; shapes.len()];
@@ -852,9 +853,10 @@ mod tests {
     const PARKED_MESH_BYTES_MAX: usize = 30_000_000;
     /// The same in the 2001 world (the coast's place until the basin's lands): the 1980s
     /// cars and the 2001 traffic cars, nineteen shapes parked and 21 driving, 36.3 MB
-    /// (33.0 parked, 3.3 for the traffic's own, most of it the two trucks); the ceiling is
-    /// ~1.2x that.
-    const PARKED_MESH_BYTES_MAX_2001: usize = 44_000_000;
+    /// (33.0 parked, 3.3 for the traffic's own, most of it the two trucks); with the eleven
+    /// 2001 hero cars driving too (their meshes are traffic's own, they never park), 53.5
+    /// MB. The ceiling is ~1.2x that.
+    const PARKED_MESH_BYTES_MAX_2001: usize = 64_000_000;
 
     /// Parked- and traffic-car meshes of scenario `scenario`'s world on the coast at seed 1:
     /// counts asserted against the paint caps, and the bytes.
