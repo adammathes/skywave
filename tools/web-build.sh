@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the browser version into dist/: release wasm, wasm-bindgen JS glue, index.html.
+# Builds the browser version into dist/: release wasm, wasm-bindgen JS glue, index.html,
+# and places/<world>.place, each world's baked default place, fetched when it is picked.
 # wasm-bindgen-cli must match the wasm-bindgen crate in Cargo.lock exactly; it is installed
 # with `cargo install` when missing or mismatched (GitHub release downloads are not used).
 # wasm-opt (binaryen; `npm install -g binaryen` works) shrinks the wasm when it is on PATH;
@@ -23,10 +24,21 @@ if [[ "$(wasm-bindgen --version 2>/dev/null || true)" != "wasm-bindgen $version"
     cargo install --locked wasm-bindgen-cli --version "$version"
 fi
 
-cargo build --release --locked --target wasm32-unknown-unknown -p platform-web
+# The app's build script bakes each world's place into its OUT_DIR (crates/app/build.rs);
+# its build-script-executed message names that directory.
+app_out="$(cargo build --release --locked --target wasm32-unknown-unknown -p platform-web \
+    --message-format=json-render-diagnostics |
+    grep '"reason":"build-script-executed"' | grep -E '"package_id":"[^"]*crates/app#' |
+    sed -E 's/.*"out_dir":"([^"]*)".*/\1/' | tail -n 1)"
+if [[ -z "$app_out" ]] || ! ls "$app_out"/*.place >/dev/null 2>&1; then
+    echo "web-build: no baked places found (app OUT_DIR: '${app_out}')" >&2
+    exit 1
+fi
 
 rm -rf "$dist"
-mkdir -p "$dist"
+mkdir -p "$dist/places"
+# Fetched when a world is picked (crates/platform-web: fetch_baked), so the wasm stays small.
+cp "$app_out"/*.place "$dist/places/"
 wasm-bindgen --target web --no-typescript --out-dir "$dist" \
     "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/platform_web.wasm"
 wasm="$dist/platform_web_bg.wasm"
