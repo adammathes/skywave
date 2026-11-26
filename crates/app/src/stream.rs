@@ -1313,25 +1313,28 @@ mod tests {
             c.pieces_ms(),
             c.worst_stage,
         );
-        assert!((100_000..=140_000).contains(&tris), "{tris} triangles");
+        // A flat place simplifies further than a hilly one; none goes over the budget.
+        assert!((50_000..=140_000).contains(&tris), "{tris} triangles");
         assert!(far.iter().all(|t| t
             .mesh
             .indices
             .iter()
             .all(|&i| (i as usize) < t.mesh.vertices.len())));
-        // The web pool holds the densest square of chunks a camera keeps resident (the ring
-        // and the chunks waiting to be evicted).
+        // Each pool holds the densest square of chunks a camera keeps resident (the ring
+        // and the chunks waiting to be evicted): on native that is the whole of a 16 x 16
+        // place but not of a bigger one.
         let side = 2 * StreamBudget::WEB.radius + 3;
         let pages = c.densest_pages(side);
         let pool = StreamBudget::WEB.pool_config().pages as usize;
-        let all: usize = c.pages.iter().map(|p| p.1).sum();
+        let native_side = 2 * StreamBudget::NATIVE.radius + 3;
+        let native_pages = c.densest_pages(native_side);
         let native = StreamBudget::NATIVE.pool_config().pages as usize;
         eprintln!(
             "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; densest 3x3 \
-             {}; the whole place {all} of the native pool's {native}",
+             {}; densest {native_side}x{native_side} {native_pages} of the native pool's {native}",
             c.densest_pages(3)
         );
         assert!(pages <= pool, "{pages} pages of {pool}");
-        assert!(all <= native, "{all} pages of {native}");
+        assert!(native_pages <= native, "{native_pages} pages of {native}");
     }
 }

@@ -1,18 +1,20 @@
 //! Lake City's hero landmark (`docs/WORLD_GENERATION.md`, "Hero landmarks"): on seeds 1-4 the
-//! lake city sites its drive-in hot dog stand on an arterial lot ahead of the start, close
+//! lake city (its authored layout) sites its drive-in hot dog stand on an arterial lot ahead of the start, close
 //! enough to see from there, clear of every building, with its stall cars parked on its lot.
 //! `cargo test -p world --release --test lake_city -- --nocapture` prints where it went.
 
 use place::{Place, PoiKind, PropKind, SpawnKind};
 use skywave_core::Seed;
 use world::math::{point_in_polygon, V2};
-use world::procgen::build_place;
+use world::layout::Layout;
+use world::procgen::authored::build_place;
 use world::procgen::setpieces::HERO_AHEAD_M;
 use world::template::RegionTemplate;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LAKE_CITY: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
+const LAYOUT: &str = include_str!("../../../assets/layouts/lake_city.ron");
 
 /// The farthest the stand stands from the start, m: in sight down the road.
 const IN_SIGHT_M: f32 = 700.0;
@@ -31,7 +33,9 @@ fn grammar() -> world::Grammar {
 fn lake_city(seed: u64) -> Place {
     let t: RegionTemplate = ron::from_str(LAKE_CITY).expect("parse");
     t.validate().expect("validate");
-    build_place(Seed(seed), &t, &grammar())
+    let l: Layout = ron::from_str(LAYOUT).expect("parse layout");
+    l.validate().expect("validate layout");
+    build_place(Seed(seed), &l, &t, &grammar())
 }
 
 #[test]

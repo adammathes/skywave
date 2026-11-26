@@ -1,0 +1,81 @@
+// Lake City (docs/SCENARIOS.md, docs/LAYOUTS.md): a flat grid city of the 1980s on a great lake,
+// built to work and warm inside. The lake is the whole east; a drive runs the shore through a
+// park the length of the city. A river comes in from the lake beside downtown and forks north
+// and south. Arterials every 300-320 m make the grid; two old diagonals run from downtown to
+// the north-west and south-west corners; an expressway runs straight west. Three-flats and
+// brick two-storey storefronts in the middle, the bungalow belt to the west with the drive-in
+// on its main street, a leafy suburb across the north limits, industry along the south branch.
+//
+// Meters, x east, z south, (0, 0) the north-west corner; 16 x 16 chunks, 2048 m square.
+Layout(
+    id: "lake_city",
+    size_chunks: (16, 16),
+    ground_m: 180,
+    water_level_m: 176,
+    edges: Edges(north: Forest, east: Lake, south: RailYards, west: RailYards),
+
+    ridges: [],
+    peaks: [],
+
+    water: [
+        // The lake.
+        Water(kind: Lake, depth_m: 4.2, polygon: [(1653, 0), (2048, 0), (2048, 2048), (1742, 2048), (1716, 1600), (1689, 1280), (1724, 978), (1689, 533)]),
+        // The river: its main stem from the lake, then the north and south branches.
+        Water(kind: Lake, depth_m: 3, polygon: [(1742, 1095), (1422, 1095), (1049, 1095), (1049, 1127), (1422, 1127), (1742, 1127)]),
+        Water(kind: Lake, depth_m: 3, polygon: [(1063, 1110), (1036, 796), (912, 459), (841, 0), (812, 2), (884, 466), (1008, 804), (1035, 1112)]),
+        Water(kind: Lake, depth_m: 3, polygon: [(1035, 1110), (1026, 1348), (928, 1668), (884, 2046), (912, 2048), (956, 1674), (1054, 1354), (1063, 1112)]),
+    ],
+
+    // Three-flats on a grid unless a district says otherwise.
+    default_zone: Residential,
+    districts: [
+        // The inner north suburb across the north limits: houses under big trees.
+        District(name: "north suburb", zone: Suburb, polygon: [(0, 0), (1653, 0), (1653, 267), (0, 267)]),
+        // The bungalow belt: the west side, one storey and a half, brick, every lot alike.
+        District(name: "bungalow belt", zone: Suburb, polygon: [(0, 267), (640, 267), (640, 2048), (0, 2048)]),
+        // Industry along the south branch: rail spurs, warehouses, the stockyards' old ground.
+        District(name: "river yards", zone: Industrial, polygon: [(907, 1182), (1173, 1182), (1102, 1564), (1022, 2048), (764, 2048), (871, 1564)]),
+        // Storefront streets: two-storey brick with flats above, both sides of the main arterials.
+        District(name: "crosstown stores", zone: Commercial, polygon: [(36, 604), (1591, 604), (1591, 676), (36, 676)]),
+        District(name: "midtown stores", zone: Commercial, polygon: [(871, 267), (942, 267), (942, 2009), (871, 2009)]),
+        District(name: "northwest stores", zone: Commercial, polygon: [(1227, 930), (53, 236), (18, 297), (1191, 990)]),
+        District(name: "southwest stores", zone: Commercial, polygon: [(1192, 1249), (19, 1880), (52, 1942), (1226, 1311)]),
+        // The bungalow belt's main street: the drive-in, the car wash, the muffler shop.
+        District(name: "drive-in stretch", zone: Strip, polygon: [(258, 320), (347, 320), (347, 1156), (258, 1156)]),
+        // Parks: the lakefront the length of the city, and the big neighborhood parks.
+        District(name: "lakefront", zone: Park, polygon: [(1511, 0), (1493, 533), (1533, 960), (1511, 1280), (1533, 1600), (1560, 2048), (1742, 2048), (1742, 2048), (1716, 1600), (1689, 1280), (1724, 978), (1689, 533), (1653, 0)]),
+        District(name: "west park", zone: Park, polygon: [(373, 1022), (578, 1022), (578, 1236), (373, 1236)]),
+        District(name: "south park", zone: Park, polygon: [(373, 1671), (676, 1671), (676, 1920), (373, 1920)]),
+        District(name: "north park", zone: Park, polygon: [(1244, 338), (1467, 338), (1467, 551), (1244, 551)]),
+        // Downtown: towers on the river's main stem, between the south branch and the lake.
+        District(name: "downtown", zone: Downtown, polygon: [(1227, 871), (1591, 871), (1591, 1387), (1227, 1387)]),
+    ],
+
+    roads: [
+        // The city limits: north, west and south.
+        Road(name: "north limits", class: Arterial, lanes: 2, points: [(36, 36), (1591, 36)]),
+        Road(name: "west limits", class: Arterial, lanes: 2, points: [(36, 36), (36, 2009)]),
+        Road(name: "south limits", class: Arterial, lanes: 2, points: [(36, 2009), (1640, 2009)]),
+        // The lake shore drive, through the lakefront park.
+        Road(name: "shore drive", class: Arterial, lanes: 3, speed_kph: Some(80), sidewalk: false, points: [(1591, 36), (1573, 533), (1613, 960), (1591, 1280), (1613, 1600), (1640, 2009)]),
+        // The grid: north-south avenues.
+        Road(name: "first avenue", class: Arterial, lanes: 2, points: [(302, 36), (302, 2009)]),
+        Road(name: "second avenue", class: Arterial, lanes: 2, points: [(604, 36), (604, 2009)]),
+        Road(name: "midtown avenue", class: Arterial, lanes: 2, points: [(907, 36), (907, 2009)]),
+        Road(name: "fourth avenue", class: Arterial, lanes: 2, points: [(1209, 36), (1209, 2009)]),
+        // East-west streets.
+        Road(name: "north street", class: Arterial, lanes: 2, points: [(36, 320), (1576, 320)]),
+        Road(name: "crosstown", class: Arterial, lanes: 2, points: [(36, 640), (1583, 640)]),
+        Road(name: "river street", class: Arterial, lanes: 2, points: [(36, 960), (1613, 960)]),
+        Road(name: "market street", class: Arterial, lanes: 2, points: [(36, 1280), (1591, 1280)]),
+        Road(name: "south street", class: Arterial, lanes: 2, points: [(36, 1600), (1613, 1600)]),
+        // The old diagonals, from downtown out to the corners.
+        Road(name: "northwest diagonal", class: Arterial, lanes: 2, points: [(1209, 960), (36, 267)]),
+        Road(name: "southwest diagonal", class: Arterial, lanes: 2, points: [(1209, 1280), (36, 1911)]),
+        // The expressway west out of downtown.
+        Road(name: "west expressway", class: Arterial, lanes: 3, speed_kph: Some(90), sidewalk: false, points: [(36, 1440), (1603, 1440)]),
+    ],
+
+    // On the bungalow belt's main street, heading south toward the drive-in.
+    start: Start(road: "first avenue", along_m: 420),
+)
