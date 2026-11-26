@@ -58,6 +58,8 @@ pub enum Action {
     Horn,
     /// The high beams lit while held (a flash), whatever the switches say.
     Flash,
+    /// Burn a charge of nitrous (`crate::nitrous`).
+    Nitrous,
     /// Swap to the next built-in vehicle, in place.
     VehicleNext,
     /// Put the car back on the nearest lane, at rest (a long press on the pad).
@@ -104,7 +106,7 @@ pub enum Context {
 }
 
 impl Action {
-    pub const COUNT: usize = 44;
+    pub const COUNT: usize = 45;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -126,6 +128,7 @@ impl Action {
         Action::Underglow,
         Action::Horn,
         Action::Flash,
+        Action::Nitrous,
         Action::VehicleNext,
         Action::Reset,
         Action::MapToggle,
@@ -244,6 +247,7 @@ impl Action {
             Action::Underglow => "Underglow",
             Action::Horn => "Horn",
             Action::Flash => "Flash",
+            Action::Nitrous => "Nitrous",
             Action::VehicleNext => "VehicleNext",
             Action::Reset => "Reset",
             Action::MapToggle => "MapToggle",
