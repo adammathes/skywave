@@ -1370,6 +1370,16 @@ fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Ve
             PropKind::LotLabel { .. } => posts.push(post(0.12, 2.8)),
             // Overhead, out of reach.
             PropKind::PowerLine { .. } => {}
+            // Its two posts off the shoulders.
+            PropKind::ExitSign { width_dm, .. } => {
+                let x = f32::from(width_dm) * 0.05 + 1.4;
+                for s in [-x, x] {
+                    posts.push(Post {
+                        c: arr(p.pos + p.dir.right() * s),
+                        ..post(0.25, 7.4)
+                    });
+                }
+            }
             PropKind::Landmark { kit, variant } => {
                 let Some(k) = kits.get(usize::from(kit)) else {
                     continue;

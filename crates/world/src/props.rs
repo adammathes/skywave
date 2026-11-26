@@ -134,6 +134,15 @@ pub enum PropKind {
         len_dm: u16,
         rise_dm: i16,
     },
+    /// A freeway's overhead exit sign: a truss on two posts spanning `width_dm` decimeters
+    /// of roadway centered on `pos`, facing traffic that travels along `dir`, its green
+    /// panel over the lanes on the right naming the street with key `street`
+    /// (`signs::street_name_of`). Built from the place's exit ramps ([`exit_signs`]);
+    /// never in a Place.
+    ExitSign {
+        width_dm: u16,
+        street: u16,
+    },
 }
 
 /// One placed prop.
@@ -489,6 +498,9 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         // A landmark needs its kit, which only the chunk plan has.
         PropKind::Landmark { .. } => {}
         PropKind::LotLabel { letter } => crate::landmarks::lot_label(m, base, p.dir, letter, pal),
+        PropKind::ExitSign { width_dm, street } => {
+            exit_sign(m, base, p.dir, f32::from(width_dm) * 0.1, street, pal)
+        }
         PropKind::PowerLine { len_dm, rise_dm } => power_line(
             m,
             base,
@@ -3327,6 +3339,226 @@ fn full_power_pole(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette, rng: &
             insulator(m, &at.offset(x, 0.9, 0.0), glass);
         }
     }
+}
+
+/// How far before the ramp leaves it a freeway's exit sign stands, m: the first of these
+/// where the freeway runs straight.
+const EXIT_SIGN_M: [f32; 3] = [160.0, 110.0, 70.0];
+
+/// The freeway's exit signs: one over each carriageway before every exit ramp, naming the
+/// street the ramp leads to. An exit ramp is a one-way road leaving a freeway node on the
+/// right of the traffic it takes; the sign stands [`EXIT_SIGN_M`] back along the freeway,
+/// where the freeway still runs straight (its centerline there is in line with the way
+/// traffic comes).
+pub fn exit_signs(place: &Place) -> Vec<Prop> {
+    let roads = &place.roads;
+    let node = |i: u32| V2::from_array(roads.nodes[i as usize].pos);
+    let mut out = Vec::new();
+    for (ri, r) in roads.edges.iter().enumerate() {
+        if !r.oneway || r.class == RoadClass::Highway || r.profile.len() < 2 {
+            continue;
+        }
+        // It leaves the freeway: starts on its roadway and heads away from it.
+        let at = node(r.a);
+        let Some((d0, _, _, along, width)) = freeway_at(place, at) else {
+            continue;
+        };
+        let away = freeway_at(place, node(r.b)).map_or(f32::MAX, |f| f.0);
+        let leave = V2::new(r.profile[1][0], r.profile[1][2]) - at;
+        if d0 > width * 0.5 + 1.0 || away < d0 + 2.0 || leave.length() < 1e-3 {
+            continue;
+        }
+        let leave = leave * (1.0 / leave.length());
+        // Traffic comes along the freeway the way the ramp heads, the ramp on its right.
+        let t = if leave.dot(along) >= 0.0 {
+            along
+        } else {
+            -along
+        };
+        if leave.dot(t.right()) < 0.05 {
+            continue;
+        }
+        // The street it leads to: the first road past the ramps that is not one.
+        let ramp = |e: &place::Edge| e.oneway && e.class == r.class;
+        let (mut end, mut prev, mut street) = (r.b, ri, None);
+        for _ in 0..4 {
+            let at_end: Vec<(usize, &place::Edge)> = roads
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|&(k, e)| {
+                    k != prev && (e.a == end || e.b == end) && e.class != RoadClass::Highway
+                })
+                .collect();
+            if let Some(&(k, _)) = at_end.iter().find(|(_, e)| !ramp(e)) {
+                street = Some(k);
+                break;
+            }
+            let Some(&(k, e)) = at_end.first() else {
+                break;
+            };
+            (end, prev) = (if e.a == end { e.b } else { e.a }, k);
+        }
+        let Some(street) = street else {
+            continue;
+        };
+        // Back along the freeway, snapped to its centerline, where it still runs in line
+        // (nearer the ramp where the freeway bends), and clear of the tunnel.
+        let Some((q, y, along, width)) = EXIT_SIGN_M.iter().find_map(|&back| {
+            let (d, q, y, along, width) = freeway_at(place, at - t * back)?;
+            let tunnel = place.props.items.iter().any(|p| {
+                matches!(p.kind, place::PropKind::TunnelPiece { .. })
+                    && (V2::new(p.pos[0], p.pos[2]) - q).length() < 30.0
+            });
+            (d < 3.0 && along.dot(t).abs() > 0.995 && !tunnel).then_some((q, y, along, width))
+        }) else {
+            continue;
+        };
+        let dir = if along.dot(t) > 0.0 { along } else { -along };
+        out.push(Prop {
+            pos: q,
+            y,
+            dir,
+            kind: PropKind::ExitSign {
+                width_dm: (width * 10.0) as u16,
+                street: signs::street_key(place, street),
+            },
+            seed: 0,
+        });
+    }
+    out
+}
+
+/// The point of the freeway's centerline nearest `p`: its distance, position, road height,
+/// unit direction (from `a` to `b`) and the road's width there.
+fn freeway_at(place: &Place, p: V2) -> Option<(f32, V2, f32, V2, f32)> {
+    let mut best: Option<(f32, V2, f32, V2, f32)> = None;
+    for e in place.roads.edges.iter() {
+        if e.class != RoadClass::Highway || e.oneway {
+            continue;
+        }
+        for w in e.profile.windows(2) {
+            let (a, b) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
+            let ab = b - a;
+            let l2 = ab.dot(ab);
+            if l2 < 1e-6 {
+                continue;
+            }
+            let u = ((p - a).dot(ab) / l2).clamp(0.0, 1.0);
+            let q = a + ab * u;
+            let d = (q - p).length();
+            if best.is_none_or(|b| d < b.0) {
+                let y = w[0][1] + (w[1][1] - w[0][1]) * u;
+                best = Some((d, q, y, ab * (1.0 / ab.length()), e.width_m));
+            }
+        }
+    }
+    best
+}
+
+/// An exit sign over a freeway `width` m wide at `base`, traffic coming along `dir`: two
+/// galvanized posts off the shoulders, a box truss across, and on its face over the right
+/// lanes a green panel with a white border, the street's name and EXIT under it.
+fn exit_sign(m: &mut WorldMesh, base: V3, dir: V2, width: f32, street: u16, pal: &Palette) {
+    // Local x across the road to the right of traffic, z toward the traffic.
+    let f = Frame::upright(base, dir.right());
+    let steel = Paint::new(shade(pal.metal_light, 230), Pattern::Metal);
+    let half = width * 0.5 + 1.4;
+    for x in [-half, half] {
+        boxf(
+            m,
+            &f,
+            [x - 0.2, 0.0, -0.2],
+            [x + 0.2, 7.4, 0.2],
+            face::NO_BOTTOM,
+            steel,
+        );
+    }
+    for y in [6.0f32, 7.0] {
+        bar(
+            m,
+            f.p(-half, y, 0.0),
+            f.p(half, y, 0.0),
+            V3::Y,
+            0.16,
+            0.16,
+            true,
+            steel,
+        );
+    }
+    let mut x = -half;
+    while x < half - 0.5 {
+        bar(
+            m,
+            f.p(x, 6.0, 0.0),
+            f.p(x + 0.5, 7.0, 0.0),
+            f.z,
+            0.08,
+            0.08,
+            false,
+            steel,
+        );
+        bar(
+            m,
+            f.p(x + 0.5, 7.0, 0.0),
+            f.p(x + 1.0, 6.0, 0.0),
+            f.z,
+            0.08,
+            0.08,
+            false,
+            steel,
+        );
+        x += 1.0;
+    }
+    // The panel over the lanes on the right.
+    let green = Paint::new(srgb_green(pal), Pattern::Paint);
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let name = signs::street_name_of(street);
+    let em = signs::letters::layout(&name, signs::letters::LetterStyle::Block).ink_w();
+    let cap = (width * 0.5 - 1.6).min(em * 0.75).max(1.0) / em.max(0.1);
+    let cap = cap.min(0.75);
+    let pw = (em * cap + 1.2).max(5.0);
+    let cx = width * 0.25;
+    let (x0, x1, y0, y1) = (cx - pw * 0.5, cx + pw * 0.5, 5.6, 8.4);
+    boxf(m, &f, [x0, y0, 0.12], [x1, y1, 0.22], face::ALL, green);
+    for (a, b) in [
+        ([x0 + 0.12, y1 - 0.2], [x1 - 0.12, y1 - 0.12]),
+        ([x0 + 0.12, y0 + 0.12], [x1 - 0.12, y0 + 0.2]),
+        ([x0 + 0.12, y0 + 0.12], [x0 + 0.2, y1 - 0.12]),
+        ([x1 - 0.2, y0 + 0.12], [x1 - 0.12, y1 - 0.12]),
+    ] {
+        rect(m, &f, a[0], a[1], b[0], b[1], 0.225, false, white);
+    }
+    letters(
+        m,
+        &f,
+        &name,
+        cx - 0.5 * em * cap,
+        7.3,
+        cap / 5.0,
+        0.225,
+        false,
+        white,
+    );
+    let exit = b"EXIT";
+    let ew = signs::letters::layout(exit, signs::letters::LetterStyle::Block).ink_w();
+    let ecap = 0.5;
+    letters(
+        m,
+        &f,
+        exit,
+        cx - 0.5 * ew * ecap,
+        6.35,
+        ecap / 5.0,
+        0.225,
+        false,
+        white,
+    );
+}
+
+/// Highway green, from the palette's deep greens.
+fn srgb_green(pal: &Palette) -> Rgb {
+    mix(shade(pal.palm_green, 150), pal.teal, 60)
 }
 
 /// Height of a power pole's top insulators, where its wires hang, m (`power_pole`).

@@ -1137,7 +1137,7 @@ impl<'a> Detailer<'a> {
                     .map(|o| (o, e.dir.dot(j.ends[o].dir).abs()))
                     .fold((k, f32::MAX), |a, b| if b.1 < a.1 { b } else { a })
                     .0;
-                let key = |o: usize| u64::from(street_key(place, j.ends[o].edge));
+                let key = |o: usize| u64::from(crate::signs::street_key(place, j.ends[o].edge));
                 let text_seed = key(k) | key(cross) << 16;
                 if let Some((q, y, out)) = self.along_end(ji, k, s, -(e.hw + 0.6)) {
                     self.add(prop(q, y, out, PropKind::Sign { text_seed }), 0.15, 0.3);
@@ -1885,37 +1885,4 @@ fn neon_clusters(m: &WorldMesh) -> Vec<(V3, V3, [u8; 3])> {
     }
     flush(&mut run, &mut out);
     out
-}
-
-/// The name key of the street edge `edge` lies on (`signs::street_name_of`): the same for
-/// every edge along one straight line (its chord's heading in 4 degree steps and its
-/// offset from the origin in 24 m steps, so both carriageways of a boulevard share it),
-/// with bit 15 set on arterials.
-fn street_key(place: &Place, edge: usize) -> u16 {
-    let e = &place.roads.edges[edge];
-    let (a, b) = (
-        place.roads.nodes[e.a as usize].pos,
-        place.roads.nodes[e.b as usize].pos,
-    );
-    let mut d = V2::new(b[0] - a[0], b[1] - a[1]);
-    let len = d.length();
-    if len < 1e-3 {
-        return 0;
-    }
-    d = d * (1.0 / len);
-    // Headings from -45 to 135 degrees, so a grid's two axes sit mid-range.
-    let mut deg = crate::math::atan2(d.y, d.x).to_degrees();
-    if deg < -45.0 {
-        deg += 180.0;
-    } else if deg >= 135.0 {
-        deg -= 180.0;
-    }
-    let (sin, cos) = crate::math::sin_cos(deg.to_radians());
-    let n = V2::new(-sin, cos);
-    let off = n.x * a[0] + n.y * a[1];
-    let h = skywave_core::mix64(
-        (floor(deg / 4.0 + 0.5) as i64 as u64) << 32 ^ (floor(off / 24.0 + 0.5) as i64 as u64),
-    );
-    let arterial = matches!(e.class, RoadClass::Arterial | RoadClass::Beachfront);
-    (h as u16 & 0x7FFF) | u16::from(arterial) << 15
 }
