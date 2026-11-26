@@ -74,6 +74,9 @@ struct State {
     keyed_fullscreen: bool,
     /// When fullscreen last ended (event time, ms), for the Esc that ended it.
     fullscreen_left_ms: f64,
+    /// A world picked on the World page whose baked place has been fetched (or found
+    /// missing): the next frame loads it.
+    fetched_world: Rc<Cell<Option<usize>>>,
 }
 
 /// What the page is told changed about the deck: source, track changes, mode, playing,
@@ -650,6 +653,35 @@ fn build_app(setup: &SceneSetup, query: &str) -> App {
     app
 }
 
+/// Fetches the baked place of `setup`'s world (`places/<scenario id>.place`, which
+/// `tools/web-build.sh` copies beside the page) and hands it to the app, when loading
+/// `setup` would use it. Without the file (a server that lacks it, say) the place is
+/// generated at load as before.
+async fn fetch_baked(setup: &SceneSetup) {
+    if setup.place != app::PlaceKey::Coast || setup.seed != app::BAKED_SEED.0 {
+        return;
+    }
+    let id = app::scenario::get(setup.scenario).id.clone();
+    match fetch_bytes(&format!("places/{id}.place")).await {
+        Ok(bytes) => app::provide_baked(&id, bytes),
+        Err(e) => log::warn!("skywave: no baked place for {id} ({e:?}); generating it"),
+    }
+}
+
+/// The body of `url`, fetched.
+async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
+    let window = web_sys::window().ok_or("no window")?;
+    let response: web_sys::Response =
+        wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+            .await?
+            .dyn_into()?;
+    if !response.ok() {
+        return Err(JsValue::from_str(&format!("HTTP {}", response.status())));
+    }
+    let body = wasm_bindgen_futures::JsFuture::from(response.array_buffer()?).await?;
+    Ok(js_sys::Uint8Array::new(&body).to_vec())
+}
+
 /// Uploads what `app` draws from (its meshes, instance room, map and stills) into a
 /// fresh `renderer`.
 fn load_renderer(renderer: &mut Renderer, app: &App) {
@@ -691,6 +723,9 @@ pub async fn run(
     let query = window.location().search()?;
     let page = Page::from_options(&options);
     if crate::query_param(&query, "selftest") == Some("1") {
+        // The basin's place as a bare start loads it, so the self-test checks the baked
+        // file against native generation.
+        fetch_baked(&SceneSetup::default().for_world(1)).await;
         let line = app::selftest::SelfTest::run().console_line();
         console::log_1(&JsValue::from_str(&line));
         let _ = on_first_frame.call1(&JsValue::NULL, &JsValue::from_str("selftest"));
@@ -710,6 +745,7 @@ pub async fn run(
             SceneSetup::default()
         })
         .with_saved_world(LocalStore.load().as_deref());
+    fetch_baked(&setup).await;
     if let Some(detail) = option_str(&options, "failure") {
         let note = crate::fallback(
             BackendChoice::Auto,
@@ -809,6 +845,7 @@ pub async fn run(
         music_reconnect: false,
         keyed_fullscreen: false,
         fullscreen_left_ms: f64::NEG_INFINITY,
+        fetched_world: Rc::new(Cell::new(None)),
     }));
     listen_keys(&window, &state)?;
     listen_mouse(&window, &state)?;
@@ -1409,6 +1446,14 @@ impl State {
             toggle_fullscreen(&self.canvas);
         }
         if let Some(world) = self.app.take_world_pick() {
+            // Its baked place first, if it has one; the frame loop goes on meanwhile.
+            let (setup, done) = (self.setup.for_world(world), self.fetched_world.clone());
+            wasm_bindgen_futures::spawn_local(async move {
+                fetch_baked(&setup).await;
+                done.set(Some(world));
+            });
+        }
+        if let Some(world) = self.fetched_world.take() {
             self.switch_world(world);
         }
         self.app.sync_chunks(&mut self.renderer);
