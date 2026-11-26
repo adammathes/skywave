@@ -328,8 +328,8 @@ pub struct PlaceSource {
     palette: Palette,
     plan: ChunkPlan,
     statics: Vec<StaticLight>,
-    /// A terrain place's far terrain, in render vertices.
-    far: Option<Mesh>,
+    /// A terrain place's far terrain, in render vertices, cut into [`FarTile`]s.
+    far: Vec<FarTile>,
     /// ...and its horizon.
     horizon: Option<Mesh>,
 }
@@ -390,7 +390,11 @@ impl PlaceSource {
         statics.sort_by_key(|s| s.chunk);
         let far = plan
             .far_terrain(&place, &palette)
-            .map(|m| convert(&atlas_mesh(&m, MeshKind::Ground), Part::Base));
+            .map(|m| {
+                let m = convert(&atlas_mesh(&m, MeshKind::Ground), Part::Base);
+                far_tiles(&m, plan.chunk_size(), plan.chunk_range())
+            })
+            .unwrap_or_default();
         let horizon = plan
             .horizon(&place, &palette)
             .map(|m| convert(&atlas_mesh(&m, MeshKind::Ground), Part::Base));
@@ -409,11 +413,11 @@ impl PlaceSource {
     }
 
     /// A terrain place's far terrain ([`ChunkPlan::far_terrain`]): the whole place's
-    /// ground and water as one coarse static mesh under the chunks', drawn always so the
-    /// hills and the sea reach the horizon past the resident ring. `None` for the test
-    /// town.
-    pub fn far_terrain(&self) -> Option<&Mesh> {
-        self.far.as_ref()
+    /// ground and water as coarse static meshes under the chunks', so the hills and the
+    /// sea reach the horizon past the resident ring; cut into tiles, each drawn until the
+    /// chunks over it are. Empty for the test town.
+    pub fn far_terrain(&self) -> &[FarTile] {
+        &self.far
     }
 
     /// A terrain place's horizon ([`ChunkPlan::horizon`]): the land past its sides, ridges
@@ -421,6 +425,82 @@ impl PlaceSource {
     /// town.
     pub fn horizon(&self) -> Option<&Mesh> {
         self.horizon.as_ref()
+    }
+}
+
+/// Edge of a far-terrain tile, in chunks: big enough to keep the draws few, small enough
+/// that the tiles under the resident ring are left out.
+const FAR_TILE_CHUNKS: i32 = 2;
+
+/// A piece of the far terrain and the chunks whose ground covers it: drawn until every
+/// one of them is.
+pub struct FarTile {
+    pub mesh: Mesh,
+    /// The chunks under its triangles, `[min, max]` inclusive, clamped to the place's
+    /// (a tile reaching out to sea is never covered).
+    pub chunks: [[i32; 2]; 2],
+    /// Whether it reaches past the place's chunks, where no chunk ever covers it.
+    pub open: bool,
+}
+
+/// `m` cut into [`FAR_TILE_CHUNKS`]-square tiles by each triangle's centroid, each tile
+/// with the chunks its triangles reach into. Tiles come in row order.
+fn far_tiles(m: &Mesh, chunk: f32, range: [[i32; 2]; 2]) -> Vec<FarTile> {
+    let tile = chunk * FAR_TILE_CHUNKS as f32;
+    // Per tile (row, column): its mesh, the vertex map into it and its x/z bounds.
+    type Cut = (Mesh, Vec<u32>, [f32; 4]);
+    let mut by: std::collections::BTreeMap<(i32, i32), Cut> = std::collections::BTreeMap::new();
+    for t in m.indices.chunks_exact(3) {
+        let v = [0, 1, 2].map(|k| m.vertices[t[k] as usize].pos);
+        let cx = (v[0][0] + v[1][0] + v[2][0]) / 3.0;
+        let cz = (v[0][2] + v[1][2] + v[2][2]) / 3.0;
+        let key = ((cz / tile).floor() as i32, (cx / tile).floor() as i32);
+        let (out, map, bb) = by.entry(key).or_insert_with(|| {
+            (
+                Mesh::default(),
+                vec![u32::MAX; m.vertices.len()],
+                [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+            )
+        });
+        for &i in t {
+            if map[i as usize] == u32::MAX {
+                map[i as usize] = out.vertices.len() as u32;
+                let vx = m.vertices[i as usize];
+                *bb = [
+                    bb[0].min(vx.pos[0]),
+                    bb[1].min(vx.pos[2]),
+                    bb[2].max(vx.pos[0]),
+                    bb[3].max(vx.pos[2]),
+                ];
+                out.vertices.push(vx);
+            }
+            out.indices.push(map[i as usize]);
+        }
+    }
+    by.into_values()
+        .map(|(mesh, _, bb)| {
+            // A hair in, so a tile whose edge lies on a chunk edge stays out of the next.
+            let c = |x: f32| ((x / chunk).floor()) as i32;
+            let lo = [c(bb[0] + 0.01), c(bb[1] + 0.01)];
+            let hi = [c(bb[2] - 0.01), c(bb[3] - 0.01)];
+            let open = (0..2).any(|k| lo[k] < range[0][k] || hi[k] > range[1][k]);
+            FarTile {
+                mesh,
+                chunks: [
+                    [lo[0].max(range[0][0]), lo[1].max(range[0][1])],
+                    [hi[0].min(range[1][0]), hi[1].min(range[1][1])],
+                ],
+                open,
+            }
+        })
+        .collect()
+}
+
+impl FarTile {
+    /// Whether the chunks over it are all drawn, so it is hidden under them.
+    pub fn covered(&self, live: impl Fn([i32; 2]) -> bool) -> bool {
+        let [lo, hi] = self.chunks;
+        !self.open && (lo[1]..=hi[1]).all(|z| (lo[0]..=hi[0]).all(|x| live([x, z])))
     }
 }
 
@@ -1048,7 +1128,7 @@ mod tests {
         let t = std::time::Instant::now();
         let src = PlaceSource::new(place, Palette::socal_1985());
         let made = t.elapsed();
-        assert!(src.far_terrain().is_none(), "the test town is flat");
+        assert!(src.far_terrain().is_empty(), "the test town is flat");
         let c = build_all(&src);
         eprintln!(
             "source {made:?}, {} statics; {} vertices (most {} in a chunk), {} parts (most {}; \
@@ -1203,14 +1283,15 @@ mod tests {
         let t = std::time::Instant::now();
         let src = PlaceSource::new(place, Palette::socal_1985());
         let made = t.elapsed();
-        let far = src.far_terrain().expect("a terrain place");
-        let tris = far.indices.len() / 3;
+        let far = src.far_terrain();
+        assert!(far.len() > 16, "{} far tiles", far.len());
+        let tris: usize = far.iter().map(|t| t.mesh.indices.len() / 3).sum();
         let c = build_all(&src);
         eprintln!(
             "{name} source {made:?}; far terrain {} vertices, {tris} triangles; {} vertices (most \
              {} in a chunk), {} parts (most {}); {} pieces (most {} a chunk); stage ms total \
              {:.1?}; pieces p99/worst {:.2?}; worst whole stage {:.2?}",
-            far.vertices.len(),
+            far.iter().map(|t| t.mesh.vertices.len()).sum::<usize>(),
             c.vertices,
             c.most_vertices,
             c.parts,
@@ -1221,11 +1302,12 @@ mod tests {
             c.pieces_ms(),
             c.worst_stage,
         );
-        assert!((8192..=10_000).contains(&tris), "{tris} triangles");
-        assert!(far
+        assert!((100_000..=140_000).contains(&tris), "{tris} triangles");
+        assert!(far.iter().all(|t| t
+            .mesh
             .indices
             .iter()
-            .all(|&i| (i as usize) < far.vertices.len()));
+            .all(|&i| (i as usize) < t.mesh.vertices.len())));
         // The web pool holds the densest square of chunks a camera keeps resident (the ring
         // and the chunks waiting to be evicted).
         let side = 2 * StreamBudget::WEB.radius + 3;

@@ -651,7 +651,7 @@ fn far_terrain_lies_under_the_ground() {
         let grid = TerrainGrid::new(&p, &Network::new(&p));
         let tris = far.indices.len() / 3;
         assert!(
-            (8192..=10_000).contains(&tris),
+            (100_000..=140_000).contains(&tris),
             "seed {seed}: {tris} triangles"
         );
         // Every fine sample under a ground triangle of the far mesh, against it.
@@ -726,7 +726,7 @@ fn horizon_rises_past_the_land_and_leaves_the_sea() {
     let east = top(&|q| q[0] > ext[0] + 600.0 && q[2] > 0.0 && q[2] < ext[1]);
     let north = top(&|q| q[2] < -600.0 && q[0] > 0.0 && q[0] < ext[0]);
     println!("horizon: {tris} triangles; tops: place {inside_top:.0}, east {east:.0}, north {north:.0} m");
-    assert!((1000..=8000).contains(&tris), "{tris} triangles");
+    assert!((1000..=25_000).contains(&tris), "{tris} triangles");
     assert!(
         east > inside_top + 100.0 && east > north,
         "east {east}, north {north}"

@@ -56,8 +56,12 @@ const WATER_SPLIT: u32 = 4;
 const KEY_GROUND: u64 = 0x4752_4F55;
 const KEY_GROUND_FINE: u64 = 0x4752_4646;
 const KEY_STANDS: u64 = 0x5354_4E44;
-/// Distance between the samples of the far terrain ([`build_far`]).
-pub const FAR_STEP_M: f32 = 32.0;
+/// Distance between the samples of the far terrain ([`build_far`]): fine enough that the
+/// hills keep their shape and shading when the streamed chunks replace it (at 32 m the
+/// ridges visibly jumped as chunks came in).
+pub const FAR_STEP_M: f32 = 8.0;
+/// Most far-terrain samples per side: a bigger place spaces them wider than [`FAR_STEP_M`].
+pub const FAR_SAMPLES_MAX: usize = 257;
 /// How far the far terrain and its water sit under the ground and the water.
 pub const FAR_DROP_M: f32 = 0.75;
 
@@ -729,7 +733,8 @@ struct FarGrid {
 }
 
 fn far_grid(grid: &TerrainGrid) -> FarGrid {
-    let step = floor(FAR_STEP_M / grid.cell + 0.5).max(1.0) as usize;
+    let wide = (grid.w.max(grid.h) - 1).div_ceil(FAR_SAMPLES_MAX - 1);
+    let step = (floor(FAR_STEP_M / grid.cell + 0.5).max(1.0) as usize).max(wide);
     let axis = |n: usize| {
         let mut v: Vec<usize> = (0..n).step_by(step).collect();
         if v.last() != Some(&(n - 1)) {
@@ -790,7 +795,7 @@ fn far_grid(grid: &TerrainGrid) -> FarGrid {
 }
 
 /// The far terrain: the whole place's ground and water as one coarse mesh, a sample every
-/// [`FAR_STEP_M`] (65×65 samples, 8192 triangles, for a 2 km place), colored by zone as
+/// [`FAR_STEP_M`] (257×257 samples, 131072 triangles, for a 2 km place), colored by zone as
 /// [`build`] colors it, under the fine ground everywhere (see the module docs), and a
 /// water plane [`FAR_DROP_M`] under the water level in every chunk with water (one quad
 /// apiece, and the skirts out to sea).
