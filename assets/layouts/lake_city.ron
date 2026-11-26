@@ -1,10 +1,13 @@
 // Lake City (docs/SCENARIOS.md, docs/LAYOUTS.md): a flat grid city of the 1980s on a great lake,
-// built to work and warm inside. The lake is the whole east; a drive runs the shore through a
-// park the length of the city. A river comes in from the lake beside downtown and forks north
-// and south. Arterials every 300-320 m make the grid; two old diagonals run from downtown out
-// to the north limits and the south-west corner; an expressway runs straight west. Three-flats and
-// brick two-storey storefronts in the middle, the bungalow belt to the west with the drive-in
-// on its main street, a leafy suburb across the north limits, industry along the south branch.
+// built to work and warm inside. Its bones are a real great-lakes city's north and west sides,
+// squeezed to a mile per 200 m: a section-line grid of arterials a mile apart, the old
+// diagonal trails cutting across it to the north-west, a river that comes in from the lake
+// beside downtown and forks at once (one branch south, one north-west, splitting again with a
+// straight channel north), a shore drive through a lakefront park that narrows going north,
+// an expressway out of downtown north-west beside the oldest trail, and the inner suburbs
+// past the north limits. Bungalows west, three-flats and storefronts in the middle, towers by
+// the river mouth, the drive-in on the plank road near the north-west corner. No circles, no
+// loops: every road ends on another road.
 //
 // Meters, x east, z south, (0, 0) the north-west corner; 16 x 16 chunks, 2048 m square.
 Layout(
@@ -12,72 +15,89 @@ Layout(
     size_chunks: (16, 16),
     ground_m: 180,
     water_level_m: 176,
-    edges: Edges(north: Forest, east: Lake, south: RailYards, west: RailYards),
+    edges: Edges(north: Forest, east: Lake, south: RailYards, west: Forest),
 
     ridges: [],
     peaks: [],
 
     water: [
-        // The lake.
-        Water(kind: Lake, depth_m: 4.2, polygon: [(1653, 0), (2048, 0), (2048, 2048), (1742, 2048), (1716, 1600), (1689, 1280), (1724, 978), (1689, 533)]),
-        // The river: its main stem from the lake, then the north and south branches.
-        Water(kind: Lake, depth_m: 3, polygon: [(1742, 1095), (1422, 1095), (1049, 1095), (1049, 1127), (1422, 1127), (1742, 1127)]),
-        Water(kind: Lake, depth_m: 3, polygon: [(1063, 1110), (1036, 796), (912, 459), (841, 0), (812, 2), (884, 466), (1008, 804), (1035, 1112)]),
-        Water(kind: Lake, depth_m: 3, polygon: [(1035, 1110), (1026, 1348), (928, 1668), (884, 2046), (912, 2048), (956, 1674), (1054, 1354), (1063, 1112)]),
+        // The lake: its shore runs west going north, so the park and the drive narrow there.
+        Water(kind: Lake, depth_m: 4.2, polygon: [(1520, 0), (2048, 0), (2048, 2048), (1986, 2048), (1986, 1836), (1936, 1636), (1886, 1436), (1761, 1236), (1711, 1036), (1686, 836), (1636, 636), (1561, 236), (1524, 36)]),
     ],
 
     // Three-flats on a grid unless a district says otherwise.
     default_zone: Residential,
     districts: [
-        // The inner north suburb across the north limits: houses under big trees.
-        District(name: "north suburb", zone: Suburb, polygon: [(0, 0), (1653, 0), (1653, 267), (0, 267)]),
-        // The bungalow belt: the west side, one storey and a half, brick, every lot alike.
-        District(name: "bungalow belt", zone: Suburb, polygon: [(0, 267), (640, 267), (640, 2048), (0, 2048)]),
-        // Industry along the south branch: rail spurs, warehouses, the stockyards' old ground.
-        District(name: "river yards", zone: Industrial, polygon: [(907, 1182), (1173, 1182), (1102, 1564), (1022, 2048), (764, 2048), (871, 1564)]),
-        // Storefront streets: two-storey brick with flats above, both sides of the main arterials.
-        District(name: "crosstown stores", zone: Commercial, polygon: [(36, 604), (1591, 604), (1591, 676), (36, 676)]),
-        District(name: "midtown stores", zone: Commercial, polygon: [(871, 267), (942, 267), (942, 2009), (871, 2009)]),
-        District(name: "northwest stores", zone: Commercial, polygon: [(1233, 933), (184, 9), (136, 63), (1185, 987)]),
-        District(name: "southwest stores", zone: Commercial, polygon: [(1192, 1249), (19, 1880), (52, 1942), (1226, 1311)]),
-        // The bungalow belt's main street: the drive-in, the car wash, the muffler shop.
-        District(name: "drive-in stretch", zone: Strip, polygon: [(258, 320), (347, 320), (347, 1156), (258, 1156)]),
-        // Parks: the lakefront the length of the city, and the big neighborhood parks.
-        District(name: "lakefront", zone: Park, polygon: [(1511, 0), (1493, 533), (1533, 960), (1511, 1280), (1533, 1600), (1560, 2048), (1742, 2048), (1742, 2048), (1716, 1600), (1689, 1280), (1724, 978), (1689, 533), (1653, 0)]),
-        District(name: "west park", zone: Park, polygon: [(373, 1022), (578, 1022), (578, 1236), (373, 1236)]),
-        District(name: "south park", zone: Park, polygon: [(373, 1671), (676, 1671), (676, 1920), (373, 1920)]),
-        District(name: "north park", zone: Park, polygon: [(1244, 338), (1467, 338), (1467, 551), (1244, 551)]),
-        // Downtown: towers on the river's main stem, between the south branch and the lake.
-        District(name: "downtown", zone: Downtown, polygon: [(1227, 871), (1591, 871), (1591, 1387), (1227, 1387)]),
+        // The inner suburbs past the north limits and the line road: houses under big trees.
+        District(name: "north suburbs", zone: Suburb, polygon: [(0, 0), (1050, 0), (1050, 236), (0, 236)]),
+        // The bungalow belt: the whole west side, a storey and a half of brick, every lot alike.
+        District(name: "bungalow belt", zone: Suburb, polygon: [(0, 236), (836, 236), (836, 2048), (0, 2048)]),
+        // Woods along the north-west branch of the river.
+        District(name: "river woods", zone: Park, polygon: [(540, 0), (650, 0), (800, 240), (690, 262)]),
+        // Industry along both branches near downtown: rail spurs, tanneries, warehouses.
+        District(name: "river yards", zone: Industrial, polygon: [(1740, 1740), (1560, 1420), (1420, 1200), (1240, 1000), (1180, 1060), (1350, 1280), (1480, 1460), (1660, 1790), (1690, 2048), (1790, 2048)]),
+        // Storefronts with flats above along the old trails and the cross-town street.
+        District(name: "plank road stores", zone: Commercial, polygon: [(1362, 1406), (662, 806), (610, 866), (1310, 1466)]),
+        District(name: "north diagonal stores", zone: Commercial, polygon: [(1472, 1018), (1072, 218), (1000, 254), (1400, 1054)]),
+        District(name: "crosstown stores", zone: Commercial, polygon: [(36, 806), (1640, 806), (1640, 866), (36, 866)]),
+        // The plank road's run near the north-west corner: the drive-in, the car wash, the
+        // muffler shop.
+        District(name: "drive-in stretch", zone: Strip, polygon: [(546, 599), (296, 199), (176, 273), (426, 673)]),
+        // Parks: the lakefront the length of the city, widest in the middle, and two big
+        // neighborhood parks.
+        District(name: "lakefront", zone: Park, polygon: [(1480, 0), (1520, 0), (1524, 36), (1561, 236), (1636, 636), (1686, 836), (1711, 1036), (1761, 1236), (1886, 1436), (1936, 1636), (1986, 1836), (1986, 2048), (1951, 2048), (1951, 1836), (1901, 1636), (1851, 1436), (1726, 1236), (1676, 1036), (1651, 836), (1601, 636), (1526, 236), (1501, 100), (1489, 36), (1480, 0)]),
+        District(name: "west park", zone: Park, polygon: [(436, 836), (636, 836), (636, 1036), (436, 1036)]),
+        District(name: "boulevard park", zone: Park, polygon: [(1040, 1450), (1150, 1450), (1150, 1560), (1040, 1560)]),
+        // Downtown: towers along the river mouth, between the south branch and the lake.
+        District(name: "downtown", zone: Downtown, polygon: [(1640, 1636), (1906, 1636), (1950, 1836), (1950, 2048), (1640, 2048)]),
     ],
 
     roads: [
-        // The city limits: north, west and south. One lane each way, as the shore drive, until
-        // lane changes exist: traffic enters a multi-lane road only in the slots its turns
-        // reach, and these roads meet the grid only from one side.
-        Road(name: "north limits", class: Arterial, lanes: 1, points: [(36, 36), (1591, 36)]),
-        Road(name: "west limits", class: Arterial, lanes: 1, points: [(36, 36), (36, 2009)]),
-        Road(name: "south limits", class: Arterial, lanes: 1, points: [(36, 2009), (1640, 2009)]),
-        // The lake shore drive, through the lakefront park.
-        Road(name: "shore drive", class: Arterial, lanes: 1, speed_kph: Some(80), sidewalk: false, points: [(1591, 36), (1573, 533), (1613, 960), (1591, 1280), (1613, 1600), (1640, 2009)]),
-        // The grid: north-south avenues.
-        Road(name: "first avenue", class: Arterial, lanes: 2, points: [(302, 36), (302, 2009)]),
-        Road(name: "second avenue", class: Arterial, lanes: 2, points: [(604, 36), (604, 2009)]),
-        Road(name: "midtown avenue", class: Arterial, lanes: 2, points: [(907, 36), (907, 2009)]),
-        Road(name: "fourth avenue", class: Arterial, lanes: 2, points: [(1209, 36), (1209, 2009)]),
-        // East-west streets.
-        Road(name: "north street", class: Arterial, lanes: 2, points: [(36, 320), (1576, 320)]),
-        Road(name: "crosstown", class: Arterial, lanes: 2, points: [(36, 640), (1583, 640)]),
-        Road(name: "river street", class: Arterial, lanes: 2, points: [(36, 960), (1613, 960)]),
-        Road(name: "market street", class: Arterial, lanes: 2, points: [(36, 1280), (1591, 1280)]),
-        Road(name: "south street", class: Arterial, lanes: 2, points: [(36, 1600), (1613, 1600)]),
-        // The old diagonals, from downtown out to the north limits and the south-west corner.
-        Road(name: "northwest diagonal", class: Arterial, lanes: 2, points: [(1209, 960), (160, 36)]),
-        Road(name: "southwest diagonal", class: Arterial, lanes: 2, points: [(1209, 1280), (36, 1911)]),
-        // The expressway west out of downtown.
-        Road(name: "west expressway", class: Arterial, lanes: 2, speed_kph: Some(90), sidewalk: false, points: [(36, 1440), (1603, 1440)]),
+        // The city limits: north, west and south.
+        Road(name: "north limits", class: Arterial, lanes: 2, points: [(100, 100), (1501, 100)]),
+        Road(name: "west limits", class: Arterial, lanes: 2, points: [(100, 100), (100, 2009)]),
+        Road(name: "south limits", class: Arterial, lanes: 2, points: [(100, 2009), (1951, 2009)]),
+        // The shore drive, through the lakefront park from the north limits to downtown.
+        Road(name: "shore drive", class: Arterial, lanes: 2, speed_kph: Some(80), sidewalk: false, points: [(1501, 100), (1526, 236), (1601, 636), (1651, 836), (1676, 1036), (1726, 1236), (1851, 1436), (1901, 1636), (1951, 1836), (1951, 2009)]),
+        // The section-line grid, a mile apart: avenues running north and south...
+        Road(name: "eighth avenue", class: Arterial, lanes: 2, points: [(436, 100), (436, 2009)]),
+        Road(name: "seventh avenue", class: Arterial, lanes: 2, points: [(636, 100), (636, 2009)]),
+        Road(name: "sixth avenue", class: Arterial, lanes: 2, points: [(836, 100), (836, 2009)]),
+        Road(name: "fifth avenue", class: Arterial, lanes: 2, points: [(1036, 100), (1036, 2009)]),
+        Road(name: "fourth avenue", class: Arterial, lanes: 2, points: [(1236, 100), (1236, 2009)]),
+        Road(name: "third avenue", class: Arterial, lanes: 2, points: [(1436, 100), (1436, 2009)]),
+        Road(name: "second avenue", class: Arterial, lanes: 2, points: [(1636, 1436), (1636, 2009)]),
+        // ...and streets running east and west, from the west limits to the shore.
+        Road(name: "line road", class: Arterial, lanes: 2, points: [(100, 236), (1526, 236)]),
+        Road(name: "market street", class: Arterial, lanes: 2, points: [(100, 636), (1601, 636)]),
+        Road(name: "crosstown", class: Arterial, lanes: 2, points: [(100, 836), (1651, 836)]),
+        Road(name: "midway street", class: Arterial, lanes: 2, points: [(100, 1036), (1676, 1036)]),
+        Road(name: "park street", class: Arterial, lanes: 2, points: [(100, 1236), (1726, 1236)]),
+        Road(name: "old north road", class: Arterial, lanes: 2, points: [(100, 1436), (1851, 1436)]),
+        Road(name: "mission street", class: Arterial, lanes: 2, points: [(100, 1636), (1901, 1636)]),
+        Road(name: "center street", class: Arterial, lanes: 2, points: [(100, 1836), (1951, 1836)]),
+        // The old trails, older than the grid. The ridge road leaves downtown north along the
+        // old shore ridge; the north diagonal leaves it for the north-west corner of the
+        // suburbs; the plank road runs from the river fork out to the north-west, through the
+        // six-way corners where it meets the grid.
+        Road(name: "ridge road", class: Arterial, lanes: 2, points: [(1811, 2009), (1811, 1436), (1661, 1236), (1561, 1036), (1500, 836)]),
+        Road(name: "north diagonal", class: Arterial, lanes: 2, points: [(1786, 1403), (1636, 1236), (1436, 1036), (1236, 636), (1036, 236), (900, 100)]),
+        Road(name: "plank road", class: Arterial, lanes: 2, points: [(1636, 1736), (1511, 1636), (1436, 1536), (1336, 1436), (1036, 1186), (636, 836), (486, 636), (236, 236), (134, 100)]),
+        // The expressway out of downtown, a block south-west of the plank road, then off west.
+        Road(name: "airport expressway", class: Highway, lanes: 2, sidewalk: false, ramps: ["midway street", "market street"], points: [(1560, 1836), (1560, 1780), (1440, 1707), (1365, 1607), (1265, 1507), (965, 1257), (565, 907), (415, 707), (100, 468)]),
     ],
 
-    // On the bungalow belt's main street, heading south toward the drive-in.
-    start: Start(road: "first avenue", along_m: 420),
+    // The river, from the lake past downtown to its fork; the south branch; the north-west
+    // branch up into the woods; and the straight channel cut north from it. Both northern
+    // ones come out of culverts in the woods short of the north limits, clear of the bluff
+    // along the edge.
+    channels: [
+        Channel(name: "river", line: [(2048, 1736), (1711, 1761)], width_m: 10, depth_m: 2.5, wet: true),
+        Channel(name: "south branch", line: [(1711, 1761), (1736, 2048)], width_m: 9, depth_m: 2.5, wet: true),
+        Channel(name: "north branch", line: [(1711, 1761), (1636, 1636), (1511, 1436), (1386, 1236), (1211, 1036), (1111, 836), (1061, 636), (1011, 536), (886, 436), (736, 236), (680, 148)], width_m: 8, depth_m: 2.5, wet: true),
+        Channel(name: "north channel", line: [(1011, 536), (986, 236), (977, 150)], width_m: 7, depth_m: 2.5, wet: true),
+    ],
+
+    // On the plank road heading north-west toward the line road and the drive-in.
+    start: Start(road: "plank road", along_m: 1700),
 )
