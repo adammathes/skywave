@@ -33,7 +33,7 @@ use super::macro_map::{
 };
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
-use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_SAMPLES};
+use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};
 use crate::edges;
 use crate::grammar::Grammar;
 use crate::layout::{self, point_at, Layout, MAX_GRADE, RAMP_RUN_M, SNAP_M};
@@ -812,7 +812,7 @@ fn right_of_way(m: &mut MacroMap, edges: &[Edge], kind: &[Kind]) {
 /// Zones every land cell whose center lies within `reach` of segment `a`-`b` as `zone`.
 fn paint(m: &mut MacroMap, a: V2, b: V2, reach: f32, zone: ZoneId) {
     let (zw, zh) = (m.zone_width as usize, m.zone_height as usize);
-    let cell = CELL_M * ZONE_SAMPLES as f32;
+    let cell = ZONE_CELL_M;
     let x0 = ((a.x.min(b.x) - reach) / cell).max(0.0) as usize;
     let z0 = ((a.y.min(b.y) - reach) / cell).max(0.0) as usize;
     let x1 = (((a.x.max(b.x) + reach) / cell) as usize).min(zw - 1);
@@ -877,8 +877,9 @@ pub fn channels(layout: &Layout, m: &mut MacroMap) {
         } else {
             ZoneId::Highway
         };
+        // A zone cell past the lips too, so no lot backs onto the wall.
         for seg in line.windows(2) {
-            paint(m, seg[0], seg[1], lip, zone);
+            paint(m, seg[0], seg[1], lip + ZONE_CELL_M, zone);
         }
         // The outline at the lips: down one side and back up the other.
         let n = line.len();
