@@ -125,9 +125,13 @@ north with one high summit that the three-lane summit avenue drives straight at;
 and west; rail yards to the south. Strip corridors line the boulevards and an old road cuts the
 grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
 mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
-lights. Zone rules, grammar, palette, radio and cars are Mirage Valley's. It sits beside Mirage
-Valley until the layout format can draw grade-separated freeways and the flood channel; then it
-replaces it.
+lights. The air is clear (`haze: 0.45`, the distance haze at under half its usual thickness) and the
+hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Zone rules,
+grammar, palette, radio and cars are Mirage Valley's. The valley freeway crosses the floor under
+downtown on sound walls, every street passing over it and diamonds at the canyon, summit and palm
+avenues; the wash, a concrete flood channel, comes down from the mountain front and runs out through
+the yards under every street's bridge. It replaces Mirage Valley once rail and the airfield have a
+place in the layout format.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

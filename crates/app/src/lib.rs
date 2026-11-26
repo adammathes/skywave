@@ -1415,13 +1415,15 @@ impl App {
             }
         }
         self.preview_drawn = start..self.instances.len();
+        let mut sky = lighting::sky(&daylight);
+        sky.fog_density *= scenario::get(self.scenario()).haze;
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),
                 proj: proj.to_cols_array_2d(),
             },
             sun: lighting::sun(&daylight),
-            sky: self.ui.video_sky(lighting::sky(&daylight)),
+            sky: self.ui.video_sky(sky),
             instances: &self.instances,
             lights: self.lights.lights(),
             hud: match (self.water_toast > 0.0)

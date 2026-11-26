@@ -160,7 +160,7 @@ fn a_road_to_nowhere_is_refused() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0x5c70e210fe95c2b3;
+const BOWL_GOLDEN: u64 = 0x2ebc2080d7418794;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.
@@ -198,6 +198,8 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
         "on the summit avenue: {:?}",
         s.pos
     );
+    // The freeway across the floor.
+    assert!(p.roads.edges.iter().any(|e| e.class == RoadClass::Highway));
     // The rim: the mountain front stands far over the floor.
     let mut m = authored::macro_map(Seed(1), &l);
     let _ = authored::arterials(&l, &mut m);
