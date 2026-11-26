@@ -11,12 +11,21 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # No debug info in CI builds: the test build takes 111 s instead of 170 s, and a failing
+  # test still prints its panic message and line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_DENY_VERSION: "0.20.2"
   PLAYWRIGHT_VERSION: "1.63.0"
 
 jobs:
-  ci:
+  # One job per stage of tools/ci.sh, side by side; together they are exactly `tools/ci.sh`.
+  check:
+    name: ${{ matrix.stage }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [lint, test-app, test-rest, test-i686, web]
     steps:
       - uses: actions/checkout@v5
 
@@ -24,8 +33,11 @@ jobs:
       - name: Rust toolchain
         run: rustup toolchain install
 
-      # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/.
+      # Caches ~/.cargo (including installed wasm-bindgen-cli and cargo-deny) and target/,
+      # one cache per stage since each builds different things.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.stage }}
 
       # lavapipe (mesa-vulkan-drivers): a software Vulkan device for the renderer's
       # fragment-count test (`fragments_on_the_coast_at_deck`).
@@ -34,36 +46,44 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers gcc-multilib
 
       - name: Install cargo-deny
+        if: matrix.stage == 'lint'
         run: cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
 
       - uses: actions/setup-node@v4
+        if: matrix.stage == 'web'
         with:
           node-version: 22
 
       - name: Install Playwright and Chromium
+        if: matrix.stage == 'web'
         run: |
           npm install --global "playwright@$PLAYWRIGHT_VERSION"
           npx "playwright@$PLAYWRIGHT_VERSION" install --with-deps chromium
 
-      # The checks themselves live in one script so sessions run exactly what CI runs:
-      # fmt, clippy (native and web), tests with budgets enforced, cargo deny, the web build,
-      # and the WebGL2/SwiftShader screenshot smoke test with the wasm self-test.
-      - name: Checks (tools/ci.sh)
-        run: tools/ci.sh
+      - name: Checks (tools/ci.sh ${{ matrix.stage }})
+        run: tools/ci.sh ${{ matrix.stage }}
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.stage == 'web'
         with:
           name: web-dist
           path: dist/
           if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.stage == 'web'
         with:
           name: screenshots
           path: tools/screenshot/out/
           if-no-files-found: warn
+
+  # The one status a PR waits on: green when every stage is.
+  ci:
+    needs: check
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[[ "${{ needs.check.result }}" == success ]]'
 
   # The macOS-only code (cfg(target_os = "macos") in platform-native) is otherwise built only
   # after merge, by release.yml.
