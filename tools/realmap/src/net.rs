@@ -13,6 +13,7 @@ pub struct Road {
     pub highway: bool,
     pub points: Vec<(f32, f32)>,
     pub ramps: Vec<String>,
+    pub suspension: bool,
 }
 
 /// Chains shorter than this between junctions are collapsed into one junction.
@@ -201,11 +202,23 @@ struct Chain {
     b: usize,
     pts: Vec<P>,
     highway: bool,
+    suspension: bool,
     alive: bool,
 }
 
 /// The road network of `lines` in the frame.
-pub fn network(lines: &[Line], warp: &Warp, ext: [f32; 2], cell: f32) -> Vec<Road> {
+/// Chains passing within this of a `suspension` point are that bridge.
+const SUSPENSION_NEAR_M: f32 = 40.0;
+
+/// The road network of `lines` in the frame. A chain that passes one of the `suspension`
+/// points is a suspension bridge and stays a road of its own.
+pub fn network(
+    lines: &[Line],
+    warp: &Warp,
+    ext: [f32; 2],
+    cell: f32,
+    suspension: &[P],
+) -> Vec<Road> {
     let w = (ext[0] / cell).ceil() as usize;
     let h = (ext[1] / cell).ceil() as usize;
     let mut g = Grid {
@@ -353,11 +366,15 @@ pub fn network(lines: &[Line], warp: &Warp, ext: [f32; 2], cell: f32) -> Vec<Roa
                     continue;
                 }
                 pts.push(nodes[b]);
+                let suspended = pts
+                    .iter()
+                    .any(|&p| suspension.iter().any(|&q| dist(p, q) < SUSPENSION_NEAR_M));
                 chains.push(Chain {
                     a,
                     b,
                     pts,
                     highway: all > 0 && hw * 2 >= all,
+                    suspension: suspended,
                     alive: true,
                 });
             }
@@ -497,7 +514,10 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
             for y in x + 1..ends.len() {
                 let (ci, ai) = ends[x];
                 let (cj, aj) = ends[y];
-                if ci == cj || chains[ci].highway != chains[cj].highway {
+                if ci == cj
+                    || chains[ci].highway != chains[cj].highway
+                    || chains[ci].suspension != chains[cj].suspension
+                {
                     continue;
                 }
                 let (u, v) = (leaving(&chains[ci], ai), leaving(&chains[cj], aj));
@@ -524,7 +544,7 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
 
     // Walk each road from an unpaired end (or anywhere on a closed loop).
     let mut done = vec![false; chains.len()];
-    let mut lines: Vec<(bool, Vec<P>)> = Vec::new();
+    let mut lines: Vec<(bool, bool, Vec<P>)> = Vec::new();
     let order: Vec<usize> = live
         .iter()
         .copied()
@@ -566,14 +586,14 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
             .into_iter()
             .map(|(x, z)| (x.round(), z.round()))
             .collect();
-        lines.push((chains[i0].highway, pts));
+        lines.push((chains[i0].highway, chains[i0].suspension, pts));
     }
-    lines.sort_by(|a, b| length(&b.1).total_cmp(&length(&a.1)));
+    lines.sort_by(|a, b| length(&b.2).total_cmp(&length(&a.2)));
 
     let (mut nh, mut na) = (0, 0);
     let mut roads: Vec<Road> = lines
         .into_iter()
-        .map(|(highway, points)| {
+        .map(|(highway, suspension, points)| {
             let name = if highway {
                 nh += 1;
                 format!("freeway {nh}")
@@ -586,6 +606,7 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
                 highway,
                 points,
                 ramps: Vec::new(),
+                suspension,
             }
         })
         .collect();
