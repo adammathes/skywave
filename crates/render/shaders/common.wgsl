@@ -85,9 +85,6 @@ struct Frame {
     shadow_params: vec4<f32>,
     // x: the look (`render::Look` as an index; see `look_id`), yzw: unused.
     look: vec4<f32>,
-    // x: fog bank front (world x, m; the bank lies west of it), y: its top (m), z: density
-    // inside it (1/m; 0 = no bank), w: unused.
-    fog_bank: vec4<f32>,
     lights: array<PackedLight, 256>,
 };
 

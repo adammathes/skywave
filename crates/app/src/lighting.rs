@@ -23,14 +23,13 @@
 
 use glam::Vec3;
 use render::{
-    exposure_from_ev100, Corona, FogBank, LightSet, MeshInstance, PointLight, Sky, Sun,
-    LIGHTS_PER_DRAW, MAX_LIGHTS,
+    exposure_from_ev100, Corona, LightSet, MeshInstance, PointLight, Sky, Sun, LIGHTS_PER_DRAW,
+    MAX_LIGHTS,
 };
 
 use crate::daylight::{Clock, Daylight, DEFAULT_LATITUDE_DEG};
 use crate::drive::CarGlow;
 use crate::input::{Action, InputState};
-use crate::scenario;
 
 /// Late September: near the equinox the sun sets almost due west at about 18:00, so...
 pub const DEFAULT_DAY_OF_YEAR: u16 = 265;
@@ -190,37 +189,6 @@ pub fn sky(d: &Daylight) -> Sky {
         cabin_light: cabin_light(d),
         ..Sky::default()
     }
-}
-
-/// When the fog bank moves, seconds of the day: it rolls in from `BANK_IN.0` to `BANK_IN.1`,
-/// stays the night, and burns off from `BANK_OUT.0` to `BANK_OUT.1`.
-const BANK_IN: (f32, f32) = (15.5 * 3600.0, 18.5 * 3600.0);
-const BANK_OUT: (f32, f32) = (9.0 * 3600.0, 11.5 * 3600.0);
-
-/// How far in the fog bank has come at `seconds_of_day`: 0 out at sea, 1 at its farthest.
-pub fn bank_reach(seconds_of_day: f32) -> f32 {
-    let t = seconds_of_day.rem_euclid(86_400.0);
-    let ramp = |(a, b): (f32, f32)| {
-        let x = ((t - a) / (b - a)).clamp(0.0, 1.0);
-        x * x * (3.0 - 2.0 * x)
-    };
-    if t < BANK_OUT.0 || t >= BANK_IN.1 {
-        1.0
-    } else if t < BANK_IN.0 {
-        1.0 - ramp(BANK_OUT)
-    } else {
-        ramp(BANK_IN)
-    }
-}
-
-/// The renderer's fog bank for `bank` at `seconds_of_day`, or none while it is out at sea.
-pub fn fog_bank(bank: &scenario::FogBank, seconds_of_day: f32) -> Option<FogBank> {
-    let r = bank_reach(seconds_of_day);
-    (r > 0.0).then_some(FogBank {
-        front_x: bank.sea_x + (bank.inland_x - bank.sea_x) * r,
-        top_m: bank.top_m,
-        density: bank.density,
-    })
 }
 
 /// How dark it is for the lights inside the car: 0 by day, 1 from −8° (the lit-window ramp).
@@ -1448,39 +1416,5 @@ mod tests {
             worst * 1000.0
         );
         assert!(steps <= 6, "{steps} steps over 10 lux");
-    }
-
-    const H: f32 = 3600.0;
-
-    #[test]
-    fn the_bank_waits_at_sea_by_day_and_fills_in_by_night() {
-        assert_eq!(bank_reach(14.0 * H), 0.0);
-        assert_eq!(bank_reach(15.5 * H), 0.0);
-        assert!((bank_reach(17.0 * H) - 0.5).abs() < 1e-3);
-        assert_eq!(bank_reach(18.5 * H), 1.0);
-        assert_eq!(bank_reach(23.0 * H), 1.0);
-        assert_eq!(bank_reach(3.0 * H), 1.0);
-        assert!((bank_reach(10.25 * H) - 0.5).abs() < 1e-3);
-        assert_eq!(bank_reach(11.5 * H), 0.0);
-        // It moves without a jump through the whole day.
-        let mut last = bank_reach(0.0);
-        for m in 1..=1440 {
-            let r = bank_reach(m as f32 * 60.0);
-            assert!((r - last).abs() < 0.02, "jump at minute {m}");
-            last = r;
-        }
-    }
-
-    #[test]
-    fn the_bay_loop_has_a_bank_that_reaches_the_bay() {
-        let bay = crate::scenario::all()
-            .iter()
-            .find(|s| s.id == "bay_loop_2005")
-            .unwrap();
-        let spec = bay.fog_bank.expect("the Bay Loop has a fog bank");
-        assert_eq!(fog_bank(&spec, 13.0 * H), None);
-        let night = fog_bank(&spec, 22.0 * H).unwrap();
-        assert_eq!(night.front_x, spec.inland_x);
-        assert!(spec.sea_x < 0.0, "by day it waits off the map's ocean edge");
     }
 }
