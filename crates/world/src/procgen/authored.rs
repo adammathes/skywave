@@ -92,6 +92,9 @@ fn build_detailed(
     super::build::fill(seed, template, grammar, &m, &roads, start)
 }
 
+/// A ridge ready to sample: its line, a height per point, falloff, relief and bounding box.
+type RidgeShape = (Vec<V2>, Vec<f32>, f32, f32, [f32; 4]);
+
 /// The macro map of `layout`: heights, water, zones and edges (see the module docs).
 pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
     let size_chunks = [layout.size_chunks.0, layout.size_chunks.1];
@@ -102,7 +105,7 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
     let bands = edges::bands(&edges);
 
     // Shapes, as plain polylines and polygons.
-    let ridges: Vec<(Vec<V2>, Vec<f32>, f32, f32, [f32; 4])> = layout
+    let ridges: Vec<RidgeShape> = layout
         .ridges
         .iter()
         .map(|r| {
