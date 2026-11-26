@@ -12,6 +12,7 @@ Scenario(
     grammar: "socal_basin_2001.ron",
     radio: "2001_basin",
     palette: "sodium_night",
+    map_skin: "atlas",
     default_time: (15, 30),
     default_vehicle: "halberd_coupe",
     years: (1995, 2001),

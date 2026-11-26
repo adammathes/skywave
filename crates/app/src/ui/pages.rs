@@ -206,7 +206,8 @@ pub const PAINT_NAMES: [&str; super::roster::MAX_PAINTS] = [
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
 /// Names of [`MINIMAP_RANGES_M`].
-pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] = ["100 m", "150 m", "250 m"];
+pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] =
+    ["Auto", "300 m", "600 m", "1.2 km"];
 /// The Headlights choice: index 0 is Auto, 1 Manual.
 pub const HEADLIGHT_NAMES: [&str; 2] = ["Auto", "Manual"];
 /// Names of [`Handling::ALL`].
@@ -942,7 +943,7 @@ mod tests {
         build(Page::Hud, &ctx, &mut items);
         assert_eq!(items[0].widget, Widget::Toggle(true));
         assert_eq!(items[1].widget, Widget::Toggle(true));
-        assert!(matches!(items[2].widget, Widget::Choice { index: 1, .. }));
+        assert!(matches!(items[2].widget, Widget::Choice { index: 0, .. }));
         build(Page::Audio, &ctx, &mut items);
         assert!(matches!(items[0].widget, Widget::Slider { value, .. } if value == 0.8));
         assert_eq!(items[3].id, ItemId::RadioVolume);

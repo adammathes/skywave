@@ -465,7 +465,7 @@ mod tests {
 
     /// Kit `id`'s window on a test lot with it in `variant`.
     fn shop_of(id: &str, variant: u8) -> DriveThru {
-        let kits = crate::places::landmarks();
+        let kits = crate::builtin::landmarks();
         let kit = kits.iter().position(|k| k.id == id).unwrap();
         let mut place = Place::test_grid();
         place.props.items = vec![Prop {
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn every_variant_has_its_window_on_the_right_side_at_its_lot_level() {
-        let kits = crate::places::landmarks();
+        let kits = crate::builtin::landmarks();
         for (id, kit, v) in SHOPS.iter().flat_map(|&id| {
             let kit = kits.iter().find(|k| k.id == id).unwrap();
             (0..kit.variants.len()).map(move |v| (id, kit, v))
@@ -518,7 +518,7 @@ mod tests {
     /// closes the lot's back.
     #[test]
     fn every_variant_loops_the_lane_round_the_back() {
-        let kits = crate::places::landmarks();
+        let kits = crate::builtin::landmarks();
         for (kit, v) in SHOPS.iter().flat_map(|&id| {
             let kit = kits.iter().find(|k| k.id == id).unwrap();
             (0..kit.variants.len()).map(move |v| (kit, v))
@@ -686,7 +686,7 @@ mod tests {
     fn every_car_driven_down_the_lane_to_the_bar_is_served() {
         let q = "seed=1&scenario=mirage_valley_2001&t=12:00";
         let mut app = scene(q);
-        let kits = crate::places::landmarks();
+        let kits = crate::builtin::landmarks();
         let kit = kits.iter().position(|k| k.id == "donut_shop").unwrap() as u8;
         let place = crate::places::build_in(
             crate::scene::PlaceKey::Coast,
