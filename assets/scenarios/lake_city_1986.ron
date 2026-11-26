@@ -10,6 +10,7 @@ Scenario(
     grammar: "great_lakes_80s.ron",
     radio: "1977_chicago",
     palette: "brick_and_limestone",
+    map_skin: "transit",
     default_time: (16, 50),
     default_vehicle: "homestead_wagon",
     years: (1977, 1989),

@@ -10,6 +10,7 @@
 //!   grammar: "california_coast_80s.ron", // assets/grammar/<file>
 //!   radio: "1984_socal",                 // assets/radio/<id>.ron
 //!   palette: "socal_1985",               // a world::Palette
+//!   map_skin: "atlas",                   // the map's look (app::map::skin; default plain)
 //!   default_time: (17, 40),              // the clock a world starts at, HH, MM
 //!   default_vehicle: "gannet_gt",      // the car it starts in unless one was picked
 //!   years: (1979, 1987),                 // the era: cars of these years are everyday cars
@@ -49,6 +50,9 @@ pub struct Scenario {
     pub grammar: String,
     pub radio: String,
     pub palette: String,
+    /// The map's skin (`app::map::skin`): "atlas", "transit", "nav"; "plain" when left out.
+    #[serde(default = "plain_map")]
+    pub map_skin: String,
     pub default_time: (u8, u8),
     pub default_vehicle: String,
     pub years: (u16, u16),
@@ -58,27 +62,14 @@ pub struct Scenario {
     pub stub: bool,
 }
 
+fn plain_map() -> String {
+    "plain".into()
+}
+
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them. The first is the world a scene is in unless it names another (a bare start
 /// is in [`DEFAULT`]).
-pub const BUILTIN: [(&str, &str); 4] = [
-    (
-        "socal_beach_1984",
-        include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
-    ),
-    (
-        "mirage_valley_2001",
-        include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
-    ),
-    (
-        "bay_loop_2005",
-        include_str!("../../../assets/scenarios/bay_loop_2005.ron"),
-    ),
-    (
-        "lake_city_1986",
-        include_str!("../../../assets/scenarios/lake_city_1986.ron"),
-    ),
-];
+pub const BUILTIN: [(&str, &str); 4] = crate::builtin::SCENARIOS;
 
 /// The world a bare start opens (a scene with no keys and no world saved from the World
 /// page; `SceneSetup::with_saved_world`): the one the game is judged in.
@@ -101,19 +92,22 @@ impl Scenario {
         if self.default_time.0 > 23 || self.default_time.1 > 59 {
             return err("bad default_time");
         }
-        if crate::places::region_text(&self.region).is_none() {
+        if crate::builtin::region_text(&self.region).is_none() {
             return err("unknown region");
         }
         if let Some(l) = &self.layout {
-            if crate::places::layout_text(l).is_none() {
+            if crate::builtin::layout_text(l).is_none() {
                 return err("unknown layout");
             }
         }
-        if crate::places::grammar_text(&self.grammar).is_none() {
+        if crate::builtin::grammar_text(&self.grammar).is_none() {
             return err("unknown grammar");
         }
         if crate::places::palette(&self.palette).is_none() {
             return err("unknown palette");
+        }
+        if crate::map::Skin::named(&self.map_skin).is_none() {
+            return err("unknown map_skin");
         }
         if !crate::radio::PRESETS
             .iter()

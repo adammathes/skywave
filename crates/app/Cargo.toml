@@ -19,3 +19,11 @@ traffic.workspace = true
 ron.workspace = true
 serde = { workspace = true, features = ["std"] }
 serde_json.workspace = true
+
+# build.rs bakes each world's place at build time (crate::places).
+[build-dependencies]
+skywave-core.workspace = true
+place.workspace = true
+world.workspace = true
+ron.workspace = true
+serde = { workspace = true, features = ["std"] }
