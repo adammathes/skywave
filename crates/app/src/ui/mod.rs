@@ -211,6 +211,9 @@ pub struct Ui {
     /// A preset the command line forced this session (not saved; a choice on the Video
     /// page replaces it).
     forced_quality: Option<Quality>,
+    /// A look a scene forced this session (not saved; a choice on the Video page replaces
+    /// it).
+    look_override: Option<render::Look>,
     /// The display's refresh rate, Hz (the platform says; 60 until it does): what the
     /// frame-rate caps are fractions of.
     panel_hz: f64,
@@ -286,6 +289,7 @@ impl Ui {
             music_name: String::new(),
             auto_quality: Quality::Medium,
             forced_quality: None,
+            look_override: None,
             panel_hz: DEFAULT_PANEL_HZ,
             focused: true,
             cpu_submit_ms: 0.0,
@@ -334,6 +338,16 @@ impl Ui {
     /// The player's driver: the scene's, else the one picked on the Vehicle page.
     pub fn driver(&self) -> usize {
         self.forced_driver.unwrap_or(self.settings.driver)
+    }
+
+    /// Draws in `look` this session without saving it (a scene's `look=`).
+    pub fn force_look(&mut self, look: render::Look) {
+        self.look_override = Some(look);
+    }
+
+    /// The look in effect.
+    pub fn look(&self) -> render::Look {
+        self.look_override.unwrap_or(self.settings.look)
     }
 
     pub fn force_ui_scale(&mut self, s: f32) {
@@ -459,6 +473,7 @@ impl Ui {
         if !self.settings.bloom {
             sky.bloom_strength = 0.0;
         }
+        sky.look = self.look();
         sky
     }
 
@@ -516,6 +531,7 @@ impl Ui {
         self.auto_quality = old.auto_quality;
         self.gpu_label = old.gpu_label.clone();
         self.forced_quality = old.forced_quality;
+        self.look_override = old.look_override;
         self.panel_hz = old.panel_hz;
         self.music_picker = old.music_picker;
         self.music_again = old.music_again;
@@ -673,6 +689,7 @@ impl Ui {
             music_picker: self.music_picker,
             music_again: self.music_again,
             quality: self.quality(),
+            look: self.look(),
             frame_rate: self.frame_rate(),
             panel_hz: self.panel_hz,
             browse: self.browse,
@@ -811,6 +828,11 @@ impl Ui {
             Effect::Choose(ItemId::Traffic, i) => {
                 self.settings.traffic =
                     crate::npc::DENSITIES[i.min(crate::npc::DENSITIES.len() - 1)];
+                self.dirty = true;
+            }
+            Effect::Choose(ItemId::Look, i) => {
+                self.settings.look = render::Look::ALL[i.min(render::Look::ALL.len() - 1)];
+                self.look_override = None;
                 self.dirty = true;
             }
             Effect::Choose(ItemId::Handling, i) => {

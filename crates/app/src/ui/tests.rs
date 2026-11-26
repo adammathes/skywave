@@ -2630,8 +2630,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         "20 cars",
         "Mirage Valley",
         "5 stations",
-        "Lake City",
-        "Lake city, 1986",
+        "Bay Loop",
         "here",
     ] {
         assert!(text.contains(line), "{line}: {text}");
@@ -2639,10 +2638,9 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert!(!text.contains("coming"), "every world is built: {text}");
     let stills = images(&mut h, render::HudTexture::Still);
     assert_eq!(stills.len(), 3);
-    assert_eq!(
-        (stills[0].uv[0], stills[1].uv[0], stills[2].uv[0]),
-        (0.0, 1.0 / 3.0, 2.0 / 3.0)
-    );
+    for (k, s) in stills.iter().enumerate() {
+        assert_eq!(s.uv, crate::scenario::still_uv(k));
+    }
     assert!(
         stills.iter().all(|s| s.color[0] == 255),
         "no still is greyed"
@@ -2651,9 +2649,18 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert_eq!(h.focus(), 1);
     h.pad(PadButton::DpadRight);
     h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 0, "wraps");
     h.pad(PadButton::DpadLeft);
-    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.focus(), 3, "wraps back");
+    // The fourth world on the next page of cards.
+    let text = h.hud_text();
+    assert!(
+        text.contains("Lake City") && text.contains("Lake city, 1986"),
+        "{text}"
+    );
+    h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 1);
     h.pad(PadButton::DpadDown);
     h.pad(PadButton::DpadUp);
@@ -2763,10 +2770,10 @@ fn the_world_page_pages_one_card_at_a_tv_scale() {
     assert_eq!(stills.len(), 1, "one card a page");
     // Beside its text, and bigger than a third of the card width would give.
     assert!(stills[0].h >= 100.0, "{:?}", stills[0]);
-    assert!(h.hud_text().contains("< 1 / 3 >"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("< 1 / 4 >"), "{}", h.hud_text());
     assert!(h.hud_text().contains("Pacific Shore"));
     h.pad(PadButton::DpadRight);
-    assert!(h.hud_text().contains("< 2 / 3 >"));
+    assert!(h.hud_text().contains("< 2 / 4 >"));
     assert!(h.hud_text().contains("Mirage Valley") && !h.hud_text().contains("Pacific Shore"));
     assert_eq!(
         images(&mut h, render::HudTexture::Still)[0].uv,

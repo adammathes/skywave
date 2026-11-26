@@ -81,21 +81,36 @@ fn build_detailed(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> (
     let arterials = arterials(seed, template, &m);
     // The start is found on the arterials as they are, before the streets split them.
     let start = player_start(&m, &arterials);
+    fill(seed, template, grammar, &m, &arterials, start)
+}
+
+/// Stages 4–7 over a macro map and its arterials, however they were made (procedurally
+/// or from an authored layout, `super::authored`): local streets merged into the graph,
+/// parcels and buildings on it, the set pieces, then the detailing. Returns the Place and
+/// the plan its detail pass read.
+pub(super) fn fill(
+    seed: Seed,
+    template: &RegionTemplate,
+    grammar: &Grammar,
+    m: &MacroMap,
+    arterials: &RoadGraph,
+    start: Option<Spawn>,
+) -> (Place, ChunkPlan) {
     // Stages 4-6: local streets merged into the graph, then parcels and buildings on it
     // (against the graph as the Place stores it, sorted by chunk).
-    let roads = streets_all(seed, template, &m, &arterials);
-    let mut place = assemble(&m, template, roads, start);
-    place.parcels = parcels_all(seed, template, &m, &place.roads);
+    let roads = streets_all(seed, template, m, arterials);
+    let mut place = assemble(m, template, roads, start);
+    place.parcels = parcels_all(seed, template, m, &place.roads);
     place.buildings = buildings_all(
         seed,
         template,
         &grammar.lots,
-        &m,
+        m,
         &place.parcels,
         &place.roads,
     );
     // The set pieces take their lots and add their landmarks.
-    let sites = super::setpieces::site(&m, &place, &grammar.landmarks, &template.roadside);
+    let sites = super::setpieces::site(m, &place, &grammar.landmarks, &template.roadside);
     super::setpieces::clear(&mut place, &sites);
     place.pois.extend(sites.pois(seed));
     // Stage 7 reads the buildings where the meshes will find them.
@@ -103,7 +118,7 @@ fn build_detailed(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> (
     // The template's own palette where it names a built-in one (the coast's names none).
     let pal = Palette::named(&template.era.palette).unwrap_or_else(Palette::socal_1985);
     let plan = ChunkPlan::new(&place, &pal, grammar);
-    detail(seed, template, grammar, &m, &sites, &plan, &mut place);
+    detail(seed, template, grammar, m, &sites, &plan, &mut place);
     // Only the props and lights move: every table the plan read is in chunk order already.
     place.sort_by_chunk();
     (place, plan)

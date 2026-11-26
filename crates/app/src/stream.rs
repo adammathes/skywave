@@ -1283,7 +1283,7 @@ mod tests {
     /// Lake City's the same.
     #[test]
     fn every_lake_city_chunk_fits_the_pool_and_the_far_terrain_is_small() {
-        let s = crate::scenario::get(2);
+        let s = crate::scenario::get(3);
         assert_eq!(s.region, "great_lakes_city");
         let place =
             crate::places::build_in(crate::PlaceKey::Coast, skywave_core::Seed(1), s).unwrap();

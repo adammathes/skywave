@@ -11,15 +11,21 @@ fn vs_tonemap(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32>
 
 @fragment
 fn fs_tonemap(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    // The low-res look reads one sample per big pixel, at its center.
+    var p = frag.xy;
+    if look_id() == LOOK_LOW_RES {
+        let b = max(floor(frame.screen.y / LOW_RES_LINES), 1.0);
+        p = (floor(p / b) + 0.5) * b;
+    }
     var c: vec3<f32>;
     if all(frame.render_size.xy == frame.screen.xy) {
-        c = textureLoad(hdr, vec2<i32>(frag.xy), 0).rgb;
+        c = textureLoad(hdr, vec2<i32>(p), 0).rgb;
     } else {
         // A scaled target: bilinear upscale to the swapchain.
-        c = textureSampleLevel(hdr, bloom_sampler, frag.xy * frame.screen.zw, 0.0).rgb;
+        c = textureSampleLevel(hdr, bloom_sampler, p * frame.screen.zw, 0.0).rgb;
     }
     c *= frame.params.x;
     // Level 0 of the bloom chain holds the sum of all five levels, wide and narrow.
-    c += tent9(bloom_src, frag.xy * frame.screen.zw) * frame.post.x;
-    return display_exposed(c, frag.xy);
+    c += tent9(bloom_src, p * frame.screen.zw) * frame.post.x;
+    return display_exposed(c, p);
 }

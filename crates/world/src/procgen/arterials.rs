@@ -1147,7 +1147,7 @@ fn build_field(m: &MacroMap, t: &RegionTemplate, gx: &Grid, gz: &Grid) -> Field 
                             add(t_terr, 0.25 * st, &mut acc, &mut sum);
                         }
                         StreetPattern::Sections => add(t_axis, 0.25, &mut acc, &mut sum),
-                        StreetPattern::Industrial => {}
+                        StreetPattern::Industrial | StreetPattern::Open => {}
                     }
                 }
             }

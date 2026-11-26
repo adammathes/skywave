@@ -402,6 +402,76 @@ pub struct Sky {
     /// A corona's own brightness follows its light against the exposure: a warm halo round
     /// a street lamp at night, nothing by day.
     pub corona_strength: f32,
+    /// The picture's style ([`Look::Standard`] is the plain physically based image).
+    pub look: Look,
+}
+
+/// A style the frame is drawn in: how light, fog and color are shaped on top of the same
+/// world. Each is a few branches in the forward and tonemap shaders (`look_id` in
+/// common.wgsl), so none costs a pass, a target or a texture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Look {
+    /// The physically based image.
+    #[default]
+    Standard,
+    /// A faded vacation snapshot: warm sun, teal shadows, a brown smog fog that eats the
+    /// distance, lifted blacks and grain.
+    Smog,
+    /// Distance as color: near things dark plum, far things warming through red and orange
+    /// toward the sky, in a few flat steps.
+    Dusk,
+    /// One amber hue and a dense haze: shapes become silhouettes at a hundred meters.
+    Amber,
+    /// A dozen flat colors, hard shadow shapes in one violet tone, no falloff.
+    Poster,
+    /// Light in three clean bands (sun, half tone, shadow) and stronger color.
+    Toon,
+    /// Early digital video at night: sodium highlights, cyan-green shadows, lifted blacks
+    /// and noise.
+    Video,
+    /// A 180-line picture dithered to a few levels per channel.
+    LowRes,
+    /// Two inks and an ordered dither.
+    Ink,
+}
+
+impl Look {
+    /// Every look, in menu order; the index is the shaders' look id.
+    pub const ALL: [Look; 9] = [
+        Look::Standard,
+        Look::Smog,
+        Look::Dusk,
+        Look::Amber,
+        Look::Poster,
+        Look::Toon,
+        Look::Video,
+        Look::LowRes,
+        Look::Ink,
+    ];
+
+    /// The settings name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Look::Standard => "standard",
+            Look::Smog => "smog",
+            Look::Dusk => "dusk",
+            Look::Amber => "amber",
+            Look::Poster => "poster",
+            Look::Toon => "toon",
+            Look::Video => "video",
+            Look::LowRes => "low-res",
+            Look::Ink => "ink",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Look> {
+        Look::ALL.into_iter().find(|l| l.name() == name)
+    }
+
+    /// The shaders' look id (`look_id` in common.wgsl).
+    fn id(self) -> u32 {
+        self as u32
+    }
 }
 
 impl Default for Sky {
@@ -423,6 +493,7 @@ impl Default for Sky {
             emissive_cap: 8.0,
             cabin_light: [0.0; 3],
             corona_strength: 0.6,
+            look: Look::Standard,
         }
     }
 }
@@ -913,6 +984,7 @@ struct FrameUniform {
     corona: [f32; 4],
     render_size: [f32; 4],
     shadow_params: [f32; 4],
+    look: [f32; 4],
     lights: [PackedLight; MAX_LIGHTS],
 }
 
