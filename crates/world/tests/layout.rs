@@ -198,6 +198,8 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
         "on the summit avenue: {:?}",
         s.pos
     );
+    // The freeway across the floor.
+    assert!(p.roads.edges.iter().any(|e| e.class == RoadClass::Highway));
     // The rim: the mountain front stands far over the floor.
     let mut m = authored::macro_map(Seed(1), &l);
     let _ = authored::arterials(&l, &mut m);

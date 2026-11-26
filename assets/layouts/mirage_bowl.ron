@@ -64,6 +64,12 @@ Layout(
         Road(name: "east avenue", class: Arterial, lanes: 2, points: [(2800, 2950), (2800, 680)]),
         Road(name: "market street", class: Collector, lanes: 1, points: [(1350, 2450), (1350, 1250)]),
 
+        // The freeway across the middle of the floor, under downtown's towers: every street
+        // crosses it on a deck, the main avenues get diamonds.
+        Road(name: "valley freeway", class: Highway, lanes: 3, speed_kph: Some(105),
+             ramps: ["canyon avenue", "summit avenue", "palm avenue"],
+             points: [(250, 1550), (2800, 1550)]),
+
         // The old road, older than the grid, on a diagonal toward the summit.
         Road(name: "old road", class: Arterial, lanes: 2, speed_kph: Some(65), points: [(425, 2950), (1615, 680)]),
 
@@ -80,6 +86,13 @@ Layout(
         Road(name: "west canyon", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
             (250, 1250), (160, 1240), (90, 1200),
         ]),
+    ],
+
+    // The wash: a concrete flood channel from the mountain front across the floor and out
+    // through the yards. Every road bridges it.
+    channels: [
+        Channel(name: "the wash", line: [(1300, 560), (1250, 1000), (1160, 1700), (1100, 2400), (1050, 3072)],
+                width_m: 14, depth_m: 5),
     ],
 
     start: Start(road: "summit avenue", along_m: 700),
