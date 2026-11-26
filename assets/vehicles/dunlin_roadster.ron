@@ -1,0 +1,46 @@
+// Dunlin Roadster: a late-90s small front-engined two-seat roadster.
+//
+// Intent: light, low and honest. A small rev-happy four, short gears and a rear axle that
+// steps out a little when asked: slow on paper, a grin at every corner. Quick steering,
+// the tightest cabin on the roster, the top always down.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "dunlin_roadster",
+    name: "Dunlin Roadster",
+    era: Nineties,
+    year: 1997,
+    class: Convertible,
+
+    mass_kg: 1000,
+    dims_m: (3.95, 1.68, 1.12),    // length, width, height
+    wheelbase_m: 2.27,
+    track_m: 1.41,
+    cg_height_m: 0.42,
+    cg_fore_aft: 0.50,             // 50% front
+
+    engine: Engine(
+        idle_rpm: 850,
+        redline_rpm: 7000,
+        torque_nm: [(1000, 108), (3000, 138), (4500, 155), (5500, 152), (6500, 144), (7000, 128)],
+    ),
+    gears: [3.14, 1.89, 1.33, 1.0, 0.81],
+    final_drive: 4.30,
+    reverse: 3.2,
+    shift_ms: 180,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.08, grip_long: 1.10, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 30000, damper: 2800, travel_m: 0.13, antiroll: 0.40),
+    steering: Steer(max_deg: 33, speed_sens: 0.55, return_rate: 13.0),
+    brakes: Brakes(max_nm: 2800, bias_front: 0.6, abs: true, handbrake_nm: 2200),
+    aero: Aero(cd: 0.363, frontal_m2: 1.75, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: 0.15, body_roll: 0.3, engine_sound: "i4", shift_jerk: 0.2),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 150, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "dunlin_roadster.shape.ron",
+)

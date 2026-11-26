@@ -1,0 +1,60 @@
+// Dunlin Roadster body: a late-90s small two-seat roadster.
+//
+// Intent: small, soft and friendly. A low rounded nose with a small mouth and pop-up
+// lamps, a short hood, a raked windshield in a black frame, bare door tops, the top folded
+// under a boot behind the seats, a short round deck and a slim pair of tail lamps. Gentle
+// hips over the rear wheels, small five-spoke alloys. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "dunlin_roadster",
+    side: [
+        (0.00, 0.42), (0.05, 0.52), (0.30, 0.61), (1.40, 0.77), (1.44, 0.78),
+        (1.88, 1.10), (1.94, 0.81), (3.20, 0.855), (3.70, 0.86), (3.88, 0.83), (3.95, 0.78),
+        (3.95, 0.34), (3.80, 0.24), (3.30, 0.17), (0.60, 0.15), (0.12, 0.18), (0.00, 0.27),
+    ],
+    plan: [
+        (0.00, 0.58), (0.15, 0.74), (0.60, 0.82), (1.00, 0.83), (2.20, 0.82), (3.00, 0.84),
+        (3.70, 0.82), (3.95, 0.74),
+    ],
+    belt: [(1.44, 0.78), (1.94, 0.81), (3.20, 0.855), (3.95, 0.865)],
+    section: Section(shoulder: 0.92, tumblehome_deg: 26, greenhouse_frac: 0.70, crown: 0.04, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.46, 1.86),
+        // No side glass; the backlight range is the boot behind the seats.
+        backlight: (2.96, 3.28),
+        side: [],
+    ),
+    wheels: Wheels(radius: 0.29, width: 0.19, arch_clearance: 0.05, front_x: 0.80, rear_x: 3.07, track: 1.41),
+    front: Front(lights: PopUp, grille: Slot, bumper: Body, bumper_y: (0.24, 0.36)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Body, bumper_y: (0.30, 0.44)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.80, creases: [(0.20, 0.50, 3.90, 0.56)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Single, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, Badge(Circle)],
+    roof: Roof(kind: Convertible(top: Down)),
+    // Classic red, white, deep green metallic, bright blue, silver, yellow, black.
+    palette: ["#b3161c", "#efeee9", "#1e3b2c", "#2a5aa8", "#b9bcc1", "#e8c21a", "#151618"],
+    accent: "#18181a",
+    interior: InteriorShape(
+        dash_height: 0.76,
+        dash_x: 1.62,
+        wheel_pos: (1.98, 0.60),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (1.80, 1.02),
+        seat: (2.26, 0.32),
+        driver_offset: 0.34,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash and cloth, a tan
+        // hide option's warmth in the inserts, black carpet, white-faced dials lit amber.
+        colors: ["#1c1d20", "#2a2b2f", "#1f2023", "#2e2f32", "#26272a", "#c8c4b8"],
+        display: "#ffb030",
+        insert: "#3b3c41",
+        piping: "#1c1d20",
+        dash_top: "#202124",
+        applique: None,
+        manual: true,
+    ),
+)

@@ -26,16 +26,16 @@ a PR into main when CI is green." That is the whole handoff; no chat history is 
 Claude Project, put `CLAUDE.md` and this file in the project instructions and start sessions from it.
 
 ## Verification before a PR
-`tools/ci.sh` runs exactly what CI runs (`ci.yml` calls it): fmt, clippy native and web, tests
-with budgets enforced, `cargo deny`, the web build and the WebGL2 screenshot smoke test. Run
+`tools/ci.sh` runs exactly what CI runs (`ci.yml` runs its stages as parallel jobs; `tools/ci.sh
+<stage>` runs one): fmt, clippy native and web, `cargo deny`, tests with budgets enforced, the
+pure crates' tests at 32-bit `usize`, the web build and the WebGL2 screenshot smoke test. Run
 `tools/ci.sh --setup` once in a fresh container (it installs the Linux deps, the wasm target,
 cargo-deny and Playwright), then `tools/ci.sh` before every push; push only when it passes. For
 visual work also run `node tools/screenshot/shoot.mjs --selftest --all && node
 tools/screenshot/diff.mjs --all` (software rendering, minutes per scene; run it once, not per
 subagent). Determinism hashes move only on purpose, in their own commit, with the reason;
 `cargo test -p app -- --ignored write_selftest` rewrites `tools/screenshot/selftest.json`.
-CI also runs clippy on a macOS runner (the `macos` job; `tools/ci.sh` cannot cover it) and the
-pure crates' tests at 32-bit `usize` (`i686-unknown-linux-gnu`, as on wasm32).
+CI also runs clippy on a macOS runner (the `macos` job; `tools/ci.sh` cannot cover it).
 
 ## Issues: the backlog and the queue
 GitHub issues are the backlog; labels are the state (`.claude/skills/issues/SKILL.md` has the

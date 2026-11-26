@@ -30,7 +30,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 35] = [
+const ROSTER: [Entry; 37] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -61,6 +61,9 @@ const ROSTER: [Entry; 35] = [
     (car!("shrike_coupe"), (5.4, 6.0)),
     (car!("falchion_sedan"), (5.9, 6.5)),
     (car!("courser_v8"), (6.0, 6.5)),
+    // The 2001 roadsters, outside the era's hero band: a light slow one and a quick one.
+    (car!("dunlin_roadster"), (7.5, 9.0)),
+    (car!("palfrey_roadster"), (6.5, 7.0)),
     // The 2001 traffic cars (the semi, which only traffic drives, is not driven here).
     (car!("plover_sedan"), (9.3, 10.3)),
     (car!("sorrel_utility"), (9.9, 10.9)),

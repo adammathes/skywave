@@ -362,10 +362,10 @@ fn remap_capture_resolves_conflicts_both_ways() {
     assert!(h.ui().capture().is_some());
     assert_eq!(h.ui().toast(), Some(Toast::WrongDevice(pad)));
     // A free button binds straight away.
-    h.pad(PadButton::West);
+    h.pad(PadButton::R1);
     assert_eq!(
         h.app.bindings().get(pad, Action::Horn),
-        &[btn(PadButton::West)]
+        &[btn(PadButton::R1)]
     );
 
     // Steering takes a whole stick axis, whichever row is remapped; the right stick's X

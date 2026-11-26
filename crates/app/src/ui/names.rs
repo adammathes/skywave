@@ -39,6 +39,7 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::Underglow, _) => "Underglow",
         (Action::Horn, _) => "Horn",
         (Action::Flash, _) => "Flash brights",
+        (Action::Nitrous, _) => "Nitrous",
         (Action::VehicleNext, _) => "Next vehicle",
         (Action::Reset, _) => "Reset car",
         (Action::MapToggle, _) => "Map",
