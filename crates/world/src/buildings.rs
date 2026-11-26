@@ -3516,7 +3516,8 @@ fn style_details(m: &mut WorldMesh, b: &Building, plan: &BuildingPlan, fp: &[V2]
         }
         StyleTag::StuccoBox => {}
         StyleTag::Brick => {
-            for &y in &plan.floor_y[1..plan.floors()] {
+            for k in 1..plan.floors() {
+                let y = plan.floor_y[k];
                 ring_band(
                     m,
                     fp,

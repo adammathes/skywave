@@ -3071,11 +3071,10 @@ fn build_graph(
             let mut pts = vec![nodes[a as usize]];
             let first = p0 as usize + 1;
             let last = p1 as usize; // inclusive candidate
-            let end = last.min(l.pts.len() - 1);
-            for (k, &p) in l.pts[..=end].iter().enumerate().skip(first) {
+            for k in first..=last.min(l.pts.len() - 1) {
                 let kf = k as f32;
                 if kf > p0 + 1e-3 && kf < p1 - 1e-3 {
-                    pts.push(p);
+                    pts.push(l.pts[k]);
                 }
             }
             pts.push(nodes[b as usize]);
