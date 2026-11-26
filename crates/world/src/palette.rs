@@ -158,7 +158,7 @@ impl Palette {
         }
     }
 
-    /// The 2005 Bay (the Bay Loop): the city's painted pastels over white trim, cool fog
+    /// The 2005 Bay (the Bay Loop): the city's painted pastels over white trim, cool
     /// light, slate-gray bay water, lawns kept green, and hills of straw-gold grass under
     /// dark olive oak stands: the open space reads gold from across the water.
     pub const fn bay_2005() -> Palette {
