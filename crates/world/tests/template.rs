@@ -288,8 +288,8 @@ fn california_masses_its_zones() {
     let d = t.zones.downtown.massing.as_ref().unwrap();
     assert_eq!((d.floors, d.floors_mean), ((2, 30), 8.0));
     assert!(t.zones.park.massing.is_none() && t.zones.highway.massing.is_none());
-    // Stubs build nothing yet.
-    assert!(parse(GREAT_LAKES).zones.downtown.massing.is_none());
+    // The lake city builds too.
+    assert!(parse(GREAT_LAKES).zones.downtown.massing.is_some());
 }
 
 #[test]

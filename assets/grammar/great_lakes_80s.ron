@@ -989,10 +989,10 @@ Grammar(
         wheel_stop_256: 200,
         pole_m: (30, 40),
         run_max: 10,
-        islands: [(Palm, 3), (Shrub, 2), (Bare, 1)],
+        islands: [(Shrub, 3), (Bare, 1)],
         yellow_256: 70,
         backed_in_256: 26,
-        rear_lot_256: 192,
+        rear_lot_256: 250,
         occupancy: [
             //           0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20  21  22  23
             (Strip,     (10,  8,  6,  5,  5,  6, 10, 18, 30, 45, 60, 70, 78, 80, 78, 75, 72, 70, 65, 55, 45, 32, 22, 14)),

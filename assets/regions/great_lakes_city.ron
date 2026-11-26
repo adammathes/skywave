@@ -21,9 +21,9 @@ RegionTemplate(
         canals: None,
     )),
 
-    // Edges: the lake east; the grid gives way to rail yards and industry west and north, and the
-    // expressway loops back along a ridge south.
-    edges: Edges(north: RailYards, east: Lake, south: HighwayLoop, west: RailYards),
+    // Edges: the lake east; the grid gives way to rail yards and industry west and south, and
+    // to the wooded bluffs of the north shore. Flat all round: no ridge.
+    edges: Edges(north: Forest, east: Lake, south: RailYards, west: RailYards),
 
     elevation: Some(Elevation(
         water_level_m: 176,
@@ -47,7 +47,7 @@ RegionTemplate(
         strip: StripRule(length_m: (1200, 1700), inland_m: (60, 120), width_m: (60, 90)),
         downtown_inland_m: (120, 260),
         highway: HighwayRule(corridor_m: 64),
-        parks: ParkRule(count: (3, 5), radius_m: (60, 120)),
+        parks: ParkRule(count: (11, 14), radius_m: (140, 240)),
         pier: true,
         overlooks: (0, 0),
     )),
@@ -74,7 +74,8 @@ RegionTemplate(
                 street_light_m: 30, street_tree_m: 12, hydrant_m: 70, power_pole_m: 0,
                 bench_per_km: 10, billboard_per_km: 1, neon: 0.2, parked_cars: (0.5, 0.8),
             ),
-            lots: Lots(width_m: (12, 25), depth_m: 40, setback_m: (0, 0, 3)),
+            lots: Lots(width_m: (20, 36), depth_m: 40, setback_m: (0, 0, 3)),
+            massing: Some(Massing(coverage: 0.75, floors: (3, 30), floors_mean: 7, floors_spread: 0.6, style_weights: [4, 2, 2, 1])),
         ),
         strip: ZoneRule(
             score: None,
@@ -87,7 +88,8 @@ RegionTemplate(
                 street_light_m: 32, street_tree_m: 14, hydrant_m: 80, power_pole_m: 0,
                 bench_per_km: 8, billboard_per_km: 1, neon: 0.3, parked_cars: (0.4, 0.7),
             ),
-            lots: Lots(width_m: (15, 40), depth_m: 40, setback_m: (1, 0, 4)),
+            lots: Lots(width_m: (24, 44), depth_m: 40, setback_m: (1, 0, 4)),
+            massing: Some(Massing(coverage: 0.7, floors: (1, 3), floors_mean: 1.8, floors_spread: 0.3, style_weights: [6, 2, 0.3])),
         ),
         residential: ZoneRule(
             score: Some(Score(
@@ -101,14 +103,15 @@ RegionTemplate(
             )),
             block_m: ((180, 200), (90, 110)),
             streets: Grid,
-            alleys: true,
+            alleys: false,
             styles: [ThreeFlat, Bungalow, Brick],
             trees: [(Elm, 0.4), (Maple, 0.3), (Ash, 0.2), (Linden, 0.1)],
             props: Props(
                 street_light_m: 45, street_tree_m: 10, hydrant_m: 100, power_pole_m: 40,
                 bench_per_km: 0.5, billboard_per_km: 0, neon: 0, parked_cars: (0.4, 0.7),
             ),
-            lots: Lots(width_m: (15, 20), depth_m: 40, setback_m: (6, 1.5, 6)),
+            lots: Lots(width_m: (28, 36), depth_m: 40, setback_m: (6, 1.5, 6)),
+            massing: Some(Massing(coverage: 0.3, floors: (1, 3), floors_mean: 1.6, floors_spread: 0.35, style_weights: [3, 4, 1])),
         ),
         suburb: ZoneRule(
             score: Some(Score(
@@ -122,14 +125,15 @@ RegionTemplate(
             )),
             block_m: ((180, 200), (100, 120)),
             streets: Grid,
-            alleys: true,
+            alleys: false,
             styles: [Bungalow, Ranch, Brick],
             trees: [(Elm, 0.3), (Maple, 0.4), (Oak, 0.3)],
             props: Props(
                 street_light_m: 55, street_tree_m: 12, hydrant_m: 120, power_pole_m: 45,
                 bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.2, 0.4),
             ),
-            lots: Lots(width_m: (20, 30), depth_m: 40, setback_m: (8, 2, 8)),
+            lots: Lots(width_m: (32, 44), depth_m: 40, setback_m: (8, 2, 8)),
+            massing: Some(Massing(coverage: 0.25, floors: (1, 2), floors_mean: 1.2, floors_spread: 0.3, style_weights: [3, 3, 1])),
         ),
         industrial: ZoneRule(
             score: Some(Score(
@@ -151,6 +155,7 @@ RegionTemplate(
                 bench_per_km: 0, billboard_per_km: 3, neon: 0, parked_cars: (0.1, 0.3),
             ),
             lots: Lots(width_m: (60, 120), depth_m: 60, setback_m: (6, 4, 6)),
+            massing: Some(Massing(coverage: 0.5, floors: (1, 4), floors_mean: 1.6, floors_spread: 0.4, style_weights: [3, 2])),
         ),
         commercial: ZoneRule(
             score: Some(Score(
@@ -171,7 +176,8 @@ RegionTemplate(
                 street_light_m: 35, street_tree_m: 16, hydrant_m: 90, power_pole_m: 0,
                 bench_per_km: 4, billboard_per_km: 2, neon: 0.3, parked_cars: (0.4, 0.7),
             ),
-            lots: Lots(width_m: (20, 40), depth_m: 40, setback_m: (3, 0, 4)),
+            lots: Lots(width_m: (26, 44), depth_m: 40, setback_m: (3, 0, 4)),
+            massing: Some(Massing(coverage: 0.7, floors: (1, 3), floors_mean: 1.8, floors_spread: 0.35, style_weights: [5, 1, 2])),
         ),
         park: ZoneRule(
             score: None,

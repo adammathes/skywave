@@ -543,17 +543,18 @@ pub struct StreamBudget {
 impl StreamBudget {
     /// 9×9 chunks, 2 ms a frame; a pool for 4.96M vertices, 208 MB of buffers. With its
     /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
-    /// stroke-lettered signs and the light tiles its street lamps cut, the coast's densest
-    /// 11×11 chunks (the ring and the chunks waiting to be evicted) take 1100 pages of 4096
-    /// vertices on seed 1; this is 1211, a tenth more (trees, cars, lamps and small
-    /// furniture are instances, outside the pool).
+    /// stroke-lettered signs and the light tiles its street lamps cut, the densest 11×11
+    /// chunks (the ring and the chunks waiting to be evicted) take, on seed 1, 978 pages of
+    /// 4096 vertices on the coast, 1096 in the basin and 1063 in Lake City; this is 1211, a
+    /// tenth more than the most (trees, cars, lamps and small furniture are instances,
+    /// outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         frame_budget_s: 0.002,
         pool_vertices: 4_960_000,
     };
-    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for the whole coast (1470
-    /// pages on seed 1) and a tenth more, 1617.
+    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for a whole place (on seed
+    /// 1 the coast takes 1217 pages, the basin 1491, Lake City 1542) and some more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         frame_budget_s: 0.004,
@@ -1277,6 +1278,16 @@ mod tests {
         let place =
             crate::places::build_in(crate::PlaceKey::Coast, skywave_core::Seed(1), s).unwrap();
         fits_the_pool(place, "basin");
+    }
+
+    /// Lake City's the same.
+    #[test]
+    fn every_lake_city_chunk_fits_the_pool_and_the_far_terrain_is_small() {
+        let s = crate::scenario::get(2);
+        assert_eq!(s.region, "great_lakes_city");
+        let place =
+            crate::places::build_in(crate::PlaceKey::Coast, skywave_core::Seed(1), s).unwrap();
+        fits_the_pool(place, "lake city");
     }
 
     fn fits_the_pool(place: place::Place, name: &str) {
