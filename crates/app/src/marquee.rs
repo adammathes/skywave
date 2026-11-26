@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn a_marquee_chases_in_thirds_and_only_near_the_eye() {
-        let kits = crate::places::landmarks();
+        let kits = crate::builtin::landmarks();
         let palace = kits.iter().position(|k| k.id == "movie_palace").unwrap();
         let tower = kits.iter().position(|k| k.id == "water_tower").unwrap();
         assert!(Marquees::of(&place_with(tower as u8, 0), kits).is_none());

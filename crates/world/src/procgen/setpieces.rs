@@ -334,6 +334,14 @@ fn to_line(p: V2, pts: &[V2]) -> f32 {
         .fold(f32::INFINITY, f32::min)
 }
 
+/// Whether `p` lies within `tol` of the polyline `pts` (`to_line(p, pts) < tol`), trying
+/// the segments around segment `from` first: a point along it usually lies by one.
+fn near_line(p: V2, pts: &[V2], from: usize, tol: f32) -> bool {
+    let n = pts.len().saturating_sub(1);
+    let near = |i: usize| segment_distance(p, pts[i], pts[i + 1]).0 < tol;
+    (from.saturating_sub(8)..(from + 9).min(n)).any(near) || (0..n).any(near)
+}
+
 /// Distance between the segments `a..b` and `c..d`: 0 where they cross.
 fn segments_distance(a: V2, b: V2, c: V2, d: V2) -> f32 {
     let side = |p: V2, q: V2, r: V2| (q - p).turn(r - p);
@@ -774,19 +782,9 @@ fn hall_sites(
     b: &super::macro_map::BasinPlan,
     (w, d): (f32, f32),
 ) -> Vec<(f32, Lot)> {
-    let segs: Vec<(V2, V2, f32)> = place
-        .roads
-        .edges
-        .iter()
-        .flat_map(|e| {
-            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.2 };
-            e.profile
-                .windows(2)
-                .map(move |q| (V2::new(q[0][0], q[0][2]), V2::new(q[1][0], q[1][2]), hw))
-        })
-        .collect();
+    let segs = RoadSegs::new(place, 0.2, 0.5);
     let on_road = |q: V2| {
-        segs.iter()
+        segs.near(q)
             .any(|&(a, c, hw)| segment_distance(q, a, c).0 < hw + 0.5)
     };
     let downtown = V2::from_array(m.downtown);
@@ -840,17 +838,7 @@ fn letters_sites(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> 
     };
     let downtown = V2::from_array(m.downtown);
     let h = |p: V2| m.height_at(p.x, p.y);
-    let roads: Vec<(V2, V2, f32)> = place
-        .roads
-        .edges
-        .iter()
-        .flat_map(|e| {
-            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
-            e.profile
-                .windows(2)
-                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
-        })
-        .collect();
+    let roads = RoadSegs::new(place, 0.0, LETTERS_ROAD_CLEAR_M);
     let (a, c) = (V2::from_array(foot.a), V2::from_array(foot.b));
     let n = ((c - a).length() / 16.0) as usize;
     let [w, d] = size;
@@ -890,7 +878,7 @@ fn letters_sites(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> 
         let clear = samples(&lot, w, d).chain(rect.iter().copied()).all(|q| {
             m.in_playable(q.x, q.y, 30.0)
                 && roads
-                    .iter()
+                    .near(q)
                     .all(|&(r0, r1, hw)| segment_distance(q, r0, r1).0 > hw + LETTERS_ROAD_CLEAR_M)
         });
         let by_overlook = s
@@ -1222,6 +1210,39 @@ impl Grid {
     }
 }
 
+/// A place's road segments `(a, b, half width)` along their profiles (the half width with
+/// the sidewalk, else `bare`), binned so that [`RoadSegs::near`] visits every segment within
+/// its half width plus `reach` of a point and few others.
+struct RoadSegs {
+    segs: Vec<(V2, V2, f32)>,
+    grid: Grid,
+}
+
+impl RoadSegs {
+    fn new(place: &Place, bare: f32, reach: f32) -> RoadSegs {
+        let mut grid = Grid::new(place, 32.0);
+        let mut segs = Vec::new();
+        for e in &place.roads.edges {
+            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { bare };
+            for w in e.profile.windows(2) {
+                let (a, b) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
+                // A margin past the reach, so rounding never drops a segment at the edge.
+                let r = V2::new(hw + reach + 1.0, hw + reach + 1.0);
+                let lo = V2::new(a.x.min(b.x), a.y.min(b.y)) - r;
+                let hi = V2::new(a.x.max(b.x), a.y.max(b.y)) + r;
+                grid.insert(lo, hi, segs.len() as u32);
+                segs.push((a, b, hw));
+            }
+        }
+        RoadSegs { segs, grid }
+    }
+
+    /// The segments that may come within their half width plus the reach of `q`.
+    fn near(&self, q: V2) -> impl Iterator<Item = &(V2, V2, f32)> {
+        self.grid.at(q).iter().map(|&k| &self.segs[k as usize])
+    }
+}
+
 /// The parcels of a place, binned, for finding the one under a point.
 struct Parcels<'a> {
     place: &'a Place,
@@ -1337,7 +1358,7 @@ pub fn lots_on(
                 // The road runs straight past the whole front.
                 let straight = [p - dir * (0.5 * w), p + dir * (0.5 * w)]
                     .iter()
-                    .all(|&q| to_line(q, &road) < 0.5);
+                    .all(|&q| near_line(q, &road, si, 0.5));
                 if !straight {
                     continue;
                 }
@@ -1387,13 +1408,33 @@ pub fn clear(place: &mut Place, s: &SetPieces) {
     let lots: Vec<Vec<V2>> = taken.iter().map(|&i| parcels.polys[i].clone()).collect();
     let mut areas = s.footprints();
     areas.extend(lots);
+    // Each area's bounds: a footprint wholly outside them cannot touch it.
+    let bounds: Vec<(V2, V2)> = areas.iter().map(|a| bounds_of(a)).collect();
     place.buildings.retain(|b| {
         let fp: Vec<V2> = b.footprint.iter().map(|&q| V2::from_array(q)).collect();
         let c = fp.iter().fold(V2::new(0.0, 0.0), |a, &q| a + q) * (1.0 / fp.len().max(1) as f32);
-        !areas
-            .iter()
-            .any(|a| point_in_polygon(c, a) || fp.iter().any(|&q| point_in_polygon(q, a)))
+        let (lo, hi) = bounds_of(&fp);
+        !areas.iter().zip(&bounds).any(|(a, (alo, ahi))| {
+            lo.x <= ahi.x
+                && hi.x >= alo.x
+                && lo.y <= ahi.y
+                && hi.y >= alo.y
+                && (point_in_polygon(c, a) || fp.iter().any(|&q| point_in_polygon(q, a)))
+        })
     });
+}
+
+/// The bounding box `(min, max)` of `pts`.
+fn bounds_of(pts: &[V2]) -> (V2, V2) {
+    pts.iter().fold(
+        (V2::new(f32::MAX, f32::MAX), V2::new(f32::MIN, f32::MIN)),
+        |(lo, hi), &q| {
+            (
+                V2::new(lo.x.min(q.x), lo.y.min(q.y)),
+                V2::new(hi.x.max(q.x), hi.y.max(q.y)),
+            )
+        },
+    )
 }
 
 /// Whether `q` stands on ground a set piece keeps (see [`SetPieces::footprints`]).
@@ -1742,17 +1783,7 @@ fn channel_fences(place: &Place, grid: &TerrainGrid, s: &SetPieces, out: &mut Ve
     let d = (c1 - c0).normalize();
     let n = d.right();
     let len = (c1 - c0).length();
-    let roads: Vec<(V2, V2, f32)> = place
-        .roads
-        .edges
-        .iter()
-        .flat_map(|e| {
-            let hw = 0.5 * e.width_m + if e.sidewalk { SIDEWALK_WIDTH_M } else { 0.0 };
-            e.profile
-                .windows(2)
-                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
-        })
-        .collect();
+    let roads = RoadSegs::new(place, 0.0, FENCE_ROAD_CLEAR_M);
     // The roadside set's lots stay unfenced: their ground is the kits'.
     let on_lot = |q: V2| {
         s.roadside.iter().any(|r| {
@@ -1763,7 +1794,7 @@ fn channel_fences(place: &Place, grid: &TerrainGrid, s: &SetPieces, out: &mut Ve
     };
     let near_road = |q: V2| {
         roads
-            .iter()
+            .near(q)
             .any(|&(a, b, hw)| segment_distance(q, a, b).0 < hw + FENCE_ROAD_CLEAR_M)
             || on_lot(q)
     };

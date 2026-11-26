@@ -59,12 +59,20 @@ dark; no street lamps, and it neither casts nor receives a sun shadow (`MeshInst
 bit in the instance's packed params that `forward.wgsl` reads to skip the cascade test). Cost: up to 10
 instances while the page is open, none otherwise; no pass or uniform.
 
-Map (`app::map`): the Place rasterized once at load into a 1024 px (longer side) image, north up: muted zone
-tints, parks, water with a darker shoreline, faint building footprints, roads by class with a 1 px darker
-outline (highways thick and light, arterials pale yellow, locals thin, alleys faint), POI dots; deterministic
-(pinned hash). The minimap is a 200-unit circle at the bottom left of the safe area, centered on the car,
-turned with the heading (or north-up), 100/150/250 m across, with the player arrow and a north badge; hidden
-under menus. The full map (MapToggle) fits the whole place into the safe area north-up, with the player
+Map (`app::map`): the Place rasterized once at load into an image at 1 m per pixel up to 2048 px on the
+longer side (the 4 km Bay Loop gets 2 m), north up: muted zone tints, parks, water with a darker shoreline,
+faint building footprints, roads by class with a 1 px darker outline (highways thick and light, arterials pale
+yellow, locals thin, alleys faint); deterministic (pinned hash). POIs are drawn by the HUD over it, crisp at any
+zoom. The minimap is a 200-unit circle at the bottom left of the safe area. Heading-up (the default) it turns
+with the car and sits the car 35% of the radius below the center, so more road ahead shows than behind;
+north-up it centers the car. Its zoom is Auto by default, 320 m across at a stop widening 20 m per m/s of
+speed to 1.1 km, eased over 1.5 s; or fixed at 300 m, 600 m or 1.2 km. POI dots, the player arrow on a light
+halo, and a north badge; hidden under menus. Each scenario names a map skin (`app::map::skin`, scenario
+`map_skin`): `plain` (default), `atlas` (a cream paper street atlas with a 400 m page grid, no buildings,
+yellow main roads, red-orange freeways), `transit` (a fold-out city map: heavy red main roads, blue freeways, a
+bold lake) or `nav` (a mid-2000s in-dash nav screen in night mode). A skin sets the image's colors, roads,
+grain and grid and the HUD's rim, arrow, dot ring and label colors. The full map skips a name that would
+overlap one already placed. The full map (MapToggle) fits the whole place into the safe area north-up, with the player
 arrow, POI labels (invented names), the time and the controls; it pans and zooms (1–8×) and is not a pause.
 Far terrain and horizon (`world::mesh::terrain`): a terrain place draws two static meshes behind the
 streamed chunks. The far terrain is the place's own ground and water at 32 m, sunk under the fine ground so a
