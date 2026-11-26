@@ -1027,8 +1027,12 @@ impl Traffic {
         let nseg = g.lanes.len() + g.turns.len();
         let mut first = Vec::with_capacity(nseg + 1);
         let mut list = Vec::new();
+        // A segment's poses over a span, sampled once: every crossing at a turn's junction
+        // (and every one at the same end of a lane) samples the same span.
+        let mut spans: Vec<(f32, f32, Vec<Pose>)> = Vec::new();
         for seg in 0..nseg as u32 {
             first.push(list.len() as u32);
+            spans.clear();
             let len = self.seg_len(g, seg);
             // A lane's crossings are at its ends' junctions, near those ends; a turn's at
             // its junction, anywhere along it.
@@ -1055,9 +1059,17 @@ impl Traffic {
                 };
                 let (mut s0, mut s1) = (f32::INFINITY, f32::NEG_INFINITY);
                 let n = ((hi - lo) / XING_STEP_M) as u32 + 1;
-                for i in 0..=n {
-                    let s = lo + (hi - lo) * i as f32 / n as f32;
-                    let p = self.seg_pose(g, seg, s);
+                let at = |i: u32| lo + (hi - lo) * i as f32 / n as f32;
+                let span = match spans.iter().position(|sp| sp.0 == lo && sp.1 == hi) {
+                    Some(j) => j,
+                    None => {
+                        let poses = (0..=n).map(|i| self.seg_pose(g, seg, at(i))).collect();
+                        spans.push((lo, hi, poses));
+                        spans.len() - 1
+                    }
+                };
+                for (i, p) in spans[span].2.iter().enumerate() {
+                    let s = at(i as u32);
                     if (p.pos[1] - a[1]).abs() > 2.0 {
                         continue;
                     }
