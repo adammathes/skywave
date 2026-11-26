@@ -604,10 +604,16 @@ mod tests {
         assert_eq!(w, [0, 0]);
     }
 
-    /// The 1980s roster: the first twenty built-in cars; then the eleven 2001 heroes and the
-    /// seven 2001 traffic cars.
+    /// The 1980s roster: the first twenty built-in cars; then the eleven 2001 heroes, the four
+    /// 2005 Bay heroes and the seven 2001 traffic cars.
     const EIGHTIES: usize = 20;
     const HEROES: usize = 11;
+    const BAY_HEROES: [&str; 4] = [
+        "goshawk_turbo",
+        "tulwar_sedan",
+        "petrel_roadster",
+        "lipizzan_sedan",
+    ];
     const TRAFFIC_2001: [&str; 7] = [
         "plover_sedan",
         "sorrel_utility",
@@ -622,7 +628,7 @@ mod tests {
     fn the_2001_traffic_cars_never_list_in_1984_and_list_last_in_2001() {
         let (l84, l01) = (lineup(0), lineup(1));
         let names = crate::ui::roster::names();
-        let first = EIGHTIES + HEROES;
+        let first = EIGHTIES + HEROES + BAY_HEROES.len();
         let ids: Vec<&str> = vehicles::BUILTIN[first..].iter().map(|c| c.0).collect();
         assert_eq!(ids, TRAFFIC_2001);
         for (j, id) in TRAFFIC_2001.iter().enumerate() {
@@ -683,11 +689,16 @@ mod tests {
         let l01 = lineup(1);
         let n = vehicles::BUILTIN.len();
         assert_eq!(vehicles::BUILTIN[n - 1].0, "anvil_semi");
-        assert_eq!(l01.cars, (0..n - 1).collect::<Vec<_>>());
+        let bay = |k: usize| BAY_HEROES.contains(&vehicles::BUILTIN[k].0);
+        assert_eq!(
+            l01.cars,
+            (0..n - 1).filter(|&k| !bay(k)).collect::<Vec<_>>()
+        );
         for (k, (id, _)) in vehicles::BUILTIN.iter().enumerate() {
             let w = l01.weights[k];
             match *id {
                 "destrier_coupe" => assert_eq!(w, era_weight(1969, (1995, 2001), true)),
+                _ if bay(k) => assert_eq!(w, 0, "{id}: newer than 2001"),
                 _ if k >= EIGHTIES => assert_eq!(w, WEIGHT_ONE, "{id}"),
                 _ => assert!(w > 0 && w < WEIGHT_ONE, "{id}: {w}"),
             }

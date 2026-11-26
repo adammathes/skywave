@@ -57,6 +57,8 @@ or golden.
 | Sledge Box Truck | 1996 | Plover Sedan | 1997 | Sorrel Utility | 1998 |
 | Wren Minivan | 1999 | Percheron Crew Cab | 2000 | Anvil Semi | 2000 |
 | Linnet Hatch | 2001 | Dunlin Roadster | 1997 | Palfrey Roadster | 1999 |
+| Goshawk Turbo | 2004 | Tulwar Sedan | 2005 | Petrel Roadster | 2002 |
+| Lipizzan Sedan | 2004 | | | | |
 
 **`built`** (optional) dates an old car carrying later parts: the Destrier Coupe is a 1969 car with a
 2001 blower and wheels, so it weighs by its 1969 age in the 2001 world (0.105, above the hero floor) and
@@ -197,6 +199,10 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Courser V8 | 11,620 | 7,100 | 3,386 | 2,150 |
 | Dunlin Roadster | 10,500 | 6,174 | 3,096 | 1,916 |
 | Palfrey Roadster | 10,236 | 6,178 | 3,012 | 1,800 |
+| Goshawk Turbo | 11,436 | 7,128 | 3,222 | 2,094 |
+| Tulwar Sedan | 12,132 | 7,152 | 3,258 | 2,118 |
+| Petrel Roadster | 11,540 | 6,194 | 3,052 | 1,860 |
+| Lipizzan Sedan | 13,398 | 7,164 | 3,246 | 2,142 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
@@ -253,6 +259,18 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `dunlin_roadster` | late-90s small front-engined two-seat roadster: low rounded nose with pop-ups and a small mouth, short deck, slim tail lamps, top down | Convertible | 1,000 kg, ~98 kW four to 7,000 rpm, 5-speed, RWD; light, quick steering, a tail that steps out when asked; 8.2 s, 57 m/s, 0.98 g |
 | `palfrey_roadster` | late-90s round-shouldered turbo-four roadster: domed hood, short steep windshield in a bright frame, high door tops, half-round tail, wheels at the corners, top down | Convertible | 1,470 kg, ~145 kW turbo four, 6-speed, AWD; a flat wall of torque, clean launches, calm grip; 6.7 s, 58.7 m/s, 1.03 g |
 
+The 2005 Bay heroes, the Bay Loop's own (`docs/SCENARIOS.md`, "The Bay Loop"): the Peninsula's
+commuter and its luxury six, which the lots of 2005 were full of, and two toys of new money. They
+drive in the Bay Loop's traffic at a hero's weight, never park, and never appear in an earlier
+world (they are newer than 2001). Luxury cars are outside the class orderings.
+
+| id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
+|---|---|---|---|
+| `goshawk_turbo` | mid-2000s compact premium sport sedan: broad grille, arched roof, short high deck, five-spoke alloys, mostly silver | Sedan | 1,540 kg, ~125 kW turbo four with a flat torque plateau, 5-speed, AWD; sure-footed, gently nose-heavy; 7.9 s, 61 m/s, 0.85 g |
+| `tulwar_sedan` | mid-2000s small rear-drive luxury sport sedan: long hood, steep windshield, roof arcing to a high lipped deck, bright window trim | Luxury | 1,580 kg, ~145 kW V6, 6-speed, RWD; calm, balanced, quiet; 8.2 s, 64 m/s, 0.86 g |
+| `petrel_roadster` | early-2000s tiny mid-engined two-seat roadster: round lamps, wide mouth, strakes into flank intakes, rising engine deck, round tail lamps, top off | Convertible | 900 kg, ~125 kW four to 7,800 rpm, 5-speed, RWD; the lightest car, turns in on a thought; 5.7 s, 62 m/s, 1.06 g |
+| `lipizzan_sedan` | mid-2000s big grand touring four-door: long hood, oval grille, long cabin, bright trim, big multi-spoke wheels | Luxury | 1,930 kg, ~285 kW V8 with a rear transaxle, 6-speed, RWD; fast and heavy, leans and settles; 5.3 s, 72 m/s, 0.93 g |
+
 The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
 Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
 Vehicle page in 2001; the semi is `traffic_only`.
@@ -294,9 +312,10 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Straight-line: 0–60 mph times within a band per car (`tests/roster.rs`: Sports 4–8 s, Wagon 10–16 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, and a band for each roster car); top speed ordering Sports > Coupe > Sedan > Wagon > Van (every car of a class beats every car of the next).
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Gannet, Longbow) beats both Appaloosas.
+- 2005 Bay heroes: each in its band; the Lipizzan, the quickest four-door, still behind the exotics.
 - 2001 traffic cars: each in its band and its class's orderings like the rest (the semi, traffic only, is not driven).
 - 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s) and the Courser over 0.5 too, the Tanager and the Glaive under 0.1 with every assist off; the Shrike has the highest redline. The part 2 heroes fill the gaps the roster left: the Glaive is the only Sports car that fits between the Longbow Convertible and the Longbow in top speed (0.7 m/s either side, so its gearing is set to the hundredth), the Shrike sits under every Sports car as a Coupe, the Falchion under every Coupe and Hatch as a Sedan, the Courser (Muscle, outside the orderings) in the gaps left. The two roadsters (Convertible, outside the orderings) sit outside the hero band: the Dunlin at 8.2 s, the Palfrey at 6.7 s, its top speed set by its gearing to fit a gap.
-- Distinct: all of them differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
+- Distinct: the cars of each class differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad (by class since the 2005 cars: across the whole roster those gaps had no room left); every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Feel bands (`tests/handling.rs`): every car, steered as a keyboard steers, through a 25 mph junction turn on full throttle, a 45 mph full-key turn braked hard, and a 45 mph full-key turn lifted off the throttle. The rear axle's peak slip angle stays below 1.5× the tires' peak in Arcade and 2× in Light; in Light the handbrake slides the rear past 1.5× (in Arcade the grip boost lets a few rears out-grip it).
 - Determinism: scripted 10 s input replay produces identical state hashes.

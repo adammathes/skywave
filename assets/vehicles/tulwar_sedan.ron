@@ -1,0 +1,48 @@
+// Tulwar Sedan: a mid-2000s small rear-drive luxury sport sedan from a Japanese premium
+// school, a smooth narrow-angle V6 and a six-speed automatic.
+//
+// Intent: calm, precise and quietly quick. A silky V6 that pulls cleanly to its redline,
+// rear drive with a near-even balance, a supple ride and light, accurate steering. Quieter
+// and more polished than the Goshawk, a little slower off the line and happier on a
+// sweeping road.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "tulwar_sedan",
+    name: "Tulwar Sedan",
+    era: Aughts,
+    year: 2005,
+    class: Luxury,
+
+    mass_kg: 1580,
+    dims_m: (4.58, 1.80, 1.42),    // length, width, height
+    wheelbase_m: 2.73,
+    track_m: 1.535,
+    cg_height_m: 0.50,
+    cg_fore_aft: 0.48,             // 52% front
+
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 6500,
+        torque_nm: [(1000, 175), (2000, 215), (3500, 238), (4800, 252), (5800, 240), (6500, 210)],
+    ),
+    gears: [3.52, 2.04, 1.40, 1.00, 0.80, 0.69],
+    final_drive: 3.91,
+    reverse: 3.2,
+    shift_ms: 220,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.94, grip_long: 1.12, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 31000, damper: 3200, travel_m: 0.15, antiroll: 0.40),
+    steering: Steer(max_deg: 34, speed_sens: 0.65, return_rate: 10.0),
+    brakes: Brakes(max_nm: 3700, bias_front: 0.62, abs: true, handbrake_nm: 2900),
+    aero: Aero(cd: 0.31, frontal_m2: 2.20, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: 0.0, body_roll: 0.3, engine_sound: "default", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "tulwar_sedan.shape.ron",
+)

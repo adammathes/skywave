@@ -115,7 +115,9 @@ the old highway, the university's open ground and the bayshore's office flats, t
 and the foothill village, with a causeway across the bay's south end. Zone rules are the
 `bay_area` region template (`StreetPattern::Open` keeps the hills free of local streets). It
 borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
-and radio follow.
+and radio follow. Its four `heroes` are the 2005 Bay heroes (`docs/VEHICLES.md`): the player starts in
+the Goshawk Turbo, the Peninsula's turbo commuter, beside the Tulwar Sedan, the Petrel Roadster and the
+Lipizzan Sedan; every car of 1996 to 2005 drives there too.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

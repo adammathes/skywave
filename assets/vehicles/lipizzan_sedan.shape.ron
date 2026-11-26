@@ -1,0 +1,59 @@
+// Lipizzan Sedan body: a mid-2000s big Italian-school grand touring four-door.
+//
+// Intent: long, low and proud. A long hood with a big oval grille between swept lamps, a
+// steep windshield set well back, a roof that arcs over a long four-door cabin into a
+// short deck with swept tail lamps, bright trim round the glass, a low line along the
+// flanks and big multi-spoke wheels filling the arches. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "lipizzan_sedan",
+    side: [
+        (0.00, 0.60), (0.05, 0.70), (0.20, 0.79), (1.55, 0.98), (1.62, 1.00),
+        (2.25, 1.39), (2.45, 1.44), (3.35, 1.43), (4.05, 1.10), (4.15, 1.08),
+        (4.95, 1.07), (5.05, 0.98),
+        (5.05, 0.36), (4.90, 0.25), (4.40, 0.19), (0.80, 0.18), (0.12, 0.22), (0.00, 0.33),
+    ],
+    plan: [
+        (0.00, 0.74), (0.10, 0.88), (0.40, 0.94), (1.20, 0.95), (4.40, 0.95), (4.80, 0.93),
+        (5.05, 0.84),
+    ],
+    belt: [(1.62, 0.99), (3.00, 1.03), (4.10, 1.08)],
+    section: Section(shoulder: 0.91, tumblehome_deg: 22, greenhouse_frac: 0.74, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.64, 2.30),
+        backlight: (3.40, 4.10),
+        side: [(1.85, 2.95), (3.05, 3.70)],
+    ),
+    wheels: Wheels(radius: 0.35, width: 0.245, arch_clearance: 0.04, front_x: 0.92, rear_x: 3.98, track: 1.58),
+    front: Front(lights: Rect, grille: Egg, bumper: Body, bumper_y: (0.26, 0.44)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Body, bumper_y: (0.34, 0.50)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.84, creases: [(0.20, 0.70, 5.00, 0.76)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: None, rims: Mesh, hubcaps: false),
+    details: [ChromeTrim, Badge(Diamond)],
+    // Deep blue, black, silver, dark gray, burgundy, pearl white.
+    palette: ["#1d2a4a", "#141518", "#b8bbbf", "#4a4d52", "#4c1520", "#ebe9e3"],
+    accent: "#141416",
+    interior: InteriorShape(
+        dash_height: 0.89,
+        dash_x: 1.96,
+        wheel_pos: (2.40, 0.74),
+        wheel_radius: 0.19,
+        column_angle_deg: 24,
+        mirror_pos: (2.26, 1.30),
+        seat: (2.90, 0.52),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: a dark blue dash, saddle tan leather
+        // with darker piping, blue carpet, wood across the dash and blue-lit dials.
+        colors: ["#1b2233", "#a8652e", "#1c2333", "#cfc8b8", "#2a2b2f", "#4a8cff"],
+        display: "#4a8cff",
+        insert: "#b87336",
+        piping: "#5a3418",
+        dash_top: "#1a2030",
+        applique: Wood,
+        manual: false,
+    ),
+)

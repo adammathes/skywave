@@ -1,0 +1,47 @@
+// Petrel Roadster: an early-2000s tiny mid-engined British-school roadster, a light
+// alloy tub, a small high-revving four behind the seats and no top to speak of.
+//
+// Intent: the purest car in the game. Almost nothing to it, so it turns the instant you
+// think about it and stops on a dime; the four revs hard and sounds busy; quick off the
+// line for its power, not fast flat out. A weekend toy for someone with money to spare.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "petrel_roadster",
+    name: "Petrel Roadster",
+    era: Aughts,
+    year: 2002,
+    class: Convertible,
+
+    mass_kg: 900,
+    dims_m: (3.79, 1.72, 1.12),    // length, width, height
+    wheelbase_m: 2.30,
+    track_m: 1.46,
+    cg_height_m: 0.40,
+    cg_fore_aft: 0.62,             // 38% front: the engine sits behind the seats
+
+    engine: Engine(
+        idle_rpm: 900,
+        redline_rpm: 7800,
+        torque_nm: [(1000, 120), (2500, 150), (4000, 175), (5500, 185), (7000, 172), (7800, 150)],
+    ),
+    gears: [3.17, 1.84, 1.31, 1.03, 0.80],
+    final_drive: 4.70,
+    reverse: 3.0,
+    shift_ms: 200,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.18, grip_long: 1.15, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 30000, damper: 3000, travel_m: 0.13, antiroll: 0.35),
+    steering: Steer(max_deg: 30, speed_sens: 0.5, return_rate: 12.0),
+    brakes: Brakes(max_nm: 2700, bias_front: 0.55, abs: true, handbrake_nm: 1800),
+    aero: Aero(cd: 0.41, frontal_m2: 1.65, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: 0.15, body_roll: 0.2, engine_sound: "default", shift_jerk: 0.25),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "petrel_roadster.shape.ron",
+)

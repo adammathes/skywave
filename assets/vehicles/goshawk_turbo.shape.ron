@@ -1,0 +1,61 @@
+// Goshawk Turbo body: a mid-2000s compact premium sport sedan.
+//
+// Intent: tidy, taut and expensive-looking without shouting. A short nose with slim
+// rectangular lamps either side of a broad grille, a hood that rises to a steep windshield,
+// a roof arched in one smooth curve over a four-door cabin, a short high deck, wide tail
+// lamps, a crisp line low along the flanks and five-spoke alloys. Mostly silver, as the
+// Peninsula's lots were. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "goshawk_turbo",
+    side: [
+        (0.00, 0.58), (0.04, 0.68), (0.14, 0.77), (1.15, 0.95), (1.22, 0.97),
+        (1.85, 1.38), (2.05, 1.43), (2.95, 1.42), (3.62, 1.10), (3.70, 1.09),
+        (4.44, 1.08), (4.55, 1.00),
+        (4.55, 0.34), (4.40, 0.24), (3.90, 0.18), (0.70, 0.17), (0.12, 0.21), (0.00, 0.31),
+    ],
+    plan: [
+        (0.00, 0.70), (0.08, 0.81), (0.30, 0.875), (1.00, 0.885), (4.00, 0.885), (4.35, 0.87),
+        (4.55, 0.81),
+    ],
+    belt: [(1.22, 0.96), (2.45, 1.00), (3.66, 1.08)],
+    section: Section(shoulder: 0.91, tumblehome_deg: 20, greenhouse_frac: 0.76, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.24, 1.90),
+        backlight: (3.02, 3.64),
+        side: [(1.45, 2.45), (2.55, 3.15)],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.215, arch_clearance: 0.04, front_x: 0.88, rear_x: 3.53, track: 1.52),
+    front: Front(lights: Rect, grille: Wide, bumper: Body, bumper_y: (0.24, 0.42)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Body, bumper_y: (0.32, 0.48)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.82, creases: [(0.20, 0.66, 4.50, 0.72)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [Badge(Circle)],
+    // Light silver, quartz gray, dark silver, black, deep blue pearl, white.
+    palette: ["#c0c3c7", "#a8acb1", "#7d8086", "#1a1b1e", "#2b3a55", "#e9e8e3"],
+    accent: "#141416",
+    interior: InteriorShape(
+        dash_height: 0.88,
+        dash_x: 1.56,
+        wheel_pos: (2.00, 0.72),
+        wheel_radius: 0.18,
+        column_angle_deg: 24,
+        mirror_pos: (1.86, 1.28),
+        seat: (2.50, 0.48),
+        driver_offset: 0.37,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, dark gray cloth sport
+        // seats with lighter inserts, black carpet, a brushed aluminum band and red-lit
+        // dials.
+        colors: ["#1c1d20", "#2c2d31", "#1f2023", "#9a9ca0", "#2a2b2f", "#e0302a"],
+        display: "#ff3a2a",
+        insert: "#5a5d63",
+        piping: "#2a2b2f",
+        dash_top: "#202124",
+        applique: Brushed,
+        manual: false,
+    ),
+)

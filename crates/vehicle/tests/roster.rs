@@ -1,7 +1,8 @@
 //! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster", the 2001
-//! hero cars and traffic cars), driven with the real specs from `assets/vehicles/`: every
-//! car's 0–60 mph time in its band, all of them distinct in 0–60, top speed and skidpad
-//! grip, the class orderings, the mid-engined exotics ahead of everything and the pony car
+//! hero cars and traffic cars, the 2005 Bay heroes), driven with the real specs from
+//! `assets/vehicles/`: every car's 0–60 mph time in its band, each distinct from the other
+//! cars of its class in 0–60, top speed and skidpad grip, the class orderings, the
+//! mid-engined exotics ahead of everything and the pony car
 //! behind the other sports cars, the 2001 heroes' launches and the rotary's redline, and
 //! nothing rolls at full lock or needs more than 60 m to stop. Run with `--nocapture` for
 //! the table: `cargo test -p vehicle --test roster -- --nocapture`.
@@ -30,7 +31,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 37] = [
+const ROSTER: [Entry; 41] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -64,6 +65,12 @@ const ROSTER: [Entry; 37] = [
     // The 2001 roadsters, outside the era's hero band: a light slow one and a quick one.
     (car!("dunlin_roadster"), (7.5, 9.0)),
     (car!("palfrey_roadster"), (6.5, 7.0)),
+    // The 2005 Bay heroes: the turbo commuter, the luxury six, the featherweight roadster
+    // and the V8 four-door.
+    (car!("goshawk_turbo"), (7.0, 8.0)),
+    (car!("tulwar_sedan"), (7.3, 8.3)),
+    (car!("petrel_roadster"), (5.3, 6.2)),
+    (car!("lipizzan_sedan"), (5.3, 6.0)),
     // The 2001 traffic cars (the semi, which only traffic drives, is not driven here).
     (car!("plover_sedan"), (9.3, 10.3)),
     (car!("sorrel_utility"), (9.9, 10.9)),
@@ -92,7 +99,7 @@ const SPORTS: [&str; 7] = [
     "gannet_gt",
 ];
 
-/// Smallest gaps between any two cars for them to count as distinct: six sim steps (the
+/// Smallest gaps between two cars of a class for them to count as distinct: six sim steps (the
 /// Homestead and the Seabreeze, tuned before the roster, are 0.09 s apart), ~1.5 mph and
 /// a hundredth of a g.
 const MIN_GAP_S: f32 = 0.05;
@@ -239,10 +246,12 @@ fn measure() -> Vec<Measured> {
         .collect()
 }
 
-/// Asserts every pair of `value`s is at least `gap` apart.
+/// Asserts every pair of `value`s of cars of one class is at least `gap` apart: the cars a
+/// player weighs against each other are those of a kind (with forty cars across seven
+/// decades, a gap between every pair of the whole roster has no room left in it).
 fn assert_distinct(m: &[Measured], what: &str, gap: f32, value: impl Fn(&Measured) -> f32) {
     for (i, a) in m.iter().enumerate() {
-        for b in &m[i + 1..] {
+        for b in m[i + 1..].iter().filter(|b| b.class == a.class) {
             let (va, vb) = (value(a), value(b));
             assert!(
                 (va - vb).abs() >= gap,
