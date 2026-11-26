@@ -1,0 +1,48 @@
+// Grackle Turbo: a late-80s rear-drive mid-size coupe with a turbocharged V6, all black.
+//
+// Intent: the sleeper. A formal, square-cut two-door any family might own, until the turbo
+// six comes on boost: soft below 2,000 rpm, then a shove that lights the skinny rear tires
+// and pulls the heavy coupe past most sports cars to 60. A four-speed automatic, a live
+// axle, soft springs and a lot of lean; it is quick in a straight line and nowhere else,
+// and it has to be slowed down well before a corner. A Lake City hero.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "grackle_turbo",
+    name: "Grackle Turbo",
+    era: Eighties,
+    year: 1988,
+    class: Muscle,
+
+    mass_kg: 1580,
+    dims_m: (5.08, 1.82, 1.38),    // length, width, height
+    wheelbase_m: 2.74,
+    track_m: 1.48,
+    cg_height_m: 0.53,
+    cg_fore_aft: 0.47,             // 53% front
+
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 5200,
+        torque_nm: [(1000, 260), (2000, 470), (2800, 540), (3600, 525), (4400, 440), (5200, 330)],
+    ),
+    gears: [2.74, 1.57, 1.0, 0.67],
+    final_drive: 3.42,
+    reverse: 2.07,
+    shift_ms: 260,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.93, grip_long: 0.98, load_sens: 0.09, slip_peak_deg: 7.5),
+    suspension: Susp(spring_n_m: 24000, damper: 2300, travel_m: 0.18, antiroll: 0.26),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 9.0),
+    brakes: Brakes(max_nm: 3800, bias_front: 0.64, abs: false, handbrake_nm: 3000),
+    aero: Aero(cd: 0.47, frontal_m2: 2.12, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.14, body_roll: 0.65, engine_sound: "v6", shift_jerk: 0.35),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 140, mph), Tach(0, 6000)],
+        radio: "digital_blue",
+    ),
+    shape: "grackle_turbo.shape.ron",
+)

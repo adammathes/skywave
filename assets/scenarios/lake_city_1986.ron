@@ -14,5 +14,7 @@ Scenario(
     default_time: (16, 50),
     default_vehicle: "homestead_wagon",
     years: (1977, 1989),
-    heroes: [],
+    // The cars of the North Side's summer nights: the black turbo coupe, the plastic-bodied
+    // sports car and the pony coupe, kept on the road past their age.
+    heroes: ["grackle_turbo", "longbow_coupe", "appaloosa_gt"],
 )

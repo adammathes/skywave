@@ -1,0 +1,60 @@
+// Grackle Turbo body: a late-80s rear-drive mid-size coupe with a turbo six, in black.
+//
+// Intent: square and formal. A long flat hood with a low bulge for the turbo plumbing, a
+// vertical-bar grille between quad square lamps, a body-colored bumper, a squared-off
+// notchback roof with a thick upright rear pillar and an almost flat rear window, a short
+// flat deck and full-width tail lamps. Black trim everywhere chrome would be, black
+// slotted rims. Front engine, rear drive. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "grackle_turbo",
+    side: [
+        (0.00, 0.60), (0.03, 0.76), (0.14, 0.82), (1.94, 0.90), (2.02, 0.92),
+        (2.58, 1.33), (2.68, 1.38), (3.52, 1.37), (3.96, 1.00), (4.04, 0.99),
+        (4.98, 0.98), (5.08, 0.90),
+        (5.08, 0.32), (4.92, 0.24), (4.40, 0.21), (0.84, 0.19), (0.14, 0.24), (0.00, 0.34),
+    ],
+    plan: [
+        (0.00, 0.87), (0.06, 0.895), (0.40, 0.91), (3.20, 0.91), (4.00, 0.915), (4.80, 0.905),
+        (5.08, 0.89),
+    ],
+    belt: [(2.00, 0.91), (3.96, 0.98)],
+    section: Section(shoulder: 0.95, tumblehome_deg: 16, greenhouse_frac: 0.80, crown: 0.02, tuck: 0.05),
+    glass: Glass(
+        windshield: (2.03, 2.58),
+        backlight: (3.58, 3.94),
+        side: [(2.10, 3.06), (3.12, 3.40)],
+    ),
+    wheels: Wheels(radius: 0.34, width: 0.24, arch_clearance: 0.05, front_x: 1.00, rear_x: 3.74, track: 1.48),
+    front: Front(lights: Quad, grille: Slot, bumper: Body, bumper_y: (0.24, 0.42)),
+    rear: Rear(lights: FullWidth, spoiler: None, bumper: Body, bumper_y: (0.26, 0.44)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.82, creases: [(0.10, 0.72, 5.00, 0.76)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Slotted, hubcaps: false),
+    details: [BlackTrim, HoodScoop, Badge(Bar)],
+    // Black above all; then the few that came in a color: charcoal, silver, dark red.
+    palette: ["#0e0e10", "#0e0e10", "#0e0e10", "#2e3034", "#a6a9ad", "#5a1418"],
+    accent: "#101012",
+    interior: InteriorShape(
+        dash_height: 0.92,
+        dash_x: 2.18,
+        wheel_pos: (2.58, 0.76),
+        wheel_radius: 0.19,
+        column_angle_deg: 22,
+        mirror_pos: (2.48, 1.24),
+        seat: (3.02, 0.44),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: gray cloth buckets, a black dash
+        // with a boost gauge, gray carpet, a charcoal headliner, red-lit dials.
+        colors: ["#18191b", "#4a4c50", "#3a3b3e", "#2e2f32", "#26272a", "#d23a2a"],
+        display: "#ff5a3a",
+        insert: "#55575c",
+        piping: "#141416",
+        dash_top: "#1c1d1f",
+        applique: None,
+        manual: false,
+    ),
+)

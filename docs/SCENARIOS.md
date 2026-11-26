@@ -87,6 +87,8 @@ shows it) and the tuner the Siskin Coupe (body kit, tall wing, aftermarket rims,
 Part 2 (M8 #5): the rotary coupe is the Shrike Coupe, the rally sedan the Glaive Turbo (hood scoop, tall
 wing, mud flaps), the compact sedan the Falchion Sedan (body kit) and the V8 sports car the Courser V8 (T-top).
 The two late-90s roadsters, the Dunlin Roadster and the Palfrey Roadster (AWD), joined them after.
+Lake City's heroes are its North Side summer-night cars, kept on the road past their age: the Grackle
+Turbo (a black 1988 turbo-six coupe, the sleeper), the Longbow Coupe and the Appaloosa GT.
 The traffic cars (M8 #6) are the Plover Sedan, Sorrel Utility, Wren Minivan, Percheron Crew Cab, Linnet
 Hatch, Sledge Box Truck and the Anvil Semi, which only traffic drives, on the freeway.
 
