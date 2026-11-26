@@ -1,13 +1,16 @@
 //! Deterministic primitives shared by every Skywave crate.
 //!
-//! Everything here is `no_std` and bit-identical on every platform: integer hashing, a
-//! seeded PCG32 generator, the fixed-timestep accumulator that drives the 120 Hz simulation,
-//! and a fixed-capacity pool.
+//! Everything here is `no_std` and bit-identical on every platform: integer hashing,
+//! IEEE-only scalar math ([`math`]), a seeded PCG32 generator, the fixed-timestep
+//! accumulator that drives the 120 Hz simulation, and a fixed-capacity pool.
 #![no_std]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod hash;
+pub mod math;
 mod pool;
 mod rng;
 mod step;

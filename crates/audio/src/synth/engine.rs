@@ -451,11 +451,6 @@ impl EngineSynth {
         self.intake.reset();
         self.pop_bp.reset();
     }
-
-    /// The firing frequency now, Hz (for tests and the preview tool).
-    pub fn firing_hz(&self) -> f32 {
-        self.rpm.value * f32::from(self.voice.cylinders) / 120.0
-    }
 }
 
 #[cfg(test)]
