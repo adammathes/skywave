@@ -1675,3 +1675,56 @@ fn a_semis_claim_reserves_its_own_length() {
     }
     assert_eq!(find(&t, car).seg, 2, "the car got through");
 }
+
+/// Spawns favor main roads: near one, main roads carry well over half their share of the
+/// lanes around. Spawning evenly, the cars on them drove off and side streets kept theirs, so
+/// main roads held a third of their share (15% of the cars on 51% of the lanes).
+#[test]
+fn main_roads_carry_more_than_their_share() {
+    let _quiet = shared();
+    let mut b = Coast::new(COAST, 1);
+    let main = |l: &traffic::Lane| l.speed_mps >= 15.0;
+    // Stand beside the middle of the longest main-road lane.
+    let (i, _) = b
+        .graph
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| main(l))
+        .max_by(|x, y| x.1.length_m.total_cmp(&y.1.length_m))
+        .expect("the coast has main roads");
+    let pose = b.graph.pose(i as u32, 0.5 * b.graph.lanes[i].length_m);
+    b.player.pos = pose.pos;
+    let g = &b.graph;
+    // Lane length near the player, where cars spawn and live.
+    let (mut total, mut main_len) = (0.0, 0.0);
+    for (i, l) in g.lanes.iter().enumerate() {
+        let p = g.pose(i as u32, 0.5 * l.length_m).pos;
+        let d = [p[0] - pose.pos[0], p[2] - pose.pos[2]];
+        if (d[0] * d[0] + d[1] * d[1]).sqrt() < 360.0 {
+            total += l.length_m;
+            main_len += if main(l) { l.length_m } else { 0.0 };
+        }
+    }
+    let mut t = b.traffic.clone();
+    let (mut on_main, mut on_lanes, mut tick) = (0usize, 0usize, 0);
+    drive(&b, &mut t, 60, Density::Normal, |t, _, _| {
+        if tick >= 30 * HZ {
+            for c in t.cars() {
+                if let Some(l) = g.lanes.get(c.seg as usize) {
+                    on_lanes += 1;
+                    on_main += usize::from(main(l));
+                }
+            }
+        }
+        tick += 1;
+    });
+    let lane_share = main_len / total;
+    let car_share = on_main as f32 / on_lanes.max(1) as f32;
+    println!(
+        "main roads: {:.0}% of lane length near, {:.0}% of cars",
+        100.0 * lane_share,
+        100.0 * car_share
+    );
+    assert!(car_share >= 0.6 * lane_share, "{car_share} vs {lane_share}");
+}

@@ -177,6 +177,10 @@ const PLAYER_ETA_S: f32 = 3.0;
 const PLAYER_NODE_M: f32 = 60.0;
 /// A spawn keeps this far from every car (m).
 const SPAWN_CLEAR_M: f32 = 12.0;
+/// Lanes this fast (55 kph and up) are main roads, which spawns favor.
+const MAIN_ROAD_MPS: f32 = 15.0;
+/// Sweeps a main road counts as near after it last offered a spawn spot.
+const MAIN_NEAR_SWEEPS: u8 = 8;
 /// Lanes checked for a spawn per step.
 const SCAN_LANES: usize = 48;
 /// Despawn a hidden car that has not moved for this long (s), not counting time it faces a
@@ -256,7 +260,7 @@ impl Density {
         match self {
             Density::Off => 0,
             Density::Low => cap / 4,
-            Density::Normal => cap / 2,
+            Density::Normal => cap * 2 / 3,
             Density::Busy => cap,
         }
     }
@@ -512,6 +516,11 @@ pub struct Traffic {
     /// Per lane, a bounding circle `[x, z, r]`.
     lane_ball: Vec<[f32; 3]>,
     cursor: u32,
+    /// Full sweeps of the cursor since a main road offered a spawn spot (saturating).
+    /// While it is under [`MAIN_NEAR_SWEEPS`], side streets spawn only up to a margin over main roads.
+    main_age: u8,
+    /// A main road offered a spawn spot on this sweep.
+    main_sweep: bool,
     /// Cars with a [`Car::ghost`].
     ghosts: u32,
     /// Pool slots sorted by `x_key`, each car's x at the start of the step.
@@ -584,6 +593,8 @@ impl Clone for Traffic {
             node_pos: self.node_pos.clone(),
             lane_ball: self.lane_ball.clone(),
             cursor: self.cursor,
+            main_age: self.main_age,
+            main_sweep: self.main_sweep,
             ghosts: self.ghosts,
             by_x,
             x_key: self.x_key.clone(),
@@ -954,6 +965,8 @@ impl Traffic {
             node_pos,
             lane_ball,
             cursor: 0,
+            main_age: u8::MAX,
+            main_sweep: false,
             ghosts: 0,
             by_x: Vec::with_capacity(cap),
             x_key: alloc::vec![0.0; cap],
@@ -2302,9 +2315,35 @@ impl Traffic {
         if self.cars.len() >= target {
             return;
         }
+        // Cars on main roads less cars on side streets (not counting turns).
+        let mut lean = 0i32;
+        // Busy fills the whole pool wherever there is room, so it does not hold side
+        // streets back.
+        let side_slack = if target >= b.cars {
+            i32::MAX
+        } else {
+            (target / 4) as i32
+        };
+        for c in &self.cars {
+            if c.seg < nl {
+                lean += if g.lanes[c.seg as usize].speed_mps >= MAIN_ROAD_MPS {
+                    1
+                } else {
+                    -1
+                };
+            }
+        }
         for _ in 0..SCAN_LANES.min(self.lanes as usize) {
             let lane = self.cursor;
             self.cursor = (self.cursor + 1) % self.lanes;
+            if lane == 0 {
+                self.main_age = if self.main_sweep {
+                    0
+                } else {
+                    self.main_age.saturating_add(1)
+                };
+                self.main_sweep = false;
+            }
             let ball = self.lane_ball[lane as usize];
             let dc = len2([ball[0] - pp[0], ball[1] - pp[2]]);
             let l = &g.lanes[lane as usize];
@@ -2312,6 +2351,17 @@ impl Traffic {
                 || dc - ball[2] > b.spawn_max_m
                 || l.length_m < 25.0
                 || l.turn_count == 0
+            {
+                continue;
+            }
+            // Main roads carry the traffic: near one, below Busy, a side street spawns only
+            // while side streets hold less than a quarter of the target over main roads. (Spawning
+            // evenly, cars on main roads drive off and side streets keep theirs, so main
+            // roads end up thin; the slack keeps the count up where few main-road spots
+            // open, as beside a still player.)
+            if l.speed_mps < MAIN_ROAD_MPS
+                && -lean >= side_slack
+                && (self.main_sweep || self.main_age < MAIN_NEAR_SWEEPS)
             {
                 continue;
             }
@@ -2331,6 +2381,7 @@ impl Traffic {
             {
                 continue;
             }
+            self.main_sweep |= l.speed_mps >= MAIN_ROAD_MPS;
             // Room on the lane, and a speed the car can stop from.
             let mut room = l.length_m - s;
             let mut clear = true;
