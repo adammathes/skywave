@@ -45,8 +45,8 @@ Layout(
         District(name: "drive-in stretch", zone: Strip, polygon: [(546, 599), (296, 199), (176, 273), (426, 673)]),
         // Parks: the lakefront the length of the city, widest in the middle, and two big
         // neighborhood parks.
-        District(name: "lakefront", zone: Park, polygon: [(1430, 0), (1520, 0), (1524, 36), (1561, 236), (1636, 636), (1686, 836), (1711, 1036), (1761, 1236), (1886, 1436), (1936, 1636), (1986, 1836), (1986, 2048), (1900, 2048), (1900, 1836), (1856, 1636), (1806, 1436), (1640, 1236), (1620, 1036), (1600, 836), (1556, 636), (1486, 236), (1450, 36)]),
-        District(name: "west park", zone: Park, polygon: [(300, 880), (410, 880), (410, 990), (300, 990)]),
+        District(name: "lakefront", zone: Park, polygon: [(1480, 0), (1520, 0), (1524, 36), (1561, 236), (1636, 636), (1686, 836), (1711, 1036), (1761, 1236), (1886, 1436), (1936, 1636), (1986, 1836), (1986, 2048), (1951, 2048), (1951, 1836), (1901, 1636), (1851, 1436), (1726, 1236), (1676, 1036), (1651, 836), (1601, 636), (1526, 236), (1501, 100), (1489, 36), (1480, 0)]),
+        District(name: "west park", zone: Park, polygon: [(436, 836), (636, 836), (636, 1036), (436, 1036)]),
         District(name: "boulevard park", zone: Park, polygon: [(1040, 1450), (1150, 1450), (1150, 1560), (1040, 1560)]),
         // Downtown: towers along the river mouth, between the south branch and the lake.
         District(name: "downtown", zone: Downtown, polygon: [(1640, 1636), (1906, 1636), (1950, 1836), (1950, 2048), (1640, 2048)]),
@@ -54,37 +54,37 @@ Layout(
 
     roads: [
         // The city limits: north, west and south.
-        Road(name: "north limits", class: Arterial, lanes: 2, points: [(36, 36), (1489, 36)]),
-        Road(name: "west limits", class: Arterial, lanes: 2, points: [(36, 36), (36, 2009)]),
-        Road(name: "south limits", class: Arterial, lanes: 2, points: [(36, 2009), (1951, 2009)]),
+        Road(name: "north limits", class: Arterial, lanes: 2, points: [(100, 100), (1501, 100)]),
+        Road(name: "west limits", class: Arterial, lanes: 2, points: [(100, 100), (100, 2009)]),
+        Road(name: "south limits", class: Arterial, lanes: 2, points: [(100, 2009), (1951, 2009)]),
         // The shore drive, through the lakefront park from the north limits to downtown.
-        Road(name: "shore drive", class: Arterial, lanes: 2, speed_kph: Some(80), sidewalk: false, points: [(1489, 36), (1526, 236), (1601, 636), (1651, 836), (1676, 1036), (1726, 1236), (1851, 1436), (1901, 1636), (1951, 1836), (1951, 2009)]),
+        Road(name: "shore drive", class: Arterial, lanes: 2, speed_kph: Some(80), sidewalk: false, points: [(1501, 100), (1526, 236), (1601, 636), (1651, 836), (1676, 1036), (1726, 1236), (1851, 1436), (1901, 1636), (1951, 1836), (1951, 2009)]),
         // The section-line grid, a mile apart: avenues running north and south...
-        Road(name: "eighth avenue", class: Arterial, lanes: 2, points: [(436, 36), (436, 2009)]),
-        Road(name: "seventh avenue", class: Arterial, lanes: 2, points: [(636, 36), (636, 2009)]),
-        Road(name: "sixth avenue", class: Arterial, lanes: 2, points: [(836, 36), (836, 2009)]),
-        Road(name: "fifth avenue", class: Arterial, lanes: 2, points: [(1036, 36), (1036, 2009)]),
-        Road(name: "fourth avenue", class: Arterial, lanes: 2, points: [(1236, 36), (1236, 2009)]),
-        Road(name: "third avenue", class: Arterial, lanes: 2, points: [(1436, 36), (1436, 2009)]),
+        Road(name: "eighth avenue", class: Arterial, lanes: 2, points: [(436, 100), (436, 2009)]),
+        Road(name: "seventh avenue", class: Arterial, lanes: 2, points: [(636, 100), (636, 2009)]),
+        Road(name: "sixth avenue", class: Arterial, lanes: 2, points: [(836, 100), (836, 2009)]),
+        Road(name: "fifth avenue", class: Arterial, lanes: 2, points: [(1036, 100), (1036, 2009)]),
+        Road(name: "fourth avenue", class: Arterial, lanes: 2, points: [(1236, 100), (1236, 2009)]),
+        Road(name: "third avenue", class: Arterial, lanes: 2, points: [(1436, 100), (1436, 2009)]),
         Road(name: "second avenue", class: Arterial, lanes: 2, points: [(1636, 1436), (1636, 2009)]),
         // ...and streets running east and west, from the west limits to the shore.
-        Road(name: "line road", class: Arterial, lanes: 2, points: [(36, 236), (1526, 236)]),
-        Road(name: "market street", class: Arterial, lanes: 2, points: [(36, 636), (1601, 636)]),
-        Road(name: "crosstown", class: Arterial, lanes: 2, points: [(36, 836), (1651, 836)]),
-        Road(name: "midway street", class: Arterial, lanes: 2, points: [(36, 1036), (1676, 1036)]),
-        Road(name: "park street", class: Arterial, lanes: 2, points: [(36, 1236), (1726, 1236)]),
-        Road(name: "old north road", class: Arterial, lanes: 2, points: [(36, 1436), (1851, 1436)]),
-        Road(name: "mission street", class: Arterial, lanes: 2, points: [(36, 1636), (1901, 1636)]),
-        Road(name: "center street", class: Arterial, lanes: 2, points: [(36, 1836), (1951, 1836)]),
+        Road(name: "line road", class: Arterial, lanes: 2, points: [(100, 236), (1526, 236)]),
+        Road(name: "market street", class: Arterial, lanes: 2, points: [(100, 636), (1601, 636)]),
+        Road(name: "crosstown", class: Arterial, lanes: 2, points: [(100, 836), (1651, 836)]),
+        Road(name: "midway street", class: Arterial, lanes: 2, points: [(100, 1036), (1676, 1036)]),
+        Road(name: "park street", class: Arterial, lanes: 2, points: [(100, 1236), (1726, 1236)]),
+        Road(name: "old north road", class: Arterial, lanes: 2, points: [(100, 1436), (1851, 1436)]),
+        Road(name: "mission street", class: Arterial, lanes: 2, points: [(100, 1636), (1901, 1636)]),
+        Road(name: "center street", class: Arterial, lanes: 2, points: [(100, 1836), (1951, 1836)]),
         // The old trails, older than the grid. The ridge road leaves downtown north along the
         // old shore ridge; the north diagonal leaves it for the north-west corner of the
         // suburbs; the plank road runs from the river fork out to the north-west, through the
         // six-way corners where it meets the grid.
         Road(name: "ridge road", class: Arterial, lanes: 2, points: [(1811, 2009), (1811, 1436), (1661, 1236), (1561, 1036), (1500, 836)]),
-        Road(name: "north diagonal", class: Arterial, lanes: 2, points: [(1786, 1403), (1636, 1236), (1436, 1036), (1236, 636), (1036, 236), (836, 36)]),
-        Road(name: "plank road", class: Arterial, lanes: 2, points: [(1636, 1736), (1511, 1636), (1436, 1536), (1336, 1436), (1036, 1186), (636, 836), (486, 636), (236, 236), (86, 36)]),
+        Road(name: "north diagonal", class: Arterial, lanes: 2, points: [(1786, 1403), (1636, 1236), (1436, 1036), (1236, 636), (1036, 236), (900, 100)]),
+        Road(name: "plank road", class: Arterial, lanes: 2, points: [(1636, 1736), (1511, 1636), (1436, 1536), (1336, 1436), (1036, 1186), (636, 836), (486, 636), (236, 236), (134, 100)]),
         // The expressway out of downtown, a block south-west of the plank road, then off west.
-        Road(name: "airport expressway", class: Highway, lanes: 2, sidewalk: false, ramps: ["midway street", "market street"], points: [(1560, 1836), (1560, 1780), (1440, 1707), (1365, 1607), (1265, 1507), (965, 1257), (565, 907), (415, 707), (36, 420)]),
+        Road(name: "airport expressway", class: Highway, lanes: 2, sidewalk: false, ramps: ["midway street", "market street"], points: [(1560, 1836), (1560, 1780), (1440, 1707), (1365, 1607), (1265, 1507), (965, 1257), (565, 907), (415, 707), (100, 468)]),
     ],
 
     // The river, from the lake past downtown to its fork; the south branch; the north-west
