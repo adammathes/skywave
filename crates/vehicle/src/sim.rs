@@ -118,6 +118,8 @@ const STEER_LIMIT_SPEED: [f32; 2] = [8.0, 11.0];
 /// `REVERSE_FADE_MPS` below it (reverse used to run up to first gear's ~20 m/s).
 pub const REVERSE_MAX_MPS: f32 = 8.0;
 const REVERSE_FADE_MPS: f32 = 1.5;
+/// The hill assist fades out between a standstill and this forward speed, m/s.
+const HILL_FADE_MPS: f32 = 10.0;
 /// Traction control: proportional cut per unit of excess normalized slip, and its smoothing.
 const TRACTION_GAIN: f32 = 2.0;
 const TRACTION_RATE: f32 = 30.0;
@@ -206,6 +208,11 @@ pub struct Assists {
     /// Engine torque multiplier in the forward gears (1 = the spec's engine; the game's
     /// nitrous raises it for a few seconds).
     pub power_boost: f32,
+    /// Hill help, `[0, 1]`: in a forward gear on the throttle, extra drive at the wheels
+    /// that cancels this share of the grade's pull back on the car, fading out by
+    /// `HILL_FADE_MPS`. Every car pulls away up a steep street as on the flat; on the flat
+    /// it adds nothing.
+    pub hill: f32,
 }
 
 impl Assists {
@@ -217,6 +224,7 @@ impl Assists {
         grip_boost: 1.0,
         brake_boost: 1.0,
         power_boost: 1.0,
+        hill: 0.0,
     };
     pub const LIGHT: Assists = Assists {
         stability: 0.3,
@@ -226,6 +234,7 @@ impl Assists {
         grip_boost: 1.0,
         brake_boost: 1.0,
         power_boost: 1.0,
+        hill: 0.5,
     };
     /// After the first play on real hardware ("too slippy, braking too slow"): firm
     /// stability, strong traction control, ABS, grip-limited steering, a fifth more grip
@@ -238,6 +247,7 @@ impl Assists {
         grip_boost: 1.2,
         brake_boost: 1.4,
         power_boost: 1.0,
+        hill: 1.0,
     };
 }
 
@@ -783,11 +793,27 @@ pub fn step(
         let wheel_drag = (lo + (hi - lo) * rev) * mass * GRAVITY * radius;
         engine_torque -= wheel_drag / (abs(ratio) * DRIVELINE_EFFICIENCY) * (1.0 - drive_pedal);
     }
-    let axle_torque = if declutched {
+    let mut axle_torque = if declutched {
         0.0
     } else {
         engine_torque * ratio * DRIVELINE_EFFICIENCY
     };
+    if state.gear > 0 && !declutched && assists.hill > 0.0 {
+        // Hill help: the grade's pull back along the car (gravity along the ground the
+        // wheels last stood on, so the body's squat adds nothing), cancelled at the wheels.
+        let mut n = ZERO;
+        for i in 0..4 {
+            if state.wheels[i].grounded {
+                n = add(n, state.wheels[i].normal);
+            }
+        }
+        let grade = fwd[1] - n[1] * dot(n, fwd) / dot(n, n).max(1e-6);
+        if grade > 1e-3 {
+            let fade = unit(1.0 - fwd_speed / HILL_FADE_MPS);
+            let pull = mass * GRAVITY * grade * radius;
+            axle_torque += unit(assists.hill) * drive_pedal * state.traction_cut * fade * pull;
+        }
+    }
     let reflected_inertia = if coupled {
         ENGINE_INERTIA * ratio * ratio
     } else {

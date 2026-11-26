@@ -119,26 +119,25 @@ fn hill_start(spec: &VehicleSpec, a: &Assists, grade: f32, gap: f32) -> (f32, f3
     (back, up)
 }
 
-/// The default (Arcade): every car, stopped by its brake on a 25% street, stays in drive,
-/// pulls straight away, and with half a second off both pedals rolls back less than a
-/// couple of meters before it climbs. (At 30% all but the heaviest climb: `hill_table`.)
+/// The default (Arcade): every car, braked to a stop on a 30% street (San Francisco's
+/// steepest), stays in drive and pulls firmly away; with half a second off both pedals it
+/// rolls back about a meter before it climbs. Light, with half the hill help, climbs 25%.
 #[test]
 fn every_car_restarts_on_a_steep_hill() {
     for text in ROSTER {
         let spec = load(text);
-        for grade in [0.2f32, 0.25] {
+        for grade in [0.2f32, 0.3] {
             let (b, u) = hill_start(&spec, &Assists::ARCADE, grade, 0.0);
-            assert!(b < 0.2 && u > 0.5, "{} {grade}: back {b} up {u}", spec.id);
+            assert!(b < 0.2 && u > 3.5, "{} {grade}: back {b} up {u}", spec.id);
             let (b, u) = hill_start(&spec, &Assists::ARCADE, grade, 0.5);
             assert!(
-                b < 1.5 && u > 0.5,
+                b < 1.5 && u > 1.8,
                 "{} {grade} after a gap: back {b} up {u}",
                 spec.id
             );
         }
-        // Light (no power boost) still makes a 20% street.
-        let (b, u) = hill_start(&spec, &Assists::LIGHT, 0.2, 0.5);
-        assert!(b < 0.6 && u > 2.0, "{} light: back {b} up {u}", spec.id);
+        let (b, u) = hill_start(&spec, &Assists::LIGHT, 0.25, 0.5);
+        assert!(b < 1.2 && u > 1.5, "{} light: back {b} up {u}", spec.id);
     }
 }
 
