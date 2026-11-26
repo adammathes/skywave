@@ -5,9 +5,11 @@
 pub const SIM_HZ: u32 = 120;
 /// Simulation step length in seconds.
 pub const SIM_DT: f64 = 1.0 / SIM_HZ as f64;
-/// Upper bound on steps per frame. Frames slower than this (debugger, tab in background)
-/// make the game run slower instead of spiralling into ever longer catch-up frames.
-pub const MAX_STEPS_PER_FRAME: u32 = 8;
+/// Upper bound on steps per frame: 200 ms, so the game keeps real time down to 5 fps.
+/// Frames slower than this (debugger, tab in background) make the game run slower instead
+/// of spiralling into ever longer catch-up frames. At 8 (67 ms) any frame rate under
+/// 15 fps slowed the whole game, so 90 mph on the speedometer covered ground slower.
+pub const MAX_STEPS_PER_FRAME: u32 = 24;
 
 /// What one frame of real time asks of the simulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
