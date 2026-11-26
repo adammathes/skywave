@@ -16,7 +16,7 @@ const BASIN_GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_20
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
-const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 
 fn grammar() -> world::Grammar {
@@ -220,7 +220,7 @@ const BOWL_GOLDEN: u64 = 0xde3ae59734a15a5d;
 fn the_mirage_bowl_validates_and_is_deterministic() {
     let l: Layout = ron::from_str(MIRAGE_BOWL).expect("parse layout");
     l.validate().expect("validate layout");
-    let t: RegionTemplate = ron::from_str(SOCAL_BASIN).expect("parse template");
+    let t: RegionTemplate = ron::from_str(SOCAL_BOWL).expect("parse template");
     t.validate().expect("validate template");
     let g = grammar_from(BASIN_GRAMMAR);
     let t0 = Instant::now();

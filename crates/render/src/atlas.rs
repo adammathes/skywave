@@ -378,13 +378,14 @@ fn texel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
             })
         }
         Tile::RoofShingles => {
-            let row = y / 32;
-            let (lx, ly) = ((x + (row % 2) * 16) % 32, y % 32);
-            let tab = rand((x + (row % 2) * 16) / 32, row, seed);
-            gray(if ly < 3 || lx < 2 {
+            // Tabs 16 px square in rows offset by half a tab: 16 by 16 of them a tile.
+            let row = y / 16;
+            let (lx, ly) = ((x + (row % 2) * 8) % 16, y % 16);
+            let tab = rand((x + (row % 2) * 8) / 16, row, seed);
+            gray(if ly < 2 || lx < 1 {
                 0.22
             } else {
-                (0.66 + 0.24 * tab + 0.12 * grain) * (0.85 + 0.15 * ly as f32 / 32.0)
+                (0.66 + 0.24 * tab + 0.12 * grain) * (0.85 + 0.15 * ly as f32 / 16.0)
             })
         }
         Tile::Soil => {
@@ -394,16 +395,17 @@ fn texel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
     }
 }
 
-/// Running-bond brick, 8 courses of 32 px and bricks 64 px long, 4 px mortar joints.
+/// Running-bond brick, 16 courses of 16 px and bricks 32 px long, 2 px mortar joints: a
+/// tile covers 2 x 1.4 m of wall, so brick walls cut into few pieces.
 fn brick(x: u32, y: u32, brick: [f32; 3], mortar: [f32; 3], seed: u32) -> [f32; 3] {
-    let course = y / 32;
-    let sx = x + (course % 2) * 32;
-    let (lx, ly) = (sx % 64, y % 32);
+    let course = y / 16;
+    let sx = x + (course % 2) * 16;
+    let (lx, ly) = (sx % 32, y % 16);
     let grain = rand(x, y, seed) - 0.5;
-    if lx < 4 || ly < 4 {
+    if lx < 2 || ly < 2 {
         return scale(mortar, 0.92 + 0.16 * rand(x, y, seed + 3));
     }
-    let id = (sx / 64) % (TILE_SIZE / 64);
+    let id = (sx / 32) % (TILE_SIZE / 32);
     let tone = 0.80 + 0.35 * rand(id, course, seed + 1);
     let burnt = rand(id, course, seed + 2) > 0.85;
     let mut c = scale(brick, tone * (1.0 + 0.12 * grain));
@@ -411,8 +413,8 @@ fn brick(x: u32, y: u32, brick: [f32; 3], mortar: [f32; 3], seed: u32) -> [f32; 
         c = scale(c, 0.7);
     }
     // Slight shadow just under the bed joint above.
-    if ly < 7 {
-        c = scale(c, 0.85 + 0.05 * (ly - 4) as f32);
+    if ly < 4 {
+        c = scale(c, 0.85 + 0.1 * (ly - 2) as f32);
     }
     c
 }

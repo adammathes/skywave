@@ -897,7 +897,8 @@ mod tests {
                 ItemId::World(0),
                 ItemId::World(1),
                 ItemId::World(2),
-                ItemId::World(3)
+                ItemId::World(3),
+                ItemId::World(4)
             ]
         );
         assert_eq!(items[1].label, "Mirage Valley");
