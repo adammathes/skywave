@@ -57,6 +57,7 @@ or golden.
 | Sledge Box Truck | 1996 | Plover Sedan | 1997 | Sorrel Utility | 1998 |
 | Wren Minivan | 1999 | Percheron Crew Cab | 2000 | Anvil Semi | 2000 |
 | Linnet Hatch | 2001 | Dunlin Roadster | 1997 | Palfrey Roadster | 1999 |
+| Corvid Hatch | 1988 | | | | |
 
 **`built`** (optional) dates an old car carrying later parts: the Destrier Coupe is a 1969 car with a
 2001 blower and wheels, so it weighs by its 1969 age in the 2001 world (0.105, above the hero floor) and
@@ -197,6 +198,7 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Courser V8 | 11,620 | 7,100 | 3,386 | 2,150 |
 | Dunlin Roadster | 10,500 | 6,174 | 3,096 | 1,916 |
 | Palfrey Roadster | 10,236 | 6,178 | 3,012 | 1,800 |
+| Corvid Hatch | 12,586 | 7,100 | 3,542 | 2,178 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
@@ -252,6 +254,7 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `courser_v8` | mid-90s American front-engined V8 sports car: very long hood, slim lamp strip, steep windshield, T-top, long fastback glass | Muscle | 1,560 kg, ~225 kW pushrod V8, 5-speed, RWD; lights its rear tires under every assist (less than the Destrier), leans, pushes; 6.3 s, 62 m/s, 0.85 g |
 | `dunlin_roadster` | late-90s small front-engined two-seat roadster: low rounded nose with pop-ups and a small mouth, short deck, slim tail lamps, top down | Convertible | 1,000 kg, ~98 kW four to 7,000 rpm, 5-speed, RWD; light, quick steering, a tail that steps out when asked; 8.2 s, 57 m/s, 0.98 g |
 | `palfrey_roadster` | late-90s round-shouldered turbo-four roadster: domed hood, short steep windshield in a bright frame, high door tops, half-round tail, wheels at the corners, top down | Convertible | 1,470 kg, ~145 kW turbo four, 6-speed, AWD; a flat wall of torque, clean launches, calm grip; 6.7 s, 58.7 m/s, 1.03 g |
+| `corvid_hatch` | late-80s American pony car, third generation of its line, in top trim: long low wedge nose with slim rectangular lamps, raked windshield, T-tops, a big curved glass hatch with a wrapped lip spoiler, a full ground-effects kit, a low tape stripe, full-width tail lamps, five-hole alloys | Coupe | 1,500 kg, ~180 kW fuel-injected V8, 4-speed automatic, RWD; strong from a light, flat and grippy, a tail that comes out when asked; 6.1 s, 62.4 m/s, 0.99 g |
 
 The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
 Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
@@ -295,7 +298,7 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Gannet, Longbow) beats both Appaloosas.
 - 2001 traffic cars: each in its band and its class's orderings like the rest (the semi, traffic only, is not driven).
-- 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s) and the Courser over 0.5 too, the Tanager and the Glaive under 0.1 with every assist off; the Shrike has the highest redline. The part 2 heroes fill the gaps the roster left: the Glaive is the only Sports car that fits between the Longbow Convertible and the Longbow in top speed (0.7 m/s either side, so its gearing is set to the hundredth), the Shrike sits under every Sports car as a Coupe, the Falchion under every Coupe and Hatch as a Sedan, the Courser (Muscle, outside the orderings) in the gaps left. The two roadsters (Convertible, outside the orderings) sit outside the hero band: the Dunlin at 8.2 s, the Palfrey at 6.7 s, its top speed set by its gearing to fit a gap.
+- 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s) and the Courser over 0.5 too, the Tanager and the Glaive under 0.1 with every assist off; the Shrike has the highest redline. The part 2 heroes fill the gaps the roster left: the Glaive is the only Sports car that fits between the Longbow Convertible and the Longbow in top speed (0.7 m/s either side, so its gearing is set to the hundredth), the Shrike sits under every Sports car as a Coupe, the Falchion under every Coupe and Hatch as a Sedan, the Courser (Muscle, outside the orderings) in the gaps left. The two roadsters (Convertible, outside the orderings) sit outside the hero band: the Dunlin at 8.2 s, the Palfrey at 6.7 s, its top speed set by its gearing to fit a gap. Lake City's Corvid Hatch (Coupe, a 1988 car) beats the older pony notchback to 60 (6.1 s) and sits between the Coupes in top speed and grip. Gaps are kept between cars of a class: with forty cars a gap between every pair has no room left.
 - Distinct: all of them differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Feel bands (`tests/handling.rs`): every car, steered as a keyboard steers, through a 25 mph junction turn on full throttle, a 45 mph full-key turn braked hard, and a 45 mph full-key turn lifted off the throttle. The rear axle's peak slip angle stays below 1.5× the tires' peak in Arcade and 2× in Light; in Light the handbrake slides the rear past 1.5× (in Arcade the grip boost lets a few rears out-grip it).
