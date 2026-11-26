@@ -1,0 +1,46 @@
+// Palfrey Roadster: a late-90s round-shouldered turbo-four all-wheel-drive roadster.
+//
+// Intent: a design object that happens to be quick. A small turbo four with a flat wall
+// of torque, six close gears and all four wheels driven, so it leaves every line clean
+// and grips without drama; heavier and calmer than its looks.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "palfrey_roadster",
+    name: "Palfrey Roadster",
+    era: Nineties,
+    year: 1999,
+    class: Convertible,
+
+    mass_kg: 1470,
+    dims_m: (4.04, 1.76, 1.26),    // length, width, height
+    wheelbase_m: 2.42,
+    track_m: 1.53,
+    cg_height_m: 0.46,
+    cg_fore_aft: 0.42,             // 58% front: the engine sits over the front axle
+
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 6800,
+        torque_nm: [(1000, 170), (2200, 248), (5500, 248), (6200, 227), (6800, 210)],
+    ),
+    gears: [3.36, 2.13, 1.46, 1.13, 0.94, 0.79],
+    final_drive: 4.88,
+    reverse: 3.0,
+    shift_ms: 190,
+    auto: true,
+    drive: All,
+
+    tires: Tires(grip_lat: 1.13, grip_long: 1.2, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 36000, damper: 3500, travel_m: 0.14, antiroll: 0.45),
+    steering: Steer(max_deg: 31, speed_sens: 0.6, return_rate: 10.5),
+    brakes: Brakes(max_nm: 3800, bias_front: 0.64, abs: true, handbrake_nm: 2800),
+    aero: Aero(cd: 0.37, frontal_m2: 1.95, downforce_coef: 0.04),
+    feel: Feel(oversteer_bias: -0.02, body_roll: 0.28, engine_sound: "i4", shift_jerk: 0.2),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "digital_blue",
+    ),
+    shape: "palfrey_roadster.shape.ron",
+)

@@ -16,7 +16,7 @@ pub fn load_spec(text: &str) -> Result<VehicleSpec, String> {
 /// The vehicle specs compiled into the game, as `(id, RON text)`, in the order the Vehicle
 /// page lists them: the 1980s roster (the everyday cars, then the sports cars), then the
 /// 2001 hero cars, then the 2001 traffic cars (the semi last: traffic only, never listed).
-pub const BUILTIN: [(&str, &str); 36] = [
+pub const BUILTIN: [(&str, &str); 38] = [
     (
         "gannet_gt",
         include_str!("../../../assets/vehicles/gannet_gt.ron"),
@@ -134,6 +134,14 @@ pub const BUILTIN: [(&str, &str); 36] = [
         include_str!("../../../assets/vehicles/courser_v8.ron"),
     ),
     (
+        "dunlin_roadster",
+        include_str!("../../../assets/vehicles/dunlin_roadster.ron"),
+    ),
+    (
+        "palfrey_roadster",
+        include_str!("../../../assets/vehicles/palfrey_roadster.ron"),
+    ),
+    (
         "plover_sedan",
         include_str!("../../../assets/vehicles/plover_sedan.ron"),
     ),
@@ -200,7 +208,7 @@ pub fn load_shape(text: &str) -> Result<ShapeSpec, String> {
 /// `VehicleSpec::shape` names one. [`TRAFFIC_SHAPES`] are the everyday cars NPC traffic
 /// drives; new shapes go at the end, so the place's parked-car paints (seeded by index)
 /// keep theirs.
-pub const BUILTIN_SHAPES: [(&str, &str); 36] = [
+pub const BUILTIN_SHAPES: [(&str, &str); 38] = [
     (
         "gannet_gt.shape.ron",
         include_str!("../../../assets/vehicles/gannet_gt.shape.ron"),
@@ -344,6 +352,14 @@ pub const BUILTIN_SHAPES: [(&str, &str); 36] = [
     (
         "courser_v8.shape.ron",
         include_str!("../../../assets/vehicles/courser_v8.shape.ron"),
+    ),
+    (
+        "dunlin_roadster.shape.ron",
+        include_str!("../../../assets/vehicles/dunlin_roadster.shape.ron"),
+    ),
+    (
+        "palfrey_roadster.shape.ron",
+        include_str!("../../../assets/vehicles/palfrey_roadster.shape.ron"),
     ),
 ];
 
@@ -535,7 +551,7 @@ mod tests {
             .iter()
             .map(|(id, _)| builtin_spec(id).unwrap())
             .collect();
-        assert_eq!(specs.len(), 36);
+        assert_eq!(specs.len(), 38);
         for class in [
             Sports,
             Coupe,
