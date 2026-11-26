@@ -57,9 +57,18 @@ pub struct Scenario {
     pub default_vehicle: String,
     pub years: (u16, u16),
     pub heroes: Vec<String>,
+    /// How thick the distance haze is, against what the weather and the hour make it
+    /// (`Sky::fog_density`): 1 as made, less for clearer air that lets a far mountain
+    /// range stand over a basin.
+    #[serde(default = "one")]
+    pub haze: f32,
     /// Still being built: the World page marks it "coming" (it can be picked).
     #[serde(default)]
     pub stub: bool,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 fn plain_map() -> String {
@@ -542,6 +551,11 @@ mod tests {
         assert_eq!(
             (bowl.id.as_str(), bowl.years, bowl.layout.as_deref()),
             ("mirage_bowl_2001", (1995, 2001), Some("mirage_bowl"))
+        );
+        assert_eq!(
+            (coast.haze, bowl.haze),
+            (1.0, 0.45),
+            "clear air over the bowl"
         );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");

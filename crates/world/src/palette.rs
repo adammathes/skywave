@@ -82,13 +82,13 @@ impl Palette {
             navy: srgb(0x2C3E66),
             concrete: srgb(0xB9B4AA),
             concrete_dark: srgb(0x8C8A84),
-            asphalt: srgb(0x48484A),
-            asphalt_worn: srgb(0x5E5D5A),
+            asphalt: srgb(0x67655F),
+            asphalt_worn: srgb(0x7A7871),
             paint_white: srgb(0xE8E8E0),
             paint_yellow: srgb(0xE6BA30),
             roof_gravel: srgb(0x7E7A72),
-            lawn: srgb(0x6A9440),
-            lawn_dry: srgb(0x9C9A58),
+            lawn: srgb(0x58A83A),
+            lawn_dry: srgb(0x9EAA4C),
             scrub: srgb(0x8C8256),
             soil: srgb(0x8E6C4A),
             water: srgb(0x2A6E78),
@@ -131,8 +131,8 @@ impl Palette {
             navy: srgb(0x26304C),
             concrete: srgb(0xBDB8AD),
             concrete_dark: srgb(0x8A8780),
-            asphalt: srgb(0x3E3E40),
-            asphalt_worn: srgb(0x56544F),
+            asphalt: srgb(0x605D57),
+            asphalt_worn: srgb(0x726F68),
             paint_white: srgb(0xE4E4DA),
             paint_yellow: srgb(0xE2B02A),
             roof_gravel: srgb(0x77736A),
@@ -233,15 +233,16 @@ impl Palette {
         ]
     }
 
-    /// Awning and canopy accent colors.
+    /// Awning and canopy accent colors: the bold shop colours (fire-engine red, sign
+    /// yellow, teal, navy) with two softer ones, so a strip reads from down the block.
     pub fn awnings(&self) -> [Rgb; 6] {
         [
             self.teal,
-            self.salmon,
-            self.terracotta,
+            self.hydrant_red,
+            self.paint_yellow,
             self.navy,
+            self.salmon,
             self.sky_blue,
-            self.pastel_pink,
         ]
     }
 
@@ -256,13 +257,14 @@ impl Palette {
         ]
     }
 
-    /// Body colors for parked cars.
+    /// Body colors for parked cars: whites, silvers and blues with a red and a yellow
+    /// among them.
     pub fn cars(&self) -> [Rgb; 8] {
         [
             self.stucco_white,
-            self.brick_red,
+            self.hydrant_red,
             self.navy,
-            self.sand,
+            self.paint_yellow,
             self.sky_blue,
             self.metal_dark,
             self.metal_light,
