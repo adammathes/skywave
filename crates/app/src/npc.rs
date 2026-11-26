@@ -1147,7 +1147,7 @@ mod tests {
     /// (seed 1) round the player beside the freeway. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const BASIN_2001_TRAFFIC_HASH: u64 = 0x712b_b24e_9b40_2f59;
+    const BASIN_2001_TRAFFIC_HASH: u64 = 0x1011_193d_36c5_ea27;
 
     /// Thirty seconds of busy 2001 traffic in the basin at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a
@@ -1217,13 +1217,24 @@ mod tests {
             eprintln!("  {file}: {}", per[k]);
         }
         assert!(freeway > 0, "the coast has a freeway");
-        for &k in &vehicles::TRAFFIC_SHAPES[14..] {
+        for &k in &vehicles::TRAFFIC_SHAPES[14..21] {
             assert!(
                 per[k] > 0,
                 "{} never drives in 2001",
                 vehicles::BUILTIN_SHAPES[k].0
             );
         }
+        // The hero cars drive too, rarer than the everyday cars (the Destrier, a 1969 car,
+        // rarer still by its age).
+        let heroes: usize = vehicles::TRAFFIC_SHAPES[21..].iter().map(|&k| per[k]).sum();
+        let everyday: usize = vehicles::TRAFFIC_SHAPES[14..21]
+            .iter()
+            .map(|&k| per[k])
+            .sum();
+        assert!(
+            heroes > 0 && heroes < everyday,
+            "{heroes} heroes, {everyday} everyday"
+        );
         assert!(on_freeway, "a semi started off the freeway");
         // The 1980s cars still drive, at their age weight: fewer than the 2001 cars.
         let old: usize = per[..14].iter().sum();
