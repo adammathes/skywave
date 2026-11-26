@@ -10,6 +10,7 @@
 //!   grammar: "california_coast_80s.ron", // assets/grammar/<file>
 //!   radio: "1984_socal",                 // assets/radio/<id>.ron
 //!   palette: "socal_1985",               // a world::Palette
+//!   map_skin: "atlas",                   // the map's look (app::map::skin; default plain)
 //!   default_time: (17, 40),              // the clock a world starts at, HH, MM
 //!   default_vehicle: "gannet_gt",      // the car it starts in unless one was picked
 //!   years: (1979, 1987),                 // the era: cars of these years are everyday cars
@@ -49,6 +50,9 @@ pub struct Scenario {
     pub grammar: String,
     pub radio: String,
     pub palette: String,
+    /// The map's skin (`app::map::skin`): "atlas", "transit", "nav"; "plain" when left out.
+    #[serde(default = "plain_map")]
+    pub map_skin: String,
     pub default_time: (u8, u8),
     pub default_vehicle: String,
     pub years: (u16, u16),
@@ -56,6 +60,10 @@ pub struct Scenario {
     /// Still being built: the World page marks it "coming" (it can be picked).
     #[serde(default)]
     pub stub: bool,
+}
+
+fn plain_map() -> String {
+    "plain".into()
 }
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
@@ -97,6 +105,9 @@ impl Scenario {
         }
         if crate::places::palette(&self.palette).is_none() {
             return err("unknown palette");
+        }
+        if crate::map::Skin::named(&self.map_skin).is_none() {
+            return err("unknown map_skin");
         }
         if !crate::radio::PRESETS
             .iter()
