@@ -73,7 +73,6 @@ pub const PIER_M: f32 = 150.0;
 
 /// Sub-keys of the detailing's draws.
 const PART_SIDE: u64 = 1;
-const PART_JUNCTION: u64 = 2;
 const PART_HOUSE: u64 = 3;
 const PART_LOT_LINE: u64 = 4;
 const PART_NEON: u64 = 5;
@@ -963,11 +962,12 @@ impl<'a> Detailer<'a> {
             }
         }
 
-        // Power poles behind the walk, along the line.
+        // Power poles behind the walk, along the line (strung with wires by
+        // `props::power_spans`); arterials carry them too, as the old grids' do.
         let poles = rule.power_pole_m > 0.0
             && matches!(
                 class,
-                RoadClass::Local | RoadClass::Rural | RoadClass::Collector
+                RoadClass::Local | RoadClass::Rural | RoadClass::Collector | RoadClass::Arterial
             )
             && i.is_multiple_of(2) != left;
         if poles {
@@ -1073,7 +1073,6 @@ impl<'a> Detailer<'a> {
             if n < 3 || j.ends.iter().any(|e| e.class == RoadClass::Highway) {
                 continue;
             }
-            let mut rng = self.rng(PART_JUNCTION, ji as u64);
             let major = j
                 .ends
                 .iter()
@@ -1127,11 +1126,19 @@ impl<'a> Detailer<'a> {
                     }
                 }
             }
-            // A street-name post on the far corner of the first road with a walk.
+            // A street-name post on the far corner of the first road with a walk: its
+            // blades name that road and the one most across it, as every corner of each
+            // street does.
             if let Some(k) = j.ends.iter().position(|e| edges[e.edge].sidewalk) {
                 let e = &j.ends[k];
                 let s = (e.trim + 1.6).max(e.s_right + 0.8);
-                let text_seed = rng.next_u32() as u64 | (u64::from(rng.next_u32()) << 32);
+                let cross = (0..n)
+                    .filter(|&o| o != k)
+                    .map(|o| (o, e.dir.dot(j.ends[o].dir).abs()))
+                    .fold((k, f32::MAX), |a, b| if b.1 < a.1 { b } else { a })
+                    .0;
+                let key = |o: usize| u64::from(crate::signs::street_key(place, j.ends[o].edge));
+                let text_seed = key(k) | key(cross) << 16;
                 if let Some((q, y, out)) = self.along_end(ji, k, s, -(e.hw + 0.6)) {
                     self.add(prop(q, y, out, PropKind::Sign { text_seed }), 0.15, 0.3);
                 }

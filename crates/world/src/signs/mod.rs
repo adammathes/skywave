@@ -13,6 +13,8 @@ use alloc::vec::Vec;
 
 use skywave_core::mix64;
 
+use crate::math::V2;
+
 /// First syllables of invented names (pruned of those that make real names; the tests
 /// check every pairing against the brand blocklist).
 const HEADS: [&str; 20] = [
@@ -101,6 +103,57 @@ pub fn business_name(seed: u64, max_len: usize) -> Vec<u8> {
         }
     }
     Vec::new()
+}
+
+/// The name key of the street edge `edge` lies on ([`street_name_of`]): the same for
+/// every edge along one straight line (its chord's heading in 4 degree steps and its
+/// offset from the origin in 24 m steps, so both carriageways of a boulevard share it),
+/// with bit 15 set on arterials.
+pub fn street_key(place: &place::Place, edge: usize) -> u16 {
+    let e = &place.roads.edges[edge];
+    let (a, b) = (
+        place.roads.nodes[e.a as usize].pos,
+        place.roads.nodes[e.b as usize].pos,
+    );
+    let mut d = V2::new(b[0] - a[0], b[1] - a[1]);
+    let len = d.length();
+    if len < 1e-3 {
+        return 0;
+    }
+    d = d * (1.0 / len);
+    // Headings from -45 to 135 degrees, so a grid's two axes sit mid-range.
+    let mut deg = crate::math::atan2(d.y, d.x).to_degrees();
+    if deg < -45.0 {
+        deg += 180.0;
+    } else if deg >= 135.0 {
+        deg -= 180.0;
+    }
+    let (sin, cos) = crate::math::sin_cos(deg.to_radians());
+    let n = V2::new(-sin, cos);
+    let off = n.x * a[0] + n.y * a[1];
+    let h = skywave_core::mix64(
+        (crate::math::floor(deg / 4.0 + 0.5) as i64 as u64) << 32
+            ^ (crate::math::floor(off / 24.0 + 0.5) as i64 as u64),
+    );
+    let arterial = matches!(
+        e.class,
+        place::RoadClass::Arterial | place::RoadClass::Beachfront
+    );
+    (h as u16 & 0x7FFF) | u16::from(arterial) << 15
+}
+
+/// The name of the street with key `key` (`procgen::detail`'s street keys): an invented
+/// word, then a boulevard's or an avenue's type for arterials (bit 15), a side street's
+/// for the rest.
+pub fn street_name_of(key: u16) -> Vec<u8> {
+    const MAJOR: [&str; 2] = ["BLVD", "AVE"];
+    const MINOR: [&str; 6] = ["ST", "AVE", "DR", "PL", "WAY", "LN"];
+    let seed = u64::from(key & 0x7FFF);
+    let mut n = word(seed ^ 0x5354_5254);
+    n.push(b' ');
+    let types: &[&str] = if key & 0x8000 != 0 { &MAJOR } else { &MINOR };
+    n.extend_from_slice(pick(types, mix64(seed) >> 12).as_bytes());
+    n
 }
 
 /// An invented street name: "NAME TYPE".
@@ -217,6 +270,8 @@ mod tests {
                 .all(|c| c.is_ascii_uppercase() || *c == b' ' || *c == b'\''));
             seen.insert(n);
             let st = street_name(s);
+            assert!(st.len() <= 12, "{:?}", core::str::from_utf8(&st));
+            let st = street_name_of((s * 331) as u16);
             assert!(st.len() <= 12, "{:?}", core::str::from_utf8(&st));
         }
         assert!(seen.len() > 150, "{} distinct", seen.len());

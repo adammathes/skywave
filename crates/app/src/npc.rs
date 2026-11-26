@@ -1147,7 +1147,7 @@ mod tests {
     /// (seed 1) round the player beside the freeway. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const BASIN_2001_TRAFFIC_HASH: u64 = 0x1011_193d_36c5_ea27;
+    const BASIN_2001_TRAFFIC_HASH: u64 = 0x1e96_11f7_9514_2305;
 
     /// Thirty seconds of busy 2001 traffic in the basin at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a
@@ -1224,16 +1224,20 @@ mod tests {
                 vehicles::BUILTIN_SHAPES[k].0
             );
         }
-        // The hero cars drive too, rarer than the everyday cars (the Destrier, a 1969 car,
-        // rarer still by its age).
-        let heroes: usize = vehicles::TRAFFIC_SHAPES[21..].iter().map(|&k| per[k]).sum();
-        let everyday: usize = vehicles::TRAFFIC_SHAPES[14..21]
-            .iter()
-            .map(|&k| per[k])
-            .sum();
+        // The hero cars drive too, each rarer than an everyday car (the Destrier, a 1969
+        // car, rarer still by its age). There are more hero shapes than everyday ones, so
+        // compare per shape: heroes / hero shapes < everyday / everyday shapes.
+        let (hero, day) = (
+            &vehicles::TRAFFIC_SHAPES[21..],
+            &vehicles::TRAFFIC_SHAPES[14..21],
+        );
+        let heroes: usize = hero.iter().map(|&k| per[k]).sum();
+        let everyday: usize = day.iter().map(|&k| per[k]).sum();
         assert!(
-            heroes > 0 && heroes < everyday,
-            "{heroes} heroes, {everyday} everyday"
+            heroes > 0 && heroes * day.len() < everyday * hero.len(),
+            "{heroes} heroes ({} shapes), {everyday} everyday ({} shapes)",
+            hero.len(),
+            day.len()
         );
         assert!(on_freeway, "a semi started off the freeway");
         // The 1980s cars still drive, at their age weight: fewer than the 2001 cars.

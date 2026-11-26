@@ -1474,7 +1474,8 @@ struct Streaming {
     source: PlaceSource,
     streamer: Streamer,
     light_chunks: Vec<[i32; 2]>,
-    /// World instances drawn whatever is resident (the far terrain), before the chunks'.
+    /// World instances drawn whatever is resident (the horizon), before the far terrain's
+    /// and the chunks'.
     fixed: usize,
 }
 
@@ -1560,17 +1561,20 @@ fn streamed_town(place: Place, budget: StreamBudget, palette: Palette, plan: Chu
     let mut lights = FrameLights::new(statics.iter().map(|s| s.light).collect());
     lights.set_active(|_| false);
     let light_chunks = statics.iter().map(|s| s.chunk).collect();
-    let meshes: Vec<Mesh> = [source.far_terrain(), source.horizon()]
+    // The horizon, then the far terrain's tiles: mesh `fixed + k` is tile `k`.
+    let meshes: Vec<Mesh> = source
+        .horizon()
         .into_iter()
-        .flatten()
         .cloned()
+        .chain(source.far_terrain().iter().map(|t| t.mesh.clone()))
         .collect();
-    let fixed = meshes.len();
-    let capacity = fixed + streamer.capacity() * MAX_CHUNK_PARTS;
+    let fixed = usize::from(source.horizon().is_some());
+    let capacity = meshes.len() + streamer.capacity() * MAX_CHUNK_PARTS;
     let mut instances = Vec::with_capacity(capacity);
     let mut roles = Vec::with_capacity(capacity);
     let mut bounds = Vec::with_capacity(capacity);
-    for i in 0..fixed {
+    // Nothing is drawn yet: every far tile shows.
+    for i in 0..meshes.len() {
         // Under the chunks everywhere: drawn after them, so they hide it before shading.
         instances.push(MeshInstance {
             late: true,
@@ -1679,6 +1683,18 @@ impl App {
         self.instances.truncate(s.fixed);
         self.roles.truncate(s.fixed);
         self.bounds.truncate(s.fixed);
+        // The far terrain's tiles but those the drawn chunks hide.
+        for (k, t) in s.source.far_terrain().iter().enumerate() {
+            if t.covered(|c| s.streamer.is_live(c)) {
+                continue;
+            }
+            self.instances.push(MeshInstance {
+                late: true,
+                ..world_instance(MeshId((s.fixed + k) as u32), PartRole::Tile)
+            });
+            self.roles.push(PartRole::Tile);
+            self.bounds.push(None);
+        }
         for (slot, parts) in s.streamer.drawn() {
             for (k, p) in parts.iter().enumerate() {
                 self.instances
@@ -2695,15 +2711,20 @@ mod tests {
         // Streamed (the default): the far terrain and the horizon drawn from the start,
         // under the ring round the start as it fills, every chunk within budget.
         let mut app = App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap();
-        assert!(app.is_streamed() && app.world_instances == 2);
-        let far = app.meshes()[0].indices.len() / 3;
+        // Nothing drawn yet: the horizon and every far tile.
+        let tiles = app.world_instances - 1;
+        assert!(app.is_streamed() && tiles > 16, "{tiles} far tiles");
+        let far: usize = app.meshes()[1..=tiles]
+            .iter()
+            .map(|m| m.indices.len() / 3)
+            .sum();
         assert!(
-            (8192..=10_000).contains(&far),
+            (100_000..=140_000).contains(&far),
             "far terrain: {far} triangles"
         );
-        let horizon = app.meshes()[1].indices.len() / 3;
+        let horizon = app.meshes()[0].indices.len() / 3;
         assert!(
-            (1000..=8000).contains(&horizon),
+            (1000..=25_000).contains(&horizon),
             "horizon: {horizon} triangles"
         );
         // On the ground at the start.
@@ -2727,11 +2748,15 @@ mod tests {
         assert_eq!(stats.upload_errors, 0);
         assert!(stats.built >= 25, "{stats:?}");
         assert!(app.world_instances > 1 && app.world_instances < world);
-        assert_eq!(
-            [app.instances[0].mesh, app.instances[1].mesh],
-            [MeshId(0), MeshId(1)],
-            "the far terrain and the horizon stay drawn"
-        );
+        // The horizon stays drawn; the far tiles under the drawn ring are left out, the rest
+        // stay.
+        assert_eq!(app.instances[0].mesh, MeshId(0), "the horizon stays drawn");
+        let far_drawn = app.instances[1..app.world_instances]
+            .iter()
+            .filter(|i| (1..=tiles as u32).contains(&i.mesh.0))
+            .count();
+        eprintln!("{far_drawn} of {tiles} far tiles drawn");
+        assert!(far_drawn > 0 && far_drawn < tiles, "{far_drawn} of {tiles}");
         // Rolling forward along the road from the start, on the ground.
         let mut input = InputState::default();
         input.set(Action::Throttle, 0.5);

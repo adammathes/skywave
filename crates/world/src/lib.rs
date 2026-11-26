@@ -625,13 +625,18 @@ impl ChunkPlan {
 /// A terrain place's props as the chunks mesh them: its `Props` table but for the kinds
 /// the app instances ([`props::instanced`]).
 fn place_props(place: &Place, seed: u64) -> Vec<props::Prop> {
-    place
+    let mut out: Vec<props::Prop> = place
         .props
         .items
         .iter()
         .filter(|p| !props::instanced(p.kind))
         .map(|p| props::from_place(p, seed))
-        .collect()
+        .collect();
+    out.extend(props::power_spans(place, seed));
+    out.extend(props::exit_signs(place));
+    out.extend(props::dead_ends(place));
+    out.extend(props::sound_walls(place));
+    out
 }
 
 /// Per prop, the shop sign a blade sign is lettered with: every blade sign a shop sign of

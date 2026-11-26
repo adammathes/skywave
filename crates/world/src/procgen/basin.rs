@@ -20,7 +20,7 @@
 //!    `boulevard` curves as well as the coast's `slope`, `downtown` and `highway`), two
 //!    majority passes, then by structure: the hills, the desert fringe (`Farmland`), the
 //!    rights of way (`Highway`: the freeway corridor, the rail line, the channel), the
-//!    airfield and the parks (`Park`).
+//!    parks (`Park`); the airfield is a right of way (`Highway`) too.
 //! 4. **Grading:** urban zones smoothed (as on the coast), the freeway corridor carved,
 //!    the walls of the edges raised; then the channel cut (its bed `depth_m` under the
 //!    ground beside it, through the walls too), the bands painted and points of interest
@@ -420,7 +420,9 @@ pub fn generate(seed: Seed, t: &RegionTemplate, b: &Basin, size_chunks: [u16; 2]
             if on_rail || on_channel || near_polyline(&highway, [x, z], corridor) {
                 zone[i] = ZoneId::Highway;
             } else if in_airfield(u, w) {
-                zone[i] = ZoneId::Park;
+                // An airfield is a right of way like the rail line's: dry, unwatered
+                // ground round its runway, not a park's lawn.
+                zone[i] = ZoneId::Highway;
             }
         }
     }
@@ -460,7 +462,7 @@ pub fn generate(seed: Seed, t: &RegionTemplate, b: &Basin, size_chunks: [u16; 2]
             let (u, w) = c.canon([x, z]);
             let i = cz * zw + cx;
             if in_airfield(u, w) && zone[i] == ZoneId::Industrial {
-                zone[i] = ZoneId::Park;
+                zone[i] = ZoneId::Highway;
             }
         }
     }

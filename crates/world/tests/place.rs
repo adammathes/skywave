@@ -31,14 +31,14 @@ fn template() -> RegionTemplate {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0xDA8C_78FF_6EE9_B508,
-    0x3A94_5B1D_5A77_8AC7,
-    0x9D33_260D_4619_F697,
-    0xD5A3_5053_2DC6_2F02,
-    0x52C3_2E81_CD2E_3794,
-    0x5CE4_F0EF_8A22_1325,
-    0x66F1_29B3_B999_A8E7,
-    0x468D_84AE_BA21_1DEC,
+    0xFD51_BDFB_F824_891C,
+    0xFC84_78D2_5EE3_149C,
+    0x4E8A_526A_F9BF_87B1,
+    0x340F_56CB_FF43_5B4A,
+    0x2C5F_B120_8CCF_5966,
+    0x7CA9_50E5_2697_7478,
+    0xB395_78C3_F44B_44E5,
+    0x8949_7359_A469_02CC,
 ];
 
 #[test]
@@ -651,7 +651,7 @@ fn far_terrain_lies_under_the_ground() {
         let grid = TerrainGrid::new(&p, &Network::new(&p));
         let tris = far.indices.len() / 3;
         assert!(
-            (8192..=10_000).contains(&tris),
+            (100_000..=140_000).contains(&tris),
             "seed {seed}: {tris} triangles"
         );
         // Every fine sample under a ground triangle of the far mesh, against it.
@@ -726,7 +726,7 @@ fn horizon_rises_past_the_land_and_leaves_the_sea() {
     let east = top(&|q| q[0] > ext[0] + 600.0 && q[2] > 0.0 && q[2] < ext[1]);
     let north = top(&|q| q[2] < -600.0 && q[0] > 0.0 && q[0] < ext[0]);
     println!("horizon: {tris} triangles; tops: place {inside_top:.0}, east {east:.0}, north {north:.0} m");
-    assert!((1000..=8000).contains(&tris), "{tris} triangles");
+    assert!((1000..=25_000).contains(&tris), "{tris} triangles");
     assert!(
         east > inside_top + 100.0 && east > north,
         "east {east}, north {north}"

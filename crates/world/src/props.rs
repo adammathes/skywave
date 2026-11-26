@@ -127,6 +127,32 @@ pub enum PropKind {
     LotLabel {
         letter: u8,
     },
+    /// The overhead lines between two power poles: from the pole at `pos` along `dir`,
+    /// `len_dm` decimeters to the next, whose base stands `rise_dm` decimeters higher
+    /// (built from the pole pairs [`power_spans`] finds; never in a Place).
+    PowerLine {
+        len_dm: u16,
+        rise_dm: i16,
+    },
+    /// A freeway's overhead exit sign: a truss on two posts spanning `width_dm` decimeters
+    /// of roadway centered on `pos`, facing traffic that travels along `dir`, its green
+    /// panel over the lanes on the right naming the street with key `street`
+    /// (`signs::street_name_of`). Built from the place's exit ramps ([`exit_signs`]);
+    /// never in a Place.
+    ExitSign {
+        width_dm: u16,
+        street: u16,
+    },
+    /// A striped barricade across the end of a dead-end street `width_dm` decimeters wide,
+    /// at `pos`, facing traffic coming along `dir` ([`dead_ends`]; never in a Place).
+    Barricade {
+        width_dm: u16,
+    },
+    /// A run of freeway sound wall `len_dm` decimeters long along `dir`, at `pos`
+    /// ([`sound_walls`]; never in a Place).
+    SoundWall {
+        len_dm: u16,
+    },
 }
 
 /// One placed prop.
@@ -482,6 +508,21 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         // A landmark needs its kit, which only the chunk plan has.
         PropKind::Landmark { .. } => {}
         PropKind::LotLabel { letter } => crate::landmarks::lot_label(m, base, p.dir, letter, pal),
+        PropKind::Barricade { width_dm } => {
+            barricade(m, base, p.dir, f32::from(width_dm) * 0.1, pal)
+        }
+        PropKind::SoundWall { len_dm } => sound_wall(m, base, p.dir, f32::from(len_dm) * 0.1, pal),
+        PropKind::ExitSign { width_dm, street } => {
+            exit_sign(m, base, p.dir, f32::from(width_dm) * 0.1, street, pal)
+        }
+        PropKind::PowerLine { len_dm, rise_dm } => power_line(
+            m,
+            base,
+            p.dir,
+            f32::from(len_dm) * 0.1,
+            f32::from(rise_dm) * 0.1,
+            pal,
+        ),
     }
 }
 
@@ -1900,14 +1941,24 @@ fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
         m,
         &f,
         [-0.03, 0.0, -0.03],
-        [0.03, 3.05, 0.03],
+        [0.03, 2.7, 0.03],
         face::NO_BOTTOM,
+        post,
+    );
+    // The blades sit on the post's cap, one on the other, so nothing crosses their names.
+    boxf(
+        m,
+        &f,
+        [-0.03, 2.88, -0.03],
+        [0.03, 2.9, 0.03],
+        face::ALL,
         post,
     );
     let green = Paint::new(shade(pal.palm_green, 170), Pattern::Paint);
     let ink = Paint::new(pal.paint_white, Pattern::Paint);
-    for (k, y) in [(0u64, 2.7f32), (1, 2.9)] {
-        let name = signs::street_name(u64::from(seed) ^ k);
+    // The blade along the post's facing names that street, the other the cross street.
+    for (k, y) in [(0u32, 2.7f32), (1, 2.9)] {
+        let name = signs::street_name_of((seed >> (16 * k)) as u16);
         // The second blade turned a quarter.
         let b = if k == 0 {
             f
@@ -1920,17 +1971,13 @@ fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
         };
         let (lo, hi) = ([-0.5, y, -0.012], [0.5, y + 0.18, 0.012]);
         boxf(m, &b, lo, hi, face::ALL & !face::NEG_Y, green);
-        let n = name.len().max(1) as f32;
-        let cell = 0.84 / n;
-        for (i, &c) in name.iter().enumerate() {
-            if c == b' ' {
-                continue;
-            }
-            let x = -0.42 + cell * i as f32;
-            let (xa, xb) = (x + cell * 0.12, x + cell * 0.88);
-            rect(m, &b, xa, y + 0.05, xb, y + 0.13, 0.0125, false, ink);
-            rect(m, &b, -xb, y + 0.05, -xa, y + 0.13, -0.0125, true, ink);
-        }
+        // White capitals, centered, as large as fit the blade.
+        let em = signs::letters::layout(&name, signs::letters::LetterStyle::Block).ink_w();
+        let cap = (0.88 / em.max(0.1)).min(0.1);
+        let x0 = -0.5 * em * cap;
+        let y0 = y + 0.5 * (0.18 - cap);
+        letters(m, &b, &name, x0, y0, cap / 5.0, 0.0125, false, ink);
+        letters(m, &b, &name, x0, y0, cap / 5.0, -0.0125, true, ink);
     }
 }
 
@@ -2363,18 +2410,30 @@ fn tube(m: &mut WorldMesh, a: V3, b: V3, r0: f32, r1: f32, sides: u32, paint: Pa
 
 /// An irregular leaf lump: a smooth [`UnitSphere`] stretched to `radii`, its surface pushed
 /// in and out by three waves in seeded directions so no two lumps share a silhouette.
-/// `shade` maps the unit normal to the vertex color, as in [`icosphere`].
+///
+/// `mass` is the whole crown the lump belongs to (its center and radii): the lump's
+/// normals lean toward the crown's own, so the crown lights as one soft mass rather than a
+/// bunch of balloons, and its points deep inside the crown are shaded darker, as leaves in
+/// the crown's own shadow are. Each lump is a little lighter or darker than the next.
+/// `shade` maps the normal to the vertex color, as in [`icosphere`].
+#[allow(clippy::too_many_arguments)]
 fn lump(
     m: &mut WorldMesh,
     sphere: &UnitSphere,
     center: V3,
     radii: V3,
+    mass: (V3, V3),
     rng: &mut Rng,
     paint: Paint,
     shade: impl Fn(V3) -> [u8; 3],
 ) {
-    const AMP: f32 = 0.07;
-    const FREQ: f32 = 2.0;
+    const AMP: f32 = 0.1;
+    const FREQ: f32 = 2.6;
+    /// How far a lump's normals lean toward the crown's.
+    const TO_MASS: f32 = 0.65;
+    let (mc, mr) = mass;
+    let minv = V3::new(1.0 / mr.x, 1.0 / mr.y, 1.0 / mr.z);
+    let tone = rng.range(222, 256);
     let mut waves = [(V3::ZERO, 0.0f32); 3];
     for w in &mut waves {
         let (s0, c0) = sin_cos(rng.range_f32(0.0, TAU));
@@ -2395,11 +2454,23 @@ fn lump(
             let n = u * k - (g - u * u.dot(g));
             let n = V3::new(n.x * inv.x, n.y * inv.y, n.z * inv.z).normalize();
             let p = center + V3::new(u.x * radii.x, u.y * radii.y, u.z * radii.z) * k;
+            // Where the point is in the crown: 0 at its middle, 1 at its outside.
+            let q = p - mc;
+            let q = V3::new(q.x * minv.x, q.y * minv.y, q.z * minv.z);
+            let depth = q.length();
+            let out = if depth > 1e-4 {
+                V3::new(q.x * minv.x, q.y * minv.y, q.z * minv.z).normalize()
+            } else {
+                n
+            };
+            let n = (n * (1.0 - TO_MASS) + out * TO_MASS).normalize();
+            let inner = (depth.clamp(0.35, 1.0) - 0.35) / 0.65;
+            let s = (tone as f32 * (0.74 + 0.26 * inner)) as u32;
             m.vertices.push(crate::mesh::WorldVertex {
                 pos: p.to_array(),
                 normal: n.to_array(),
                 uv: [u.x, u.y],
-                color: paint.with_rgb(shade(n)).color,
+                color: paint.with_rgb(crate::palette::shade(shade(n), s)).color,
                 emissive: paint.emissive,
             });
         }
@@ -2519,8 +2590,13 @@ fn cobra_light(m: &mut WorldMesh, base: V3, arm: V2, pal: &Palette) {
 fn canopy_tones(pal: &Palette, rng: &mut Rng) -> ([u8; 3], [u8; 3]) {
     let tint = rng.range(0, 64);
     (
-        shade(pal.leaf_green, 220 + tint),
-        mix(pal.leaf_light, pal.palm_green, tint * 2),
+        // Dusty, not lawn green: a dry summer's street trees, some sunnier than others.
+        mix(shade(pal.leaf_green, 220 + tint), pal.scrub, 40),
+        mix(
+            mix(pal.leaf_light, pal.palm_green, tint * 2),
+            pal.lawn_dry,
+            70,
+        ),
     )
 }
 
@@ -2550,7 +2626,11 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
     let main_r = rng.range_f32(1.8, 2.3);
     let crown = top + V3::new(0.0, main_r * 0.85, 0.0);
     let radii = V3::new(main_r, main_r * 0.75, main_r);
-    lump(m, &kit.sphere1, crown, radii, rng, leaf, tone);
+    let mass = (
+        crown + V3::Y * 0.4,
+        V3::new(main_r + 1.7, main_r + 0.9, main_r + 1.7),
+    );
+    lump(m, &kit.sphere1, crown, radii, mass, rng, leaf, tone);
     let r = main_r * rng.range_f32(0.55, 0.7);
     let crest = crown + V3::new(rng.range_f32(-0.5, 0.5), main_r * 0.6, 0.3);
     lump(
@@ -2558,6 +2638,7 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
         &kit.sphere1,
         crest,
         V3::new(r, r * 0.8, r),
+        mass,
         rng,
         leaf,
         tone,
@@ -2578,6 +2659,7 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
             &kit.sphere1,
             at,
             V3::new(r, r * 0.78, r),
+            mass,
             rng,
             leaf,
             tone,
@@ -2594,6 +2676,7 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
                 &kit.sphere1,
                 twig,
                 V3::new(r, r * 0.8, r),
+                mass,
                 rng,
                 leaf,
                 tone,
@@ -2719,27 +2802,34 @@ fn gum_tree(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut
     }
     let leaf = Paint::new(pal.leaf_green, Pattern::Foliage);
     let tint = rng.range(0, 64);
-    let dark = shade(mix(pal.leaf_green, pal.teal, 80 + tint), 190);
-    let light = mix(mix(pal.leaf_light, pal.sky_blue, 70), pal.lawn_dry, tint);
+    let dark = shade(mix(pal.leaf_green, pal.teal, 80 + tint), 215);
+    let light = mix(
+        mix(pal.leaf_light, pal.sky_blue, 70),
+        pal.lawn_dry,
+        60 + tint,
+    );
     let tone = |n: V3| mix(dark, light, ((n.y * 0.5 + 0.5) * 240.0) as u32);
-    let lobes = rng.range(7, 10);
+    // A tall, ragged crown over the upper half: overlapping clumps round the trunk that
+    // light as one mass, the widest low and a smaller tuft on top.
+    let mass = (spine(0.74), V3::new(3.6, height * 0.3, 3.6));
+    let lobes = rng.range(9, 12);
     let spin = rng.range_f32(0.0, TAU);
     for k in 0..lobes {
         let t = if k == 0 {
             1.0
         } else {
-            0.5 + 0.45 * (k as f32 / lobes as f32)
+            0.45 + 0.5 * (k as f32 / lobes as f32)
         };
-        let (s, c) = sin_cos(spin + TAU * 0.38 * k as f32);
+        let (s, c) = sin_cos(spin + TAU * 0.382 * k as f32);
         let reach = if k == 0 {
-            0.4
+            0.3
         } else {
-            rng.range_f32(1.6, 3.2) * (1.15 - 0.5 * t)
+            rng.range_f32(1.4, 2.8) * (1.3 - 0.5 * t)
         };
-        let at = spine(t) + V3::new(c * reach, rng.range_f32(0.2, 1.2), s * reach);
-        if (1..=4).contains(&k) {
-            // A limb out to the lobe; the first two fork.
-            let from = spine(t - 0.12);
+        let at = spine(t) + V3::new(c * reach, rng.range_f32(0.3, 1.0), s * reach);
+        if k > 0 && k <= 6 {
+            // A limb out to the clump; the first two fork.
+            let from = spine(t - 0.1);
             tube(m, from, at, 0.1, 0.04, 6, bark);
             if k <= 2 {
                 let mid = from.lerp(at, 0.55);
@@ -2747,10 +2837,10 @@ fn gum_tree(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut
                 tube(m, mid, twig, 0.05, 0.02, 5, bark);
             }
         }
-        let rad = rng.range_f32(1.3, 2.0);
-        let tall = rng.range_f32(1.1, 1.5);
-        let radii = V3::new(rad, rad * tall, rad);
-        lump(m, &kit.sphere1, at, radii, rng, leaf, tone);
+        let rad = rng.range_f32(1.5, 2.2) * if k == 0 { 0.8 } else { 1.0 };
+        let flat = rng.range_f32(0.85, 1.2);
+        let radii = V3::new(rad, rad * flat, rad);
+        lump(m, &kit.sphere1, at, radii, mass, rng, leaf, tone);
     }
 }
 
@@ -3106,7 +3196,8 @@ fn planter(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut 
         let r = rng.range_f32(0.24, 0.3);
         let radii = V3::new(r, r * 0.85, r);
         let at = base + out * 0.13 + V3::Y * (h + 0.22 + 0.08 * k as f32);
-        lump(m, &kit.sphere1, at, radii, rng, leaf, tone);
+        let mass = (base + V3::Y * (h + 0.3), V3::new(0.45, 0.35, 0.45));
+        lump(m, &kit.sphere1, at, radii, mass, rng, leaf, tone);
         // Two blooms on the lump's sunny shoulder.
         for t in [-0.45, 0.45] {
             let d = (out * 0.7 + V3::Y * 0.7 + side * t).normalize();
@@ -3304,6 +3395,556 @@ fn full_power_pole(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette, rng: &
         lathe(m, &at.offset(0.0, 0.85, 0.0), &lid, 8, false, false, can);
         for x in [-0.12, 0.12] {
             insulator(m, &at.offset(x, 0.9, 0.0), glass);
+        }
+    }
+}
+
+/// The barricades closing the place's dead-end streets: one across the end of every side
+/// street, alley or arterial that stops short of everything (at a channel, the tracks, a
+/// freeway, the edge of town), so a street that ends reads as closed, not unfinished.
+/// Farm and hill roads end at their farms and overlooks and get none.
+pub fn dead_ends(place: &Place) -> Vec<Prop> {
+    let roads = &place.roads;
+    let mut deg = alloc::vec![0u32; roads.nodes.len()];
+    for e in &roads.edges {
+        deg[e.a as usize] += 1;
+        deg[e.b as usize] += 1;
+    }
+    let mut out = Vec::new();
+    for e in &roads.edges {
+        let ok = matches!(
+            e.class,
+            RoadClass::Local | RoadClass::Alley | RoadClass::Arterial | RoadClass::Collector
+        );
+        if !ok || e.oneway || e.profile.len() < 2 {
+            continue;
+        }
+        let n = e.profile.len();
+        for (end, end_deg, prev) in [
+            (e.profile[0], deg[e.a as usize], e.profile[1]),
+            (e.profile[n - 1], deg[e.b as usize], e.profile[n - 2]),
+        ] {
+            if end_deg != 1 {
+                continue;
+            }
+            let at = V2::new(end[0], end[2]);
+            let d = at - V2::new(prev[0], prev[2]);
+            if d.length() < 1e-3 {
+                continue;
+            }
+            let dir = d * (1.0 / d.length());
+            out.push(Prop {
+                pos: at - dir * 0.5,
+                y: end[1],
+                dir,
+                kind: PropKind::Barricade {
+                    width_dm: (e.width_m * 10.0) as u16,
+                },
+                seed: 0,
+            });
+        }
+    }
+    out
+}
+
+/// How far a sound wall stands out from the freeway's edge, m.
+const SOUND_WALL_OUT_M: f32 = 8.0;
+/// A sound wall run's length, m.
+const SOUND_WALL_RUN_M: f32 = 12.0;
+/// Its height and thickness, m.
+pub const SOUND_WALL_H_M: f32 = 4.2;
+pub const SOUND_WALL_T_M: f32 = 0.3;
+/// Clearance it keeps from every other road (past the road's half width and sidewalk), m.
+const SOUND_WALL_CLEAR_M: f32 = 6.0;
+
+/// The block walls along both sides of the freeway where it runs at grade through town:
+/// the side streets that stop short of it stop at a wall, as they do in the basin's real
+/// counterparts. A run is left out near every other road (ramps, the streets crossing
+/// over or under it, frontage streets), near the tunnel, where the freeway stands more
+/// than a little off the ground (bridges, cuts) and outside the place.
+pub fn sound_walls(place: &Place) -> Vec<Prop> {
+    let mut deg = alloc::vec![0u32; place.roads.nodes.len()];
+    for e in &place.roads.edges {
+        deg[e.a as usize] += 1;
+        deg[e.b as usize] += 1;
+    }
+    // How near the wall may come to each road's centerline: its half width and sidewalk
+    // and a clearance, but to a dead end only a meter, since the wall is there to close
+    // it across its end.
+    let roads: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .filter(|e| e.class != RoadClass::Highway)
+        .flat_map(|e| {
+            let dead = deg[e.a as usize] == 1 || deg[e.b as usize] == 1;
+            let hw = if dead {
+                1.0
+            } else {
+                0.5 * e.width_m
+                    + if e.sidewalk {
+                        place::SIDEWALK_WIDTH_M
+                    } else {
+                        0.0
+                    }
+                    + SOUND_WALL_CLEAR_M
+            };
+            e.profile
+                .windows(2)
+                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
+        })
+        .collect();
+    let tunnel: Vec<V2> = place
+        .props
+        .items
+        .iter()
+        .filter(|p| matches!(p.kind, place::PropKind::TunnelPiece { .. }))
+        .map(|p| V2::new(p.pos[0], p.pos[2]))
+        .collect();
+    let ext = place.header.extent_m();
+    let ground = |q: V2| place.terrain.height_at(&place.header, [q.x, q.y]);
+    let clear = |q: V2| {
+        q.x > 1.0
+            && q.y > 1.0
+            && q.x < ext[0] - 1.0
+            && q.y < ext[1] - 1.0
+            && !roads
+                .iter()
+                .any(|&(a, b, hw)| crate::math::segment_distance(q, a, b).0 < hw)
+            && !tunnel.iter().any(|&t| (t - q).length() < 40.0)
+    };
+    let mut out = Vec::new();
+    for e in place.roads.edges.iter() {
+        if e.class != RoadClass::Highway || e.oneway || e.profile.len() < 2 {
+            continue;
+        }
+        let off = 0.5 * e.width_m + SOUND_WALL_OUT_M;
+        // Cut the centerline into runs of about the run length, each a straight chord.
+        let mut runs: Vec<([f32; 3], [f32; 3])> = Vec::new();
+        let mut start = e.profile[0];
+        let mut acc = 0.0;
+        for w in e.profile.windows(2) {
+            acc += V2::new(w[1][0] - w[0][0], w[1][2] - w[0][2]).length();
+            if acc >= SOUND_WALL_RUN_M {
+                runs.push((start, w[1]));
+                start = w[1];
+                acc = 0.0;
+            }
+        }
+        for (a, b) in runs {
+            let (pa, pb) = (V2::new(a[0], a[2]), V2::new(b[0], b[2]));
+            let d = pb - pa;
+            let len = d.length();
+            if len < 1.0 {
+                continue;
+            }
+            let dir = d * (1.0 / len);
+            for side in [-1.0f32, 1.0] {
+                let n = dir.right() * (side * off);
+                let (qa, qb) = (pa + n, pb + n);
+                let q = (qa + qb) * 0.5;
+                if !(clear(qa) && clear(qb) && clear(q)) {
+                    continue;
+                }
+                let (Some(ga), Some(gb), Some(gq)) = (ground(qa), ground(qb), ground(q)) else {
+                    continue;
+                };
+                // At grade: the road within a little of the ground under the wall.
+                let road_y = 0.5 * (a[1] + b[1]);
+                if (road_y - gq).abs() > 1.5 {
+                    continue;
+                }
+                out.push(Prop {
+                    pos: q,
+                    y: ga.min(gb).min(gq) - 0.2,
+                    dir,
+                    kind: PropKind::SoundWall {
+                        len_dm: ((len + 0.2) * 10.0) as u16,
+                    },
+                    seed: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// A run of sound wall `len` m along `dir` at `base`: split-face block in courses with a
+/// darker cap and a footing course.
+fn sound_wall(m: &mut WorldMesh, base: V3, dir: V2, len: f32, pal: &Palette) {
+    let f = Frame::upright(base, dir);
+    let block = Paint::new(mix(pal.concrete, pal.stucco_white, 60), Pattern::Concrete);
+    let cap = Paint::new(shade(pal.concrete, 215), Pattern::Concrete);
+    let (h, t, hl) = (SOUND_WALL_H_M, SOUND_WALL_T_M, 0.5 * len);
+    boxf(
+        m,
+        &f,
+        [-t * 0.5, 0.0, -hl],
+        [t * 0.5, h - 0.15, hl],
+        face::NO_BOTTOM,
+        block,
+    );
+    boxf(
+        m,
+        &f,
+        [-t * 0.5 - 0.04, h - 0.15, -hl],
+        [t * 0.5 + 0.04, h, hl],
+        face::NO_BOTTOM,
+        cap,
+    );
+    boxf(
+        m,
+        &f,
+        [-t * 0.5 - 0.03, 0.0, -hl],
+        [t * 0.5 + 0.03, 0.45, hl],
+        face::NO_BOTTOM,
+        cap,
+    );
+}
+
+/// A road-closed barricade `width` m across at `base`, traffic coming along `dir`: three
+/// rails striped white and orange on two white legs at each end.
+fn barricade(m: &mut WorldMesh, base: V3, dir: V2, width: f32, pal: &Palette) {
+    let f = Frame::upright(base, dir.right());
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let orange = Paint::new(mix(pal.hydrant_red, pal.paint_yellow, 100), Pattern::Paint);
+    let half = width * 0.5 - 0.2;
+    for x in [-half, half] {
+        boxf(
+            m,
+            &f,
+            [x - 0.05, 0.0, -0.05],
+            [x + 0.05, 1.5, 0.05],
+            face::NO_BOTTOM,
+            white,
+        );
+    }
+    const STRIPE: f32 = 0.3;
+    for y in [0.55f32, 0.9, 1.25] {
+        let mut x = -half - 0.15;
+        let mut k = 0;
+        while x < half + 0.15 {
+            let x1 = (x + STRIPE).min(half + 0.15);
+            let paint = if k % 2 == 0 { white } else { orange };
+            boxf(m, &f, [x, y, 0.06], [x1, y + 0.2, 0.1], face::ALL, paint);
+            x = x1;
+            k += 1;
+        }
+    }
+}
+
+/// How far before the ramp leaves it a freeway's exit sign stands, m: the first of these
+/// where the freeway runs straight.
+const EXIT_SIGN_M: [f32; 3] = [160.0, 110.0, 70.0];
+
+/// The freeway's exit signs: one over each carriageway before every exit ramp, naming the
+/// street the ramp leads to. An exit ramp is a one-way road leaving a freeway node on the
+/// right of the traffic it takes; the sign stands [`EXIT_SIGN_M`] back along the freeway,
+/// where the freeway still runs straight (its centerline there is in line with the way
+/// traffic comes).
+pub fn exit_signs(place: &Place) -> Vec<Prop> {
+    let roads = &place.roads;
+    let node = |i: u32| V2::from_array(roads.nodes[i as usize].pos);
+    let mut out = Vec::new();
+    for (ri, r) in roads.edges.iter().enumerate() {
+        if !r.oneway || r.class == RoadClass::Highway || r.profile.len() < 2 {
+            continue;
+        }
+        // It leaves the freeway: starts on its roadway and heads away from it.
+        let at = node(r.a);
+        let Some((d0, _, _, along, width)) = freeway_at(place, at) else {
+            continue;
+        };
+        let away = freeway_at(place, node(r.b)).map_or(f32::MAX, |f| f.0);
+        let leave = V2::new(r.profile[1][0], r.profile[1][2]) - at;
+        if d0 > width * 0.5 + 1.0 || away < d0 + 2.0 || leave.length() < 1e-3 {
+            continue;
+        }
+        let leave = leave * (1.0 / leave.length());
+        // Traffic comes along the freeway the way the ramp heads, the ramp on its right.
+        let t = if leave.dot(along) >= 0.0 {
+            along
+        } else {
+            -along
+        };
+        if leave.dot(t.right()) < 0.05 {
+            continue;
+        }
+        // The street it leads to: the first road past the ramps that is not one.
+        let ramp = |e: &place::Edge| e.oneway && e.class == r.class;
+        let (mut end, mut prev, mut street) = (r.b, ri, None);
+        for _ in 0..4 {
+            let at_end: Vec<(usize, &place::Edge)> = roads
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|&(k, e)| {
+                    k != prev && (e.a == end || e.b == end) && e.class != RoadClass::Highway
+                })
+                .collect();
+            if let Some(&(k, _)) = at_end.iter().find(|(_, e)| !ramp(e)) {
+                street = Some(k);
+                break;
+            }
+            let Some(&(k, e)) = at_end.first() else {
+                break;
+            };
+            (end, prev) = (if e.a == end { e.b } else { e.a }, k);
+        }
+        let Some(street) = street else {
+            continue;
+        };
+        // Back along the freeway, snapped to its centerline, where it still runs in line
+        // (nearer the ramp where the freeway bends), and clear of the tunnel.
+        let Some((q, y, along, width)) = EXIT_SIGN_M.iter().find_map(|&back| {
+            let (d, q, y, along, width) = freeway_at(place, at - t * back)?;
+            let tunnel = place.props.items.iter().any(|p| {
+                matches!(p.kind, place::PropKind::TunnelPiece { .. })
+                    && (V2::new(p.pos[0], p.pos[2]) - q).length() < 30.0
+            });
+            (d < 3.0 && along.dot(t).abs() > 0.995 && !tunnel).then_some((q, y, along, width))
+        }) else {
+            continue;
+        };
+        let dir = if along.dot(t) > 0.0 { along } else { -along };
+        out.push(Prop {
+            pos: q,
+            y,
+            dir,
+            kind: PropKind::ExitSign {
+                width_dm: (width * 10.0) as u16,
+                street: signs::street_key(place, street),
+            },
+            seed: 0,
+        });
+    }
+    out
+}
+
+/// The point of the freeway's centerline nearest `p`: its distance, position, road height,
+/// unit direction (from `a` to `b`) and the road's width there.
+fn freeway_at(place: &Place, p: V2) -> Option<(f32, V2, f32, V2, f32)> {
+    let mut best: Option<(f32, V2, f32, V2, f32)> = None;
+    for e in place.roads.edges.iter() {
+        if e.class != RoadClass::Highway || e.oneway {
+            continue;
+        }
+        for w in e.profile.windows(2) {
+            let (a, b) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
+            let ab = b - a;
+            let l2 = ab.dot(ab);
+            if l2 < 1e-6 {
+                continue;
+            }
+            let u = ((p - a).dot(ab) / l2).clamp(0.0, 1.0);
+            let q = a + ab * u;
+            let d = (q - p).length();
+            if best.is_none_or(|b| d < b.0) {
+                let y = w[0][1] + (w[1][1] - w[0][1]) * u;
+                best = Some((d, q, y, ab * (1.0 / ab.length()), e.width_m));
+            }
+        }
+    }
+    best
+}
+
+/// An exit sign over a freeway `width` m wide at `base`, traffic coming along `dir`: two
+/// galvanized posts off the shoulders, a box truss across, and on its face over the right
+/// lanes a green panel with a white border, the street's name and EXIT under it.
+fn exit_sign(m: &mut WorldMesh, base: V3, dir: V2, width: f32, street: u16, pal: &Palette) {
+    // Local x across the road to the right of traffic, z toward the traffic.
+    let f = Frame::upright(base, dir.right());
+    let steel = Paint::new(shade(pal.metal_light, 230), Pattern::Metal);
+    let half = width * 0.5 + 1.4;
+    for x in [-half, half] {
+        boxf(
+            m,
+            &f,
+            [x - 0.2, 0.0, -0.2],
+            [x + 0.2, 7.4, 0.2],
+            face::NO_BOTTOM,
+            steel,
+        );
+    }
+    for y in [6.0f32, 7.0] {
+        bar(
+            m,
+            f.p(-half, y, 0.0),
+            f.p(half, y, 0.0),
+            V3::Y,
+            0.16,
+            0.16,
+            true,
+            steel,
+        );
+    }
+    let mut x = -half;
+    while x < half - 0.5 {
+        bar(
+            m,
+            f.p(x, 6.0, 0.0),
+            f.p(x + 0.5, 7.0, 0.0),
+            f.z,
+            0.08,
+            0.08,
+            false,
+            steel,
+        );
+        bar(
+            m,
+            f.p(x + 0.5, 7.0, 0.0),
+            f.p(x + 1.0, 6.0, 0.0),
+            f.z,
+            0.08,
+            0.08,
+            false,
+            steel,
+        );
+        x += 1.0;
+    }
+    // The panel over the lanes on the right.
+    let green = Paint::new(srgb_green(pal), Pattern::Paint);
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let name = signs::street_name_of(street);
+    let em = signs::letters::layout(&name, signs::letters::LetterStyle::Block).ink_w();
+    let cap = (width * 0.5 - 1.6).min(em * 0.75).max(1.0) / em.max(0.1);
+    let cap = cap.min(0.75);
+    let pw = (em * cap + 1.2).max(5.0);
+    let cx = width * 0.25;
+    let (x0, x1, y0, y1) = (cx - pw * 0.5, cx + pw * 0.5, 5.6, 8.4);
+    boxf(m, &f, [x0, y0, 0.12], [x1, y1, 0.22], face::ALL, green);
+    for (a, b) in [
+        ([x0 + 0.12, y1 - 0.2], [x1 - 0.12, y1 - 0.12]),
+        ([x0 + 0.12, y0 + 0.12], [x1 - 0.12, y0 + 0.2]),
+        ([x0 + 0.12, y0 + 0.12], [x0 + 0.2, y1 - 0.12]),
+        ([x1 - 0.2, y0 + 0.12], [x1 - 0.12, y1 - 0.12]),
+    ] {
+        rect(m, &f, a[0], a[1], b[0], b[1], 0.225, false, white);
+    }
+    letters(
+        m,
+        &f,
+        &name,
+        cx - 0.5 * em * cap,
+        7.3,
+        cap / 5.0,
+        0.225,
+        false,
+        white,
+    );
+    let exit = b"EXIT";
+    let ew = signs::letters::layout(exit, signs::letters::LetterStyle::Block).ink_w();
+    let ecap = 0.5;
+    letters(
+        m,
+        &f,
+        exit,
+        cx - 0.5 * ew * ecap,
+        6.35,
+        ecap / 5.0,
+        0.225,
+        false,
+        white,
+    );
+}
+
+/// Highway green, from the palette's deep greens.
+fn srgb_green(pal: &Palette) -> Rgb {
+    mix(shade(pal.palm_green, 150), pal.teal, 60)
+}
+
+/// Height of a power pole's top insulators, where its wires hang, m (`power_pole`).
+const WIRE_Y: f32 = 9.75;
+/// Longest gap strung between two poles, m: a span and a street crossed with it.
+const SPAN_MAX_M: f32 = 75.0;
+
+/// The overhead lines of a place: each pair of power poles that stand in a row (each the
+/// other's nearest pole ahead or behind along the line) as a [`PropKind::PowerLine`] from
+/// the first to the second. Poles in a row face along it (`detail`'s pole runs), so a pole
+/// is strung only to poles in line with both its facing and theirs.
+pub fn power_spans(place: &Place, seed: u64) -> Vec<Prop> {
+    let mut poles: Vec<(V2, f32, V2)> = place
+        .props
+        .items
+        .iter()
+        .filter(|p| p.kind == place::PropKind::PowerPole)
+        .map(|p| (V2::new(p.pos[0], p.pos[2]), p.pos[1], dir_of_yaw(p.yaw)))
+        .collect();
+    // By x then z, so the search below is a window and the output's order is fixed.
+    poles.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)));
+    let in_line = |a: V2, b: V2, d: V2| {
+        let n = d.length();
+        n > 4.0
+            && (d.x * a.x + d.y * a.y).abs() > 0.97 * n
+            && (d.x * b.x + d.y * b.y).abs() > 0.97 * n
+    };
+    // Per pole, the nearest in line ahead of it (along its facing) and behind it.
+    let mut next: Vec<[Option<(usize, f32)>; 2]> = alloc::vec![[None; 2]; poles.len()];
+    for (i, &(pa, _, da)) in poles.iter().enumerate() {
+        for (j, &(pb, _, db)) in poles.iter().enumerate().skip(i + 1) {
+            if pb.x - pa.x > SPAN_MAX_M {
+                break;
+            }
+            let d = pb - pa;
+            let n = d.length();
+            if n > SPAN_MAX_M || !in_line(da, db, d) {
+                continue;
+            }
+            for (k, l, side) in [
+                (i, j, d.x * da.x + d.y * da.y > 0.0),
+                (j, i, d.x * db.x + d.y * db.y < 0.0),
+            ] {
+                let slot = &mut next[k][usize::from(side)];
+                if slot.is_none_or(|(_, m)| n < m) {
+                    *slot = Some((l, n));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (i, slots) in next.iter().enumerate() {
+        for &(j, n) in slots.iter().flatten() {
+            // Strung once, from the lower index, when each is the other's nearest.
+            if j < i || !next[j].iter().flatten().any(|&(k, _)| k == i) {
+                continue;
+            }
+            let ((pa, ya, _), (pb, yb, _)) = (poles[i], poles[j]);
+            out.push(Prop {
+                pos: pa,
+                y: ya,
+                dir: (pb - pa) * (1.0 / n),
+                kind: PropKind::PowerLine {
+                    len_dm: (n * 10.0) as u16,
+                    rise_dm: ((yb - ya) * 10.0).clamp(-3000.0, 3000.0) as i16,
+                },
+                seed: mix64(seed ^ u64::from(pa.x.to_bits()) << 32 ^ u64::from(pa.y.to_bits()))
+                    as u32,
+            });
+        }
+    }
+    out
+}
+
+/// Sagging wires from a pole at `base` to the next, `len` m along `dir` and `rise` m up:
+/// three primaries from the crossarm's insulators and a fat black phone cable lower down.
+fn power_line(m: &mut WorldMesh, base: V3, dir: V2, len: f32, rise: f32, pal: &Palette) {
+    let f = Frame::upright(base, dir);
+    let wire = Paint::new(shade(pal.metal_dark, 200), Pattern::Metal);
+    let cable = Paint::new(shade(pal.metal_dark, 120), Pattern::Plain);
+    const SEGS: usize = 8;
+    for (z, y, sag, w, paint) in [
+        (-1.15, WIRE_Y, 0.022, 0.03, wire),
+        (0.45, WIRE_Y, 0.022, 0.03, wire),
+        (1.15, WIRE_Y, 0.022, 0.03, wire),
+        (0.25, 7.1, 0.03, 0.07, cable),
+    ] {
+        let at = |k: usize| {
+            let t = k as f32 / SEGS as f32;
+            let drop = 4.0 * sag * len * t * (1.0 - t);
+            f.p(len * t, y + rise * t - drop, z)
+        };
+        for k in 0..SEGS {
+            bar(m, at(k), at(k + 1), f.z, w, w, false, paint);
         }
     }
 }
