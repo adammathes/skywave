@@ -26,7 +26,7 @@ mod wheel;
 mod tests;
 
 pub use crate::math::polyline_at;
-pub use mesh::MeshData;
+pub use mesh::{MeshData, FINISH_CHROME, FINISH_PAINT};
 pub use params::{
     Antenna, Applique, BadgeShape, Bumper, Detail, Exhaust, Front, Glass, Grille, Handles,
     HeadLights, InteriorShape, Mirrors, Parts, Rear, Rims, Roof, RoofKind, Seams, Section,
@@ -400,8 +400,8 @@ impl Materials {
     fn new(spec: &ShapeSpec, color_index: usize, paint: Option<&str>) -> Materials {
         let paint_hex = paint.unwrap_or(&spec.palette[color_index % spec.palette.len()]);
         let (upper, lower) = parse_paint(paint_hex).unwrap_or(([128, 128, 128], None));
-        let paint = Mat::new(rgb(upper));
-        let paint_low = lower.map_or(paint, |c| Mat::new(rgb(c)));
+        let paint = Mat::new(rgb(upper)).finish(FINISH_PAINT);
+        let paint_low = lower.map_or(paint, |c| Mat::new(rgb(c)).finish(FINISH_PAINT));
         let s = |h: [u8; 3]| Mat::new(rgb(h));
         let ic = &spec.interior.colors;
         let ic = |k: usize| Mat::new(hex(&ic[k]));
@@ -426,7 +426,7 @@ impl Materials {
             seam: paint.shade(0.25).group(1),
             chassis: s([30, 30, 32]),
             liner: s([18, 18, 19]),
-            chrome: s([196, 200, 206]).group(2),
+            chrome: s([196, 200, 206]).group(2).finish(FINISH_CHROME),
             trim,
             rubber: s([34, 34, 36]),
             glass: Mat::new({
@@ -437,14 +437,14 @@ impl Materials {
             .uv(Uv::Side),
             tire: s([30, 30, 31]),
             whitewall: s([226, 224, 216]),
-            rim: s([196, 198, 202]),
+            rim: s([196, 198, 202]).finish(FINISH_CHROME),
             steel: s([70, 72, 76]),
             headlamp: s([236, 238, 230]).glow(emissive([255, 238, 205], 2.0)),
             tail: s([180, 16, 14]).glow(emissive([255, 18, 8], 1.0)),
             amber: s([232, 128, 24]).glow(emissive([255, 110, 10], 0.6)),
             reverse: s([226, 226, 222]),
             grille: s([20, 20, 22]).uv(Uv::Face),
-            mirror: s([170, 180, 190]),
+            mirror: s([170, 180, 190]).finish(FINISH_CHROME),
             plate: s([228, 226, 214]),
             accent: Mat::new(hex(&spec.accent)),
             wood: s([120, 74, 40]).uv(Uv::Side),

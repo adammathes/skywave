@@ -338,6 +338,30 @@ fn sun_visibility(world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) -> f32 {
     return vis;
 }
 
+// Glossy finishes, keyed by vertex alpha (`FINISH_PAINT`, `FINISH_CHROME` in src/mesh.rs):
+// the analytic sky (the ground below the horizon) mirrored about the normal, plus a sun
+// glint where the sun is not shadowed, both weighted by Schlick's Fresnel. Paint is a clear
+// coat (F0 0.04) over its lit color; chrome is a metal (F0 its color) keeping a fifth of its
+// lit color, so lamps the sky does not hold still show on it at night. Other codes: `lit`.
+fn finish(lit: vec3<f32>, albedo: vec3<f32>, n: vec3<f32>, world_pos: vec3<f32>, vis: f32, code: u32) -> vec3<f32> {
+    if code != 254u && code != 253u {
+        return lit;
+    }
+    let v = normalize(frame.camera_pos.xyz - world_pos);
+    let r = reflect(-v, n);
+    let edge = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 5.0);
+    // A normalized Phong lobe: tighter on chrome.
+    let p = select(400.0, 200.0, code == 254u);
+    let glint = frame.sun_light.rgb * (vis * pow(max(dot(r, frame.sun_dir.xyz), 0.0), p) * (p + 2.0) * 0.5);
+    let env = sky_radiance(r) + glint;
+    if code == 254u {
+        let f = 0.04 + 0.96 * edge;
+        return mix(lit, env, f);
+    }
+    let f = albedo + (1.0 - albedo) * edge;
+    return lit * 0.2 + env * f;
+}
+
 fn shade(in: MeshOut) -> vec3<f32> {
     // Sampled first, in uniform control flow, so implicit derivatives are valid.
     let texel = textureSample(atlas, atlas_sampler, in.uv);
@@ -360,6 +384,7 @@ fn shade(in: MeshOut) -> vec3<f32> {
     // the sun.
     let lamps = point_lights(in.world_pos, n, in.lights) * (1.0 / 3.14159265);
     var c = albedo * (frame.sun_light.rgb * (ndl * vis) + ambient + lamps);
+    c = finish(c, albedo, n, in.world_pos, vis, u32(round(in.color.a * 255.0)));
     // Self-lit color, untouched by texture and instance tint; fog still dims it.
     c += in.emissive;
 

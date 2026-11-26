@@ -78,7 +78,7 @@ pub use light::{
 };
 pub use mesh::{
     emissive, emissive_scale, emissive_window, Mesh, Vertex, EMISSIVE_MAX_SCALE,
-    EMISSIVE_WINDOW_BIT,
+    EMISSIVE_WINDOW_BIT, FINISH_CHROME, FINISH_PAINT,
 };
 pub use pool::{
     ChunkPool, ChunkPoolConfig, ChunkStore, ChunkWrite, PoolError, PoolStats, SlotId,

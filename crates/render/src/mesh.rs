@@ -40,10 +40,19 @@ pub fn emissive_scale(e: [u8; 4]) -> (f32, bool) {
 /// to `0.0..=1.0`, v down); build it with [`crate::tile_uv`] and [`crate::uv_unorm`].
 /// The default uv `[0, 0]` lies in [`Tile::White`], so untextured vertices are unaffected.
 ///
+/// In opaque meshes, a vertex alpha of [`FINISH_PAINT`] or [`FINISH_CHROME`] makes the
+/// surface glossy (it mirrors the sky, more at grazing angles); any other alpha is matte.
+/// Window glass blends by its alpha instead.
+///
 /// `emissive` is self-lit color added after lighting, multiplied by neither the atlas texel
 /// nor the instance color: rgb is linear unorm8, alpha holds a 7-bit intensity scale
 /// (`0..=127` → `0..=8×`) and, in its top bit, the window flag. Build it with [`emissive`]
 /// or [`emissive_window`]; `[0; 4]` emits nothing.
+/// Vertex alpha of a clear-coated paint: its color under a thin reflective coat.
+pub const FINISH_PAINT: u8 = 254;
+/// Vertex alpha of chrome: a mirror tinted by its color.
+pub const FINISH_CHROME: u8 = 253;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct Vertex {

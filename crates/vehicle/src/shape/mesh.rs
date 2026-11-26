@@ -44,6 +44,11 @@ pub fn emissive(rgb: [u8; 3], scale: f32) -> [u8; 4] {
     [rgb[0], rgb[1], rgb[2], a as u8]
 }
 
+/// Color alpha of glossy paint, like `render::FINISH_PAINT`.
+pub const FINISH_PAINT: u8 = 254;
+/// Color alpha of chrome, like `render::FINISH_CHROME`.
+pub const FINISH_CHROME: u8 = 253;
+
 /// How a triangle's uvs are made from its positions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Uv {
@@ -85,6 +90,15 @@ impl Mat {
 
     pub const fn group(self, group: u8) -> Mat {
         Mat { group, ..self }
+    }
+
+    /// The same material with finish `alpha` ([`FINISH_PAINT`], [`FINISH_CHROME`]).
+    pub const fn finish(self, alpha: u8) -> Mat {
+        let c = self.color;
+        Mat {
+            color: [c[0], c[1], c[2], alpha],
+            ..self
+        }
     }
 
     pub const fn uv(self, uv: Uv) -> Mat {

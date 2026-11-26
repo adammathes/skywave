@@ -1033,7 +1033,11 @@ fn two_tone_paint_splits_at_the_crease() {
     for (text, k) in [(GANNET, 6), (REGENT, 0), (HOMESTEAD, 0)] {
         let spec = load(text);
         let (upper, lower) = parse_paint(&spec.palette[k]).unwrap();
-        let (upper, lower) = (rgb(upper), rgb(lower.unwrap()));
+        let gloss = |mut c: [u8; 4]| {
+            c[3] = FINISH_PAINT;
+            c
+        };
+        let (upper, lower) = (gloss(rgb(upper)), gloss(rgb(lower.unwrap())));
         let stripe = hex(&spec.accent);
         for lod in 0..2 {
             let car = build_lod(&spec, k, lod).unwrap();

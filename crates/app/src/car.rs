@@ -1239,6 +1239,12 @@ mod tests {
     }
 
     #[test]
+    fn shape_finishes_are_the_renderers() {
+        assert_eq!(shape::FINISH_PAINT, render::FINISH_PAINT);
+        assert_eq!(shape::FINISH_CHROME, render::FINISH_CHROME);
+    }
+
+    #[test]
     fn glass_and_grille_map_into_their_tiles() {
         let inside = |uv: [u16; 2], tile: Tile| {
             let [u0, v0, u1, v1] = tile.rect();
