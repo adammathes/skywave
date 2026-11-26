@@ -267,8 +267,9 @@ mod tests {
         for s in crate::scenario::all() {
             assert!(region_text(&s.region).is_some());
             assert!(core::ptr::eq(grammar_of(s), grammar_of(s)), "parsed once");
-            // A world still being built may dress in another's grammar.
-            if !s.stub {
+            // A world still being built, or one from an authored layout that has no grammar of
+            // its own yet, may dress in another's grammar.
+            if !s.stub && s.layout.is_none() {
                 assert_eq!(grammar_of(s).template, s.region);
             }
             assert!(palette(&s.palette).is_some());

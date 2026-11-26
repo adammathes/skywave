@@ -527,9 +527,14 @@ mod tests {
             (basin.id.as_str(), basin.years, basin.stub),
             ("mirage_valley_2001", (1995, 2001), false)
         );
+        let bay = &all[2];
+        assert_eq!(
+            (bay.id.as_str(), bay.years, bay.layout.as_deref()),
+            ("bay_loop_2005", (1996, 2005), Some("bay_loop"))
+        );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");
-        assert_eq!(get(99).id, basin.id);
+        assert_eq!(get(99).id, bay.id);
     }
 
     #[test]
