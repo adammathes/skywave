@@ -66,6 +66,8 @@ const OVERPASS_FLAT_M: f32 = 9.0;
 const APPROACH_GRADE: f32 = 0.04;
 /// Steepest highway grade unless the road says otherwise.
 const HIGHWAY_GRADE: f32 = 0.05;
+/// Passes that ease junction heights on steep ground toward their streets' grades.
+const JUNCTION_PASSES: usize = 64;
 /// A ramp meets its crossing road where the approach has come down this far from the deck.
 const RAMP_FOOT_DROP_M: f32 = 1.0;
 /// A ramp stays level with the highway this far from where it leaves it.
@@ -693,6 +695,45 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
             if !on_highway[nd] {
                 node_y[nd] = node_y[nd].max(lift(i, s));
             }
+        }
+    }
+    // Junctions on steep ground: the ground under two ends of a street can differ by more
+    // than its grade allows over its length, and the street would then ramp straight
+    // between them, as steep as the hill. Ease such ends toward each other (the ground is
+    // cut and filled to meet them), leaving the highways' and overpasses' heights be.
+    let fixed: Vec<bool> = (0..nodes.len())
+        .map(|nd| on_highway[nd] || node_y[nd] > elev[nd].unwrap_or(0.0) + 0.01)
+        .collect();
+    let spans: Vec<(usize, usize, f32)> = pieces
+        .iter()
+        .filter(|pc| kind[pc.line] == Kind::Road)
+        .map(|pc| {
+            let len = arcs(&pc.pts).last().copied().unwrap_or(0.0);
+            let g = layout.roads[road[pc.line]].max_grade.unwrap_or(MAX_GRADE);
+            (pc.a, pc.b, g * len)
+        })
+        .collect();
+    for _ in 0..JUNCTION_PASSES {
+        let mut moved = false;
+        for &(a, b, reach) in &spans {
+            let d = node_y[b] - node_y[a];
+            let excess = abs(d) - reach;
+            if excess <= 0.01 || fixed[a] && fixed[b] {
+                continue;
+            }
+            let step = if d > 0.0 { excess } else { -excess };
+            if fixed[a] {
+                node_y[b] -= step;
+            } else if fixed[b] {
+                node_y[a] += step;
+            } else {
+                node_y[a] += 0.5 * step;
+                node_y[b] -= 0.5 * step;
+            }
+            moved = true;
+        }
+        if !moved {
+            break;
         }
     }
 

@@ -24,7 +24,7 @@ Layout(
         Ridge(name: "headlands", line: [(480, 215), (1200, 200), (1900, 205)],
               heights_m: [44, 40, 30], falloff_m: 130, relief_m: 6),
         Ridge(name: "east hills", line: [(3720, 420), (3760, 1500), (3720, 2600), (3620, 3500)],
-              height_m: 145, falloff_m: 470, relief_m: 14),
+              height_m: 145, falloff_m: 320, relief_m: 14),
     ],
     peaks: [
         // The city's hills: the crests its grid is laid straight over, about as steep as its
@@ -105,9 +105,11 @@ Layout(
             (1100, 1453), (1050, 2000), (1000, 2600), (950, 3000), (950, 3300),
         ]),
         Road(name: "old highway", class: Arterial, lanes: 2, speed_kph: Some(55), points: [(1450, 1000), (1450, 3300)]),
+        Road(name: "city line", class: Arterial, lanes: 1, dead_end: true, points: [(1082, 1750), (1840, 1750)]),
         Road(name: "north cross", class: Arterial, lanes: 1, dead_end: true, points: [(1043, 2100), (1840, 2100)]),
         Road(name: "college cross", class: Arterial, lanes: 1, dead_end: true, points: [(1008, 2500), (1840, 2500)]),
         Road(name: "south cross", class: Arterial, lanes: 1, dead_end: true, points: [(975, 2700), (1700, 2700)]),
+        Road(name: "creek cross", class: Arterial, lanes: 1, dead_end: true, points: [(950, 3000), (1700, 3000)]),
 
         // The causeway across the bay's south end.
         Road(name: "causeway", class: Arterial, lanes: 2, speed_kph: Some(80), points: [(1761, 2750), (3150, 2750)]),
@@ -123,6 +125,10 @@ Layout(
         Road(name: "hillside", class: Arterial, lanes: 1, points: [(3450, 1212), (3450, 3200), (3300, 3800)]),
         Road(name: "flats avenue", class: Arterial, lanes: 1, points: [(3145, 1600), (3450, 1600)]),
         Road(name: "hill cross", class: Arterial, lanes: 1, points: [(3150, 2200), (3450, 2200)]),
+        Road(name: "flats boulevard", class: Arterial, lanes: 2, points: [(3300, 1269), (3300, 3800)]),
+        Road(name: "grove cross", class: Arterial, lanes: 1, points: [(3150, 1900), (3450, 1900)]),
+        Road(name: "lake cross", class: Arterial, lanes: 1, points: [(3150, 2500), (3450, 2500)]),
+        Road(name: "port cross", class: Arterial, lanes: 1, points: [(3150, 2950), (3450, 2950)]),
         Road(name: "overlook road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
             (3138, 1300), (3400, 1250), (3560, 1200), (3520, 1060), (3660, 1010), (3720, 960),
         ]),
