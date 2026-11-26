@@ -43,6 +43,7 @@ pub mod scenario;
 pub mod scene;
 pub mod selftest;
 mod settings;
+mod settle;
 mod signals;
 pub mod sound;
 pub mod stream;
@@ -347,13 +348,19 @@ impl App {
         let ground = world::WorldCollider::with_plan(&place, grammar, &plan);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
-        let mut props =
-            propinst::PropInstances::new(&place, &palette, &lineup.shapes, &lineup.heroes, |p| {
+        let mut props = propinst::PropInstances::new(
+            &place,
+            &palette,
+            &lineup.shapes,
+            &lineup.heroes,
+            Some(&ground),
+            |p| {
                 [
                     world::math::floor(p[0] / chunk_size) as i32,
                     world::math::floor(p[1] / chunk_size) as i32,
                 ]
-            })?;
+            },
+        )?;
         let mut strip = dragstrip::DragStrip::of(&place);
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let mut marquees = marquee::Marquees::of(&place, &grammar.landmarks);
@@ -1356,8 +1363,14 @@ impl App {
             d.push(eye, &pose, seat, &self.lights, &mut self.instances);
         }
         let npc_glow = lighting::car_glow(&daylight).lamps;
-        self.npcs
-            .push(alpha, eye, &self.lights, npc_glow, &mut self.instances);
+        self.npcs.push(
+            alpha,
+            eye,
+            &self.ground,
+            &self.lights,
+            npc_glow,
+            &mut self.instances,
+        );
         // Whole people only: none near the vehicle preview (below), none cut in half there.
         let clear = if self.preview.is_some() {
             preview::CLEAR_M + peds::REACH_M
