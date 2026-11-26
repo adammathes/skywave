@@ -182,15 +182,16 @@ impl Palette {
         ]
     }
 
-    /// Awning and canopy accent colors.
+    /// Awning and canopy accent colors: the bold shop colours (fire-engine red, sign
+    /// yellow, teal, navy) with two softer ones, so a strip reads from down the block.
     pub fn awnings(&self) -> [Rgb; 6] {
         [
             self.teal,
-            self.salmon,
-            self.terracotta,
+            self.hydrant_red,
+            self.paint_yellow,
             self.navy,
+            self.salmon,
             self.sky_blue,
-            self.pastel_pink,
         ]
     }
 
@@ -205,13 +206,14 @@ impl Palette {
         ]
     }
 
-    /// Body colors for parked cars.
+    /// Body colors for parked cars: whites, silvers and blues with a red and a yellow
+    /// among them.
     pub fn cars(&self) -> [Rgb; 8] {
         [
             self.stucco_white,
-            self.brick_red,
+            self.hydrant_red,
             self.navy,
-            self.sand,
+            self.paint_yellow,
             self.sky_blue,
             self.metal_dark,
             self.metal_light,
