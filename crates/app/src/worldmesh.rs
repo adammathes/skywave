@@ -62,8 +62,8 @@ const GAIN_LAWN: f32 = 1.35;
 const GAIN_WOOD: f32 = 1.28;
 const GAIN_SHINGLES: f32 = 1.55;
 /// Inverse mean luminance of the brick tiles (pre-colored).
-const GAIN_BRICK_RED: f32 = 4.22;
-const GAIN_BRICK_TAN: f32 = 2.40;
+const GAIN_BRICK_RED: f32 = 4.20;
+const GAIN_BRICK_TAN: f32 = 2.44;
 /// Inverse mean luminance of a window pane (frame excluded), so the glass keeps the
 /// brightness of its vertex color and the frame comes out lighter.
 const GAIN_GLASS: f32 = 4.12;
@@ -108,8 +108,8 @@ fn look(pattern: u8, rgb: [u8; 3], kind: MeshKind) -> Look {
             Look {
                 tile,
                 fit: Fit::Repeat {
-                    period: [1.0, 0.7],
-                    step: [0.25, 0.25],
+                    period: [2.0, 1.4],
+                    step: [0.125, 0.125],
                 },
                 tint: Tint::Gray(gain),
             }
@@ -617,9 +617,9 @@ mod tests {
         // piece's uv stays inside the tile.
         let tri = WorldMesh {
             vertices: vec![
-                wv([0.1, 0.2, 0.0], [0.1, 0.2], Pattern::Brick),
-                wv([4.3, 0.9, 0.0], [4.3, 0.9], Pattern::Brick),
-                wv([1.7, 3.1, 0.0], [1.7, 3.1], Pattern::Brick),
+                wv([0.2, 0.4, 0.0], [0.2, 0.4], Pattern::Brick),
+                wv([8.6, 1.8, 0.0], [8.6, 1.8], Pattern::Brick),
+                wv([3.4, 6.2, 0.0], [3.4, 6.2], Pattern::Brick),
             ],
             indices: vec![0, 1, 2],
         };
