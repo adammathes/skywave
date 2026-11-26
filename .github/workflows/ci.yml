@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stage: [lint, test-app, test-traffic, test-rest, test-i686, web]
+        stage: [lint, test-app, test-traffic, test-rest, test-i686, test-i686-traffic, web]
         # The Ubuntu packages each stage needs, and no more: the mirror can be slow, and
         # gcc-multilib alone pulls 25 packages.
         include:
@@ -34,6 +34,8 @@ jobs:
           - stage: test-rest
             apt: libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers
           - stage: test-i686
+            apt: gcc-multilib
+          - stage: test-i686-traffic
             apt: gcc-multilib
     steps:
       - uses: actions/checkout@v5
