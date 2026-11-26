@@ -5,8 +5,8 @@
 
 use place::{Place, PoiKind, PropKind, SpawnKind};
 use skywave_core::Seed;
-use world::math::{point_in_polygon, V2};
 use world::layout::Layout;
+use world::math::{point_in_polygon, V2};
 use world::procgen::authored::build_place;
 use world::procgen::setpieces::HERO_AHEAD_M;
 use world::template::RegionTemplate;
