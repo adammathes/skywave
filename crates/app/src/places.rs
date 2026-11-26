@@ -297,7 +297,7 @@ mod tests {
         ("mirage_valley_2001", 92),
         ("bay_loop_2005", 152),
         ("mirage_bowl_2001", 156),
-        ("lake_city_1986", 40),
+        ("lake_city_1986", 0),
     ];
 
     /// The map audit over every built-in world: no road you cannot reach, no loop back to
