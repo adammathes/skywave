@@ -113,9 +113,14 @@ headlands road round to an East Bay college town under its hills and an overlook
 crossing back; south from the city the ridge and its ridge road, the foothill freeway, the strip on
 the old highway, the university's open ground and the bayshore's office flats, to the flat South Bay
 and the foothill village, with a causeway across the bay's south end. Zone rules are the
-`bay_area` region template (`StreetPattern::Open` keeps the hills free of local streets). It
-borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
-and radio follow.
+`bay_area` region template. Its look is the art direction's: the open space is a hard line
+(`StreetPattern::Open`: no local streets, no lots, gold grass under oak stands), the city is painted
+stucco row houses shoulder to shoulder over garage doors with bay windows and cornices (its own
+grammar, `bay_area_2005.ron`), its grid climbing the crests at up to 22% (`street_grade`), and the
+flats round the bay are long straight blocks of ranch and craftsman houses under oaks. Its palette is
+`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and fog,
+bridge towers, its own 2005 cars and its own radio follow; every car of 1996 to 2005 drives
+there.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

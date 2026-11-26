@@ -27,11 +27,12 @@ Layout(
               height_m: 145, falloff_m: 470, relief_m: 14),
     ],
     peaks: [
-        // The city's hills: the crests its grid is laid straight over.
-        Peak(name: "high crest", at: (820, 1060), height_m: 78, falloff_m: 340),
-        Peak(name: "north crest", at: (1300, 820), height_m: 52, falloff_m: 240),
-        Peak(name: "south crest", at: (1180, 1320), height_m: 46, falloff_m: 230),
-        Peak(name: "west crest", at: (560, 1260), height_m: 54, falloff_m: 240),
+        // The city's hills: the crests its grid is laid straight over, about as steep as its
+        // streets can climb (`street_grade` in the `bay_area` zone rules).
+        Peak(name: "high crest", at: (820, 1060), height_m: 48, falloff_m: 340),
+        Peak(name: "north crest", at: (1300, 820), height_m: 34, falloff_m: 240),
+        Peak(name: "south crest", at: (1180, 1320), height_m: 30, falloff_m: 230),
+        Peak(name: "west crest", at: (560, 1260), height_m: 36, falloff_m: 240),
         Peak(name: "summit", at: (3740, 960), height_m: 115, falloff_m: 380),
     ],
 
@@ -54,13 +55,13 @@ Layout(
     // Open hills unless a district says otherwise.
     default_zone: Hills,
     districts: [
-        District(name: "east bay", zone: Residential, polygon: [(2950, 650), (3450, 600), (3450, 3250), (2900, 3250)]),
+        District(name: "east bay", zone: Suburb, polygon: [(2950, 650), (3450, 600), (3450, 3250), (2900, 3250)]),
         District(name: "college town", zone: Commercial, polygon: [(3060, 820), (3400, 820), (3400, 1160), (3060, 1160)]),
         District(name: "peninsula", zone: Suburb, polygon: [(1080, 1500), (1900, 1500), (1900, 3260), (1080, 3260)]),
         District(name: "bayshore", zone: Industrial, polygon: [(1640, 1620), (1900, 1620), (1900, 3000), (1640, 3000)]),
         District(name: "the strip", zone: Strip, polygon: [(1380, 1500), (1520, 1500), (1520, 3260), (1380, 3260)]),
         District(name: "university", zone: Park, polygon: [(1140, 2330), (1370, 2330), (1370, 2660), (1140, 2660)]),
-        District(name: "south bay", zone: Residential, polygon: [(1000, 3260), (3480, 3260), (3480, 3870), (1000, 3870)]),
+        District(name: "south bay", zone: Suburb, polygon: [(1000, 3260), (3480, 3260), (3480, 3870), (1000, 3870)]),
         District(name: "office parks", zone: Industrial, polygon: [(2000, 3340), (2600, 3340), (2600, 3560), (2000, 3560)]),
         District(name: "village", zone: Suburb, polygon: [(820, 3380), (1060, 3380), (1060, 3640), (820, 3640)]),
         District(name: "city", zone: Residential, hilly: true, polygon: [(380, 610), (1860, 610), (1880, 1500), (340, 1500)]),
