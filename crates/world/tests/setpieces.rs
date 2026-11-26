@@ -11,7 +11,7 @@ use vehicle::{step, Assists, VehicleInput, VehicleSpec, VehicleState};
 use world::landmarks::Kit;
 use world::math::{point_in_polygon, segment_distance, V2, V3};
 use world::procgen::build_place;
-use world::procgen::setpieces::{DRIVE_IN_VIEW_M, EXTRA_APART_M, ROADSIDE, ROADSIDE_APART_M};
+use world::procgen::setpieces::{DRIVE_IN_VIEW_M, EXTRA_APART_M, ROADSIDE};
 use world::template::RegionTemplate;
 use world::{resolve, WorldCollider};
 

@@ -694,11 +694,21 @@ mod tests {
             crate::scenario::get(app.scenario()),
         )
         .unwrap();
+        // The owner's donut shop: the first donut shop sited (its point of interest first).
+        let poi = place
+            .pois
+            .iter()
+            .find(|p| p.kind == place::PoiKind::DonutShop)
+            .unwrap();
         let prop = place
             .props
             .items
             .iter()
-            .find(|p| matches!(p.kind, PropKind::Landmark { kit: k, .. } if k == kit))
+            .filter(|p| matches!(p.kind, PropKind::Landmark { kit: k, .. } if k == kit))
+            .min_by(|a, b| {
+                let d = |p: &Prop| Vec2::new(p.pos[0], p.pos[2]).distance(Vec2::from(poi.pos));
+                d(a).total_cmp(&d(b))
+            })
             .unwrap();
         let f = world::props::dir_of_yaw(prop.yaw);
         let road = Vec2::new(f.x, f.y);
@@ -728,10 +738,20 @@ mod tests {
                 .unwrap();
             let hip = app.drive.layout.seating.hip;
             let [len, width, _] = app.drive.spec.dims_m;
-            // 24 m out toward the street, nose in, 2.5 m wide of the lane's middle (clear of
-            // the sidewalk's hydrant at its mouth at seed 1); the driver steers into it.
+            // 24 m out toward the street, nose in, beside the lane's middle where the
+            // sidewalk has nothing standing (a hydrant, a tree); the driver steers into it.
             let lane = 0.5 * width + 1.0;
-            let start = Vec2::new(w.sill.x, w.sill.z) + w.out * (lane + 2.5) + road * 24.0;
+            let start = [2.5, 0.0, 5.0, 7.5]
+                .map(|wide| Vec2::new(w.sill.x, w.sill.z) + w.out * (lane + wide) + road * 24.0)
+                .into_iter()
+                .find(|s| {
+                    place
+                        .props
+                        .items
+                        .iter()
+                        .all(|q| Vec2::new(q.pos[0], q.pos[2]).distance(*s) > 3.5)
+                })
+                .unwrap();
             let (y, _) = app.ground.level_at([start.x, start.y]);
             let heading = (road.x).atan2(road.y);
             app.drive = crate::drive::Drive::with_layout(
@@ -770,7 +790,11 @@ mod tests {
                 };
                 app.drive.step(input, &app.ground);
                 let c = app.drive_thru_car();
-                worst_gap = worst_gap.min((c.door - Vec2::new(w.sill.x, w.sill.z)).dot(w.out));
+                // Beside the shop's wall (its 11 m round the window), the door stays off it.
+                let d = c.door - Vec2::new(w.sill.x, w.sill.z);
+                if d.perp_dot(w.out).abs() < 6.0 {
+                    worst_gap = worst_gap.min(d.dot(w.out));
+                }
                 app.drivethru.as_mut().unwrap().step(&c, DT);
             }
             let boxes = app.drivethru.as_ref().unwrap().boxes;
