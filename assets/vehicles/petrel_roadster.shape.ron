@@ -10,7 +10,7 @@
 ShapeSpec(
     id: "petrel_roadster",
     side: [
-        (0.00, 0.40), (0.05, 0.50), (0.25, 0.60), (1.05, 0.76), (1.10, 0.77),
+        (0.00, 0.44), (0.05, 0.55), (0.25, 0.64), (1.05, 0.76), (1.10, 0.77),
         (1.50, 1.10), (1.56, 0.80), (2.80, 0.88), (3.40, 0.92), (3.70, 0.90), (3.79, 0.84),
         (3.79, 0.36), (3.65, 0.25), (3.20, 0.15), (0.55, 0.14), (0.10, 0.17), (0.00, 0.26),
     ],
@@ -19,7 +19,7 @@ ShapeSpec(
         (3.50, 0.86), (3.79, 0.78),
     ],
     belt: [(1.10, 0.77), (1.56, 0.80), (2.80, 0.88), (3.40, 0.915)],
-    section: Section(shoulder: 0.92, tumblehome_deg: 26, greenhouse_frac: 0.70, crown: 0.04, tuck: 0.05),
+    section: Section(shoulder: 0.80, tumblehome_deg: 26, greenhouse_frac: 0.70, crown: 0.06, tuck: 0.07),
     glass: Glass(
         windshield: (1.12, 1.49),
         // No side glass; the backlight range is the boot behind the seats.
@@ -27,11 +27,11 @@ ShapeSpec(
         side: [],
     ),
     wheels: Wheels(radius: 0.30, width: 0.20, arch_clearance: 0.05, front_x: 0.78, rear_x: 3.08, track: 1.46),
-    front: Front(lights: Round, grille: Wide, bumper: Body, bumper_y: (0.22, 0.34)),
+    front: Front(lights: Swept, grille: Wide, bumper: Body, bumper_y: (0.18, 0.36)),
     rear: Rear(lights: Round, spoiler: None, bumper: Body, bumper_y: (0.30, 0.44)),
     seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.78, creases: [(0.20, 0.48, 3.70, 0.56)]),
-    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Alloy5, hubcaps: false),
-    details: [SideStrakes, BlackTrim, Badge(Circle)],
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Split, hubcaps: false),
+    details: [BlackTrim, Badge(Circle)],
     roof: Roof(kind: Convertible(top: Down)),
     // Racing green, bright yellow, silver, orange, white, black.
     palette: ["#1d4a2e", "#e8c21a", "#bcc0c4", "#e0661c", "#efeee9", "#151618"],

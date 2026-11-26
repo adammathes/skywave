@@ -576,10 +576,10 @@ fn builds_are_deterministic() {
         0xebbe_b1b8_7826_cd46,
         0xd114_d3e5_6950_98e7,
         0xbf73_75be_c260_c310,
-        0xeb26_978e_08e3_19c9,
-        0x441a_4fb0_f6c5_7665,
-        0x5337_aac9_5881_f793,
-        0x2eff_03cc_020f_62de,
+        0xb376_3d8f_e78a_a274,
+        0x2337_65bb_154c_4e20,
+        0x8d9c_7db1_9d62_70b7,
+        0x626b_ac4a_8544_3973,
     ];
     let mut got = [0u64; 42];
     for (k, spec) in shapes().iter().enumerate() {
@@ -1161,6 +1161,7 @@ fn every_option_builds() {
         HeadLights::Quad,
         HeadLights::Round,
         HeadLights::Hidden,
+        HeadLights::Swept,
     ];
     let grilles = [Grille::Slot, Grille::Egg, Grille::Wide, Grille::None];
     let bumpers = [Bumper::Chrome, Bumper::Body, Bumper::Rubber];
@@ -1169,6 +1170,7 @@ fn every_option_builds() {
         TailLights::Dual,
         TailLights::Triple,
         TailLights::Round,
+        TailLights::Wrap,
     ];
     let spoilers = [
         Spoiler::None,
@@ -1184,6 +1186,8 @@ fn every_option_builds() {
         Rims::Dish,
         Rims::Slotted,
         Rims::Twin,
+        Rims::Split,
+        Rims::Spoke7,
     ];
     let details = [
         Detail::Louvers,

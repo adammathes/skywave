@@ -67,6 +67,9 @@ pub enum HeadLights {
     Round,
     /// A slim strip behind the grille.
     Hidden,
+    /// A tall clear lens swept back round the corner, its outer end the tallest, with two
+    /// round projectors behind it: the 2000s lamp.
+    Swept,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +107,8 @@ pub enum TailLights {
     Dual,
     Triple,
     Round,
+    /// Wide lamps high on the corners that wrap round onto the quarters: the 2000s lamp.
+    Wrap,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -185,6 +190,11 @@ pub enum Rims {
     /// Aftermarket: six pairs of thin polished spokes from a small cap to a wide bright
     /// lip, on a bigger rim with a low-profile tire.
     Twin,
+    /// Five split spokes (ten thin arms in pairs) on a big rim with a low-profile tire: the
+    /// 2000s sport sedan's.
+    Split,
+    /// Seven thin straight spokes to a bright lip on a big rim: the 2000s luxury car's.
+    Spoke7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
