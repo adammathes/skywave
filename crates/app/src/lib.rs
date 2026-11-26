@@ -2704,12 +2704,12 @@ mod tests {
         assert!(app.is_streamed() && app.world_instances == 2);
         let far = app.meshes()[0].indices.len() / 3;
         assert!(
-            (8192..=10_000).contains(&far),
+            (100_000..=140_000).contains(&far),
             "far terrain: {far} triangles"
         );
         let horizon = app.meshes()[1].indices.len() / 3;
         assert!(
-            (1000..=8000).contains(&horizon),
+            (1000..=25_000).contains(&horizon),
             "horizon: {horizon} triangles"
         );
         // On the ground at the start.

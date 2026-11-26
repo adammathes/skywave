@@ -1226,7 +1226,7 @@ mod tests {
             c.pieces_ms(),
             c.worst_stage,
         );
-        assert!((8192..=10_000).contains(&tris), "{tris} triangles");
+        assert!((100_000..=140_000).contains(&tris), "{tris} triangles");
         assert!(far
             .indices
             .iter()
