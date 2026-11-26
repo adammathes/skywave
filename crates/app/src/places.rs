@@ -22,6 +22,7 @@ const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+const BAY_AREA_2005: &str = include_str!("../../../assets/grammar/bay_area_2005.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 
@@ -42,9 +43,10 @@ const REGIONS: [(&str, &str); 3] = [
 /// The authored layouts compiled into the game, as `(id, RON text)`.
 const LAYOUTS: [(&str, &str); 1] = [("bay_loop", BAY_LOOP)];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
-const GRAMMARS: [(&str, &str); 2] = [
+const GRAMMARS: [(&str, &str); 3] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
     ("socal_basin_2001.ron", SOCAL_BASIN_2001),
+    ("bay_area_2005.ron", BAY_AREA_2005),
 ];
 
 /// The text of the built-in region template `id`.
@@ -267,9 +269,8 @@ mod tests {
         for s in crate::scenario::all() {
             assert!(region_text(&s.region).is_some());
             assert!(core::ptr::eq(grammar_of(s), grammar_of(s)), "parsed once");
-            // A world still being built, or one from an authored layout that has no grammar of
-            // its own yet, may dress in another's grammar.
-            if !s.stub && s.layout.is_none() {
+            // A world still being built may dress in another's grammar.
+            if !s.stub {
                 assert_eq!(grammar_of(s).template, s.region);
             }
             assert!(palette(&s.palette).is_some());

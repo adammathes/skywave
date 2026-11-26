@@ -1,6 +1,6 @@
 // The Bay Loop, 2005 (docs/SCENARIOS.md, "The Bay Loop"): a compressed Bay Area as one ring of
 // districts around the water, from the authored `bay_loop` layout (docs/LAYOUTS.md) dressed by
-// the `bay_area` zone rules. The radio and the palette are borrowed until the world has its own.
+// the `bay_area` zone rules. The radio is borrowed until the world has its own.
 Scenario(
     id: "bay_loop_2005",
     title: "Bay Loop",
@@ -8,9 +8,9 @@ Scenario(
     kind: "Bay and hills",
     region: "bay_area",
     layout: Some("bay_loop"),
-    grammar: "socal_basin_2001.ron",
+    grammar: "bay_area_2005.ron",
     radio: "2001_basin",
-    palette: "socal_1985",
+    palette: "bay_2005",
     default_time: (16, 10),
     default_vehicle: "goshawk_turbo",
     years: (1996, 2005),

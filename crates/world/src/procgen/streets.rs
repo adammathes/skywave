@@ -1052,6 +1052,21 @@ impl<'a> StreetPlan<'a> {
         self.cell_of(p).map_or(0.0, |c| self.adist[c])
     }
 
+    /// The local street grades of the zone at `p` (`ZoneRule::street_grade`): the profile
+    /// filter's, the steepest segment's and the lattice's break grade. The usual constants
+    /// unless the zone sets its own.
+    fn grades_at(&self, p: V2) -> (f32, f32, f32) {
+        let zone = self.m.zone_at(p.x, p.y);
+        match self.t.zones.get(zone).and_then(|r| r.street_grade) {
+            None => (FILTER_GRADE, MAX_GRADE, STEEP_GRADE),
+            Some(g) => (
+                g - (MAX_GRADE - FILTER_GRADE),
+                g,
+                g + (STEEP_GRADE - MAX_GRADE),
+            ),
+        }
+    }
+
     fn pattern_at(&self, p: V2) -> u8 {
         self.pat[self.m.zone_at(p.x, p.y) as usize]
     }
@@ -1093,10 +1108,11 @@ impl<'a> StreetPlan<'a> {
             }
             s.push(acc);
         }
+        let (filter, max, _) = self.grades_at((pts[0] + pts[pts.len() - 1]) * 0.5);
         let ys = grade_limit(
             &ground,
             &s,
-            FILTER_GRADE,
+            filter,
             Some(y0),
             Some(y1),
             Some((&ground, PROFILE_BAND_M)),
@@ -1105,7 +1121,7 @@ impl<'a> StreetPlan<'a> {
             .iter()
             .zip(&ground)
             .all(|(y, g)| abs(y - g) <= CUT_FILL_M)
-            && (1..ys.len()).all(|k| abs(ys[k] - ys[k - 1]) <= MAX_GRADE * (s[k] - s[k - 1]));
+            && (1..ys.len()).all(|k| abs(ys[k] - ys[k - 1]) <= max * (s[k] - s[k - 1]));
         fits.then_some(ys)
     }
 
@@ -1411,10 +1427,12 @@ impl<'a> StreetPlan<'a> {
         let n = (kb - ka + 1) as usize;
         let mut ok = vec![false; n];
         let mut hs = vec![0.0f32; n];
+        let mut steep = vec![0.0f32; n];
         let mut lab = vec![NONE; n];
         for k in 0..n {
             let p = base + dir * ((ka + k as i32) as f32 * SAMPLE_M);
             hs[k] = self.hgt(p);
+            steep[k] = self.grades_at(p).2;
             lab[k] = self.label_at(p);
             ok[k] = self.ok(p, lat.pattern)
                 && (lat.comp == NONE || lab[k] == lat.comp || lab[k] == NONE);
@@ -1422,7 +1440,7 @@ impl<'a> StreetPlan<'a> {
         // Steep stretches (over 16 m; the profile filter evens out gentler ones) break runs.
         let mut good = ok.clone();
         for k in 2..n.saturating_sub(2) {
-            if abs(hs[k + 2] - hs[k - 2]) > STEEP_GRADE * 4.0 * SAMPLE_M {
+            if abs(hs[k + 2] - hs[k - 2]) > steep[k] * 4.0 * SAMPLE_M {
                 good[k - 1] = false;
                 good[k] = false;
                 good[k + 1] = false;
