@@ -418,10 +418,23 @@ fn sun_visibility(world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) -> f32 {
     return vis;
 }
 
+// Vibrance on a linear albedo: a muted colour (pastel stucco, dry lawn, a car's paint) gets
+// up to VIBRANCE more chroma, an already bold one (a red band, neon trim) little, a grey
+// (asphalt, concrete) none, so the palette reads bright without the paint going neon.
+const VIBRANCE: f32 = 0.8;
+
+fn vivid(a: vec3<f32>) -> vec3<f32> {
+    let hi = max(a.r, max(a.g, a.b));
+    let lo = min(a.r, min(a.g, a.b));
+    let sat = (hi - lo) / max(hi, 1e-4);
+    let l = dot(a, LUMA);
+    return clamp(vec3<f32>(l) + (a - vec3<f32>(l)) * (1.0 + VIBRANCE * (1.0 - sat)), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 fn shade(in: MeshOut) -> vec3<f32> {
     // Sampled first, in uniform control flow, so implicit derivatives are valid.
     let texel = textureSample(atlas, atlas_sampler, in.uv);
-    let albedo = in.color.rgb * texel.rgb;
+    let albedo = vivid(in.color.rgb) * texel.rgb;
     let n = normalize(in.normal);
     let ndl = max(dot(n, frame.sun_dir.xyz), 0.0);
     // 1: unshadowed (it only ever scales ndl); the no-sun-shadow flag (16 in lights.x, bit 28

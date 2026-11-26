@@ -412,12 +412,18 @@ fn in_triangle(p: V2, a: V3, b: V3, c: V3) -> Option<f32> {
     (l1 >= eps && l2 >= eps && l3 >= eps).then_some(l1 * a.y + l2 * b.y + l3 * c.y)
 }
 
+/// Height where the hills' chaparral starts closing up, and the rise over which it does.
+const CHAPARRAL_FROM_M: f32 = 110.0;
+const CHAPARRAL_OVER_M: f32 = 120.0;
+
 /// Ground color of a zone before blending; `patch` in `[0, 1)` is seeded noise that puts
 /// stands of dark chaparral on the hills' golden grass and varies the open ground and the
-/// paving.
-fn zone_color(pal: &Palette, zone: ZoneId, patch: f32) -> Rgb {
+/// paving. The stands close up with height (`y`, meters): from [`CHAPARRAL_FROM_M`] the
+/// mountains go dark with brush, so a range reads through the haze from across a basin.
+fn zone_color(pal: &Palette, zone: ZoneId, patch: f32, y: f32) -> Rgb {
     let golden = mix(pal.lawn_dry, pal.sand, 70);
-    let stand = clamp((patch - 0.55) * 5.0, 0.0, 1.0);
+    let up = clamp((y - CHAPARRAL_FROM_M) / CHAPARRAL_OVER_M, 0.0, 1.0);
+    let stand = clamp((patch - 0.55 + 0.7 * up) * 5.0, 0.0, 1.0);
     match zone {
         ZoneId::Beach => pal.sand,
         ZoneId::Water => shade(pal.sand, 170),
@@ -467,7 +473,8 @@ impl CellColors {
             .map(|i| {
                 let p = grid.pos(i % cw, i / cw);
                 let patch = value_noise(seed ^ KEY_STANDS, p.x, p.y, 46.0);
-                zone_color(pal, colors.zone_at(i % cw, i / cw), patch).map(u32::from)
+                let y = grid.sample((i % cw).min(grid.w - 1), (i / cw).min(grid.h - 1));
+                zone_color(pal, colors.zone_at(i % cw, i / cw), patch, y).map(u32::from)
             })
             .collect();
         colors
