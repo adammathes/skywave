@@ -3,14 +3,15 @@
 // no basin: the layout says where everything is; these rules say what a district of each zone
 // looks like (blocks, streets, styles, trees, props). Scores are unused.
 //
-// The hills are open space: no local streets, oaks on dry grass. The city's residential
-// blocks are walk-ups and craftsman houses under street trees; the Peninsula's suburbs are
-// ranch houses under oaks; the industrial zone is the bayshore's office parks.
+// The hills are open space: no local streets, no houses, oaks on gold grass. The city's
+// residential blocks are row houses, painted walk-ups shoulder to shoulder over the crests;
+// the flats round the bay are long grid blocks of ranch and craftsman houses under oaks; the
+// industrial zone is the bayshore's office parks.
 RegionTemplate(
     name: "bay_area",
     driving_side: Right,
     sign_language: EnUs,
-    era: EraDefaults(year: 2005, street_lights: Sodium, palette: "socal_1985"),
+    era: EraDefaults(year: 2005, street_lights: Sodium, palette: "bay_2005"),
 
     edges: Edges(north: Ocean, east: Hills, south: Hills, west: Ocean),
 
@@ -63,17 +64,22 @@ RegionTemplate(
                 noise: 0.35,
                 noise_scale_m: 220,
             )),
+            // The city's row houses: narrow lots shoulder to shoulder (as narrow as a stucco
+            // walk-up builds on), two and three storeys of painted stucco over the crests, few
+            // street trees.
             block_m: ((100, 130), (60, 80)),
             streets: Grid,
-            alleys: true,
-            styles: [ThreeFlat, Craftsman, Bungalow, StuccoBox],
-            trees: [(Sycamore, 0.4), (Cypress, 0.2), (Maple, 0.2), (Linden, 0.2)],
+            alleys: false,
+            styles: [StuccoBox],
+            trees: [(Sycamore, 0.4), (Cypress, 0.4), (Linden, 0.2)],
             props: Props(
-                street_light_m: 50, street_tree_m: 18, hydrant_m: 110, power_pole_m: 0,
+                street_light_m: 50, street_tree_m: 34, hydrant_m: 110, power_pole_m: 0,
                 bench_per_km: 0.5, billboard_per_km: 0, neon: 0, parked_cars: (0.3, 0.6),
             ),
-            lots: Lots(width_m: (14, 20), depth_m: 38, setback_m: (5, 1.5, 5)),
-            massing: Some(Massing(coverage: 0.4, floors: (1, 3), floors_mean: 1.6, floors_spread: 0.4, style_weights: [3, 2, 1, 2])),
+            lots: Lots(width_m: (11, 14), depth_m: 30, setback_m: (2, 0, 6)),
+            massing: Some(Massing(coverage: 0.7, floors: (2, 3), floors_mean: 2.5, floors_spread: 0.3, style_weights: [1])),
+            // The grid runs straight up and over the crests.
+            street_grade: Some(0.22),
         ),
         suburb: ZoneRule(
             // Tract houses of the 1990s up against the foothills.
@@ -88,8 +94,10 @@ RegionTemplate(
                 noise: 0.35,
                 noise_scale_m: 200,
             )),
-            block_m: ((110, 170), (70, 110)),
-            streets: Curvy,
+            // The flats of the Peninsula, the South Bay and the East Bay: long straight blocks of
+            // single-storey houses under oaks, not cul-de-sac loops.
+            block_m: ((140, 190), (60, 80)),
+            streets: Grid,
             alleys: false,
             styles: [Ranch, Tract70s, Craftsman],
             trees: [(Oak, 0.45), (Sycamore, 0.25), (Maple, 0.15), (Eucalyptus, 0.15)],
@@ -198,14 +206,14 @@ RegionTemplate(
             block_m: ((200, 400), (150, 300)),
             streets: Open,
             alleys: false,
-            styles: [Ranch],
+            // Open space: a hard line where the houses stop, nothing built past it.
+            styles: [],
             trees: [(Oak, 0.75), (Eucalyptus, 0.15), (Pine, 0.1)],
             props: Props(
                 street_light_m: 0, street_tree_m: 0, hydrant_m: 250, power_pole_m: 60,
                 bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.1),
             ),
             lots: Lots(width_m: (25, 45), depth_m: 40, setback_m: (8, 4, 8)),
-            massing: Some(Massing(coverage: 0.18, floors: (1, 2), floors_mean: 1.4, floors_spread: 0.4, style_weights: [1])),
         ),
         highway: ZoneRule(
             // The rights of way: the freeway corridor, the rail line and the channel.

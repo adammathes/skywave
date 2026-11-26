@@ -158,11 +158,60 @@ impl Palette {
         }
     }
 
+    /// The 2005 Bay (the Bay Loop): the city's painted pastels over white trim, cool fog
+    /// light, slate-gray bay water, lawns kept green, and hills of straw-gold grass under
+    /// dark olive oak stands: the open space reads gold from across the water.
+    pub const fn bay_2005() -> Palette {
+        Palette {
+            stucco_cream: srgb(0xEFE6CF),
+            stucco_white: srgb(0xF0EEE8),
+            salmon: srgb(0xE3A58E),
+            pastel_pink: srgb(0xEBC3C6),
+            peach: srgb(0xF0D9A6),
+            mint: srgb(0xBFDCCB),
+            sky_blue: srgb(0xA9C6DA),
+            lavender: srgb(0xC6BCD8),
+            sand: srgb(0xD8BE84),
+            brick_red: srgb(0x8E4436),
+            brick_brown: srgb(0x6E5444),
+            teal: srgb(0x2E6F7A),
+            terracotta: srgb(0xB8634A),
+            navy: srgb(0x2A3A5C),
+            concrete: srgb(0xBDBAB2),
+            concrete_dark: srgb(0x8E8C86),
+            asphalt: srgb(0x424345),
+            asphalt_worn: srgb(0x5A5A58),
+            paint_white: srgb(0xE8E8E2),
+            paint_yellow: srgb(0xE4B82E),
+            roof_gravel: srgb(0x76746E),
+            lawn: srgb(0x5E8A3C),
+            lawn_dry: srgb(0xC9A55C),
+            scrub: srgb(0x4E5A32),
+            soil: srgb(0x8C6C4C),
+            water: srgb(0x3A6274),
+            palm_green: srgb(0x4A7234),
+            leaf_green: srgb(0x3A5A2A),
+            leaf_light: srgb(0x62883C),
+            bark: srgb(0x5E4A38),
+            glass: srgb(0x34485A),
+            metal_dark: srgb(0x3A3C40),
+            metal_light: srgb(0xA2A6AC),
+            hydrant_red: srgb(0xC42820),
+            sodium: srgb(0xFFA24A),
+            window_warm: srgb(0xFFD8A0),
+            neon_pink: srgb(0xFF4CA0),
+            neon_cyan: srgb(0x4CD8FF),
+            neon_red: srgb(0xFF3424),
+            neon_green: srgb(0x5CFF78),
+        }
+    }
+
     /// The built-in palette called `name` (a scenario's or a template's `era.palette`).
     pub fn named(name: &str) -> Option<Palette> {
         match name {
             "socal_1985" => Some(Palette::socal_1985()),
             "sodium_night" => Some(Palette::sodium_night()),
+            "bay_2005" => Some(Palette::bay_2005()),
             _ => None,
         }
     }
