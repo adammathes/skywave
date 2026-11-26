@@ -92,10 +92,10 @@ impl Rail {
             world::setpieces::gate_arm(&mut m, g.arm_m, pal);
             self.arm_mesh[k] = add(m);
         }
-        for k in 0..2 {
+        for (k, slot) in self.lamp_mesh.iter_mut().enumerate() {
             let mut m = WorldMesh::default();
             world::setpieces::gate_lamp(&mut m, k);
-            self.lamp_mesh[k] = add(m);
+            *slot = add(m);
         }
         out
     }
