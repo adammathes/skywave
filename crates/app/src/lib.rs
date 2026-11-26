@@ -340,6 +340,7 @@ impl App {
         drive.auto_headlights = ui.settings().headlights_auto;
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
+        ui.set_districts(map::districts::Districts::of(&place));
         let ground = world::WorldCollider::with_plan(&place, grammar, &plan);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
