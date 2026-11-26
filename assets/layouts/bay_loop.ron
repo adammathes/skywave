@@ -24,7 +24,7 @@ Layout(
         Ridge(name: "headlands", line: [(480, 215), (1200, 200), (1900, 205)],
               heights_m: [44, 40, 30], falloff_m: 130, relief_m: 6),
         Ridge(name: "east hills", line: [(3720, 420), (3760, 1500), (3720, 2600), (3620, 3500)],
-              height_m: 145, falloff_m: 470, relief_m: 14),
+              height_m: 145, falloff_m: 320, relief_m: 14),
     ],
     peaks: [
         // The city's hills: the crests its grid is laid straight over, about as steep as its
