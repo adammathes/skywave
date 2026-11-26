@@ -148,6 +148,11 @@ pub enum PropKind {
     Barricade {
         width_dm: u16,
     },
+    /// A run of freeway sound wall `len_dm` decimeters long along `dir`, at `pos`
+    /// ([`sound_walls`]; never in a Place).
+    SoundWall {
+        len_dm: u16,
+    },
 }
 
 /// One placed prop.
@@ -506,6 +511,7 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         PropKind::Barricade { width_dm } => {
             barricade(m, base, p.dir, f32::from(width_dm) * 0.1, pal)
         }
+        PropKind::SoundWall { len_dm } => sound_wall(m, base, p.dir, f32::from(len_dm) * 0.1, pal),
         PropKind::ExitSign { width_dm, street } => {
             exit_sign(m, base, p.dir, f32::from(width_dm) * 0.1, street, pal)
         }
@@ -3395,6 +3401,161 @@ pub fn dead_ends(place: &Place) -> Vec<Prop> {
         }
     }
     out
+}
+
+/// How far a sound wall stands out from the freeway's edge, m.
+const SOUND_WALL_OUT_M: f32 = 8.0;
+/// A sound wall run's length, m.
+const SOUND_WALL_RUN_M: f32 = 12.0;
+/// Its height and thickness, m.
+pub const SOUND_WALL_H_M: f32 = 4.2;
+pub const SOUND_WALL_T_M: f32 = 0.3;
+/// Clearance it keeps from every other road (past the road's half width and sidewalk), m.
+const SOUND_WALL_CLEAR_M: f32 = 6.0;
+
+/// The block walls along both sides of the freeway where it runs at grade through town:
+/// the side streets that stop short of it stop at a wall, as they do in the basin's real
+/// counterparts. A run is left out near every other road (ramps, the streets crossing
+/// over or under it, frontage streets), near the tunnel, where the freeway stands more
+/// than a little off the ground (bridges, cuts) and outside the place.
+pub fn sound_walls(place: &Place) -> Vec<Prop> {
+    let mut deg = alloc::vec![0u32; place.roads.nodes.len()];
+    for e in &place.roads.edges {
+        deg[e.a as usize] += 1;
+        deg[e.b as usize] += 1;
+    }
+    // How near the wall may come to each road's centerline: its half width and sidewalk
+    // and a clearance, but to a dead end only a meter, since the wall is there to close
+    // it across its end.
+    let roads: Vec<(V2, V2, f32)> = place
+        .roads
+        .edges
+        .iter()
+        .filter(|e| e.class != RoadClass::Highway)
+        .flat_map(|e| {
+            let dead = deg[e.a as usize] == 1 || deg[e.b as usize] == 1;
+            let hw = if dead {
+                1.0
+            } else {
+                0.5 * e.width_m
+                    + if e.sidewalk {
+                        place::SIDEWALK_WIDTH_M
+                    } else {
+                        0.0
+                    }
+                    + SOUND_WALL_CLEAR_M
+            };
+            e.profile
+                .windows(2)
+                .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
+        })
+        .collect();
+    let tunnel: Vec<V2> = place
+        .props
+        .items
+        .iter()
+        .filter(|p| matches!(p.kind, place::PropKind::TunnelPiece { .. }))
+        .map(|p| V2::new(p.pos[0], p.pos[2]))
+        .collect();
+    let ext = place.header.extent_m();
+    let ground = |q: V2| place.terrain.height_at(&place.header, [q.x, q.y]);
+    let clear = |q: V2| {
+        q.x > 1.0
+            && q.y > 1.0
+            && q.x < ext[0] - 1.0
+            && q.y < ext[1] - 1.0
+            && !roads
+                .iter()
+                .any(|&(a, b, hw)| crate::math::segment_distance(q, a, b).0 < hw)
+            && !tunnel.iter().any(|&t| (t - q).length() < 40.0)
+    };
+    let mut out = Vec::new();
+    for e in place.roads.edges.iter() {
+        if e.class != RoadClass::Highway || e.oneway || e.profile.len() < 2 {
+            continue;
+        }
+        let off = 0.5 * e.width_m + SOUND_WALL_OUT_M;
+        // Cut the centerline into runs of about the run length, each a straight chord.
+        let mut runs: Vec<([f32; 3], [f32; 3])> = Vec::new();
+        let mut start = e.profile[0];
+        let mut acc = 0.0;
+        for w in e.profile.windows(2) {
+            acc += V2::new(w[1][0] - w[0][0], w[1][2] - w[0][2]).length();
+            if acc >= SOUND_WALL_RUN_M {
+                runs.push((start, w[1]));
+                start = w[1];
+                acc = 0.0;
+            }
+        }
+        for (a, b) in runs {
+            let (pa, pb) = (V2::new(a[0], a[2]), V2::new(b[0], b[2]));
+            let d = pb - pa;
+            let len = d.length();
+            if len < 1.0 {
+                continue;
+            }
+            let dir = d * (1.0 / len);
+            for side in [-1.0f32, 1.0] {
+                let n = dir.right() * (side * off);
+                let (qa, qb) = (pa + n, pb + n);
+                let q = (qa + qb) * 0.5;
+                if !(clear(qa) && clear(qb) && clear(q)) {
+                    continue;
+                }
+                let (Some(ga), Some(gb), Some(gq)) = (ground(qa), ground(qb), ground(q)) else {
+                    continue;
+                };
+                // At grade: the road within a little of the ground under the wall.
+                let road_y = 0.5 * (a[1] + b[1]);
+                if (road_y - gq).abs() > 1.5 {
+                    continue;
+                }
+                out.push(Prop {
+                    pos: q,
+                    y: ga.min(gb).min(gq) - 0.2,
+                    dir,
+                    kind: PropKind::SoundWall {
+                        len_dm: ((len + 0.2) * 10.0) as u16,
+                    },
+                    seed: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// A run of sound wall `len` m along `dir` at `base`: split-face block in courses with a
+/// darker cap and a footing course.
+fn sound_wall(m: &mut WorldMesh, base: V3, dir: V2, len: f32, pal: &Palette) {
+    let f = Frame::upright(base, dir);
+    let block = Paint::new(mix(pal.concrete, pal.stucco_white, 60), Pattern::Concrete);
+    let cap = Paint::new(shade(pal.concrete, 215), Pattern::Concrete);
+    let (h, t, hl) = (SOUND_WALL_H_M, SOUND_WALL_T_M, 0.5 * len);
+    boxf(
+        m,
+        &f,
+        [-t * 0.5, 0.0, -hl],
+        [t * 0.5, h - 0.15, hl],
+        face::NO_BOTTOM,
+        block,
+    );
+    boxf(
+        m,
+        &f,
+        [-t * 0.5 - 0.04, h - 0.15, -hl],
+        [t * 0.5 + 0.04, h, hl],
+        face::NO_BOTTOM,
+        cap,
+    );
+    boxf(
+        m,
+        &f,
+        [-t * 0.5 - 0.03, 0.0, -hl],
+        [t * 0.5 + 0.03, 0.45, hl],
+        face::NO_BOTTOM,
+        cap,
+    );
 }
 
 /// A road-closed barricade `width` m across at `base`, traffic coming along `dir`: three

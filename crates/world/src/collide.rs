@@ -1370,6 +1370,15 @@ fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Ve
             PropKind::LotLabel { .. } => posts.push(post(0.12, 2.8)),
             // Overhead, out of reach.
             PropKind::PowerLine { .. } => {}
+            PropKind::SoundWall { len_dm } => boxes.push(BoxSolid {
+                c: arr(p.pos),
+                u: arr(p.dir),
+                half: [f32::from(len_dm) * 0.05, 0.5 * crate::props::SOUND_WALL_T_M],
+                y0: p.y,
+                y1: p.y + crate::props::SOUND_WALL_H_M,
+                kind: p.kind,
+                lot: NO_LOT,
+            }),
             PropKind::Barricade { width_dm } => boxes.push(BoxSolid {
                 c: arr(p.pos),
                 u: arr(p.dir.right()),
