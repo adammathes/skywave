@@ -141,8 +141,7 @@ with gates and bridges the wash; an airfield lies at the south-east corner of th
 tamarisk boulevard, its runway the drag strip. The set pieces are sited on this
 map: the crew garage in the yards, the stands and roadside landmarks along the boulevards, the
 city hall closing the view down the mirage boulevard, the letters on the mountain front where the
-summit avenue points at them, and a turnout at each lookout. There is no freeway tunnel: a street
-bridges the freeway every block.
+summit avenue points at them, a turnout at each lookout, and a tunnel on the freeway where no street crosses it.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

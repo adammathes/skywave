@@ -13,6 +13,10 @@ RegionTemplate(
     edges: Edges(north: Mountains, east: Mountains, south: RailYards, west: Hills),
 
 
+    // A grid city: a side street that stops short of the freeway, the wash or the rail line is
+    // cut back to its last crossing rather than left dead-ended.
+    through_streets: true,
+
     zones: Zones(
         downtown: ZoneRule(
             score: Some(Score(
