@@ -687,7 +687,7 @@ impl<'a> StreetPlan<'a> {
                     StreetPattern::Switchback => P_SWITCH,
                     StreetPattern::Sections => P_SECTIONS,
                     StreetPattern::Industrial => P_INDUSTRIAL,
-                    StreetPattern::Beachfront => P_NONE,
+                    StreetPattern::Beachfront | StreetPattern::Open => P_NONE,
                 },
             };
         }

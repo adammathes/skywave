@@ -42,6 +42,10 @@ pub struct Scenario {
     /// What kind of place, for the World page ("Beach town").
     pub kind: String,
     pub region: String,
+    /// An authored layout (`assets/layouts/<id>.ron`, `docs/LAYOUTS.md`) for the place, dressed
+    /// by `region`'s zone rules; without one the region template generates the place.
+    #[serde(default)]
+    pub layout: Option<String>,
     pub grammar: String,
     pub radio: String,
     pub palette: String,
@@ -57,7 +61,7 @@ pub struct Scenario {
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them. The first is the world a scene is in unless it names another (a bare start
 /// is in [`DEFAULT`]).
-pub const BUILTIN: [(&str, &str); 2] = [
+pub const BUILTIN: [(&str, &str); 3] = [
     (
         "socal_beach_1984",
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
@@ -65,6 +69,10 @@ pub const BUILTIN: [(&str, &str); 2] = [
     (
         "mirage_valley_2001",
         include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
+    ),
+    (
+        "bay_loop_2005",
+        include_str!("../../../assets/scenarios/bay_loop_2005.ron"),
     ),
 ];
 
@@ -91,6 +99,11 @@ impl Scenario {
         }
         if crate::places::region_text(&self.region).is_none() {
             return err("unknown region");
+        }
+        if let Some(l) = &self.layout {
+            if crate::places::layout_text(l).is_none() {
+                return err("unknown layout");
+            }
         }
         if crate::places::grammar_text(&self.grammar).is_none() {
             return err("unknown grammar");
@@ -400,7 +413,7 @@ pub const STILLS_PER_ROW: u32 = 4;
 /// Each scenario's still for the World page (`assets/stills/<id>.still`, rendered with
 /// `tools/screenshot`), in [`BUILTIN`] order: a 256-color palette (768 bytes of sRGB) and
 /// then one palette index per texel, row-major from the top-left.
-const STILLS: [(&str, &[u8]); 2] = [
+const STILLS: [(&str, &[u8]); 3] = [
     (
         "socal_beach_1984",
         include_bytes!("../../../assets/stills/socal_beach_1984.still"),
@@ -408,6 +421,10 @@ const STILLS: [(&str, &[u8]); 2] = [
     (
         "mirage_valley_2001",
         include_bytes!("../../../assets/stills/mirage_valley_2001.still"),
+    ),
+    (
+        "bay_loop_2005",
+        include_bytes!("../../../assets/stills/bay_loop_2005.still"),
     ),
 ];
 
@@ -510,9 +527,14 @@ mod tests {
             (basin.id.as_str(), basin.years, basin.stub),
             ("mirage_valley_2001", (1995, 2001), false)
         );
+        let bay = &all[2];
+        assert_eq!(
+            (bay.id.as_str(), bay.years, bay.layout.as_deref()),
+            ("bay_loop_2005", (1996, 2005), Some("bay_loop"))
+        );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");
-        assert_eq!(get(99).id, basin.id);
+        assert_eq!(get(99).id, bay.id);
     }
 
     #[test]

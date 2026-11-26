@@ -11,7 +11,9 @@
 //! (lots pale, parks green, empty lots and fields tan).
 //!
 //! Usage: `cargo run -p mapdump -- --seed 1 --template assets/regions/california_coast.ron
-//! --out map.png [--size 16x16] [--scale 1] [--roads] [--streets] [--parcels]`
+//! --out map.png [--size 16x16] [--scale 1] [--roads] [--streets] [--parcels]`. With
+//! `--layout assets/layouts/<id>.ron` the macro map and main roads come from that authored
+//! layout (`docs/LAYOUTS.md`) and the template only supplies zone rules.
 
 mod png;
 
@@ -19,6 +21,8 @@ use std::time::Instant;
 
 use place::{LotKind, Parcel, RoadClass, RoadGraph, ZoneId};
 use skywave_core::Seed;
+use world::layout::Layout;
+use world::procgen::authored;
 use world::procgen::{
     arterials, hash_graph, hash_parcels, MacroMap, MacroPoiKind, ParcelPlan, StreetPlan,
 };
@@ -413,7 +417,7 @@ pub fn generate_parcels(
 
 fn usage() -> ! {
     eprintln!(
-        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--size WxH] [--scale S] [--roads] [--streets] [--parcels]"
+        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--layout <layout.ron>] [--size WxH] [--scale S] [--roads] [--streets] [--parcels]"
     );
     std::process::exit(2);
 }
@@ -428,6 +432,7 @@ fn main() {
     let mut roads = false;
     let mut streets = false;
     let mut parcels = false;
+    let mut layout_path: Option<String> = None;
     let mut k = 1;
     while k < args.len() {
         let val = args.get(k + 1).cloned();
@@ -452,6 +457,7 @@ fn main() {
             }
             "--seed" => seed = val.and_then(|v| v.parse().ok()).unwrap_or_else(|| usage()),
             "--template" => template = val,
+            "--layout" => layout_path = val,
             "--out" => out = val,
             "--size" => {
                 let v = val.unwrap_or_else(|| usage());
@@ -477,8 +483,26 @@ fn main() {
         eprintln!("{e}");
         std::process::exit(1);
     });
+    let layout = layout_path.map(|p| {
+        let text = std::fs::read_to_string(&p).unwrap_or_else(|e| {
+            eprintln!("{p}: {e}");
+            std::process::exit(1);
+        });
+        let l: Layout = ron::from_str(&text).unwrap_or_else(|e| {
+            eprintln!("{p}: {e}");
+            std::process::exit(1);
+        });
+        l.validate().unwrap_or_else(|e| {
+            eprintln!("{p}: {e}");
+            std::process::exit(1);
+        });
+        l
+    });
     let start = Instant::now();
-    let map = MacroMap::generate(Seed(seed), &t, size);
+    let mut map = match &layout {
+        Some(l) => authored::macro_map(Seed(seed), l),
+        None => MacroMap::generate(Seed(seed), &t, size),
+    };
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let mut counts = [0usize; 12];
     for &z in &map.zones {
@@ -527,7 +551,10 @@ fn main() {
     let (w, h, mut rgb) = render(&map, scale.max(1));
     if roads {
         let start = Instant::now();
-        let g = arterials(Seed(seed), &t, &map);
+        let g = match &layout {
+            Some(l) => authored::arterials(l, &mut map).0,
+            None => arterials(Seed(seed), &t, &map),
+        };
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         // One-way edges are ramps whatever their class, and drawn as ramps, so count them apart.
         let mut count = [0usize; 7];

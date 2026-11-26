@@ -658,7 +658,10 @@ fn far_terrain_lies_under_the_ground() {
         let (mut checked, mut closest) = (0usize, f32::INFINITY);
         for t in far.indices.chunks_exact(3) {
             let v = [0, 1, 2].map(|k| far.vertices[t[k] as usize]);
-            if v.iter().any(|v| v.color[3] == Pattern::Water as u8) {
+            // Water, and the night's far street lamps, which glow above the ground on purpose.
+            if v.iter()
+                .any(|v| v.color[3] == Pattern::Water as u8 || v.emissive[3] != 0)
+            {
                 continue;
             }
             let [a, b, c] = v.map(|v| v.pos);
