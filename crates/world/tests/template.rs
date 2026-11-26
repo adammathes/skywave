@@ -45,21 +45,19 @@ fn california_is_the_west_coast_template() {
 
 #[test]
 fn stubs_are_flat_lake_grids() {
-    for text in [NORTH_SHORE] {
-        let t = parse(text);
-        assert_eq!(t.coast().water, CoastWater::Lake);
-        assert_eq!(t.elevation().ridge_count, (0, 0));
-        assert_eq!(
-            t.zones.residential.streets,
-            world::template::StreetPattern::Grid
-        );
-        assert_eq!(t.zones.suburb.streets, world::template::StreetPattern::Grid);
-        assert!(t
-            .zones
-            .residential
-            .styles
-            .contains(&world::template::BuildingStyle::Bungalow));
-    }
+    let t = parse(NORTH_SHORE);
+    assert_eq!(t.coast().water, CoastWater::Lake);
+    assert_eq!(t.elevation().ridge_count, (0, 0));
+    assert_eq!(
+        t.zones.residential.streets,
+        world::template::StreetPattern::Grid
+    );
+    assert_eq!(t.zones.suburb.streets, world::template::StreetPattern::Grid);
+    assert!(t
+        .zones
+        .residential
+        .styles
+        .contains(&world::template::BuildingStyle::Bungalow));
     // The lake city dresses its authored layout: zone rules only, bungalows on a grid.
     let t = parse(GREAT_LAKES);
     assert!(t.coast.is_none() && t.elevation.is_none() && t.layout.is_none());

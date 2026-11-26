@@ -192,10 +192,7 @@ fn strip_runs_beside_the_beach() {
 
 #[test]
 fn heights_are_finite_and_within_the_template() {
-    for (text, hilly) in [
-        (CALIFORNIA, true),
-        (NORTH_SHORE, false),
-    ] {
+    for (text, hilly) in [(CALIFORNIA, true), (NORTH_SHORE, false)] {
         let t = template(text);
         let (lo, hi) = t.height_bounds();
         for seed in 1..=3 {
