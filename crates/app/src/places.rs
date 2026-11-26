@@ -296,8 +296,8 @@ mod tests {
         ("socal_beach_1984", 41),
         ("mirage_valley_2001", 92),
         ("bay_loop_2005", 152),
-        ("mirage_bowl_2001", 194),
-        ("lake_city_1986", 40),
+        ("mirage_bowl_2001", 0),
+        ("lake_city_1986", 0),
     ];
 
     /// The map audit over every built-in world: no road you cannot reach, no loop back to
@@ -315,7 +315,11 @@ mod tests {
                 .layout
                 .as_deref()
                 .map(|id| crate::builtin::layout(id).unwrap());
-            // Where the layout says a road ends.
+            // Where the layout says a road ends, and the far end of a runway.
+            let runway = layout
+                .iter()
+                .filter_map(|l| l.airfield.as_ref())
+                .flat_map(|a| [a.runway.0, a.runway.1].map(|p| world::math::V2::new(p.0, p.1)));
             let ends: Vec<world::math::V2> = layout
                 .iter()
                 .flat_map(|l| {
@@ -325,6 +329,7 @@ mod tests {
                         .map(|r| l.road_line(r))
                 })
                 .filter_map(|line| line?.last().copied())
+                .chain(runway)
                 .collect();
             let ok = |p: [f32; 2]| {
                 let p = world::math::V2::new(p[0], p[1]);
