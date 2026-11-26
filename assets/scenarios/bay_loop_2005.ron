@@ -16,4 +16,8 @@ Scenario(
     years: (1996, 2005),
     // The Bay's own: a turbo commuter and a luxury six off the Peninsula's lots, and two VC toys.
     heroes: ["goshawk_turbo", "tulwar_sedan", "petrel_roadster", "lipizzan_sedan"],
+    // The marine layer: out past the ocean beach by day, it pours in over the city and the
+    // ridge's low end from half past three, fills the Peninsula to the bay shore by half past
+    // six, and burns off by half past eleven. The ridge and the East Bay hills stand above it.
+    fog_bank: Some(FogBank(sea_x: -600, inland_x: 2000, top_m: 80, density: 0.012)),
 )

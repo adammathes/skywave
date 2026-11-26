@@ -15,6 +15,7 @@
 //!   years: (1979, 1987),                 // the era: cars of these years are everyday cars
 //!   heroes: [],                          // cars rare by age but kept on the road
 //!   stub: false,                         // optional: a world still being built ("coming")
+//!   fog_bank: None,                      // optional: a marine layer ([`FogBank`])
 //! )
 //! ```
 //!
@@ -56,6 +57,25 @@ pub struct Scenario {
     /// Still being built: the World page marks it "coming" (it can be picked).
     #[serde(default)]
     pub stub: bool,
+    /// A fog bank off the sea to the west that rolls in each evening and burns off each
+    /// morning ([`crate::lighting::fog_bank`]).
+    #[serde(default)]
+    pub fog_bank: Option<FogBank>,
+}
+
+/// A marine layer: its front moves east from `sea_x` (out at sea, where it waits by day) to
+/// `inland_x` (how far it reaches by night), filling everything west of it below `top_m`.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FogBank {
+    /// World x of the front by day (m).
+    pub sea_x: f32,
+    /// World x of the front at its farthest, overnight (m).
+    pub inland_x: f32,
+    /// Height of its top (m).
+    pub top_m: f32,
+    /// Density inside it, 1/m (about 3.9 / visibility).
+    pub density: f32,
 }
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
