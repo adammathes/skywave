@@ -10,6 +10,7 @@ Scenario(
     grammar: "california_coast_80s.ron",
     radio: "1984_socal",
     palette: "socal_1985",
+    map_skin: "atlas",
     default_time: (17, 40),
     default_vehicle: "gannet_gt",
     years: (1979, 1987),
