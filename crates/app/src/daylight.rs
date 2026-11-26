@@ -51,8 +51,9 @@ const EXTINCTION_RGB: [f32; 3] = [0.02, 0.05, 0.11];
 const EXTINCTION_GREY: f32 = 0.08;
 /// What the sun's tint fades to as it sinks from the horizon to civil dusk.
 const SUN_DARK_RED: [f32; 3] = [0.40, 0.05, 0.0];
-/// Exponential fog coefficient per unit turbidity, 1/m.
-const FOG_PER_TURBIDITY: f32 = 0.0003;
+/// Exponential fog coefficient per unit turbidity, 1/m: a typical day keeps about two thirds of a
+/// hill 1 km off, so far colour still reads.
+const FOG_PER_TURBIDITY: f32 = 0.00015;
 /// The morning haze over the basin: it settles through the small hours (from this many
 /// seconds after midnight)...
 const HAZE_SETTLES_S: f64 = 2.0 * 3600.0;

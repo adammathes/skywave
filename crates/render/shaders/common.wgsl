@@ -151,11 +151,12 @@ fn agx(color: vec3<f32>) -> vec3<f32> {
     let x4 = x2 * x2;
     v = 15.5 * x4 * x2 - 40.14 * x4 * v + 31.96 * x4 - 6.868 * x2 * v + 0.4298 * x2
         + 0.1191 * v - 0.00232;
-    // Look: base AgX lifts shadows and reads flat next to the period palette, so add
-    // contrast (power 1.25) and saturation (1.2), between base and Wrensch's "punchy".
+    // Look: base AgX lifts shadows and greys out colour, which reads washed out next to
+    // the period palette, so add contrast (power 1.3) and saturation (1.5), Wrensch's
+    // "punchy" (1.35, 1.4) with more colour: paint, signs and sky read bold.
     let luma = dot(v, LUMA);
-    v = pow(max(v, vec3<f32>(0.0)), vec3<f32>(1.25));
-    v = max(luma + 1.2 * (v - luma), vec3<f32>(0.0));
+    v = pow(max(v, vec3<f32>(0.0)), vec3<f32>(1.3));
+    v = max(luma + 1.5 * (v - luma), vec3<f32>(0.0));
     // The outset has negative entries, so a saturated colour can land just below zero
     // here, and pow() of a negative base is undefined (NaN on some GPUs).
     let display = max(outset * v, vec3<f32>(0.0));
@@ -301,6 +302,8 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 const TWILIGHT_BLUE: vec3<f32> = vec3<f32>(0.447, 0.894, 3.687);
 // Keep radiance well inside the f16 range.
 const MAX_RADIANCE: f32 = 60000.0;
+// Extra chroma on the sky's radiance (see the end of `sky_radiance`).
+const SKY_VIVID: f32 = 1.35;
 
 fn perez(cos_theta: f32, gamma: f32, cos_gamma: f32) -> vec3<f32> {
     let ct = max(cos_theta, 1e-3);
@@ -343,5 +346,9 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
     let haze = frame.sky_horizon.rgb * (1.0 + 0.8 * toward);
     c = mix(c, haze, frame.sky_params.z * exp(-up * 12.0));
     c = mix(frame.sky_ground.rgb, c, smoothstep(-0.03, 0.0, dir.y));
+    // A painted sky: the model's pale blues and golds pushed toward their hue, so the sky
+    // (and the fog, which takes its colour) reads as colour rather than grey.
+    let l = dot(c, LUMA);
+    c = max(vec3<f32>(l) + (c - vec3<f32>(l)) * SKY_VIVID, vec3<f32>(0.0));
     return min(c, vec3<f32>(MAX_RADIANCE));
 }
