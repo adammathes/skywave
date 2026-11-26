@@ -88,6 +88,8 @@ pub enum StreetPattern {
     Industrial,
     /// The beachfront road, parking lots and a pier road.
     Beachfront,
+    /// No local streets: open land the main roads cross (an authored layout's open space).
+    Open,
 }
 
 /// Street and yard tree species. Shapes come from the shared prop library.
@@ -596,7 +598,8 @@ pub struct Basin {
 
 /// A kind of place: everything world generation needs besides the seed and the era. A
 /// coastal place has `coast`, `elevation` and `layout`; an inland basin has `basin` and
-/// none of them.
+/// none of them; a template with none of them carries only zone rules, to dress an
+/// authored layout (`crate::layout`, `docs/LAYOUTS.md`).
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -839,11 +842,19 @@ impl RegionTemplate {
             return Err(TemplateError::EraYear);
         }
 
-        match (&self.coast, &self.elevation, &self.layout, &self.basin) {
-            (Some(c), Some(e), Some(l), None) => self.validate_coast(c, e, l)?,
-            (None, None, None, Some(b)) => self.validate_basin(b)?,
+        let generated = match (&self.coast, &self.elevation, &self.layout, &self.basin) {
+            (Some(c), Some(e), Some(l), None) => {
+                self.validate_coast(c, e, l)?;
+                true
+            }
+            (None, None, None, Some(b)) => {
+                self.validate_basin(b)?;
+                true
+            }
+            // Zone rules only: the dressing of an authored layout (`crate::layout`).
+            (None, None, None, None) => false,
             _ => return Err(TemplateError::BadShape),
-        }
+        };
 
         let mut scored = 0;
         for zone in LAND_ZONES {
@@ -855,7 +866,7 @@ impl RegionTemplate {
                 scored += 1;
             }
         }
-        if scored == 0 {
+        if scored == 0 && generated {
             return Err(TemplateError::NoScoredZones);
         }
         Ok(())

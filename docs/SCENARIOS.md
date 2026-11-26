@@ -104,6 +104,19 @@ the format above), in the pause menu. Mirage Valley's place is its own, the `soc
 (`docs/WORLD_GENERATION.md`, "Inland basins"), dressed by its own grammar and the `sodium_night` palette
 ("The 2001 basin's grammar"), with its own `2001_basin` radio preset (`docs/AUDIO_RADIO.md`).
 
+## Fourth: the Bay Loop (2005)
+**`bay_loop_2005` — Bay Loop, 2005.** The first world built from an authored layout
+(`assets/layouts/bay_loop.ron`, `docs/LAYOUTS.md`) instead of a scored template: a compressed bay
+of the 2000s as one ring of districts around the water. A hilly city with a straight grid laid over
+its crests at the north-west, a red bridge over the strait to the headlands and a lookout, the
+headlands road round to an East Bay college town under its hills and an overlook road, a long bay
+crossing back; south from the city the ridge and its ridge road, the foothill freeway, the strip on
+the old highway, the university's open ground and the bayshore's office flats, to the flat South Bay
+and the foothill village, with a causeway across the bay's south end. Zone rules are the
+`bay_area` region template (`StreetPattern::Open` keeps the hills free of local streets). It
+borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
+and radio follow.
+
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.
 
