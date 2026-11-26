@@ -21,6 +21,9 @@ const END_CODAS: [&str; 9] = ["", "", "n", "r", "l", "s", "nd", "th", "m"];
 /// The burger chain's invented name: every stand is one of it.
 pub const BURGER_CHAIN: &str = "Hi-Wave";
 
+/// The lake city's drive-in hot dog stand's invented name: there is one.
+pub const HOT_DOG_STAND: &str = "Twin Franks";
+
 /// The word after the stem for each kind.
 pub fn kind_word(kind: PoiKind) -> &'static str {
     match kind {
@@ -46,6 +49,7 @@ pub fn kind_word(kind: PoiKind) -> &'static str {
         PoiKind::MoviePalace => "Theatre",
         PoiKind::CityHall => "City Hall",
         PoiKind::BurgerStand => "Burger",
+        PoiKind::HotDogStand => "Drive-In",
     }
 }
 
@@ -85,6 +89,9 @@ pub fn write_name(out: &mut impl Write, kind: PoiKind, seed: u64) -> fmt::Result
     if kind == PoiKind::BurgerStand {
         // A chain: every stand wears the one invented name.
         return write!(out, "{BURGER_CHAIN} {}", kind_word(kind));
+    }
+    if kind == PoiKind::HotDogStand {
+        return write!(out, "{HOT_DOG_STAND} {}", kind_word(kind));
     }
     write_stem(out, seed)?;
     write!(out, " {}", kind_word(kind))

@@ -16,6 +16,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod audit;
 pub mod buildings;
 pub mod collide;
 pub mod edges;

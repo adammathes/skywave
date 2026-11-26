@@ -2653,7 +2653,16 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     h.pad(PadButton::DpadRight);
     h.pad(PadButton::DpadRight);
     h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 0, "wraps");
+    h.pad(PadButton::DpadLeft);
+    assert_eq!(h.focus(), 4, "wraps back");
+    // The fifth world on the next page of cards.
+    let text = h.hud_text();
+    assert!(
+        text.contains("Lake City") && text.contains("Lake city, 1986"),
+        "{text}"
+    );
     h.pad(PadButton::DpadLeft);
     h.pad(PadButton::DpadLeft);
     h.pad(PadButton::DpadLeft);
@@ -2766,10 +2775,10 @@ fn the_world_page_pages_one_card_at_a_tv_scale() {
     assert_eq!(stills.len(), 1, "one card a page");
     // Beside its text, and bigger than a third of the card width would give.
     assert!(stills[0].h >= 100.0, "{:?}", stills[0]);
-    assert!(h.hud_text().contains("< 1 / 4 >"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("< 1 / 5 >"), "{}", h.hud_text());
     assert!(h.hud_text().contains("Pacific Shore"));
     h.pad(PadButton::DpadRight);
-    assert!(h.hud_text().contains("< 2 / 4 >"));
+    assert!(h.hud_text().contains("< 2 / 5 >"));
     assert!(h.hud_text().contains("Mirage Valley") && !h.hud_text().contains("Pacific Shore"));
     assert_eq!(
         images(&mut h, render::HudTexture::Still)[0].uv,
