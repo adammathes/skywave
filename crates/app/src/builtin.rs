@@ -37,7 +37,7 @@ pub const LANDMARKS: [(&str, &str); 10] = world::landmarks::BUILTIN;
 pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-pub const REGIONS: [(&str, &str); 4] = [
+pub const REGIONS: [(&str, &str); 5] = [
     ("california_coast", CALIFORNIA_COAST),
     ("socal_basin", SOCAL_BASIN),
     ("socal_bowl", SOCAL_BOWL),
