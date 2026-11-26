@@ -126,8 +126,10 @@ and west; rail yards to the south. Strip corridors line the boulevards and an ol
 grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
 mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
 lights. The air is clear (`haze: 0.45`, the distance haze at under half its usual thickness) and the
-hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Zone rules,
-grammar, palette, radio and cars are Mirage Valley's. The valley freeway crosses the floor under
+hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Its zone rules
+(`socal_bowl`) are Mirage Valley's with the streets of the real region: straight grids wherever a
+street goes, none on the open hillsides or in the parks, so no street loops off into the brush and
+stops in a bulb. Grammar, palette, radio and cars are Mirage Valley's. The valley freeway crosses the floor under
 downtown on sound walls, every street passing over it and diamonds at the canyon, summit and palm
 avenues; the wash, a concrete flood channel, comes down from the mountain front and runs out through
 the yards under every street's bridge. It replaces Mirage Valley once rail and the airfield have a
