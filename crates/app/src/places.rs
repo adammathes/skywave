@@ -295,8 +295,8 @@ mod tests {
     const MAP_FAULTS: [(&str, usize); 5] = [
         ("socal_beach_1984", 41),
         ("mirage_valley_2001", 92),
-        ("bay_loop_2005", 117),
-        ("mirage_bowl_2001", 156),
+        ("bay_loop_2005", 0),
+        ("mirage_bowl_2001", 0),
         ("lake_city_1986", 40),
     ];
 

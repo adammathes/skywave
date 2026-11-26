@@ -3668,7 +3668,84 @@ impl<'a> StreetPlan<'a> {
             stitch_rail(&nodes, &mut edges, &plan.rail, rule.rail.row_m);
             prune_stubs(&mut nodes, &mut edges);
         }
+        if self.t.no_dead_ends {
+            self.tidy(&mut nodes, &mut edges);
+        }
         RoadGraph { nodes, edges }
+    }
+
+    /// For a template with `no_dead_ends`: takes back every side street and alley that
+    /// ends at nothing (in a bulb or not) to its last junction, unless its zone's streets
+    /// have dead ends (cul-de-sacs, switchbacks, the beach road) or it runs off the map,
+    /// then drops the streets left cut off from the main network. What is left reads as a
+    /// street map: every block has a way round it.
+    fn tidy(&self, nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
+        use crate::template::StreetPattern::{Beachfront, Curvy, Switchback};
+        let edge_m = crate::audit::EDGE_M;
+        let may_end = |p: [f32; 2]| {
+            p[0] < edge_m
+                || p[1] < edge_m
+                || p[0] > self.ext[0] - edge_m
+                || p[1] > self.ext[1] - edge_m
+                || self
+                    .t
+                    .zones
+                    .get(self.m.zone_at(p[0], p[1]))
+                    .is_some_and(|r| matches!(r.streets, Curvy | Switchback | Beachfront))
+        };
+        let side = |c: RoadClass| matches!(c, RoadClass::Local | RoadClass::Alley);
+        loop {
+            // Each node's other ends (self-loops lead nowhere) and whether it has a main road.
+            let mut far: Vec<[u32; 2]> = vec![[u32::MAX; 2]; nodes.len()];
+            let mut main = vec![false; nodes.len()];
+            for e in edges.iter() {
+                for (u, v) in [(e.a, e.b), (e.b, e.a)] {
+                    main[u as usize] |= !side(e.class);
+                    let f = &mut far[u as usize];
+                    if v == u || f[0] == v {
+                        continue;
+                    }
+                    if f[0] == u32::MAX {
+                        f[0] = v;
+                    } else {
+                        f[1] = v;
+                    }
+                }
+            }
+            let dead: Vec<bool> = (0..nodes.len())
+                .map(|u| far[u][1] == u32::MAX && !main[u] && !may_end(nodes[u].pos))
+                .collect();
+            let before = edges.len();
+            edges.retain(|e| !(side(e.class) && (dead[e.a as usize] || dead[e.b as usize])));
+            if edges.len() == before {
+                break;
+            }
+        }
+        // The streets cut off from the main network.
+        let mut comp: Vec<u32> = (0..nodes.len() as u32).collect();
+        fn root(c: &mut [u32], mut i: u32) -> u32 {
+            while c[i as usize] != i {
+                c[i as usize] = c[c[i as usize] as usize];
+                i = c[i as usize];
+            }
+            i
+        }
+        for e in edges.iter() {
+            let (a, b) = (root(&mut comp, e.a), root(&mut comp, e.b));
+            comp[a.max(b) as usize] = a.min(b);
+        }
+        let mut has_main = vec![false; nodes.len()];
+        for e in edges.iter() {
+            if !side(e.class) {
+                let r = root(&mut comp, e.a);
+                has_main[r as usize] = true;
+            }
+        }
+        edges.retain(|e| {
+            let r = root(&mut comp, e.a);
+            has_main[r as usize]
+        });
+        drop_unused_nodes(nodes, edges);
     }
 }
 
@@ -3828,6 +3905,11 @@ fn prune_stubs(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
             break;
         }
     }
+    drop_unused_nodes(nodes, edges);
+}
+
+/// Drops the nodes no edge uses, keeping the others in order.
+fn drop_unused_nodes(nodes: &mut Vec<Node>, edges: &mut [Edge]) {
     let mut used = vec![false; nodes.len()];
     for e in edges.iter() {
         used[e.a as usize] = true;
