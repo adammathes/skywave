@@ -250,7 +250,8 @@ pub fn signed_area(poly: &[V2]) -> f32 {
 pub fn point_in_polygon(p: V2, poly: &[V2]) -> bool {
     let mut inside = false;
     let n = poly.len();
-    let mut j = n - 1;
+    // Nothing is inside no polygon (a plan with no airfield has an empty one).
+    let mut j = n.saturating_sub(1);
     for i in 0..n {
         let (a, b) = (poly[i], poly[j]);
         if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
