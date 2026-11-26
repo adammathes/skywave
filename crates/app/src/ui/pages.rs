@@ -21,9 +21,10 @@
 //!            this device; select to remap
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
-//! Video:     Quality (Low / Battery / Deck / Medium / High / Ultra) · Frame rate (the
-//!            panel's, then its whole divisors: 45 / 30 at 90 Hz) · UI scale · Resolution
-//!            scale · Bloom
+//! Video:     Look (Standard / Smog / Dusk layers / Amber haze / Poster / Toon / Night
+//!            video / Low-res / Ink) · Quality (Low / Battery / Deck / Medium / High /
+//!            Ultra) · Frame rate (the panel's, then its whole divisors: 45 / 30 at 90 Hz) ·
+//!            UI scale · Resolution scale · Bloom
 //! HUD:       Minimap · Rotate with car · Minimap zoom · Performance overlay (Off / FPS /
 //!            Full) · Show controls at start
 //! Audio:     Master volume · Engine volume · World volume · Radio volume · Mute · Source
@@ -129,6 +130,7 @@ pub enum ItemId {
     Dashboard,
     CockpitDriver,
     CameraShake,
+    Look,
     Quality,
     FrameRate,
     UiScale,
@@ -184,6 +186,8 @@ pub struct PageCtx<'a> {
     pub music_again: bool,
     /// The preset in effect (the saved one, else the one picked for the device).
     pub quality: Quality,
+    /// The look in effect (a scene's `look=` until one is picked, else the saved one).
+    pub look: render::Look,
     /// The frame-rate cap in effect, and the display's refresh rate it divides.
     pub frame_rate: FrameRate,
     pub panel_hz: f64,
@@ -213,6 +217,18 @@ pub const CAMERA_NAMES: [&str; CameraMode::CYCLE.len()] =
 /// Names of [`Quality::ALL`].
 pub const QUALITY_NAMES: [&str; Quality::ALL.len()] =
     ["Low", "Battery", "Deck", "Medium", "High", "Ultra"];
+/// Names of [`render::Look::ALL`].
+pub const LOOK_NAMES: [&str; render::Look::ALL.len()] = [
+    "Standard",
+    "Smog",
+    "Dusk layers",
+    "Amber haze",
+    "Poster",
+    "Toon",
+    "Night video",
+    "Low-res",
+    "Ink",
+];
 /// Names of [`Overlay::ALL`].
 pub const OVERLAY_NAMES: [&str; Overlay::ALL.len()] = ["Off", "FPS", "Full"];
 /// Names of [`FrameRate::ALL`] (the page draws the frames a second they come to).
@@ -542,6 +558,17 @@ pub fn build(page: Page, ctx: &PageCtx, out: &mut Vec<Item>) {
         }
         Page::Video => {
             let s = ctx.settings;
+            add(
+                ItemId::Look,
+                "Look",
+                Widget::Choice {
+                    options: &LOOK_NAMES,
+                    index: render::Look::ALL
+                        .iter()
+                        .position(|&l| l == ctx.look)
+                        .unwrap_or(0),
+                },
+            );
             let index = Quality::ALL
                 .iter()
                 .position(|&q| q == ctx.quality)
@@ -835,6 +862,7 @@ mod tests {
             music_picker: false,
             music_again: false,
             quality: Quality::Deck,
+            look: render::Look::Standard,
             frame_rate: FrameRate::Half,
             panel_hz: 90.0,
             browse: [3, 1],
@@ -958,14 +986,19 @@ mod tests {
         assert_eq!(items[5].widget, Widget::Toggle(true));
         assert_eq!(items[6].widget, Widget::Toggle(true));
         build(Page::Video, &ctx, &mut items);
-        assert_eq!(items[0].id, ItemId::Quality);
+        assert_eq!(items[0].id, ItemId::Look);
         assert!(
-            matches!(items[0].widget, Widget::Choice { index: 2, .. }),
+            matches!(items[0].widget, Widget::Choice { index: 0, options } if options.len() == 9),
+            "standard of nine"
+        );
+        assert_eq!(items[1].id, ItemId::Quality);
+        assert!(
+            matches!(items[1].widget, Widget::Choice { index: 2, .. }),
             "deck"
         );
-        assert_eq!(items[1].id, ItemId::FrameRate);
+        assert_eq!(items[2].id, ItemId::FrameRate);
         assert!(
-            matches!(items[1].widget, Widget::Choice { index: 1, options } if options.len() == 3),
+            matches!(items[2].widget, Widget::Choice { index: 1, options } if options.len() == 3),
             "45 of 90, 45 and 30"
         );
     }

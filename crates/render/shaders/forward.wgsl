@@ -115,6 +115,15 @@ fn sky_full(dir: vec3<f32>) -> vec3<f32> {
     return min(c, vec3<f32>(MAX_RADIANCE));
 }
 
+// The sky as the look draws it.
+fn look_sky_full(dir: vec3<f32>) -> vec3<f32> {
+    let look = look_id();
+    if look == LOOK_STANDARD {
+        return sky_full(dir);
+    }
+    return look_sky(look, sky_full(dir), dir);
+}
+
 fn sky_dir(ndc: vec2<f32>) -> vec3<f32> {
     let far = frame.inv_view_proj * vec4<f32>(ndc, 1.0, 1.0);
     return normalize(far.xyz / far.w - frame.camera_pos.xyz);
@@ -122,12 +131,12 @@ fn sky_dir(ndc: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(sky_full(sky_dir(in.ndc)), 1.0);
+    return vec4<f32>(look_sky_full(sky_dir(in.ndc)), 1.0);
 }
 
 @fragment
 fn fs_sky_ldr(in: SkyOut) -> @location(0) vec4<f32> {
-    return display(sky_full(sky_dir(in.ndc)), in.clip.xy);
+    return display(look_sky_full(sky_dir(in.ndc)), in.clip.xy);
 }
 
 // ---- Meshes ---------------------------------------------------------------------------
@@ -359,21 +368,141 @@ fn shade(in: MeshOut) -> vec3<f32> {
     // Point-light illuminance / pi is the luminance of a white Lambertian surface, as for
     // the sun.
     let lamps = point_lights(in.world_pos, n, in.lights) * (1.0 / 3.14159265);
-    var c = albedo * (frame.sun_light.rgb * (ndl * vis) + ambient + lamps);
+    let look = look_id();
+    var c: vec3<f32>;
+    if look == LOOK_STANDARD {
+        c = albedo * (frame.sun_light.rgb * (ndl * vis) + ambient + lamps);
+    } else {
+        c = look_light(look, albedo, in.color.rgb, ndl * vis, ambient, lamps);
+    }
     // Self-lit color, untouched by texture and instance tint; fog still dims it.
     c += in.emissive;
 
     let to_frag = in.world_pos - frame.camera_pos.xyz;
     let dist = length(to_frag);
-    let fog = 1.0 - exp(-dist * frame.camera_pos.w);
+    let density = frame.camera_pos.w * look_fog_scale(look);
+    let fog = 1.0 - exp(-dist * density);
     // A fog thicker than any weather's (a morning haze, over 0.002/m) lies on the ground
     // too: its in-scatter fades into the ground's over a wider band below the horizon, so
     // no line marks the eye height. Thinner fog keeps the sky's own band exactly.
     var d = to_frag / max(dist, 1e-4);
-    let band = 0.03 + 0.5 * clamp((frame.camera_pos.w - 0.002) / 0.002, 0.0, 1.0);
+    let band = 0.03 + 0.5 * clamp((density - 0.002) / 0.002, 0.0, 1.0);
     d.y = select(d.y, d.y * (0.03 / band), d.y < 0.0);
-    c = mix(c, sky_radiance(d), fog);
+    if look == LOOK_DUSK {
+        c = dusk_layers(c, dist);
+    } else {
+        c = mix(c, look_sky(look, sky_radiance(d), d), fog);
+    }
     return min(c, vec3<f32>(MAX_RADIANCE));
+}
+
+// ---- Looks (see `render::Look`) ---------------------------------------------------------
+
+// A look's sun, ambient and lamp light on `albedo` (`color` is the albedo without the
+// atlas's pattern), given the sun's share `sun` (cosine times shadow visibility).
+fn look_light(look: u32, albedo: vec3<f32>, color: vec3<f32>, sun: f32, ambient: vec3<f32>, lamps: vec3<f32>) -> vec3<f32> {
+    var s = sun;
+    var a = albedo;
+    var sun_tint = vec3<f32>(1.0);
+    var shade_tint = vec3<f32>(1.0);
+    switch look {
+        case LOOK_SMOG: {
+            sun_tint = vec3<f32>(1.3, 1.06, 0.72);
+            shade_tint = vec3<f32>(0.78, 0.98, 1.08);
+        }
+        case LOOK_POSTER: {
+            // Lit or not, no falloff; shadow in one violet tone; a dozen paint colors and
+            // no pattern.
+            s = select(0.0, 1.0, sun > 0.2);
+            shade_tint = vec3<f32>(0.8, 0.72, 1.2);
+            a = poster_paint(color);
+        }
+        case LOOK_TOON: {
+            s = select(select(0.0, 0.5, sun > 0.1), 1.0, sun > 0.45);
+        }
+        default: {}
+    }
+    return a * (frame.sun_light.rgb * (s * sun_tint) + ambient * shade_tint + lamps);
+}
+
+// The poster look's paint: the nearest of a dozen colors to the albedo with its color
+// pushed up, compared in sRGB.
+fn poster_paint(albedo: vec3<f32>) -> vec3<f32> {
+    var paints = array<vec3<f32>, 12>(
+        vec3<f32>(0.957, 0.937, 0.894), vec3<f32>(0.914, 0.847, 0.722),
+        vec3<f32>(0.184, 0.714, 0.816), vec3<f32>(0.937, 0.353, 0.541),
+        vec3<f32>(0.231, 0.561, 0.353), vec3<f32>(0.173, 0.169, 0.2),
+        vec3<f32>(0.91, 0.639, 0.239), vec3<f32>(0.839, 0.271, 0.196),
+        vec3<f32>(0.541, 0.561, 0.588), vec3<f32>(0.788, 0.761, 0.702),
+        vec3<f32>(0.122, 0.435, 0.545), vec3<f32>(0.369, 0.294, 0.337),
+    );
+    let e = saturate_by(linear_to_srgb(clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0))), 1.4);
+    var best = paints[0];
+    var best_d = 1e9;
+    for (var i = 0u; i < 12u; i++) {
+        let v = e - paints[i];
+        let dd = dot(v, v);
+        if dd < best_d {
+            best_d = dd;
+            best = paints[i];
+        }
+    }
+    return srgb_to_linear(best);
+}
+
+// How much thicker a look's fog is than the weather's.
+fn look_fog_scale(look: u32) -> f32 {
+    switch look {
+        case LOOK_SMOG: {
+            return 3.0;
+        }
+        case LOOK_AMBER: {
+            return 14.0;
+        }
+        default: {
+            return 1.0;
+        }
+    }
+}
+
+// A look's color for the sky radiance `c` toward `dir` (also the fog's color).
+fn look_sky(look: u32, c: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, LUMA);
+    switch look {
+        case LOOK_SMOG: {
+            // A brown-gold smog band low, the sky's own blue faded above it.
+            let low = 1.0 - smoothstep(0.0, 0.35, dir.y);
+            return mix(mix(c, vec3<f32>(l), 0.3), l * vec3<f32>(1.3, 1.0, 0.62), low);
+        }
+        case LOOK_AMBER: {
+            return l * vec3<f32>(1.7, 0.85, 0.3);
+        }
+        case LOOK_DUSK: {
+            // Warm near the horizon, fading to pale gold above.
+            let t = smoothstep(0.0, 0.5, dir.y);
+            return l * mix(vec3<f32>(1.75, 0.82, 0.45), vec3<f32>(1.35, 1.05, 0.7), t);
+        }
+        default: {
+            return c;
+        }
+    }
+}
+
+// The dusk look's distance color: five stops from dark plum near to pale gold far, in
+// place of the fog, lit by the horizon so it follows the time of day.
+fn dusk_layers(c: vec3<f32>, dist: f32) -> vec3<f32> {
+    let t = clamp(log(max(dist, 15.0) / 15.0) / log(120.0), 0.0, 1.0);
+    var stops = array<vec3<f32>, 5>(
+        vec3<f32>(0.165, 0.086, 0.192), vec3<f32>(0.478, 0.184, 0.271),
+        vec3<f32>(0.816, 0.341, 0.243), vec3<f32>(0.945, 0.604, 0.298),
+        vec3<f32>(0.984, 0.827, 0.541),
+    );
+    let x = t * 4.0;
+    let i = u32(min(floor(x), 3.0));
+    let ramp = srgb_to_linear(mix(stops[i], stops[i + 1u], x - f32(i)));
+    let horizon = dot(frame.sky_horizon.rgb, LUMA);
+    let w = clamp(t * 1.6, 0.0, 1.0);
+    return mix(c, ramp * (horizon * 1.6), 0.3 + 0.7 * w);
 }
 
 @fragment
