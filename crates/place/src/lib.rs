@@ -799,6 +799,16 @@ pub enum PropKind {
     LotLabel {
         letter: u8,
     },
+    /// A suspension bridge's tower astride the deck, `pos` at its middle on the deck,
+    /// facing: along the deck toward the other tower, `span_m` away. Its legs stand
+    /// `width_m` apart (outside the deck) and rise `rise_m` over it; it carries its half of
+    /// the main cables to mid-span, their hangers down to the deck, and its back cables to
+    /// an anchorage a third of the span behind it.
+    BridgeTower {
+        span_m: u16,
+        rise_m: u8,
+        width_m: u8,
+    },
 }
 
 /// [`PropKind::Track`] beds: on a ballast embankment over the ground...

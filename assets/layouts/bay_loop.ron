@@ -88,7 +88,7 @@ Layout(
 
         // The red bridge over the strait, the lookout and the headlands road round to the
         // East Bay.
-        Road(name: "red bridge", class: Arterial, lanes: 2, max_grade: Some(0.2), points: [(1000, 1450), (1000, 320)]),
+        Road(name: "red bridge", class: Arterial, lanes: 2, max_grade: Some(0.2), suspension: true, points: [(1000, 1450), (1000, 320)]),
         Road(name: "lookout", class: Rural, lanes: 1, sidewalk: false, dead_end: true, points: [(1000, 320), (700, 300), (520, 230)]),
         Road(name: "headlands road", class: Rural, lanes: 1, sidewalk: false, speed_kph: Some(70), points: [
             (1000, 320), (1600, 315), (2200, 330), (2500, 400), (2900, 520), (3150, 700), (3136, 1100),

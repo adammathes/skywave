@@ -236,6 +236,14 @@ pub fn hash_detail(place: &Place) -> u64 {
             PropKind::CrossingGate { arm_dm } => (32, u64::from(arm_dm)),
             PropKind::Landmark { kit, variant } => (33, u64::from(kit) | u64::from(variant) << 8),
             PropKind::LotLabel { letter } => (34, u64::from(letter)),
+            PropKind::BridgeTower {
+                span_m,
+                rise_m,
+                width_m,
+            } => (
+                35,
+                u64::from(span_m) | u64::from(rise_m) << 16 | u64::from(width_m) << 24,
+            ),
         };
         words.push(tag);
         words.push(payload);
