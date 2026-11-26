@@ -118,9 +118,11 @@ and the foothill village, with a causeway across the bay's south end. Zone rules
 stucco row houses shoulder to shoulder over garage doors with bay windows and cornices (its own
 grammar, `bay_area_2005.ron`), its grid climbing the crests at up to 22% (`street_grade`), and the
 flats round the bay are long straight blocks of ranch and craftsman houses under oaks. Its palette is
-`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and fog,
-bridge towers, its own 2005 cars and its own radio follow; every car of 1996 to 2005 drives
-there.
+`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and
+bridge towers, its own 2005 cars and its own radio follow. Its `fog_bank` is the marine layer: out
+at sea by day, it pours in over the city from half past three, fills the Peninsula to the bay shore
+by half past six and burns off by half past eleven, while the ridge and the East Bay hills stand
+above it. Every car of 1996 to 2005 drives there.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

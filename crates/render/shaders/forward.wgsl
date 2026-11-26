@@ -73,6 +73,71 @@ fn disc_coords(dir: vec3<f32>, center: vec3<f32>, cos_r: f32) -> vec3<f32> {
     return vec3<f32>(q, select(0.0, 1.0, dot(dir, center) > 0.0));
 }
 
+// ---- Fog bank (see `render::FogBank`) ---------------------------------------------------
+
+// Half widths of the bank's soft edges: across the front and at the top (m).
+const BANK_FRONT_EDGE: f32 = 200.0;
+const BANK_TOP_EDGE: f32 = 15.0;
+// Farthest a sky ray is followed through the bank (m).
+const BANK_SKY_REACH: f32 = 6000.0;
+const BANK_SAMPLES: i32 = 8;
+// Luminance the city's lamps give the bank by night (kcd/m²).
+const BANK_CITY_GLOW: f32 = 0.0008;
+
+// How much of the bank is at `p`: 1 inside, 0 outside.
+fn bank_at(p: vec3<f32>) -> f32 {
+    let b = frame.fog_bank;
+    let across = clamp((b.x - p.x) / (2.0 * BANK_FRONT_EDGE) + 0.5, 0.0, 1.0);
+    let below = clamp((b.y - p.y) / (2.0 * BANK_TOP_EDGE) + 0.5, 0.0, 1.0);
+    return across * below;
+}
+
+// The bank's color: the sky's light from above and the sun's on it, greyer than either.
+fn bank_color() -> vec3<f32> {
+    let sun = frame.sun_light.rgb * clamp(frame.sun_dir.y * 6.0, 0.0, 1.0);
+    let c = 1.1 * frame.sky_up.rgb + 0.6 * sun;
+    let grey = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    // By night it glows with the city's lamps under it (kcd/m², as the window scale rises).
+    let city = vec3<f32>(1.0, 0.72, 0.48) * (BANK_CITY_GLOW * frame.emissive.y);
+    return mix(vec3<f32>(grey), c, 0.25) + city;
+}
+
+// `c` seen from `eye` at `at` through the bank: the ray is clipped to the bank's box (west
+// of the front's outer edge, below the top's), then its cover is the mean of a few samples.
+fn fog_bank(c: vec3<f32>, eye: vec3<f32>, at: vec3<f32>) -> vec3<f32> {
+    let b = frame.fog_bank;
+    if b.z <= 0.0 {
+        return c;
+    }
+    let d = at - eye;
+    var t0 = 0.0;
+    var t1 = 1.0;
+    let xmax = b.x + BANK_FRONT_EDGE;
+    let ymax = b.y + BANK_TOP_EDGE;
+    if abs(d.x) > 1e-4 {
+        let t = (xmax - eye.x) / d.x;
+        if d.x > 0.0 { t1 = min(t1, t); } else { t0 = max(t0, t); }
+    } else if eye.x > xmax {
+        return c;
+    }
+    if abs(d.y) > 1e-4 {
+        let t = (ymax - eye.y) / d.y;
+        if d.y > 0.0 { t1 = min(t1, t); } else { t0 = max(t0, t); }
+    } else if eye.y > ymax {
+        return c;
+    }
+    if t1 <= t0 {
+        return c;
+    }
+    var cover = 0.0;
+    for (var i = 0; i < BANK_SAMPLES; i++) {
+        let t = mix(t0, t1, (f32(i) + 0.5) / f32(BANK_SAMPLES));
+        cover += bank_at(eye + d * t);
+    }
+    let depth = b.z * length(d) * (t1 - t0) * cover / f32(BANK_SAMPLES);
+    return mix(c, bank_color(), 1.0 - exp(-depth));
+}
+
 fn sky_full(dir: vec3<f32>) -> vec3<f32> {
     var c = sky_radiance(dir);
     let above = smoothstep(-0.002, 0.004, dir.y);
@@ -124,6 +189,12 @@ fn look_sky_full(dir: vec3<f32>) -> vec3<f32> {
     return look_sky(look, sky_full(dir), dir);
 }
 
+// The sky toward `dir`, through the bank out to `BANK_SKY_REACH`.
+fn banked_sky(dir: vec3<f32>) -> vec3<f32> {
+    let eye = frame.camera_pos.xyz;
+    return fog_bank(look_sky_full(dir), eye, eye + dir * BANK_SKY_REACH);
+}
+
 fn sky_dir(ndc: vec2<f32>) -> vec3<f32> {
     let far = frame.inv_view_proj * vec4<f32>(ndc, 1.0, 1.0);
     return normalize(far.xyz / far.w - frame.camera_pos.xyz);
@@ -131,12 +202,12 @@ fn sky_dir(ndc: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(look_sky_full(sky_dir(in.ndc)), 1.0);
+    return vec4<f32>(banked_sky(sky_dir(in.ndc)), 1.0);
 }
 
 @fragment
 fn fs_sky_ldr(in: SkyOut) -> @location(0) vec4<f32> {
-    return display(look_sky_full(sky_dir(in.ndc)), in.clip.xy);
+    return display(banked_sky(sky_dir(in.ndc)), in.clip.xy);
 }
 
 // ---- Meshes ---------------------------------------------------------------------------
@@ -393,6 +464,7 @@ fn shade(in: MeshOut) -> vec3<f32> {
     } else {
         c = mix(c, look_sky(look, sky_radiance(d), d), fog);
     }
+    c = fog_bank(c, frame.camera_pos.xyz, in.world_pos);
     return min(c, vec3<f32>(MAX_RADIANCE));
 }
 
