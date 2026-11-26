@@ -11,7 +11,7 @@ use vehicle::{step, Assists, VehicleInput, VehicleSpec, VehicleState};
 use world::landmarks::Kit;
 use world::math::{point_in_polygon, segment_distance, V2, V3};
 use world::procgen::build_place;
-use world::procgen::setpieces::{DRIVE_IN_VIEW_M, ROADSIDE, ROADSIDE_APART_M};
+use world::procgen::setpieces::{DRIVE_IN_VIEW_M, EXTRA_APART_M, ROADSIDE, ROADSIDE_APART_M};
 use world::template::RegionTemplate;
 use world::{resolve, WorldCollider};
 
@@ -206,30 +206,34 @@ fn freeway(p: &Place) -> Vec<(V2, V2)> {
 #[test]
 fn the_roadside_set_stands_once_each_on_its_own_clear_lot() {
     let g = grammar();
-    let picks: Vec<(usize, u8)> = ROADSIDE
-        .iter()
-        .map(|(id, letter, _)| {
-            let k = g.landmarks.iter().position(|k| k.id == *id).unwrap();
-            (k, *letter as u8 - b'A')
-        })
-        .collect();
     for seed in 1..=4u64 {
         let p = basin(seed);
         let set = roadside(&p, &g);
-        // Once each, in the owner's picks, each with its point of interest.
-        assert_eq!(set.len(), ROADSIDE.len(), "seed {seed}");
-        for &(kit, variant) in &picks {
-            let n = count(&p, |k| {
-                k == PropKind::Landmark {
-                    kit: kit as u8,
-                    variant,
-                }
-            });
-            assert_eq!(n, 1, "seed {seed}: kit {kit}");
+        // The owner's four picks once each; the extra donut shops and the burger chain's
+        // stands as many as the arterials have room for, but plenty.
+        for (id, letter, poi) in &ROADSIDE[..4] {
+            let kit = g.landmarks.iter().position(|k| k.id == *id).unwrap() as u8;
+            let variant = *letter as u8 - b'A';
+            let n = count(&p, |k| k == PropKind::Landmark { kit, variant });
+            assert!(n >= 1, "seed {seed}: {id} {letter}");
+            if *poi != PoiKind::DonutShop {
+                assert_eq!(pois(&p, *poi), 1, "seed {seed}: {poi:?}");
+            }
         }
-        for (_, _, poi) in ROADSIDE {
-            assert_eq!(pois(&p, poi), 1, "seed {seed}: {poi:?}");
-        }
+        let (donuts, burgers) = (pois(&p, PoiKind::DonutShop), pois(&p, PoiKind::BurgerStand));
+        eprintln!(
+            "seed {seed}: {} of the roadside set, {donuts} donut shops, {burgers} burger stands",
+            set.len()
+        );
+        assert!(
+            donuts >= 5 && burgers >= 2,
+            "seed {seed}: {donuts} donuts, {burgers} burgers"
+        );
+        assert_eq!(
+            set.len(),
+            (4 + donuts + burgers - 1),
+            "seed {seed}: each its point of interest"
+        );
         let fronts: Vec<V2> = p
             .props
             .items
@@ -281,16 +285,16 @@ fn the_roadside_set_stands_once_each_on_its_own_clear_lot() {
                 if i != j {
                     let d = (at(o) - at(q)).length();
                     assert!(
-                        d >= ROADSIDE_APART_M,
+                        d >= EXTRA_APART_M,
                         "seed {seed}: {name} {d:.0} m from another"
                     );
                 }
             }
+            // The garage's and the stand's props stand back from their lots' fronts, which
+            // are what the siting keeps apart.
             for f in &fronts {
-                assert!(
-                    (*f - at(q)).length() >= ROADSIDE_APART_M,
-                    "seed {seed}: {name}"
-                );
+                let d = (*f - at(q)).length();
+                assert!(d >= EXTRA_APART_M - 40.0, "seed {seed}: {name} {d:.0} m");
             }
             // Its parked cars stand on its lot, clear of its solid parts.
             let variant = match q.kind {

@@ -198,6 +198,9 @@ pub struct Assists {
     pub grip_boost: f32,
     /// Service-brake torque multiplier (1 = the spec's brakes; the handbrake is not boosted).
     pub brake_boost: f32,
+    /// Engine torque multiplier in the forward gears (1 = the spec's engine; the game's
+    /// nitrous raises it for a few seconds).
+    pub power_boost: f32,
 }
 
 impl Assists {
@@ -208,6 +211,7 @@ impl Assists {
         steering: 0.0,
         grip_boost: 1.0,
         brake_boost: 1.0,
+        power_boost: 1.0,
     };
     pub const LIGHT: Assists = Assists {
         stability: 0.3,
@@ -216,6 +220,7 @@ impl Assists {
         steering: 1.0,
         grip_boost: 1.0,
         brake_boost: 1.0,
+        power_boost: 1.0,
     };
     /// After the first play on real hardware ("too slippy, braking too slow"): firm
     /// stability, strong traction control, ABS, grip-limited steering, a fifth more grip
@@ -227,6 +232,7 @@ impl Assists {
         steering: 1.0,
         grip_boost: 1.2,
         brake_boost: 1.4,
+        power_boost: 1.0,
     };
 }
 
@@ -749,6 +755,9 @@ pub fn step(
     let mut engine_torque = 0.0;
     if state.engine_rpm < redline {
         engine_torque = spec.engine.torque_at(state.engine_rpm) * drive_pedal * state.traction_cut;
+        if state.gear > 0 {
+            engine_torque *= assists.power_boost;
+        }
     }
     if state.gear < 0 {
         // Reverse is for parking: the drive fades out toward the reverse speed cap.

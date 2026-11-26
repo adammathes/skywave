@@ -183,7 +183,7 @@ coast's Place is unchanged.
   shop B, coffee shop C, motel C, drive-in A). Landmark kits on lots of their kit's size, square to a road
   behind its walk; their lots lose their buildings and nothing the detailing scatters stands on them. The
   donut shop, the coffee shop and the motel, in that order, on commercial or strip lots on an arterial or
-  collector, each the nearest the boulevard at least 250 m from the others, the garage and the stand. The
+  collector, each the nearest the boulevard at least 250 m from the others, the garage and the stand (the extras below 150 m). The
   drive-in on open farmland (or an industrial lot) off a road that is not the freeway: of the sites within
   350 m of the freeway, the one farthest from downtown, its screen facing the road and seen from the
   freeway. Each is a point of interest (`DonutShop`, `CoffeeShop`, `Motel`, `DriveIn`; the map names it
@@ -196,6 +196,13 @@ coast's Place is unchanged.
   side to it, gets the person inside leaning out over the sill with a box, which goes in the window and
   lands on the passenger seat, and rides there (up to three stacked) until the car is switched. No menu,
   no money, no UI; the radio plays on. Driving 6 m off lets the window serve again.
+  After those four, the valley's other donut shops (eight in all where the lots allow, wearing the donut
+  kit's three looks in turn) and three stands of its one burger chain (`burger_stand`, `BurgerStand`; the map
+  calls every one "Hi-Wave Burger") take lots the same way, interleaved so both spread along the arterials.
+  The burger stand paints the donut shop's lane, stall and window layout; its stalls fill at lunch, dinner
+  and late. Its window hands out a red-and-white bag; the moment the seat holds a donut box and a burger bag
+  the driver eats them, which is a charge of nitrous (`app::nitrous`, up to three; the Nitrous button burns
+  one for 3 s at 1.8× engine torque, and a toast says what is in the tank).
 - **The grade crossings.** Every road the rail line crosses at grade: a `GradeCrossing` landmark on the track's
   middle, and a `CrossingGate` (mast, crossed blades, twin lamps, bell, the arm's pivot) on each approach on the
   right, its arm reaching across the approach to 0.3 m short of the road's middle (across the whole road on a

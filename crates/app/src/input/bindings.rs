@@ -400,6 +400,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Underglow => vec![key(Key::KeyU, Pos)],
             Action::Horn => vec![key(Key::KeyB, Pos)],
             Action::Flash => vec![key(Key::KeyN, Pos)],
+            Action::Nitrous => vec![key(Key::ShiftLeft, Pos)],
             Action::VehicleNext => vec![key(Key::KeyV, Pos)],
             Action::Reset => vec![key(Key::KeyR, Pos)],
             Action::MapToggle => vec![key(Key::KeyM, Pos)],
@@ -450,6 +451,7 @@ pub fn default_bindings(device: DeviceKind, action: Action) -> Vec<Binding> {
             Action::Underglow => vec![],
             Action::Horn => vec![btn(PadButton::L3)],
             Action::Flash => vec![btn(PadButton::East)],
+            Action::Nitrous => vec![btn(PadButton::West)],
             // The pad picks a car on the pause menu's Vehicle page.
             Action::VehicleNext => vec![],
             // Held, so a tap (the map) never resets by accident.
@@ -520,7 +522,7 @@ mod tests {
         let pad = DeviceKind::Gamepad;
         let raws = |d, a| b.get(d, a).iter().map(|b| b.raw).collect::<Vec<_>>();
         use RawInput::{Key as K, PadAxis as A, PadButton as B};
-        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 29] = [
+        let table: [(Action, Vec<RawInput>, Vec<RawInput>); 30] = [
             (
                 Action::Throttle,
                 vec![K(Key::KeyW), K(Key::ArrowUp)],
@@ -610,6 +612,11 @@ mod tests {
             (Action::Underglow, vec![K(Key::KeyU)], vec![]),
             (Action::Horn, vec![K(Key::KeyB)], vec![B(PadButton::L3)]),
             (Action::Flash, vec![K(Key::KeyN)], vec![B(PadButton::East)]),
+            (
+                Action::Nitrous,
+                vec![K(Key::ShiftLeft)],
+                vec![B(PadButton::West)],
+            ),
             (Action::VehicleNext, vec![K(Key::KeyV)], vec![]),
             (
                 Action::Reset,

@@ -70,7 +70,11 @@ pub const ROWS: [Row; 25] = [
     merged("Drive", "Steer", &[Action::Steer]),
     row("Drive", "Throttle", &[Action::Throttle]),
     row("Drive", "Brake / reverse", &[Action::Brake]),
-    row("Drive", "Handbrake", &[Action::Handbrake]),
+    row(
+        "Drive",
+        "Handbrake, nitrous",
+        &[Action::Handbrake, Action::Nitrous],
+    ),
     row("Drive", "Horn", &[Action::Horn]),
     row("Drive", "Reset car", &[Action::Reset]),
     row("Drive", "Next car", &[Action::VehicleNext]),
