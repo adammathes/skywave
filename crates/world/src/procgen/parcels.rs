@@ -1044,7 +1044,6 @@ impl<'a> ParcelPlan<'a> {
         }
     }
 
-    /// Whether a piece of an open face touches water, beach or the highway corridor.
     /// Whether `piece` lies in open space (a zone whose streets are
     /// [`StreetPattern::Open`]): no lots there, open or closed face.
     fn open_space(&self, piece: &[Vx]) -> bool {
@@ -1056,6 +1055,7 @@ impl<'a> ParcelPlan<'a> {
             .is_some_and(|r| r.streets == StreetPattern::Open)
     }
 
+    /// Whether a piece of an open face touches water, beach or the highway corridor.
     fn unwanted(&self, piece: &[Vx]) -> bool {
         let c = area_centroid(piece);
         core::iter::once(c)

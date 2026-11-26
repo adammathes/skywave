@@ -1,0 +1,26 @@
+// Mirage Bowl, 2001 (docs/LAYOUTS.md, docs/SCENARIOS.md): Mirage Valley redrawn from the
+// authored `mirage_bowl` layout, a basin floor in a ring of mountains, dressed by the
+// `socal_basin` zone rules with Mirage Valley's grammar, radio, palette and cars. It sits
+// beside Mirage Valley until the layout format can draw its freeway and flood channel.
+Scenario(
+    id: "mirage_bowl_2001",
+    title: "Mirage Bowl",
+    year: 2001,
+    kind: "Basin in the mountains",
+    region: "socal_basin",
+    layout: Some("mirage_bowl"),
+    grammar: "socal_basin_2001.ron",
+    radio: "2001_basin",
+    palette: "sodium_night",
+    map_skin: "atlas",
+    default_time: (15, 30),
+    default_vehicle: "halberd_coupe",
+    years: (1995, 2001),
+    // Clear air, the day after the wind: the mountain front stands over the whole floor.
+    haze: 0.45,
+    heroes: [
+        "halberd_coupe", "halberd_targa", "tanager_awd", "destrier_coupe", "siskin_coupe",
+        "shrike_coupe", "glaive_turbo", "falchion_sedan", "courser_v8",
+        "dunlin_roadster", "palfrey_roadster",
+    ],
+)

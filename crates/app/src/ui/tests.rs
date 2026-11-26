@@ -2633,13 +2633,14 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         "Mirage Valley",
         "5 stations",
         "Bay Loop",
+        "< 1 / 2 >",
         "here",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
     assert!(!text.contains("coming"), "every world is built: {text}");
     let stills = images(&mut h, render::HudTexture::Still);
-    assert_eq!(stills.len(), 3);
+    assert_eq!(stills.len(), 3, "three cards a page");
     for (k, s) in stills.iter().enumerate() {
         assert_eq!(s.uv, crate::scenario::still_uv(k));
     }
@@ -2651,7 +2652,9 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert_eq!(h.focus(), 1);
     h.pad(PadButton::DpadRight);
     h.pad(PadButton::DpadRight);
+    h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 0, "wraps");
+    h.pad(PadButton::DpadLeft);
     h.pad(PadButton::DpadLeft);
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.focus(), 1);
@@ -2763,10 +2766,10 @@ fn the_world_page_pages_one_card_at_a_tv_scale() {
     assert_eq!(stills.len(), 1, "one card a page");
     // Beside its text, and bigger than a third of the card width would give.
     assert!(stills[0].h >= 100.0, "{:?}", stills[0]);
-    assert!(h.hud_text().contains("< 1 / 3 >"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("< 1 / 4 >"), "{}", h.hud_text());
     assert!(h.hud_text().contains("Pacific Shore"));
     h.pad(PadButton::DpadRight);
-    assert!(h.hud_text().contains("< 2 / 3 >"));
+    assert!(h.hud_text().contains("< 2 / 4 >"));
     assert!(h.hud_text().contains("Mirage Valley") && !h.hud_text().contains("Pacific Shore"));
     assert_eq!(
         images(&mut h, render::HudTexture::Still)[0].uv,

@@ -1415,6 +1415,8 @@ impl App {
             }
         }
         self.preview_drawn = start..self.instances.len();
+        let mut sky = lighting::sky(&daylight);
+        sky.fog_density *= scenario::get(self.scenario()).haze;
         SceneView {
             camera: Camera {
                 view: view.to_cols_array_2d(),
@@ -1425,7 +1427,7 @@ impl App {
                 fog_bank: scenario::get(self.scenario())
                     .fog_bank
                     .and_then(|b| lighting::fog_bank(&b, self.time.clock.seconds_of_day as f32)),
-                ..lighting::sky(&daylight)
+                ..sky
             }),
             instances: &self.instances,
             lights: self.lights.lights(),
