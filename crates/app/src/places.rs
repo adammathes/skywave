@@ -289,4 +289,66 @@ mod tests {
         let err = load_grammar(CALIFORNIA_COAST_80S, &lex).unwrap_err();
         assert!(err.contains("us_roadside"), "{err}");
     }
+
+    /// Faults the map audit (`world::audit`) still finds in each world, seed 1. A world's
+    /// count may only go down: fix the map, then lower its number here. New worlds start at 0.
+    const MAP_FAULTS: [(&str, usize); 5] = [
+        ("socal_beach_1984", 41),
+        ("mirage_valley_2001", 92),
+        ("bay_loop_2005", 117),
+        ("mirage_bowl_2001", 156),
+        ("lake_city_1986", 40),
+    ];
+
+    /// The map audit over every built-in world: no road you cannot reach, no loop back to
+    /// its own junction, no stub, and a dead end only where its zone's streets have them
+    /// (cul-de-sacs, switchbacks, the pier road) or the layout says `dead_end`. Prints
+    /// each fault and where it is (`cargo test -p app map_audit -- --nocapture`).
+    #[test]
+    fn every_world_passes_the_map_audit() {
+        use world::template::StreetPattern::{Beachfront, Curvy, Switchback};
+        let mut wrong = Vec::new();
+        for s in crate::scenario::all() {
+            let place = build_in(PlaceKey::Coast, Seed(1), s).expect("the world builds");
+            let t = crate::builtin::template(&s.region).unwrap();
+            let layout = s
+                .layout
+                .as_deref()
+                .map(|id| crate::builtin::layout(id).unwrap());
+            // Where the layout says a road ends.
+            let ends: Vec<world::math::V2> = layout
+                .iter()
+                .flat_map(|l| {
+                    l.roads
+                        .iter()
+                        .filter(|r| r.dead_end)
+                        .map(|r| l.road_line(r))
+                })
+                .filter_map(|line| line?.last().copied())
+                .collect();
+            let ok = |p: [f32; 2]| {
+                let p = world::math::V2::new(p[0], p[1]);
+                let rule = t.zones.get(world::zone_at(&place, p));
+                rule.is_some_and(|r| matches!(r.streets, Curvy | Switchback | Beachfront))
+                    || ends.iter().any(|e| (*e - p).length() < 60.0)
+            };
+            let found = world::audit::roads(&place, ok);
+            for f in &found {
+                eprintln!(
+                    "{}: {:?} at ({:.0}, {:.0}): {:?} road, {:.0} m (?scenario={}&pos={:.0},{:.0})",
+                    s.id, f.fault, f.at[0], f.at[1], f.class, f.len_m, s.id, f.at[0], f.at[1]
+                );
+            }
+            let known = MAP_FAULTS.iter().find(|k| k.0 == s.id).map_or(0, |k| k.1);
+            eprintln!("{}: {} map faults (pinned {known})", s.id, found.len());
+            if found.len() != known {
+                wrong.push((s.id.clone(), found.len(), known));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "map faults (world, found, pinned in MAP_FAULTS): {wrong:?}; more: fix the map, \
+             fewer: lower the pin"
+        );
+    }
 }

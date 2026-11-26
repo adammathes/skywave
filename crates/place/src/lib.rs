@@ -523,6 +523,9 @@ pub enum PoiKind {
     CityHall = 20,
     /// A walk-up burger stand with a drive-thru, one of a chain, at its lot's middle.
     BurgerStand = 21,
+    /// A drive-in hot dog stand with figures on its roof and carhop canopies, a lake city's
+    /// hero landmark, at its lot's middle.
+    HotDogStand = 22,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.

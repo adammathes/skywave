@@ -746,10 +746,16 @@ fn repick_m(v: f32) -> f32 {
 }
 
 /// Whether car `c`, `d` meters from its signal's stop line, goes on through it: it commits
-/// only to what clears the line before red.
+/// only to what clears the line before red, at no more than its turn's speed (a car that
+/// claims a sharp turn on the yellow slows for it on the way to the line).
 fn signal_open(g: &LaneGraph, c: &Car, d: f32, tick: u64) -> bool {
     let left = g.until_red(c.seg, tick).unwrap_or(0) as f32 * DT;
-    let makes_it = time_to(d, c.speed) + RED_MARGIN_S < left;
+    let cap = if c.next_turn == NONE {
+        f32::MAX
+    } else {
+        turn_speed(g, c.next_turn)
+    };
+    let makes_it = time_to_capped(d, c.speed, cap) + RED_MARGIN_S < left;
     match g.light(c.seg, tick) {
         Some(Light::Green) => makes_it || d > commit_m(c.speed),
         Some(Light::Yellow) => makes_it && d <= commit_m(c.speed),
@@ -761,6 +767,19 @@ fn signal_open(g: &LaneGraph, c: &Car, d: f32, tick: u64) -> bool {
 fn time_to(d: f32, v: f32) -> f32 {
     let a = 0.5 * A_MAX;
     (sqrt(v * v + 2.0 * a * d.max(0.0)) - v) / a
+}
+
+/// [`time_to`], at no more than `cap` m/s: a car above it is taken to be at it already, so
+/// the estimate errs late.
+fn time_to_capped(d: f32, v: f32, cap: f32) -> f32 {
+    let v = v.min(cap);
+    let a = 0.5 * A_MAX;
+    let reach = (cap * cap - v * v) / (2.0 * a);
+    if d <= reach {
+        time_to(d, v)
+    } else {
+        (cap - v) / a + (d - reach) / cap
+    }
 }
 
 fn turn_speed(g: &LaneGraph, turn: u32) -> f32 {

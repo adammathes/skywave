@@ -585,3 +585,20 @@ the grammar when a task first needs to vary it; a fitted value names its source
 - Connectivity: ≥ 95% of edges in one component; a path exists from `PlayerStart` to every zone.
 - Budget: median chunk generation ≤ 2 ms, p99 ≤ 6 ms on the CI runner (native release).
 - Screenshots of seed 1 from four fixed cameras (strip at dusk, downtown noon, suburb morning, farmland sunset) checked visually at each milestone gate.
+
+## The map audit
+A street map has no road you cannot drive to, no street that loops back to its own junction, and no
+street that stops at nothing except where streets do (a suburb's cul-de-sac, a switchback's end, the
+pier road, a road the layout marks `dead_end`). `world::audit::roads` reads a finished place's road
+graph for exactly those and says where each is: `Unreachable`, `Loop`, `DeadEnd`, `Stub` (a dead end
+under 40 m, allowed nowhere) and `Unjoined` (a street whose end lies on another road with no junction
+there). A road running off the edge of the place is not a dead end. The test
+`every_world_passes_the_map_audit` (`crates/app/src/places.rs`) runs it over every built-in world in
+CI and prints each fault with a `?scenario=…&pos=…` to go and look at it:
+
+```
+cargo test -p app every_world_passes_the_map_audit -- --nocapture
+```
+
+Each world's count is pinned in `MAP_FAULTS` and may only go down: a change that adds a fault fails, a
+change that removes some lowers the pin in the same PR. A new world starts at 0.
