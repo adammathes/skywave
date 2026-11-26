@@ -184,14 +184,13 @@ fn gradient_noise(pixel: vec2<f32>) -> f32 {
 // ---- Looks -------------------------------------------------------------------------
 // Mirrors `render::Look`: the index of each in `Look::ALL`.
 const LOOK_STANDARD: u32 = 0u;
-const LOOK_SMOG: u32 = 1u;
-const LOOK_DUSK: u32 = 2u;
-const LOOK_AMBER: u32 = 3u;
-const LOOK_POSTER: u32 = 4u;
-const LOOK_TOON: u32 = 5u;
-const LOOK_VIDEO: u32 = 6u;
-const LOOK_LOW_RES: u32 = 7u;
-const LOOK_INK: u32 = 8u;
+const LOOK_DUSK: u32 = 1u;
+const LOOK_AMBER: u32 = 2u;
+const LOOK_POSTER: u32 = 3u;
+const LOOK_TOON: u32 = 4u;
+const LOOK_VIDEO: u32 = 5u;
+const LOOK_LOW_RES: u32 = 6u;
+const LOOK_INK: u32 = 7u;
 // Lines of the low-res look's picture.
 const LOW_RES_LINES: f32 = 180.0;
 
@@ -219,12 +218,6 @@ fn saturate_by(c: vec3<f32>, k: f32) -> vec3<f32> {
 fn grade(e: vec3<f32>, frag: vec2<f32>, look: u32) -> vec3<f32> {
     var c = e;
     switch look {
-        case LOOK_SMOG: {
-            // Faded print: warm, a touch more color, lifted blacks, rolled-off whites, grain.
-            c = saturate_by(c * vec3<f32>(1.06, 1.0, 0.86), 1.15);
-            c = 0.06 + 0.9 * c;
-            c += (gradient_noise(frag * 1.7 + 13.0) - 0.5) * 0.05;
-        }
         case LOOK_DUSK: {
             // A few flat steps.
             c = (floor(c * 7.0) + 0.5) / 7.0;
