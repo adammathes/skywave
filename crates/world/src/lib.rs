@@ -637,6 +637,7 @@ fn place_props(place: &Place, seed: u64) -> Vec<props::Prop> {
     out.extend(props::exit_signs(place));
     out.extend(props::dead_ends(place));
     out.extend(props::sound_walls(place));
+    out.extend(props::pole_signs(place));
     out
 }
 
@@ -648,7 +649,12 @@ fn shop_signs(
     props: &[props::Prop],
 ) -> Vec<Option<signs::lexicon::ShopSign>> {
     let blades: Vec<usize> = (0..props.len())
-        .filter(|&i| matches!(props[i].kind, props::PropKind::NeonSign { .. }))
+        .filter(|&i| {
+            matches!(
+                props[i].kind,
+                props::PropKind::NeonSign { .. } | props::PropKind::PoleSign { .. }
+            )
+        })
         .collect();
     let at: Vec<V2> = blades.iter().map(|&i| props[i].pos).collect();
     let drawn = signs::lexicon::assign(&grammar.signs, &grammar.lexicon, grammar.era, seed, &at);

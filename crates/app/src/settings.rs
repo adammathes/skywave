@@ -8,7 +8,7 @@
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "driver": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
-//!              "frame_rate": "panel" },
+//!              "frame_rate": "panel", "look": "standard" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0,
 //!            "overlay": "off", "controls_at_start": true, "controls_dismissed": 0 },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal", "scenario": "socal_beach_1984" },
@@ -385,6 +385,8 @@ pub struct Settings {
     /// size and is upscaled, the HUD stays sharp.
     pub resolution_scale: f32,
     pub bloom: bool,
+    /// The picture's style.
+    pub look: render::Look,
     /// The graphics preset; `None` picks one for the device ([`Quality::auto`]).
     pub quality: Option<Quality>,
     /// The frame-rate cap (the panel's rate unless chosen).
@@ -439,6 +441,7 @@ impl Default for Settings {
             ui_scale: 1.0,
             resolution_scale: 1.0,
             bloom: true,
+            look: render::Look::Standard,
             quality: None,
             frame_rate: FrameRate::Panel,
             overlay: Overlay::Off,
@@ -551,6 +554,8 @@ struct Video {
     quality: String,
     /// A [`FrameRate`] name.
     frame_rate: String,
+    /// A [`render::Look`] name.
+    look: String,
 }
 
 impl Default for Video {
@@ -563,6 +568,7 @@ impl Default for Video {
             debug_overlay: None,
             quality: quality_name(s.quality).to_owned(),
             frame_rate: s.frame_rate.name().to_owned(),
+            look: s.look.name().to_owned(),
         }
     }
 }
@@ -739,6 +745,7 @@ impl Settings {
                 debug_overlay: None,
                 quality: quality_name(self.quality).to_owned(),
                 frame_rate: self.frame_rate.name().to_owned(),
+                look: self.look.name().to_owned(),
             },
             "hud": HudSection {
                 minimap: self.minimap,
@@ -812,6 +819,7 @@ impl Settings {
             ui_scale: video.ui_scale,
             resolution_scale: video.resolution_scale,
             bloom: video.bloom,
+            look: render::Look::from_name(&video.look).unwrap_or_default(),
             quality: Quality::from_name(&video.quality),
             frame_rate: FrameRate::from_name(&video.frame_rate).unwrap_or_default(),
             overlay: match hud.overlay.as_deref() {
@@ -862,6 +870,7 @@ mod tests {
             ui_scale: 1.75,
             resolution_scale: 0.75,
             bloom: false,
+            look: render::Look::Ink,
             quality: Some(Quality::Low),
             frame_rate: FrameRate::Third,
             overlay: Overlay::Fps,
