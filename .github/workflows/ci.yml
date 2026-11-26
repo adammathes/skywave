@@ -25,7 +25,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stage: [lint, test-app, test-rest, test-i686, web]
+        stage: [lint, test-app, test-traffic, test-rest, test-i686, test-i686-traffic, web]
+        # The Ubuntu packages each stage needs, and no more: the mirror can be slow, and
+        # gcc-multilib alone pulls 25 packages.
+        include:
+          - stage: lint
+            apt: libudev-dev libasound2-dev pkg-config
+          - stage: test-rest
+            apt: libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers
+          - stage: test-i686
+            apt: gcc-multilib
+          - stage: test-i686-traffic
+            apt: gcc-multilib
     steps:
       - uses: actions/checkout@v5
 
@@ -39,11 +50,12 @@ jobs:
         with:
           key: ${{ matrix.stage }}
 
-      # lavapipe (mesa-vulkan-drivers): a software Vulkan device for the renderer's
-      # fragment-count test (`fragments_on_the_coast_at_deck`).
-      # gcc-multilib links the 32-bit (i686) test binaries.
-      - name: Linux build deps (libudev for gilrs, ALSA for cpal, lavapipe, 32-bit libc)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev pkg-config mesa-vulkan-drivers gcc-multilib
+      # libudev for gilrs and ALSA for cpal (platform-native); lavapipe (mesa-vulkan-drivers):
+      # a software Vulkan device for platform-native's fragment-count test
+      # (`fragments_on_the_coast_at_deck`); gcc-multilib links the 32-bit (i686) test binaries.
+      - name: Linux build deps (${{ matrix.apt }})
+        if: matrix.apt
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.apt }}
 
       - name: Install cargo-deny
         if: matrix.stage == 'lint'
@@ -58,7 +70,9 @@ jobs:
         if: matrix.stage == 'web'
         run: |
           npm install --global "playwright@$PLAYWRIGHT_VERSION"
-          npx "playwright@$PLAYWRIGHT_VERSION" install --with-deps chromium
+          # No --with-deps: the runner image already has the libraries Chromium needs, and
+          # installing them again through apt took over 5 minutes on a slow mirror.
+          npx "playwright@$PLAYWRIGHT_VERSION" install chromium
 
       - name: Checks (tools/ci.sh ${{ matrix.stage }})
         run: tools/ci.sh ${{ matrix.stage }}
