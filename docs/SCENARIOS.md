@@ -125,7 +125,9 @@ north with one high summit that the three-lane summit avenue drives straight at;
 and west; rail yards to the south. Strip corridors line the boulevards and an old road cuts the
 grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
 mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
-lights. Zone rules, grammar, palette, radio and cars are Mirage Valley's. It sits beside Mirage
+lights. The air is clear (`haze: 0.45`, the distance haze at under half its usual thickness) and the
+hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Zone rules,
+grammar, palette, radio and cars are Mirage Valley's. It sits beside Mirage
 Valley until the layout format can draw grade-separated freeways and the flood channel; then it
 replaces it.
 
