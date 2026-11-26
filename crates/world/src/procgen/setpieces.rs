@@ -135,17 +135,32 @@ pub const RAIL_CLEAR_M: f32 = 16.0;
 const HALL_SETBACK_M: f32 = 1.0;
 
 /// The roadside set: each landmark kit by id, the variant the owner picked for this world
-/// (2026-10-29, PR #70) and its point of interest. A kit the grammar does not carry is
-/// left out.
-pub const ROADSIDE: [(&str, char, PoiKind); 4] = [
+/// (2026-10-29, PR #70) and its point of interest, in the order they take their lots. A
+/// kit the grammar does not carry is left out. After the first four, the valley's other
+/// donut shops (in each of the donut kit's looks in turn) and the stands of its one burger
+/// chain: a donut and a burger from their drive-thrus make nitrous (`app::drivethru`).
+pub const ROADSIDE: [(&str, char, PoiKind); 14] = [
     ("donut_shop", 'B', PoiKind::DonutShop),
     ("coffee_shop", 'C', PoiKind::CoffeeShop),
     ("motel", 'C', PoiKind::Motel),
     ("drive_in", 'A', PoiKind::DriveIn),
+    ("burger_stand", 'A', PoiKind::BurgerStand),
+    ("donut_shop", 'A', PoiKind::DonutShop),
+    ("donut_shop", 'C', PoiKind::DonutShop),
+    ("burger_stand", 'A', PoiKind::BurgerStand),
+    ("donut_shop", 'B', PoiKind::DonutShop),
+    ("donut_shop", 'A', PoiKind::DonutShop),
+    ("burger_stand", 'A', PoiKind::BurgerStand),
+    ("donut_shop", 'C', PoiKind::DonutShop),
+    ("donut_shop", 'B', PoiKind::DonutShop),
+    ("donut_shop", 'A', PoiKind::DonutShop),
 ];
 /// The least distance between the roadside set's lots and from them to the garage's and
 /// the stand's, m.
 pub const ROADSIDE_APART_M: f32 = 250.0;
+/// The same for the extra donut shops and the burger stands (after the first four of
+/// [`ROADSIDE`]), so a valley has room for plenty, m.
+pub const EXTRA_APART_M: f32 = 150.0;
 /// The farthest the drive-in's lot stands from the freeway, m (its screen shows from it).
 pub const DRIVE_IN_VIEW_M: f32 = 350.0;
 
@@ -553,7 +568,12 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
 
     // The roadside set, in order, each on ground nothing else keeps.
     let mut fronts: Vec<V2> = s.garage.iter().chain(&s.stand).map(|l| l.front).collect();
-    for (id, letter, poi) in ROADSIDE {
+    for (i, (id, letter, poi)) in ROADSIDE.into_iter().enumerate() {
+        let apart = if i < 4 {
+            ROADSIDE_APART_M
+        } else {
+            EXTRA_APART_M
+        };
         let Some(k) = kits.iter().position(|k| k.id == id) else {
             continue;
         };
@@ -566,9 +586,7 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
         let taken = s.footprints();
         let free = |l: &Lot| {
             let rect = l.rect(size.0, size.1);
-            fronts
-                .iter()
-                .all(|&f| (f - l.front).length() >= ROADSIDE_APART_M)
+            fronts.iter().all(|&f| (f - l.front).length() >= apart)
                 && !samples(l, size.0, size.1).any(|q| taken.iter().any(|a| point_in_polygon(q, a)))
                 && !taken.iter().flatten().any(|&q| point_in_polygon(q, &rect))
         };
@@ -1696,9 +1714,12 @@ fn roadside_stalls(id: &str) -> (&'static [[f32; 2]], &'static [u32]) {
     const DONUT_HOURS: [u32; 4] = [hours(6, 11), hours(5, 21), hours(15, 19), hours(7, 10)];
     const COFFEE_HOURS: [u32; 4] = [hours(7, 11), hours(11, 14), hours(21, 2), hours(6, 23)];
     const MOTEL_HOURS: [u32; 3] = [hours(18, 9), hours(20, 8), hours(16, 10)];
+    const BURGER_HOURS: [u32; 4] = [hours(11, 14), hours(17, 20), hours(21, 1), hours(10, 23)];
     const SHOW_HOURS: [u32; 3] = [hours(19, 0), hours(19, 1), hours(20, 0)];
     match id {
         "donut_shop" => (&DONUTS, &DONUT_HOURS),
+        // The burger stand paints the donut shop's stalls.
+        "burger_stand" => (&DONUTS, &BURGER_HOURS),
         "coffee_shop" => (&COFFEE, &COFFEE_HOURS),
         "motel" => (&MOTEL, &MOTEL_HOURS),
         "drive_in" => (&DRIVE_IN, &SHOW_HOURS),

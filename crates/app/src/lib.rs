@@ -30,6 +30,7 @@ pub mod lighting;
 mod lighttiles;
 pub mod map;
 mod marquee;
+mod nitrous;
 pub mod npc;
 pub mod pacing;
 mod peds;
@@ -256,6 +257,8 @@ pub struct App {
     marquees: Option<marquee::Marquees>,
     /// The landmarks' service windows and the boxes on the passenger seat.
     drivethru: Option<drivethru::DriveThru>,
+    /// The nitrous the drive-thrus' meals made.
+    nitrous: nitrous::Nitrous,
     /// The place's railway: its train and its crossings' gates.
     rail: Option<crossing::Rail>,
     /// The junction lights' lit lenses.
@@ -335,6 +338,7 @@ impl App {
         drive.auto_headlights = ui.settings().headlights_auto;
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
+        ui.set_districts(map::districts::Districts::of(&place));
         let ground = world::WorldCollider::with_plan(&place, grammar, &plan);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
@@ -532,6 +536,7 @@ impl App {
             strip,
             marquees,
             drivethru,
+            nitrous: nitrous::Nitrous::default(),
             rail,
             signals,
         })
@@ -628,14 +633,15 @@ impl App {
         Ok(app)
     }
 
-    /// The car stopped with its driver's door at the place's first service window (its
+    /// The car stopped with its driver's door at the place's first donut window (its
     /// order in) and the serve `secs` seconds along; nothing on a place without one.
     fn serve_at_window(&mut self, secs: f32) {
-        let Some(w) = self
-            .drivethru
-            .as_ref()
-            .and_then(|d| d.windows.first().copied())
-        else {
+        let Some(w) = self.drivethru.as_ref().and_then(|d| {
+            d.windows
+                .iter()
+                .find(|w| w.food == drivethru::Food::Donut)
+                .copied()
+        }) else {
             return;
         };
         // The door the gap from the wall, the driver's side to it; the car's middle is
@@ -840,7 +846,7 @@ impl App {
             self.drive.switch_car(spec, car.layout, &self.ground);
             // The boxes stay with the car they were handed into.
             if let Some(d) = &mut self.drivethru {
-                d.boxes = 0;
+                d.clear_seat();
             }
             self.sound.set_car(&self.drive);
             self.settle_camera();
@@ -971,6 +977,9 @@ impl App {
         // Auto headlights switch when the NPC drivers' first lamps do.
         let dark = self.traffic_clock().dark(0.0);
         self.drive.frame(input, dark);
+        if !self.fly && input.just_pressed(Action::Nitrous) {
+            self.nitrous.fire();
+        }
         let none = InputState::default();
         let dt = SIM_DT as f32;
         let (mut traffic_s, mut peds_s) = (0.0, 0.0);
@@ -983,6 +992,7 @@ impl App {
             } else {
                 drive::vehicle_input(input)
             };
+            self.drive.assists.power_boost = self.nitrous.step(dt);
             self.drive.step(car_input, &self.ground);
             // A car that went back to its start on its own takes the camera with it,
             // rather than the chase camera flying across the map to it.
@@ -1053,6 +1063,7 @@ impl App {
             let car = self.drive_thru_car();
             if let Some(d) = &mut self.drivethru {
                 d.step(&car, dt);
+                self.nitrous.add(d.meals());
             }
             let cam_input = if self.fly { &none } else { input };
             self.camera.step(&self.drive, cam_input, dt, &self.ground);
@@ -1064,6 +1075,7 @@ impl App {
             self.water_toast = WATER_TOAST_S;
         }
         self.water_toast = (self.water_toast - dt_real as f32).max(0.0);
+        self.nitrous.frame(dt_real as f32);
         self.wave.frame(dt_real as f32);
         self.npcs.note_time(traffic_s * 1000.0, steps.count);
         self.npcs.crowd.note_time(peds_s * 1000.0, steps.count);
@@ -1394,6 +1406,7 @@ impl App {
             hud: match (self.water_toast > 0.0)
                 .then_some(WATER_TOAST)
                 .or_else(|| self.strip.as_ref().and_then(|s| s.toast()))
+                .or_else(|| self.nitrous.toast())
             {
                 None => self.ui.hud(),
                 Some(text) => {
