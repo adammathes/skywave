@@ -55,8 +55,10 @@ pub use settings::{
     FrameRate, GpuInfo, Handling, MemoryStore, Quality, Settings, SettingsStore, SETTINGS_VERSION,
 };
 
+pub use builtin::BAKED_SEED;
 pub use camera::CameraMode;
 pub use drive::{HudState, DEFAULT_VEHICLE};
+pub use places::provide_baked;
 pub use scene::{PlaceKey, SceneSetup};
 
 pub use input::{
