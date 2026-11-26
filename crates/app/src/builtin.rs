@@ -17,6 +17,7 @@ pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/califor
 pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
+pub const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 pub const CALIFORNIA_COAST_80S: &str =
     include_str!("../../../assets/grammar/california_coast_80s.ron");
 pub const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
@@ -38,7 +39,7 @@ pub const REGIONS: [(&str, &str); 3] = [
     ("bay_area", BAY_AREA),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.
-pub const LAYOUTS: [(&str, &str); 1] = [("bay_loop", BAY_LOOP)];
+pub const LAYOUTS: [(&str, &str); 2] = [("bay_loop", BAY_LOOP), ("mirage_bowl", MIRAGE_BOWL)];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
 pub const GRAMMARS: [(&str, &str); 2] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
@@ -62,7 +63,7 @@ pub fn grammar_text(file: &str) -> Option<&'static str> {
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them (`crate::scenario::BUILTIN`).
-pub const SCENARIOS: [(&str, &str); 3] = [
+pub const SCENARIOS: [(&str, &str); 4] = [
     (
         "socal_beach_1984",
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
@@ -74,6 +75,10 @@ pub const SCENARIOS: [(&str, &str); 3] = [
     (
         "bay_loop_2005",
         include_str!("../../../assets/scenarios/bay_loop_2005.ron"),
+    ),
+    (
+        "mirage_bowl_2001",
+        include_str!("../../../assets/scenarios/mirage_bowl_2001.ron"),
     ),
 ];
 
