@@ -39,6 +39,11 @@ pub struct CameraTuning {
     /// makes speed read on a screen.
     pub speed_fov_deg: f32,
     pub speed_fov_mps: [f32; 2],
+    /// Over the same speeds the chase cameras come down toward the car's roof: this share
+    /// of their rise above [`CameraTuning::chase_target_height_m`] goes. How fast the
+    /// ground seems to stream is speed over eye height, so a camera at 2.3 m makes 90 mph
+    /// look like 40 from the driver's seat; lower, it reads closer to the speedometer.
+    pub speed_drop: f32,
     /// Near clip planes, m: close for the dash, farther out for depth precision elsewhere.
     pub cockpit_near_m: f32,
     pub near_m: f32,
@@ -124,6 +129,7 @@ pub const TUNING: CameraTuning = CameraTuning {
     chase_fov_deg: 50.0,
     speed_fov_deg: 9.0,
     speed_fov_mps: [13.0, 45.0],
+    speed_drop: 0.5,
     cockpit_near_m: 0.1,
     near_m: 0.25,
     far_m: 3000.0,
@@ -330,6 +336,14 @@ fn chase_lead(drive: &Drive, t: &CameraTuning) -> f32 {
     -drive.state.steer.clamp(-1.0, 1.0) * t.chase_lead_deg.to_radians() * s * s * (3.0 - 2.0 * s)
 }
 
+/// How far `speed` (m/s, either way) is into [`CameraTuning::speed_fov_mps`], eased: 0 at
+/// town speeds, 1 at the top.
+fn speed_ease(t: &CameraTuning, speed: f32) -> f32 {
+    let [lo, hi] = t.speed_fov_mps;
+    let u = ((speed.abs() - lo) / (hi - lo)).clamp(0.0, 1.0);
+    u * u * (3.0 - 2.0 * u)
+}
+
 /// Horizontal unit vector at yaw `y`.
 fn yaw_dir(y: f32) -> Vec3 {
     {
@@ -484,7 +498,8 @@ impl CameraRig {
         let slot = self.chase_slot();
         let pivot = self.pivot(drive, alpha);
         let (d, h) = (t.chase_distance_m[slot], t.chase_height_m[slot]);
-        let rise = h - t.chase_target_height_m;
+        let rise = (h - t.chase_target_height_m)
+            * (1.0 - t.speed_drop * speed_ease(t, drive.state.speed_mps));
         let r = (d * d + rise * rise).sqrt();
         let elev = (atan2(rise, d) - s.look_pitch).clamp(
             t.chase_min_elev_deg.to_radians(),
@@ -664,10 +679,8 @@ impl CameraRig {
         let car = drive.pose(alpha);
         let back = if self.look_back { PI } else { 0.0 };
         let mode = self.mode();
-        let speed = mix(drive.prev.speed_mps, drive.state.speed_mps, alpha).abs();
-        let [lo, hi] = t.speed_fov_mps;
-        let u = ((speed - lo) / (hi - lo)).clamp(0.0, 1.0);
-        let wide = t.speed_fov_deg * u * u * (3.0 - 2.0 * u);
+        let speed = mix(drive.prev.speed_mps, drive.state.speed_mps, alpha);
+        let wide = t.speed_fov_deg * speed_ease(t, speed);
         let first_person = |eye: Vec3, fov: f32, near: f32| CameraPose {
             eye: car.point(eye),
             rot: car.rot
@@ -821,6 +834,26 @@ mod tests {
         rig.set_mode(CameraMode::ChaseMid);
         at(&mut d, 45.0);
         assert!((fov(&d, &rig) - 59.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_chase_camera_comes_down_at_speed() {
+        let t = TUNING;
+        let (mut d, _) = setup(CameraMode::ChaseMid);
+        let rig = CameraRig::new(CameraMode::ChaseMid, &d);
+        let s = rig.curr;
+        let height = |rig: &CameraRig, d: &Drive| rig.chase_target(d, &s, 1.0).y - d.state.pos[1];
+        let slow = height(&rig, &d);
+        d.state.speed_mps = 45.0;
+        let fast = height(&rig, &d);
+        let rise = t.chase_height_m[1] - t.chase_target_height_m;
+        // Half the rise above the target height goes at the top of the range.
+        assert!(
+            (slow - fast - t.speed_drop * rise).abs() < 0.05,
+            "{slow} -> {fast}"
+        );
+        d.state.speed_mps = 10.0;
+        assert!((height(&rig, &d) - slow).abs() < 1e-4);
     }
 
     #[test]
