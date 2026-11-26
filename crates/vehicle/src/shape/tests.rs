@@ -573,7 +573,7 @@ fn builds_are_deterministic() {
         0xebbe_b1b8_7826_cd46,
         0xd114_d3e5_6950_98e7,
         0xbf73_75be_c260_c310,
-        0x8e12_3e42_7bcd_4fa0,
+        0x4df7_be35_5d97_fff4,
     ];
     let mut got = [0u64; 39];
     for (k, spec) in shapes().iter().enumerate() {

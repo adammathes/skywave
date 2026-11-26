@@ -198,7 +198,7 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Courser V8 | 11,620 | 7,100 | 3,386 | 2,150 |
 | Dunlin Roadster | 10,500 | 6,174 | 3,096 | 1,916 |
 | Palfrey Roadster | 10,236 | 6,178 | 3,012 | 1,800 |
-| Grackle Turbo | 12,132 | 7,088 | 3,196 | 1,888 |
+| Grackle Turbo | 12,212 | 7,108 | 3,196 | 1,932 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
