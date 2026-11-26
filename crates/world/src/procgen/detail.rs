@@ -963,11 +963,12 @@ impl<'a> Detailer<'a> {
             }
         }
 
-        // Power poles behind the walk, along the line.
+        // Power poles behind the walk, along the line (strung with wires by
+        // `props::power_spans`); arterials carry them too, as the old grids' do.
         let poles = rule.power_pole_m > 0.0
             && matches!(
                 class,
-                RoadClass::Local | RoadClass::Rural | RoadClass::Collector
+                RoadClass::Local | RoadClass::Rural | RoadClass::Collector | RoadClass::Arterial
             )
             && i.is_multiple_of(2) != left;
         if poles {

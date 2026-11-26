@@ -174,7 +174,7 @@ RegionTemplate(
             styles: [StripMall, StuccoBox, Motel, Deco],
             trees: [(Palm, 0.7), (FanPalm, 0.3)],
             props: Props(
-                street_light_m: 32, street_tree_m: 16, hydrant_m: 90, power_pole_m: 0,
+                street_light_m: 32, street_tree_m: 16, hydrant_m: 90, power_pole_m: 45,
                 bench_per_km: 5, billboard_per_km: 2, neon: 0.35, parked_cars: (0.3, 0.6),
             ),
             lots: Lots(width_m: (18, 40), depth_m: 40, setback_m: (2, 0, 4)),

@@ -1368,6 +1368,8 @@ fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Ve
             PropKind::StripLine { .. } => {}
             PropKind::CrossingGate { .. } => posts.push(post(0.15, 4.2)),
             PropKind::LotLabel { .. } => posts.push(post(0.12, 2.8)),
+            // Overhead, out of reach.
+            PropKind::PowerLine { .. } => {}
             PropKind::Landmark { kit, variant } => {
                 let Some(k) = kits.get(usize::from(kit)) else {
                     continue;

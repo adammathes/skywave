@@ -394,7 +394,8 @@ fn in_triangle(p: V2, a: V3, b: V3, c: V3) -> Option<f32> {
 }
 
 /// Ground color of a zone before blending; `patch` in `[0, 1)` is seeded noise that puts
-/// stands of dark chaparral on the hills' golden grass and varies the open ground.
+/// stands of dark chaparral on the hills' golden grass and varies the open ground and the
+/// paving.
 fn zone_color(pal: &Palette, zone: ZoneId, patch: f32) -> Rgb {
     let golden = mix(pal.lawn_dry, pal.sand, 70);
     let stand = clamp((patch - 0.55) * 5.0, 0.0, 1.0);
@@ -405,6 +406,13 @@ fn zone_color(pal: &Palette, zone: ZoneId, patch: f32) -> Rgb {
         ZoneId::Hills => mix(golden, shade(pal.scrub, 175), (stand * 230.0) as u32),
         ZoneId::Farmland => mix(pal.soil, pal.lawn_dry, (40.0 + 120.0 * patch) as u32),
         ZoneId::Suburb => mix(pal.lawn, golden, 130),
+        // Shops, offices and yards stand on paving out to the walk, not on dirt: worn
+        // asphalt and old concrete in patches.
+        ZoneId::Downtown | ZoneId::Strip | ZoneId::Commercial | ZoneId::Industrial => mix(
+            pal.concrete,
+            pal.asphalt_worn,
+            (90.0 + 130.0 * patch) as u32,
+        ),
         _ => mix(golden, pal.scrub, (40.0 + 100.0 * patch) as u32),
     }
 }

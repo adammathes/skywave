@@ -127,6 +127,13 @@ pub enum PropKind {
     LotLabel {
         letter: u8,
     },
+    /// The overhead lines between two power poles: from the pole at `pos` along `dir`,
+    /// `len_dm` decimeters to the next, whose base stands `rise_dm` decimeters higher
+    /// (built from the pole pairs [`power_spans`] finds; never in a Place).
+    PowerLine {
+        len_dm: u16,
+        rise_dm: i16,
+    },
 }
 
 /// One placed prop.
@@ -482,6 +489,14 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         // A landmark needs its kit, which only the chunk plan has.
         PropKind::Landmark { .. } => {}
         PropKind::LotLabel { letter } => crate::landmarks::lot_label(m, base, p.dir, letter, pal),
+        PropKind::PowerLine { len_dm, rise_dm } => power_line(
+            m,
+            base,
+            p.dir,
+            f32::from(len_dm) * 0.1,
+            f32::from(rise_dm) * 0.1,
+            pal,
+        ),
     }
 }
 
@@ -3304,6 +3319,102 @@ fn full_power_pole(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette, rng: &
         lathe(m, &at.offset(0.0, 0.85, 0.0), &lid, 8, false, false, can);
         for x in [-0.12, 0.12] {
             insulator(m, &at.offset(x, 0.9, 0.0), glass);
+        }
+    }
+}
+
+/// Height of a power pole's top insulators, where its wires hang, m (`power_pole`).
+const WIRE_Y: f32 = 9.75;
+/// Longest gap strung between two poles, m: a span and a street crossed with it.
+const SPAN_MAX_M: f32 = 75.0;
+
+/// The overhead lines of a place: each pair of power poles that stand in a row (each the
+/// other's nearest pole ahead or behind along the line) as a [`PropKind::PowerLine`] from
+/// the first to the second. Poles in a row face along it (`detail`'s pole runs), so a pole
+/// is strung only to poles in line with both its facing and theirs.
+pub fn power_spans(place: &Place, seed: u64) -> Vec<Prop> {
+    let mut poles: Vec<(V2, f32, V2)> = place
+        .props
+        .items
+        .iter()
+        .filter(|p| p.kind == place::PropKind::PowerPole)
+        .map(|p| (V2::new(p.pos[0], p.pos[2]), p.pos[1], dir_of_yaw(p.yaw)))
+        .collect();
+    // By x then z, so the search below is a window and the output's order is fixed.
+    poles.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)));
+    let in_line = |a: V2, b: V2, d: V2| {
+        let n = d.length();
+        n > 4.0
+            && (d.x * a.x + d.y * a.y).abs() > 0.97 * n
+            && (d.x * b.x + d.y * b.y).abs() > 0.97 * n
+    };
+    // Per pole, the nearest in line ahead of it (along its facing) and behind it.
+    let mut next: Vec<[Option<(usize, f32)>; 2]> = alloc::vec![[None; 2]; poles.len()];
+    for (i, &(pa, _, da)) in poles.iter().enumerate() {
+        for (j, &(pb, _, db)) in poles.iter().enumerate().skip(i + 1) {
+            if pb.x - pa.x > SPAN_MAX_M {
+                break;
+            }
+            let d = pb - pa;
+            let n = d.length();
+            if n > SPAN_MAX_M || !in_line(da, db, d) {
+                continue;
+            }
+            for (k, l, side) in [
+                (i, j, d.x * da.x + d.y * da.y > 0.0),
+                (j, i, d.x * db.x + d.y * db.y < 0.0),
+            ] {
+                let slot = &mut next[k][usize::from(side)];
+                if slot.is_none_or(|(_, m)| n < m) {
+                    *slot = Some((l, n));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (i, slots) in next.iter().enumerate() {
+        for &(j, n) in slots.iter().flatten() {
+            // Strung once, from the lower index, when each is the other's nearest.
+            if j < i || !next[j].iter().flatten().any(|&(k, _)| k == i) {
+                continue;
+            }
+            let ((pa, ya, _), (pb, yb, _)) = (poles[i], poles[j]);
+            out.push(Prop {
+                pos: pa,
+                y: ya,
+                dir: (pb - pa) * (1.0 / n),
+                kind: PropKind::PowerLine {
+                    len_dm: (n * 10.0) as u16,
+                    rise_dm: ((yb - ya) * 10.0).clamp(-3000.0, 3000.0) as i16,
+                },
+                seed: mix64(seed ^ u64::from(pa.x.to_bits()) << 32 ^ u64::from(pa.y.to_bits()))
+                    as u32,
+            });
+        }
+    }
+    out
+}
+
+/// Sagging wires from a pole at `base` to the next, `len` m along `dir` and `rise` m up:
+/// three primaries from the crossarm's insulators and a fat black phone cable lower down.
+fn power_line(m: &mut WorldMesh, base: V3, dir: V2, len: f32, rise: f32, pal: &Palette) {
+    let f = Frame::upright(base, dir);
+    let wire = Paint::new(shade(pal.metal_dark, 200), Pattern::Metal);
+    let cable = Paint::new(shade(pal.metal_dark, 120), Pattern::Plain);
+    const SEGS: usize = 8;
+    for (z, y, sag, w, paint) in [
+        (-1.15, WIRE_Y, 0.022, 0.03, wire),
+        (0.45, WIRE_Y, 0.022, 0.03, wire),
+        (1.15, WIRE_Y, 0.022, 0.03, wire),
+        (0.25, 7.1, 0.03, 0.07, cable),
+    ] {
+        let at = |k: usize| {
+            let t = k as f32 / SEGS as f32;
+            let drop = 4.0 * sag * len * t * (1.0 - t);
+            f.p(len * t, y + rise * t - drop, z)
+        };
+        for k in 0..SEGS {
+            bar(m, at(k), at(k + 1), f.z, w, w, false, paint);
         }
     }
 }
