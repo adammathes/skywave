@@ -1,15 +1,14 @@
-// Great Lakes city (stub): a flat grid city on a lake. Lakefront drive with a beach, a
-// dense downtown of mid-century towers, brick three-flats and bungalows on a grid that runs
-// to the edge, wide boulevards, an expressway inland, an industrial corridor. No hills, no
-// farms. Elevated rail and river bridges come with later stages; see docs/SCENARIOS.md.
-//
-// Stub: plausible numbers that validate and generate a flat, all-grid place. Tune when the
-// scenario is built (M7). Layout and units: crates/world/src/template.rs.
+// Great Lakes city: a flat grid city on a lake (Lake City, docs/SCENARIOS.md). Built to work,
+// warm inside: a lakefront drive with a beach, a dense downtown of towers inside its ring,
+// brick three-flats and bungalows on a grid that runs to the edge, wide boulevards, an
+// expressway, an industrial corridor. No hills, no farms. Its hero landmark is a drive-in hot
+// dog stand on the first arterial ahead of the start (`roadside`). Elevated rail and river
+// bridges come with later stages. Layout and units: crates/world/src/template.rs.
 RegionTemplate(
     name: "great_lakes_city",
     driving_side: Right,
     sign_language: EnUs,
-    era: EraDefaults(year: 1977, street_lights: Sodium, palette: "brick_and_limestone"),
+    era: EraDefaults(year: 1986, street_lights: Sodium, palette: "brick_and_limestone"),
 
     coast: Some(Coast(
         side: East,
@@ -52,6 +51,8 @@ RegionTemplate(
         pier: true,
         overlooks: (0, 0),
     )),
+
+    roadside: [RoadsideKit(kit: "hot_dog_stand", variant: 'A')],
 
     zones: Zones(
         downtown: ZoneRule(

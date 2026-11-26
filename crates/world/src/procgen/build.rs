@@ -95,7 +95,7 @@ fn build_detailed(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> (
         &place.roads,
     );
     // The set pieces take their lots and add their landmarks.
-    let sites = super::setpieces::site(&m, &place, &grammar.landmarks);
+    let sites = super::setpieces::site(&m, &place, &grammar.landmarks, &template.roadside);
     super::setpieces::clear(&mut place, &sites);
     place.pois.extend(sites.pois(seed));
     // Stage 7 reads the buildings where the meshes will find them.

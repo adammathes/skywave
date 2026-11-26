@@ -57,7 +57,7 @@ pub struct Scenario {
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them. The first is the world a scene is in unless it names another (a bare start
 /// is in [`DEFAULT`]).
-pub const BUILTIN: [(&str, &str); 2] = [
+pub const BUILTIN: [(&str, &str); 3] = [
     (
         "socal_beach_1984",
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
@@ -65,6 +65,10 @@ pub const BUILTIN: [(&str, &str); 2] = [
     (
         "mirage_valley_2001",
         include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
+    ),
+    (
+        "lake_city_1986",
+        include_str!("../../../assets/scenarios/lake_city_1986.ron"),
     ),
 ];
 
@@ -400,7 +404,7 @@ pub const STILLS_PER_ROW: u32 = 4;
 /// Each scenario's still for the World page (`assets/stills/<id>.still`, rendered with
 /// `tools/screenshot`), in [`BUILTIN`] order: a 256-color palette (768 bytes of sRGB) and
 /// then one palette index per texel, row-major from the top-left.
-const STILLS: [(&str, &[u8]); 2] = [
+const STILLS: [(&str, &[u8]); 3] = [
     (
         "socal_beach_1984",
         include_bytes!("../../../assets/stills/socal_beach_1984.still"),
@@ -408,6 +412,10 @@ const STILLS: [(&str, &[u8]); 2] = [
     (
         "mirage_valley_2001",
         include_bytes!("../../../assets/stills/mirage_valley_2001.still"),
+    ),
+    (
+        "lake_city_1986",
+        include_bytes!("../../../assets/stills/lake_city_1986.still"),
     ),
 ];
 
@@ -512,7 +520,12 @@ mod tests {
         );
         assert_eq!(index_of("atlantis"), None);
         assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");
-        assert_eq!(get(99).id, basin.id);
+        let lake = &all[2];
+        assert_eq!(
+            (lake.id.as_str(), lake.years, lake.stub),
+            ("lake_city_1986", (1977, 1989), false)
+        );
+        assert_eq!(get(99).id, lake.id, "past the end, the last");
     }
 
     #[test]

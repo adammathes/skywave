@@ -17,28 +17,32 @@ use crate::scene::PlaceKey;
 
 const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
 const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const GREAT_LAKES_CITY: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+const GREAT_LAKES_80S: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 
 /// The landmark kits compiled into the game: a `place::PropKind::Landmark`'s `kit` is an
 /// index into this list.
-const LANDMARKS: [(&str, &str); 9] = world::landmarks::BUILTIN;
+const LANDMARKS: [(&str, &str); 10] = world::landmarks::BUILTIN;
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.
 const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-const REGIONS: [(&str, &str); 2] = [
+const REGIONS: [(&str, &str); 3] = [
     ("california_coast", CALIFORNIA_COAST),
     ("socal_basin", SOCAL_BASIN),
+    ("great_lakes_city", GREAT_LAKES_CITY),
 ];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
-const GRAMMARS: [(&str, &str); 2] = [
+const GRAMMARS: [(&str, &str); 3] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
     ("socal_basin_2001.ron", SOCAL_BASIN_2001),
+    ("great_lakes_80s.ron", GREAT_LAKES_80S),
 ];
 
 /// The text of the built-in region template `id`.
