@@ -20,7 +20,7 @@ macro_rules! car {
     };
 }
 
-const ROSTER: [&str; 25] = [
+const ROSTER: [&str; 27] = [
     car!("basilisk_v12"),
     car!("basilisk_roadster"),
     car!("avocet_v8"),
@@ -46,6 +46,8 @@ const ROSTER: [&str; 25] = [
     car!("tanager_awd"),
     car!("destrier_coupe"),
     car!("siskin_coupe"),
+    car!("dunlin_roadster"),
+    car!("palfrey_roadster"),
 ];
 
 fn load(text: &str) -> VehicleSpec {

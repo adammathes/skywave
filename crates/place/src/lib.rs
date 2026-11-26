@@ -520,6 +520,8 @@ pub enum PoiKind {
     MoviePalace = 19,
     /// The city hall at the head of the boulevard, on the middle of its lot.
     CityHall = 20,
+    /// A walk-up burger stand with a drive-thru, one of a chain, at its lot's middle.
+    BurgerStand = 21,
 }
 
 /// A point of interest for the map and directions. Its name is invented from `name_seed`.

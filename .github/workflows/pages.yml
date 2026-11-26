@@ -26,10 +26,9 @@ jobs:
         with:
           fetch-depth: 0 # `git describe` needs the tags for the version in the footer.
 
+      # Installs the version, components and targets in rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
-          rustup default stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
 
