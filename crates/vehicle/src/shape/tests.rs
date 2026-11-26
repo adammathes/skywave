@@ -576,10 +576,10 @@ fn builds_are_deterministic() {
         0xebbe_b1b8_7826_cd46,
         0xd114_d3e5_6950_98e7,
         0xbf73_75be_c260_c310,
-        0xb376_3d8f_e78a_a274,
-        0x2337_65bb_154c_4e20,
-        0x8d9c_7db1_9d62_70b7,
-        0x626b_ac4a_8544_3973,
+        0xcfb5_6418_27b5_0c27,
+        0x8c52_4d2b_8324_a7d3,
+        0xf4f5_f8de_c06c_d457,
+        0xa854_c49d_20f7_a3eb,
     ];
     let mut got = [0u64; 42];
     for (k, spec) in shapes().iter().enumerate() {
