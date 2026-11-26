@@ -1,8 +1,8 @@
 // Lake City (docs/SCENARIOS.md, docs/LAYOUTS.md): a flat grid city of the 1980s on a great lake,
 // built to work and warm inside. The lake is the whole east; a drive runs the shore through a
 // park the length of the city. A river comes in from the lake beside downtown and forks north
-// and south. Arterials every 300-320 m make the grid; two old diagonals run from downtown to
-// the north-west and south-west corners; an expressway runs straight west. Three-flats and
+// and south. Arterials every 300-320 m make the grid; two old diagonals run from downtown out
+// to the north limits and the south-west corner; an expressway runs straight west. Three-flats and
 // brick two-storey storefronts in the middle, the bungalow belt to the west with the drive-in
 // on its main street, a leafy suburb across the north limits, industry along the south branch.
 //
@@ -38,7 +38,7 @@ Layout(
         // Storefront streets: two-storey brick with flats above, both sides of the main arterials.
         District(name: "crosstown stores", zone: Commercial, polygon: [(36, 604), (1591, 604), (1591, 676), (36, 676)]),
         District(name: "midtown stores", zone: Commercial, polygon: [(871, 267), (942, 267), (942, 2009), (871, 2009)]),
-        District(name: "northwest stores", zone: Commercial, polygon: [(1227, 930), (53, 236), (18, 297), (1191, 990)]),
+        District(name: "northwest stores", zone: Commercial, polygon: [(1233, 933), (184, 9), (136, 63), (1185, 987)]),
         District(name: "southwest stores", zone: Commercial, polygon: [(1192, 1249), (19, 1880), (52, 1942), (1226, 1311)]),
         // The bungalow belt's main street: the drive-in, the car wash, the muffler shop.
         District(name: "drive-in stretch", zone: Strip, polygon: [(258, 320), (347, 320), (347, 1156), (258, 1156)]),
@@ -52,12 +52,14 @@ Layout(
     ],
 
     roads: [
-        // The city limits: north, west and south.
-        Road(name: "north limits", class: Arterial, lanes: 2, points: [(36, 36), (1591, 36)]),
-        Road(name: "west limits", class: Arterial, lanes: 2, points: [(36, 36), (36, 2009)]),
-        Road(name: "south limits", class: Arterial, lanes: 2, points: [(36, 2009), (1640, 2009)]),
+        // The city limits: north, west and south. One lane each way, as the shore drive, until
+        // lane changes exist: traffic enters a multi-lane road only in the slots its turns
+        // reach, and these roads meet the grid only from one side.
+        Road(name: "north limits", class: Arterial, lanes: 1, points: [(36, 36), (1591, 36)]),
+        Road(name: "west limits", class: Arterial, lanes: 1, points: [(36, 36), (36, 2009)]),
+        Road(name: "south limits", class: Arterial, lanes: 1, points: [(36, 2009), (1640, 2009)]),
         // The lake shore drive, through the lakefront park.
-        Road(name: "shore drive", class: Arterial, lanes: 3, speed_kph: Some(80), sidewalk: false, points: [(1591, 36), (1573, 533), (1613, 960), (1591, 1280), (1613, 1600), (1640, 2009)]),
+        Road(name: "shore drive", class: Arterial, lanes: 1, speed_kph: Some(80), sidewalk: false, points: [(1591, 36), (1573, 533), (1613, 960), (1591, 1280), (1613, 1600), (1640, 2009)]),
         // The grid: north-south avenues.
         Road(name: "first avenue", class: Arterial, lanes: 2, points: [(302, 36), (302, 2009)]),
         Road(name: "second avenue", class: Arterial, lanes: 2, points: [(604, 36), (604, 2009)]),
@@ -69,11 +71,11 @@ Layout(
         Road(name: "river street", class: Arterial, lanes: 2, points: [(36, 960), (1613, 960)]),
         Road(name: "market street", class: Arterial, lanes: 2, points: [(36, 1280), (1591, 1280)]),
         Road(name: "south street", class: Arterial, lanes: 2, points: [(36, 1600), (1613, 1600)]),
-        // The old diagonals, from downtown out to the corners.
-        Road(name: "northwest diagonal", class: Arterial, lanes: 2, points: [(1209, 960), (36, 267)]),
+        // The old diagonals, from downtown out to the north limits and the south-west corner.
+        Road(name: "northwest diagonal", class: Arterial, lanes: 2, points: [(1209, 960), (160, 36)]),
         Road(name: "southwest diagonal", class: Arterial, lanes: 2, points: [(1209, 1280), (36, 1911)]),
         // The expressway west out of downtown.
-        Road(name: "west expressway", class: Arterial, lanes: 3, speed_kph: Some(90), sidewalk: false, points: [(36, 1440), (1603, 1440)]),
+        Road(name: "west expressway", class: Arterial, lanes: 2, speed_kph: Some(90), sidewalk: false, points: [(36, 1440), (1603, 1440)]),
     ],
 
     // On the bungalow belt's main street, heading south toward the drive-in.
