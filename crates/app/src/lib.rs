@@ -599,6 +599,9 @@ impl App {
         if let Some(s) = setup.ui_scale {
             app.ui.force_ui_scale(s);
         }
+        if let Some(l) = setup.look {
+            app.ui.force_look(l);
+        }
         if let Some(d) = setup.driver {
             app.ui.force_driver(d);
         }
@@ -2220,6 +2223,20 @@ mod tests {
         }
         assert_eq!(app.curr.pos.y, MIN_HEIGHT);
         assert_eq!(app.curr.pitch, -MAX_PITCH);
+    }
+
+    #[test]
+    fn a_scene_look_reaches_the_renderer() {
+        let setup = SceneSetup::from_query("look=ink&traffic=off").unwrap();
+        assert_eq!(setup.look, Some(render::Look::Ink));
+        let mut app = App::from_setup(&setup).unwrap();
+        assert_eq!(app.ui.look(), render::Look::Ink);
+        assert_eq!(app.scene_view(0.0, 16.0 / 9.0).sky.look, render::Look::Ink);
+        let mut app = App::from_setup(&SceneSetup::from_query("traffic=off").unwrap()).unwrap();
+        assert_eq!(
+            app.scene_view(0.0, 16.0 / 9.0).sky.look,
+            render::Look::Standard
+        );
     }
 
     #[test]

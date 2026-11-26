@@ -83,6 +83,8 @@ struct Frame {
     // x: shadow cascades drawn (2 or 3), y: 1 when the sun lights (else no cascade is
     // drawn), zw: unused.
     shadow_params: vec4<f32>,
+    // x: the look (`render::Look` as an index; see `look_id`), yzw: unused.
+    look: vec4<f32>,
     lights: array<PackedLight, 256>,
 };
 
@@ -178,14 +180,108 @@ fn gradient_noise(pixel: vec2<f32>) -> f32 {
     return fract(52.9829189 * fract(dot(floor(pixel), vec2<f32>(0.06711056, 0.00583715))));
 }
 
+// ---- Looks -------------------------------------------------------------------------
+// Mirrors `render::Look`: the index of each in `Look::ALL`.
+const LOOK_STANDARD: u32 = 0u;
+const LOOK_SMOG: u32 = 1u;
+const LOOK_DUSK: u32 = 2u;
+const LOOK_AMBER: u32 = 3u;
+const LOOK_POSTER: u32 = 4u;
+const LOOK_TOON: u32 = 5u;
+const LOOK_VIDEO: u32 = 6u;
+const LOOK_LOW_RES: u32 = 7u;
+const LOOK_INK: u32 = 8u;
+// Lines of the low-res look's picture.
+const LOW_RES_LINES: f32 = 180.0;
+
+fn look_id() -> u32 {
+    return u32(frame.look.x + 0.5);
+}
+
+// Ordered dither threshold in (0, 1) for pixel `p`: the 8×8 Bayer matrix, from the bits
+// of x ^ y and y interleaved and reversed.
+fn bayer8(p: vec2<f32>) -> f32 {
+    let y = u32(p.y) & 7u;
+    let v = (u32(p.x) & 7u) ^ y;
+    let b = ((v & 1u) << 5u) | ((y & 1u) << 4u) | ((v & 2u) << 2u) | ((y & 2u) << 1u)
+        | ((v & 4u) >> 1u) | ((y & 4u) >> 2u);
+    return (f32(b) + 0.5) / 64.0;
+}
+
+fn saturate_by(c: vec3<f32>, k: f32) -> vec3<f32> {
+    let l = dot(c, LUMA);
+    return max(vec3<f32>(l) + (c - vec3<f32>(l)) * k, vec3<f32>(0.0));
+}
+
+// The look's grade of a display value (sRGB-encoded, 0..1) at pixel `frag`, before the
+// dither. The low-res look's `frag` is already snapped to its big pixels.
+fn grade(e: vec3<f32>, frag: vec2<f32>, look: u32) -> vec3<f32> {
+    var c = e;
+    switch look {
+        case LOOK_SMOG: {
+            // Faded print: warm, a touch more color, lifted blacks, rolled-off whites, grain.
+            c = saturate_by(c * vec3<f32>(1.06, 1.0, 0.86), 1.15);
+            c = 0.06 + 0.9 * c;
+            c += (gradient_noise(frag * 1.7 + 13.0) - 0.5) * 0.05;
+        }
+        case LOOK_DUSK: {
+            // A few flat steps.
+            c = (floor(c * 7.0) + 0.5) / 7.0;
+        }
+        case LOOK_AMBER: {
+            // One hue: brightness picks a point on a dark-brown to hot-orange ramp.
+            let l = clamp(dot(c, LUMA) * 1.25, 0.0, 1.0);
+            c = mix(vec3<f32>(0.16, 0.06, 0.02), vec3<f32>(1.0, 0.64, 0.25), l);
+            c = mix(c, vec3<f32>(1.0, 0.9, 0.7), smoothstep(0.85, 1.0, l));
+        }
+        case LOOK_POSTER: {
+            c = saturate_by(c, 1.2);
+        }
+        case LOOK_TOON: {
+            c = saturate_by(c, 1.45);
+        }
+        case LOOK_VIDEO: {
+            // Split tone: cyan-green shadows, sodium highlights; lifted blacks; noise.
+            let l = dot(c, LUMA);
+            let tone = mix(vec3<f32>(0.6, 1.08, 1.0), vec3<f32>(1.25, 0.92, 0.58), smoothstep(0.08, 0.55, l));
+            c = 0.045 + 0.95 * c * tone;
+            c += (gradient_noise(frag * 0.93 + 7.0) - 0.5) * vec3<f32>(0.05, 0.06, 0.08);
+        }
+        case LOOK_LOW_RES: {
+            // Seven levels a channel, ordered-dithered over the big pixels.
+            let b = max(floor(frame.screen.y / LOW_RES_LINES), 1.0);
+            let t = (bayer8(floor(frag / b)) - 0.5) * 0.7;
+            c = floor(c * 6.0 + 0.5 + t) / 6.0;
+        }
+        case LOOK_INK: {
+            // Paper where the dither threshold is under the brightness, ink elsewhere, in
+            // dots two pixels wide.
+            let l = smoothstep(0.06, 0.8, dot(c, LUMA));
+            let paper = vec3<f32>(0.91, 0.886, 0.79);
+            let ink = vec3<f32>(0.17, 0.165, 0.23);
+            c = select(ink, paper, l > bayer8(floor(frag * 0.5)));
+        }
+        default: {}
+    }
+    return c;
+}
+
 // Post-exposure value -> display value at pixel `frag` (framebuffer coordinates):
-// AgX, vignette, then ±half an 8-bit step of dither in sRGB-encoded space (where the
-// quantization happens), decoded again when the target encodes sRGB in hardware.
+// AgX, vignette, the look's grade, then ±half an 8-bit step of dither in sRGB-encoded
+// space (where the quantization happens), decoded again when the target encodes sRGB in
+// hardware.
 fn display_exposed(exposed: vec3<f32>, frag: vec2<f32>) -> vec4<f32> {
     var c = agx(exposed);
     let d = frag * frame.screen.zw * 2.0 - 1.0;
     c *= 1.0 - frame.post.z * (0.5 * dot(d, d));
-    var e = linear_to_srgb(c) + (gradient_noise(frag) - 0.5) / 255.0;
+    let look = look_id();
+    var e = linear_to_srgb(c);
+    if look != LOOK_STANDARD {
+        e = grade(e, frag, look);
+    }
+    if look != LOOK_INK && look != LOOK_LOW_RES {
+        e += (gradient_noise(frag) - 0.5) / 255.0;
+    }
     e = clamp(e, vec3<f32>(0.0), vec3<f32>(1.0));
     if frame.params.y > 0.5 {
         return vec4<f32>(e, 1.0);
