@@ -139,7 +139,12 @@ fn main_roads_are_one_network_with_bridges_over_water() {
         on + deck > all * 97 / 100,
         "roads sit on the ground ({on} of {all})"
     );
-    assert!(g.edges.iter().all(|e| e.class != RoadClass::Highway));
+    // The freeways round the bay, and the bayshore's two interchanges' ramps.
+    assert!(g.edges.iter().any(|e| e.class == RoadClass::Highway));
+    assert!(
+        g.edges.iter().filter(|e| e.oneway).count() >= 8,
+        "two diamonds of four ramps"
+    );
 }
 
 #[test]
