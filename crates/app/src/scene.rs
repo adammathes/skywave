@@ -47,6 +47,8 @@
 //!   scene at rest (for screenshot goldens; input is ignored).
 //! - `map=1`: start with the full-screen map open.
 //! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
+//! - `look=<name>`: the look for this session (`render::Look::name`: standard, smog, dusk,
+//!   amber, poster, toon, video, low-res, ink), over the saved setting.
 //! - `stream=0`: build the whole place at load instead of streaming it round the camera
 //!   (`stream=1`, the default; see `app::stream`). The screenshot goldens use it.
 //! - `traffic=off|low|normal|busy`: NPC traffic and pedestrian density for this session,
@@ -123,6 +125,8 @@ pub struct SceneSetup {
     pub map: bool,
     /// UI scale for this session, overriding the setting.
     pub ui_scale: Option<f32>,
+    /// The look for this session, overriding the setting.
+    pub look: Option<render::Look>,
     /// Stream the place round the camera (else build it all at load).
     pub stream: bool,
     /// Traffic density over the setting, or `None` for the setting.
@@ -158,6 +162,7 @@ impl Default for SceneSetup {
             still: false,
             map: false,
             ui_scale: None,
+            look: None,
             stream: true,
             traffic: None,
             phase: None,
@@ -188,9 +193,10 @@ impl SceneSetup {
     }
 
     /// The keys [`SceneSetup::set`] takes.
-    pub const KEYS: [&'static str; 21] = [
+    pub const KEYS: [&'static str; 22] = [
         "seed", "place", "scenario", "car", "paint", "driver", "cam", "t", "pos", "yaw", "lights",
-        "glow", "fly", "still", "map", "ui", "stream", "traffic", "phase", "train", "donut",
+        "glow", "fly", "still", "map", "ui", "look", "stream", "traffic", "phase", "train",
+        "donut",
     ];
 
     /// World `scenario` and its procedural place; its own car unless the scene named one.
@@ -307,6 +313,7 @@ impl SceneSetup {
                 }
                 self.donut_s = Some(s);
             }
+            "look" => self.look = Some(render::Look::from_name(value).ok_or_else(bad)?),
             "ui" => {
                 let s: f32 = value.parse().map_err(|_| bad())?;
                 if !(render::UI_SCALE_MIN..=render::UI_SCALE_MAX).contains(&s) {

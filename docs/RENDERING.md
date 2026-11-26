@@ -152,8 +152,22 @@ The corona pass is optional: its pipeline is built in its own error scope and co
 
 `?diag=1` runs the same checks on each backend without the game, on small detached canvases, and shows a plain-text report to paste into a bug report (also on the console and in `window.skywaveDiag`): user agent, pixel ratio and whether `navigator.gpu` exists, then per backend a `[WebGPU]` / `[WebGL2]` block of `key: value` lines (adapter name, vendor, driver; adapter features; selected limits as adapter vs granted; surface formats, present and alpha modes; the `Rgba16Float` capabilities and the HDR path chosen; the surface configuration; `pipelines`, `probe frame (validation)`, `probe frame (present)` as `ok` or `FAILED: <message>`; the renderer's path; whether coronas passed and how they read depth; uncaptured errors), each ending in `verdict: OK` or `verdict: FAILED`, and finally which backend the game would start on.
 
-## Optional styles (later)
-Cel: quantized Lambert + edge detect from depth/normal. Dither/CRT: ordered dither to palette, scanline/curvature post. VHS: chroma shift, blur. All in the post pass; off by default.
+## Looks
+Settings › Video › Look (saved; a scene's `look=` overrides it for the session) picks a `render::Look`, carried in `Sky::look` and the frame uniform's `look.x`. Each is a few branches in the forward and tonemap shaders: no extra pass, target or texture, and `Standard` is bit-identical to the plain pipeline.
+
+| Look | Forward pass | Tonemap |
+|---|---|---|
+| Standard | — | — |
+| Smog | warm sun, teal shade; fog ×3 toward a brown-gold band low in the sky | warm, lifted blacks, grain |
+| Dusk layers | distance (15 m–1.8 km, log) replaces fog with a five-stop plum → gold ramp lit by the horizon; warm sky | 7 levels a channel |
+| Amber haze | fog ×14 in one amber hue; amber sky | brightness → dark-brown to orange ramp |
+| Poster | sun lit or not (no falloff), violet shade, vertex color snapped to 12 paints (no atlas pattern) | saturation ×1.2 |
+| Toon | sun in three bands | saturation ×1.45 |
+| Night video | — | cyan-green shadows, sodium highlights, lifted blacks, noise |
+| Low-res | — | one sample per block of `screen.y / 180` px, 7 levels a channel, 8×8 ordered dither |
+| Ink | — | two inks by an 8×8 ordered dither in 2 px dots |
+
+Later: outlines (cel, ink lines) need an edge pass over depth and normals; CRT/VHS post.
 
 ## Debug
 A debug overlay (F3 cycles off, the frame rate alone, and the full overlay; see `docs/CONTROLS_INPUT.md`), the full one showing frame time graph, draw calls, CPU submit time, instances submitted and drawn per pass, triangles, cascades and their size, scene and swapchain size, GPU time per pass and per cascade (timestamp queries, native; medians over 64 frames), light count, the adapter, and camera/sun parameters, drawn with the HUD font. Native `--stats` prints the same once a second, and every 5 s a per-pass GPU table (min / median / p95) with the fragments the forward pass shaded, from occlusion queries (`docs/PERFORMANCE.md`). Screenshot command writes a PNG (native) or triggers canvas download (web).

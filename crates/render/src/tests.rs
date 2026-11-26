@@ -254,12 +254,30 @@ fn hdr_needs_a_renderable_blendable_filterable_float_format() {
 }
 
 #[test]
+fn looks_have_names_and_shader_ids() {
+    let wgsl = include_str!("../shaders/common.wgsl");
+    for (i, look) in Look::ALL.into_iter().enumerate() {
+        assert_eq!(Look::from_name(look.name()), Some(look));
+        assert_eq!(look.id() as usize, i);
+    }
+    // The shaders' ids are the same indices, in the same order.
+    let ids: Vec<&str> = wgsl
+        .lines()
+        .filter(|l| l.starts_with("const LOOK_"))
+        .map(|l| l.split(" = ").nth(1).unwrap())
+        .collect();
+    let want: Vec<String> = (0..Look::ALL.len()).map(|i| format!("{i}u;")).collect();
+    assert_eq!(ids, want);
+    assert_eq!(Sky::default().look, Look::Standard);
+}
+
+#[test]
 fn uniform_and_instance_layouts() {
     // std140-compatible: only mat4 and vec4 members, 16-byte multiple, under WebGL2's
     // 16 KiB uniform block limit.
     assert_eq!(
         size_of::<FrameUniform>(),
-        6 * 64 + 29 * 16 + MAX_LIGHTS * 32
+        6 * 64 + 30 * 16 + MAX_LIGHTS * 32
     );
     assert_eq!(size_of::<PackedLight>(), 32);
     assert_eq!(size_of::<CoronaRaw>(), 32);
@@ -323,6 +341,7 @@ fn uniform_and_instance_layouts() {
             "corona",
             "render_size",
             "shadow_params",
+            "look",
             "lights",
         ]
     );

@@ -1068,6 +1068,7 @@ impl Renderer {
                 0.0,
                 0.0,
             ],
+            look: [scene.sky.look.id() as f32, 0.0, 0.0, 0.0],
             lights: std::array::from_fn(|i| {
                 scene
                     .lights
