@@ -13,6 +13,7 @@
 use core::f32::consts::{PI, TAU};
 use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
 use vehicle::Ground;
+use world::math::{atan2, sin_cos};
 
 use crate::drive::{mix, mix3, Drive};
 use crate::input::{Action, InputState};
@@ -292,7 +293,7 @@ impl CameraPose {
     /// Yaw of the view direction, rad (0 faces `-z`, counter-clockwise positive).
     pub fn yaw(&self) -> f32 {
         let f = self.forward();
-        (-f.x).atan2(-f.z)
+        atan2(-f.x, -f.z)
     }
 }
 
@@ -309,7 +310,7 @@ fn wrap_pi(x: f32) -> f32 {
 /// Yaw of the car's heading, rad.
 fn heading(drive: &Drive, alpha: f32) -> f32 {
     let f = drive.pose(alpha).forward();
-    (-f.x).atan2(-f.z)
+    atan2(-f.x, -f.z)
 }
 
 /// The chase camera's lead into the turn, rad (positive left, like yaw): toward the way the
@@ -323,7 +324,10 @@ fn chase_lead(drive: &Drive, t: &CameraTuning) -> f32 {
 
 /// Horizontal unit vector at yaw `y`.
 fn yaw_dir(y: f32) -> Vec3 {
-    Vec3::new(-y.sin(), 0.0, -y.cos())
+    {
+        let (s, c) = sin_cos(y);
+        Vec3::new(-s, 0.0, -c)
+    }
 }
 
 /// Ground height under `p`, or `None` when nothing is there.
@@ -474,13 +478,14 @@ impl CameraRig {
         let (d, h) = (t.chase_distance_m[slot], t.chase_height_m[slot]);
         let rise = h - t.chase_target_height_m;
         let r = (d * d + rise * rise).sqrt();
-        let elev = (rise.atan2(d) - s.look_pitch).clamp(
+        let elev = (atan2(rise, d) - s.look_pitch).clamp(
             t.chase_min_elev_deg.to_radians(),
             t.chase_max_elev_deg.to_radians(),
         );
         let back = if self.look_back { PI } else { 0.0 };
         let behind = -yaw_dir(s.yaw + s.look_yaw + back);
-        pivot + behind * (r * elev.cos()) + Vec3::Y * (r * elev.sin())
+        let (es, ec) = sin_cos(elev);
+        pivot + behind * (r * ec) + Vec3::Y * (r * es)
     }
 
     /// The point the chase and orbit cameras turn around: above the car's center of mass by
@@ -570,7 +575,7 @@ impl CameraRig {
             // would wind up unseen and the return would sit still, then lurch into view.
             let slot = self.chase_slot();
             let rise = t.chase_height_m[slot] - t.chase_target_height_m;
-            let base = rise.atan2(t.chase_distance_m[slot]);
+            let base = atan2(rise, t.chase_distance_m[slot]);
             s.look_yaw = wrap_pi(s.look_yaw);
             s.look_pitch = s.look_pitch.clamp(
                 base - t.chase_max_elev_deg.to_radians(),
