@@ -1546,11 +1546,6 @@ impl Renderer {
         });
         MeshId(self.meshes.len() as u32 - 1)
     }
-
-    /// The chunk pool's counters.
-    pub fn chunk_pool_stats(&self) -> PoolStats {
-        self.chunk_pool.stats()
-    }
 }
 
 /// The name of a graphics backend as the platform layers and overlays show it.

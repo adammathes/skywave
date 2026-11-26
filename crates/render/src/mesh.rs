@@ -155,18 +155,6 @@ impl Mesh {
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
-    /// Appends a quad showing one copy of `tile`. Corners are bottom-left, bottom-right,
-    /// top-right, top-left, as for [`Mesh::push_quad`].
-    pub fn push_tile_quad(
-        &mut self,
-        corners: [[f32; 3]; 4],
-        normal: [f32; 3],
-        color: [u8; 4],
-        tile: Tile,
-    ) {
-        self.push_quad_uv(corners, normal, tile_uv(tile), color);
-    }
-
     /// Appends a quad split into `repeat[0]` columns (along `a→b`) by `repeat[1]` rows
     /// (along `a→d`), each showing one copy of `tile`, so the pattern repeats across the
     /// surface. A zero count is treated as one.

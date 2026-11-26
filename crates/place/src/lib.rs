@@ -1109,11 +1109,6 @@ impl Place {
             .find(|s| s.kind == SpawnKind::PlayerStart)
     }
 
-    /// Canonical serialization ([`codec::encode`]), appended to `out`.
-    pub fn write_bytes(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&codec::encode(self));
-    }
-
     /// Hash of [`codec::encode`]: the determinism fingerprint of a place.
     pub fn content_hash(&self) -> u64 {
         skywave_core::hash_bytes(0, &codec::encode(self))

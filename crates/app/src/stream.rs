@@ -652,11 +652,6 @@ impl Streamer {
             .is_some_and(|r| r.phase == Phase::Live)
     }
 
-    /// Resident chunks (any phase), in pool order.
-    pub fn resident_chunks(&self) -> impl Iterator<Item = [i32; 2]> + '_ {
-        self.residents.iter().map(|(_, r)| r.chunk)
-    }
-
     /// What to draw: every live chunk's GPU slot and parts, in pool order.
     pub fn drawn(&self) -> impl Iterator<Item = (SlotId, &[ChunkPart])> + '_ {
         self.residents

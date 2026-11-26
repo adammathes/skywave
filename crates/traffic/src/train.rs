@@ -409,11 +409,6 @@ impl Train {
         self.speed * self.speed / (2.0 * BRAKE) + LOOK_MARGIN_M
     }
 
-    /// Whether the train is on the line at all (not hidden at an end).
-    pub fn moving_phase(&self) -> bool {
-        self.phase == Phase::Running
-    }
-
     /// Each body (the locomotive first): its middle on the ground (top of rail), the way
     /// it faces, its length.
     pub fn bodies(&self) -> impl Iterator<Item = ([f32; 3], [f32; 2], f32)> + '_ {
