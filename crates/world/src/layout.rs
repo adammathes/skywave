@@ -91,7 +91,8 @@ pub struct District {
 /// along a bearing (`bearing_deg`) or toward a peak (`toward`). Each end must meet
 /// another road (within [`SNAP_M`]) unless `dead_end` says the last point is a dead end
 /// (an overlook, a gate). Over water the road is a bridge, its deck `deck_m` above the
-/// water.
+/// water; a `suspension` bridge also stands two towers over its longest crossing, with
+/// cables between them.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -121,6 +122,8 @@ pub struct Road {
     pub dead_end: bool,
     #[cfg_attr(feature = "serde", serde(default = "deck"))]
     pub deck_m: f32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub suspension: bool,
 }
 
 #[cfg(feature = "serde")]

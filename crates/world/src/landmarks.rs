@@ -936,7 +936,7 @@ fn bulb_at(a: [f32; 3], b: [f32; 3], n: u16, i: u16) -> V3 {
 }
 
 /// A square beam `w` wide from `a` to `b`, world points.
-fn strut(m: &mut WorldMesh, a: V3, b: V3, w: f32, paint: Paint) {
+pub(crate) fn strut(m: &mut WorldMesh, a: V3, b: V3, w: f32, paint: Paint) {
     let u = (b - a).normalize();
     let side = if abs(u.y) > 0.95 { V3::X } else { V3::Y };
     let p = u.cross(side).normalize();
