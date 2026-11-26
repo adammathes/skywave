@@ -36,15 +36,16 @@ Layout(
     // Everything no district covers is open hillside: the rim and the knoll.
     default_zone: Hills,
     districts: [
-        District(name: "the flats", zone: Residential, polygon: [(230, 700), (2820, 700), (2820, 2680), (230, 2680)]),
-        District(name: "foothills", zone: Suburb, hilly: true, polygon: [(300, 560), (2750, 560), (2750, 720), (300, 720)]),
+        // The floor stops at the avenues that frame it; past them is open hillside, so no street
+        // runs off into the brush and stops.
+        District(name: "the flats", zone: Residential, polygon: [(250, 680), (2800, 680), (2800, 2680), (250, 2680)]),
         District(name: "knoll park", zone: Park, polygon: [(560, 1860), (880, 1860), (880, 2150), (560, 2150)]),
-        District(name: "the yards", zone: Industrial, polygon: [(150, 2680), (2900, 2680), (2900, 3072), (150, 3072)]),
+        District(name: "the yards", zone: Industrial, polygon: [(250, 2680), (2800, 2680), (2800, 2950), (250, 2950)]),
         // Strip corridors along the boulevards and the old road.
-        District(name: "mirage strip", zone: Strip, polygon: [(230, 1180), (2820, 1180), (2820, 1320), (230, 1320)]),
-        District(name: "tamarisk strip", zone: Strip, polygon: [(880, 1790), (2820, 1790), (2820, 1910), (880, 1910)]),
+        District(name: "mirage strip", zone: Strip, polygon: [(250, 1180), (2800, 1180), (2800, 1320), (250, 1320)]),
+        District(name: "tamarisk strip", zone: Strip, polygon: [(880, 1790), (2800, 1790), (2800, 1910), (880, 1910)]),
         District(name: "old road strip", zone: Strip, polygon: [(360, 2930), (490, 2970), (1680, 670), (1550, 630)]),
-        District(name: "foothill strip", zone: Strip, polygon: [(300, 650), (2750, 650), (2750, 720), (300, 720)]),
+        District(name: "foothill strip", zone: Strip, polygon: [(250, 680), (2800, 680), (2800, 760), (250, 760)]),
         // A few towers on the summit avenue, framed by the mountains behind them.
         District(name: "downtown", zone: Downtown, polygon: [(1780, 1330), (2260, 1330), (2260, 1700), (1780, 1700)]),
         District(name: "the junction", zone: Commercial, polygon: [(1180, 1550), (1500, 1550), (1500, 1800), (1180, 1800)]),
@@ -85,9 +86,6 @@ Layout(
         ]),
         Road(name: "knoll drive", class: Collector, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
             (800, 1850), (760, 1930), (720, 2000),
-        ]),
-        Road(name: "west canyon", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
-            (250, 1250), (160, 1240), (90, 1200),
         ]),
     ],
 

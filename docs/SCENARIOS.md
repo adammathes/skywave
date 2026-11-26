@@ -50,7 +50,7 @@ reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
 ## Third: the early 2000s (M8)
 **`mirage_bowl_2001` — Mirage Bowl, 2001.** The authored `mirage_bowl` layout (below, "The Mirage
-Bowl's map") dressed by the `socal_basin` region template: the flat inland grid of a big
+Bowl's map") dressed by the `socal_bowl` region template: the flat inland grid of a big
 Southern California city at the turn of the century, inspired by the import street-racing culture
 of the era and the films and shows that mythologized it (an influence, not a copy: no titles, no
 names, no scenes reproduced). Wide industrial boulevards with four-lane straights, warehouse
@@ -103,7 +103,7 @@ crew garage (a warehouse with the hero cars parked and a lit sign), a taco stand
 "Change worlds": a World page listing every scenario as a card (title, year, a still, the cars and
 stations it ships with); picking one reloads the place and persists; `?scenario=` on the web. Built (see
 the format above), in the pause menu. Mirage Bowl's place is its own, the `mirage_bowl` layout under the
-`socal_basin` region template's zone rules
+`socal_bowl` region template's zone rules
 (`docs/WORLD_GENERATION.md`, "Inland basins"), dressed by its own grammar and the `sodium_night` palette
 ("The 2001 basin's grammar"), with its own `2001_basin` radio preset (`docs/AUDIO_RADIO.md`).
 
@@ -130,7 +130,10 @@ and west; rail yards to the south. Strip corridors line the boulevards and an ol
 grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
 mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
 lights. The air is clear (`haze: 0.45`, the distance haze at under half its usual thickness) and the
-hills close up with dark chaparral from 110 m, so the range stands over the whole floor. The valley freeway crosses the floor under
+hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Its zone rules
+(`socal_bowl`) keep the streets of the real region: straight grids wherever a
+street goes, none on the open hillsides or in the parks, so no street loops off into the brush and
+stops in a bulb. The valley freeway crosses the floor under
 downtown on sound walls, every street passing over it and diamonds at the canyon, summit and palm
 avenues; the wash, a concrete flood channel, comes down from the mountain front and runs out through
 the yards under every street's bridge. A rail line comes in through the yards, crosses the avenues at grade

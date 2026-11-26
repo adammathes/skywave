@@ -1,6 +1,6 @@
 // Mirage Bowl, 2001 (docs/SCENARIOS.md, docs/LAYOUTS.md, docs/backlog/MIRAGE2001.md): the
 // authored `mirage_bowl` layout, a basin floor in a ring of mountains, dressed by the
-// `socal_basin` zone rules, the `socal_basin_2001` grammar, the `sodium_night` palette and the
+// `socal_bowl` zone rules, the `socal_basin_2001` grammar, the `sodium_night` palette and the
 // `2001_basin` radio preset. Its years filter the roster: the 2001 hero cars are its own and
 // start it, the 1980s cars are old here and weigh less by their age.
 Scenario(
@@ -8,7 +8,7 @@ Scenario(
     title: "Mirage Bowl",
     year: 2001,
     kind: "Basin in the mountains",
-    region: "socal_basin",
+    region: "socal_bowl",
     layout: Some("mirage_bowl"),
     grammar: "socal_basin_2001.ron",
     radio: "2001_basin",

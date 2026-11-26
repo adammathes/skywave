@@ -15,6 +15,7 @@ use world::Grammar;
 
 pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
 pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+pub const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 pub const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
@@ -33,9 +34,10 @@ pub const LANDMARKS: [(&str, &str); 9] = world::landmarks::BUILTIN;
 pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-pub const REGIONS: [(&str, &str); 3] = [
+pub const REGIONS: [(&str, &str); 4] = [
     ("california_coast", CALIFORNIA_COAST),
     ("socal_basin", SOCAL_BASIN),
+    ("socal_bowl", SOCAL_BOWL),
     ("bay_area", BAY_AREA),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.

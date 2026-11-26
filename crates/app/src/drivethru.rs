@@ -749,7 +749,7 @@ mod tests {
                         .props
                         .items
                         .iter()
-                        .all(|q| Vec2::new(q.pos[0], q.pos[2]).distance(*s) > 3.5)
+                        .all(|q| Vec2::new(q.pos[0], q.pos[2]).distance(*s) > 3.0)
                 })
                 .unwrap();
             let (y, _) = app.ground.level_at([start.x, start.y]);

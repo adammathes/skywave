@@ -1306,7 +1306,7 @@ mod tests {
     #[test]
     fn every_basin_chunk_fits_the_pool_and_the_far_terrain_is_small() {
         let s = crate::scenario::get(1);
-        assert_eq!(s.region, "socal_basin");
+        assert_eq!(s.region, "socal_bowl");
         let place =
             crate::places::build_in(crate::PlaceKey::Coast, skywave_core::Seed(1), s).unwrap();
         fits_the_pool(place, "basin");
