@@ -179,15 +179,15 @@ impl DragStrip {
             out.push(mesh);
             (out.len() - 1) as u16
         };
-        for (k, slot) in self.lamp_mesh.iter_mut().enumerate() {
+        for (k, id) in self.lamp_mesh.iter_mut().enumerate() {
             let mut m = WorldMesh::default();
             world::setpieces::tree_lamps(&mut m, k);
-            *slot = add(m);
+            *id = add(m);
         }
-        for (d, slot) in self.digit_mesh.iter_mut().enumerate() {
+        for (d, id) in self.digit_mesh.iter_mut().enumerate() {
             let mut m = WorldMesh::default();
             world::setpieces::digit(&mut m, d);
-            *slot = add(m);
+            *id = add(m);
         }
         out
     }
