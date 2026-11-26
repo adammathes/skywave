@@ -219,6 +219,18 @@ impl TerrainGrid {
                 }
             }
         }
+        // A basin's flood channel runs on under the roads that cross it: they bridge it,
+        // and their decks stand over its bed rather than the ground filling in under them.
+        let channels = channel_polygons(place);
+        let in_channel = |q: V2| {
+            channels.iter().any(|(poly, lo, hi)| {
+                q.x >= lo.x
+                    && q.y >= lo.y
+                    && q.x <= hi.x
+                    && q.y <= hi.y
+                    && crate::math::point_in_polygon(q, poly)
+            })
+        };
         // Pass 2: the chosen road's surface height there, just under it.
         let mut roads = vec![NONE; g.w * g.h];
         for iz in 0..g.h {
@@ -226,7 +238,10 @@ impl TerrainGrid {
                 let c = pull[iz * g.w + ix];
                 let q = g.pos(ix, iz);
                 let hp = &mut g.heights[iz * g.w + ix];
-                if c.core != NONE {
+                let spanned = |y: f32, h: f32| y - h > DECK_CLEARANCE_M && in_channel(q);
+                if c.core != NONE && spanned(c.core_y.min(c.min_y), *hp) {
+                    // Left as it is: the bridge's deck stands over it.
+                } else if c.core != NONE {
                     let road = if c.min_y < c.core_y - DECK_CLEARANCE_M {
                         c.min
                     } else {
@@ -236,7 +251,7 @@ impl TerrainGrid {
                     let y = local_height(net, road, q);
                     let bend = 0.5 * bend_up(net, road, q, y, 0.5 * g.cell);
                     *hp = y - UNDER_ROAD_M - bend.min(MAX_BEND_DROP_M);
-                } else if c.blend != NONE {
+                } else if c.blend != NONE && !spanned(local_height(net, c.blend, q), *hp) {
                     let y = local_height(net, c.blend, q) - UNDER_ROAD_M;
                     let (h0, s) = (*hp, c.blend_s);
                     let sloped = clamp(h0, y - SLOPE * s, y + SLOPE * s);
@@ -487,21 +502,7 @@ pub fn build(
     let wl = grid.water_level;
     let [nx, nz] = place.header.size_chunks.map(usize::from);
     // A basin's flood channel: its ground is concrete.
-    let channels: Vec<(Vec<V2>, V2, V2)> = place
-        .terrain
-        .water
-        .iter()
-        .filter(|b| b.kind == WaterKind::Channel)
-        .map(|b| {
-            let poly: Vec<V2> = b.polygon.iter().map(|&p| V2::from_array(p)).collect();
-            let (mut lo, mut hi) = (poly[0], poly[0]);
-            for q in &poly {
-                lo = V2::new(lo.x.min(q.x), lo.y.min(q.y));
-                hi = V2::new(hi.x.max(q.x), hi.y.max(q.y));
-            }
-            (poly, lo, hi)
-        })
-        .collect();
+    let channels = channel_polygons(place);
     let concrete_at = |p: V2| {
         channels.iter().any(|(poly, lo, hi)| {
             p.x >= lo.x
@@ -591,6 +592,25 @@ pub fn build(
             dst.indices.extend(m.indices.iter().map(|i| i + base));
         }
     }
+}
+
+/// A basin's flood channel and its ramps: each polygon with its bounds.
+fn channel_polygons(place: &Place) -> Vec<(Vec<V2>, V2, V2)> {
+    place
+        .terrain
+        .water
+        .iter()
+        .filter(|b| b.kind == WaterKind::Channel)
+        .map(|b| {
+            let poly: Vec<V2> = b.polygon.iter().map(|&p| V2::from_array(p)).collect();
+            let (mut lo, mut hi) = (poly[0], poly[0]);
+            for q in &poly {
+                lo = V2::new(lo.x.min(q.x), lo.y.min(q.y));
+                hi = V2::new(hi.x.max(q.x), hi.y.max(q.y));
+            }
+            (poly, lo, hi)
+        })
+        .collect()
 }
 
 /// A channel's bed marks this long or longer (its ramps are shorter): the low-flow strip
