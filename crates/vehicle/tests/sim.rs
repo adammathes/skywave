@@ -920,3 +920,32 @@ fn step_does_not_allocate() {
         assert_eq!(allocations() - before, 0, "{} step allocated", spec.id);
     }
 }
+
+#[test]
+fn power_boost_pulls_harder_from_thirty() {
+    for spec in cars() {
+        let gain = |boost: f32| {
+            let assists = Assists {
+                power_boost: boost,
+                ..Assists::ARCADE
+            };
+            let mut s = spawn(&spec);
+            up_to_speed(&spec, &mut s, 13.4);
+            let v0 = s.speed_mps;
+            hold(
+                &spec,
+                &mut s,
+                input(1.0, 0.0, 0.0),
+                &assists,
+                2 * STEPS_PER_S,
+            );
+            s.speed_mps - v0
+        };
+        let (stock, boosted) = (gain(1.0), gain(1.8));
+        assert!(
+            boosted > stock * 1.25,
+            "{}: stock {stock} m/s, boosted {boosted} m/s",
+            spec.id
+        );
+    }
+}

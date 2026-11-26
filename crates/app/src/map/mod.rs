@@ -11,6 +11,7 @@
 //! centers. Everything is plain f32 arithmetic in a fixed order (no `mul_add`, no hashing
 //! order), so the same Place gives bit-identical pixels on every platform.
 
+pub mod districts;
 pub mod names;
 pub mod view;
 
@@ -119,7 +120,9 @@ pub fn poi_color(kind: PoiKind) -> Rgb {
         PoiKind::ChannelRamp | PoiKind::Tunnel | PoiKind::GradeCrossing | PoiKind::WaterTower => {
             [120, 130, 140]
         }
-        PoiKind::TacoStand | PoiKind::DonutShop | PoiKind::CoffeeShop => [222, 84, 60],
+        PoiKind::TacoStand | PoiKind::DonutShop | PoiKind::BurgerStand | PoiKind::CoffeeShop => {
+            [222, 84, 60]
+        }
         PoiKind::Motel | PoiKind::DriveIn | PoiKind::MoviePalace => [214, 60, 160],
         PoiKind::CityHall => [120, 90, 170],
     }

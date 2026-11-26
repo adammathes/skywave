@@ -1,0 +1,61 @@
+// Palfrey Roadster body: a late-90s round-shouldered roadster.
+//
+// Intent: geometry first. A domed hood rising in one arc to a short steep windshield in a
+// bright frame, high flat door tops, the top folded under a boot behind the seats, and a
+// tail that rounds down in a near half circle to slim lamps over a body-colored bumper.
+// Wheels pushed hard to the corners under round arches, a wide low mouth, smooth flanks
+// with no creases, five-spoke alloys. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "palfrey_roadster",
+    side: [
+        (0.00, 0.50), (0.06, 0.62), (0.30, 0.72), (0.80, 0.82), (1.50, 0.89), (1.56, 0.90),
+        (2.08, 1.26), (2.14, 0.92), (3.00, 0.945), (3.60, 0.93), (3.88, 0.88), (4.04, 0.80),
+        (4.04, 0.36), (3.85, 0.24), (3.40, 0.17), (0.65, 0.15), (0.12, 0.20), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.62), (0.15, 0.78), (0.50, 0.86), (1.00, 0.88), (3.30, 0.88), (3.85, 0.84),
+        (4.04, 0.74),
+    ],
+    belt: [(1.56, 0.89), (2.14, 0.915), (3.00, 0.94), (3.60, 0.925), (4.04, 0.84)],
+    section: Section(shoulder: 0.94, tumblehome_deg: 30, greenhouse_frac: 0.68, crown: 0.06, tuck: 0.06),
+    glass: Glass(
+        windshield: (1.58, 2.06),
+        // No side glass; the backlight range is the boot behind the seats.
+        backlight: (3.14, 3.46),
+        side: [],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.22, arch_clearance: 0.04, front_x: 0.86, rear_x: 3.28, track: 1.53),
+    front: Front(lights: Rect, grille: Wide, bumper: Body, bumper_y: (0.26, 0.38)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 2, hood_width: 0.95, creases: []),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [ChromeTrim, Badge(Circle)],
+    roof: Roof(kind: Convertible(top: Down)),
+    // Silver, deep blue pearl, yellow, black, red, white, graphite.
+    palette: ["#c4c7cc", "#1d2c5a", "#e4b819", "#141517", "#a81820", "#efeee9", "#4a4d53"],
+    accent: "#1a1a1c",
+    interior: InteriorShape(
+        dash_height: 0.80,
+        dash_x: 1.80,
+        wheel_pos: (2.20, 0.62),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (1.98, 1.14),
+        seat: (2.46, 0.34),
+        driver_offset: 0.38,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash with brushed metal
+        // rings, baseball-mitt brown hide, black carpet, red-lit dials.
+        colors: ["#1b1c1f", "#7a4a2a", "#1d1e21", "#2e2f32", "#2a2b2e", "#b8bcc2"],
+        display: "#ff4030",
+        insert: "#8a5634",
+        piping: "#5a361e",
+        dash_top: "#202124",
+        applique: Brushed,
+        manual: true,
+    ),
+)

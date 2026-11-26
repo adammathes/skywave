@@ -36,6 +36,7 @@ use crate::input::{
     Action, AxisOptions, Binding, Bindings, Conflict, DeviceKind, InputMapper, InputState, PadAxis,
     PadButton, RawInput, Sign,
 };
+use crate::map::districts::{DistrictCard, Districts};
 use crate::map::view::{
     FullMap, MapGeom, MINIMAP_RANGES_M, ZOOM_OCTAVES_PER_NOTCH, ZOOM_OCTAVES_PER_S,
 };
@@ -127,6 +128,8 @@ pub struct MapHud {
     pub geom: Option<MapGeom>,
     pub pois: Vec<MapPoi>,
     pub full: FullMap,
+    /// The named districts, for the card shown on entering one.
+    pub districts: Districts,
 }
 
 pub struct Ui {
@@ -166,6 +169,8 @@ pub struct Ui {
     capture: Option<CaptureState>,
     conflict: Option<PendingConflict>,
     toast: Option<(Toast, f32)>,
+    /// The name of the district just entered, fading in and out.
+    district: DistrictCard,
     can_quit: bool,
     quit: bool,
     last_device: DeviceKind,
@@ -257,6 +262,7 @@ impl Ui {
             capture: None,
             conflict: None,
             toast: None,
+            district: DistrictCard::default(),
             can_quit: false,
             quit: false,
             last_device: DeviceKind::KeyboardMouse,
@@ -342,7 +348,27 @@ impl Ui {
             geom: Some(geom),
             pois,
             full: FullMap::default(),
+            districts: std::mem::take(&mut self.map.districts),
         };
+    }
+
+    /// The place's named districts, for their cards.
+    pub fn set_districts(&mut self, districts: Districts) {
+        self.map.districts = districts;
+        self.district = DistrictCard::default();
+    }
+
+    /// One driving frame with the car at ground point `car`: shows a district's name a
+    /// moment after the car enters it.
+    pub fn district_frame(&mut self, car: [f32; 2], dt: f32) {
+        let here = self.map.districts.at(car);
+        self.district.update(here, dt);
+    }
+
+    /// The district name on screen and its opacity, 0..=1.
+    pub fn district_card(&self) -> Option<(&str, f32)> {
+        let (d, a) = self.district.showing()?;
+        Some((self.map.districts.names.get(d)?.as_str(), a))
     }
 
     pub fn map(&self) -> &MapHud {
@@ -1400,6 +1426,10 @@ impl App {
             self.camera.pose(&self.drive, steps.alpha).eye
         };
         let (car, heading) = self.map_focus(steps.alpha);
+        // The district's card waits under the controls card and the full map.
+        if steps.count > 0 && !self.ui.controls_up() && !self.ui.full_map_open() {
+            self.ui.district_frame(car, dt as f32);
+        }
         let radio_display = self.radio_display(steps.alpha);
         let ctx = draw::DrawCtx {
             daylight: &daylight,
