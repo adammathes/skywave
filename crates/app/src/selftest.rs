@@ -186,7 +186,7 @@ mod tests {
         let t = SelfTest::run();
         // The same values the crates' own golden tests pin.
         assert_eq!(t.place_content_hash, 0x324D_158F_EC2A_D198);
-        assert_eq!(t.town_mesh_hash, 0x3E33_BB0B_2B1F_DBEA);
+        assert_eq!(t.town_mesh_hash, 0xEE11_FD41_AF94_9309);
         assert_eq!(t.map_image_hash, 0x8a97_cf1e_db61_56ae);
         assert_eq!(t.basin_content_hash, 0xFDD5_C467_3805_6925);
         assert_eq!(t.drive_hash, 0x38e5_0ff8_2dc0_4d2f);

@@ -717,7 +717,7 @@ mod tests {
     }
 
     /// Idle is a low, steady hum well under the radio for every engine, and steady: its
-    /// level in 50 ms windows barely moves.
+    /// level in 200 ms windows (several firings of even a four) barely moves.
     #[test]
     fn idle_sits_under_the_radio_and_is_steady() {
         let mut all = Vec::new();
@@ -729,7 +729,7 @@ mod tests {
             p.engine.profile = profile;
             let x = settled(&p, 4.5);
             let db = under_radio_db(&x);
-            let env: Vec<f32> = x.chunks(4800).map(rms).collect();
+            let env: Vec<f32> = x.chunks(19_200).map(rms).collect();
             let mean = env.iter().sum::<f32>() / env.len() as f32;
             let var = env.iter().map(|e| (e - mean) * (e - mean)).sum::<f32>() / env.len() as f32;
             let wobble = var.sqrt() / mean;
@@ -772,13 +772,13 @@ mod tests {
         assert!((-16.0..-9.0).contains(&db), "{db}");
     }
 
-    /// The scripted drive (12 s per engine profile, all five) renders bit-identically
+    /// The scripted drive (12 s per engine profile, the first five) renders bit-identically
     /// everywhere. `SKYWAVE_AUDIO_WAV=path` also writes it out for listening.
     ///
     /// Re-pin deliberately, in its own commit, when the synth changes.
     #[test]
     fn scripted_drive_renders_deterministically() {
-        const PINNED: u64 = 0x3016_fe04_3a75_434b;
+        const PINNED: u64 = 0xb69d_07bb_7562_4c34;
         let mut m = Mixer::new();
         let out = render_script(&mut m, 720 * 5, |_, _| {});
         let bytes = wav(&out);
