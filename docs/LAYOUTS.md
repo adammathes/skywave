@@ -30,7 +30,10 @@ Layout(
   ground_m: 6,                      // land height where no shape says otherwise
   water_level_m: 0,
   edges: Edges(north: Ocean, east: Hills, south: Hills, west: Ocean),
-  // Terrain, added onto `ground_m`; the highest shape wins. Each fades to nothing at
+  // Optional: a height grid over `ground_m`, `cell_m` apart, rows from the north-west
+  // corner, sampled bilinearly (real terrain; see "Real data" below).
+  terrain: Some(Terrain(cell_m: 32, cols: 129, rows: 129, heights_m: [...])),
+  // Terrain shapes, added onto `ground_m` and the grid; the highest shape wins. Each fades to nothing at
   // `falloff_m` from its line or point. A ridge takes one `height_m`, or `heights_m` with one
   // height per point, interpolated along the line; `relief_m` roughens its crest.
   ridges: [ Ridge(name: "spine", line: [(760, 1600), (720, 2150), (900, 4060)],
@@ -90,6 +93,33 @@ shallow enough to bridge; the start names a road and lies along it.
 
 `tools/mapdump --layout assets/layouts/<id>.ron` draws the macro map and main roads to check a
 layout by eye.
+
+## Real data
+`tools/realmap` grounds a layout in a real place, from public-domain US sources only
+(`docs/adr/0005-reference-sources.md`; never OpenStreetMap or anything built on it, such as
+Overture): the primary and secondary roads of Census TIGER/Line (`MTFCC` S1100 become
+highways, S1200 arterials) and USGS 3DEP elevation. It is an offline tool; the game never
+reads the sources.
+
+An import file (`tools/realmap/<id>.ron`) names the layout and maps a real box into its
+frame with piecewise-linear `x_warp` (longitude to meters) and `z_warp` (latitude), so a
+city can get more room than the land around it. `cargo run -p realmap -- tools/realmap/<id>.ron`
+downloads the sources into `target/realmap/` (once; never committed), then rewrites only the
+layout's generated sections, each between `// realmap:<name> begin` and `// realmap:<name> end`:
+- `terrain`: the real heights at each grid point, scaled by `slope` over the local squeeze (so
+  slopes stay that many times the real ones wherever the frame compresses the land).
+- `water`: low ground (`sea_below_m`) the open water at the frame's edge reaches, islands
+  filled, traced and simplified into `Sea` polygons.
+- `roads`: the roads rasterized at `merge_m` (a divided highway's carriageways merge),
+  thinned to a skeleton, cut to its 2-core (every road ends on another road: no roads to
+  nowhere), small loops and interchange knots removed, joined straight on through
+  junctions into long roads, smoothed. Each highway gets ramps to the arterials that cross
+  it, 500 m apart. Names are invented (`freeway 3`, `road 12`). `links` adds invented
+  connections where the real one runs outside the box.
+- `districts`, drawn in the import file in degrees (a polygon, or a band along a line), and
+  `start`, the road nearest a real point.
+
+Everything else in the layout (extra hand-drawn roads, channels, edges) stays as written.
 
 ## Kept small on purpose
 No scoring, no noise fields, no tuning curves. If a world needs something a layout cannot say,

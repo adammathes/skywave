@@ -260,7 +260,8 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
                 let t = 1.0 - smoothstep(0.0, pk.falloff_m, d);
                 lift = lift.max(pk.height_m * t);
             }
-            let mut y = layout.ground_m + lift + 1.5 * roll.at(p.x, p.y);
+            let grid = layout.terrain.as_ref().map_or(0.0, |t| t.at(p.x, p.y));
+            let mut y = layout.ground_m + grid + lift + 1.5 * roll.at(p.x, p.y);
             for (poly, depth, bb) in &waters {
                 if !in_box(p, bb) {
                     continue;

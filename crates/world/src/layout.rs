@@ -156,6 +156,33 @@ impl Channel {
     }
 }
 
+/// A height grid: `cols` x `rows` heights over the ground, `cell_m` apart, row by row from
+/// the north-west corner, sampled bilinearly. Real terrain resampled by `tools/realmap`.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Terrain {
+    pub cell_m: f32,
+    pub cols: u16,
+    pub rows: u16,
+    pub heights_m: Vec<f32>,
+}
+
+impl Terrain {
+    /// The height at `(x, z)`, clamped to the grid.
+    pub fn at(&self, x: f32, z: f32) -> f32 {
+        let (c, r) = (usize::from(self.cols), usize::from(self.rows));
+        let fx = (x / self.cell_m).max(0.0).min((c - 1) as f32);
+        let fz = (z / self.cell_m).max(0.0).min((r - 1) as f32);
+        let (ix, iz) = ((fx as usize).min(c - 2), (fz as usize).min(r - 2));
+        let (tx, tz) = (fx - ix as f32, fz - iz as f32);
+        let h = |i: usize, j: usize| self.heights_m[j * c + i];
+        let top = h(ix, iz) + (h(ix + 1, iz) - h(ix, iz)) * tx;
+        let bot = h(ix, iz + 1) + (h(ix + 1, iz + 1) - h(ix, iz + 1)) * tx;
+        top + (bot - top) * tz
+    }
+}
+
 #[cfg(feature = "serde")]
 fn yes() -> bool {
     true
@@ -188,6 +215,9 @@ pub struct Layout {
     pub ground_m: f32,
     pub water_level_m: f32,
     pub edges: Edges,
+    /// Heights over `ground_m` from a grid, under the ridges and peaks.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub terrain: Option<Terrain>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub ridges: Vec<Ridge>,
     #[cfg_attr(feature = "serde", serde(default))]
@@ -321,6 +351,20 @@ impl Layout {
             }
             Ok(())
         };
+        if let Some(t) = &self.terrain {
+            let n = usize::from(t.cols) * usize::from(t.rows);
+            let span = |k: u16| f32::from(k.max(1) - 1) * t.cell_m;
+            if t.cols < 2
+                || t.rows < 2
+                || t.heights_m.len() != n
+                || t.cell_m <= 0.0
+                || span(t.cols) < ext[0]
+                || span(t.rows) < ext[1]
+                || t.heights_m.iter().any(|h| !h.is_finite())
+            {
+                return Err(LayoutError::Value("terrain".into()));
+            }
+        }
         let mut names: Vec<&str> = Vec::new();
         let mut unique = |n: &'a str| -> Result<(), LayoutError> {
             if names.contains(&n) {
@@ -487,4 +531,23 @@ pub fn point_at(line: &[V2], s: f32) -> (V2, V2) {
 /// Length of the polyline `line`.
 pub fn line_length(line: &[V2]) -> f32 {
     line.windows(2).map(|s| (s[1] - s[0]).length()).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Terrain;
+
+    #[test]
+    fn terrain_samples_bilinearly_and_clamps() {
+        let t = Terrain {
+            cell_m: 10.0,
+            cols: 2,
+            rows: 2,
+            heights_m: alloc::vec![0.0, 10.0, 20.0, 30.0],
+        };
+        assert_eq!(t.at(0.0, 0.0), 0.0);
+        assert_eq!(t.at(5.0, 5.0), 15.0);
+        assert_eq!(t.at(10.0, 0.0), 10.0);
+        assert_eq!(t.at(-5.0, 99.0), 20.0);
+    }
 }

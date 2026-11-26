@@ -1759,6 +1759,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "realmap"
+version = "0.1.0"
+dependencies = [
+ "place",
+ "ron",
+ "serde",
+ "world",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
