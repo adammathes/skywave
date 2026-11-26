@@ -36,6 +36,16 @@ pub struct Import {
     pub z_warp: Vec<(f64, f32)>,
     /// Slopes are this many times steeper than the real ones at the local squeeze.
     pub slope: f32,
+    /// Low ground is flattened: a real height `h` counts as `h * h / (h + foothill_m)`, so
+    /// the land under about this height (where the suburbs climb) stays gentle enough for
+    /// streets while the ridges keep nearly their full height. Hilly districts keep their
+    /// full relief. 0 leaves heights as they are.
+    #[serde(default)]
+    pub foothill_m: f32,
+    /// Passes of a 3 x 3 box blur over the height grid: rounds off hills too small to drive
+    /// at the frame's scale.
+    #[serde(default)]
+    pub smooth: u32,
     /// Heights are capped here, after scaling.
     #[serde(default = "max_height")]
     pub max_height_m: f32,
@@ -56,6 +66,10 @@ pub struct Import {
     /// real connection that runs outside the box, so the roads it joins are not trimmed.
     #[serde(default)]
     pub links: Vec<Vec<(f64, f64)>>,
+    /// Points on suspension bridges, in degrees: the chain through each stays its own road
+    /// and stands towers.
+    #[serde(default)]
+    pub suspension: Vec<(f64, f64)>,
     /// Districts, in degrees.
     pub districts: Vec<District>,
     /// The player starts on the road nearest this point, driving away from its first point.
@@ -177,6 +191,19 @@ fn extent(text: &str) -> Option<[f32; 2]> {
     ])
 }
 
+/// Whether (x, y) lies inside `poly` (even-odd).
+fn point_in(x: f64, y: f64, poly: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[(i + n - 1) % n]);
+        if (a.1 > y) != (b.1 > y) && x < (b.0 - a.0) * (y - a.1) / (b.1 - a.1) + a.0 {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
 /// A polygon `half` meters either side of `line`.
 fn band(line: &[(f32, f32)], half: f32) -> Vec<(f32, f32)> {
     let n = line.len();
@@ -249,6 +276,42 @@ fn run(path: &str) -> Result<(), String> {
     let cell = cfg.terrain_cell_m;
     let cols = (ext[0] / cell).ceil() as usize + 1;
     let rows = (ext[1] / cell).ceil() as usize + 1;
+    let hilly: Vec<&Vec<(f64, f64)>> = cfg
+        .districts
+        .iter()
+        .filter(|d| d.hilly)
+        .map(|d| &d.polygon)
+        .collect();
+    let mut hs = vec![0.0f32; cols * rows];
+    for r in 0..rows {
+        for c in 0..cols {
+            let (x, z) = (c as f32 * cell, r as f32 * cell);
+            let (lon, lat) = warp.inv(x, z);
+            let h = dem.at(lon, lat).max(0.0);
+            let hilly = hilly.iter().any(|p| point_in(lon, lat, p));
+            let h = if cfg.foothill_m > 0.0 && !hilly {
+                h * h / (h + cfg.foothill_m)
+            } else {
+                h
+            };
+            hs[r * cols + c] = (h * cfg.slope / warp.squeeze(x, z)).min(cfg.max_height_m);
+        }
+    }
+    for _ in 0..cfg.smooth {
+        let src = hs.clone();
+        for r in 0..rows {
+            for c in 0..cols {
+                let (mut sum, mut n) = (0.0, 0.0);
+                for rr in r.saturating_sub(1)..(r + 2).min(rows) {
+                    for cc in c.saturating_sub(1)..(c + 2).min(cols) {
+                        sum += src[rr * cols + cc];
+                        n += 1.0;
+                    }
+                }
+                hs[r * cols + c] = sum / n;
+            }
+        }
+    }
     let mut t = String::new();
     writeln!(
         t,
@@ -258,11 +321,7 @@ fn run(path: &str) -> Result<(), String> {
     for r in 0..rows {
         t.push_str("        ");
         for c in 0..cols {
-            let (x, z) = (c as f32 * cell, r as f32 * cell);
-            let (lon, lat) = warp.inv(x, z);
-            let h = dem.at(lon, lat).max(0.0);
-            let y = (h * cfg.slope / warp.squeeze(x, z)).min(cfg.max_height_m);
-            let y = (y * 2.0).round() / 2.0;
+            let y = (hs[r * cols + c] * 2.0).round() / 2.0;
             write!(t, "{y},").unwrap();
         }
         t.push('\n');
@@ -300,7 +359,12 @@ fn run(path: &str) -> Result<(), String> {
         mtfcc: "S1200".into(),
         lonlat: l.clone(),
     }));
-    let net = net::network(&lines, &warp, ext, cfg.merge_m);
+    let susp: Vec<(f32, f32)> = cfg
+        .suspension
+        .iter()
+        .map(|&(a, b)| warp.fwd(a, b))
+        .collect();
+    let net = net::network(&lines, &warp, ext, cfg.merge_m, &susp);
     let mut r = String::new();
     for road in &net {
         let pts: Vec<String> = road
@@ -313,6 +377,11 @@ fn run(path: &str) -> Result<(), String> {
         } else {
             let names: Vec<String> = road.ramps.iter().map(|n| format!("\"{n}\"")).collect();
             format!(", ramps: [{}]", names.join(", "))
+        };
+        let ramps = if road.suspension {
+            format!("{ramps}, suspension: true")
+        } else {
+            ramps
         };
         let class = if road.highway {
             "class: Highway, lanes: 2".to_string()

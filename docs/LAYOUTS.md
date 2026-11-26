@@ -104,7 +104,10 @@ city can get more room than the land around it. `cargo run -p realmap -- tools/r
 downloads the sources into `target/realmap/` (once; never committed), then rewrites only the
 layout's generated sections, each between `// realmap:<name> begin` and `// realmap:<name> end`:
 - `terrain`: the real heights at each grid point, scaled by `slope` over the local squeeze (so
-  slopes stay that many times the real ones wherever the frame compresses the land).
+  slopes stay that many times the real ones wherever the frame compresses the land). Outside
+  `hilly` districts, `foothill_m` flattens low ground (a height `h` counts as
+  `h * h / (h + foothill_m)`) so suburbs on real foothills stay gentle enough for streets
+  while ridges keep their height; `smooth` box-blurs away hills too small to drive.
 - `water`: low ground (`sea_below_m`) the open water at the frame's edge reaches, islands
   filled, traced and simplified into `Sea` polygons.
 - `roads`: the roads rasterized at `merge_m` (a divided highway's carriageways merge),
@@ -112,7 +115,8 @@ layout's generated sections, each between `// realmap:<name> begin` and `// real
   nowhere), small loops and interchange knots removed, joined straight on through
   junctions into long roads, smoothed. Each highway gets ramps to the arterials that cross
   it, 500 m apart. Names are invented (`freeway 3`, `road 12`). `links` adds invented
-  connections where the real one runs outside the box.
+  connections where the real one runs outside the box. A `suspension` point marks the
+  chain through it as its own road with `suspension: true` (the layout must have that field).
 - `districts`, drawn in the import file in degrees (a polygon, or a band along a line), and
   `start`, the road nearest a real point.
 
