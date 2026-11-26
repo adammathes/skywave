@@ -1,0 +1,31 @@
+// A test layout (tests/freeway.rs): a flat town with a freeway across its middle that
+// three avenues cross (the middle one with ramps), a dry flood channel the freeway and both
+// boulevards bridge, and a river through the park. 12 x 12 chunks, 1536 m square.
+Layout(
+    id: "freeway_town",
+    size_chunks: (12, 12),
+    ground_m: 6,
+    water_level_m: 0,
+    edges: Edges(north: Hills, east: Hills, south: Hills, west: Hills),
+    default_zone: Residential,
+    districts: [
+        District(name: "park", zone: Park, polygon: [(160, 160), (490, 160), (490, 500), (160, 500)]),
+    ],
+    roads: [
+        Road(name: "north boulevard", class: Arterial, lanes: 2, points: [(150, 150), (1380, 150)]),
+        Road(name: "south boulevard", class: Arterial, lanes: 2, points: [(150, 1380), (1380, 1380)]),
+        Road(name: "west avenue", class: Arterial, lanes: 2, points: [(150, 150), (150, 1380)]),
+        Road(name: "east avenue", class: Arterial, lanes: 2, points: [(1380, 150), (1380, 1380)]),
+        Road(name: "first avenue", class: Arterial, lanes: 1, points: [(500, 150), (500, 1380)]),
+        Road(name: "second avenue", class: Arterial, lanes: 2, points: [(800, 150), (800, 1380)]),
+        Road(name: "third avenue", class: Arterial, lanes: 1, points: [(1150, 150), (1150, 1380)]),
+        Road(name: "freeway", class: Highway, lanes: 2, ramps: ["second avenue"], points: [
+            (150, 700), (500, 760), (800, 780), (1150, 760), (1380, 700),
+        ]),
+    ],
+    channels: [
+        Channel(name: "wash", line: [(1280, 60), (1260, 700), (1290, 1480)], width_m: 14, depth_m: 5),
+        Channel(name: "creek", line: [(160, 330), (330, 300), (640, 340)], width_m: 10, depth_m: 1.5, wet: true),
+    ],
+    start: Start(road: "second avenue", along_m: 200),
+)
