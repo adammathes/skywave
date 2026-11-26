@@ -16,6 +16,10 @@ pub const SUN_ANGULAR_RADIUS: f32 = 0.5 * core::f32::consts::PI / 180.0;
 pub const MOON_ANGULAR_RADIUS: f32 = 0.5 * core::f32::consts::PI / 180.0;
 /// Highest radiance written for the sun disc, kcd/m² (stays well inside f16).
 const SUN_DISC_MAX: f32 = 30_000.0;
+/// How much of the sky's hemisphere light reaches surfaces as ambient, and how much of its
+/// colour (see `SkyModel::new`).
+const AMBIENT_SCALE: f32 = 1.0;
+const AMBIENT_TINT: f32 = 0.6;
 
 /// Perez coefficients A..E as (slope, offset) in turbidity, for luminance Y and
 /// chromaticities x and y (Preetham et al., appendix A.2).
@@ -192,7 +196,12 @@ impl SkyModel {
                 up += model.radiance(Vec3::new(sin_t * a.cos(), cos_t, sin_t * a.sin()));
             }
         }
-        model.sky_up = up / 32.0;
+        // Then graded: at full strength its blue floods every wall in shade with one cold
+        // colour. Keep its brightness (shade stays bright and clean, arcade-style, not
+        // murky) but 60% of its tint, so shaded paint keeps its own hue with a cool cast.
+        let up = up / 32.0;
+        let luma = Vec3::splat(up.dot(LUMA));
+        model.sky_up = (luma + (up - luma) * AMBIENT_TINT) * AMBIENT_SCALE;
 
         // The sun stops lighting as its disc sinks below the horizon.
         let above = ((sun_dir.y + 0.01) / 0.03).clamp(0.0, 1.0);

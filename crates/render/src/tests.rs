@@ -2283,8 +2283,8 @@ fn agx_cpu(color: Vec3) -> (Vec3, Vec3) {
     v = 15.5 * x4 * x2 - 40.14 * x4 * v + 31.96 * x4 - 6.868 * x2 * v + 0.4298 * x2 + 0.1191 * v
         - Vec3::splat(0.00232);
     let luma = v.dot(Vec3::new(0.2126, 0.7152, 0.0722));
-    v = v.max(Vec3::ZERO).powf(1.25);
-    v = (luma + 1.2 * (v - luma)).max(Vec3::ZERO);
+    v = v.max(Vec3::ZERO).powf(1.2);
+    v = (luma + 1.6 * (v - luma)).max(Vec3::ZERO);
     let pre = outset * v;
     (
         pre,
