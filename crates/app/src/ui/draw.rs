@@ -69,9 +69,13 @@ const GRAPH_BAD: [u8; 4] = [235, 80, 70, 230];
 const MAP_RIM: [u8; 4] = [16, 20, 30, 235];
 const MAP_SHADE: [u8; 4] = [8, 10, 18, 250];
 const ARROW_EDGE: [u8; 4] = [24, 16, 8, 255];
+/// A soft light disc under the minimap's player arrow, so it reads on any ground.
+const PLAYER_HALO: [u8; 4] = [255, 255, 255, 150];
 /// Minimap rim width and arrow size, virtual units.
 const RIM: f32 = 4.0;
 const MINI_ARROW: f32 = 24.0;
+/// Radius of a point of interest's dot on the minimap (with its dark ring).
+const MINI_POI: f32 = 6.0;
 const FULL_ARROW: f32 = 26.0;
 /// Lines in the full overlay's stats block, under the graph.
 const STAT_LINES: f32 = 13.0;
@@ -936,34 +940,43 @@ impl Ui {
     }
 
     /// The minimap's circle at the bottom left of the safe area: the map around the car
-    /// (turned with it, or north-up), a north badge on the rim, and the player arrow.
+    /// (turned with it, the car low so the road ahead shows, or north-up), the points of
+    /// interest in view, a north badge on the rim, and the player arrow.
     fn draw_minimap(&self, hud: &mut HudBuilder, ctx: &DrawCtx, geom: &MapGeom) {
         let [sx, sy, _, sh] = hud.safe_rect();
         let r = MINIMAP_DIAMETER * 0.5;
         let center = [sx + r + RIM, sy + sh - r - RIM];
         let s = &self.settings;
-        let m = Minimap::new(
-            center,
-            r,
-            ctx.car,
-            ctx.heading,
-            s.minimap_rotate,
-            s.minimap_range_m,
-        );
+        let range = if self.map.minimap_range_m > 0.0 {
+            self.map.minimap_range_m
+        } else {
+            crate::map::view::auto_range_m(0.0)
+        };
+        let m = Minimap::new(center, r, ctx.car, ctx.heading, s.minimap_rotate, range);
         hud.image(HudImage::disc(center[0], center[1], r + RIM, MAP_RIM));
         hud.image(m.image(geom));
-        // The player: always at the center.
+        // Landmarks: crisp dots over the image, kept inside the circle.
+        for poi in &self.map.pois {
+            let q = m.to_screen(poi.pos);
+            let (dx, dy) = (q[0] - center[0], q[1] - center[1]);
+            if dx * dx + dy * dy > (r - MINI_POI) * (r - MINI_POI) {
+                continue;
+            }
+            let [pr, pg, pb] = map::poi_color(poi.kind);
+            hud.image(HudImage::disc(q[0], q[1], MINI_POI, ARROW_EDGE));
+            hud.image(HudImage::disc(
+                q[0],
+                q[1],
+                MINI_POI - 2.0,
+                [pr, pg, pb, 255],
+            ));
+        }
+        // The player: a light halo, a dark edge, the accent.
         let rot = m.arrow_rotation();
-        hud.image(HudImage::arrow(
-            center[0],
-            center[1],
-            MINI_ARROW + 6.0,
-            rot,
-            ARROW_EDGE,
-        ));
-        hud.image(HudImage::arrow(
-            center[0], center[1], MINI_ARROW, rot, ACCENT,
-        ));
+        let [cx, cy] = m.car_screen();
+        hud.image(HudImage::disc(cx, cy, MINI_ARROW * 0.62, PLAYER_HALO));
+        hud.image(HudImage::arrow(cx, cy, MINI_ARROW + 6.0, rot, ARROW_EDGE));
+        hud.image(HudImage::arrow(cx, cy, MINI_ARROW, rot, ACCENT));
         // North: a badge with an N, straddling the rim where north is.
         let n = m.north();
         let [bx, by] = [center[0] + n[0] * r, center[1] + n[1] * r];

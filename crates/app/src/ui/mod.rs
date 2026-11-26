@@ -130,6 +130,9 @@ pub struct MapHud {
     pub full: FullMap,
     /// The named districts, for the card shown on entering one.
     pub districts: Districts,
+    /// Meters across the minimap this frame (eased when the zoom is automatic); 0 until the
+    /// first frame.
+    pub minimap_range_m: f32,
 }
 
 pub struct Ui {
@@ -363,6 +366,7 @@ impl Ui {
             pois,
             full: FullMap::default(),
             districts: std::mem::take(&mut self.map.districts),
+            minimap_range_m: 0.0,
         };
     }
 
@@ -1304,6 +1308,18 @@ impl Ui {
         self.save_if_dirty();
     }
 
+    /// The minimap's zoom for this frame: the setting, or with it on auto the range for
+    /// `speed_mps`, eased.
+    fn minimap_frame(&mut self, speed_mps: f32, dt: f32) {
+        let set = self.settings.minimap_range_m;
+        self.map.minimap_range_m = if set > 0.0 {
+            set
+        } else {
+            let target = crate::map::view::auto_range_m(speed_mps);
+            crate::map::view::ease_range(self.map.minimap_range_m, target, dt)
+        };
+    }
+
     /// Records one frame for the overlay.
     fn note_frame(&mut self, dt: f32, steps: u32) {
         self.frame_ms[self.frame_head] = dt * 1000.0;
@@ -1436,11 +1452,13 @@ impl App {
         }
         self.stream(steps.alpha, now_seconds);
         self.ui.note_frame(dt as f32, steps.count);
-        self.ui.speed_mph = if self.fly {
-            None
+        let speed_mps = if self.fly {
+            0.0
         } else {
-            Some(self.hud_state().speed_mps.abs() * MPH_PER_MPS)
+            self.hud_state().speed_mps
         };
+        self.ui.speed_mph = (!self.fly).then(|| speed_mps.abs() * MPH_PER_MPS);
+        self.ui.minimap_frame(speed_mps, dt as f32);
         let daylight = self.time.daylight();
         let camera = if self.fly {
             self.curr.pos

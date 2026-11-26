@@ -2,12 +2,13 @@
 //! HUD draws as the minimap and the full-screen map ([`view`]), plus invented names for the
 //! points of interest ([`names`]).
 //!
-//! The image covers the whole place, north (-z) up and east (+x) right, [`MAP_SIZE`] pixels
-//! along the longer side (the 1 km test town is ~1 m per pixel, a 2 km place 2 m). Layers,
+//! The image covers the whole place, north (-z) up and east (+x) right, at a pixel per meter
+//! up to [`MAP_SIZE`] pixels along the longer side (the 1 km test town 1 m per pixel, the
+//! 4 km Bay Loop 2 m). Layers,
 //! bottom to top: a muted tint per zone, parks, water (with a darker shoreline), faint
 //! building footprints, every road's 1 px darker outline, road fills by class (alleys
-//! faint, locals thin, highways thick and light), and a dot per point of interest. Roads
-//! and dots are anti-aliased by coverage; fills are scanline polygons sampled at pixel
+//! faint, locals thin, highways thick and light). Points of interest are not in the image:
+//! the HUD draws them crisp over it. Roads are anti-aliased by coverage; fills are scanline polygons sampled at pixel
 //! centers. Everything is plain f32 arithmetic in a fixed order (no `mul_add`, no hashing
 //! order), so the same Place gives bit-identical pixels on every platform.
 
@@ -18,8 +19,11 @@ pub mod view;
 use place::{LotKind, Place, PoiKind, RoadClass, ZoneId, Zones};
 use skywave_core::hash_bytes;
 
-/// Pixels along the longer side of the place.
-pub const MAP_SIZE: u32 = 1024;
+/// The most pixels along the longer side of the place (the HUD texture's limit).
+pub const MAP_SIZE: u32 = 2048;
+/// The finest the map is drawn, meters per pixel: a place up to 2 km gets a pixel per
+/// meter, a bigger one [`MAP_SIZE`] pixels.
+pub const MIN_METERS_PER_PX: f32 = 1.0;
 
 /// The rasterized place.
 #[derive(Clone, Debug, PartialEq)]
@@ -149,16 +153,13 @@ pub fn labels(place: &Place) -> Vec<MapPoi> {
         .collect()
 }
 
-/// Radius of a point of interest's dot, px (plus a 1 px ring).
-const POI_DOT_PX: f32 = 3.0;
-
 impl MapImage {
     /// Rasterizes `place` (see the module docs). Allocates the image and a few scratch
     /// buffers; meant for load time.
     pub fn rasterize(place: &Place) -> MapImage {
         let extent = place.header.extent_m();
         let longest = extent[0].max(extent[1]).max(1.0);
-        let meters_per_px = longest / MAP_SIZE as f32;
+        let meters_per_px = (longest / MAP_SIZE as f32).max(MIN_METERS_PER_PX);
         let size = |e: f32| ((e / meters_per_px).round() as u32).clamp(1, MAP_SIZE);
         let mut c = Canvas {
             w: size(extent[0]),
@@ -189,11 +190,6 @@ impl MapImage {
             c.polygon(&b.footprint, shade);
         }
         c.roads(place);
-        for poi in &place.pois {
-            let [x, y] = c.to_px(poi.pos);
-            c.disc(x, y, POI_DOT_PX + 1.0, [40, 40, 44], 1.0);
-            c.disc(x, y, POI_DOT_PX, poi_color(poi.kind), 1.0);
-        }
         let mut rgba = Vec::with_capacity(c.px.len() * 4);
         for p in &c.px {
             rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
@@ -463,10 +459,6 @@ impl Canvas {
             }
         }
     }
-
-    fn disc(&mut self, x: f32, y: f32, r: f32, color: Rgb, opacity: f32) {
-        self.capsule([x, y], [x, y], r, color, opacity);
-    }
 }
 
 #[cfg(test)]
@@ -486,7 +478,7 @@ mod tests {
         let b = MapImage::rasterize(&place);
         assert_eq!(a, b);
         // 1024 m square town: 1024 px, 1 m per pixel, origin at its northwest corner.
-        assert_eq!((a.w, a.h), (MAP_SIZE, MAP_SIZE));
+        assert_eq!((a.w, a.h), (1024, 1024));
         assert_eq!(a.meters_per_px, 1.0);
         assert_eq!(a.origin, [-512.0, -512.0]);
         assert_eq!(a.rgba.len(), (a.w * a.h * 4) as usize);
@@ -570,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lake_and_a_poi_are_drawn() {
+    fn a_lake_is_drawn_and_a_poi_is_left_to_the_hud() {
         let mut place = Place::test_grid();
         // A 60 m square lake in the empty lawn of the northwest corner.
         let (x0, z0, s) = (-500.0, -500.0, 60.0);
@@ -590,10 +582,13 @@ mod tests {
         assert_eq!(rgb(map.pixel_at([-470.5, -440.5])), SHORE);
         let lawn = ZONE_COLORS[ZoneId::Residential as usize];
         assert_eq!(rgb(map.pixel_at([-470.5, -439.5])), lawn);
-        assert_eq!(
-            rgb(map.pixel_at([-479.5, -399.5])),
-            poi_color(PoiKind::Diner)
-        );
+        assert_eq!(rgb(map.pixel_at([-479.5, -399.5])), lawn);
+        let lake_only = {
+            let mut p = place.clone();
+            p.pois.clear();
+            MapImage::rasterize(&p)
+        };
+        assert_eq!(map, lake_only);
         assert_ne!(map.hash(), MapImage::rasterize(&Place::test_grid()).hash());
     }
 
