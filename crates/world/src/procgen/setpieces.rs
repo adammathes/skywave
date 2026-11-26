@@ -49,8 +49,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use place::{
-    Light, LightKind, LotKind, Place, Poi, PoiKind, Prop, PropKind, RoadClass, ZoneId, ALL_HOURS,
-    SIDEWALK_WIDTH_M,
+    Light, LightKind, LotKind, Place, Poi, PoiKind, Prop, PropKind, RoadClass, SpawnKind, ZoneId,
+    ALL_HOURS, SIDEWALK_WIDTH_M,
 };
 use skywave_core::Seed;
 
@@ -61,6 +61,7 @@ use crate::mesh::terrain::TerrainGrid;
 use crate::palette::Palette;
 use crate::props::yaw_of_dir;
 use crate::setpieces::{bay_x, GARAGE_M, STAND_M, TUNNEL_H_M};
+use crate::template::RoadsideKit;
 
 /// Key of the set pieces' name seeds.
 const SETPIECES: u64 = 0x5345_5450;
@@ -163,6 +164,85 @@ pub const ROADSIDE_APART_M: f32 = 250.0;
 pub const EXTRA_APART_M: f32 = 150.0;
 /// The farthest the drive-in's lot stands from the freeway, m (its screen shows from it).
 pub const DRIVE_IN_VIEW_M: f32 = 350.0;
+
+/// The point of interest a roadside kit is, by its id.
+fn roadside_poi(id: &str) -> Option<PoiKind> {
+    if id == "hot_dog_stand" {
+        return Some(PoiKind::HotDogStand);
+    }
+    ROADSIDE.iter().find(|r| r.0 == id).map(|r| r.2)
+}
+
+/// The nearest a hero landmark's lot stands ahead of the start, m: far enough that the
+/// start is on the road, near enough to see it from there.
+pub const HERO_AHEAD_M: f32 = 60.0;
+
+/// A place without a basin: its template's roadside kits, in order, each on the commercial
+/// or strip lot on an arterial nearest its start at least [`HERO_AHEAD_M`] ahead of it (the
+/// nearest at all when none is ahead), [`ROADSIDE_APART_M`] from the others.
+fn by_start(m: &MacroMap, place: &Place, kits: &[Kit], list: &[RoadsideKit]) -> SetPieces {
+    let mut s = SetPieces::default();
+    let Some(start) = place
+        .spawns
+        .iter()
+        .find(|sp| sp.kind == SpawnKind::PlayerStart)
+    else {
+        return s;
+    };
+    let at = V2::new(start.pos[0], start.pos[2]);
+    let (sin, cos) = crate::math::sin_cos(start.heading);
+    let ahead = V2::new(-sin, -cos);
+    for r in list {
+        let Some(k) = kits.iter().position(|k| k.id == r.kit) else {
+            continue;
+        };
+        let Some(poi) = roadside_poi(&r.kit) else {
+            continue;
+        };
+        let variant = (r.variant as usize).wrapping_sub('A' as usize);
+        if variant >= kits[k].variants.len() {
+            continue;
+        }
+        let size = (kits[k].lot[0], kits[k].lot[1]);
+        let taken = s.footprints();
+        let fronts: Vec<V2> = s.roadside.iter().map(|r| r.lot.front).collect();
+        let free = |l: &Lot| {
+            let rect = l.rect(size.0, size.1);
+            m.in_playable(l.front.x, l.front.y, size.1 + 20.0)
+                && fronts
+                    .iter()
+                    .all(|&f| (f - l.front).length() >= ROADSIDE_APART_M)
+                && !samples(l, size.0, size.1).any(|q| taken.iter().any(|a| point_in_polygon(q, a)))
+                && !taken.iter().flatten().any(|&q| point_in_polygon(q, &rect))
+        };
+        let key = |l: &Lot| {
+            let d = l.at(0.0, 0.5 * size.1) - at;
+            (d.dot(ahead) < HERO_AHEAD_M, d.length(), l.key)
+        };
+        let lot = lots(
+            place,
+            size,
+            &[ZoneId::Commercial, ZoneId::Strip],
+            &[RoadClass::Arterial],
+        )
+        .into_iter()
+        .filter(|l| free(l))
+        .min_by(|x, y| {
+            let (a, b) = (key(x), key(y));
+            a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2))
+        });
+        if let Some(lot) = lot {
+            s.roadside.push(Roadside {
+                kit: k as u8,
+                variant: variant as u8,
+                poi,
+                lot,
+                size,
+            });
+        }
+    }
+    s
+}
 
 /// A site a set piece stands on: the middle of its front at the property line, the way
 /// into it from the road, the way along the road.
@@ -398,9 +478,9 @@ fn overlaps(l: &Lot, (w, d): (f32, f32), areas: &[Vec<V2>]) -> bool {
 /// Where the set pieces of the place `m` describes go, its roads, lots and buildings
 /// standing (see the module docs), the landmarks from `kits` (the grammar's). Empty unless
 /// `m` is a basin.
-pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
+pub fn site(m: &MacroMap, place: &Place, kits: &[Kit], roadside: &[RoadsideKit]) -> SetPieces {
     let Some(b) = m.basin.as_ref() else {
-        return SetPieces::default();
+        return by_start(m, place, kits, roadside);
     };
     let mut s = SetPieces {
         tunnel_width_m: 0.0,
@@ -1656,12 +1736,17 @@ pub fn dress(
         let (stalls, hours) = roadside_stalls(&kit.id);
         let classes = [0x01u8, 0x14, 0x23, 0x31, 0x45, 0x18, 0x27, 0x3A];
         let right = r.lot.inward.right();
-        for (k, &[x, z]) in stalls.iter().enumerate() {
+        for (k, &[x, z, turn]) in stalls.iter().enumerate() {
             let q = r.lot.front + right * x - r.lot.inward * z;
+            let nose = if turn == 0.0 {
+                r.lot.inward
+            } else {
+                right * turn
+            };
             props.push(prop(
                 q,
                 ground(q),
-                r.lot.inward,
+                nose,
                 PropKind::ParkedCar {
                     vehicle_class: classes[k % classes.len()],
                     hours: hours[k % hours.len()],
@@ -1713,50 +1798,74 @@ const fn hours(h0: u32, h1: u32) -> u32 {
     m
 }
 
-/// A roadside kit's parked cars: their stalls in the kit frame (`[x, z]`, m) and the
-/// hours they keep, in turn.
-fn roadside_stalls(id: &str) -> (&'static [[f32; 2]], &'static [u32]) {
-    const DONUTS: [[f32; 2]; 5] = [
-        [-6.0, -10.75],
-        [-3.0, -10.75],
-        [0.0, -10.75],
-        [3.0, -10.75],
-        [6.0, -10.75],
+/// A roadside kit's parked cars: their stalls in the kit frame (`[x, z]`, m, and which way
+/// the car noses: 0 into the lot, 1 toward `+x`, -1 toward `-x`) and the hours they keep,
+/// in turn.
+fn roadside_stalls(id: &str) -> (&'static [[f32; 3]], &'static [u32]) {
+    const DONUTS: [[f32; 3]; 5] = [
+        [-6.0, -10.75, 0.0],
+        [-3.0, -10.75, 0.0],
+        [0.0, -10.75, 0.0],
+        [3.0, -10.75, 0.0],
+        [6.0, -10.75, 0.0],
     ];
-    const COFFEE: [[f32; 2]; 7] = [
-        [-9.0, -9.75],
-        [-6.0, -9.75],
-        [-3.0, -9.75],
-        [0.0, -9.75],
-        [3.0, -9.75],
-        [6.0, -9.75],
-        [9.0, -9.75],
+    const COFFEE: [[f32; 3]; 7] = [
+        [-9.0, -9.75, 0.0],
+        [-6.0, -9.75, 0.0],
+        [-3.0, -9.75, 0.0],
+        [0.0, -9.75, 0.0],
+        [3.0, -9.75, 0.0],
+        [6.0, -9.75, 0.0],
+        [9.0, -9.75, 0.0],
     ];
-    const MOTEL: [[f32; 2]; 4] = [[17.0, -7.5], [20.0, -7.5], [23.0, -7.5], [26.0, -7.5]];
+    const MOTEL: [[f32; 3]; 4] = [
+        [17.0, -7.5, 0.0],
+        [20.0, -7.5, 0.0],
+        [23.0, -7.5, 0.0],
+        [26.0, -7.5, 0.0],
+    ];
     // Two rows by the speaker posts, a car between each pair of posts but every third.
-    const DRIVE_IN: [[f32; 2]; 16] = [
-        [-27.5, -56.0],
-        [-22.5, -56.0],
-        [-12.5, -56.0],
-        [-7.5, -56.0],
-        [2.5, -56.0],
-        [7.5, -56.0],
-        [17.5, -56.0],
-        [22.5, -56.0],
-        [-22.5, -48.0],
-        [-17.5, -48.0],
-        [-7.5, -48.0],
-        [-2.5, -48.0],
-        [7.5, -48.0],
-        [12.5, -48.0],
-        [22.5, -48.0],
-        [27.5, -48.0],
+    const DRIVE_IN: [[f32; 3]; 16] = [
+        [-27.5, -56.0, 0.0],
+        [-22.5, -56.0, 0.0],
+        [-12.5, -56.0, 0.0],
+        [-7.5, -56.0, 0.0],
+        [2.5, -56.0, 0.0],
+        [7.5, -56.0, 0.0],
+        [17.5, -56.0, 0.0],
+        [22.5, -56.0, 0.0],
+        [-22.5, -48.0, 0.0],
+        [-17.5, -48.0, 0.0],
+        [-7.5, -48.0, 0.0],
+        [-2.5, -48.0, 0.0],
+        [7.5, -48.0, 0.0],
+        [12.5, -48.0, 0.0],
+        [22.5, -48.0, 0.0],
+        [27.5, -48.0, 0.0],
     ];
     const DONUT_HOURS: [u32; 4] = [hours(6, 11), hours(5, 21), hours(15, 19), hours(7, 10)];
     const COFFEE_HOURS: [u32; 4] = [hours(7, 11), hours(11, 14), hours(21, 2), hours(6, 23)];
     const MOTEL_HOURS: [u32; 3] = [hours(18, 9), hours(20, 8), hours(16, 10)];
     const BURGER_HOURS: [u32; 4] = [hours(11, 14), hours(17, 20), hours(21, 1), hours(10, 23)];
     const SHOW_HOURS: [u32; 3] = [hours(19, 0), hours(19, 1), hours(20, 0)];
+    // Under the two canopies, a car nosed in at every other stall either side.
+    const HOT_DOGS: [[f32; 3]; 14] = [
+        [-16.0, -27.0, 1.0],
+        [-16.0, -21.0, 1.0],
+        [-16.0, -15.0, 1.0],
+        [-16.0, -9.0, 1.0],
+        [-9.0, -24.0, -1.0],
+        [-9.0, -18.0, -1.0],
+        [-9.0, -12.0, -1.0],
+        [9.0, -27.0, 1.0],
+        [9.0, -21.0, 1.0],
+        [9.0, -15.0, 1.0],
+        [9.0, -9.0, 1.0],
+        [16.0, -24.0, -1.0],
+        [16.0, -18.0, -1.0],
+        [16.0, -12.0, -1.0],
+    ];
+    const HOT_DOG_HOURS: [u32; 4] = [hours(11, 14), hours(17, 21), hours(20, 1), hours(11, 23)];
     match id {
         "donut_shop" => (&DONUTS, &DONUT_HOURS),
         // The burger stand paints the donut shop's stalls.
@@ -1764,6 +1873,7 @@ fn roadside_stalls(id: &str) -> (&'static [[f32; 2]], &'static [u32]) {
         "coffee_shop" => (&COFFEE, &COFFEE_HOURS),
         "motel" => (&MOTEL, &MOTEL_HOURS),
         "drive_in" => (&DRIVE_IN, &SHOW_HOURS),
+        "hot_dog_stand" => (&HOT_DOGS, &HOT_DOG_HOURS),
         _ => (&[], &[0]),
     }
 }
