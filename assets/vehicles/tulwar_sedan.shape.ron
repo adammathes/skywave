@@ -1,0 +1,60 @@
+// Tulwar Sedan body: a mid-2000s small rear-drive luxury sport sedan.
+//
+// Intent: sleek and a little sharp. A long hood over the rear-drive six, swept lamps and a
+// small grille, a steep windshield into a roof that arcs back to a short, high deck with a
+// lip on its edge, angular tail lamps, a tight four-door cabin with bright trim round the
+// glass and five-spoke alloys. Mostly silver. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "tulwar_sedan",
+    side: [
+        (0.00, 0.58), (0.05, 0.68), (0.18, 0.78), (1.30, 0.97), (1.36, 0.99),
+        (1.98, 1.37), (2.15, 1.42), (2.75, 1.41), (3.55, 1.12), (3.65, 1.11),
+        (4.48, 1.10), (4.58, 1.00),
+        (4.58, 0.34), (4.42, 0.24), (3.95, 0.18), (0.75, 0.17), (0.12, 0.21), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.70), (0.10, 0.83), (0.35, 0.89), (1.10, 0.90), (3.95, 0.90), (4.35, 0.88),
+        (4.58, 0.80),
+    ],
+    belt: [(1.36, 0.98), (2.60, 1.02), (3.62, 1.10)],
+    section: Section(shoulder: 0.91, tumblehome_deg: 22, greenhouse_frac: 0.74, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.38, 2.02),
+        backlight: (2.84, 3.58),
+        side: [(1.60, 2.50), (2.60, 3.10)],
+    ),
+    wheels: Wheels(radius: 0.33, width: 0.225, arch_clearance: 0.04, front_x: 0.84, rear_x: 3.57, track: 1.535),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.24, 0.42)),
+    rear: Rear(lights: Dual, spoiler: Lip, bumper: Body, bumper_y: (0.32, 0.48)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.82, creases: [(0.20, 0.68, 4.52, 0.74)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Dual, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [ChromeTrim, Badge(Bar)],
+    // Silver, light silver, champagne, black, smoky brown, pearl white.
+    palette: ["#b2b5b8", "#c8cacc", "#cfc8b6", "#16171a", "#3e3029", "#e8e7e2"],
+    accent: "#141416",
+    interior: InteriorShape(
+        dash_height: 0.87,
+        dash_x: 1.70,
+        wheel_pos: (2.14, 0.72),
+        wheel_radius: 0.18,
+        column_angle_deg: 24,
+        mirror_pos: (2.00, 1.28),
+        seat: (2.64, 0.50),
+        driver_offset: 0.37,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: black dash, ivory leather with
+        // matching inserts and dark piping, black carpet, a metallic band and cool white-blue
+        // dials.
+        colors: ["#1b1c1f", "#cfc6b3", "#1f2023", "#c9c4b8", "#2a2b2f", "#7ad0ff"],
+        display: "#7ad0ff",
+        insert: "#c2b9a5",
+        piping: "#3a3630",
+        dash_top: "#1f2023",
+        applique: Brushed,
+        manual: false,
+    ),
+)

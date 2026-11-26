@@ -13,7 +13,8 @@ Scenario(
     palette: "socal_1985",
     map_skin: "nav",
     default_time: (16, 10),
-    default_vehicle: "halberd_coupe",
+    default_vehicle: "goshawk_turbo",
     years: (1996, 2005),
-    heroes: [],
+    // The Bay's own: a turbo commuter and a luxury six off the Peninsula's lots, and two VC toys.
+    heroes: ["goshawk_turbo", "tulwar_sedan", "petrel_roadster", "lipizzan_sedan"],
 )
