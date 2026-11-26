@@ -1088,11 +1088,13 @@ fn a_minute_of_random_bumping_stays_finite_and_grounded() {
 }
 
 /// The car-count band each of Low, Normal and Busy holds at every step of 120 s, of the
-/// 96-car pool's targets 24, 48 and 96: never above the target, and never below 3/8, 5/8
-/// and 3/4 of it, so no two settings' bands overlap. (Measured, seed 1: Low dips to 10 at
-/// the start, 14 downtown; Normal to 33; Busy to 78. Cars despawn hidden and far, and
-/// respawn only 150-300 m off, out of view and on lanes flowing toward the player.)
-const BANDS: [(usize, usize); 3] = [(9, 24), (30, 48), (72, 96)];
+/// 96-car pool's targets 24, 64 and 96: never above the target, and never below 3/8, 9/16
+/// and 3/4 of it, so no two settings' bands overlap. (Measured, seed 1, before Normal rose
+/// from 48 and spawns favored main roads: Low dips to 10 at the start, 14 downtown; Normal
+/// to 33; Busy to 78. After: Normal dips to 50 on the arterial, where cars on the main road
+/// pass the still player and go, and 53 elsewhere. Cars despawn hidden and far, and respawn
+/// only 150-300 m off, out of view and on lanes flowing toward the player.)
+const BANDS: [(usize, usize); 3] = [(9, 24), (36, 64), (72, 96)];
 
 /// Live NPC cars sampled every step over `secs` with the player held still: least, most.
 fn hold_and_count(app: &mut App, secs: u32) -> (usize, usize) {
