@@ -368,6 +368,15 @@ pub struct Sky {
     /// Aerial-perspective fog density, 1/m (0 disables it): about 3.9 / visibility, so
     /// 0.0002 matches a clear turbidity-3 sky and 0.001 is a hazy marine layer.
     pub fog_density: f32,
+    /// A low haze layer on top of the even fog (smog, a marine layer): its density at and
+    /// below `smog_floor_y`, 1/m (0 disables it).
+    pub smog_density: f32,
+    /// World height of the haze layer's floor, m.
+    pub smog_floor_y: f32,
+    /// Height over which the haze thins by e above its floor, m.
+    pub smog_height_m: f32,
+    /// The haze's in-scatter as a multiple of the horizon sky's radiance, linear RGB.
+    pub smog_tint: [f32; 3],
     /// Multiplier from luminance in kcd/m² to tonemapper input (≈ 0.05 on a sunny day); see
     /// [`exposure_from_ev100`].
     pub exposure: f32,
@@ -485,6 +494,10 @@ impl Default for Sky {
             night_luminance: 2e-5,
             ground_albedo: [0.12, 0.11, 0.10],
             fog_density: 0.0003,
+            smog_density: 0.0,
+            smog_floor_y: 0.0,
+            smog_height_m: 100.0,
+            smog_tint: [1.0; 3],
             exposure: exposure_from_ev100(14.0),
             emissive_boost: 0.5,
             window_emissive_scale: 0.0,

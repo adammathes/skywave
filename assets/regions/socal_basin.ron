@@ -44,6 +44,9 @@ RegionTemplate(
         overlooks: (1, 2),
     )),
 
+    // The smog: a brown band over the flat that the hills rise out of. The flat lies near
+    // 30 m; the layer thins by e every 80 m above it.
+    air: Some(Air(density: 0.00035, floor_m: 30, height_m: 80, tint: (1.15, 0.97, 0.78))),
     zones: Zones(
         downtown: ZoneRule(
             score: Some(Score(

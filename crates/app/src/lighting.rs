@@ -169,8 +169,12 @@ pub fn sun(d: &Daylight) -> Sun {
 
 /// The renderer's sky for `d`: turbidity, moon, stars, the night sky, fog, exposure (EV100
 /// to the renderer's kcd/m² scale), the lit-window scale, the emissive cap and the cabin
-/// light; the rest stays at the defaults.
-pub fn sky(d: &Daylight) -> Sky {
+/// light, and the place's low haze layer (`air`, if it has one); the rest stays at the
+/// defaults.
+pub fn sky(d: &Daylight, air: Option<&world::template::Air>) -> Sky {
+    let smog = air.map_or((0.0, 0.0, 100.0, [1.0; 3]), |a| {
+        (a.density, a.floor_m, a.height_m, a.tint)
+    });
     Sky {
         turbidity: d.turbidity,
         moon_direction: d.moon_dir,
@@ -182,6 +186,10 @@ pub fn sky(d: &Daylight) -> Sky {
         star_brightness: d.star_brightness,
         night_luminance: NIGHT_SKY_KCD,
         fog_density: d.fog_density,
+        smog_density: smog.0,
+        smog_floor_y: smog.1,
+        smog_height_m: smog.2,
+        smog_tint: smog.3,
         exposure: exposure_from_ev100(d.ev100),
         emissive_boost: EMISSIVE_BOOST,
         window_emissive_scale: d.window_emissive_scale,
@@ -866,7 +874,7 @@ mod tests {
         let [r, g, b] = sun.illuminance;
         assert!(r > g && g > b, "{:?}", sun.illuminance);
         assert!((5.0..40.0).contains(&r), "{r}");
-        let sky = sky(&d);
+        let sky = sky(&d, None);
         assert_eq!(sky.exposure, exposure_from_ev100(d.ev100));
         assert!(
             sky.exposure > Sky::default().exposure,
@@ -909,7 +917,7 @@ mod tests {
         assert_eq!(sun.direction, d.sun_dir);
         assert!(sun.direction[1] < 0.0);
         assert_eq!(sun.illuminance, [0.0; 3]);
-        let sky = sky(&d);
+        let sky = sky(&d, None);
         assert!(sky.window_emissive_scale > 0.99);
         assert!(sky.star_brightness > 0.5);
     }
@@ -933,8 +941,8 @@ mod tests {
         // Warm at night, neutral by day; in the sky it rides along.
         let [r, _, b] = cabin_light(&night);
         assert!(r > 1.5 * b);
-        assert_eq!(sky(&night).cabin_light, cabin_light(&night));
-        assert_eq!(sky(&night).emissive_cap, EMISSIVE_CAP);
+        assert_eq!(sky(&night, None).cabin_light, cabin_light(&night));
+        assert_eq!(sky(&night, None).emissive_cap, EMISSIVE_CAP);
     }
 
     #[test]

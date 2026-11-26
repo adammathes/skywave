@@ -150,6 +150,11 @@ pub fn load(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan
     Ok((place, plan))
 }
 
+/// The low haze layer over scenario `s`'s place, if its region has one.
+pub fn air_of(s: &Scenario) -> Option<world::template::Air> {
+    template_of(s).ok().and_then(|t| t.air)
+}
+
 /// Scenario `s`'s region template, checked.
 fn template_of(s: &Scenario) -> Result<RegionTemplate, String> {
     let text = region_text(&s.region).ok_or("no such region template")?;

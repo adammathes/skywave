@@ -112,6 +112,13 @@ fn sky_full(dir: vec3<f32>) -> vec3<f32> {
         let edge = 1.0 - smoothstep(0.8, 1.0, sqrt(sr2));
         c += frame.sun_disc.rgb * (limb * edge * above);
     }
+    // Out through the smog to the top of the layer: a band along the horizon.
+    if frame.sky_params.w > 0.0 {
+        let h = frame.sun_dir.w;
+        let a = max(frame.camera_pos.y - frame.camera_fwd.w, 0.0);
+        let depth = frame.sky_params.w * h * exp(-a / h) / max(dir.y, 0.004);
+        c = mix(c, smog_color(), 1.0 - exp(-depth));
+    }
     return min(c, vec3<f32>(MAX_RADIANCE));
 }
 
@@ -393,6 +400,8 @@ fn shade(in: MeshOut) -> vec3<f32> {
     } else {
         c = mix(c, look_sky(look, sky_radiance(d), d), fog);
     }
+    let smog = 1.0 - exp(-smog_depth(frame.camera_pos.y, in.world_pos.y, dist));
+    c = mix(c, smog_color(), smog);
     return min(c, vec3<f32>(MAX_RADIANCE));
 }
 
