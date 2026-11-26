@@ -15,6 +15,8 @@ const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
+const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 
 fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
@@ -155,4 +157,51 @@ fn a_road_to_nowhere_is_refused() {
         l.validate(),
         Err(LayoutError::RoadToNowhere("old highway".into()))
     );
+}
+
+/// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
+const BOWL_GOLDEN: u64 = 0x5c70e210fe95c2b3;
+
+/// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
+/// the summit avenue, and the rim above the floor on its mountain sides.
+#[test]
+fn the_mirage_bowl_validates_and_is_deterministic() {
+    let l: Layout = ron::from_str(MIRAGE_BOWL).expect("parse layout");
+    l.validate().expect("validate layout");
+    let t: RegionTemplate = ron::from_str(SOCAL_BASIN).expect("parse template");
+    t.validate().expect("validate template");
+    let g = grammar();
+    let t0 = Instant::now();
+    let p = authored::build_place(Seed(1), &l, &t, &g);
+    println!(
+        "mirage bowl: {} roads, {} parcels, {} buildings, {} props in {:.0} ms, hash {:#018x}",
+        p.roads.edges.len(),
+        p.parcels.len(),
+        p.buildings.len(),
+        p.props.items.len(),
+        t0.elapsed().as_secs_f64() * 1000.0,
+        p.content_hash()
+    );
+    place::validate::validate(&p).expect("the Mirage Bowl validates");
+    let again = authored::build_place(Seed(1), &l, &t, &g);
+    assert_eq!(p.content_hash(), again.content_hash(), "deterministic");
+    if BOWL_GOLDEN != 0 {
+        assert_eq!(p.content_hash(), BOWL_GOLDEN, "golden moved");
+    }
+    let s = p
+        .spawns
+        .iter()
+        .find(|s| s.kind == SpawnKind::PlayerStart)
+        .expect("a start");
+    assert!(
+        (s.pos[0] - 1900.0).abs() < 20.0,
+        "on the summit avenue: {:?}",
+        s.pos
+    );
+    // The rim: the mountain front stands far over the floor.
+    let mut m = authored::macro_map(Seed(1), &l);
+    let _ = authored::arterials(&l, &mut m);
+    let floor = m.height_at(1500.0, 2000.0);
+    assert!(m.height_at(1900.0, 150.0) > floor + 200.0);
+    assert!(m.height_at(1500.0, 200.0) > floor + 150.0);
 }

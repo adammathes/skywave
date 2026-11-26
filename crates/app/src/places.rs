@@ -20,6 +20,7 @@ const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_
 const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
+const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 const CALIFORNIA_COAST_80S: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
@@ -40,7 +41,7 @@ const REGIONS: [(&str, &str); 3] = [
     ("bay_area", BAY_AREA),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.
-const LAYOUTS: [(&str, &str); 1] = [("bay_loop", BAY_LOOP)];
+const LAYOUTS: [(&str, &str); 2] = [("bay_loop", BAY_LOOP), ("mirage_bowl", MIRAGE_BOWL)];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
 const GRAMMARS: [(&str, &str); 2] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
