@@ -15,6 +15,7 @@
 //! walls) for each further paint it drives or shows on the Vehicle page's turntable
 //! ([`preview`]), which draws from the same ids.
 
+mod builtin;
 pub mod camera;
 pub mod car;
 pub mod crossing;
@@ -332,12 +333,14 @@ impl App {
         let start = place.player_start().ok_or("the place has no PlayerStart")?;
         let start = (start.pos, start.heading);
         let mut drive = Drive::with_layout(spec, model.layout, start.0, start.1);
-        let map = map::MapImage::rasterize(&place);
+        let skin = map::Skin::named(&world.map_skin).unwrap_or(&map::skin::PLAIN);
+        let map = map::MapImage::rasterize_with(&place, skin);
         let mut ui = ui::Ui::new();
         ui.set_scenario(scenario);
         drive.auto_headlights = ui.settings().headlights_auto;
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
+        ui.set_map_skin(skin);
         ui.set_districts(map::districts::Districts::of(&place));
         let ground = world::WorldCollider::with_plan(&place, grammar, &plan);
         let lanes = world::lanes::LaneLines::of(&place);

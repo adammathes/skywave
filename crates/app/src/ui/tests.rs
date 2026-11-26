@@ -841,12 +841,14 @@ fn first_image(h: &mut Harness, texture: render::HudTexture) -> render::HudImage
 fn minimap_shows_while_driving_and_hides_under_the_menu() {
     let mut h = Harness::new();
     assert_eq!(map_quads(&mut h), (1, 0));
-    // The car arrow sits at the circle's center, pointing up while the map turns with it.
+    // The car arrow sits under the circle's center (the road ahead in view), pointing up
+    // while the map turns with it.
     let circle = first_image(&mut h, render::HudTexture::Map);
     let arrow = first_image(&mut h, render::HudTexture::Arrow);
     let mid = |x: f32, w: f32| x + w * 0.5;
     assert!((mid(arrow.x, arrow.w) - mid(circle.x, circle.w)).abs() < 1e-3);
-    assert!((mid(arrow.y, arrow.h) - mid(circle.y, circle.h)).abs() < 1e-3);
+    let lead = crate::map::view::MINIMAP_LEAD * circle.h * 0.5;
+    assert!((mid(arrow.y, arrow.h) - mid(circle.y, circle.h) - lead).abs() < 1e-3);
     assert_eq!(arrow.rotation, 0.0);
     // The car faces east: the map turns a quarter left so east is up.
     assert!((circle.rotation + core::f32::consts::FRAC_PI_2).abs() < 1e-3);
@@ -869,17 +871,17 @@ fn hud_page_switches_the_minimap_and_its_zoom() {
     let mut h = Harness::with_store(&store);
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
     assert_eq!(h.page(), Page::Hud);
-    // Rotate off: north-up; zoom 150 -> 250 m.
+    // Rotate off: north-up; zoom Auto -> 300 m.
     h.focus_on(ItemId::MinimapRotate);
     h.pad(PadButton::DpadRight);
     h.focus_on(ItemId::MinimapZoom);
     h.pad(PadButton::DpadRight);
     assert!(!h.app.settings().minimap_rotate);
-    assert_eq!(h.app.settings().minimap_range_m, 250.0);
+    assert_eq!(h.app.settings().minimap_range_m, 300.0);
     h.pad(PadButton::Start);
     let saved = store.0.borrow().clone().expect("saved on close");
     let (s, _) = Settings::from_json(&saved);
-    assert!(!s.minimap_rotate && s.minimap_range_m == 250.0);
+    assert!(!s.minimap_rotate && s.minimap_range_m == 300.0);
     // North-up: the map does not turn; the arrow does (the car faces east).
     assert_eq!(first_image(&mut h, render::HudTexture::Map).rotation, 0.0);
     let arrow = first_image(&mut h, render::HudTexture::Arrow);

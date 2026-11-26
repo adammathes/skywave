@@ -9,7 +9,7 @@
 //!               "seat_forward_cm": 0.0, "dashboard": true, "driver": true, "shake": true },
 //!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
 //!              "frame_rate": "panel", "look": "standard" },
-//!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 150.0,
+//!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 0.0,
 //!            "overlay": "off", "controls_at_start": true, "controls_dismissed": 0 },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal", "scenario": "socal_beach_1984" },
 //!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
@@ -404,7 +404,7 @@ pub struct Settings {
     pub minimap: bool,
     /// The minimap turns with the car (its forward up); off is north-up.
     pub minimap_rotate: bool,
-    /// Meters across the minimap; one of [`MINIMAP_RANGES_M`].
+    /// Meters across the minimap; one of [`MINIMAP_RANGES_M`] (0 zooms with speed).
     pub minimap_range_m: f32,
     /// The controls card shows for a few seconds when a game starts.
     pub controls_at_start: bool,
@@ -879,7 +879,7 @@ mod tests {
             scenario: Some("mirage_valley_2001"),
             minimap: false,
             minimap_rotate: false,
-            minimap_range_m: 250.0,
+            minimap_range_m: 600.0,
             controls_at_start: false,
             controls_dismissed: 2,
             master_volume: 0.5,
@@ -938,7 +938,7 @@ mod tests {
         let (s, b) = Settings::from_json(
             r#"{ "video": { "ui_scale": 7, "bloom": false, "extra": 1 },
                  "world": { "clock_speed": 12, "scenario": "atlantis" }, "input": 5, "radio": {},
-                 "hud": { "minimap_rotate": false, "minimap_range_m": 120,
+                 "hud": { "minimap_rotate": false, "minimap_range_m": 640,
                           "controls_dismissed": 40 },
                  "drive": { "handling": "light" },
                  "camera": { "mode": "orbit", "cockpit_fov_deg": 120, "seat_height_cm": -9,
@@ -957,7 +957,7 @@ mod tests {
                 bloom: false,
                 clock_speed: 10.0,
                 minimap_rotate: false,
-                minimap_range_m: 100.0,
+                minimap_range_m: 600.0,
                 controls_dismissed: CONTROLS_DISMISSALS,
                 master_volume: 1.0,
                 engine_volume: 0.0,

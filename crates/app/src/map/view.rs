@@ -13,10 +13,20 @@ use super::MapImage;
 
 /// Minimap diameter, virtual units.
 pub const MINIMAP_DIAMETER: f32 = 200.0;
-/// Minimap zoom settings: meters across the circle.
-pub const MINIMAP_RANGES_M: [f32; 3] = [100.0, 150.0, 250.0];
-/// The default zoom: 150 m across.
-pub const DEFAULT_MINIMAP_RANGE: usize = 1;
+/// Minimap zoom settings: meters across the circle, 0 for [`auto_range_m`].
+pub const MINIMAP_RANGES_M: [f32; 4] = [0.0, 300.0, 600.0, 1200.0];
+/// The default zoom: automatic.
+pub const DEFAULT_MINIMAP_RANGE: usize = 0;
+/// Auto zoom: meters across the circle when stopped, the seconds of travel added per m/s
+/// of speed, and the most it shows.
+pub const AUTO_RANGE_MIN_M: f32 = 320.0;
+pub const AUTO_RANGE_S: f32 = 20.0;
+pub const AUTO_RANGE_MAX_M: f32 = 1100.0;
+/// Auto zoom eases toward its target with this time constant, s.
+pub const AUTO_RANGE_EASE_S: f32 = 1.5;
+/// Heading-up, the car sits this share of the radius below the center, so more of the
+/// road ahead is in view than behind.
+pub const MINIMAP_LEAD: f32 = 0.35;
 /// The full map zooms from fitting the whole place (1) to this many times closer.
 pub const FULL_MAP_MAX_ZOOM: f32 = 8.0;
 /// Full-map pan speed at full deflection: this share of the visible width per second.
@@ -69,6 +79,27 @@ pub fn heading_of(forward: [f32; 2]) -> f32 {
     (-forward[0]).atan2(-forward[1])
 }
 
+/// The auto zoom's meters across the circle at `speed_mps`: zoomed in at a crawl to read
+/// the streets, out at speed to see the turns coming.
+pub fn auto_range_m(speed_mps: f32) -> f32 {
+    let v = if speed_mps.is_finite() {
+        speed_mps.abs()
+    } else {
+        0.0
+    };
+    (AUTO_RANGE_MIN_M + v * AUTO_RANGE_S).min(AUTO_RANGE_MAX_M)
+}
+
+/// `range` eased toward `target` over `dt` seconds; a range that is not yet set (not
+/// positive) jumps straight there.
+pub fn ease_range(range: f32, target: f32, dt: f32) -> f32 {
+    if range.is_nan() || range <= 0.0 || !dt.is_finite() {
+        return target;
+    }
+    let k = 1.0 - (-dt.max(0.0) / AUTO_RANGE_EASE_S).exp();
+    range + (target - range) * k
+}
+
 /// One frame's minimap.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Minimap {
@@ -76,8 +107,10 @@ pub struct Minimap {
     pub center: [f32; 2],
     /// Radius of the circle, virtual units.
     pub radius: f32,
-    /// World point under the center (the car).
+    /// World point under the center: the car north-up, a little ahead of it heading-up.
     pub focus: [f32; 2],
+    /// The car.
+    pub car: [f32; 2],
     /// The car's heading.
     pub heading: f32,
     /// Clockwise turn of the map content: the heading when it rotates with the car
@@ -91,19 +124,31 @@ impl Minimap {
     pub fn new(
         center: [f32; 2],
         radius: f32,
-        focus: [f32; 2],
+        car: [f32; 2],
         heading: f32,
         rotate: bool,
         range_m: f32,
     ) -> Minimap {
+        let range_m = range_m.max(1.0);
+        let lead = if rotate {
+            MINIMAP_LEAD * range_m * 0.5
+        } else {
+            0.0
+        };
         Minimap {
             center,
             radius,
-            focus,
+            focus: [car[0] - heading.sin() * lead, car[1] - heading.cos() * lead],
+            car,
             heading,
             rotation: if rotate { heading } else { 0.0 },
-            range_m: range_m.max(1.0),
+            range_m,
         }
+    }
+
+    /// Where the car is drawn.
+    pub fn car_screen(&self) -> [f32; 2] {
+        self.to_screen(self.car)
     }
 
     /// Virtual units per meter.
@@ -361,21 +406,24 @@ mod tests {
         ];
         for (heading, rotate, p, want) in cases {
             let m = Minimap::new([100.0, 600.0], 100.0, car, heading, rotate, 150.0);
+            // North-up the car is at the center; heading-up it sits below it, ahead up.
+            let at = m.car_screen();
+            let lead = if rotate { MINIMAP_LEAD * 100.0 } else { 0.0 };
+            assert!(close(at, [100.0, 600.0 + lead]), "car {heading} {rotate}");
             let q = m.to_screen(p);
             assert!(
-                close([q[0] - 100.0, q[1] - 600.0], want),
+                close([q[0] - at[0], q[1] - at[1]], want),
                 "heading {heading} rotate {rotate} {p:?}: {q:?}"
             );
-            // The car stays at the center; the arrow points along the heading.
-            assert!(close(m.to_screen(car), m.center));
+            // The arrow points along the heading.
             let ahead = [car[0] - heading.sin() * 30.0, car[1] - heading.cos() * 30.0];
             let d = m.to_screen(ahead);
             let dir = rotate_cw([0.0, -1.0], m.arrow_rotation());
-            let (dx, dy) = ((d[0] - 100.0) / (30.0 * s), (d[1] - 600.0) / (30.0 * s));
+            let (dx, dy) = ((d[0] - at[0]) / (30.0 * s), (d[1] - at[1]) / (30.0 * s));
             assert!(close([dx, dy], dir), "arrow {heading} {rotate}");
             // North on the screen is where the north of the world went.
             let n = m.to_screen([car[0], car[1] - 30.0]);
-            let nd = [(n[0] - 100.0) / (30.0 * s), (n[1] - 600.0) / (30.0 * s)];
+            let nd = [(n[0] - at[0]) / (30.0 * s), (n[1] - at[1]) / (30.0 * s)];
             assert!(close(nd, m.north()));
         }
         // Heading-up keeps the arrow pointing up.
@@ -403,6 +451,21 @@ mod tests {
         assert_eq!(m.image(&TOWN).rotation, 0.3);
         assert_eq!(heading_of([0.0, -1.0]), 0.0);
         assert!((heading_of([1.0, 0.0]) + FRAC_PI_2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn auto_zoom_widens_with_speed_and_eases() {
+        assert_eq!(auto_range_m(0.0), AUTO_RANGE_MIN_M);
+        assert_eq!(auto_range_m(f32::NAN), AUTO_RANGE_MIN_M);
+        assert!(auto_range_m(15.0) > auto_range_m(5.0));
+        assert_eq!(auto_range_m(-15.0), auto_range_m(15.0));
+        assert_eq!(auto_range_m(200.0), AUTO_RANGE_MAX_M);
+        // Unset jumps; set eases a share of the way, never past.
+        assert_eq!(ease_range(0.0, 500.0, 0.016), 500.0);
+        let r = ease_range(400.0, 800.0, 0.5);
+        assert!(r > 400.0 && r < 800.0);
+        assert!((ease_range(400.0, 800.0, 100.0) - 800.0).abs() < 1e-3);
+        assert_eq!(ease_range(400.0, 800.0, 0.0), 400.0);
     }
 
     #[test]
