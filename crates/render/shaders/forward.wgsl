@@ -350,7 +350,7 @@ fn sun_visibility(world_pos: vec3<f32>, n: vec3<f32>, ndl: f32) -> f32 {
 // Vibrance on a linear albedo: a muted colour (pastel stucco, dry lawn, a car's paint) gets
 // up to VIBRANCE more chroma, an already bold one (a red band, neon trim) little, a grey
 // (asphalt, concrete) none, so the palette reads bright without the paint going neon.
-const VIBRANCE: f32 = 0.6;
+const VIBRANCE: f32 = 0.8;
 
 fn vivid(a: vec3<f32>) -> vec3<f32> {
     let hi = max(a.r, max(a.g, a.b));

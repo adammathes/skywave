@@ -71,7 +71,9 @@ const HAZE_FOG: f32 = 0.0028;
 const EV_ELEV: [f32; 11] = [
     -18.0, -12.0, -8.0, -6.0, -3.0, 0.0, 3.0, 8.0, 20.0, 45.0, 90.0,
 ];
-const EV_VALUE: [f32; 11] = [3.0, 3.5, 5.0, 6.5, 8.5, 10.5, 12.0, 13.3, 14.3, 14.8, 15.0];
+/// Daylight sits half a stop over a light meter's pick: high-key arcade daylight rather
+/// than a camera's grey card.
+const EV_VALUE: [f32; 11] = [3.0, 3.5, 5.0, 6.5, 8.5, 10.3, 11.6, 12.8, 13.8, 14.3, 14.5];
 
 /// Sky keys: sun elevation (degrees, ascending) → display-referred zenith and horizon colors
 /// at turbidity 3.
