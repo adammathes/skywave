@@ -15,6 +15,7 @@
 //! walls) for each further paint it drives or shows on the Vehicle page's turntable
 //! ([`preview`]), which draws from the same ids.
 
+mod builtin;
 pub mod camera;
 pub mod car;
 pub mod crossing;
