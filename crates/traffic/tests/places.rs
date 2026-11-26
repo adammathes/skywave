@@ -10,9 +10,20 @@ use skywave_core::Seed;
 use traffic::lanes::{CURVE_STEPS, WAVE_DELAY_TICKS};
 use traffic::signal::cycle_ticks;
 use traffic::{Control, LaneGraph, Light, TurnKind, NONE};
-use world::procgen::build_place;
 use world::roads::Network;
 use world::template::RegionTemplate;
+
+/// `t`'s place for `seed`: generated, or for a template with only zone rules (the lake
+/// city's) its authored layout dressed by them.
+fn build_place(seed: Seed, t: &RegionTemplate, g: &world::Grammar) -> Place {
+    if t.coast.is_some() || t.basin.is_some() {
+        return world::procgen::build_place(seed, t, g);
+    }
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/lake_city.ron")).expect("layout");
+    layout.validate().expect("validate layout");
+    world::procgen::authored::build_place(seed, &layout, t, g)
+}
 
 const REGIONS: [(&str, &str); 3] = [
     (

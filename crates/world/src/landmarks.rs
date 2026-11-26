@@ -31,7 +31,7 @@ use crate::signs::letters::{self, Finish, LetterStyle, Strokes};
 
 /// The built-in kits, `assets/landmarks/<id>.ron`, as `(id, RON text)` in file-name order
 /// (the app parses them; a `place::PropKind::Landmark`'s `kit` indexes this list).
-pub const BUILTIN: [(&str, &str); 9] = [
+pub const BUILTIN: [(&str, &str); 10] = [
     (
         "burger_stand",
         include_str!("../../../assets/landmarks/burger_stand.ron"),
@@ -55,6 +55,10 @@ pub const BUILTIN: [(&str, &str); 9] = [
     (
         "hillside_letters",
         include_str!("../../../assets/landmarks/hillside_letters.ron"),
+    ),
+    (
+        "hot_dog_stand",
+        include_str!("../../../assets/landmarks/hot_dog_stand.ron"),
     ),
     ("motel", include_str!("../../../assets/landmarks/motel.ron")),
     (
