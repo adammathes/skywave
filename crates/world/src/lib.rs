@@ -456,9 +456,9 @@ impl ChunkPlan {
     /// ground and water as one coarse mesh under the chunks' own; `None` for the test town.
     pub fn far_terrain(&self, place: &Place, palette: &Palette) -> Option<WorldMesh> {
         let (g, colors) = self.terrain.as_ref()?;
-        Some(mesh::terrain::build_far(
-            place, g, colors, palette, self.seed,
-        ))
+        let mut m = mesh::terrain::build_far(place, g, colors, palette, self.seed);
+        far_lights(place, palette, &mut m);
+        Some(m)
     }
 
     /// A terrain place's horizon ([`mesh::terrain::build_horizon`]): what continues past
@@ -620,6 +620,48 @@ impl ChunkPlan {
             }
         }
         None
+    }
+}
+
+/// Height of a far lamp's glow above its base, m.
+const FAR_LAMP_Y: f32 = 7.0;
+/// Half the size of a far lamp's glow, m: a few pixels a couple of kilometers off.
+const FAR_LAMP_HALF: f32 = 1.6;
+
+/// The night carpet: every street lamp of `place` as a small glow in the far terrain, lit
+/// with the windows (dark by day). Where its chunk is loaded the far tile is hidden and the
+/// lamp itself shines, so from a rise or a long boulevard the whole flat is points of light
+/// out to the hills.
+fn far_lights(place: &Place, palette: &Palette, m: &mut WorldMesh) {
+    use crate::math::V3;
+    let sodium = palette.sodium;
+    let paint =
+        mesh::Paint::new(sodium, mesh::Pattern::Terrain).glowing(sodium, mesh::Glow::Window);
+    // Untextured like the ground under it, so the far terrain keeps its shared vertices.
+    // Every other lamp is enough for a field of points, and keeps the far terrain small.
+    let lamps = place
+        .props
+        .items
+        .iter()
+        .filter(|p| p.kind == place::PropKind::StreetLight)
+        .step_by(2);
+    for p in lamps {
+        let c = V3::new(p.pos[0], p.pos[1] + FAR_LAMP_Y, p.pos[2]);
+        let h = FAR_LAMP_HALF;
+        // An octahedron: a point from any side and from above, in 8 triangles.
+        let ax = [
+            V3::new(h, 0.0, 0.0),
+            V3::new(0.0, 0.0, h),
+            V3::new(-h, 0.0, 0.0),
+            V3::new(0.0, 0.0, -h),
+        ];
+        for k in 0..4 {
+            let (a, b) = (c + ax[k], c + ax[(k + 1) % 4]);
+            for tip in [c + V3::new(0.0, h, 0.0), c - V3::new(0.0, h, 0.0)] {
+                let out = (a + b + tip) * (1.0 / 3.0) - c;
+                mesh::tri(m, a, b, tip, out, paint);
+            }
+        }
     }
 }
 

@@ -154,7 +154,7 @@ pub fn sheet_json(kits: &[Kit]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::places::landmarks;
+    use crate::builtin::landmarks;
 
     const COMMITTED: &str = include_str!("../../../tools/screenshot/gallery.json");
 
