@@ -318,6 +318,7 @@ impl PropInstances {
         palette: &Palette,
         era: &[u32],
         heroes: &[usize],
+        ground: Option<&crate::drive::DriveGround>,
         chunk_of: impl Fn([f32; 2]) -> [i32; 2],
     ) -> Result<Option<PropInstances>, String> {
         let items: Vec<&place::Prop> = place
@@ -448,7 +449,13 @@ impl PropInstances {
                             g
                         }
                     };
-                    let m = Mat4::from_rotation_translation(Quat::from_rotation_y(p.yaw), pos);
+                    // On the ground under its wheels: pitched up a hill street, rolled
+                    // across a sloping one.
+                    let (pos, rot) = match ground {
+                        Some(g) => crate::settle::rest(g, pos, p.yaw),
+                        None => (pos, Quat::from_rotation_y(p.yaw)),
+                    };
+                    let m = Mat4::from_rotation_translation(rot, pos);
                     let b = Bounds::cube(pos + Vec3::Y, 2.8);
                     // Road dust and sun wear: a little darker and warmer, up to 14%; a hero
                     // car is kept clean.
@@ -865,9 +872,10 @@ mod tests {
         let place =
             crate::places::build(crate::scene::PlaceKey::Coast, skywave_core::Seed(1)).unwrap();
         let era = &crate::scenario::lineup(scenario).shapes;
-        let mut props = PropInstances::new(&place, &Palette::socal_1985(), era, &[], |_| [0, 0])
-            .unwrap()
-            .unwrap();
+        let mut props =
+            PropInstances::new(&place, &Palette::socal_1985(), era, &[], None, |_| [0, 0])
+                .unwrap()
+                .unwrap();
         let ids = (0..props.meshes().len() as u32).map(MeshId).collect();
         props.set_ids(ids);
         let first_car: usize = LOOKS.iter().map(|l| l.variants as usize).sum();

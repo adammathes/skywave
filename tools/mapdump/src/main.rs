@@ -499,9 +499,12 @@ fn main() {
         l
     });
     let start = Instant::now();
-    let mut map = match &layout {
-        Some(l) => authored::macro_map(Seed(seed), l),
-        None => MacroMap::generate(Seed(seed), &t, size),
+    let (map, main_roads) = match &layout {
+        Some(l) => {
+            let (m, g, _) = authored::skeleton(Seed(seed), l);
+            (m, Some(g))
+        }
+        None => (MacroMap::generate(Seed(seed), &t, size), None),
     };
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let mut counts = [0usize; 12];
@@ -551,10 +554,7 @@ fn main() {
     let (w, h, mut rgb) = render(&map, scale.max(1));
     if roads {
         let start = Instant::now();
-        let g = match &layout {
-            Some(l) => authored::arterials(l, &mut map).0,
-            None => arterials(Seed(seed), &t, &map),
-        };
+        let g = main_roads.unwrap_or_else(|| arterials(Seed(seed), &t, &map));
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         // One-way edges are ramps whatever their class, and drawn as ramps, so count them apart.
         let mut count = [0usize; 7];

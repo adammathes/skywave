@@ -1,0 +1,86 @@
+// Mirage Bowl (docs/LAYOUTS.md; the LA direction in docs/SCENARIOS.md, "Mirage Valley 2001"):
+// a city made to be seen from a car, in a bowl you can always see the rim of. A flat floor of
+// one-story sheds and bungalows, a long mountain front across the north with one high summit
+// that the main avenue drives straight at, lower ranges east and west, rail yards to the
+// south. Strip corridors run along the boulevards; an old road cuts across the grid on a
+// diagonal toward the summit; a few towers stand downtown against the mountains; a lone
+// knoll in the flats and a spur of the front range carry lookouts over the lights.
+//
+// Meters, x east, z south, (0, 0) the north-west corner; 24 x 24 chunks, 3072 m square.
+Layout(
+    id: "mirage_bowl",
+    size_chunks: (24, 24),
+    ground_m: 30,
+    water_level_m: -40,
+    edges: Edges(north: Mountains, east: Mountains, south: RailYards, west: Hills),
+
+    ridges: [
+        // The mountain front: the rim you see down every north-south street.
+        Ridge(name: "front range", line: [(0, 230), (700, 200), (1500, 170), (2300, 190), (3072, 240)],
+              heights_m: [150, 210, 250, 220, 170], falloff_m: 460, relief_m: 18),
+        Ridge(name: "east range", line: [(3010, 300), (2990, 1200), (3020, 2400)],
+              heights_m: [170, 120, 70], falloff_m: 330, relief_m: 12),
+        Ridge(name: "west hills", line: [(60, 400), (90, 1400), (70, 2500)],
+              heights_m: [110, 80, 50], falloff_m: 250, relief_m: 10),
+    ],
+    peaks: [
+        Peak(name: "summit", at: (1900, 110), height_m: 300, falloff_m: 520),
+        // A spur of the front range with a lookout over the flats.
+        Peak(name: "observatory spur", at: (1100, 420), height_m: 120, falloff_m: 230),
+        // The lone knoll in the flats, a park with a road to its top.
+        Peak(name: "the knoll", at: (720, 2000), height_m: 55, falloff_m: 230),
+    ],
+
+    // Everything no district covers is open hillside: the rim and the knoll.
+    default_zone: Hills,
+    districts: [
+        District(name: "the flats", zone: Residential, polygon: [(230, 700), (2820, 700), (2820, 2680), (230, 2680)]),
+        District(name: "foothills", zone: Suburb, hilly: true, polygon: [(300, 560), (2750, 560), (2750, 720), (300, 720)]),
+        District(name: "knoll park", zone: Park, polygon: [(560, 1860), (880, 1860), (880, 2150), (560, 2150)]),
+        District(name: "the yards", zone: Industrial, polygon: [(150, 2680), (2900, 2680), (2900, 3072), (150, 3072)]),
+        // Strip corridors along the boulevards and the old road.
+        District(name: "mirage strip", zone: Strip, polygon: [(230, 1180), (2820, 1180), (2820, 1320), (230, 1320)]),
+        District(name: "tamarisk strip", zone: Strip, polygon: [(880, 1790), (2820, 1790), (2820, 1910), (880, 1910)]),
+        District(name: "old road strip", zone: Strip, polygon: [(360, 2930), (490, 2970), (1680, 670), (1550, 630)]),
+        District(name: "foothill strip", zone: Strip, polygon: [(300, 650), (2750, 650), (2750, 720), (300, 720)]),
+        // A few towers on the summit avenue, framed by the mountains behind them.
+        District(name: "downtown", zone: Downtown, polygon: [(1780, 1330), (2260, 1330), (2260, 1700), (1780, 1700)]),
+        District(name: "the junction", zone: Commercial, polygon: [(1180, 1550), (1500, 1550), (1500, 1800), (1180, 1800)]),
+    ],
+
+    roads: [
+        // The boulevards, west to east.
+        Road(name: "foothill boulevard", class: Arterial, lanes: 2, points: [(250, 680), (2800, 680)]),
+        Road(name: "mirage boulevard", class: Arterial, lanes: 3, speed_kph: Some(70), points: [(250, 1250), (2800, 1250)]),
+        Road(name: "tamarisk boulevard", class: Arterial, lanes: 2, points: [(250, 1850), (2800, 1850)]),
+        Road(name: "oleander avenue", class: Arterial, lanes: 2, points: [(250, 2450), (2800, 2450)]),
+        Road(name: "yard road", class: Arterial, lanes: 1, points: [(250, 2950), (2800, 2950)]),
+
+        // The avenues, south to north: every one ends at the mountain front.
+        Road(name: "west avenue", class: Arterial, lanes: 2, points: [(250, 2950), (250, 680)]),
+        Road(name: "canyon avenue", class: Arterial, lanes: 2, points: [(800, 2950), (800, 680)]),
+        Road(name: "summit avenue", class: Arterial, lanes: 3, speed_kph: Some(70), points: [(1900, 2950), (1900, 680)]),
+        Road(name: "palm avenue", class: Arterial, lanes: 2, points: [(2400, 2950), (2400, 680)]),
+        Road(name: "east avenue", class: Arterial, lanes: 2, points: [(2800, 2950), (2800, 680)]),
+        Road(name: "market street", class: Collector, lanes: 1, points: [(1350, 2450), (1350, 1250)]),
+
+        // The old road, older than the grid, on a diagonal toward the summit.
+        Road(name: "old road", class: Arterial, lanes: 2, speed_kph: Some(65), points: [(425, 2950), (1615, 680)]),
+
+        // Up into the rim: the canyon road to the spur's lookout, the summit road, the knoll.
+        Road(name: "observatory road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
+            (800, 680), (820, 560), (920, 500), (1020, 470), (1100, 430),
+        ]),
+        Road(name: "summit road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
+            (1900, 680), (1900, 560), (2050, 470), (1960, 390), (2120, 300), (2000, 220),
+        ]),
+        Road(name: "knoll drive", class: Collector, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
+            (800, 1850), (760, 1930), (720, 2000),
+        ]),
+        Road(name: "west canyon", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
+            (250, 1250), (160, 1240), (90, 1200),
+        ]),
+    ],
+
+    start: Start(road: "summit avenue", along_m: 700),
+)

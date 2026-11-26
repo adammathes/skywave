@@ -10,7 +10,7 @@ use core::fmt;
 
 use place::{RoadClass, ZoneId};
 
-use crate::math::{segment_distance, sin_cos, PI, V2};
+use crate::math::{seg_intersect, segment_distance, sin_cos, PI, V2};
 use crate::template::Edges;
 
 /// A point `(x, z)` in meters in the place's frame: x east, z south, `(0, 0)` the corner of
@@ -92,6 +92,10 @@ pub struct District {
 /// another road (within [`SNAP_M`]) unless `dead_end` says the last point is a dead end
 /// (an overlook, a gate). Over water the road is a bridge, its deck `deck_m` above the
 /// water.
+///
+/// A `Highway` is grade-separated: the roads that cross it pass over on a deck and do not
+/// meet it, except those named in `ramps`, which get a diamond of four one-way ramps. Its
+/// own ends meet roads at grade like any road's.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -121,6 +125,32 @@ pub struct Road {
     pub dead_end: bool,
     #[cfg_attr(feature = "serde", serde(default = "deck"))]
     pub deck_m: f32,
+    /// A `Highway`'s interchanges: the crossing roads joined to it by ramps.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ramps: Vec<String>,
+}
+
+/// A channel cut along a polyline: a flat bed `width_m` wide, `depth_m` under the ground
+/// beside it, with sloped walls. Dry concrete (a flood channel), or with `wet` a river: its
+/// bed `depth_m` under the water level, for land that lies just above it. Roads cross it
+/// on bridges and nothing is built in it.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Channel {
+    pub name: String,
+    pub line: Vec<Pt>,
+    pub width_m: f32,
+    pub depth_m: f32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub wet: bool,
+}
+
+impl Channel {
+    /// Half the width at the lips: the bed and one wall, 1.5 m out for each meter down.
+    pub fn lip_half_m(&self) -> f32 {
+        0.5 * self.width_m + 1.5 * self.depth_m
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -166,6 +196,8 @@ pub struct Layout {
     #[cfg_attr(feature = "serde", serde(default))]
     pub districts: Vec<District>,
     pub roads: Vec<Road>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub channels: Vec<Channel>,
     pub start: Start,
 }
 
@@ -177,6 +209,8 @@ pub const MAX_GRADE: f32 = 0.12;
 pub const DECK_M: f32 = 3.0;
 /// How far a road profile may leave the ground; `place::validate` allows 8 m.
 pub const PROFILE_BAND_M: f32 = 7.8;
+/// A ramp leaves the highway this far along it from the crossing it serves.
+pub const RAMP_RUN_M: f32 = 150.0;
 
 /// Why [`Layout::validate`] refused a layout.
 #[derive(Clone, Debug, PartialEq)]
@@ -190,6 +224,9 @@ pub enum LayoutError {
     Duplicate(String),
     /// A road names no peak that exists, or has neither points nor `from` and a length.
     BadRoad(String),
+    /// A road has ramps but is no highway, or a ramp names no road that crosses it with
+    /// room for the ramps either side.
+    BadRamp(String),
     /// A road end meets no other road and the road is not a dead end.
     RoadToNowhere(String),
     /// A bridge's deck would stand more than the profile band over the water's bed.
@@ -208,6 +245,9 @@ impl fmt::Display for LayoutError {
             LayoutError::TooFewPoints(n) => write!(f, "`{n}` has too few points"),
             LayoutError::Duplicate(n) => write!(f, "two things are named `{n}`"),
             LayoutError::BadRoad(n) => write!(f, "road `{n}` has no usable line"),
+            LayoutError::BadRamp(n) => {
+                write!(f, "road `{n}`: ramps need a highway and a road crossing it, {RAMP_RUN_M} m from its ends")
+            }
             LayoutError::RoadToNowhere(n) => {
                 write!(f, "road `{n}` ends nowhere (meet a road or say dead_end)")
             }
@@ -336,6 +376,36 @@ impl Layout {
             check(&r.name, &line, 2)?;
             lines.push(line);
         }
+        // Ramps: on a highway, to a road that crosses it away from the highway's ends.
+        for (i, r) in self.roads.iter().enumerate() {
+            let bad = || LayoutError::BadRamp(r.name.clone());
+            if !r.ramps.is_empty() && r.class != RoadClass::Highway {
+                return Err(bad());
+            }
+            for name in &r.ramps {
+                let j = self.roads.iter().position(|q| &q.name == name);
+                let j = j.filter(|&j| self.roads[j].class != RoadClass::Highway);
+                let (s, _, _) = j
+                    .and_then(|j| crossing(&lines[i], &lines[j]))
+                    .ok_or_else(bad)?;
+                if s < RAMP_RUN_M + 10.0 || s > line_length(&lines[i]) - RAMP_RUN_M - 10.0 {
+                    return Err(bad());
+                }
+            }
+        }
+        for c in &self.channels {
+            unique(&c.name)?;
+            check(&c.name, &pts(&c.line), 2)?;
+            // A bridge over it must stay in the profile band.
+            let drop = if c.wet {
+                self.ground_m - self.water_level_m + c.depth_m
+            } else {
+                c.depth_m
+            };
+            if c.width_m <= 0.0 || c.depth_m <= 0.0 || drop > PROFILE_BAND_M {
+                return Err(LayoutError::Value(c.name.clone()));
+            }
+        }
         // Every road end meets another road (or itself, for a loop) unless it is a dead end.
         for (i, r) in self.roads.iter().enumerate() {
             let line = &lines[i];
@@ -372,6 +442,43 @@ pub fn distance_to_line(p: V2, line: &[V2]) -> f32 {
     line.windows(2)
         .map(|s| segment_distance(p, s[0], s[1]).0)
         .fold(f32::INFINITY, f32::min)
+}
+
+/// Where polyline `a` first crosses polyline `b`: the arc length along each and the point.
+pub fn crossing(a: &[V2], b: &[V2]) -> Option<(f32, f32, V2)> {
+    let mut sa = 0.0;
+    for p in a.windows(2) {
+        let la = (p[1] - p[0]).length();
+        let mut sb = 0.0;
+        for q in b.windows(2) {
+            let lb = (q[1] - q[0]).length();
+            if let Some((t, u)) = seg_intersect(p[0], p[1], q[0], q[1]) {
+                return Some((sa + t * la, sb + u * lb, p[0].lerp(p[1], t)));
+            }
+            sb += lb;
+        }
+        sa += la;
+    }
+    None
+}
+
+/// The point `s` along polyline `line` (clamped to its ends) and the direction there.
+pub fn point_at(line: &[V2], s: f32) -> (V2, V2) {
+    let mut s = s.max(0.0);
+    let mut out = (line[0], V2::new(1.0, 0.0));
+    for p in line.windows(2) {
+        let len = (p[1] - p[0]).length();
+        if len < 1e-6 {
+            continue;
+        }
+        let dir = (p[1] - p[0]) * (1.0 / len);
+        out = (p[1], dir);
+        if s <= len {
+            return (p[0] + dir * s, dir);
+        }
+        s -= len;
+    }
+    out
 }
 
 /// Length of the polyline `line`.

@@ -60,7 +60,7 @@ const GAIN_ASPHALT: f32 = 1.36;
 const GAIN_ROOF_GRAVEL: f32 = 1.54;
 const GAIN_LAWN: f32 = 1.35;
 const GAIN_WOOD: f32 = 1.28;
-const GAIN_SHINGLES: f32 = 1.55;
+const GAIN_SHINGLES: f32 = 1.565;
 /// Inverse mean luminance of the brick tiles (pre-colored).
 const GAIN_BRICK_RED: f32 = 4.20;
 const GAIN_BRICK_TAN: f32 = 2.44;
@@ -123,9 +123,12 @@ fn look(pattern: u8, rgb: [u8; 3], kind: MeshKind) -> Look {
         }
         p if p == Pattern::Lawn as u8 => repeat(Tile::Lawn, [8.0; 2], [0.0; 2], GAIN_LAWN),
         // Shingle tabs 30 cm wide with 20 cm exposure, rows along the eaves.
-        p if p == Pattern::RoofTile as u8 => {
-            repeat(Tile::RoofShingles, [2.4, 1.6], [0.125, 0.25], GAIN_SHINGLES)
-        }
+        p if p == Pattern::RoofTile as u8 => repeat(
+            Tile::RoofShingles,
+            [4.8, 3.2],
+            [0.0625, 0.125],
+            GAIN_SHINGLES,
+        ),
         // Board-like rings on palm trunks, staves on water tanks.
         p if p == Pattern::Bark as u8 => {
             repeat(Tile::WoodSiding, [1.6, 2.4], [0.0, 0.125], GAIN_WOOD)

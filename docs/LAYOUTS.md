@@ -47,7 +47,11 @@ Layout(
   roads: [
     Road(name: "loop", class: Arterial, lanes: 2, speed_kph: Some(80), points: [...]),
     Road(name: "lookout", class: Rural, lanes: 1, sidewalk: false, dead_end: true, points: [...]),
+    // A grade-separated highway: roads cross over it; the ones `ramps` names get ramps.
+    Road(name: "freeway", class: Highway, lanes: 2, ramps: ["summit avenue"], points: [...]),
   ],
+  // Channels cut along polylines: a dry concrete flood channel, or with `wet: true` a river.
+  channels: [ Channel(name: "wash", line: [(1280, 60), (1290, 1480)], width_m: 14, depth_m: 5) ],
   start: Start(road: "crest street", along_m: 160),   // the player starts this far along this road
 )
 ```
@@ -57,14 +61,29 @@ Road fields beyond the line: `lanes`, `speed_kph` (default from class and lanes)
 false) and `deck_m` (a bridge's deck height over the water, default 3).
 
 How roads are built: an end within 30 m of another road snaps onto it; ends and crossings become
-junctions, all at grade. Over water a road rides its deck; on land it follows the ground, limited
+junctions. Over water a road rides its deck; on land it follows the ground, limited
 to its `max_grade`, and the terrain is then cut and filled under it (with a blended shoulder) so it
-sits on the ground. `Highway` (grade-separated) roads are not supported yet.
+sits on the ground.
+
+A `Highway` road is grade-separated. A road that crosses it does not meet it: it rises (4%
+approaches) to a deck 7 m over the highway, so keep its junctions some 200 m clear of the
+crossing or they are lifted too. Each road named in the highway's `ramps` gets a diamond: four
+one-way ramps leaving the highway 150 m either side of the crossing. The highway's own ends meet
+roads at grade like any road's, and a road that *ends* on a highway joins it at grade. The land
+under a highway and inside its ramps is zoned `Highway`: no streets or lots.
+
+A channel is cut after the roads are laid, so every road that crosses one bridges it. `width_m`
+is its flat bed; the walls slope 1.5 m out per meter down. Dry, its bed lies `depth_m` (at most
+7.8) under the ground and it is zoned `Highway`; `wet`, its bed lies `depth_m` under the water
+level and it is water, for land that stands a few meters above the water level (ground plus
+depth within 7.8 m). An end inside the place is a headwall; run the line to the place's edge to
+carry it out.
 
 Rules the loader checks (`Layout::validate`): names unique; every point inside the place; sane
 values; a deck low enough to stay in the road profile band; every road end on another road unless
-the road is a closed loop or a `dead_end`, so a road to nowhere is an error, not a default; the
-start names a road and lies along it.
+the road is a closed loop or a `dead_end`, so a road to nowhere is an error, not a default; ramps
+only on a highway, each naming a road that crosses it at least 160 m from its ends; a channel
+shallow enough to bridge; the start names a road and lies along it.
 
 `tools/mapdump --layout assets/layouts/<id>.ron` draws the macro map and main roads to check a
 layout by eye.

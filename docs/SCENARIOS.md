@@ -119,6 +119,18 @@ and the foothill village, with a causeway across the bay's south end. Zone rules
 borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
 and radio follow.
 
+## Mirage Valley redrawn: the Mirage Bowl (2001)
+**`mirage_bowl_2001` — Mirage Bowl, 2001.** Mirage Valley's point of view drawn as an authored
+layout (`assets/layouts/mirage_bowl.ron`): a city made to be seen from a car, in a bowl you can
+always see the rim of. A flat floor of bungalows and one-story sheds; a mountain front across the
+north with one high summit that the three-lane summit avenue drives straight at; lower ranges east
+and west; rail yards to the south. Strip corridors line the boulevards and an old road cuts the
+grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
+mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
+lights. Zone rules, grammar, palette, radio and cars are Mirage Valley's. It sits beside Mirage
+Valley until the layout format can draw grade-separated freeways and the flood channel; then it
+replaces it.
+
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.
 

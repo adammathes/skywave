@@ -706,6 +706,7 @@ impl Npcs {
         &mut self,
         alpha: f32,
         eye: Vec3,
+        ground: &crate::drive::DriveGround,
         lights: &FrameLights,
         lamp_glow: f32,
         out: &mut Vec<MeshInstance>,
@@ -751,7 +752,9 @@ impl Npcs {
         let lit2 = LIT_RADIUS_M * LIT_RADIUS_M;
         let place = |i: u16| {
             let (pos, heading) = self.pose(usize::from(i), alpha);
-            let transform = Mat4::from_rotation_translation(Quat::from_rotation_y(heading), pos);
+            // On the road under its wheels, pitched and rolled with it.
+            let (pos, rot) = crate::settle::rest(ground, pos, heading);
+            let transform = Mat4::from_rotation_translation(rot, pos);
             let bounds = Bounds::cube(pos + Vec3::Y, CAR_HALF_M);
             let set = if bounds.distance_squared(eye) < lit2 {
                 lights.set_for(&bounds)

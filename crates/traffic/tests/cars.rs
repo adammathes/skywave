@@ -16,7 +16,6 @@ use traffic::{
     Car, Clock, Control, Density, Inputs, Junction, Lane, LaneGraph, Light, Player, ShapeRule,
     Traffic, TrafficBudget, Turn, TurnKind, View, NONE,
 };
-use world::procgen::build_place;
 use world::template::RegionTemplate;
 
 /// Counts heap allocations made on the current thread, so stepping can be shown to make
@@ -209,6 +208,18 @@ const NO_VIEW: View = View {
     dir: [0.0, -1.0],
     tan_half: 1.0,
 };
+
+/// `t`'s place for `seed`: generated, or for a template with only zone rules (the lake
+/// city's) its authored layout dressed by them.
+fn build_place(seed: Seed, t: &RegionTemplate, g: &world::Grammar) -> place::Place {
+    if t.coast.is_some() || t.basin.is_some() {
+        return world::procgen::build_place(seed, t, g);
+    }
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/lake_city.ron")).expect("layout");
+    layout.validate().expect("validate layout");
+    world::procgen::authored::build_place(seed, &layout, t, g)
+}
 
 /// The shipped coast grammar: `build_place` dresses buildings from it.
 fn grammar() -> world::Grammar {

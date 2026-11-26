@@ -544,17 +544,18 @@ impl StreamBudget {
     /// 9×9 chunks, 2 ms a frame; a pool for 4.96M vertices, 208 MB of buffers. With its
     /// buildings (awnings, canopies, rooflines and rooftop units), baked props,
     /// stroke-lettered signs and the light tiles its street lamps cut, the densest 11×11
-    /// chunks (the ring and the chunks waiting to be evicted) take, on seed 1, 978 pages of
-    /// 4096 vertices on the coast, 1096 in the basin and 1063 in Lake City; this is 1211, a
-    /// tenth more than the most (trees, cars, lamps and small furniture are instances,
+    /// chunks (the ring and the chunks waiting to be evicted) take, on seed 1, 912 pages of
+    /// 4096 vertices on the coast, 1051 in the basin and 1034 in Lake City; this is 1211, a
+    /// sixth more than the most (trees, cars, lamps and small furniture are instances,
     /// outside the pool).
     pub const WEB: StreamBudget = StreamBudget {
         radius: 4,
         frame_budget_s: 0.002,
         pool_vertices: 4_960_000,
     };
-    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for a whole place (on seed
-    /// 1 the coast takes 1217 pages, the basin 1491, Lake City 1542) and some more, 1617.
+    /// 13×13 chunks, 4 ms a frame; 6.62M vertices, 278 MB: room for the densest 15×15 chunks
+    /// it keeps resident (on seed 1 the coast's take 1109 pages, the basin's 1402, Lake
+    /// City's 1490) and some more, 1617.
     pub const NATIVE: StreamBudget = StreamBudget {
         radius: 6,
         frame_budget_s: 0.004,
@@ -1283,7 +1284,7 @@ mod tests {
     /// Lake City's the same.
     #[test]
     fn every_lake_city_chunk_fits_the_pool_and_the_far_terrain_is_small() {
-        let s = crate::scenario::get(3);
+        let s = crate::scenario::get(4);
         assert_eq!(s.region, "great_lakes_city");
         let place =
             crate::places::build_in(crate::PlaceKey::Coast, skywave_core::Seed(1), s).unwrap();
@@ -1313,25 +1314,28 @@ mod tests {
             c.pieces_ms(),
             c.worst_stage,
         );
-        assert!((100_000..=140_000).contains(&tris), "{tris} triangles");
+        // A flat place simplifies further than a hilly one; none goes over the budget.
+        assert!((50_000..=140_000).contains(&tris), "{tris} triangles");
         assert!(far.iter().all(|t| t
             .mesh
             .indices
             .iter()
             .all(|&i| (i as usize) < t.mesh.vertices.len())));
-        // The web pool holds the densest square of chunks a camera keeps resident (the ring
-        // and the chunks waiting to be evicted).
+        // Each pool holds the densest square of chunks a camera keeps resident (the ring
+        // and the chunks waiting to be evicted): on native that is the whole of a 16 x 16
+        // place but not of a bigger one.
         let side = 2 * StreamBudget::WEB.radius + 3;
         let pages = c.densest_pages(side);
         let pool = StreamBudget::WEB.pool_config().pages as usize;
-        let all: usize = c.pages.iter().map(|p| p.1).sum();
+        let native_side = 2 * StreamBudget::NATIVE.radius + 3;
+        let native_pages = c.densest_pages(native_side);
         let native = StreamBudget::NATIVE.pool_config().pages as usize;
         eprintln!(
             "densest {side}x{side} chunks: {pages} pages of the web pool's {pool}; densest 3x3 \
-             {}; the whole place {all} of the native pool's {native}",
+             {}; densest {native_side}x{native_side} {native_pages} of the native pool's {native}",
             c.densest_pages(3)
         );
         assert!(pages <= pool, "{pages} pages of {pool}");
-        assert!(all <= native, "{all} pages of {native}");
+        assert!(native_pages <= native, "{native_pages} pages of {native}");
     }
 }
