@@ -13,3 +13,6 @@ python3 -c "from PIL import Image; im = Image.open('/tmp/<id>.png').convert('RGB
 
 `mirage_bowl_2001`'s still is its boulevard at its default time (15:30, afternoon sun): the query above
 with `&pos=1500,1256&yaw=90`, in its own grammar and palette.
+
+`lake_city_1986`'s still is its start at its default time (16:50), seed 1: the query above as is, south
+down the bungalow belt's main street toward the drive-in.

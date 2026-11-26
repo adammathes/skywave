@@ -160,7 +160,7 @@ fn a_road_to_nowhere_is_refused() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0xae2d836d2b4af610;
+const BOWL_GOLDEN: u64 = 0x1ff341e87a4c2fc8;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.
