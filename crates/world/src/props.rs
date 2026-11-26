@@ -127,6 +127,12 @@ pub enum PropKind {
     LotLabel {
         letter: u8,
     },
+    /// A suspension bridge's tower and its half of the cables, as `place::PropKind`'s.
+    BridgeTower {
+        span_m: u16,
+        rise_m: u8,
+        width_m: u8,
+    },
     /// The overhead lines between two power poles: from the pole at `pos` along `dir`,
     /// `len_dm` decimeters to the next, whose base stands `rise_dm` decimeters higher
     /// (built from the pole pairs [`power_spans`] finds; never in a Place).
@@ -511,7 +517,8 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         | PropKind::CrewGarage { .. }
         | PropKind::TacoStand { .. }
         | PropKind::PicnicTable
-        | PropKind::CrossingGate { .. } => crate::setpieces::build(m, p, pal, &Lexicon::default()),
+        | PropKind::CrossingGate { .. }
+        | PropKind::BridgeTower { .. } => crate::setpieces::build(m, p, pal, &Lexicon::default()),
         // A landmark needs its kit, which only the chunk plan has.
         PropKind::Landmark { .. } => {}
         PropKind::LotLabel { letter } => crate::landmarks::lot_label(m, base, p.dir, letter, pal),
@@ -1606,6 +1613,15 @@ pub fn from_place(p: &place::Prop, seed: u64) -> Prop {
         P::CrossingGate { arm_dm } => PropKind::CrossingGate { arm_dm },
         P::Landmark { kit, variant } => PropKind::Landmark { kit, variant },
         P::LotLabel { letter } => PropKind::LotLabel { letter },
+        P::BridgeTower {
+            span_m,
+            rise_m,
+            width_m,
+        } => PropKind::BridgeTower {
+            span_m,
+            rise_m,
+            width_m,
+        },
     };
     let variation = match p.kind {
         P::Sign { text_seed } => text_seed,

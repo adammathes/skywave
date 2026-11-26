@@ -91,7 +91,8 @@ pub struct District {
 /// along a bearing (`bearing_deg`) or toward a peak (`toward`). Each end must meet
 /// another road (within [`SNAP_M`]) unless `dead_end` says the last point is a dead end
 /// (an overlook, a gate). Over water the road is a bridge, its deck `deck_m` above the
-/// water.
+/// water; a `suspension` bridge also stands two towers over its longest crossing, with
+/// cables between them.
 ///
 /// A `Highway` is grade-separated: the roads that cross it pass over on a deck and do not
 /// meet it, except those named in `ramps`, which get a diamond of four one-way ramps. Its
@@ -125,6 +126,8 @@ pub struct Road {
     pub dead_end: bool,
     #[cfg_attr(feature = "serde", serde(default = "deck"))]
     pub deck_m: f32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub suspension: bool,
     /// A `Highway`'s interchanges: the crossing roads joined to it by ramps.
     #[cfg_attr(feature = "serde", serde(default))]
     pub ramps: Vec<String>,
