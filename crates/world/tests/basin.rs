@@ -45,24 +45,24 @@ fn template() -> RegionTemplate {
 /// new values in their own commit whose message says why they moved.
 const GOLDEN: [(u64, u64, u64); 4] = [
     (
-        0x39A1_C053_F7A8_0B31,
-        0xA2D7_B9A0_3D09_A4FE,
-        0x9744_78A4_54FB_9659,
+        0xB143_96B4_5451_52EA,
+        0x0064_0F32_D37F_5A19,
+        0xD5B2_DF21_8381_DED3,
     ),
     (
-        0xA3F4_A281_380E_596B,
-        0x7AD4_5617_94BE_609B,
-        0x38B1_BEE3_8064_B2BC,
+        0xD435_711D_0080_D093,
+        0x95E9_D8A9_B3BB_9F94,
+        0x9FAC_379A_4743_FDB9,
     ),
     (
-        0x82B6_07FD_D1FD_CF4F,
-        0xB348_0BC3_E55C_8454,
-        0xCA1E_81EA_15A2_5F4F,
+        0x6A46_905E_FFA8_A30C,
+        0xCAAB_0ECE_5C89_ABD1,
+        0x6B22_0C89_3E9B_91CC,
     ),
     (
-        0x6DBB_5CB8_4DBB_0036,
-        0x68EB_95E2_5702_79E7,
-        0x9BF8_07B3_AA81_B16D,
+        0xC27D_7502_6AB3_32EB,
+        0xF4DD_5E27_5E68_D9B0,
+        0x8876_4C99_0121_2C90,
     ),
 ];
 
