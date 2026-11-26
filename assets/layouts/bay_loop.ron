@@ -105,11 +105,13 @@ Layout(
             (1100, 1453), (1050, 2000), (1000, 2600), (950, 3000), (950, 3300),
         ]),
         Road(name: "old highway", class: Arterial, lanes: 2, speed_kph: Some(55), points: [(1450, 1000), (1450, 3300)]),
-        Road(name: "city line", class: Arterial, lanes: 1, dead_end: true, points: [(1082, 1750), (1840, 1750)]),
-        Road(name: "north cross", class: Arterial, lanes: 1, dead_end: true, points: [(1043, 2100), (1840, 2100)]),
-        Road(name: "college cross", class: Arterial, lanes: 1, dead_end: true, points: [(1008, 2500), (1840, 2500)]),
-        Road(name: "south cross", class: Arterial, lanes: 1, dead_end: true, points: [(975, 2700), (1700, 2700)]),
-        Road(name: "creek cross", class: Arterial, lanes: 1, dead_end: true, points: [(950, 3000), (1700, 3000)]),
+        Road(name: "city line", class: Arterial, lanes: 1, points: [(1082, 1750), (1840, 1750)]),
+        Road(name: "north cross", class: Arterial, lanes: 1, points: [(1043, 2100), (1840, 2100)]),
+        Road(name: "college cross", class: Arterial, lanes: 1, points: [(1008, 2500), (1840, 2500)]),
+        Road(name: "south cross", class: Arterial, lanes: 1, points: [(975, 2700), (1840, 2700)]),
+        Road(name: "creek cross", class: Arterial, lanes: 1, points: [(950, 3000), (1840, 3000)]),
+        // The frontage road on the bay side of the freeway, where the cross streets end.
+        Road(name: "frontage road", class: Arterial, lanes: 1, points: [(1840, 1750), (1840, 3000)]),
 
         // The causeway across the bay's south end.
         Road(name: "causeway", class: Arterial, lanes: 2, speed_kph: Some(80), points: [(1761, 2750), (3150, 2750)]),
