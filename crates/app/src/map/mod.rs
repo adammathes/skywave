@@ -14,10 +14,13 @@
 
 pub mod districts;
 pub mod names;
+pub mod skin;
 pub mod view;
 
 use place::{LotKind, Place, PoiKind, RoadClass, ZoneId, Zones};
 use skywave_core::hash_bytes;
+
+pub use skin::Skin;
 
 /// The most pixels along the longer side of the place (the HUD texture's limit).
 pub const MAP_SIZE: u32 = 2048;
@@ -40,7 +43,7 @@ pub struct MapImage {
 /// Colors, sRGB.
 type Rgb = [u8; 3];
 
-/// Muted ground tint per zone, in [`ZoneId`] order.
+/// The plain skin's muted ground tint per zone, in [`ZoneId`] order.
 pub const ZONE_COLORS: [Rgb; 12] = [
     [176, 170, 172], // Downtown
     [204, 184, 160], // Strip
@@ -60,8 +63,6 @@ pub const SHORE: Rgb = [74, 112, 150];
 pub const PARK: Rgb = [140, 180, 120];
 /// A dry flood channel's concrete.
 pub const CHANNEL: Rgb = [176, 174, 166];
-/// Footprints darken the ground under them to this share (out of 256).
-const BUILDING_SHADE: u32 = 216;
 
 /// How one road class is drawn: fill, outline, the narrowest it is drawn (px) whatever its
 /// real width, and the fill's opacity (alleys are faint and have no outline).
@@ -154,9 +155,14 @@ pub fn labels(place: &Place) -> Vec<MapPoi> {
 }
 
 impl MapImage {
-    /// Rasterizes `place` (see the module docs). Allocates the image and a few scratch
-    /// buffers; meant for load time.
+    /// Rasterizes `place` in the plain skin.
     pub fn rasterize(place: &Place) -> MapImage {
+        MapImage::rasterize_with(place, &skin::PLAIN)
+    }
+
+    /// Rasterizes `place` in `skin` (see the module docs). Allocates the image and a few
+    /// scratch buffers; meant for load time.
+    pub fn rasterize_with(place: &Place, skin: &Skin) -> MapImage {
         let extent = place.header.extent_m();
         let longest = extent[0].max(extent[1]).max(1.0);
         let meters_per_px = (longest / MAP_SIZE as f32).max(MIN_METERS_PER_PX);
@@ -169,27 +175,32 @@ impl MapImage {
             origin: place.header.origin_m(),
             mpp: meters_per_px,
             spans: Vec::new(),
+            skin: *skin,
         };
         c.zones(place);
         for p in &place.parcels {
             if p.lot_kind == LotKind::Park || p.zone == ZoneId::Park {
-                c.polygon(&p.polygon, |_| PARK);
+                c.polygon(&p.polygon, |_| skin.park);
             }
         }
         for water in &place.terrain.water {
             // A dry flood channel is concrete, not water.
             if water.kind == place::WaterKind::Channel {
-                c.polygon(&water.polygon, |_| CHANNEL);
+                c.polygon(&water.polygon, |_| skin.channel);
                 continue;
             }
-            c.polygon(&water.polygon, |_| WATER);
+            c.polygon(&water.polygon, |_| skin.water);
             c.mark_water(&water.polygon);
         }
         c.shore();
-        for b in &place.buildings {
-            c.polygon(&b.footprint, shade);
+        c.grid();
+        if skin.building_shade < 256 {
+            for b in &place.buildings {
+                c.polygon(&b.footprint, |under| shade(under, skin.building_shade));
+            }
         }
         c.roads(place);
+        c.grain();
         let mut rgba = Vec::with_capacity(c.px.len() * 4);
         for p in &c.px {
             rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
@@ -254,9 +265,9 @@ impl MapImage {
     }
 }
 
-/// The ground under a footprint, darkened.
-fn shade(under: Rgb) -> Rgb {
-    under.map(|c| ((u32::from(c) * BUILDING_SHADE) >> 8) as u8)
+/// The ground under a footprint, darkened to `share` out of 256.
+fn shade(under: Rgb, share: u32) -> Rgb {
+    under.map(|c| ((u32::from(c) * share) >> 8) as u8)
 }
 
 /// `a` toward `b` by `t` (0..1), rounded.
@@ -280,6 +291,7 @@ struct Canvas {
     mpp: f32,
     /// Scanline crossings, reused.
     spans: Vec<f32>,
+    skin: Skin,
 }
 
 impl Canvas {
@@ -303,7 +315,8 @@ impl Canvas {
         let cell_m = header.chunk_size_m / f32::from(res);
         let po = header.origin_m();
         let n = (self.w * self.h) as usize;
-        self.px = vec![ZONE_COLORS[ZoneId::Residential as usize]; n];
+        let tint = self.skin.zones;
+        self.px = vec![tint[ZoneId::Residential as usize]; n];
         self.water = vec![false; n];
         if cells.len() != cw * ch {
             return;
@@ -316,7 +329,7 @@ impl Canvas {
                 let cx = ((wx - po[0]) / cell_m).max(0.0) as usize;
                 let zone = cells[cz.min(ch - 1) * cw + cx.min(cw - 1)];
                 let i = self.index(x, y);
-                self.px[i] = ZONE_COLORS[zone as usize];
+                self.px[i] = tint[zone as usize];
                 self.water[i] = zone == ZoneId::Water;
             }
         }
@@ -398,7 +411,7 @@ impl Canvas {
                         && !self.water[self.index(nx as u32, ny as u32)]
                 };
                 if land(-1, 0) || land(1, 0) || land(0, -1) || land(0, 1) {
-                    self.px[i] = SHORE;
+                    self.px[i] = self.skin.shore;
                 }
             }
         }
@@ -408,7 +421,7 @@ impl Canvas {
     fn roads(&mut self, place: &Place) {
         for pass in 0..2 {
             for class in ROAD_ORDER {
-                let style = road_style(class);
+                let style = (self.skin.road)(class);
                 if pass == 0 && !style.outline {
                     continue;
                 }
@@ -425,6 +438,48 @@ impl Canvas {
                         self.capsule(a, b, r, color, opacity);
                     }
                 }
+            }
+        }
+    }
+
+    /// The skin's page grid: a 1 px line wherever a multiple of `grid_m` (world x or z)
+    /// falls inside a pixel.
+    fn grid(&mut self) {
+        let (step, color, k) = (self.skin.grid_m, self.skin.grid, self.skin.grid_opacity);
+        if step <= 0.0 {
+            return;
+        }
+        let on = |o: f32, i: u32, mpp: f32| {
+            let a = ((o + i as f32 * mpp) / step).floor();
+            let b = ((o + (i + 1) as f32 * mpp) / step).floor();
+            a != b
+        };
+        for y in 0..self.h {
+            let row = on(self.origin[1], y, self.mpp);
+            for x in 0..self.w {
+                if row || on(self.origin[0], x, self.mpp) {
+                    let i = self.index(x, y);
+                    self.px[i] = blend(self.px[i], color, k);
+                }
+            }
+        }
+    }
+
+    /// The skin's paper grain: every pixel nudged by a hash of its position.
+    fn grain(&mut self) {
+        let g = i32::from(self.skin.grain);
+        if g == 0 {
+            return;
+        }
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let mut h = x.wrapping_mul(0x9E37_79B1) ^ y.wrapping_mul(0x85EB_CA77);
+                h ^= h >> 15;
+                h = h.wrapping_mul(0x2C1B_3C6D);
+                h ^= h >> 12;
+                let d = (h % (2 * g as u32 + 1)) as i32 - g;
+                let i = self.index(x, y);
+                self.px[i] = self.px[i].map(|c| (i32::from(c) + d).clamp(0, 255) as u8);
             }
         }
     }
@@ -518,7 +573,7 @@ mod tests {
         assert_ne!(under, lawn);
         assert!(ZONE_COLORS
             .iter()
-            .any(|&z| shade(z) == under || shade(PARK) == under));
+            .any(|&z| shade(z, 216) == under || shade(PARK, 216) == under));
         // The park is green.
         let park = place
             .parcels
@@ -590,6 +645,37 @@ mod tests {
         };
         assert_eq!(map, lake_only);
         assert_ne!(map.hash(), MapImage::rasterize(&Place::test_grid()).hash());
+    }
+
+    #[test]
+    fn skins_restyle_the_map_deterministically() {
+        let place = Place::test_grid();
+        let plain = MapImage::rasterize(&place);
+        assert_eq!(plain, MapImage::rasterize_with(&place, &skin::PLAIN));
+        for s in skin::SKINS.iter().skip(1) {
+            let a = MapImage::rasterize_with(&place, s);
+            assert_eq!(a, MapImage::rasterize_with(&place, s), "{}", s.id);
+            assert_ne!(a.hash(), plain.hash(), "{}", s.id);
+        }
+        // The nav screen: its road colors, and no buildings (the bare ground under one).
+        let nav = MapImage::rasterize_with(&place, &skin::NAV);
+        assert_eq!(
+            rgb(nav.pixel_at([0.5, -350.5])),
+            (skin::NAV.road)(RoadClass::Arterial).fill
+        );
+        let c = centroid(&place.buildings[0].footprint);
+        assert!(
+            skin::NAV.zones.contains(&rgb(nav.pixel_at(c)))
+                || rgb(nav.pixel_at(c)) == skin::NAV.park
+        );
+        // The atlas: a grid line on x = 0 mod 400 m, paper grain off it.
+        let atlas = MapImage::rasterize_with(&place, &skin::ATLAS);
+        let lawn = skin::ATLAS.zones[ZoneId::Residential as usize];
+        let near =
+            |p: Rgb, q: Rgb, d: i32| (0..3).all(|k| (i32::from(p[k]) - i32::from(q[k])).abs() <= d);
+        let on_grid = rgb(atlas.pixel_at([-400.5, -480.5]));
+        assert!(!near(on_grid, lawn, 5) && near(on_grid, lawn, 60));
+        assert!(near(rgb(atlas.pixel_at([-420.5, -480.5])), lawn, 5));
     }
 
     #[test]

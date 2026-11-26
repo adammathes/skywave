@@ -130,6 +130,8 @@ pub struct MapHud {
     pub full: FullMap,
     /// The named districts, for the card shown on entering one.
     pub districts: Districts,
+    /// The map's skin, for the HUD's frame and marker colors.
+    pub skin: Option<&'static crate::map::Skin>,
     /// Meters across the minimap this frame (eased when the zoom is automatic); 0 until the
     /// first frame.
     pub minimap_range_m: f32,
@@ -367,7 +369,13 @@ impl Ui {
             full: FullMap::default(),
             districts: std::mem::take(&mut self.map.districts),
             minimap_range_m: 0.0,
+            skin: self.map.skin,
         };
+    }
+
+    /// The skin the map image was drawn in.
+    pub fn set_map_skin(&mut self, skin: &'static crate::map::Skin) {
+        self.map.skin = Some(skin);
     }
 
     /// The place's named districts, for their cards.

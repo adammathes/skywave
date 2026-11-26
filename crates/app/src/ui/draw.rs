@@ -65,15 +65,13 @@ const SHADOW: [u8; 4] = [0, 0, 0, 170];
 const GRAPH_OK: [u8; 4] = [110, 210, 130, 230];
 const GRAPH_SLOW: [u8; 4] = [255, 178, 62, 230];
 const GRAPH_BAD: [u8; 4] = [235, 80, 70, 230];
-/// The minimap's rim and what shows past the place's edge; the full map's backdrop.
-const MAP_RIM: [u8; 4] = [16, 20, 30, 235];
 const MAP_SHADE: [u8; 4] = [8, 10, 18, 250];
 const ARROW_EDGE: [u8; 4] = [24, 16, 8, 255];
-/// A soft light disc under the minimap's player arrow, so it reads on any ground.
-const PLAYER_HALO: [u8; 4] = [255, 255, 255, 150];
 /// Minimap rim width and arrow size, virtual units.
 const RIM: f32 = 4.0;
 const MINI_ARROW: f32 = 24.0;
+/// The most names the full map places at once.
+const MAX_MAP_LABELS: usize = 64;
 /// Radius of a point of interest's dot on the minimap (with its dark ring).
 const MINI_POI: f32 = 6.0;
 const FULL_ARROW: f32 = 26.0;
@@ -947,13 +945,17 @@ impl Ui {
         let r = MINIMAP_DIAMETER * 0.5;
         let center = [sx + r + RIM, sy + sh - r - RIM];
         let s = &self.settings;
+        let skin = self.map.skin.unwrap_or(&map::skin::PLAIN);
         let range = if self.map.minimap_range_m > 0.0 {
             self.map.minimap_range_m
         } else {
             crate::map::view::auto_range_m(0.0)
         };
         let m = Minimap::new(center, r, ctx.car, ctx.heading, s.minimap_rotate, range);
-        hud.image(HudImage::disc(center[0], center[1], r + RIM, MAP_RIM));
+        hud.image(HudImage::disc(center[0], center[1], r + RIM, skin.rim));
+        // Past the place's edge: the skin's bare ground.
+        let [gr, gg, gb] = skin.zones[place::ZoneId::Hills as usize];
+        hud.image(HudImage::disc(center[0], center[1], r, [gr, gg, gb, 255]));
         hud.image(m.image(geom));
         // Landmarks: crisp dots over the image, kept inside the circle.
         for poi in &self.map.pois {
@@ -963,7 +965,7 @@ impl Ui {
                 continue;
             }
             let [pr, pg, pb] = map::poi_color(poi.kind);
-            hud.image(HudImage::disc(q[0], q[1], MINI_POI, ARROW_EDGE));
+            hud.image(HudImage::disc(q[0], q[1], MINI_POI, skin.poi_ring));
             hud.image(HudImage::disc(
                 q[0],
                 q[1],
@@ -974,16 +976,22 @@ impl Ui {
         // The player: a light halo, a dark edge, the accent.
         let rot = m.arrow_rotation();
         let [cx, cy] = m.car_screen();
-        hud.image(HudImage::disc(cx, cy, MINI_ARROW * 0.62, PLAYER_HALO));
+        hud.image(HudImage::disc(cx, cy, MINI_ARROW * 0.62, skin.halo));
         hud.image(HudImage::arrow(cx, cy, MINI_ARROW + 6.0, rot, ARROW_EDGE));
-        hud.image(HudImage::arrow(cx, cy, MINI_ARROW, rot, ACCENT));
+        hud.image(HudImage::arrow(cx, cy, MINI_ARROW, rot, skin.player));
         // North: a badge with an N, straddling the rim where north is.
         let n = m.north();
         let [bx, by] = [center[0] + n[0] * r, center[1] + n[1] * r];
-        hud.image(HudImage::disc(bx, by, 13.0, ACCENT));
-        hud.image(HudImage::disc(bx, by, 11.0, MAP_RIM));
+        hud.image(HudImage::disc(bx, by, 13.0, skin.player));
+        hud.image(HudImage::disc(bx, by, 11.0, skin.rim));
         let w = width("N", 2.0);
-        hud.text(bx - w * 0.5, by - font::CAP_HEIGHT as f32, 2.0, ACCENT, "N");
+        hud.text(
+            bx - w * 0.5,
+            by - font::CAP_HEIGHT as f32,
+            2.0,
+            skin.player,
+            "N",
+        );
     }
 
     /// The full-screen map: the whole place fit to the safe area (panned and zoomed),
@@ -992,6 +1000,7 @@ impl Ui {
         let [vw, vh] = hud.size();
         hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, MAP_SHADE);
         let Some(geom) = &self.map.geom else { return };
+        let skin = self.map.skin.unwrap_or(&map::skin::PLAIN);
         let rect = self.full_map_rect();
         let [sx, sy, sw, sh] = rect;
         let view = self.map.full.view(geom, rect);
@@ -1003,21 +1012,39 @@ impl Ui {
                 w: img.w + 2.0 * pad,
                 h: img.h + 2.0 * pad,
                 mask: render::HudMask::Rounded(10.0 + pad),
-                ..HudImage::disc(0.0, 0.0, 0.0, MAP_RIM)
+                ..HudImage::disc(0.0, 0.0, 0.0, skin.rim)
             });
             hud.image(img);
         }
+        // Every dot; a name only where it clears the names already placed (in the
+        // place's POI order), so dense blocks stay legible. Zooming in shows the rest.
+        let mut placed = [[0.0f32; 4]; MAX_MAP_LABELS];
+        let mut n = 0;
         for poi in &self.map.pois {
             let q = view.to_screen(poi.pos);
             if !view.contains(q) {
                 continue;
             }
             let [r, g, b] = map::poi_color(poi.kind);
-            hud.image(HudImage::disc(q[0], q[1], 7.0, ARROW_EDGE));
+            hud.image(HudImage::disc(q[0], q[1], 7.0, skin.poi_ring));
             hud.image(HudImage::disc(q[0], q[1], 5.0, [r, g, b, 255]));
             let (tx, ty) = (q[0] + 11.0, q[1] - font::CAP_HEIGHT as f32);
-            hud.text(tx + 2.0, ty + 2.0, 2.0, SHADOW, &poi.name);
-            hud.text(tx, ty, 2.0, TEXT, &poi.name);
+            let bx = [
+                tx - 4.0,
+                ty - 4.0,
+                tx + width(&poi.name, 2.0) + 4.0,
+                ty + LINE_H,
+            ];
+            let clear = placed[..n]
+                .iter()
+                .all(|o| bx[2] < o[0] || o[2] < bx[0] || bx[3] < o[1] || o[3] < bx[1]);
+            if !clear || n == MAX_MAP_LABELS {
+                continue;
+            }
+            placed[n] = bx;
+            n += 1;
+            hud.text(tx + 2.0, ty + 2.0, 2.0, skin.label_shadow, &poi.name);
+            hud.text(tx, ty, 2.0, skin.label, &poi.name);
         }
         let q = view.to_screen(ctx.car);
         if view.contains(q) {
@@ -1029,7 +1056,7 @@ impl Ui {
                 rot,
                 ARROW_EDGE,
             ));
-            hud.image(HudImage::arrow(q[0], q[1], FULL_ARROW, rot, ACCENT));
+            hud.image(HudImage::arrow(q[0], q[1], FULL_ARROW, rot, skin.player));
         }
 
         // Title and time at the top corners, the controls centered under the map.
