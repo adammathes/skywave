@@ -103,6 +103,20 @@ pub fn business_name(seed: u64, max_len: usize) -> Vec<u8> {
     Vec::new()
 }
 
+/// The name of the street with key `key` (`procgen::detail`'s street keys): an invented
+/// word, then a boulevard's or an avenue's type for arterials (bit 15), a side street's
+/// for the rest.
+pub fn street_name_of(key: u16) -> Vec<u8> {
+    const MAJOR: [&str; 2] = ["BLVD", "AVE"];
+    const MINOR: [&str; 6] = ["ST", "AVE", "DR", "PL", "WAY", "LN"];
+    let seed = u64::from(key & 0x7FFF);
+    let mut n = word(seed ^ 0x5354_5254);
+    n.push(b' ');
+    let types: &[&str] = if key & 0x8000 != 0 { &MAJOR } else { &MINOR };
+    n.extend_from_slice(pick(types, mix64(seed) >> 12).as_bytes());
+    n
+}
+
 /// An invented street name: "NAME TYPE".
 pub fn street_name(seed: u64) -> Vec<u8> {
     let mut n = word(seed ^ 0x5354_5254);
@@ -217,6 +231,8 @@ mod tests {
                 .all(|c| c.is_ascii_uppercase() || *c == b' ' || *c == b'\''));
             seen.insert(n);
             let st = street_name(s);
+            assert!(st.len() <= 12, "{:?}", core::str::from_utf8(&st));
+            let st = street_name_of((s * 331) as u16);
             assert!(st.len() <= 12, "{:?}", core::str::from_utf8(&st));
         }
         assert!(seen.len() > 150, "{} distinct", seen.len());

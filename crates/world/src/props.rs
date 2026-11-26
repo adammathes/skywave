@@ -1915,14 +1915,24 @@ fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
         m,
         &f,
         [-0.03, 0.0, -0.03],
-        [0.03, 3.05, 0.03],
+        [0.03, 2.7, 0.03],
         face::NO_BOTTOM,
+        post,
+    );
+    // The blades sit on the post's cap, one on the other, so nothing crosses their names.
+    boxf(
+        m,
+        &f,
+        [-0.03, 2.88, -0.03],
+        [0.03, 2.9, 0.03],
+        face::ALL,
         post,
     );
     let green = Paint::new(shade(pal.palm_green, 170), Pattern::Paint);
     let ink = Paint::new(pal.paint_white, Pattern::Paint);
-    for (k, y) in [(0u64, 2.7f32), (1, 2.9)] {
-        let name = signs::street_name(u64::from(seed) ^ k);
+    // The blade along the post's facing names that street, the other the cross street.
+    for (k, y) in [(0u32, 2.7f32), (1, 2.9)] {
+        let name = signs::street_name_of((seed >> (16 * k)) as u16);
         // The second blade turned a quarter.
         let b = if k == 0 {
             f
@@ -1935,17 +1945,13 @@ fn street_sign(m: &mut WorldMesh, base: V3, dir: V2, pal: &Palette, seed: u32) {
         };
         let (lo, hi) = ([-0.5, y, -0.012], [0.5, y + 0.18, 0.012]);
         boxf(m, &b, lo, hi, face::ALL & !face::NEG_Y, green);
-        let n = name.len().max(1) as f32;
-        let cell = 0.84 / n;
-        for (i, &c) in name.iter().enumerate() {
-            if c == b' ' {
-                continue;
-            }
-            let x = -0.42 + cell * i as f32;
-            let (xa, xb) = (x + cell * 0.12, x + cell * 0.88);
-            rect(m, &b, xa, y + 0.05, xb, y + 0.13, 0.0125, false, ink);
-            rect(m, &b, -xb, y + 0.05, -xa, y + 0.13, -0.0125, true, ink);
-        }
+        // White capitals, centered, as large as fit the blade.
+        let em = signs::letters::layout(&name, signs::letters::LetterStyle::Block).ink_w();
+        let cap = (0.88 / em.max(0.1)).min(0.1);
+        let x0 = -0.5 * em * cap;
+        let y0 = y + 0.5 * (0.18 - cap);
+        letters(m, &b, &name, x0, y0, cap / 5.0, 0.0125, false, ink);
+        letters(m, &b, &name, x0, y0, cap / 5.0, -0.0125, true, ink);
     }
 }
 
