@@ -22,8 +22,9 @@ Scenario(
 ```
 Validation: years in order and the year within them, a known region, grammar, palette and preset, a
 default car no newer than the years (nor built up later, `VehicleSpec::built`), heroes that are built-in
-cars. Mirage Valley (`mirage_valley_2001`; it was `inland_basin_2001` until it was renamed, and a saved
-world choice, a saved radio pick or a `?scenario=` / `--scenario` naming the old id still finds it,
+cars. Mirage Bowl (`mirage_bowl_2001`; the procedural Mirage Valley it replaced was `mirage_valley_2001`
+and before that `inland_basin_2001`, and a saved
+world choice, a saved radio pick or a `?scenario=` / `--scenario` naming an old id still finds it,
 `scenario::RENAMED`) is `years: (1995, 2001)` and starts in the Halberd Coupe; its
 `heroes` are the eleven 2001 hero cars (`docs/VEHICLES.md`), which no earlier world shows. The era filter and its weights are in
 `docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
@@ -35,7 +36,7 @@ picking one saves it as the `scenario` setting and the platform reloads the game
 moved to that world's procedural place, its start and default time (`SceneSetup::for_world`), the settings
 kept, the radio off; the old app and renderer are dropped whole. A session starts in the world last picked
 unless its scene names a place or a world (`?scenario=<id>` on the web, `--scenario <id>` natively; an id
-that is not built in starts the first world and says so); with none saved, a bare start opens Mirage Valley
+that is not built in starts the first world and says so); with none saved, a bare start opens Mirage Bowl
 (`scenario::DEFAULT`) and a scene with other keys the hand-laid test town (`SceneSetup::with_saved_world`). There is no title screen yet: the World page (Pause › Worlds) is
 reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
@@ -48,7 +49,8 @@ reached from the pause menu (and `?menu=worlds` opens the web build on it).
 **`north_shore_suburb_1986` — Lincolnwood-style, 1986.** Region template `north_shore_suburb`: a flat, pre-war grid suburb at the city edge. Brick bungalows and 50s ranches on 40-foot lots with alleys and detached garages, parkway elms and maples, strip malls and a shopping center with a big parking field, a brutalist tower hotel as the landmark, a six-lane expressway along one edge with a rail line beside it, forest preserve and golf course green, a Jewish deli, a diner, a cemetery, a high school with a track. Flat and frank light, brick-red and beige palette, mercury-vapor streetlights going sodium. Radio: 80s pop, new wave, classic rock, oldies presets. The procedural version evokes it; the place compiler on the real bounding box is the childhood version.
 
 ## Third: the early 2000s (M8)
-**`mirage_valley_2001` — Mirage Valley, 2001.** Region template `socal_basin`: the flat inland grid of a big
+**`mirage_bowl_2001` — Mirage Bowl, 2001.** The authored `mirage_bowl` layout (below, "The Mirage
+Bowl's map") dressed by the `socal_basin` region template: the flat inland grid of a big
 Southern California city at the turn of the century, inspired by the import street-racing culture
 of the era and the films and shows that mythologized it (an influence, not a copy: no titles, no
 names, no scenes reproduced). Wide industrial boulevards with four-lane straights, warehouse
@@ -65,7 +67,7 @@ lit race start line with a crowd that steps aside.
 
 The deck (the player's own music, `docs/AUDIO_RADIO.md`) is named by the scenario's year:
 **TAPE** for worlds up to 1989 (Pacific Shore 1984, Lake City 1977, the 1986 suburb), **CD** for
-1990–2009 (Mirage Valley 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
+1990–2009 (Mirage Bowl 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
 worlds renames it and keeps the library.
 
 Era rules: the roster is filtered by year. A scenario has `years: (min, max)`; a car has a
@@ -100,7 +102,8 @@ crew garage (a warehouse with the hero cars parked and a lit sign), a taco stand
 
 "Change worlds": a World page listing every scenario as a card (title, year, a still, the cars and
 stations it ships with); picking one reloads the place and persists; `?scenario=` on the web. Built (see
-the format above), in the pause menu. Mirage Valley's place is its own, the `socal_basin` region template
+the format above), in the pause menu. Mirage Bowl's place is its own, the `mirage_bowl` layout under the
+`socal_basin` region template's zone rules
 (`docs/WORLD_GENERATION.md`, "Inland basins"), dressed by its own grammar and the `sodium_night` palette
 ("The 2001 basin's grammar"), with its own `2001_basin` radio preset (`docs/AUDIO_RADIO.md`).
 
@@ -117,25 +120,26 @@ and the foothill village, with a causeway across the bay's south end. Zone rules
 borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
 and radio follow.
 
-## Mirage Valley redrawn: the Mirage Bowl (2001)
-**`mirage_bowl_2001` — Mirage Bowl, 2001.** Mirage Valley's point of view drawn as an authored
-layout (`assets/layouts/mirage_bowl.ron`): a city made to be seen from a car, in a bowl you can
+## The Mirage Bowl's map
+The 2001 world was first a procedural place, Mirage Valley, whose roads and districts came from
+scored noise. The Mirage Bowl is its point of view drawn as an authored
+layout (`assets/layouts/mirage_bowl.ron`, `docs/LAYOUTS.md`), and took its place: a city made to be seen from a car, in a bowl you can
 always see the rim of. A flat floor of bungalows and one-story sheds; a mountain front across the
 north with one high summit that the three-lane summit avenue drives straight at; lower ranges east
 and west; rail yards to the south. Strip corridors line the boulevards and an old road cuts the
 grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
 mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
 lights. The air is clear (`haze: 0.45`, the distance haze at under half its usual thickness) and the
-hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Zone rules,
-grammar, palette, radio and cars are Mirage Valley's. The valley freeway crosses the floor under
+hills close up with dark chaparral from 110 m, so the range stands over the whole floor. The valley freeway crosses the floor under
 downtown on sound walls, every street passing over it and diamonds at the canyon, summit and palm
 avenues; the wash, a concrete flood channel, comes down from the mountain front and runs out through
 the yards under every street's bridge. A rail line comes in through the yards, crosses the avenues at grade
 with gates and bridges the wash; an airfield lies at the south-east corner of the flats off the
-tamarisk boulevard, its runway the drag strip. The set pieces are Mirage Valley's, sited on this
+tamarisk boulevard, its runway the drag strip. The set pieces are sited on this
 map: the crew garage in the yards, the stands and roadside landmarks along the boulevards, the
-city hall closing the view down the mirage boulevard, the tunnel on the freeway, the letters on
-the hillside and a turnout at each lookout.
+city hall closing the view down the mirage boulevard, the letters on the mountain front where the
+summit avenue points at them, and a turnout at each lookout. There is no freeway tunnel: a street
+bridges the freeway every block.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

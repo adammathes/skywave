@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn the_valley_serves_a_box_onto_the_seat_and_draws_the_server() {
-        let q = "seed=1&scenario=mirage_valley_2001&cam=chase-mid&t=12:00&still=1";
+        let q = "seed=1&scenario=mirage_bowl_2001&cam=chase-mid&t=12:00&still=1";
         let mut app = scene(&format!("{q}&donut=1.0"));
         let d = app.drivethru.as_ref().unwrap();
         let count = |f: Food| d.windows.iter().filter(|w| w.food == f).count();
@@ -684,7 +684,7 @@ mod tests {
     /// at the stop bar orders, for every car; the car never touches the building.
     #[test]
     fn every_car_driven_down_the_lane_to_the_bar_is_served() {
-        let q = "seed=1&scenario=mirage_valley_2001&t=12:00";
+        let q = "seed=1&scenario=mirage_bowl_2001&t=12:00";
         let mut app = scene(q);
         let kits = crate::builtin::landmarks();
         let kit = kits.iter().position(|k| k.id == "donut_shop").unwrap() as u8;

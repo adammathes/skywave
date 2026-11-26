@@ -28,8 +28,8 @@ fn a_load_builds_the_grid_the_lots_and_the_plan_once() {
         chunk_plans: 1,
     };
     for query in [
-        "scenario=mirage_valley_2001&seed=1&stream=1",
-        "scenario=mirage_valley_2001&seed=1",
+        "scenario=mirage_bowl_2001&seed=1&stream=1",
+        "scenario=mirage_bowl_2001&seed=1",
         "scenario=socal_beach_1984&seed=2&stream=1",
     ] {
         assert_eq!(builds(query), once, "{query}");

@@ -1,4 +1,4 @@
-// The 2001 Southern California basin (`socal_basin`, Aughts): Mirage Valley's buildings,
+// The 2001 Southern California basin (`socal_basin`, Aughts): Mirage Bowl's buildings,
 // the numbers and weights the building planner reads (docs/backlog/MIRAGE2001.md item 3).
 // Format: crates/world/src/grammar.rs and docs/WORLD_GENERATION.md ("Facade grammars"), as
 // for the coast's (`california_coast_80s.ron`, which this started from).

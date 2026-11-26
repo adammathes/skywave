@@ -13,7 +13,7 @@
 //   node tools/screenshot/shoot.mjs ... --size 1280x800          # another viewport (16:10)
 //   node tools/screenshot/shoot.mjs --gallery water_tower         # a landmark's contact sheet
 //   node tools/screenshot/shoot.mjs --gallery water_tower --times noon   # only some times
-//   node tools/screenshot/shoot.mjs --gallery motel --scenario mirage_valley_2001   # in a world
+//   node tools/screenshot/shoot.mjs --gallery motel --scenario mirage_bowl_2001   # in a world
 //
 // `--gallery <kit>` (may repeat) shoots every variant of a landmark kit in the landmark
 // gallery (`place=gallery`) from the fixed cameras and at the times of day in

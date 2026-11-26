@@ -2630,10 +2630,9 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         "Pacific Shore",
         "Beach town, 1984",
         "20 cars",
-        "Mirage Valley",
+        "Mirage Bowl",
         "5 stations",
         "Bay Loop",
-        "< 1 / 2 >",
         "here",
     ] {
         assert!(text.contains(line), "{line}: {text}");
@@ -2652,9 +2651,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert_eq!(h.focus(), 1);
     h.pad(PadButton::DpadRight);
     h.pad(PadButton::DpadRight);
-    h.pad(PadButton::DpadRight);
     assert_eq!(h.focus(), 0, "wraps");
-    h.pad(PadButton::DpadLeft);
     h.pad(PadButton::DpadLeft);
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.focus(), 1);
@@ -2670,7 +2667,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     let saved = store.0.borrow().clone().expect("saved");
     assert_eq!(
         Settings::from_json(&saved).0.scenario,
-        Some("mirage_valley_2001")
+        Some("mirage_bowl_2001")
     );
 
     // The platform's load: the same settings in the other world, its place, the radio off,
@@ -2695,7 +2692,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert!(h.ui().items().iter().any(|i| i.id == ItemId::AddMusic));
     h.pad(PadButton::Start);
     assert!(
-        h.hud_text().contains("Mirage Valley, 2001"),
+        h.hud_text().contains("Mirage Bowl, 2001"),
         "{}",
         h.hud_text()
     );
@@ -2703,7 +2700,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     assert_eq!(
         h.app.settings(),
         &Settings {
-            scenario: Some("mirage_valley_2001"),
+            scenario: Some("mirage_bowl_2001"),
             radio: audio::RadioSettings {
                 // The deck's place: the library's first track, loaded, not playing.
                 deck: audio::DeckSettings {
@@ -2766,11 +2763,11 @@ fn the_world_page_pages_one_card_at_a_tv_scale() {
     assert_eq!(stills.len(), 1, "one card a page");
     // Beside its text, and bigger than a third of the card width would give.
     assert!(stills[0].h >= 100.0, "{:?}", stills[0]);
-    assert!(h.hud_text().contains("< 1 / 4 >"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("< 1 / 3 >"), "{}", h.hud_text());
     assert!(h.hud_text().contains("Pacific Shore"));
     h.pad(PadButton::DpadRight);
-    assert!(h.hud_text().contains("< 2 / 4 >"));
-    assert!(h.hud_text().contains("Mirage Valley") && !h.hud_text().contains("Pacific Shore"));
+    assert!(h.hud_text().contains("< 2 / 3 >"));
+    assert!(h.hud_text().contains("Mirage Bowl") && !h.hud_text().contains("Pacific Shore"));
     assert_eq!(
         images(&mut h, render::HudTexture::Still)[0].uv,
         crate::scenario::still_uv(1)
