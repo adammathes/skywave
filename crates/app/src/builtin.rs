@@ -17,6 +17,7 @@ pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/califor
 pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
+pub const LAKE_CITY: &str = include_str!("../../../assets/layouts/lake_city.ron");
 pub const GREAT_LAKES_CITY: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 pub const CALIFORNIA_COAST_80S: &str =
     include_str!("../../../assets/grammar/california_coast_80s.ron");
@@ -41,7 +42,7 @@ pub const REGIONS: [(&str, &str); 4] = [
     ("great_lakes_city", GREAT_LAKES_CITY),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.
-pub const LAYOUTS: [(&str, &str); 1] = [("bay_loop", BAY_LOOP)];
+pub const LAYOUTS: [(&str, &str); 2] = [("bay_loop", BAY_LOOP), ("lake_city", LAKE_CITY)];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
 pub const GRAMMARS: [(&str, &str); 3] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),

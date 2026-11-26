@@ -378,13 +378,14 @@ fn texel(tile: Tile, x: u32, y: u32) -> [f32; 3] {
             })
         }
         Tile::RoofShingles => {
-            let row = y / 32;
-            let (lx, ly) = ((x + (row % 2) * 16) % 32, y % 32);
-            let tab = rand((x + (row % 2) * 16) / 32, row, seed);
-            gray(if ly < 3 || lx < 2 {
+            // Tabs 16 px square in rows offset by half a tab: 16 by 16 of them a tile.
+            let row = y / 16;
+            let (lx, ly) = ((x + (row % 2) * 8) % 16, y % 16);
+            let tab = rand((x + (row % 2) * 8) / 16, row, seed);
+            gray(if ly < 2 || lx < 1 {
                 0.22
             } else {
-                (0.66 + 0.24 * tab + 0.12 * grain) * (0.85 + 0.15 * ly as f32 / 32.0)
+                (0.66 + 0.24 * tab + 0.12 * grain) * (0.85 + 0.15 * ly as f32 / 16.0)
             })
         }
         Tile::Soil => {
