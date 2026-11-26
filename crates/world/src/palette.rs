@@ -111,6 +111,7 @@ impl Palette {
 
     /// The 2001 inland basin at night (Mirage Valley): stucco in beiges, tans and dusty
     /// whites rather than pastels, terracotta tile roofs, sun-baked concrete and dry lawns,
+    /// hills of straw-gold grass under gray-green chaparral,
     /// deep sodium-orange lamps, and neon in the period's colors (purple, blue, green).
     pub const fn sodium_night() -> Palette {
         Palette {
@@ -136,8 +137,8 @@ impl Palette {
             paint_yellow: srgb(0xE2B02A),
             roof_gravel: srgb(0x77736A),
             lawn: srgb(0x7A8C44),
-            lawn_dry: srgb(0xA49A62),
-            scrub: srgb(0x8E825C),
+            lawn_dry: srgb(0xBC9C5E),
+            scrub: srgb(0x6E7048),
             soil: srgb(0x9A7650),
             water: srgb(0x2A6070),
             palm_green: srgb(0x48703A),
