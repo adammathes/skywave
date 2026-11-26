@@ -74,6 +74,7 @@ use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
 use render::{ChunkPoolConfig, ChunkStore, MAX_CHUNK_PARTS};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
 use stream::{ChunkSource, PartRole, PlaceSource, StreamBudget, StreamStats, Streamer};
+use world::math::{atan2, sin_cos, sqrt};
 use world::{ChunkMesh, ChunkPlan, Glow, Palette, WorldMesh};
 
 /// Free-fly speed, m/s.
@@ -122,7 +123,7 @@ impl FlyCamera {
         self.pitch = (self.pitch
             - (input.axis(Action::FlyLookY) * TURN_RATE * dt + look.y * TURN_RATE))
             .clamp(-MAX_PITCH, MAX_PITCH);
-        let (s, c) = self.yaw.sin_cos();
+        let (s, c) = sin_cos(self.yaw);
         let forward = Vec3::new(-s, 0.0, -c);
         let right = Vec3::new(c, 0.0, -s);
         let axis = |pos: Action, neg: Action| input.axis(pos) - input.axis(neg);
@@ -147,8 +148,8 @@ impl FlyCamera {
     }
 
     fn view(&self) -> Mat4 {
-        let (sy, cy) = self.yaw.sin_cos();
-        let (sp, cp) = self.pitch.sin_cos();
+        let (sy, cy) = sin_cos(self.yaw);
+        let (sp, cp) = sin_cos(self.pitch);
         let dir = Vec3::new(-sy * cp, sp, -cy * cp);
         view::look_to_mat4(self.pos, dir, Vec3::Y)
     }
@@ -647,7 +648,7 @@ impl App {
         // half its width out from the door and the hip's station back from it.
         let hip = self.drive.layout.seating.hip;
         let out = Vec3::new(w.out.x, 0.0, w.out.y) * -hip.x.signum();
-        let heading = (-out.z).atan2(out.x);
+        let heading = atan2(-out.z, out.x);
         let rot = glam::Quat::from_rotation_y(heading);
         let door = w.sill + Vec3::new(w.out.x, 0.0, w.out.y) * drivethru::PARK_GAP_M;
         let mid = door
@@ -1102,7 +1103,7 @@ impl App {
     fn view(&self) -> (Vec3, Vec3, f32) {
         if self.fly {
             let c = &self.curr;
-            let (s, co) = c.yaw.sin_cos();
+            let (s, co) = sin_cos(c.yaw);
             (c.pos, Vec3::new(-s, 0.0, -co), FLY_FOV_DEG.to_radians())
         } else {
             let pose = self.camera.pose(&self.drive, 1.0);
@@ -1454,8 +1455,9 @@ fn fly_from(pose: &camera::CameraPose) -> FlyCamera {
     let f = pose.forward();
     FlyCamera {
         pos: pose.eye,
-        yaw: (-f.x).atan2(-f.z),
-        pitch: f.y.clamp(-1.0, 1.0).asin().clamp(-MAX_PITCH, MAX_PITCH),
+        yaw: atan2(-f.x, -f.z),
+        // asin of the forward's height, from the same deterministic atan2.
+        pitch: atan2(f.y, sqrt(1.0 - f.y * f.y)).clamp(-MAX_PITCH, MAX_PITCH),
     }
 }
 
@@ -1643,7 +1645,7 @@ impl App {
     fn stream(&mut self, alpha: f32, now: &dyn Fn() -> f64) {
         let (eye, forward) = if self.fly {
             let c = self.prev.lerp(&self.curr, alpha);
-            let (s, co) = c.yaw.sin_cos();
+            let (s, co) = sin_cos(c.yaw);
             (c.pos, Vec3::new(-s, 0.0, -co))
         } else {
             let pose = self.camera.pose(&self.drive, alpha);
@@ -1970,7 +1972,7 @@ mod tests {
         // deliberately.
         assert_eq!(
             a.state_hash(),
-            0x7610_80ff_ff70_d65d,
+            0xcd51_2037_d793_a104,
             "{:#x}",
             a.state_hash()
         );
