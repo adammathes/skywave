@@ -102,8 +102,8 @@ const SHIFT_HOLD_S: f32 = 0.6;
 const DOWNSHIFT_MARGIN: f32 = 0.8;
 /// Below this forward speed the auto box may switch between drive and reverse, m/s.
 const DIRECTION_SWITCH_SPEED: f32 = 0.8;
-/// Brake held this long at a stop before the auto box selects reverse, s, so waiting at a
-/// light with the brake down keeps the car still.
+/// Brake pressed at a stop and held this long before the auto box selects reverse, s, so a
+/// tap never reverses.
 const REVERSE_DWELL_S: f32 = 0.5;
 /// Steering lock reaches `max_deg * (1 - speed_sens)` at this speed, m/s.
 const STEER_SENS_SPEED: f32 = 60.0;
@@ -171,7 +171,8 @@ const DEG_TO_RAD: f32 = crate::math::PI / 180.0;
 pub struct VehicleInput {
     /// `[0, 1]`.
     pub throttle: f32,
-    /// `[0, 1]`. Held at a standstill it selects reverse, where it becomes the throttle.
+    /// `[0, 1]`. Pressed and held at a standstill it selects reverse, where it becomes the
+    /// throttle; held through a stop it only holds the car.
     pub brake: f32,
     /// `[-1, 1]`, positive steers right.
     pub steer: f32,
@@ -366,7 +367,8 @@ pub struct VehicleState {
     /// box holds the gear until it reaches 0.
     pub shift_timer: f32,
     /// How long the brake has been held at a stop in a forward gear, s; reverse engages at
-    /// `REVERSE_DWELL_S`. Zero whenever the car moves or the brake is released.
+    /// `REVERSE_DWELL_S`. Zero once the brake is released; -1 while a brake pressed on the
+    /// move holds the car it stopped (reverse takes a fresh press).
     pub reverse_hold_s: f32,
     /// Smoothed pedals in `[0, 1]` and the clamped steer input in `[-1, 1]`.
     pub throttle: f32,
@@ -665,7 +667,8 @@ pub fn step(
     state.steer_angle_rad += (target - state.steer_angle_rad) * chase;
 
     // 2. Gearbox and engine (automatic; `spec.auto == false` shifts the same until manual
-    // mode exists). Stopped + brake held `REVERSE_DWELL_S` selects reverse; stopped + throttle
+    // mode exists). Stopped + brake pressed at the stop and held `REVERSE_DWELL_S` selects
+    // reverse (a brake that brought the car to the stop only holds it); stopped + throttle
     // selects drive.
     let shift_s = spec.shift_ms * 0.001 + SHIFT_HOLD_S;
     let n_gears = spec.gears.len() as i8;
@@ -676,8 +679,13 @@ pub fn step(
         }
     }
     let stopped = abs(fwd_speed) < DIRECTION_SWITCH_SPEED;
-    if stopped && state.gear >= 0 && state.brake > 0.2 && state.throttle < 0.05 {
-        state.reverse_hold_s += DT;
+    if state.gear >= 0 && state.brake > 0.2 {
+        if !stopped {
+            // A brake that stops the car holds it (at a light, on a hill) until let go.
+            state.reverse_hold_s = -1.0;
+        } else if state.reverse_hold_s >= 0.0 && state.throttle < 0.05 {
+            state.reverse_hold_s += DT;
+        }
     } else {
         state.reverse_hold_s = 0.0;
     }
