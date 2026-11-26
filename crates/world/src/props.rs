@@ -2410,18 +2410,30 @@ fn tube(m: &mut WorldMesh, a: V3, b: V3, r0: f32, r1: f32, sides: u32, paint: Pa
 
 /// An irregular leaf lump: a smooth [`UnitSphere`] stretched to `radii`, its surface pushed
 /// in and out by three waves in seeded directions so no two lumps share a silhouette.
-/// `shade` maps the unit normal to the vertex color, as in [`icosphere`].
+///
+/// `mass` is the whole crown the lump belongs to (its center and radii): the lump's
+/// normals lean toward the crown's own, so the crown lights as one soft mass rather than a
+/// bunch of balloons, and its points deep inside the crown are shaded darker, as leaves in
+/// the crown's own shadow are. Each lump is a little lighter or darker than the next.
+/// `shade` maps the normal to the vertex color, as in [`icosphere`].
+#[allow(clippy::too_many_arguments)]
 fn lump(
     m: &mut WorldMesh,
     sphere: &UnitSphere,
     center: V3,
     radii: V3,
+    mass: (V3, V3),
     rng: &mut Rng,
     paint: Paint,
     shade: impl Fn(V3) -> [u8; 3],
 ) {
-    const AMP: f32 = 0.07;
-    const FREQ: f32 = 2.0;
+    const AMP: f32 = 0.1;
+    const FREQ: f32 = 2.6;
+    /// How far a lump's normals lean toward the crown's.
+    const TO_MASS: f32 = 0.65;
+    let (mc, mr) = mass;
+    let minv = V3::new(1.0 / mr.x, 1.0 / mr.y, 1.0 / mr.z);
+    let tone = rng.range(222, 256);
     let mut waves = [(V3::ZERO, 0.0f32); 3];
     for w in &mut waves {
         let (s0, c0) = sin_cos(rng.range_f32(0.0, TAU));
@@ -2442,11 +2454,23 @@ fn lump(
             let n = u * k - (g - u * u.dot(g));
             let n = V3::new(n.x * inv.x, n.y * inv.y, n.z * inv.z).normalize();
             let p = center + V3::new(u.x * radii.x, u.y * radii.y, u.z * radii.z) * k;
+            // Where the point is in the crown: 0 at its middle, 1 at its outside.
+            let q = p - mc;
+            let q = V3::new(q.x * minv.x, q.y * minv.y, q.z * minv.z);
+            let depth = q.length();
+            let out = if depth > 1e-4 {
+                V3::new(q.x * minv.x, q.y * minv.y, q.z * minv.z).normalize()
+            } else {
+                n
+            };
+            let n = (n * (1.0 - TO_MASS) + out * TO_MASS).normalize();
+            let inner = (depth.clamp(0.35, 1.0) - 0.35) / 0.65;
+            let s = (tone as f32 * (0.74 + 0.26 * inner)) as u32;
             m.vertices.push(crate::mesh::WorldVertex {
                 pos: p.to_array(),
                 normal: n.to_array(),
                 uv: [u.x, u.y],
-                color: paint.with_rgb(shade(n)).color,
+                color: paint.with_rgb(crate::palette::shade(shade(n), s)).color,
                 emissive: paint.emissive,
             });
         }
@@ -2566,8 +2590,13 @@ fn cobra_light(m: &mut WorldMesh, base: V3, arm: V2, pal: &Palette) {
 fn canopy_tones(pal: &Palette, rng: &mut Rng) -> ([u8; 3], [u8; 3]) {
     let tint = rng.range(0, 64);
     (
-        shade(pal.leaf_green, 220 + tint),
-        mix(pal.leaf_light, pal.palm_green, tint * 2),
+        // Dusty, not lawn green: a dry summer's street trees, some sunnier than others.
+        mix(shade(pal.leaf_green, 220 + tint), pal.scrub, 40),
+        mix(
+            mix(pal.leaf_light, pal.palm_green, tint * 2),
+            pal.lawn_dry,
+            70,
+        ),
     )
 }
 
@@ -2597,7 +2626,11 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
     let main_r = rng.range_f32(1.8, 2.3);
     let crown = top + V3::new(0.0, main_r * 0.85, 0.0);
     let radii = V3::new(main_r, main_r * 0.75, main_r);
-    lump(m, &kit.sphere1, crown, radii, rng, leaf, tone);
+    let mass = (
+        crown + V3::Y * 0.4,
+        V3::new(main_r + 1.7, main_r + 0.9, main_r + 1.7),
+    );
+    lump(m, &kit.sphere1, crown, radii, mass, rng, leaf, tone);
     let r = main_r * rng.range_f32(0.55, 0.7);
     let crest = crown + V3::new(rng.range_f32(-0.5, 0.5), main_r * 0.6, 0.3);
     lump(
@@ -2605,6 +2638,7 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
         &kit.sphere1,
         crest,
         V3::new(r, r * 0.8, r),
+        mass,
         rng,
         leaf,
         tone,
@@ -2625,6 +2659,7 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
             &kit.sphere1,
             at,
             V3::new(r, r * 0.78, r),
+            mass,
             rng,
             leaf,
             tone,
@@ -2641,6 +2676,7 @@ fn lobed_oak(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mu
                 &kit.sphere1,
                 twig,
                 V3::new(r, r * 0.8, r),
+                mass,
                 rng,
                 leaf,
                 tone,
@@ -2766,27 +2802,34 @@ fn gum_tree(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut
     }
     let leaf = Paint::new(pal.leaf_green, Pattern::Foliage);
     let tint = rng.range(0, 64);
-    let dark = shade(mix(pal.leaf_green, pal.teal, 80 + tint), 190);
-    let light = mix(mix(pal.leaf_light, pal.sky_blue, 70), pal.lawn_dry, tint);
+    let dark = shade(mix(pal.leaf_green, pal.teal, 80 + tint), 215);
+    let light = mix(
+        mix(pal.leaf_light, pal.sky_blue, 70),
+        pal.lawn_dry,
+        60 + tint,
+    );
     let tone = |n: V3| mix(dark, light, ((n.y * 0.5 + 0.5) * 240.0) as u32);
-    let lobes = rng.range(7, 10);
+    // A tall, ragged crown over the upper half: overlapping clumps round the trunk that
+    // light as one mass, the widest low and a smaller tuft on top.
+    let mass = (spine(0.74), V3::new(3.6, height * 0.3, 3.6));
+    let lobes = rng.range(9, 12);
     let spin = rng.range_f32(0.0, TAU);
     for k in 0..lobes {
         let t = if k == 0 {
             1.0
         } else {
-            0.5 + 0.45 * (k as f32 / lobes as f32)
+            0.45 + 0.5 * (k as f32 / lobes as f32)
         };
-        let (s, c) = sin_cos(spin + TAU * 0.38 * k as f32);
+        let (s, c) = sin_cos(spin + TAU * 0.382 * k as f32);
         let reach = if k == 0 {
-            0.4
+            0.3
         } else {
-            rng.range_f32(1.6, 3.2) * (1.15 - 0.5 * t)
+            rng.range_f32(1.4, 2.8) * (1.3 - 0.5 * t)
         };
-        let at = spine(t) + V3::new(c * reach, rng.range_f32(0.2, 1.2), s * reach);
-        if (1..=4).contains(&k) {
-            // A limb out to the lobe; the first two fork.
-            let from = spine(t - 0.12);
+        let at = spine(t) + V3::new(c * reach, rng.range_f32(0.3, 1.0), s * reach);
+        if k > 0 && k <= 6 {
+            // A limb out to the clump; the first two fork.
+            let from = spine(t - 0.1);
             tube(m, from, at, 0.1, 0.04, 6, bark);
             if k <= 2 {
                 let mid = from.lerp(at, 0.55);
@@ -2794,10 +2837,10 @@ fn gum_tree(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut
                 tube(m, mid, twig, 0.05, 0.02, 5, bark);
             }
         }
-        let rad = rng.range_f32(1.3, 2.0);
-        let tall = rng.range_f32(1.1, 1.5);
-        let radii = V3::new(rad, rad * tall, rad);
-        lump(m, &kit.sphere1, at, radii, rng, leaf, tone);
+        let rad = rng.range_f32(1.5, 2.2) * if k == 0 { 0.8 } else { 1.0 };
+        let flat = rng.range_f32(0.85, 1.2);
+        let radii = V3::new(rad, rad * flat, rad);
+        lump(m, &kit.sphere1, at, radii, mass, rng, leaf, tone);
     }
 }
 
@@ -3153,7 +3196,8 @@ fn planter(m: &mut WorldMesh, base: V3, pal: &Palette, kit: &PropKit, rng: &mut 
         let r = rng.range_f32(0.24, 0.3);
         let radii = V3::new(r, r * 0.85, r);
         let at = base + out * 0.13 + V3::Y * (h + 0.22 + 0.08 * k as f32);
-        lump(m, &kit.sphere1, at, radii, rng, leaf, tone);
+        let mass = (base + V3::Y * (h + 0.3), V3::new(0.45, 0.35, 0.45));
+        lump(m, &kit.sphere1, at, radii, mass, rng, leaf, tone);
         // Two blooms on the lump's sunny shoulder.
         for t in [-0.45, 0.45] {
             let d = (out * 0.7 + V3::Y * 0.7 + side * t).normalize();
