@@ -33,6 +33,12 @@ pub struct CameraTuning {
     pub cockpit_fov_deg: f32,
     pub hood_fov_deg: f32,
     pub chase_fov_deg: f32,
+    /// Speed widens the view: up to this many degrees more vertical FOV in the cockpit,
+    /// hood and chase cameras, eased in between these speeds, m/s. The road and the
+    /// roadside then stream past the edges of the frame faster, which is most of what
+    /// makes speed read on a screen.
+    pub speed_fov_deg: f32,
+    pub speed_fov_mps: [f32; 2],
     /// Near clip planes, m: close for the dash, farther out for depth precision elsewhere.
     pub cockpit_near_m: f32,
     pub near_m: f32,
@@ -116,6 +122,8 @@ pub const TUNING: CameraTuning = CameraTuning {
     cockpit_fov_deg: 62.0,
     hood_fov_deg: 55.0,
     chase_fov_deg: 50.0,
+    speed_fov_deg: 9.0,
+    speed_fov_mps: [13.0, 45.0],
     cockpit_near_m: 0.1,
     near_m: 0.25,
     far_m: 3000.0,
@@ -656,12 +664,16 @@ impl CameraRig {
         let car = drive.pose(alpha);
         let back = if self.look_back { PI } else { 0.0 };
         let mode = self.mode();
+        let speed = mix(drive.prev.speed_mps, drive.state.speed_mps, alpha).abs();
+        let [lo, hi] = t.speed_fov_mps;
+        let u = ((speed - lo) / (hi - lo)).clamp(0.0, 1.0);
+        let wide = t.speed_fov_deg * u * u * (3.0 - 2.0 * u);
         let first_person = |eye: Vec3, fov: f32, near: f32| CameraPose {
             eye: car.point(eye),
             rot: car.rot
                 * Quat::from_rotation_y(look_yaw + back)
                 * Quat::from_rotation_x(look_pitch),
-            fov_y_rad: fov.to_radians(),
+            fov_y_rad: (fov + wide).to_radians(),
             near_m: near,
             far_m: t.far_m,
         };
@@ -690,7 +702,7 @@ impl CameraRig {
                 CameraPose {
                     eye,
                     rot: look_rot(target - eye),
-                    fov_y_rad: t.chase_fov_deg.to_radians(),
+                    fov_y_rad: (t.chase_fov_deg + wide).to_radians(),
                     near_m: t.near_m,
                     far_m: t.far_m,
                 }
@@ -777,6 +789,38 @@ mod tests {
         assert!((fov(&rig) - 55.0).abs() < 1e-3);
         rig.set_mode(CameraMode::Cockpit);
         assert!((fov(&rig) - 75.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn speed_widens_the_view_smoothly() {
+        let (mut d, mut rig) = setup(CameraMode::Cockpit);
+        let fov = |d: &Drive, rig: &CameraRig| rig.pose(d, 1.0).fov_y_rad.to_degrees();
+        let at = |d: &mut Drive, mps: f32| {
+            d.state.speed_mps = mps;
+            d.prev.speed_mps = mps;
+        };
+        // Town speeds keep the base view; 100 mph gets the whole widening.
+        at(&mut d, 12.0);
+        assert!((fov(&d, &rig) - 62.0).abs() < 1e-3);
+        at(&mut d, 45.0);
+        assert!((fov(&d, &rig) - 71.0).abs() < 1e-3);
+        // 90 mph, and the same reversing; monotone in between.
+        at(&mut d, 40.0);
+        let f90 = fov(&d, &rig);
+        assert!(f90 > 69.0 && f90 < 71.0, "{f90}");
+        at(&mut d, -40.0);
+        assert!((fov(&d, &rig) - f90).abs() < 1e-3);
+        at(&mut d, 0.0);
+        let mut last = fov(&d, &rig);
+        for k in 0..60 {
+            at(&mut d, k as f32);
+            let f = fov(&d, &rig);
+            assert!(f >= last && f - last < 0.6, "{k}: {last} -> {f}");
+            last = f;
+        }
+        rig.set_mode(CameraMode::ChaseMid);
+        at(&mut d, 45.0);
+        assert!((fov(&d, &rig) - 59.0).abs() < 1e-3);
     }
 
     #[test]
