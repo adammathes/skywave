@@ -107,6 +107,10 @@ impl V2 {
         V2::new(p[0], p[1])
     }
 
+    pub fn to_array(self) -> [f32; 2] {
+        [self.x, self.y]
+    }
+
     pub fn dot(self, o: V2) -> f32 {
         self.x * o.x + self.y * o.y
     }

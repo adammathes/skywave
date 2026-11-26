@@ -29,7 +29,8 @@ use skywave_core::Seed;
 
 use super::arterials::grade_limit;
 use super::macro_map::{
-    ccw, flatten_by_zone, paint_bands, raise_walls, Frame, MacroMap, Strip, WaterBody, WaterKind,
+    ccw, flatten_by_zone, paint_bands, raise_walls, BasinPlan, Frame, GridLine, MacroMap, MacroPoi,
+    MacroPoiKind, Strip, WaterBody, WaterKind,
 };
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
@@ -74,6 +75,8 @@ const RAMP_MERGE_M: f32 = 30.0;
 const RAMP_WIDTH_M: f32 = 8.0;
 /// The right of way reaches this far past a highway's or a ramp's edge.
 const RIGHT_OF_WAY_M: f32 = 10.0;
+/// The foot of the hills is the straight road with the highest ground this far to one side.
+const FOOT_REACH_M: f32 = 300.0;
 /// A channel fades in over this length at an end that lies inside the place.
 const CHANNEL_HEAD_M: f32 = 40.0;
 /// Hash key of the layout's terrain noise.
@@ -118,8 +121,104 @@ fn build_detailed(
 pub fn skeleton(seed: Seed, layout: &Layout) -> (MacroMap, RoadGraph, Option<Spawn>) {
     let mut m = macro_map(seed, layout);
     let (roads, start) = arterials(layout, &mut m);
+    let bridge_heights = m.heights.clone();
     channels(layout, &mut m);
+    m.basin = Some(plan(layout, &m, &roads, bridge_heights));
+    m.highway = roads
+        .edges
+        .iter()
+        .filter(|e| e.class == RoadClass::Highway)
+        .flat_map(|e| e.profile.iter().step_by(2).map(|p| [p[0], p[2]]))
+        .collect();
+    // A lookout at the end of each dead-end road, facing downtown.
+    let downtown = V2::from_array(m.downtown);
+    for r in layout.roads.iter().filter(|r| r.dead_end) {
+        let Some(&end) = layout.road_line(r).as_ref().and_then(|l| l.last()) else {
+            continue;
+        };
+        m.pois.push(MacroPoi {
+            kind: MacroPoiKind::Overlook,
+            pos: [end.x, end.y],
+            facing: (downtown - end).normalize().to_array(),
+        });
+    }
     (m, roads, start)
+}
+
+/// What the set pieces, the track and the detailing read of the layout's structure
+/// ([`BasinPlan`], as a generated basin fills it): the straight roads as grid lines (those
+/// of three lanes or more the boulevards), the first of them the one along the foot of the
+/// highest ground; the first dry channel; the rail line; the airfield.
+fn plan(layout: &Layout, m: &MacroMap, g: &RoadGraph, bridge_heights: Vec<f32>) -> BasinPlan {
+    let h = |p: V2| m.height_at(p.x, p.y);
+    // Straight roads, their ends where the graph has them (snapped onto the roads they meet).
+    let node = |p: V2| {
+        g.nodes
+            .iter()
+            .map(|n| V2::from_array(n.pos))
+            .min_by(|a, b| (*a - p).length().total_cmp(&(*b - p).length()))
+            .filter(|q| (*q - p).length() <= SNAP_M + 1.0)
+            .unwrap_or(p)
+    };
+    let mut lines: Vec<GridLine> = Vec::new();
+    // The rise to one side of each line, a few hundred meters off: (rise, way out).
+    let mut foot: (f32, usize, V2) = (0.0, 0, V2::new(0.0, 1.0));
+    for r in &layout.roads {
+        let line = layout.road_line(r).unwrap_or_default();
+        if line.len() != 2 || r.class == RoadClass::Highway {
+            continue;
+        }
+        let (a, b) = (node(line[0]), node(line[1]));
+        let (mid, side) = (a.lerp(b, 0.5), (b - a).normalize().right());
+        for out in [side, -side] {
+            let rise = h(mid - out * FOOT_REACH_M) - h(mid);
+            if rise > foot.0 {
+                foot = (rise, lines.len(), out);
+            }
+        }
+        lines.push(GridLine {
+            a: a.to_array(),
+            b: b.to_array(),
+            boulevard: r.lanes >= 3,
+        });
+    }
+    if !lines.is_empty() {
+        lines.swap(0, foot.1);
+    }
+    let dense = |line: &[(f32, f32)]| -> Vec<[f32; 2]> {
+        densify(&pts(line), ZONE_CELL_M)
+            .iter()
+            .map(|p| p.to_array())
+            .collect()
+    };
+    let wash = layout.channels.iter().find(|c| !c.wet);
+    let field = layout.airfield.as_ref();
+    let pt = |p: (f32, f32)| [p.0, p.1];
+    BasinPlan {
+        lines,
+        cross: 0,
+        freeway_ends: [0, 0],
+        boulevard_lanes: 3,
+        median_m: 0.0,
+        channel: wash.map_or(Vec::new(), |c| dense(&c.line)),
+        channel_half_m: wash.map_or((0.0, 0.0), |c| (0.5 * c.width_m, c.lip_half_m())),
+        ramps: Vec::new(),
+        rail: layout.rail.as_ref().map_or(Vec::new(), |r| dense(&r.line)),
+        spurs: layout
+            .rail
+            .as_ref()
+            .map_or(Vec::new(), |r| r.spurs.iter().map(|s| dense(s)).collect()),
+        airfield: field.map_or(Vec::new(), |a| {
+            a.corners().iter().map(|p| p.to_array()).collect()
+        }),
+        runway: field.map_or([[0.0; 2]; 2], |a| [pt(a.runway.0), pt(a.runway.1)]),
+        runway_m: field.map_or(0.0, |a| a.runway_m),
+        taxiway: field.map_or([[0.0; 2]; 2], |a| [pt(a.runway.0), pt(a.taxiway)]),
+        bridge_heights,
+        square: false,
+        out: foot.2.to_array(),
+        set_pieces: layout.set_pieces,
+    }
 }
 
 /// A ridge ready to sample: its line, a height per point, falloff, relief and bounding box.
@@ -228,6 +327,30 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
         }
     }
 
+    // The rail line's right of way and the airfield: nothing is built there.
+    let field = layout.airfield.as_ref().map(|a| a.corners());
+    let tracks: Vec<Vec<V2>> = layout
+        .rail
+        .iter()
+        .flat_map(|r| core::iter::once(&r.line).chain(&r.spurs))
+        .map(|l| pts(l))
+        .collect();
+    for cz in 0..zh {
+        for cx in 0..zw {
+            let (x, z) = cell_center(cx, cz);
+            let c = V2::new(x, z);
+            let i = cz * zw + cx;
+            if zones[i] != ZoneId::Water
+                && (field.is_some_and(|f| point_in_polygon(c, &f))
+                    || tracks
+                        .iter()
+                        .any(|t| layout::distance_to_line(c, t) <= layout::RAIL_ROW_M))
+            {
+                zones[i] = ZoneId::Highway;
+            }
+        }
+    }
+
     // Grading: urban ground smoothed except in hilly districts, then the walls.
     let before = heights.clone();
     flatten_by_zone(&mut heights, w, h, &zones, zw, zh);
@@ -309,6 +432,8 @@ enum Kind {
     Road,
     Highway,
     Ramp,
+    /// An airfield's runway: a road as wide as the airfield says.
+    Runway,
 }
 
 /// Half the width of a highway with `lanes` each way.
@@ -371,12 +496,38 @@ fn bezier(p0: V2, p1: V2, p2: V2, p3: V2) -> Vec<V2> {
 /// The layout's roads as a graph (see the module docs) and the player's start on them.
 pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>) {
     let wl = m.water_level;
-    // Lines, free ends snapped onto the road they meet.
-    let mut lines: Vec<Vec<V2>> = layout
-        .roads
+    // The layout's roads, then an airfield's runway and its taxiway as two more.
+    let mut roads = layout.roads.clone();
+    let mut lines: Vec<Vec<V2>> = roads
         .iter()
         .map(|r| layout.road_line(r).unwrap_or_default())
         .collect();
+    if let Some(a) = &layout.airfield {
+        for (name, to, dead_end, speed) in [
+            ("runway", a.runway.1, true, 40),
+            ("taxiway", a.taxiway, false, 30),
+        ] {
+            lines.push(pts(&[a.runway.0, to]));
+            roads.push(layout::Road {
+                name: name.into(),
+                class: RoadClass::Collector,
+                lanes: 1,
+                points: Vec::new(),
+                from: None,
+                toward: None,
+                bearing_deg: None,
+                length_m: None,
+                speed_kph: Some(speed),
+                max_grade: Some(0.03),
+                sidewalk: false,
+                dead_end,
+                deck_m: layout::DECK_M,
+                ramps: Vec::new(),
+            });
+        }
+    }
+    let runway = layout.airfield.as_ref().map(|_| layout.roads.len());
+    // Free ends snap onto the road they meet.
     for i in 0..lines.len() {
         let closed =
             lines[i].len() >= 2 && (lines[i][0] - lines[i][lines[i].len() - 1]).length() < 1.0;
@@ -384,7 +535,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
             continue;
         }
         for end in 0..2 {
-            if end == 1 && layout.roads[i].dead_end {
+            if end == 1 && roads[i].dead_end {
                 continue;
             }
             let p = if end == 0 {
@@ -420,11 +571,12 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     }
     // Each line's layout road and kind; the ramps follow the layout's own roads.
     let mut road: Vec<usize> = (0..lines.len()).collect();
-    let mut kind: Vec<Kind> = layout
-        .roads
+    let mut kind: Vec<Kind> = roads
         .iter()
-        .map(|r| match r.class {
+        .enumerate()
+        .map(|(i, r)| match r.class {
             RoadClass::Highway => Kind::Highway,
+            _ if runway == Some(i) => Kind::Runway,
             _ => Kind::Road,
         })
         .collect();
@@ -553,7 +705,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     let mut elev: Vec<Option<f32>> = vec![None; nodes.len()];
     let mut on_highway = vec![false; nodes.len()];
     for pc in &pieces {
-        let deck = layout.roads[road[pc.line]].deck_m;
+        let deck = roads[road[pc.line]].deck_m;
         for nd in [pc.a, pc.b] {
             let y = target(nodes[nd], deck);
             elev[nd] = Some(elev[nd].map_or(y, |e: f32| e.max(y)));
@@ -569,7 +721,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
         if kind[pc.line] != Kind::Highway {
             continue;
         }
-        let r = &layout.roads[road[pc.line]];
+        let r = &roads[road[pc.line]];
         let tgt: Vec<f32> = pc.pts.iter().map(|&p| target(p, r.deck_m)).collect();
         *ys = grade_limit(
             &tgt,
@@ -598,7 +750,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     // Overpasses per line: (arc, deck height, half the level span).
     let mut decks: Vec<Vec<(f32, f32, f32)>> = vec![Vec::new(); lines.len()];
     for &(i, s, j, p) in &over {
-        let flat = highway_half(layout.roads[road[j]].lanes) + OVERPASS_FLAT_M;
+        let flat = highway_half(roads[road[j]].lanes) + OVERPASS_FLAT_M;
         decks[i].push((s, highway_y(p) + OVERPASS_LIFT_M, flat));
     }
     // The height an overpass asks of its road at arc `s`: the deck, falling away either side.
@@ -621,7 +773,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
         .iter()
         .zip(ys)
         .map(|(pc, hy)| {
-            let r = &layout.roads[road[pc.line]];
+            let r = &roads[road[pc.line]];
             let s = arcs(&pc.pts);
             let total = s[s.len() - 1];
             // A deck spans the water, and the highway's bed under an overpass.
@@ -654,7 +806,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                         })
                         .collect()
                 }
-                Kind::Road => {
+                Kind::Road | Kind::Runway => {
                     let tgt: Vec<f32> = (0..pc.pts.len())
                         .map(|k| target(pc.pts[k], r.deck_m).max(lift(pc.line, pc.s0 + s[k])))
                         .collect();
@@ -669,6 +821,9 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                 }
             };
             let (width_m, speed) = match (r.class, r.lanes) {
+                _ if kind[pc.line] == Kind::Runway => {
+                    (layout.airfield.as_ref().map_or(30.0, |a| a.runway_m), 40)
+                }
                 (RoadClass::Highway, l) => (2.0 * highway_half(l), 100),
                 (RoadClass::Rural, _) => (8.0, 70),
                 (_, 1) => (12.0, 50),

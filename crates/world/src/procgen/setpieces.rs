@@ -391,7 +391,7 @@ fn overlaps(l: &Lot, (w, d): (f32, f32), areas: &[Vec<V2>]) -> bool {
 /// standing (see the module docs), the landmarks from `kits` (the grammar's). Empty unless
 /// `m` is a basin.
 pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
-    let Some(b) = m.basin.as_ref() else {
+    let Some(b) = m.basin.as_ref().filter(|b| b.set_pieces) else {
         return SetPieces::default();
     };
     let mut s = SetPieces {
@@ -462,6 +462,14 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
         s.tunnel_width_m = width;
     }
 
+    // No lot of theirs lies on the rail line.
+    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
+    let off_rail = |l: &Lot, (w, d): (f32, f32)| {
+        l.rect(w, d)
+            .into_iter()
+            .chain(samples(l, w, d))
+            .all(|q| to_line(q, &rail) > RAIL_CLEAR_M)
+    };
     // The lots, nearest the boulevard first.
     let blvd: Vec<V2> = b
         .lines
@@ -484,12 +492,14 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     let garage = lots(place, GARAGE_LOT_M, &[ZoneId::Industrial], &classes)
         .into_iter()
         .filter(|l| !tunnel_box.iter().any(|f| point_in_polygon(l.front, f)))
+        .filter(|l| off_rail(l, GARAGE_LOT_M))
         .min_by(by_blvd);
     s.garage = garage;
     let zones = [ZoneId::Commercial, ZoneId::Strip, ZoneId::Industrial];
     s.stand = lots(place, STAND_LOT_M, &zones, &classes[..2])
         .into_iter()
         .filter(|l| garage.is_none_or(|g| (g.front - l.front).length() >= APART_M))
+        .filter(|l| off_rail(l, STAND_LOT_M))
         .min_by(by_blvd);
 
     // The drag strip.
@@ -532,7 +542,6 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     }
     // The grade crossings: where the main line crosses a road's centerline (every road it
     // meets crosses at grade), inside the place.
-    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
     let mut crossings: Vec<(f32, V2)> = Vec::new();
     let mut arc = 0.0;
     for w in rail.windows(2) {
@@ -587,6 +596,7 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
         let free = |l: &Lot| {
             let rect = l.rect(size.0, size.1);
             fronts.iter().all(|&f| (f - l.front).length() >= apart)
+                && off_rail(l, size)
                 && !samples(l, size.0, size.1).any(|q| taken.iter().any(|a| point_in_polygon(q, a)))
                 && !taken.iter().flatten().any(|&q| point_in_polygon(q, &rect))
         };
@@ -707,13 +717,6 @@ pub fn site(m: &MacroMap, place: &Place, kits: &[Kit]) -> SetPieces {
     }
     // The downtown anchors: the city hall first (the boulevard fixes its site), then the
     // palace on the nearest downtown lot; both clear of everything sited so far.
-    let rail: Vec<V2> = b.rail.iter().map(|&p| V2::from_array(p)).collect();
-    let off_rail = |l: &Lot, (w, d): (f32, f32)| {
-        l.rect(w, d)
-            .into_iter()
-            .chain(samples(l, w, d))
-            .all(|q| to_line(q, &rail) > RAIL_CLEAR_M)
-    };
     if let Some((kit, variant, size)) = kit_of(kits, HALL) {
         let wd = (size[0], size[1]);
         let areas = s.footprints();
@@ -828,10 +831,13 @@ fn hall_sites(
 /// the slope's contour below the letters, facing down it; squarest across from downtown
 /// first, each with its distance off that line.
 fn letters_sites(m: &MacroMap, place: &Place, s: &SetPieces, size: [f32; 2]) -> Vec<(f32, Lot)> {
-    let Some(foot) = m.basin.as_ref().and_then(|b| b.lines.first()) else {
+    let Some((foot, out)) = m
+        .basin
+        .as_ref()
+        .and_then(|b| Some((b.lines.first()?, V2::from_array(b.out))))
+    else {
         return Vec::new();
     };
-    let out = V2::from_array(m.frame.dir_to_world(1.0, 0.0));
     let downtown = V2::from_array(m.downtown);
     let h = |p: V2| m.height_at(p.x, p.y);
     let roads: Vec<(V2, V2, f32)> = place

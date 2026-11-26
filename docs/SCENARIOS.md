@@ -130,8 +130,12 @@ hills close up with dark chaparral from 110 m, so the range stands over the whol
 grammar, palette, radio and cars are Mirage Valley's. The valley freeway crosses the floor under
 downtown on sound walls, every street passing over it and diamonds at the canyon, summit and palm
 avenues; the wash, a concrete flood channel, comes down from the mountain front and runs out through
-the yards under every street's bridge. It replaces Mirage Valley once rail and the airfield have a
-place in the layout format.
+the yards under every street's bridge. A rail line comes in through the yards, crosses the avenues at grade
+with gates and bridges the wash; an airfield lies at the south-east corner of the flats off the
+tamarisk boulevard, its runway the drag strip. The set pieces are Mirage Valley's, sited on this
+map: the crew garage in the yards, the stands and roadside landmarks along the boulevards, the
+city hall closing the view down the mirage boulevard, the tunnel on the freeway, the letters on
+the hillside and a turnout at each lookout.
 
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.

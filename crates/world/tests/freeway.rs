@@ -174,6 +174,20 @@ fn bad_ramps_and_channels_are_refused() {
         l.roads[i].ramps = vec![name.into()];
         assert_eq!(l.validate(), Err(LayoutError::BadRamp("freeway".into())));
     }
+    // An airfield's taxiway must reach a road.
+    let mut l = layout();
+    l.airfield = Some(world::layout::Airfield {
+        runway: ((600.0, 900.0), (600.0, 1300.0)),
+        runway_m: 30.0,
+        width_m: 100.0,
+        taxiway: (650.0, 1380.0),
+    });
+    assert_eq!(l.validate(), Ok(()));
+    l.airfield.as_mut().unwrap().taxiway = (650.0, 1200.0);
+    assert_eq!(
+        l.validate(),
+        Err(LayoutError::RoadToNowhere("airfield taxiway".into()))
+    );
     let mut l = layout();
     l.channels[0].depth_m = 9.0;
     assert_eq!(l.validate(), Err(LayoutError::Value("wash".into())));

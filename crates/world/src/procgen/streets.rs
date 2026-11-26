@@ -862,7 +862,7 @@ impl<'a> StreetPlan<'a> {
                 coast_tangent(self.m, centroid)
             };
             // A basin's grid is square to its axes, whatever its ramps and curves say.
-            let dir = if self.m.basin.is_some() {
+            let dir = if self.m.basin.as_ref().is_some_and(|b| b.square) {
                 if abs(dir.x) >= abs(dir.y) {
                     V2::new(1.0f32.copysign(dir.x), 0.0)
                 } else {

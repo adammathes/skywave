@@ -277,6 +277,13 @@ pub struct BasinPlan {
     pub taxiway: [[f32; 2]; 2],
     /// The heights with the channel filled: what the roads and the track over it bridge.
     pub bridge_heights: Vec<f32>,
+    /// The local streets' grid is square to the axes whatever the roads beside it do (a
+    /// generated basin's); else it follows the main roads (an authored layout's).
+    pub square: bool,
+    /// The way out from the foot of the hills (`lines[0]`) onto the floor.
+    pub out: [f32; 2],
+    /// Whether the set pieces are sited on this plan (`super::setpieces`).
+    pub set_pieces: bool,
 }
 
 /// Terrain smoothing strength per zone (by `ZoneId` discriminant).
