@@ -129,6 +129,10 @@ const STABILITY_GAIN: f32 = 8.0;
 /// sideways speed at the center of mass beyond the tires' peak slip angle that it takes
 /// away (a car caught sliding wide stops sliding instead of carrying on sideways).
 const SLIDE_GAIN: f32 = 4.0;
+/// Stability assist tail hold at full strength, 1/s: the share per second of the rear
+/// axle's sideways speed beyond the tires' peak slip angle that a yaw torque takes away.
+/// It acts only past the peak and in proportion to the excess, so it never snaps.
+const TAIL_GAIN: f32 = 4.0;
 /// Handbrake pivot (part of the steering assist): with the handbrake held above
 /// `HANDBRAKE_PIVOT_SPEED` m/s, yaw is helped toward `steer × HANDBRAKE_YAW_RATE` rad/s at
 /// `HANDBRAKE_YAW_GAIN` 1/s, rotation only, never against it; the stability assist lets go
@@ -1053,6 +1057,20 @@ pub fn step(
             };
             let f = -unit(assists.stability) * SLIDE_GAIN * mass * over * gate;
             force = add_scaled(force, right, f);
+            // Hold the tail: yaw the car so the rear axle's sideways speed past the tires'
+            // peak slip angle shrinks, so the rear steps out progressively and comes back.
+            let b = (1.0 - spec.cg_fore_aft) * wheelbase;
+            let rear = add(state.vel, cross(state.ang_vel, scale(fwd, -b)));
+            let side_r = dot(rear, right);
+            let over_r = if side_r > allowed {
+                side_r - allowed
+            } else if side_r < -allowed {
+                side_r + allowed
+            } else {
+                0.0
+            };
+            let t = -unit(assists.stability) * TAIL_GAIN * over_r / b * inertia[1] * gate;
+            torque = add_scaled(torque, up, t);
         }
     }
     if assists.steering > 0.0 && state.handbrake && grounded && fwd_speed > HANDBRAKE_PIVOT_SPEED {
