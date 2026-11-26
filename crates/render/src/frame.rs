@@ -1069,6 +1069,10 @@ impl Renderer {
                 0.0,
             ],
             look: [scene.sky.look.id() as f32, 0.0, 0.0, 0.0],
+            fog_bank: scene
+                .sky
+                .fog_bank
+                .map_or([0.0; 4], |b| [b.front_x, b.top_m, b.density.max(0.0), 0.0]),
             lights: std::array::from_fn(|i| {
                 scene
                     .lights

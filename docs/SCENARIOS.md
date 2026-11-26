@@ -118,8 +118,10 @@ and the foothill village, with a causeway across the bay's south end. Zone rules
 stucco row houses shoulder to shoulder over garage doors with bay windows and cornices (its own
 grammar, `bay_area_2005.ron`), its grid climbing the crests at up to 22% (`street_grade`), and the
 flats round the bay are long straight blocks of ranch and craftsman houses under oaks. Its palette is
-`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and fog,
-bridge towers and its own radio follow. Its four `heroes` are the 2005 Bay heroes (`docs/VEHICLES.md`): the player starts in
+`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and
+bridge towers and its own radio follow. Its `fog_bank` is the marine layer: out at sea by day, it
+pours in over the city from half past three, fills the Peninsula to the bay shore by half past six
+and burns off by half past eleven, while the ridge and the East Bay hills stand above it. Its four `heroes` are the 2005 Bay heroes (`docs/VEHICLES.md`): the player starts in
 the Goshawk Turbo, the Peninsula's turbo commuter, beside the Tulwar Sedan, the Petrel Roadster and the
 Lipizzan Sedan; every car of 1996 to 2005 drives there too.
 

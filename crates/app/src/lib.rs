@@ -72,7 +72,7 @@ use glam::camera::rh::{proj::directx, view};
 use glam::{Mat4, Vec2, Vec3};
 use lighting::{Bounds, FrameLights, TimeOfDay};
 use place::Place;
-use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Vertex};
+use render::{Camera, Mesh, MeshId, MeshInstance, PointLight, SceneView, Sky, Vertex};
 use render::{ChunkPoolConfig, ChunkStore, MAX_CHUNK_PARTS};
 use skywave_core::{hash64, FixedStep, Seed, Steps, SIM_DT};
 use stream::{ChunkSource, PartRole, PlaceSource, StreamBudget, StreamStats, Streamer};
@@ -1406,7 +1406,12 @@ impl App {
                 proj: proj.to_cols_array_2d(),
             },
             sun: lighting::sun(&daylight),
-            sky: self.ui.video_sky(lighting::sky(&daylight)),
+            sky: self.ui.video_sky(Sky {
+                fog_bank: scenario::get(self.scenario())
+                    .fog_bank
+                    .and_then(|b| lighting::fog_bank(&b, self.time.clock.seconds_of_day as f32)),
+                ..lighting::sky(&daylight)
+            }),
             instances: &self.instances,
             lights: self.lights.lights(),
             hud: match (self.water_toast > 0.0)

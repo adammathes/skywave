@@ -404,6 +404,22 @@ pub struct Sky {
     pub corona_strength: f32,
     /// The picture's style ([`Look::Standard`] is the plain physically based image).
     pub look: Look,
+    /// A marine fog bank, or none: thick fog filling everything west of a front and below a
+    /// top, lit by the sky and the sun on it.
+    pub fog_bank: Option<FogBank>,
+}
+
+/// A fog bank lying in off the sea: it fills the world where `x < front_x` and
+/// `y < top_m`, with soft edges (about 200 m across the front, 30 m at the top), so the
+/// ridges stand out of it and the front can be driven into.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FogBank {
+    /// World x of the front (m); the bank lies west of it.
+    pub front_x: f32,
+    /// Height of its top (m).
+    pub top_m: f32,
+    /// Density inside it, 1/m (about 3.9 / visibility: 0.012 sees ≈ 320 m).
+    pub density: f32,
 }
 
 /// A style the frame is drawn in: how light, fog and color are shaped on top of the same
@@ -494,6 +510,7 @@ impl Default for Sky {
             cabin_light: [0.0; 3],
             corona_strength: 0.6,
             look: Look::Standard,
+            fog_bank: None,
         }
     }
 }
@@ -985,6 +1002,7 @@ struct FrameUniform {
     render_size: [f32; 4],
     shadow_params: [f32; 4],
     look: [f32; 4],
+    fog_bank: [f32; 4],
     lights: [PackedLight; MAX_LIGHTS],
 }
 

@@ -277,7 +277,7 @@ fn uniform_and_instance_layouts() {
     // 16 KiB uniform block limit.
     assert_eq!(
         size_of::<FrameUniform>(),
-        6 * 64 + 30 * 16 + MAX_LIGHTS * 32
+        6 * 64 + 31 * 16 + MAX_LIGHTS * 32
     );
     assert_eq!(size_of::<PackedLight>(), 32);
     assert_eq!(size_of::<CoronaRaw>(), 32);
@@ -342,6 +342,7 @@ fn uniform_and_instance_layouts() {
             "render_size",
             "shadow_params",
             "look",
+            "fog_bank",
             "lights",
         ]
     );
