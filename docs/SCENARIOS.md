@@ -122,6 +122,22 @@ flats round the bay are long straight blocks of ranch and craftsman houses under
 bridge towers, its own 2005 cars and its own radio follow; every car of 1996 to 2005 drives
 there.
 
+## Mirage Valley redrawn: the Mirage Bowl (2001)
+**`mirage_bowl_2001` — Mirage Bowl, 2001.** Mirage Valley's point of view drawn as an authored
+layout (`assets/layouts/mirage_bowl.ron`): a city made to be seen from a car, in a bowl you can
+always see the rim of. A flat floor of bungalows and one-story sheds; a mountain front across the
+north with one high summit that the three-lane summit avenue drives straight at; lower ranges east
+and west; rail yards to the south. Strip corridors line the boulevards and an old road cuts the
+grid on a diagonal toward the summit. A few towers stand downtown on the summit avenue, against the
+mountains; a lone knoll park in the flats and a spur of the front range carry lookouts over the
+lights. The air is clear (`haze: 0.45`, the distance haze at under half its usual thickness) and the
+hills close up with dark chaparral from 110 m, so the range stands over the whole floor. Zone rules,
+grammar, palette, radio and cars are Mirage Valley's. The valley freeway crosses the floor under
+downtown on sound walls, every street passing over it and diamonds at the canyon, summit and palm
+avenues; the wash, a concrete flood channel, comes down from the mountain front and runs out through
+the yards under every street's bridge. It replaces Mirage Valley once rail and the airfield have a
+place in the layout format.
+
 ## Later ideas (write them down when they come)
 `miami_strip_1986` (deco, neon, causeways), `desert_highway_1971` (motels, gas stations, nothing for miles), `seattle_1992` (hills, rain, ferries), `nyc_outer_borough_1979`, `tokyo_ward_2005` (narrow streets, vending machines, elevated expressway), `la_valley_1999`, `austin_2012`.
 
