@@ -303,12 +303,6 @@ impl App {
         App::build(seed, vehicle_id, 0, key, None, 0)
     }
 
-    /// [`App::new_with`], the town streamed within `budget` round the camera instead
-    /// (nothing is built until [`App::frame`] runs).
-    pub fn new_streamed(seed: Seed, vehicle_id: &str, budget: StreamBudget) -> Result<App, String> {
-        App::build(seed, vehicle_id, 0, PlaceKey::TestTown, Some(budget), 0)
-    }
-
     /// The car in palette entry `paint` on the place `key` names in built-in scenario
     /// `scenario` ([`scenario::BUILTIN`]), built at load or (with `stream`) streamed. The car
     /// must be one the scenario has ([`scenario::Lineup`]).

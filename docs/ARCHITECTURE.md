@@ -12,7 +12,7 @@ A thin custom engine. Not a general engine: it renders exactly one kind of scene
                  └───────────────┬───────────────────────────────┬───────────────┘
                                  │ InputState, real dt           │ frames
                           ┌──────▼──────┐                 ┌──────▼──────┐
-                          │     app     │  SceneView ───▶ │   render    │ (wgpu behind a tiny RHI trait)
+                          │     app     │  SceneView ───▶ │   render    │ (wgpu, the only backend)
                           │ loop, cams, │                 └─────────────┘
                           │ HUD, radio  │                 ┌─────────────┐
                           │ state, menu │  AudioCmd ────▶ │    audio    │ (decode + mix; sink provided by platform)
@@ -27,17 +27,25 @@ A thin custom engine. Not a general engine: it renders exactly one kind of scene
 
 | Crate | std? | Owns | Must never |
 |---|---|---|---|
-| `core` (crate `skywave-core`; a crate named `core` would shadow Rust's) | no_std+alloc | `Seed`, `hash64`, `Rng`, `FixedStep`, fixed-capacity containers, color/palette math | allocate per frame in hot paths |
+| `core` (crate `skywave-core`; a crate named `core` would shadow Rust's) | no_std+alloc | `Seed`, `hash64`, `Rng`, `FixedStep`, `Pool`, deterministic scalar math (`math`: `sqrt`, `sin_cos`, `atan2`, `floor`) | allocate per frame in hot paths |
 | `place` | no_std+alloc | the Place format (`docs/PLACES.md`): types, validation, chunk index, (de)serialization | know how a Place was produced |
 | `world` | no_std+alloc | procedural producer and the detailing pass (`docs/WORLD_GENERATION.md`); produces chunk meshes as plain vertex arrays | touch the GPU, read files |
 | `vehicle` | no_std+alloc | vehicle specs, raycast-car sim, parametric meshes (`docs/VEHICLES.md`) | depend on `world` |
 | `traffic` | no_std+alloc | NPC cars and pedestrians over a Place's lane graph (`docs/NPCS.md`) | collide the player into harm |
-| `render` | std | RHI trait + wgpu backend, passes, shaders, mesh/instance upload, HUD text (`docs/RENDERING.md`) | run game logic |
-| `audio` | std | station model, decoding (symphonia native / Web Audio web), mixing, procedural engine sound (`docs/AUDIO_RADIO.md`) | block the main thread |
+| `render` | std | wgpu device and surface, passes, shaders, mesh/instance upload, HUD text (`docs/RENDERING.md`) | run game logic |
+| `audio` | std | station model, the deck, mixing (decoding is the platform's: `nanomp3-core` native, the browser on web), procedural engine sound (`docs/AUDIO_RADIO.md`) | block the main thread |
 | `app` | std | game loop, cameras, input action mapping, settings, HUD/minimap/menu state, seed codes | call OS or browser APIs directly |
 | `platform-*` | std | everything OS/browser-specific, as thin as possible | contain game logic |
 
 Dependency direction is strictly downward in the diagram. `app` is the only crate that knows about more than one sibling.
+
+## Layers inside `world`
+`world` holds three layers over the Place format. Keep them apart:
+- **Producing** a Place: `procgen` (the stages), driven by the data types `template` (regions), `grammar` (facades) and `landmarks` (kits).
+- **Meshing** a Place: `roads`, `ground`, `buildings`, `props`, `setpieces`, `signs`, on the low-poly builders in `mesh`.
+- **Colliding** with a Place: `collide`.
+
+Producing should read only the Place, the data types and shared plans (road profiles, `lots::plan`, building plans); it must not import a mesh builder. Today `procgen::detail` and `procgen::buildings` still reach into the meshing modules; untangling that is open work.
 
 ## Frame
 1. Platform collects events since last frame into `InputState` (digital actions + analog axes, already mapped through the user's bindings). Latest state wins; nothing is queued.
@@ -69,7 +77,7 @@ Web (primary; what CI tests) → **Steam Deck** (Linux x86_64 binary, Vulkan, 12
 | Time to first frame | < 1 s after download | < 0.5 s |
 | Frame time | 16.6 ms at 1080p on Intel Iris Xe / Apple M1 | same at 1440p |
 
-Budgets are constants in `app::budgets` and tested where measurable.
+Budgets are constants beside the code they bound (`app::stream::StreamBudget`, the renderer's pools, each instance list's `MAX_*`) and tested where measurable.
 
 ## Platform contract (`app::Platform` trait implemented per platform)
 `now_seconds()`, `surface size`, `input bindings load/save`, `settings load/save` (JSON string through `app::SettingsStore`; localStorage on web, XDG config dir native; bindings live in the same document), `open_music_files()` (file picker / folder scan → list of `MusicSource`), `audio sink` (push f32 interleaved stereo at 48 kHz), `open_url` (for the sharing code), `log`. Nothing else.
@@ -81,4 +89,4 @@ Settings are one JSON document, versioned, with defaults filled on load. Share c
 Generation and sim never panic on bad data: validation returns `Result`, invalid Places are rejected at load with a message. Rendering degrades (lower shadow resolution, fewer lights) rather than failing. Panics in WASM show an overlay with a copyable message.
 
 ## Portability hedge (ADR 0001)
-Sim crates are plain-old-data and loops; `render` talks to a small RHI trait (`Rhi`: create buffer/texture/pipeline, begin pass, draw) with wgpu as the only backend for now. `platform-*` is the only place with OS code. This is what keeps a future C port or console backend bounded.
+Sim crates are plain-old-data and loops; `render` is the only crate that names wgpu, so a second backend would replace one crate. `platform-*` is the only place with OS code. This is what keeps a future C port or console backend bounded.
