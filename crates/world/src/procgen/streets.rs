@@ -3644,8 +3644,76 @@ impl<'a> StreetPlan<'a> {
                 }
             }
         }
+        // The inland grid's streets stop at its rights of way; the coast's are left as
+        // they are.
+        if self.t.basin.is_some() {
+            prune_stubs(&mut nodes, &mut edges);
+        }
         RoadGraph { nodes, edges }
     }
+}
+
+/// Longest dead-end side street or alley the merged graph drops, m: the stubs left where
+/// chunks' streets meet a right of way, an arterial or each other, which read as roads to
+/// nowhere.
+const MERGED_STUB_M: f32 = 45.0;
+/// Longest dead-end arterial piece it drops, m.
+const ARTERIAL_STUB_M: f32 = 25.0;
+
+/// Drops the merged graph's short dead ends (side streets and alleys under
+/// [`MERGED_STUB_M`], arterial pieces under [`ARTERIAL_STUB_M`]) until none is left, then
+/// the nodes no edge uses. The arterials' own nodes come first in `nodes` and keep their
+/// indices: an arterial node always has an edge left.
+fn prune_stubs(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
+    loop {
+        let mut deg = vec![0u32; nodes.len()];
+        for e in edges.iter() {
+            deg[e.a as usize] += 1;
+            deg[e.b as usize] += 1;
+        }
+        let before = edges.len();
+        edges.retain(|e| {
+            let max = match e.class {
+                RoadClass::Local | RoadClass::Alley => MERGED_STUB_M,
+                RoadClass::Arterial => ARTERIAL_STUB_M,
+                _ => return true,
+            };
+            let dead = deg[e.a as usize] == 1 || deg[e.b as usize] == 1;
+            let both = deg[e.a as usize] == 1 && deg[e.b as usize] == 1;
+            both || !dead || profile_length(&e.profile) >= max
+        });
+        if edges.len() == before {
+            break;
+        }
+    }
+    let mut used = vec![false; nodes.len()];
+    for e in edges.iter() {
+        used[e.a as usize] = true;
+        used[e.b as usize] = true;
+    }
+    let mut map = vec![u32::MAX; nodes.len()];
+    let mut kept = 0u32;
+    for (i, u) in used.iter().enumerate() {
+        if *u {
+            map[i] = kept;
+            kept += 1;
+        }
+    }
+    let mut i = 0;
+    nodes.retain(|_| {
+        i += 1;
+        used[i - 1]
+    });
+    for e in edges.iter_mut() {
+        e.a = map[e.a as usize];
+        e.b = map[e.b as usize];
+    }
+}
+
+fn profile_length(p: &[[f32; 3]]) -> f32 {
+    p.windows(2)
+        .map(|w| V2::new(w[1][0] - w[0][0], w[1][2] - w[0][2]).length())
+        .sum()
 }
 
 // ---------------------------------------------------------------------------------------

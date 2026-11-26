@@ -143,6 +143,11 @@ pub enum PropKind {
         width_dm: u16,
         street: u16,
     },
+    /// A striped barricade across the end of a dead-end street `width_dm` decimeters wide,
+    /// at `pos`, facing traffic coming along `dir` ([`dead_ends`]; never in a Place).
+    Barricade {
+        width_dm: u16,
+    },
 }
 
 /// One placed prop.
@@ -498,6 +503,9 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, kit: &PropKit) {
         // A landmark needs its kit, which only the chunk plan has.
         PropKind::Landmark { .. } => {}
         PropKind::LotLabel { letter } => crate::landmarks::lot_label(m, base, p.dir, letter, pal),
+        PropKind::Barricade { width_dm } => {
+            barricade(m, base, p.dir, f32::from(width_dm) * 0.1, pal)
+        }
         PropKind::ExitSign { width_dm, street } => {
             exit_sign(m, base, p.dir, f32::from(width_dm) * 0.1, street, pal)
         }
@@ -3337,6 +3345,85 @@ fn full_power_pole(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette, rng: &
         lathe(m, &at.offset(0.0, 0.85, 0.0), &lid, 8, false, false, can);
         for x in [-0.12, 0.12] {
             insulator(m, &at.offset(x, 0.9, 0.0), glass);
+        }
+    }
+}
+
+/// The barricades closing the place's dead-end streets: one across the end of every side
+/// street, alley or arterial that stops short of everything (at a channel, the tracks, a
+/// freeway, the edge of town), so a street that ends reads as closed, not unfinished.
+/// Farm and hill roads end at their farms and overlooks and get none.
+pub fn dead_ends(place: &Place) -> Vec<Prop> {
+    let roads = &place.roads;
+    let mut deg = alloc::vec![0u32; roads.nodes.len()];
+    for e in &roads.edges {
+        deg[e.a as usize] += 1;
+        deg[e.b as usize] += 1;
+    }
+    let mut out = Vec::new();
+    for e in &roads.edges {
+        let ok = matches!(
+            e.class,
+            RoadClass::Local | RoadClass::Alley | RoadClass::Arterial | RoadClass::Collector
+        );
+        if !ok || e.oneway || e.profile.len() < 2 {
+            continue;
+        }
+        let n = e.profile.len();
+        for (end, end_deg, prev) in [
+            (e.profile[0], deg[e.a as usize], e.profile[1]),
+            (e.profile[n - 1], deg[e.b as usize], e.profile[n - 2]),
+        ] {
+            if end_deg != 1 {
+                continue;
+            }
+            let at = V2::new(end[0], end[2]);
+            let d = at - V2::new(prev[0], prev[2]);
+            if d.length() < 1e-3 {
+                continue;
+            }
+            let dir = d * (1.0 / d.length());
+            out.push(Prop {
+                pos: at - dir * 0.5,
+                y: end[1],
+                dir,
+                kind: PropKind::Barricade {
+                    width_dm: (e.width_m * 10.0) as u16,
+                },
+                seed: 0,
+            });
+        }
+    }
+    out
+}
+
+/// A road-closed barricade `width` m across at `base`, traffic coming along `dir`: three
+/// rails striped white and orange on two white legs at each end.
+fn barricade(m: &mut WorldMesh, base: V3, dir: V2, width: f32, pal: &Palette) {
+    let f = Frame::upright(base, dir.right());
+    let white = Paint::new(pal.paint_white, Pattern::Paint);
+    let orange = Paint::new(mix(pal.hydrant_red, pal.paint_yellow, 100), Pattern::Paint);
+    let half = width * 0.5 - 0.2;
+    for x in [-half, half] {
+        boxf(
+            m,
+            &f,
+            [x - 0.05, 0.0, -0.05],
+            [x + 0.05, 1.5, 0.05],
+            face::NO_BOTTOM,
+            white,
+        );
+    }
+    const STRIPE: f32 = 0.3;
+    for y in [0.55f32, 0.9, 1.25] {
+        let mut x = -half - 0.15;
+        let mut k = 0;
+        while x < half + 0.15 {
+            let x1 = (x + STRIPE).min(half + 0.15);
+            let paint = if k % 2 == 0 { white } else { orange };
+            boxf(m, &f, [x, y, 0.06], [x1, y + 0.2, 0.1], face::ALL, paint);
+            x = x1;
+            k += 1;
         }
     }
 }

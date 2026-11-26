@@ -634,6 +634,7 @@ fn place_props(place: &Place, seed: u64) -> Vec<props::Prop> {
         .collect();
     out.extend(props::power_spans(place, seed));
     out.extend(props::exit_signs(place));
+    out.extend(props::dead_ends(place));
     out
 }
 

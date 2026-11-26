@@ -1747,10 +1747,19 @@ fn channel_fences(place: &Place, grid: &TerrainGrid, s: &SetPieces, out: &mut Ve
                 .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
         })
         .collect();
+    // The roadside set's lots stay unfenced: their ground is the kits'.
+    let on_lot = |q: V2| {
+        s.roadside.iter().any(|r| {
+            let d = q - r.lot.front;
+            let (x, z) = (d.dot(r.lot.along), d.dot(r.lot.inward));
+            x.abs() < 0.5 * r.size.0 + 1.0 && z > -1.0 && z < r.size.1 + 1.0
+        })
+    };
     let near_road = |q: V2| {
         roads
             .iter()
             .any(|&(a, b, hw)| segment_distance(q, a, b).0 < hw + FENCE_ROAD_CLEAR_M)
+            || on_lot(q)
     };
     // Each ramp: its span along the channel and the side it is on.
     let ramps: Vec<(f32, f32, f32)> = s

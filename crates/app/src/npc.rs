@@ -1224,16 +1224,20 @@ mod tests {
                 vehicles::BUILTIN_SHAPES[k].0
             );
         }
-        // The hero cars drive too, rarer than the everyday cars (the Destrier, a 1969 car,
-        // rarer still by its age).
-        let heroes: usize = vehicles::TRAFFIC_SHAPES[21..].iter().map(|&k| per[k]).sum();
-        let everyday: usize = vehicles::TRAFFIC_SHAPES[14..21]
-            .iter()
-            .map(|&k| per[k])
-            .sum();
+        // The hero cars drive too, each rarer than an everyday car (the Destrier, a 1969
+        // car, rarer still by its age). There are more hero shapes than everyday ones, so
+        // compare per shape: heroes / hero shapes < everyday / everyday shapes.
+        let (hero, day) = (
+            &vehicles::TRAFFIC_SHAPES[21..],
+            &vehicles::TRAFFIC_SHAPES[14..21],
+        );
+        let heroes: usize = hero.iter().map(|&k| per[k]).sum();
+        let everyday: usize = day.iter().map(|&k| per[k]).sum();
         assert!(
-            heroes > 0 && heroes < everyday,
-            "{heroes} heroes, {everyday} everyday"
+            heroes > 0 && heroes * day.len() < everyday * hero.len(),
+            "{heroes} heroes ({} shapes), {everyday} everyday ({} shapes)",
+            hero.len(),
+            day.len()
         );
         assert!(on_freeway, "a semi started off the freeway");
         // The 1980s cars still drive, at their age weight: fewer than the 2001 cars.
