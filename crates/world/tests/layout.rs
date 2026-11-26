@@ -15,7 +15,7 @@ const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
-const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 
 fn grammar() -> world::Grammar {
@@ -160,7 +160,7 @@ fn a_road_to_nowhere_is_refused() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0xddb7258b7cb4d1ee;
+const BOWL_GOLDEN: u64 = 0xa7dba24a0562a5ea;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.
@@ -168,7 +168,7 @@ const BOWL_GOLDEN: u64 = 0xddb7258b7cb4d1ee;
 fn the_mirage_bowl_validates_and_is_deterministic() {
     let l: Layout = ron::from_str(MIRAGE_BOWL).expect("parse layout");
     l.validate().expect("validate layout");
-    let t: RegionTemplate = ron::from_str(SOCAL_BASIN).expect("parse template");
+    let t: RegionTemplate = ron::from_str(SOCAL_BOWL).expect("parse template");
     t.validate().expect("validate template");
     let g = grammar();
     let t0 = Instant::now();
@@ -216,7 +216,7 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
     ] {
         assert_eq!(count(k), 1, "{k:?}");
     }
-    assert_eq!(count(PoiKind::Overlook), 4);
+    assert_eq!(count(PoiKind::Overlook), 3);
     assert!(count(PoiKind::GradeCrossing) >= 5);
     assert!(count(PoiKind::DonutShop) >= 2 && count(PoiKind::BurgerStand) >= 2);
     let track = |q: &&place::Prop| matches!(q.kind, place::PropKind::Track { .. });
