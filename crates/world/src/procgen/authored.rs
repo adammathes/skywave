@@ -29,7 +29,8 @@ use skywave_core::Seed;
 
 use super::arterials::grade_limit;
 use super::macro_map::{
-    ccw, flatten_by_zone, paint_bands, raise_walls, Frame, MacroMap, Strip, WaterBody, WaterKind,
+    ccw, flatten_by_zone, paint_bands, raise_walls, Frame, MacroMap, MacroPoi, MacroPoiKind, Strip,
+    WaterBody, WaterKind,
 };
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
@@ -296,7 +297,18 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
         highway: Vec::new(),
         highway_bed: Vec::new(),
         pass: None,
-        pois: Vec::new(),
+        pois: layout
+            .pier
+            .iter()
+            .map(|p| {
+                let out = (V2::new(p.toward.0, p.toward.1) - V2::new(p.at.0, p.at.1)).normalize();
+                MacroPoi {
+                    kind: MacroPoiKind::Pier,
+                    pos: [p.at.0, p.at.1],
+                    facing: [out.x, out.y],
+                }
+            })
+            .collect(),
         edges,
         bands,
         basin: None,

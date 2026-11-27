@@ -163,6 +163,16 @@ fn deck() -> f32 {
     DECK_M
 }
 
+/// A pier: a deck on piles from `at` on the shore out over the water toward `toward`, with a
+/// short street from the nearest road to its foot.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Pier {
+    pub at: Pt,
+    pub toward: Pt,
+}
+
 /// Where the player starts: on road `road`, `along_m` from its first point, driving away
 /// from it.
 #[derive(Clone, Debug, PartialEq)]
@@ -198,6 +208,8 @@ pub struct Layout {
     pub roads: Vec<Road>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub channels: Vec<Channel>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub pier: Option<Pier>,
     pub start: Start,
 }
 
