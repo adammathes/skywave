@@ -522,7 +522,10 @@ fn glancing_hit_yaws_away_and_keeps_speed() {
             travel.asin().to_degrees(),
             s.ang_vel[1]
         );
-        assert!(kept >= 0.5, "{} kept {kept}: stopped", spec.id);
+        // Hands off, the fronts now hold their line instead of castering along the slide
+        // (which set the car weaving after a steering tap at speed), so the scrape off the
+        // wall costs a little more: 57% → 46–49% kept.
+        assert!(kept >= 0.4, "{} kept {kept}: stopped", spec.id);
         assert!(kept <= 1.0, "{} gained speed: {kept}", spec.id);
         assert!(
             into < angle.sin() * 0.5,
@@ -1477,7 +1480,15 @@ fn side_swipe_lets_both_drive_on() {
         let mut s = launched(&spec, [0.0; 3], 0.0, v);
         s.vel[0] = 1.5;
         let mut npc = Npc::new([2.2, -0.5], 0.0, v);
-        let run = car_run(&spec, &mut s, &mut npc, 2, |s, _| cruise(s, v));
+        // A touch of steer holds the drift: the front wheels no longer caster along a
+        // sideways shove, so the tires alone would stop it short of the NPC.
+        let run = car_run(&spec, &mut s, &mut npc, 2, |s, hit| {
+            let mut inp = cruise(s, v);
+            if !hit {
+                inp.steer = 0.06;
+            }
+            inp
+        });
         let yaw = heading_of(forward2(&s));
         eprintln!(
             "{}: side swipe {run:?}, after {:.2} / {:.2} m/s, yaw {yaw:.3} / {:.3}",
