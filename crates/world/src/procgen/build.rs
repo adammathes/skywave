@@ -65,6 +65,7 @@ pub(super) fn fill(
     // (against the graph as the Place stores it, sorted by chunk).
     let roads = streets_all(seed, template, m, arterials);
     let mut place = assemble(m, template, roads, start);
+    crate::roads::meet_merges(&mut place);
     place.parcels = parcels_all(seed, template, m, &place.roads);
     place.buildings = buildings_all(
         seed,

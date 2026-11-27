@@ -100,6 +100,74 @@ pub struct Merge {
     pub side: f32,
 }
 
+/// Past its gore a merging road eases from the height of the road it joins back to its own
+/// over this far, m.
+const MERGE_EASE_M: f32 = 60.0;
+/// Spacing of the heights a merging road is given over its merge and ease, m.
+const MERGE_STEP_M: f32 = 2.0;
+
+/// Gives every road that merges into another (a ramp, a slip lane) that road's height
+/// alongside wherever the two share pavement, out to the gore, then eases it back to its
+/// own profile over [`MERGE_EASE_M`] (a smoothstep, so its grade changes gently). Two
+/// profiles graded on their own can disagree by a meter along a merge, and wherever they
+/// did the pavement between them had to be a ledge or a twisted sheet. Each merging
+/// profile is resampled every [`MERGE_STEP_M`] over that stretch; its far end is left
+/// alone.
+pub fn meet_merges(place: &mut Place) {
+    let net = Network::new(place);
+    for j in &net.junctions {
+        for mg in &j.merges {
+            let e = mg.end.edge;
+            let major = &place.roads.edges[j.ends[mg.major].edge].profile;
+            let mxz: Vec<V2> = major.iter().map(|p| V2::new(p[0], p[2])).collect();
+            let my: Vec<f32> = major.iter().map(|p| p[1]).collect();
+            let from_b = place.roads.edges[e].a as usize != j.node;
+            let mut prof = place.roads.edges[e].profile.clone();
+            if from_b {
+                prof.reverse();
+            }
+            let len: f32 = prof
+                .windows(2)
+                .map(|w| V2::new(w[1][0] - w[0][0], w[1][2] - w[0][2]).length())
+                .sum();
+            // Too short to ease back before its far end: left as it is.
+            if len < mg.s_gore + 2.0 * MERGE_STEP_M {
+                continue;
+            }
+            let ease = MERGE_EASE_M.min(0.5 * (len - mg.s_gore));
+            let end = mg.s_gore + ease;
+            let mut out: Vec<[f32; 3]> = Vec::with_capacity(prof.len() + 64);
+            let mut s = 0.0f32;
+            for w in prof.windows(2) {
+                let (p, q) = (w[0], w[1]);
+                let l = V2::new(q[0] - p[0], q[2] - p[2]).length();
+                if s > end {
+                    out.push(p);
+                    s += l;
+                    continue;
+                }
+                let mut d = 0.0f32;
+                while d < l && s + d <= end {
+                    let t = d / l;
+                    let xz = V2::new(lerp(p[0], q[0], t), lerp(p[2], q[2], t));
+                    let own = lerp(p[1], q[1], t);
+                    let theirs = profile_height(&mxz, &my, xz);
+                    let x = ((s + d - mg.s_gore) / ease).clamp(0.0, 1.0);
+                    let f = 1.0 - x * x * (3.0 - 2.0 * x);
+                    out.push([xz.x, own + f * (theirs - own), xz.y]);
+                    d += MERGE_STEP_M;
+                }
+                s += l;
+            }
+            out.push(prof[prof.len() - 1]);
+            if from_b {
+                out.reverse();
+            }
+            place.roads.edges[e].profile = out;
+        }
+    }
+}
+
 /// Ends meeting at less than this angle's cosine (about 30 degrees) merge.
 const MERGE_COS: f32 = 0.866;
 /// Merges whose gore would lie farther than this from the node are ordinary corners.
@@ -659,6 +727,14 @@ impl Network {
     /// Junction `j`'s asphalt as a fan: the center, then the ring of trimmed ends and curb
     /// returns (counter-clockwise), each with its surface height. Empty for dead ends.
     pub fn junction_ring(&self, j: &Junction) -> Vec<V3> {
+        self.junction_ring_split(j, f32::INFINITY)
+    }
+
+    /// [`Self::junction_ring`] with each road's end split every `step` m or less. A road's
+    /// height across its end is not a straight line near a change of grade (the profile
+    /// blends its bends by distance), so a fan spanning the end in one edge leaves a step of
+    /// a few centimeters where the road meets it; the collider's fan follows it instead.
+    pub fn junction_ring_split(&self, j: &Junction, step: f32) -> Vec<V3> {
         let n = j.ends.len();
         let mut ring: Vec<V3> = Vec::with_capacity(n * 10);
         if n < 2 {
@@ -672,6 +748,11 @@ impl Network {
             let pr = c + e.dir * e.trim + e.dir.right() * e.hw;
             let pl = c + e.dir * e.trim + e.dir.left() * e.hw;
             ring.push(pr.at(path.y_at(pr)));
+            let parts = (2.0 * e.hw / step) as u32 + 1;
+            for k in 1..parts {
+                let q = pr + (pl - pr) * (k as f32 / parts as f32);
+                ring.push(q.at(path.y_at(q)));
+            }
             ring.push(pl.at(path.y_at(pl)));
             match j.corners[i] {
                 Corner::Fillet { q, r, ta, tb, .. } => {
