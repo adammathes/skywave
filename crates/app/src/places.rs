@@ -716,9 +716,9 @@ mod ledges {
     fn pavement_has_no_ledges() {
         let pins = [
             ("socal_beach_1984", 0),
-            ("mirage_bowl_2001", 17),
-            ("bay_loop_2005", 15),
-            ("lake_city_1986", 5),
+            ("mirage_bowl_2001", 10),
+            ("bay_loop_2005", 10),
+            ("lake_city_1986", 3),
         ];
         let mut over = Vec::new();
         for (id, pin) in pins {
