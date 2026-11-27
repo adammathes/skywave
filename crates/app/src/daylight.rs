@@ -51,21 +51,10 @@ const EXTINCTION_RGB: [f32; 3] = [0.02, 0.05, 0.11];
 const EXTINCTION_GREY: f32 = 0.08;
 /// What the sun's tint fades to as it sinks from the horizon to civil dusk.
 const SUN_DARK_RED: [f32; 3] = [0.40, 0.05, 0.0];
-/// Exponential fog coefficient per unit turbidity, 1/m: a typical day keeps about two thirds of a
-/// hill 1 km off, so far colour still reads.
-const FOG_PER_TURBIDITY: f32 = 0.00015;
-/// The morning haze over the basin: it settles through the small hours (from this many
-/// seconds after midnight)...
-const HAZE_SETTLES_S: f64 = 2.0 * 3600.0;
-/// ...is thickest from an hour before sunrise, starts to burn off half an hour after it and
-/// is gone three and a half hours after it, by mid-morning (seconds from sunrise).
-const HAZE_THICK_S: f64 = -3600.0;
-const HAZE_BURNS_S: f64 = 1800.0;
-const HAZE_GONE_S: f64 = 3.5 * 3600.0;
-/// At its thickest it adds this much to the weather's haze (turbidity +2.4)...
-const HAZE_WEATHER: f32 = 0.6;
-/// ...and this much fog, 1/m: about a kilometre's visibility, a low grey basin.
-const HAZE_FOG: f32 = 0.0028;
+/// Exponential fog coefficient per unit turbidity, 1/m: only the faintest aerial
+/// perspective, about a sixth of the way to the sky at 3 km on a typical day, so the whole
+/// place reads clearly. (The far plane's own fade hides the edge of the view.)
+const FOG_PER_TURBIDITY: f32 = 0.00002;
 
 /// Exposure keys: sun elevation (degrees, ascending) → EV100.
 const EV_ELEV: [f32; 11] = [
@@ -128,9 +117,9 @@ pub struct Weather {
 }
 
 impl Default for Weather {
-    /// A typical coastal day, turbidity 3.
+    /// A clear day, turbidity 2.4.
     fn default() -> Weather {
-        Weather { haze: 0.25 }
+        Weather { haze: 0.1 }
     }
 }
 
@@ -179,9 +168,6 @@ pub struct Daylight {
     /// Game seconds since the photocell last switched (on at civil dusk, off at dawn): the
     /// clock the street lamps' wave and the signs' delays run on, `0..86400`.
     pub lamps_switched_s: f32,
-    /// The morning haze, 0..1: settles overnight, thickest at dawn, burnt off by
-    /// mid-morning. Already in `turbidity` and `fog_density`.
-    pub haze: f32,
     /// Lit-window emissive scale: 0 by day, ramping over blue hour to 1 by −8°.
     pub window_emissive_scale: f32,
     /// 0 by day, 1 at astronomical night (−18°).
@@ -219,11 +205,7 @@ impl Daylight {
         let (moon_elev, _) = elevation_azimuth(moon);
         let lit_fraction = (1.0 - (core::f64::consts::TAU * phase_f).cos()) as f32 * 0.5;
 
-        let haze = morning_haze(latitude_deg, day_of_year, secs);
-        let turbidity = Weather {
-            haze: weather.haze + HAZE_WEATHER * haze,
-        }
-        .turbidity();
+        let turbidity = weather.turbidity();
         let (sun_color, sun_intensity) = sunlight(sun_elev, turbidity);
 
         let ev100 = ev100(sun_elev);
@@ -261,13 +243,12 @@ impl Daylight {
             sky_zenith_color,
             sky_horizon_color,
             turbidity,
-            fog_density: FOG_PER_TURBIDITY * turbidity + HAZE_FOG * haze,
+            fog_density: FOG_PER_TURBIDITY * turbidity,
             fog_color: sky_horizon_color,
             ev100,
             exposure,
             streetlights_on,
             lamps_switched_s: since as f32,
-            haze,
             window_emissive_scale: 1.0 - smoothstep(-8.0, 0.0, sun_elev),
             star_brightness: 1.0 - smoothstep(-18.0, -4.0, sun_elev),
             phase: phase(sun_elev, morning),
@@ -301,24 +282,6 @@ fn half_day(lat: f64, day_of_year: u16, elev_deg: f32) -> f64 {
     let cos_h = (f64::from(elev_deg).to_radians().sin() - lat.sin() * decl.sin())
         / (lat.cos() * decl.cos());
     cos_h.clamp(-1.0, 1.0).acos() / core::f64::consts::TAU * DAY_SECONDS
-}
-
-/// The morning haze at `secs` (apparent solar time), 0..1: rising from
-/// [`HAZE_SETTLES_S`] to its thickest an hour before sunrise, burning off by mid-morning.
-fn morning_haze(latitude_deg: f32, day_of_year: u16, secs: f64) -> f32 {
-    let (rise, _) = sun_times(latitude_deg, day_of_year);
-    let rise = f64::from(rise);
-    let settle = smoothstep(
-        HAZE_SETTLES_S as f32,
-        (rise + HAZE_THICK_S).max(HAZE_SETTLES_S + 1.0) as f32,
-        secs as f32,
-    );
-    let burn = smoothstep(
-        (rise + HAZE_BURNS_S) as f32,
-        (rise + HAZE_GONE_S) as f32,
-        secs as f32,
-    );
-    settle * (1.0 - burn)
 }
 
 /// The game clock. Real time drives it at `speed`; the day of year rolls over at midnight.
@@ -633,7 +596,10 @@ mod tests {
         assert_eq!(Weather { haze: 0.0 }.turbidity(), 2.0);
         assert_eq!(Weather { haze: 1.0 }.turbidity(), 6.0);
         assert_eq!(Weather { haze: 9.0 }.turbidity(), 6.0);
-        assert_eq!(Daylight::compute(LAT, 1, 0.0).turbidity, 3.0);
+        assert_eq!(
+            Daylight::compute(LAT, 1, 0.0).turbidity,
+            Weather::default().turbidity()
+        );
     }
 
     #[test]
@@ -695,31 +661,6 @@ mod tests {
             t += 0.1;
         }
         assert!(Daylight::compute(LAT, day, t).lamps_switched_s < 0.5);
-    }
-
-    #[test]
-    fn morning_haze_settles_by_dawn_and_burns_off_by_mid_morning() {
-        let day = 265;
-        let at = |h: f32| Daylight::compute(LAT, day, h * HOUR);
-        let (rise, _) = sun_times(LAT, day);
-        let dawn = Daylight::compute(LAT, day, rise - 0.5 * HOUR);
-        assert!(dawn.haze > 0.99, "{}", dawn.haze);
-        for h in [10.0, 12.0, 17.0 + 40.0 / 60.0, 22.5, 0.5] {
-            assert_eq!(at(h).haze, 0.0, "{h}");
-        }
-        // Thicker fog and greyer air at dawn than the same light in the evening.
-        let dusk = at(19.0);
-        assert!(dawn.fog_density > 3.0 * dusk.fog_density);
-        assert!(dawn.turbidity > dusk.turbidity + 2.0);
-        // It thins steadily through the morning.
-        let mut prev = 1.0;
-        for k in 0..=24 {
-            let h = rise / HOUR + 0.25 * k as f32;
-            let haze = at(h).haze;
-            assert!(haze <= prev, "{h}");
-            prev = haze;
-        }
-        assert_eq!(prev, 0.0);
     }
 
     #[test]
