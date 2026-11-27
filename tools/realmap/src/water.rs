@@ -11,15 +11,24 @@ const MIN_CELLS: usize = 64;
 /// Shoreline simplification tolerance, meters.
 const TOLERANCE_M: f32 = 10.0;
 
-/// Polygons of the sea, counter-clockwise in (x, z), each closed implicitly.
-pub fn sea(dem: &Dem, warp: &Warp, ext: [f32; 2], below_m: f32) -> Vec<Vec<(f32, f32)>> {
+/// Polygons of the sea, counter-clockwise in (x, z), each closed implicitly. Cells within
+/// `dry_m` of a `dry` polyline stay land.
+pub fn sea(
+    dem: &Dem,
+    warp: &Warp,
+    ext: [f32; 2],
+    below_m: f32,
+    dry: &[&[(f32, f32)]],
+    dry_m: f32,
+) -> Vec<Vec<(f32, f32)>> {
     let w = (ext[0] / CELL_M).round() as usize;
     let h = (ext[1] / CELL_M).round() as usize;
     let low: Vec<bool> = (0..w * h)
         .map(|i| {
             let (x, z) = ((i % w) as f32 + 0.5, (i / w) as f32 + 0.5);
             let (lon, lat) = warp.inv(x * CELL_M, z * CELL_M);
-            dem.at(lon, lat) <= below_m
+            let p = (x * CELL_M, z * CELL_M);
+            dem.at(lon, lat) <= below_m && !dry.iter().any(|l| near(p, l, dry_m))
         })
         .collect();
 
@@ -68,6 +77,17 @@ pub fn sea(dem: &Dem, warp: &Warp, ext: [f32; 2], below_m: f32) -> Vec<Vec<(f32,
         out.push(simplify_ring(&pts, TOLERANCE_M));
     }
     out
+}
+
+/// Whether `p` lies within `d` of the polyline `line`.
+fn near(p: (f32, f32), line: &[(f32, f32)], d: f32) -> bool {
+    line.windows(2).any(|w| {
+        let (a, b) = (w[0], w[1]);
+        let (vx, vz) = (b.0 - a.0, b.1 - a.1);
+        let len2 = (vx * vx + vz * vz).max(1e-6);
+        let t = (((p.0 - a.0) * vx + (p.1 - a.1) * vz) / len2).clamp(0.0, 1.0);
+        (p.0 - a.0 - vx * t).hypot(p.1 - a.1 - vz * t) <= d
+    })
 }
 
 fn flood(

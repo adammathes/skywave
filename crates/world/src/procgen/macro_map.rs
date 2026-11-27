@@ -171,6 +171,8 @@ pub struct MacroMap {
     pub basin: Option<BasinPlan>,
     /// An authored town's one street grid, `[origin, block]` ([`crate::layout::Grid`]).
     pub grid: Option<[[f32; 2]; 2]>,
+    /// Where an authored town's hero landmark stands ([`crate::layout::Layout::hero`]).
+    pub hero: Option<[f32; 2]>,
 }
 
 /// One arterial of a basin's grid: a straight line, world coordinates.

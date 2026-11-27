@@ -1,14 +1,14 @@
 //! Lake City's hero landmark (`docs/WORLD_GENERATION.md`, "Hero landmarks"): on seeds 1-4 the
-//! lake city (its authored layout) sites its drive-in hot dog stand on an arterial lot ahead of the start, close
-//! enough to see from there, clear of every building, with its stall cars parked on its lot.
+//! lake city (its authored layout) sites its drive-in hot dog stand on an arterial lot by the
+//! layout's `hero` point, on the plank road at the line road, clear of every building, with
+//! its stall cars parked on its lot.
 //! `cargo test -p world --release --test lake_city -- --nocapture` prints where it went.
 
-use place::{Place, PoiKind, PropKind, SpawnKind};
+use place::{Place, PoiKind, PropKind};
 use skywave_core::Seed;
 use world::layout::Layout;
 use world::math::{point_in_polygon, V2};
 use world::procgen::authored::build_place;
-use world::procgen::setpieces::HERO_AHEAD_M;
 use world::template::RegionTemplate;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
@@ -16,8 +16,8 @@ const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 const LAKE_CITY: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 const LAYOUT: &str = include_str!("../../../assets/layouts/lake_city.ron");
 
-/// The farthest the stand stands from the start, m: in sight down the road.
-const IN_SIGHT_M: f32 = 700.0;
+/// The farthest the stand's lot stands from the layout's hero point, m: on its corner.
+const NEAR_M: f32 = 150.0;
 
 fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
@@ -39,7 +39,7 @@ fn lake_city(seed: u64) -> Place {
 }
 
 #[test]
-fn the_hot_dog_stand_stands_ahead_of_the_start() {
+fn the_hot_dog_stand_stands_at_the_hero_point() {
     let kit = world::landmarks::BUILTIN
         .iter()
         .position(|(id, _)| *id == "hot_dog_stand")
@@ -47,14 +47,9 @@ fn the_hot_dog_stand_stands_ahead_of_the_start() {
     for seed in 1..=4 {
         let p = lake_city(seed);
         p.validate().expect("valid");
-        let start = p
-            .spawns
-            .iter()
-            .find(|s| s.kind == SpawnKind::PlayerStart)
-            .expect("a start");
-        let at = V2::new(start.pos[0], start.pos[2]);
-        let (sin, cos) = world::math::sin_cos(start.heading);
-        let ahead = V2::new(-sin, -cos);
+        let l: Layout = ron::from_str(LAYOUT).expect("parse layout");
+        let hero = l.hero.expect("a hero point");
+        let at = V2::new(hero.0, hero.1);
         let stands: Vec<_> = p
             .pois
             .iter()
@@ -62,14 +57,9 @@ fn the_hot_dog_stand_stands_ahead_of_the_start() {
             .collect();
         assert_eq!(stands.len(), 1, "seed {seed}: one stand");
         let mid = V2::new(stands[0].pos[0], stands[0].pos[1]);
-        let d = mid - at;
-        println!(
-            "seed {seed}: stand {:.0} m from the start, {:.0} m ahead",
-            d.length(),
-            d.dot(ahead)
-        );
-        assert!(d.dot(ahead) >= HERO_AHEAD_M, "seed {seed}: ahead");
-        assert!(d.length() <= IN_SIGHT_M, "seed {seed}: in sight");
+        let d = (mid - at).length();
+        println!("seed {seed}: stand {d:.0} m from the hero point");
+        assert!(d <= NEAR_M, "seed {seed}: by the hero point");
         let marks: Vec<_> = p
             .props
             .items

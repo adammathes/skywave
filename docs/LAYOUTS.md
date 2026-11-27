@@ -28,6 +28,7 @@ Layout(
   size_chunks: (32, 32),            // 128 m chunks: 4.1 km square
   ground_m: 6,                      // land height where no shape says otherwise
   water_level_m: 0,
+  shore_m: Some(240),               // the land's slope down to the water (default 60): wider is flatter
   edges: Edges(north: Ocean, east: Hills, south: Hills, west: Ocean),
   // Optional: a height grid over `ground_m`, `cell_m` apart, rows from the north-west
   // corner, sampled bilinearly (real terrain; see "Real data" below).
@@ -69,6 +70,7 @@ Layout(
   // blocks beside them come out whole. Without it each superblock picks its own spacing.
   grid: Some(Grid(origin: (980, 260), block_m: (84, 130))),
   set_pieces: true,                 // site the world's set pieces here (default false)
+  hero: Some((295, 303)),           // the hero landmark's lot is the arterial lot nearest here
   start: Start(road: "crest street", along_m: 160),   // the player starts this far along this road
 )
 ```
@@ -92,6 +94,11 @@ crossing or they are lifted too. Each road named in the highway's `ramps` gets a
 one-way ramps leaving the highway 150 m either side of the crossing. The highway's own ends meet
 roads at grade like any road's, and a road that *ends* on a highway joins it at grade. The land
 under a highway and inside its ramps is zoned `Highway`: no streets or lots.
+
+An `elevated: true` highway turns that round for a flat city: it rides a viaduct 7 m over the
+ground and the roads crossing it stay level and pass under, so none of them hump. Its ramps
+climb to it and its ends come down to their junctions at its grade, so keep crossings some
+200 m clear of its ends.
 
 A channel is cut after the roads are laid, so every road that crosses one bridges it. `width_m`
 is its flat bed; the walls slope 1.5 m out per meter down. Dry, its bed lies `depth_m` (at most
@@ -155,12 +162,16 @@ A city's main streets are mostly not state routes, so an import may name a `coun
 all-roads file is read instead, and the streets whose TIGER names are in `names` come in as
 arterials (the names stay in the import file; the game's are invented). With
 `separate_highways: true` (a dense grid) highways are traced apart from the streets, so they
-pass over them; a highway's loose end is cut back to the first street junction it passes and
+pass over them (with `elevated_highways: true` on viaducts, the streets level under them); a
+highway's loose end is cut back to the first street junction it passes and
 meets the streets there. Otherwise (a sparse net of main roads, whose streets meet each other
 only through the freeways) everything traces as one network and a highway piece under 300 m
 stays a street. Streets mostly over a `hilly` district may climb 0.22, others 0.16. Bends
 are eased to 12° or less, road ends join exactly on the road they meet, and roads run
-straight for 25 m into every junction, which traffic's lanes and stop lines need. `skip` boxes cut highways out where they run too close to streets or a river for their
+straight for 25 m into every junction, which traffic's lanes and stop lines need. Two roads
+alone at a node bending less than 60° join into one, eased round the bend. `dry_roads_m` keeps
+low ground within that far of a road dry, so a shore drive keeps to the shore instead of crossing the
+harbors beside it. `skip` boxes cut highways out where they run too close to streets or a river for their
 overpasses at the squeeze.
 
 Only the sections a layout marks are rewritten: a layout drawn by hand can mark `terrain`

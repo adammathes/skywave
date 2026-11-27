@@ -30,6 +30,8 @@ Import(
     slope: 1,
     smooth: 2,
     sea_below_m: 177,
+    // The shore drive keeps to the shore, inland of the harbors.
+    dry_roads_m: 24,
     water_kind: "Lake",
     terrain_cell_m: 32,
     merge_m: 12,
@@ -38,7 +40,7 @@ Import(
     // Downtown, the expressways' tangle sits a few squeezed blocks from the river: they come
     // off at the edge of downtown onto its streets instead. The west expressway runs along
     // the south edge, under the frame's last mile street: left out.
-    skip: [(-87.752, 41.9685, -87.73, 42.03), (-87.66, 41.86, -87.60, 41.897), (-87.82, 41.86, -87.60, 41.879)],
+    skip: [(-87.80, 41.9625, -87.73, 42.03), (-87.66, 41.86, -87.60, 41.897), (-87.82, 41.86, -87.60, 41.879)],
     channels: [
         Channel(name: "river", line: [(-87.6060, 41.8890), (-87.6375, 41.8868)], width_m: 10, depth_m: 2.5, wet: true),
         Channel(name: "south branch", line: [(-87.6375, 41.8868), (-87.6385, 41.8700)], width_m: 9, depth_m: 2.5, wet: true),
@@ -75,14 +77,18 @@ Import(
             (-87.6235, 41.8970), (-87.6260, 41.9110), (-87.6330, 41.9250), (-87.6385, 41.9400),
             (-87.6400, 41.9500), (-87.6440, 41.9620), (-87.6490, 41.9750), (-87.6550, 41.9860),
         ]),
+        // A square of lawn below the six-way corner.
+        District(name: "six corners park", zone: "Park", polygon: [(-87.7800, 41.9760), (-87.7700, 41.9760), (-87.7700, 41.9700), (-87.7800, 41.9700)]),
         District(name: "lincoln woods", zone: "Park", polygon: [(-87.6450, 41.9400), (-87.6335, 41.9400), (-87.6250, 41.9100), (-87.6340, 41.9100)]),
         District(name: "west park", zone: "Park", polygon: [(-87.7080, 41.9070), (-87.6970, 41.9070), (-87.6970, 41.8990), (-87.7080, 41.8990)]),
         // Downtown: towers by the river mouth, between the branches and the lake.
         District(name: "downtown", zone: "Downtown", polygon: [(-87.6375, 41.8966), (-87.6080, 41.8966), (-87.6080, 41.8710), (-87.6375, 41.8710)]),
     ],
-    // On the plank road a block past the six-way corner, heading north-west to the drive-in.
-    start: (-87.7625, 41.9697),
-    start_toward: Some((-87.7876, 41.9975)),
-    // A dense grid: the freeways pass over it.
+    // On the shore drive at the edge of downtown, the lake on the left, heading south into
+    // the towers.
+    start: (-87.6246, 41.8969),
+    start_toward: Some((-87.6247, 41.8920)),
+    // A dense, flat grid: the freeways run apart from it, on viaducts over its streets.
     separate_highways: true,
+    elevated_highways: true,
 )
