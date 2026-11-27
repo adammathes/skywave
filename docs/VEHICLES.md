@@ -238,7 +238,7 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `drayman_van` | full-size panel van | Van | 1,900 kg, ~104 kW six, 3-speed, RWD; tall, tippy, the lowest top speed; 13.5 s, 37 m/s, 0.70 g |
 | `meadow_minivan` | front-drive minivan, wood-grain edition | Van | 1,450 kg, ~86 kW four, 3-speed, FWD; tall, roomy, wallowy; 15.0 s, 44 m/s, 0.73 g |
 
-The 2001 hero cars (`docs/backlog/MIRAGE2001.md` item 4), player cars of the Mirage Valley and never of an
+The 2001 hero cars (`docs/backlog/MIRAGE2001.md` item 4), player cars of the Mirage Bowl and never of an
 earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics still out-sprint them all:
 
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
@@ -257,7 +257,7 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `corvid_hatch` | late-80s American pony car, third generation of its line, in top trim: long low wedge nose with slim rectangular lamps, raked windshield, T-tops, a big curved glass hatch with a wrapped lip spoiler, a full ground-effects kit, a low tape stripe, full-width tail lamps, five-hole alloys | Coupe | 1,500 kg, ~180 kW fuel-injected V8, 4-speed automatic, RWD; strong from a light, flat and grippy, a tail that comes out when asked; 6.1 s, 62.4 m/s, 0.99 g |
 
 The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
-Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
+Mirage Bowl and never in an earlier world. All but the semi are player-drivable and list at the end of the
 Vehicle page in 2001; the semi is `traffic_only`.
 
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |

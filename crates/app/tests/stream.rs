@@ -248,6 +248,25 @@ fn streaming_allocates_nothing_per_step_after_warmup() {
     assert_eq!(pool.stats().used as usize, s.resident);
 }
 
+/// A pool with pages for the ring but not for the chunks held one past it: those are
+/// evicted when a new chunk needs their pages, so the ring is still whole whenever the
+/// streamer is idle (checked every idle step), all the way across.
+#[test]
+fn a_pool_short_of_the_spare_chunks_still_fills_the_ring() {
+    let budget = StreamBudget {
+        radius: 2,
+        // 25 chunks in the ring, 49 with the spares, a page each.
+        pool_vertices: 30 * render::ChunkPoolConfig::PAGE_VERTICES,
+        ..StreamBudget::WEB
+    };
+    let (d, streamer, pool) = drive(&Tiny, budget, 0.0002, [-1500.0, 0.0], 1.0);
+    let s = streamer.stats();
+    assert_eq!(pool.stats().pages, 30);
+    assert!(d.idle_checks > 5000, "{}", d.idle_checks);
+    assert!(streamer.is_idle() && s.resident <= 30, "{s:?}");
+    assert_eq!(s.upload_errors, 0);
+}
+
 /// Every chunk the streamer draws covers its ring: the drawn parts are the built chunks'.
 #[test]
 fn drawn_parts_are_the_built_chunks() {

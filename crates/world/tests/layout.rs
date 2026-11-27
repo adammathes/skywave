@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use place::{RoadClass, SpawnKind, ZoneId};
+use place::{PoiKind, RoadClass, SpawnKind, ZoneId};
 use skywave_core::Seed;
 use world::layout::{Layout, LayoutError};
 use world::procgen::authored;
@@ -209,7 +209,7 @@ fn no_bay_loop_street_is_steeper_than_a_real_one() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0xfa828737e825a89b;
+const BOWL_GOLDEN: u64 = 0x985a50fc532b99af;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.
@@ -249,6 +249,28 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
     );
     // The freeway across the floor.
     assert!(p.roads.edges.iter().any(|e| e.class == RoadClass::Highway));
+    // The set pieces found their places: the drag strip on the runway, gates where the
+    // rail line crosses the avenues, the garage, the hall, the letters, the
+    // tunnel on a stretch of freeway no street crosses.
+    let count = |k: PoiKind| p.pois.iter().filter(|q| q.kind == k).count();
+    for k in [
+        PoiKind::DragStrip,
+        PoiKind::CrewGarage,
+        PoiKind::TacoStand,
+        PoiKind::CityHall,
+        PoiKind::MoviePalace,
+        PoiKind::HillsideLetters,
+        PoiKind::WaterTower,
+        PoiKind::DriveIn,
+        PoiKind::Tunnel,
+    ] {
+        assert_eq!(count(k), 1, "{k:?}");
+    }
+    assert_eq!(count(PoiKind::Overlook), 3);
+    assert!(count(PoiKind::GradeCrossing) >= 5);
+    assert!(count(PoiKind::DonutShop) >= 2 && count(PoiKind::BurgerStand) >= 2);
+    let track = |q: &&place::Prop| matches!(q.kind, place::PropKind::Track { .. });
+    assert!(p.props.items.iter().filter(track).count() > 150);
     // The rim: the mountain front stands far over the floor.
     let mut m = authored::macro_map(Seed(1), &l);
     let _ = authored::arterials(&l, &mut m);

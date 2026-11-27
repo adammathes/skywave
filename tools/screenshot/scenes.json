@@ -64,60 +64,56 @@
     "params": { "menu": "vehicle", "car": "regent_coupe_cabrio", "t": "17:40", "still": "1", "stream": "0" }
   },
   "basin-boulevard-night": {
-    "about": "Mirage Valley (the socal_basin template) at night on the boulevard: the eastbound carriageway, the palm median and its lamps, the mini-malls, from the far chase camera.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl (the mirage_bowl layout) at night on the boulevard: the eastbound carriageway, the palm median and its lamps, the mini-malls, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "1500,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
   "basin-boulevard-afternoon": {
-    "about": "Mirage Valley's boulevard at 15:30 from the far chase camera, as basin-boulevard-night: the filler kept quiet (no names on the shops' sign bands, only bare stucco, plain fascias and mural walls; stepped and shaped parapets), the blade neon the only signs.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "15:30", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's boulevard at 15:30 from the far chase camera, as basin-boulevard-night: the filler kept quiet (no names on the shops' sign bands, only bare stucco, plain fascias and mural walls; stepped and shaped parapets), the blade neon the only signs.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "15:30", "pos": "1500,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
   "basin-channel-golden": {
-    "about": "Mirage Valley's flood channel at golden hour from its bed: the concrete trapezoid and its low-flow strip, looking down it toward the freeway's bridge, from the far chase camera.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "417.9,940", "yaw": "180", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's wash at golden hour from its bed: the concrete trapezoid and its low-flow strip, looking down it toward the freeway's bridge, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "1211,1350", "yaw": "187", "still": "1", "stream": "1" }
   },
   "basin-drive-thru-noon": {
-    "about": "Mirage Valley's donut shop drive-thru at noon from the near chase camera: the car stopped in the lane with its driver's door at the window (donut=1.1: the serve 1.1 s in), the person inside leaning out over the sill holding the pink box out to it.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-near", "t": "12:00", "still": "1", "stream": "1", "donut": "1.1" }
+    "about": "Mirage Bowl's donut shop drive-thru at noon from the near chase camera: the car stopped in the lane with its driver's door at the window (donut=1.1: the serve 1.1 s in), the person inside leaning out over the sill holding the pink box out to it.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-near", "t": "12:00", "still": "1", "stream": "1", "donut": "1.1" }
   },
   "basin-freeway-night": {
-    "about": "Mirage Valley's freeway at night, eastbound inside its tiled tunnel (the set piece), toward the far portal and an overpass past it, from the far chase camera.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "880,1054", "yaw": "90", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's freeway at night, eastbound across the floor toward downtown's towers: the streets' overpasses ahead, the lamps of the grid either side, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "1500,1556", "yaw": "90", "still": "1", "stream": "1" }
   },
   "basin-hills-night": {
-    "about": "Mirage Valley from the overlook road in the hills at night: its turnout's guard rail, benches and lamp, the lit grid and downtown below, from the far chase camera.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "664,184", "yaw": "180", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl from the lookout at the end of the observatory road at night: its turnout's guard rail, benches and lamp, the lit grid and downtown below, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "1098,436", "yaw": "180", "still": "1", "stream": "1" }
   },
   "basin-garage-night": {
-    "about": "Mirage Valley's crew garage at night from the far chase camera on the street before it: three open bays lit by their tubes, two hero cars nosed out in the outer bays and one angled on the apron, the backlit box sign over the bays lettered from the 2001 lexicon.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "1014,569", "yaw": "270", "still": "1", "stream": "1" }
-  },
-  "basin-tunnel-night": {
-    "about": "Mirage Valley's tiled freeway tunnel at night from the far chase camera before its west portal, eastbound: the concrete box and headwall over the freeway, its tiled band, the lit tile and lamp strips inside (basin-freeway-night is inside it).",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "836,1052", "yaw": "90", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's crew garage at night from the far chase camera on the summit avenue before it: three open bays lit by their tubes, two hero cars nosed out in the outer bays and one angled on the apron, the backlit box sign over the bays lettered from the 2001 lexicon.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "22:30", "pos": "1880,2748", "yaw": "90", "still": "1", "stream": "1" }
   },
   "basin-crossing-train": {
-    "about": "Mirage Valley's grade crossing on an arterial at dusk with the freight train across it (90 s into a run), from the mid chase camera stopped on the approach: both gates' arms down in red and white bands, the near mast's lamp lit, the train's boxcars, tank cars and hoppers on the track.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-mid", "lights": "1", "t": "18:25", "pos": "611.5,628", "yaw": "180", "train": "90", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's grade crossing on an arterial at dusk with the freight train across it (102 s into a run), from the mid chase camera stopped on the approach: both gates' arms down in red and white bands, the near mast's lamp lit, the train's boxcars, tank cars and hoppers on the track.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-mid", "lights": "1", "t": "18:25", "pos": "797,2776", "yaw": "180", "train": "102", "still": "1", "stream": "1" }
   },
   "basin-boulevard-dusk-wave": {
-    "about": "Mirage Valley's boulevard at dusk, 12 s into the street lamps' wave (civil dusk at 18:30:43), eastbound toward where it started: the median's lamps lit in the blocks ahead, striking or still dark in the near ones, signs at their own moments, from the far chase camera.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:30:55", "pos": "800,1256", "yaw": "90", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's boulevard at dusk, 12 s into the street lamps' wave (civil dusk at 18:30:43), eastbound toward where it started: the median's lamps lit in the blocks ahead, striking or still dark in the near ones, signs at their own moments, from the far chase camera.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "18:30:55", "pos": "1500,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
   "basin-palace-night": {
-    "about": "Mirage Valley's movie palace at night from the far chase camera, eastbound on the road along the foot of the hills (a downtown anchor, variant A, the owner's pick, sited where the hill roads see it): the marquee's lit boards and dim bulbs (the chasing third lit, frozen at the clock's phase), the blade sign lettered THEATRE in neon over it.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "21:30", "pos": "490,447", "yaw": "95", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's movie palace at night from the far chase camera, northbound on the summit avenue downtown (a downtown anchor, variant A, the owner's pick): the marquee's lit boards and dim bulbs (the chasing third lit, frozen at the clock's phase), the blade sign lettered THEATRE in neon over it.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "21:30", "pos": "1906,1740", "yaw": "0", "still": "1", "stream": "1" }
   },
   "basin-city-hall-golden": {
-    "about": "Mirage Valley's boulevard at golden hour from the far chase camera, northbound toward its head: the city hall (a downtown anchor, variant B: its clock tower over the arcade) closing the view across the T at the foot of the hills.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "1026,540", "yaw": "0", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's boulevard at golden hour from the far chase camera, eastbound toward its end: the city hall (a downtown anchor, variant B: its clock tower over the arcade) closing the view across the T at the east avenue.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "2600,1256", "yaw": "90", "still": "1", "stream": "1" }
   },
   "basin-letters-golden": {
-    "about": "Mirage Valley's hillside letters at golden hour from the far chase camera, north up the street that points at them (a terminated vista, docs/WORLD_GENERATION.md \"Vistas\"): MIRAGE in white sheet-metal letters on the slope above the foothill houses, closing the view.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "614,550", "yaw": "0", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's hillside letters at golden hour from the far chase camera, north up the summit avenue, which points at them (a terminated vista, docs/WORLD_GENERATION.md \"Vistas\"): MIRAGE in white sheet-metal letters on the slope above the foothill houses, closing the view.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "17:40", "pos": "1906,900", "yaw": "0", "still": "1", "stream": "1" }
   },
   "basin-water-tower-noon": {
-    "about": "Mirage Valley's water tower at noon from the far chase camera, east down the industrial street that points at it: the sky-blue pedestal tower (variant B) over the warehouses and their parked cars.",
-    "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "12:00", "pos": "795,1946", "yaw": "92", "still": "1", "stream": "1" }
+    "about": "Mirage Bowl's water tower at noon from the far chase camera, east down the yard road toward it: the sky-blue pedestal tower (variant B) over the warehouses and their parked cars.",
+    "params": { "seed": "1", "scenario": "mirage_bowl_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "12:00", "pos": "2100,2953", "yaw": "90", "still": "1", "stream": "1" }
   },
   "coast-dawn-haze": {
     "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera, the sky lightening behind them.",
