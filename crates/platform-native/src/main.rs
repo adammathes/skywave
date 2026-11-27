@@ -2281,7 +2281,7 @@ mod tests {
         const STILL: &str = "?stream=0&t=12:00&traffic=off";
         // Three seconds for the car to settle on its springs, not drawn.
         const SETTLE: u32 = 270;
-        let pause = |app: &mut App| app.open_menu(app::ui::Page::Pause);
+        let pause = |app: &mut App| app.open_menu(app::ui::Page::Game);
         let (paused, _) = draw_frames(STILL, pause, None, SETTLE, 120);
         eprintln!("paused: {paused:?}");
         assert_eq!(paused.world, 1, "{paused:?}");
@@ -2304,7 +2304,7 @@ mod tests {
         let query = "?seed=1&place=coast&t=17:40&traffic=off";
         let (drawn, plan) = draw_frames(query, |_| {}, None, 270, 600);
         eprintln!("coast, still: {drawn:?}; plan {plan:?} a frame drawn nothing");
-        let pause = |app: &mut App| app.open_menu(app::ui::Page::Pause);
+        let pause = |app: &mut App| app.open_menu(app::ui::Page::Game);
         let query = "?seed=1&place=coast&t=17:40&traffic=busy";
         let (drawn, plan) = draw_frames(query, pause, None, 270, 600);
         eprintln!("coast, busy traffic, paused: {drawn:?}; plan {plan:?} a frame drawn nothing");

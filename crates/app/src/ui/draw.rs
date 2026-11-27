@@ -15,12 +15,12 @@ use crate::map::view::{MapGeom, Minimap, MINIMAP_DIAMETER};
 use crate::radio::ndc_to_hud;
 
 use super::menu::{Unit, Widget};
-use super::names::{self, action_label, device_label, device_noun};
+use super::names::{self, action_label, device_noun};
 
 use super::pages::{self, ItemId, Page, QUALITY_NAMES};
 use super::roster;
-use super::{covers, Toast, Ui, FRAME_HISTORY};
-use crate::settings::{FrameRate, Overlay, Quality};
+use super::{covers, MenuNav, Toast, Ui, FRAME_HISTORY};
+use crate::settings::{Overlay, Quality};
 
 /// What the UI shows besides its own state.
 pub struct DrawCtx<'a> {
@@ -91,32 +91,30 @@ const TITLE_S: f32 = 3.0;
 const PAD: f32 = 36.0;
 const ROW_H: f32 = 34.0;
 const LINE_H: f32 = font::LINE_HEIGHT as f32 * S;
-const MAX_PANEL_W: f32 = 880.0;
-/// Panel space above the first row (crumbs, title, rule) and below the last (rule, hints).
-const HEADER_H: f32 = 98.0;
-const FOOTER_H: f32 = 62.0;
-/// The Vehicle page: its panel's width (the rest of the safe area is the turntable's
-/// stage, when it is at least `STAGE_MIN_W` wide), the gap between them, the room above
-/// the stage for the car's name, and the spec lines under the rows.
-const VEHICLE_PANEL_W: [f32; 2] = [470.0, 600.0];
-const STAGE_GAP: f32 = 16.0;
-const STAGE_MIN_W: f32 = 220.0;
-const STAGE_TITLE_H: f32 = 56.0;
+/// The full-screen menu: the tab bar's height, a tab name's padding and the gap between
+/// tabs, the gap between the bar, the body and the footer, the list column's width range
+/// and padding, the gap to the detail column and the least room it needs (else the list
+/// takes the whole width).
+const TAB_BAR_H: f32 = 64.0;
+const TAB_PAD: f32 = 14.0;
+const TAB_GAP: f32 = 10.0;
+const BODY_GAP: f32 = 24.0;
+const MIN_LIST_W: f32 = 420.0;
+const MAX_LIST_W: f32 = 600.0;
+const LIST_PAD: f32 = 20.0;
+const DETAIL_GAP: f32 = 24.0;
+const MIN_DETAIL_W: f32 = 260.0;
+/// Behind the menu: the game is not drawn there.
+const BACKDROP: [u8; 4] = [16, 20, 34, 255];
+/// The Car tab: the room above the turntable's stage for the car's name, and the spec
+/// lines under the rows.
+const STAGE_TITLE_H: f32 = 72.0;
 const SPEC_LINES: usize = 7;
-/// Where a spec line's value starts, from the panel's text edge.
+/// Where a spec line's value starts, from the column's text edge.
 const SPEC_VALUE_X: f32 = 150.0;
 /// Paint swatch size and spacing.
 const SWATCH: f32 = 20.0;
 const SWATCH_GAP: f32 = 8.0;
-/// The World page: room for its cards, the gap between them, their padding, the lines of
-/// text under the still, and a card's backdrop.
-const CARDS_H: f32 = 360.0;
-/// Cards on one page of the World page (more page with left and right).
-pub(super) const CARDS_PER_PAGE: usize = 3;
-const CARD_GAP: f32 = 20.0;
-const CARD_PAD: f32 = 12.0;
-const CARD_LINES: usize = 4;
-const CARD: [u8; 4] = [30, 36, 56, 255];
 /// A stub world's still is greyed.
 const STUB_TINT: [u8; 4] = [120, 120, 128, 255];
 
@@ -234,23 +232,6 @@ impl Display for SliderValue {
     }
 }
 
-struct Crumbs<'a>(&'a super::MenuNav);
-
-impl Display for Crumbs<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The pages above this one; the pause page only while it is the sole one.
-        let depth = self.0.depth();
-        let skip = usize::from(depth > 2);
-        for (i, page) in self.0.path().take(depth - 1).skip(skip).enumerate() {
-            if i > 0 {
-                f.write_str(" / ")?;
-            }
-            f.write_str(pages::title(page))?;
-        }
-        Ok(())
-    }
-}
-
 impl Ui {
     /// Lays out this frame's HUD.
     pub(super) fn draw(&mut self, ctx: &DrawCtx) {
@@ -362,84 +343,178 @@ impl Ui {
         shadowed(hud, line, S, TEXT, format_args!("{at} of {n}"));
     }
 
-    /// The World page: cards for the worlds side by side in `[x, y, w, h]` (each its still,
-    /// title, kind and year, cars and stations), the focused one framed, the one the app is
-    /// marked "here", a stub's still greyed and marked "coming". Up to [`CARDS_PER_PAGE`]
-    /// a page, the page with the focus shown and "< 1 / 2 >" under them when there are
-    /// more; past a UI scale of 1.5 one a page, its text beside the still.
-    fn draw_cards(&self, hud: &mut HudBuilder, area: [f32; 4], focus: usize) {
-        let [x, y, w, mut h] = area;
-        let n = self.items.len().max(1);
-        let side = self.settings.ui_scale > 1.5;
-        let per = if side { 1 } else { n.min(CARDS_PER_PAGE) };
-        let (page, pages) = (focus / per, n.div_ceil(per));
-        if pages > 1 {
-            h -= LINE_H + 6.0;
-            let args = format_args!("< {} / {} >", page + 1, pages);
-            text_center(hud, x + 0.5 * w, y + h + 6.0, S, DIM, args);
+    /// Words of `text` wrapped to `w` at `scale` from `(x, y)`, paragraphs at its line
+    /// breaks; returns the y under the last line. Lines are slices of `text`, so nothing is
+    /// allocated.
+    #[allow(clippy::too_many_arguments)]
+    fn wrapped(
+        hud: &mut HudBuilder,
+        x: f32,
+        mut y: f32,
+        w: f32,
+        scale: f32,
+        color: [u8; 4],
+        text: &str,
+    ) -> f32 {
+        let line_h = font::LINE_HEIGHT as f32 * scale;
+        for para in text.split('\n') {
+            let mut start = 0;
+            let mut end = 0;
+            for (i, _) in para
+                .match_indices(' ')
+                .chain(core::iter::once((para.len(), "")))
+            {
+                if end > start && width(&para[start..i], scale) > w {
+                    hud.text(x, y, scale, color, &para[start..end]);
+                    y += line_h;
+                    start = end + 1;
+                }
+                end = i;
+            }
+            hud.text(x, y, scale, color, para.get(start..).unwrap_or(""));
+            y += line_h;
         }
-        let cw = (w - CARD_GAP * (per - 1) as f32) / per as f32;
+        y
+    }
+
+    /// The tabs across the top of `[x, y, w]`: every tab's name, the open one lit, the
+    /// tab buttons at the ends; only the open one between them when they do not all fit.
+    fn draw_tabs(&self, hud: &mut HudBuilder, x: f32, y: f32, w: f32, open: Page) {
+        let d = self.last_device;
+        let ty = y + (TAB_BAR_H - LINE_H) * 0.5;
+        // The tab buttons at the ends, the names centered between them.
+        hud.text_fmt(
+            x,
+            ty,
+            S,
+            DIM,
+            format_args!("[{}]", Glyph(self, d, Action::MenuTabPrev)),
+        );
+        let prev = width(hud.last_text(), S);
+        let args = format_args!("[{}]", Glyph(self, d, Action::MenuTabNext));
+        let next = text_right(hud, x + w, ty, S, DIM, false, args);
+        let (x, w) = (x + prev + TAB_GAP, w - prev - next - 2.0 * TAB_GAP);
+        let tab_w = |t: Page| width(pages::title(t), S) + 2.0 * TAB_PAD;
+        let all: f32 = pages::TABS.iter().map(|&t| tab_w(t)).sum::<f32>()
+            + TAB_GAP * (pages::TABS.len() - 1) as f32;
+        let at = pages::TABS.iter().position(|&t| t == open).unwrap_or(0);
+        let shown = if all <= w {
+            &pages::TABS[..]
+        } else {
+            &pages::TABS[at..=at]
+        };
+        let total: f32 =
+            shown.iter().map(|&t| tab_w(t)).sum::<f32>() + TAB_GAP * (shown.len() - 1) as f32;
+        let mut cx = x + ((w - total) * 0.5).max(0.0);
+        for &t in shown {
+            let lit = t == open;
+            if lit {
+                hud.rect(cx, y + 10.0, tab_w(t), TAB_BAR_H - 20.0, ACCENT);
+            }
+            let color = if lit { ON_ACCENT } else { TEXT };
+            hud.text(cx + TAB_PAD, ty, S, color, pages::title(t));
+            cx += tab_w(t) + TAB_GAP;
+        }
+    }
+
+    /// The Worlds tab's detail for world `k` in `[x, y, w, h]`: its still, title, kind and
+    /// year, cars and stations, and whether you are there or it is still coming.
+    fn draw_world(&self, hud: &mut HudBuilder, area: [f32; 4], k: usize) {
+        let [x, y, w, h] = area;
+        let s = crate::scenario::get(k);
         let (still_w, still_h) = crate::scenario::STILL_SIZE;
         let aspect = still_w as f32 / still_h as f32;
-        let text_h = CARD_LINES as f32 * LINE_H + 10.0;
-        let (sw, sh) = if side {
-            let sh = (h - 2.0 * CARD_PAD).min(0.5 * cw / aspect).max(0.0);
-            (sh * aspect, sh)
-        } else {
-            let sh = ((cw - 2.0 * CARD_PAD) / aspect)
-                .min(h - text_h - 2.0 * CARD_PAD)
-                .max(0.0);
-            (sh * aspect, sh)
-        };
-        let first = page * per;
-        for (slot, item) in self.items.iter().enumerate().skip(first).take(per) {
-            let ItemId::World(k) = item.id else { continue };
-            let s = crate::scenario::get(k);
-            let cx = x + (slot - first) as f32 * (cw + CARD_GAP);
-            if slot == focus {
-                hud.rect(cx - 4.0, y - 4.0, cw + 8.0, h + 8.0, ACCENT);
-            }
-            hud.rect(cx, y, cw, h, CARD);
-            let (ix, iy) = if side {
-                (cx + CARD_PAD, y + 0.5 * (h - sh))
-            } else {
-                (cx + 0.5 * (cw - sw), y + CARD_PAD)
-            };
-            if sh >= 24.0 {
-                hud.image(HudImage {
-                    x: ix,
-                    y: iy,
-                    w: sw,
-                    h: sh,
-                    uv: crate::scenario::still_uv(k),
-                    texture: render::HudTexture::Still,
-                    mask: render::HudMask::Rounded(4.0),
-                    color: if s.stub { STUB_TINT } else { [255; 4] },
-                    ..HudImage::default()
-                });
-            }
-            let (tx, ty) = if side {
-                (ix + sw + CARD_PAD, y + 0.5 * (h - text_h) + 5.0)
-            } else {
-                (cx + CARD_PAD, iy + sh + 10.0)
-            };
-            let right = cx + cw - CARD_PAD;
-            hud.text(tx, ty, S, if s.stub { DIM } else { TEXT }, &s.title);
-            let line = |k: usize| ty + k as f32 * LINE_H;
-            hud.text_fmt(tx, line(1), S, DIM, format_args!("{}, {}", s.kind, s.year));
-            let cars = crate::scenario::lineup(k).cars.len();
-            let stations = crate::scenario::station_counts()[k];
-            hud.text_fmt(tx, line(2), S, DIM, format_args!("{cars} cars"));
-            hud.text_fmt(tx, line(3), S, DIM, format_args!("{stations} stations"));
-            // Beside the short lines, clear of the longer ones at any UI scale.
-            if k == self.scenario {
-                text_right(hud, right, line(2), S, GOOD, false, format_args!("here"));
-            }
-            if s.stub {
-                let at = line(3);
-                text_right(hud, right, at, S, ACCENT, false, format_args!("coming"));
-            }
+        let text_h = 6.0 * LINE_H + TITLE_S * font::LINE_HEIGHT as f32;
+        let sh = (w / aspect).min(h - text_h).max(0.0);
+        let sw = sh * aspect;
+        if sh >= 24.0 {
+            hud.image(HudImage {
+                x,
+                y,
+                w: sw,
+                h: sh,
+                uv: crate::scenario::still_uv(k),
+                texture: render::HudTexture::Still,
+                mask: render::HudMask::Rounded(4.0),
+                color: if s.stub { STUB_TINT } else { [255; 4] },
+                ..HudImage::default()
+            });
         }
+        let mut ty = y + sh + 18.0;
+        hud.text(x, ty, TITLE_S, TEXT, &s.title);
+        ty += TITLE_S * font::LINE_HEIGHT as f32 + 6.0;
+        let cars = crate::scenario::lineup(k).cars.len();
+        let stations = crate::scenario::station_counts()[k];
+        let lines = [
+            format_args!("{}, {}", s.kind, s.year),
+            format_args!("{cars} cars, {stations} stations"),
+        ];
+        for line in lines {
+            hud.text_fmt(x, ty, S, DIM, line);
+            ty += LINE_H;
+        }
+        ty += 6.0;
+        if s.stub {
+            hud.text(x, ty, S, ACCENT, "Coming soon");
+        } else if k == self.scenario {
+            hud.text(x, ty, S, GOOD, "You are here");
+        }
+    }
+
+    /// The right column: what the focused row is, or the tab's own picture (the turntable's
+    /// stage, a world, the credits, the remap question).
+    fn draw_detail(&mut self, hud: &mut HudBuilder, area: [f32; 4], page: Page, focus: usize) {
+        let [x, y, w, h] = area;
+        if page == Page::Car {
+            // The studio shows through: the car's name over the turntable's stage.
+            let stage = [x, y + STAGE_TITLE_H, w, h - STAGE_TITLE_H];
+            self.stage = Some(stage);
+            self.draw_stage_title(hud, stage);
+            return;
+        }
+        hud.rect(x, y, w, h, PANEL);
+        let (x, y, w, h) = (x + PAD, y + PAD, w - 2.0 * PAD, h - 2.0 * PAD);
+        if page == Page::Conflict {
+            if let Some(p) = &self.conflict {
+                hud.text_fmt(
+                    x,
+                    y,
+                    S,
+                    TEXT,
+                    format_args!(
+                        "{} is already bound to {}.\nMove it to {}, or keep it\nwhere it is?",
+                        BindingName(&p.conflict.binding),
+                        action_label(p.conflict.existing, Sign::Full),
+                        action_label(p.conflict.wanted, p.sign),
+                    ),
+                );
+            }
+            return;
+        }
+        if page == Page::Game {
+            hud.text(x, y, TITLE_S, TEXT, "Skywave");
+            let ty = y + TITLE_S * font::LINE_HEIGHT as f32 + 16.0;
+            Self::wrapped(hud, x, ty, w, S, DIM, pages::ABOUT);
+            return;
+        }
+        let Some(item) = self.items.get(focus) else {
+            return;
+        };
+        if let ItemId::World(k) = item.id {
+            self.draw_world(hud, [x, y, w, h], k);
+            return;
+        }
+        let mut ty = y;
+        if !item.label.is_empty() {
+            let scale = if width(item.label, TITLE_S) <= w {
+                TITLE_S
+            } else {
+                S
+            };
+            hud.text(x, ty, scale, TEXT, item.label);
+            ty += scale * font::LINE_HEIGHT as f32 + 16.0;
+        }
+        Self::wrapped(hud, x, ty, w, S, DIM, pages::help(item.id));
     }
 
     fn draw_menu(&mut self, hud: &mut HudBuilder) {
@@ -447,125 +522,64 @@ impl Ui {
         let [vw, vh] = hud.size();
         self.stage = None;
         let Some(menu) = &self.menu else { return };
-        let page = menu.page();
-        let vehicle = page == Page::Vehicle && self.capture.is_none();
-        // The Vehicle page's spec lines take the note's place, as many as leave room for
-        // its rows.
-        let spec_lines = if vehicle {
-            let room = sh - HEADER_H - self.items.len() as f32 * ROW_H - FOOTER_H - 12.0;
-            ((room / LINE_H).floor().max(0.0) as usize).min(SPEC_LINES)
-        } else {
-            0
-        };
-        // The panel fits its content, up to the safe area's height (then rows scroll).
-        let note_lines = match (page, pages::note(page)) {
-            (Page::Conflict, _) if self.conflict.is_some() => 2,
-            (_, Some(note)) => note.split('\n').count(),
-            _ => spec_lines,
-        };
-        let note_h = if note_lines > 0 {
-            note_lines as f32 * LINE_H + 12.0
-        } else {
-            0.0
-        };
-        let content = if page == Page::Worlds {
-            CARDS_H
-        } else {
-            self.items.len().max(1) as f32 * ROW_H
-        };
-        let wanted = HEADER_H + content + note_h + FOOTER_H;
-        let ph = wanted.min(sh);
-        let mut pw = sw.min(MAX_PANEL_W);
-        let mut px = sx + (sw - pw) * 0.5;
-        let top = sy + (sh - ph) * 0.5;
-        // The Vehicle page sits at the left, the turntable's stage to its right.
-        let panel_w = (0.5 * sw).clamp(VEHICLE_PANEL_W[0], VEHICLE_PANEL_W[1]);
-        if vehicle && sw - panel_w - STAGE_GAP >= STAGE_MIN_W {
-            (px, pw) = (sx, panel_w);
-            let x = sx + pw + STAGE_GAP;
-            // Level with the panel: the name at its top, the turntable below.
-            let h = ph.max(0.6 * sh);
-            let y = (top + 0.5 * ph - 0.5 * h).max(sy);
-            self.stage = Some([x, y + STAGE_TITLE_H, sx + sw - x, h - STAGE_TITLE_H]);
+        let (page, root, depth, focus) = (menu.page(), menu.root(), menu.depth(), menu.focus());
+        // Full screen: the menu replaces the game. The Car tab's studio is drawn under it
+        // instead (the renderer puts it where `stage` says).
+        let studio = page == Page::Car && self.capture.is_none();
+        let wide = sw >= MIN_LIST_W + DETAIL_GAP + MIN_DETAIL_W;
+        if !(studio && wide) {
+            hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, BACKDROP);
         }
-        // Dim the game under the menu, letterbox bars included; the Vehicle page's studio
-        // replaces it instead.
-        if self.stage.is_none() {
-            hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, SHADE);
-        }
-        let bottom = top + ph;
-        hud.rect(px, top, pw, ph, PANEL);
-        hud.rect(px, top, pw, 4.0, ACCENT);
-        hud.text_fmt(
-            px + PAD,
-            top + 22.0,
-            S,
-            DIM,
-            format_args!("{}", Crumbs(menu)),
-        );
-        hud.text(px + PAD, top + 46.0, TITLE_S, TEXT, pages::title(page));
-        hud.rect(px + PAD, top + 84.0, pw - 2.0 * PAD, 2.0, RULE);
+        // The tab bar, edge to edge.
+        hud.rect(-vw, sy - vh, 3.0 * vw, vh + TAB_BAR_H, PANEL);
+        hud.rect(-vw, sy + TAB_BAR_H, 3.0 * vw, 3.0, ACCENT);
+        self.draw_tabs(hud, sx, sy, sw, root);
+
+        let top = sy + TAB_BAR_H + BODY_GAP;
+        let footer = sy + sh - LINE_H;
+        let bottom = footer - BODY_GAP;
+        let list_w = if wide {
+            (0.45 * sw).clamp(MIN_LIST_W, MAX_LIST_W)
+        } else {
+            sw
+        };
+        hud.rect(sx, top, list_w, bottom - top, PANEL);
 
         // Footer: button hints and the status message.
-        let footer = bottom - 40.0;
-        hud.rect(px + PAD, footer - 14.0, pw - 2.0 * PAD, 2.0, RULE);
         let d = self.last_device;
-        let adjustable = self.items.get(menu.focus()).is_some_and(|i| {
+        let adjustable = self.items.get(focus).is_some_and(|i| {
             matches!(
                 i.widget,
                 Widget::Toggle(_) | Widget::Slider { .. } | Widget::Choice { .. }
             )
         });
-        let adjust = if adjustable {
-            "   [Left/Right] Adjust"
-        } else {
-            ""
+        let select = match page {
+            Page::Car => "Drive",
+            Page::Worlds => "Go there",
+            _ => "Select",
         };
-        if self.items.is_empty() {
-            let back = Glyph(self, d, Action::MenuBack);
-            hud.text_fmt(px + PAD, footer, S, DIM, format_args!("[{back}] Back"));
-        } else if page == Page::Worlds {
-            hud.text_fmt(
-                px + PAD,
-                footer,
-                S,
-                DIM,
-                format_args!(
-                    "[{}] Go there   [{}] Back",
-                    Glyph(self, d, Action::MenuConfirm),
-                    Glyph(self, d, Action::MenuBack),
-                ),
-            );
-        } else if page == Page::Vehicle {
-            hud.text_fmt(
-                px + PAD,
-                footer,
-                S,
-                DIM,
-                format_args!(
-                    "[{}] Drive   [{}] Back",
-                    Glyph(self, d, Action::MenuConfirm),
-                    Glyph(self, d, Action::MenuBack),
-                ),
-            );
-        } else {
-            hud.text_fmt(
-                px + PAD,
-                footer,
-                S,
-                DIM,
-                format_args!(
-                    "[{}] Select   [{}] Back{adjust}",
-                    Glyph(self, d, Action::MenuConfirm),
-                    Glyph(self, d, Action::MenuBack),
-                ),
-            );
-        }
+        let back = if depth > 1 { "Back" } else { "Close" };
+        hud.text_fmt(
+            sx,
+            footer,
+            S,
+            DIM,
+            format_args!(
+                "[{}] {select}   [{}] {back}{}",
+                Glyph(self, d, Action::MenuConfirm),
+                Glyph(self, d, Action::MenuBack),
+                if adjustable {
+                    "   [Left/Right] Adjust"
+                } else {
+                    ""
+                },
+            ),
+        );
         if let Some(t) = self.toast() {
             let args = ToastText(t, &self.music_name);
             text_right(
                 hud,
-                px + pw - PAD,
+                sx + sw,
                 footer,
                 S,
                 ACCENT,
@@ -574,47 +588,41 @@ impl Ui {
             );
         }
 
-        // A note above the footer (the conflict question, license text, hints).
-        let rows_bottom = bottom - FOOTER_H - note_h;
-        let y = rows_bottom + 6.0;
-        if page == Page::Conflict {
-            if let Some(p) = &self.conflict {
-                hud.text_fmt(
-                    px + PAD,
-                    y,
-                    S,
-                    TEXT,
-                    format_args!(
-                        "{} is already bound to {}.\nMove it to {}, or keep it where it is?",
-                        BindingName(&p.conflict.binding),
-                        action_label(p.conflict.existing, Sign::Full),
-                        action_label(p.conflict.wanted, p.sign),
-                    ),
-                );
+        // A page under a tab names itself over its rows.
+        let mut rows_top = top + LIST_PAD;
+        if depth > 1 {
+            let title = format_args!("{} / {}", pages::title(root), pages::title(page));
+            hud.text_fmt(sx + PAD, rows_top, S, DIM, title);
+            rows_top += LINE_H + 12.0;
+            hud.rect(sx + PAD, rows_top - 6.0, list_w - 2.0 * PAD, 2.0, RULE);
+        }
+        // The Car tab's specs under its rows, as many lines as fit.
+        let mut rows_bottom = bottom - LIST_PAD;
+        if page == Page::Car {
+            let room = rows_bottom - rows_top - self.items.len() as f32 * ROW_H - 12.0;
+            let lines = ((room / LINE_H).floor().max(0.0) as usize).min(SPEC_LINES);
+            if lines > 0 {
+                let y = rows_bottom - lines as f32 * LINE_H;
+                self.draw_specs(hud, sx + PAD, y, list_w - 2.0 * PAD, lines);
+                rows_bottom = y - 12.0;
             }
-        } else if let Some(note) = pages::note(page) {
-            hud.text(px + PAD, y, S, DIM, note);
-        } else if spec_lines > 0 {
-            self.draw_specs(hud, px + PAD, y, pw - 2.0 * PAD, spec_lines);
         }
-        if let Some(stage) = self.stage {
-            self.draw_stage_title(hud, stage);
+        self.draw_rows(hud, [sx, rows_top, list_w, rows_bottom - rows_top]);
+        if wide {
+            let x = sx + list_w + DETAIL_GAP;
+            let focus = self.menu.as_ref().map_or(0, MenuNav::focus);
+            self.draw_detail(hud, [x, top, sx + sw - x, bottom - top], page, focus);
         }
+        if let Some(cap) = self.capture {
+            self.draw_capture(hud, cap);
+        }
+    }
 
-        // Rows (or the World page's cards).
-        let rows_top = top + HEADER_H;
-        if page == Page::Worlds {
-            let area = [
-                px + PAD,
-                rows_top,
-                pw - 2.0 * PAD,
-                rows_bottom - rows_top - 8.0,
-            ];
-            self.draw_cards(hud, area, menu.focus());
-            return;
-        }
-        // (A hair over, so a panel sized for n rows shows n.)
-        let rows = (((rows_bottom - rows_top) / ROW_H + 1e-3).floor() as usize).max(1);
+    /// The focused page's rows in `[x, y, w, h]` (scrolled to keep the focus in view).
+    fn draw_rows(&mut self, hud: &mut HudBuilder, area: [f32; 4]) {
+        let [px, rows_top, pw, h] = area;
+        // (A hair over, so a column sized for n rows shows n.)
+        let rows = ((h / ROW_H + 1e-3).floor() as usize).max(1);
         let len = self.items.len();
         if let Some(menu) = &mut self.menu {
             menu.fit(len, rows);
@@ -687,7 +695,7 @@ impl Ui {
                 } => {
                     let shown = SliderValue(value, unit);
                     text_right(hud, right, ty, S, fg, false, format_args!("{shown}"));
-                    let (tw, tx) = (150.0, right - 112.0 - 150.0);
+                    let (tw, tx) = (120.0, right - 104.0 - 120.0);
                     let frac = if max > min {
                         ((value - min) / (max - min)).clamp(0.0, 1.0)
                     } else {
@@ -705,20 +713,6 @@ impl Ui {
                 Widget::Choice { index, .. } if item.id == ItemId::Paint => {
                     self.draw_swatches(hud, right, y, index, focused);
                 }
-                Widget::Choice { index, .. } if item.id == ItemId::FrameRate => {
-                    let hz = self.panel_hz();
-                    match FrameRate::ALL.get(index) {
-                        Some(&f) if index > 0 => {
-                            let fps = f.fps(hz);
-                            let args = format_args!("< {fps:.0} fps >");
-                            text_right(hud, right, ty, S, fg, false, args);
-                        }
-                        _ => {
-                            let args = format_args!("< Panel ({hz:.0}) >");
-                            text_right(hud, right, ty, S, fg, false, args);
-                        }
-                    }
-                }
                 Widget::Choice { options, index } => {
                     let name = options.get(index).copied().unwrap_or("?");
                     text_right(hud, right, ty, S, fg, false, format_args!("< {name} >"));
@@ -726,7 +720,12 @@ impl Ui {
                 Widget::Submenu(_) => {
                     text_right(hud, right, ty, S, dim, false, format_args!(">"));
                 }
-                Widget::Action => {}
+                Widget::Action => {
+                    if item.id == ItemId::World(self.scenario) {
+                        let color = if focused { fg } else { GOOD };
+                        text_right(hud, right, ty, S, color, false, format_args!("here"));
+                    }
+                }
                 Widget::Capture {
                     device,
                     action,
@@ -763,51 +762,54 @@ impl Ui {
                 "v",
             );
         }
+    }
 
-        if let Some(cap) = self.capture {
-            hud.rect(px, top, pw, sh, SHADE);
-            let (bw, bh) = (pw.min(640.0), 200.0);
-            let (bx, by) = (px + (pw - bw) * 0.5, sy + (sh - bh) * 0.5);
-            hud.rect(bx, by, bw, bh, DIALOG);
-            hud.rect(bx, by, bw, 4.0, ACCENT);
-            let cx = bx + bw * 0.5;
-            text_center(
-                hud,
-                cx,
-                by + 28.0,
-                S,
-                DIM,
-                format_args!("Press the new input for"),
-            );
-            text_center(
-                hud,
-                cx,
-                by + 62.0,
-                TITLE_S,
-                TEXT,
-                format_args!("{}", action_label(cap.action, cap.sign)),
-            );
-            text_center(
-                hud,
-                cx,
-                by + 108.0,
-                S,
-                DIM,
-                format_args!("on the {}", device_noun(cap.device)),
-            );
-            text_center(
-                hud,
-                cx,
-                by + 150.0,
-                S,
-                ACCENT,
-                format_args!(
-                    "[{}] Cancel   ({:.0} s)",
-                    Glyph(self, cap.device, Action::MenuBack),
-                    cap.remaining.ceil()
-                ),
-            );
-        }
+    /// The remap prompt over everything: press the new input, or Back to cancel.
+    fn draw_capture(&self, hud: &mut HudBuilder, cap: super::CaptureState) {
+        let [sx, sy, sw, sh] = hud.safe_rect();
+        let [vw, vh] = hud.size();
+        hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, SHADE);
+        let (bw, bh) = (sw.min(640.0), 200.0);
+        let (bx, by) = (sx + (sw - bw) * 0.5, sy + (sh - bh) * 0.5);
+        hud.rect(bx, by, bw, bh, DIALOG);
+        hud.rect(bx, by, bw, 4.0, ACCENT);
+        let cx = bx + bw * 0.5;
+        text_center(
+            hud,
+            cx,
+            by + 28.0,
+            S,
+            DIM,
+            format_args!("Press the new input for"),
+        );
+        text_center(
+            hud,
+            cx,
+            by + 62.0,
+            TITLE_S,
+            TEXT,
+            format_args!("{}", action_label(cap.action, cap.sign)),
+        );
+        text_center(
+            hud,
+            cx,
+            by + 108.0,
+            S,
+            DIM,
+            format_args!("on the {}", device_noun(cap.device)),
+        );
+        text_center(
+            hud,
+            cx,
+            by + 150.0,
+            S,
+            ACCENT,
+            format_args!(
+                "[{}] Cancel   ({:.0} s)",
+                Glyph(self, cap.device, Action::MenuBack),
+                cap.remaining.ceil()
+            ),
+        );
     }
 
     /// The driving HUD; returns where the status toast is (its top and how far right it
@@ -1197,7 +1199,7 @@ impl Ui {
                 "{}  draws {}  (shadow {}, bloom {})  cpu {:.2} ms\n\
                  instances {}  drawn {}  shadow {}/{}/{}\n\
                  tris {:.0}k  shadow {:.0}k\n\
-                 shadow {} x{} ({} drawn)  {} {}\n\
+                 shadow {} x{} ({} drawn)  {}\n\
                  view {}x{} of {}x{}  bloom {}\n\
                  lights {}/{}  coronas {}\n\
                  sim {} steps/frame  tick {}\n\
@@ -1226,7 +1228,6 @@ impl Ui {
                     .iter()
                     .position(|&q| q == self.quality())
                     .unwrap_or(2)],
-                if self.settings.bloom { "" } else { "bloom off" },
                 r.render_size.0,
                 r.render_size.1,
                 r.surface_size.0,
@@ -1324,7 +1325,7 @@ impl Display for ToastText<'_> {
             Toast::WrongDevice(d) => write!(f, "Use the {}", device_noun(d)),
             Toast::Southpaw => f.write_str("Sticks swapped"),
             Toast::SwapTriggers => f.write_str("Throttle and brake on the right stick"),
-            Toast::Reset(d) => write!(f, "{} reset to defaults", device_label(d)),
+            Toast::ControlsReset => f.write_str("Controls reset to defaults"),
             Toast::Vehicle(i) => match roster::roster().get(i) {
                 Some(car) => f.write_str(&car.name),
                 None => Ok(()),

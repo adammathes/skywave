@@ -68,8 +68,8 @@ mod web;
 
 /// The first value of `key` in a URL query string such as `?seed=123&car=homestead_wagon`.
 /// The scene keys (`seed`, `car`, `cam`, `t`, `pos`, `yaw`, `lights`, `fly`, `still`, `map`,
-/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=1` opens the settings menu,
-/// `menu=vehicle` the pause menu's Vehicle page, `selftest=1` runs the determinism self-test
+/// `ui`, `stream`) are read by `app::SceneSetup::from_query`; `menu=<tab>` opens the menu on a
+/// tab ([`menu_from_query`]), `selftest=1` runs the determinism self-test
 /// and `diag=1` the start-up diagnostics instead of the game, and `gl=1` / `gpu=1` pick the backend ([`BackendChoice`]).
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
@@ -78,22 +78,19 @@ pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
         .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
 }
 
-/// True when the URL query asks to open the settings menu at startup (`menu=1`), for
-/// screenshots of the menu.
-pub fn menu_from_query(query: &str) -> bool {
-    query_param(query, "menu") == Some("1")
-}
+/// The menu tabs `menu=` may open at startup, for screenshots of the menu (`menu=1` is
+/// the first, Game; `menu=vehicle` was the Car tab's old name).
+pub const MENU_TABS: [&str; 8] = [
+    "game", "car", "worlds", "driving", "camera", "display", "audio", "controls",
+];
 
-/// True when the URL query asks to open the Vehicle page at startup (`menu=vehicle`), for
-/// screenshots of it.
-pub fn vehicle_menu_from_query(query: &str) -> bool {
-    query_param(query, "menu") == Some("vehicle")
-}
-
-/// True when the URL query asks to open the World page at startup (`menu=worlds`), for
-/// screenshots of it.
-pub fn worlds_menu_from_query(query: &str) -> bool {
-    query_param(query, "menu") == Some("worlds")
+/// The index in [`MENU_TABS`] of the tab the URL query asks to open at startup.
+pub fn menu_from_query(query: &str) -> Option<usize> {
+    match query_param(query, "menu")? {
+        "1" => Some(0),
+        "vehicle" => Some(1),
+        name => MENU_TABS.iter().position(|&t| t == name),
+    }
 }
 
 /// The graphics backends the browser build can run on.
@@ -465,16 +462,14 @@ mod tests {
 
     #[test]
     fn parses_menu_parameter() {
-        assert!(menu_from_query("?menu=1"));
-        assert!(menu_from_query("?seed=4&menu=1"));
-        assert!(!menu_from_query("?menu=0"));
-        assert!(!menu_from_query("?mymenu=1"));
-        assert!(!menu_from_query(""));
-        assert!(vehicle_menu_from_query("?still=1&menu=vehicle"));
-        assert!(!vehicle_menu_from_query("?menu=1"));
-        assert!(worlds_menu_from_query("?menu=worlds&still=1"));
-        assert!(!worlds_menu_from_query("?menu=vehicle"));
-        assert!(!menu_from_query("?menu=vehicle"));
+        assert_eq!(menu_from_query("?menu=1"), Some(0));
+        assert_eq!(menu_from_query("?seed=4&menu=1"), Some(0));
+        assert_eq!(menu_from_query("?menu=0"), None);
+        assert_eq!(menu_from_query("?mymenu=1"), None);
+        assert_eq!(menu_from_query(""), None);
+        assert_eq!(menu_from_query("?still=1&menu=vehicle"), Some(1));
+        assert_eq!(menu_from_query("?menu=worlds&still=1"), Some(2));
+        assert_eq!(menu_from_query("?menu=controls"), Some(7));
     }
 
     #[test]

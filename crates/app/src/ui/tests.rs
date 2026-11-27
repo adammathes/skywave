@@ -107,14 +107,33 @@ impl Harness {
         }
     }
 
-    /// Opens the menu and walks to `path` by selecting each item in turn (pad only).
+    /// The tab the menu is on.
+    fn tab(&self) -> Page {
+        self.ui().menu().expect("menu open").root()
+    }
+
+    /// Opens the menu and walks to `path` by selecting each item in turn, or for a tab
+    /// stepping right along the tabs to it (pad only).
     fn open(&mut self, path: &[ItemId]) {
         if !self.app.menu_open() {
             self.pad(PadButton::Start);
         }
         for &id in path {
-            self.focus_on(id);
-            self.pad(PadButton::South);
+            match id {
+                ItemId::Open(tab) if TABS.contains(&tab) => {
+                    for _ in 0..TABS.len() {
+                        if self.tab() == tab {
+                            break;
+                        }
+                        self.pad(PadButton::R1);
+                    }
+                    assert_eq!(self.page(), tab);
+                }
+                _ => {
+                    self.focus_on(id);
+                    self.pad(PadButton::South);
+                }
+            }
         }
     }
 
@@ -190,28 +209,33 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     assert!(ticks > 0);
     assert!(!h.app.menu_open());
     h.pad(PadButton::Start);
-    assert_eq!(h.page(), Page::Pause);
+    assert_eq!(h.page(), Page::Game);
     let paused_at = h.app.ticks();
     let bindings = h.app.bindings().clone();
     let settings = h.app.settings().clone();
 
+    // Every tab in turn (the right shoulder steps along them, wrapping).
     let mut visited = Vec::new();
     let mut changed = 0;
-    explore(&mut h, &mut visited, &mut changed);
-
     let mut expected = Vec::new();
-    reachable(Page::Pause, &h.app, &mut expected);
+    for &tab in &TABS {
+        assert_eq!(h.page(), tab);
+        explore(&mut h, &mut visited, &mut changed);
+        reachable(tab, &h.app, &mut expected);
+        h.pad(PadButton::R1);
+    }
+    assert_eq!(h.page(), Page::Game, "the tabs wrap");
     assert_eq!(visited, expected);
-    // The pause menu's Controls item among them.
+    // The Game tab's Controls item among them.
     let controls = h.ui().items().iter().position(|i| i.id == ItemId::Controls);
-    assert!(visited.contains(&(Page::Pause, controls.expect("Controls item"))));
-    // Pause, Settings, Controls, 2 × (device, bindings, axes, 8 axes), Video, World, About.
+    assert!(visited.contains(&(Page::Game, controls.expect("Controls item"))));
+    // The eight tabs, both devices' bindings, the stations.
     let mut pages: Vec<Page> = visited.iter().map(|v| v.0).collect();
     pages.dedup();
-    assert!(pages.len() >= 25, "{}", pages.len());
-    assert!(visited.len() > 150, "{}", visited.len());
-    // Toggles, sliders and choices on the device, axis, video and world pages.
-    assert!(changed >= 2 * (3 + 8 * 4) + 4 + 2, "{changed}");
+    assert!(pages.len() >= 11, "{}", pages.len());
+    assert!(visited.len() > 100, "{}", visited.len());
+    // Toggles, sliders and choices on the tabs.
+    assert!(changed >= 35, "{changed}");
     // Everything was put back, and the simulation stood still throughout.
     assert_eq!(h.app.bindings(), &bindings);
     // Choosing a preset (and back) makes the automatic one an explicit choice.
@@ -222,7 +246,7 @@ fn gamepad_alone_reaches_every_item_and_changes_every_value() {
     assert_eq!(h.app.settings(), &explicit);
     assert_eq!(h.app.ticks(), paused_at);
 
-    // Back on the pause page closes the menu, and the simulation runs again.
+    // Back on a tab closes the menu, and the simulation runs again.
     h.pad(PadButton::East);
     assert!(!h.app.menu_open());
     h.frame();
@@ -234,22 +258,20 @@ fn invert_y_toggle_flips_gamepad_look_and_persists() {
     let store = SharedStore::default();
     let mut h = Harness::with_store(&store);
     let pad = DeviceKind::Gamepad;
-    h.open(&[
-        ItemId::Open(Page::Settings),
-        ItemId::Open(Page::Controls),
-        ItemId::Open(Page::Device(pad)),
-    ]);
-    assert_eq!(h.item(0).id, ItemId::InvertLookY(pad));
-    assert_eq!(h.item(0).label, "Invert look Y");
-    assert_eq!(h.item(0).widget, Widget::Toggle(false));
-    assert!(h.hud_text().contains("Invert look Y"));
+    h.open(&[ItemId::Open(Page::Controls)]);
+    h.focus_on(ItemId::InvertLook);
+    let i = h.focus();
+    assert_eq!(h.item(i).label, "Invert look");
+    assert_eq!(h.item(i).widget, Widget::Toggle(false));
+    assert!(h.hud_text().contains("Invert look"));
     h.pad(PadButton::South);
-    assert_eq!(h.item(0).widget, Widget::Toggle(true));
+    assert_eq!(h.item(i).widget, Widget::Toggle(true));
     assert!(h.app.bindings().axis_options(pad, Action::LookY).invert);
     assert!(h.app.bindings().axis_options(pad, Action::FlyLookY).invert);
     assert!(!h.app.bindings().axis_options(pad, Action::LookX).invert);
+    // One switch for both devices.
     assert!(
-        !h.app
+        h.app
             .bindings()
             .axis_options(DeviceKind::KeyboardMouse, Action::LookY)
             .invert
@@ -284,9 +306,7 @@ fn remap_capture_resolves_conflicts_both_ways() {
     let pad = DeviceKind::Gamepad;
     let btn = |b| Binding::new(RawInput::PadButton(b), Sign::Positive);
     h.open(&[
-        ItemId::Open(Page::Settings),
         ItemId::Open(Page::Controls),
-        ItemId::Open(Page::Device(pad)),
         ItemId::Open(Page::Bindings(pad)),
     ]);
     let horn = ItemId::Bind(pad, Action::Horn, Sign::Full);
@@ -389,13 +409,11 @@ fn keyboard_remap_replaces_one_direction() {
     let mut h = Harness::new();
     let kb = DeviceKind::KeyboardMouse;
     h.key(Key::Escape);
-    assert_eq!(h.page(), Page::Pause);
-    for id in [
-        ItemId::Open(Page::Settings),
-        ItemId::Open(Page::Controls),
-        ItemId::Open(Page::Device(kb)),
-        ItemId::Open(Page::Bindings(kb)),
-    ] {
+    assert_eq!(h.page(), Page::Game);
+    // Q steps left along the tabs, wrapping to the last: Controls.
+    h.key(Key::KeyQ);
+    assert_eq!(h.page(), Page::Controls);
+    for id in [ItemId::Open(Page::Bindings(kb))] {
         let target = h.ui().items().iter().position(|i| i.id == id).unwrap();
         while h.focus() != target {
             h.key(Key::ArrowDown);
@@ -434,7 +452,7 @@ fn keyboard_remap_replaces_one_direction() {
 #[test]
 fn holding_right_repeats_on_a_slider() {
     let mut h = Harness::new();
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Video)]);
+    h.open(&[ItemId::Open(Page::Display)]);
     h.focus_on(ItemId::UiScale);
     let right = RawInput::PadButton(PadButton::DpadRight);
     h.input.press(right);
@@ -451,7 +469,7 @@ fn holding_right_repeats_on_a_slider() {
 #[test]
 fn world_page_drives_the_clock() {
     let mut h = Harness::new();
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::World)]);
+    h.open(&[ItemId::Open(Page::Driving)]);
     // A quarter hour later, on the slider's 15-minute grid.
     let want = (h.app.time.clock.seconds_of_day / 900.0).round() * 900.0 + 900.0;
     h.focus_on(ItemId::TimeOfDay);
@@ -547,7 +565,7 @@ fn the_overlay_mode_persists_and_is_on_the_hud_page() {
     let mut again = Harness::with_store(&store);
     assert_eq!(again.app.settings().overlay, Overlay::Fps);
     // Settings › HUD offers the same three, in cycle order.
-    again.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    again.open(&[ItemId::Open(Page::Display)]);
     again.focus_on(ItemId::DebugOverlay);
     let item = again.item(again.focus());
     assert_eq!(
@@ -585,8 +603,7 @@ fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
     h.app.ui.settings_mut().overlay = Overlay::Full;
     h.frame();
     assert_eq!(overlay_shown(&h), Some(Overlay::Full));
-    // The pause page, each page it opens (vehicle select, settings, worlds) and each page
-    // under settings.
+    // Every tab and each page under one.
     let submenus = |h: &Harness, page| {
         let mut items = Vec::new();
         pages::build(page, &h.app.ui.page_ctx(&h.app.time.clock), &mut items);
@@ -599,17 +616,11 @@ fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
             .collect::<Vec<_>>()
     };
     let mut paths = vec![vec![]];
-    for page in submenus(&h, Page::Pause) {
-        paths.push(vec![ItemId::Open(page)]);
-    }
-    for page in submenus(&h, Page::Settings) {
-        paths.push(vec![ItemId::Open(Page::Settings), ItemId::Open(page)]);
-    }
-    for page in [Page::Vehicle, Page::Settings, Page::Worlds, Page::Hud] {
-        assert!(
-            paths.iter().any(|p| p.last() == Some(&ItemId::Open(page))),
-            "{page:?} covered"
-        );
+    for tab in TABS {
+        paths.push(vec![ItemId::Open(tab)]);
+        for page in submenus(&h, tab) {
+            paths.push(vec![ItemId::Open(tab), ItemId::Open(page)]);
+        }
     }
     for path in &paths {
         h.open(path);
@@ -627,7 +638,7 @@ fn every_menu_and_the_map_hide_the_overlay_until_they_close() {
     assert_eq!(overlay_shown(&h), Some(Overlay::Full), "after the map");
 
     // F3 under a menu cycles the saved mode, which shows once the menu closes.
-    h.open(&[ItemId::Open(Page::Settings)]);
+    h.open(&[ItemId::Open(Page::Display)]);
     h.key(Key::F3);
     assert_eq!(h.app.settings().overlay, Overlay::Off);
     h.key(Key::F3);
@@ -776,14 +787,26 @@ fn quit_is_offered_only_where_it_works() {
 }
 
 #[test]
-fn open_settings_starts_on_the_settings_page() {
+fn open_menu_starts_on_a_page_over_its_tab() {
     let mut h = Harness::new();
-    h.app.open_settings();
+    h.app.open_menu(Page::Stations);
     h.frame();
-    assert_eq!(h.page(), Page::Settings);
-    assert!(h.hud_text().contains("Controls"));
+    assert_eq!(h.page(), Page::Stations);
+    assert!(h.hud_text().contains("Audio / Stations"));
+    // Every tab's name is across the top.
+    for tab in TABS {
+        assert!(h.hud_text().contains(pages::title(tab)), "{tab:?}");
+    }
     h.pad(PadButton::East);
-    assert_eq!(h.page(), Page::Pause);
+    assert_eq!(h.page(), Page::Audio);
+    // The shoulders and Q / E move along the tabs from a page under one too.
+    h.app.open_menu(Page::Stations);
+    h.key(Key::KeyE);
+    assert_eq!(h.page(), Page::Controls);
+    h.pad(PadButton::L1);
+    assert_eq!(h.page(), Page::Audio);
+    h.pad(PadButton::East);
+    assert!(!h.app.menu_open(), "back on a tab closes the menu");
 }
 
 #[test]
@@ -869,8 +892,8 @@ fn minimap_shows_while_driving_and_hides_under_the_menu() {
 fn hud_page_switches_the_minimap_and_its_zoom() {
     let store = SharedStore::default();
     let mut h = Harness::with_store(&store);
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
-    assert_eq!(h.page(), Page::Hud);
+    h.open(&[ItemId::Open(Page::Display)]);
+    assert_eq!(h.page(), Page::Display);
     // Rotate off: north-up; zoom Auto -> 500 m.
     h.focus_on(ItemId::MinimapRotate);
     h.pad(PadButton::DpadRight);
@@ -887,7 +910,7 @@ fn hud_page_switches_the_minimap_and_its_zoom() {
     let arrow = first_image(&mut h, render::HudTexture::Arrow);
     assert!((arrow.rotation - core::f32::consts::FRAC_PI_2).abs() < 1e-3);
     // Minimap off.
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    h.open(&[ItemId::Open(Page::Display)]);
     h.focus_on(ItemId::Minimap);
     h.pad(PadButton::South);
     assert!(!h.app.settings().minimap);
@@ -1008,7 +1031,7 @@ fn drive_page_switches_the_handling_and_persists() {
         vehicle::Assists::ARCADE,
         "arcade by default"
     );
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Drive)]);
+    h.open(&[ItemId::Open(Page::Driving)]);
     assert_eq!(h.item(0).id, ItemId::Handling);
     h.pad(PadButton::DpadRight);
     assert_eq!(h.app.settings().handling, Handling::Light);
@@ -1084,7 +1107,7 @@ fn drive_page_sets_the_headlights_to_manual_and_persists() {
     let mut h = Harness::with_store(&store);
     assert!(h.app.settings().headlights_auto, "auto by default");
     assert!(h.app.drive.auto_headlights);
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Drive)]);
+    h.open(&[ItemId::Open(Page::Driving)]);
     h.focus_on(ItemId::Headlights);
     h.pad(PadButton::DpadRight);
     assert!(!h.app.settings().headlights_auto);
@@ -1100,7 +1123,7 @@ fn camera_page_sets_the_cockpit_and_the_camera_is_remembered() {
     let store = SharedStore::default();
     let mut h = Harness::with_store(&store);
     assert_eq!(h.app.hud_state().camera_mode, CameraMode::ChaseMid);
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Camera)]);
+    h.open(&[ItemId::Open(Page::Camera)]);
     // Camera: chase mid -> chase near, applied at once.
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.settings().camera, CameraMode::ChaseNear);
@@ -1181,7 +1204,7 @@ fn the_cockpit_driver_can_be_hidden() {
         assert!(cycles < 8, "no cockpit in the cycle");
     }
     assert!(drawn(&mut h), "the driver's on by default");
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Camera)]);
+    h.open(&[ItemId::Open(Page::Camera)]);
     h.focus_on(ItemId::CockpitDriver);
     h.pad(PadButton::South);
     h.pad(PadButton::Start);
@@ -1217,20 +1240,18 @@ fn the_sound_follows_the_car_and_the_audio_page() {
     assert!(p.horn && p.speed_mps > 1.0);
     h.input.axis(RawInput::PadAxis(PadAxis::R2), 0.0);
     h.input.release(RawInput::Key(Key::KeyB));
-    // Audio page: the master volume down a step, mute on; a menu pauses the sound.
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    // Audio tab: the master volume down a step; a menu pauses the sound.
+    h.open(&[ItemId::Open(Page::Audio)]);
     assert!(h.app.audio_params().paused);
     h.focus_on(ItemId::MasterVolume);
     h.pad(PadButton::DpadLeft);
-    h.focus_on(ItemId::Mute);
-    h.pad(PadButton::South);
     let p = *h.app.audio_params();
-    assert!((p.master - 0.75).abs() < 1e-6 && p.muted);
+    assert!((p.master - 0.75).abs() < 1e-6);
     h.pad(PadButton::Start);
     assert!(!h.app.audio_params().paused);
     let saved = store.0.borrow().clone().expect("saved on close");
     let (s, _) = Settings::from_json(&saved);
-    assert!(s.mute && (s.master_volume - 0.75).abs() < 1e-6);
+    assert!((s.master_volume - 0.75).abs() < 1e-6);
 }
 
 /// Mesh ids one registration of the built-in car `id` takes.
@@ -1325,8 +1346,8 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert!(h.app.drive.odometer_m() > 5.0);
 
     // Pause > Vehicle: the car chooser focused on the car driven, its specs beside it.
-    h.open(&[ItemId::Open(Page::Vehicle)]);
-    assert_eq!(h.page(), Page::Vehicle);
+    h.open(&[ItemId::Open(Page::Car)]);
+    assert_eq!(h.page(), Page::Car);
     let ids: Vec<ItemId> = h.ui().items().iter().map(|i| i.id).collect();
     assert_eq!(
         ids,
@@ -1411,7 +1432,7 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert_eq!((saved.vehicle, saved.paint), (Some("homestead_wagon"), 0));
 
     // Back to the first car: its meshes again, nothing new.
-    h.open(&[ItemId::Open(Page::Vehicle)]);
+    h.open(&[ItemId::Open(Page::Car)]);
     assert_eq!(browsed(&h), (1, 0), "starts on the car driven");
     h.pad(PadButton::DpadLeft);
     h.pad(PadButton::South);
@@ -1420,7 +1441,7 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
     assert_eq!(h.app.mesh_count(), before + wagon_meshes);
     assert_eq!(h.app.take_new_meshes().count(), 0);
     // Picking the car already driven, from any row, changes nothing.
-    h.open(&[ItemId::Open(Page::Vehicle), ItemId::Paint]);
+    h.open(&[ItemId::Open(Page::Car), ItemId::Paint]);
     assert_eq!(h.app.car_meshes, gannet_ids);
     assert!(!h.app.menu_open());
 
@@ -1454,7 +1475,7 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
     let builtin = &crate::vehicles::BUILTIN[..crate::scenario::lineup(0).cars.len()];
     let mut h = Harness::new();
     assert!(turntable(&mut h).is_empty(), "driving");
-    h.open(&[ItemId::Open(Page::Vehicle)]);
+    h.open(&[ItemId::Open(Page::Car)]);
     let before = h.app.mesh_count();
     let new: usize = builtin[1..].iter().map(|(id, _)| car_mesh_count(id)).sum();
     for lap in 0..2 {
@@ -1513,7 +1534,7 @@ fn the_vehicle_page_cycles_every_car_on_one_turntable() {
     h.pad(PadButton::DpadDown);
     assert_eq!(h.item(3).id, ItemId::Vehicle(last));
     h.pad(PadButton::East);
-    assert_eq!(h.page(), Page::Pause);
+    assert!(!h.app.menu_open());
     assert!(turntable(&mut h).is_empty(), "the page is closed");
     assert_eq!(h.app.drive.spec.id, builtin[0].0);
 }
@@ -1523,7 +1544,7 @@ fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
     let store = SharedStore::default();
     let mut h = Harness::with_store(&store);
     let regent = roster::index_of("regent_coupe_cabrio").unwrap();
-    h.open(&[ItemId::Open(Page::Vehicle)]);
+    h.open(&[ItemId::Open(Page::Car)]);
     while browsed(&h).0 != regent {
         h.pad(PadButton::DpadRight);
     }
@@ -1561,7 +1582,7 @@ fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
     assert_eq!(again.app.ui().vehicle_paint(), 2);
     // The page opens on it.
     let mut again = again;
-    again.open(&[ItemId::Open(Page::Vehicle)]);
+    again.open(&[ItemId::Open(Page::Car)]);
     assert_eq!(browsed(&again), (regent, 2));
     // Another car starts in its first paint.
     again.pad(PadButton::DpadRight);
@@ -1627,7 +1648,7 @@ fn the_vehicle_page_fits_the_deck_and_a_tv() {
             let mut h = Harness::new();
             h.app.set_target_size(target.0, target.1);
             h.app.ui.force_ui_scale(scale);
-            h.open(&[ItemId::Open(Page::Vehicle)]);
+            h.open(&[ItemId::Open(Page::Car)]);
             for car in [most, longest] {
                 while browsed(&h).0 != car {
                     h.pad(PadButton::DpadRight);
@@ -1671,22 +1692,23 @@ fn fits(h: &mut Harness, what: &str, scale: f32) {
                 (x, y, w, h)
             }
             render::HudItem::Rect { color, .. } if color == SHADE_TEST => continue,
+            // The tab bar runs edge to edge.
+            render::HudItem::Rect { w, .. } if w > sw => continue,
             render::HudItem::Rect { x, y, w, h, .. } => (x, y, w, h),
             render::HudItem::Image(i) => (i.x, i.y, i.w, i.h),
         };
         let at = format!("{what}: {item:?}");
         assert!(x >= sx - 0.5 && x + w <= sx + sw + 0.5, "{at}");
         assert!(y >= sy - 0.5 && y + h <= sy + sh + 0.5, "{at}");
-        if let Some([stx, sty, ..]) = stage {
-            if x < stx {
+        if let Some([stx, sty, _, sth]) = stage {
+            // Beside the turntable only the list; its name and number over it.
+            if y < sty + sth && y + h > sty {
                 assert!(x + w <= stx, "into the stage: {at}");
-            } else {
-                assert!(y + h <= sty + 4.0, "over the turntable: {at}");
             }
         }
     }
     let text = h.hud_text();
-    for want in ["Car", "Paint", "Driver", "Drive this car"] {
+    for want in ["Model", "Paint", "Driver", "Drive this car"] {
         assert!(text.contains(want), "{what}: {text}");
     }
     if scale <= 1.5 {
@@ -1726,7 +1748,7 @@ fn the_vehicle_page_is_a_still_studio_the_look_stick_turns() {
         h.frame();
     }
     assert!(h.app.npcs.count() > 0, "traffic is running");
-    h.open(&[ItemId::Open(Page::Vehicle)]);
+    h.open(&[ItemId::Open(Page::Car)]);
     assert_eq!(turntable(&mut h).len(), PREVIEW);
     let backdrop = h.app.backdrop;
     let view = h.app.scene_view(1.0, 16.0 / 9.0);
@@ -1768,7 +1790,7 @@ fn the_vehicle_page_is_a_still_studio_the_look_stick_turns() {
     h.frame();
     assert!(h.app.spin > held, "{} {held}", h.app.spin);
     // The page and the car are unchanged by it.
-    assert_eq!(h.page(), Page::Vehicle);
+    assert_eq!(h.page(), Page::Car);
     assert_eq!(browsed(&h), (0, 0));
 }
 
@@ -1927,9 +1949,7 @@ fn fullscreen_toggles_on_its_key_and_from_the_pause_menu() {
     assert!(h.app.take_fullscreen_toggle());
     // A press a remap captures is not a toggle.
     h.open(&[
-        ItemId::Open(Page::Settings),
         ItemId::Open(Page::Controls),
-        ItemId::Open(Page::Device(DeviceKind::KeyboardMouse)),
         ItemId::Open(Page::Bindings(DeviceKind::KeyboardMouse)),
     ]);
     h.focus_on(ItemId::Bind(
@@ -1950,9 +1970,7 @@ fn reset_is_listed_on_both_bindings_pages() {
     ] {
         let mut h = Harness::new();
         h.open(&[
-            ItemId::Open(Page::Settings),
             ItemId::Open(Page::Controls),
-            ItemId::Open(Page::Device(device)),
             ItemId::Open(Page::Bindings(device)),
         ]);
         h.focus_on(ItemId::Bind(device, Action::Reset, Sign::Full));
@@ -1968,7 +1986,7 @@ fn reset_is_listed_on_both_bindings_pages() {
 #[test]
 fn about_page_credits_the_author() {
     let mut h = Harness::new();
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::About)]);
+    h.open(&[ItemId::Open(Page::Game)]);
     let text = h.hud_text();
     let credit = text.find("Created by Adam Mathes").expect("credit");
     assert!(credit < text.find("BSD-3-Clause").unwrap(), "{text}");
@@ -2045,23 +2063,16 @@ fn radio_keys_tune_stations_and_the_last_one_comes_back() {
 }
 
 #[test]
-fn the_master_volume_and_mute_reach_the_radio() {
+fn the_master_volume_reaches_the_radio() {
     use audio::RadioCommand;
     let mut h = Harness::new();
     h.frame();
     h.app.radio_commands().for_each(drop);
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.open(&[ItemId::Open(Page::Audio)]);
     h.focus_on(ItemId::MasterVolume);
     h.pad(PadButton::DpadLeft);
     let cmds: Vec<_> = h.app.radio_commands().collect();
     assert_eq!(cmds, [RadioCommand::Volume(0.8 * 0.75)]);
-    h.focus_on(ItemId::Mute);
-    h.pad(PadButton::South);
-    let cmds: Vec<_> = h.app.radio_commands().collect();
-    assert_eq!(cmds, [RadioCommand::Volume(0.0)], "muted");
-    h.pad(PadButton::South);
-    let cmds: Vec<_> = h.app.radio_commands().collect();
-    assert_eq!(cmds, [RadioCommand::Volume(0.8 * 0.75)], "unmuted");
 }
 
 #[test]
@@ -2079,7 +2090,7 @@ fn the_game_pauses_in_the_background_and_resumes_in_front() {
     h.frame();
     assert!(h.app.ticks() > ticks, "running again");
     // A menu the player opened stays open through it.
-    h.open(&[ItemId::Open(Page::Settings)]);
+    h.open(&[ItemId::Open(Page::Display)]);
     h.app.set_focused(false);
     h.frame();
     h.app.set_focused(true);
@@ -2100,7 +2111,7 @@ fn the_radio_keeps_playing_in_the_background_unless_set_to_mute() {
         cmds.iter().all(|c| *c == RadioCommand::Volume(0.8 * 0.8)),
         "it is a radio: {cmds:?}"
     );
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.open(&[ItemId::Open(Page::Audio)]);
     h.focus_on(ItemId::BackgroundRadio);
     h.pad(PadButton::DpadRight);
     assert!(h.app.settings().mute_radio_unfocused);
@@ -2180,10 +2191,17 @@ fn music_folders_are_picked_from_the_audio_page() {
             .find(|i| i.id == ItemId::AddMusic)
             .map(|i| i.label)
     };
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
-    assert_eq!(label(&h), None, "no picker on this platform");
+    h.open(&[ItemId::Open(Page::Audio)]);
+    let has_music = |h: &Harness| {
+        h.ui()
+            .items()
+            .iter()
+            .any(|i| i.id == ItemId::Open(Page::Music))
+    };
+    assert!(!has_music(&h), "no picker on this platform, no music");
     h.app.set_music_picker(true, true);
     h.pad(PadButton::DpadDown);
+    h.open(&[ItemId::Open(Page::Music)]);
     assert_eq!(label(&h), Some("Pick music folder again"));
     h.focus_on(ItemId::AddMusic);
     h.pad(PadButton::South);
@@ -2228,14 +2246,12 @@ fn music_folders_are_picked_from_the_audio_page() {
         .collect();
     assert_eq!(albums, ["B", "Mixtape"]);
     h.pad(PadButton::DpadUp);
-    assert_eq!(label(&h), Some("Music library"), "picked again");
-    // Removing one from the Library page forgets it; "Remove music folders" the rest.
-    h.open(&[ItemId::Open(Page::Library)]);
+    assert_eq!(label(&h), Some("Add music folder"), "picked again");
+    // Removing one from the Music page forgets it; "Remove all music" the rest.
     h.focus_on(ItemId::RemoveFolder(0));
     h.pad(PadButton::South);
     assert_eq!(h.app.take_forgotten_music(), ["h1"]);
     assert_eq!(h.app.deck().library().albums.len(), 1);
-    h.pad(PadButton::East);
     h.focus_on(ItemId::ClearMusic);
     h.pad(PadButton::South);
     assert_eq!(h.app.take_forgotten_music(), ["*"]);
@@ -2350,13 +2366,13 @@ fn the_deck_plays_from_the_pad_alone() {
     h.chord(PadButton::Select, PadButton::DpadUp);
     assert_eq!(h.app.deck().mode(), audio::deck::Mode::Shuffle);
     assert!(!h.app.drive.headlights, "not also the headlights");
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.open(&[ItemId::Open(Page::Audio)]);
     h.focus_on(ItemId::DeckMode);
     h.pad(PadButton::DpadRight);
     assert_eq!(h.app.deck().mode(), audio::deck::Mode::Continuous);
     // Continuous lands where its broadcast is.
     assert_eq!(h.played().len(), 1);
-    h.open(&[ItemId::Open(Page::Library)]);
+    h.open(&[ItemId::Open(Page::Music)]);
     assert!(
         h.hud_text().contains("Night Shift - Coastline"),
         "{}",
@@ -2367,7 +2383,7 @@ fn the_deck_plays_from_the_pad_alone() {
     assert!(!h.app.menu_open(), "back to the road");
     assert_eq!(h.played(), ["h1/Night Shift/Coastline/01 Sunset Drive.mp3"]);
     // Back to the radio from the page: the deck stops, the radio tunes.
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
+    h.open(&[ItemId::Open(Page::Audio)]);
     h.focus_on(ItemId::Source);
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.source(), Source::Radio);
@@ -2582,27 +2598,17 @@ fn quality_presets_apply_to_the_renderer_and_save() {
         "the panel's rate everywhere"
     );
     h.app.set_panel_hz(90.0);
-    // Battery on the Video page: the Deck's knobs at 85%, every other refresh.
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Video)]);
+    // Battery on the Display tab: the Deck's knobs at 85%, every other refresh.
+    h.open(&[ItemId::Open(Page::Display)]);
     h.focus_on(ItemId::Quality);
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.settings().quality, Some(Quality::Battery));
     assert_eq!(h.app.settings().resolution_scale, 0.85);
     assert_eq!(h.app.frame_rate(), FrameRate::Half);
-    assert!(h.hud_text().contains("45 fps"), "{}", h.hud_text());
-    // 90 Hz offers 45 and 30 and no slower: one more step comes round to the panel's.
-    h.focus_on(ItemId::FrameRate);
-    h.pad(PadButton::DpadRight);
-    assert_eq!(h.app.frame_rate(), FrameRate::Third);
-    h.pad(PadButton::DpadRight);
-    assert_eq!(h.app.frame_rate(), FrameRate::Panel);
-    h.pad(PadButton::DpadLeft);
-    assert_eq!(h.app.frame_rate(), FrameRate::Third);
-    // Low: cheaper shadows, 75% resolution, saved; the cap stays.
-    h.focus_on(ItemId::Quality);
+    // Low: cheaper shadows, 75% resolution, the panel's rate again, saved.
     h.pad(PadButton::DpadLeft);
     assert_eq!(h.app.settings().quality, Some(Quality::Low));
-    assert_eq!(h.app.frame_rate(), FrameRate::Third);
+    assert_eq!(h.app.frame_rate(), FrameRate::Panel);
     assert_eq!(h.app.settings().resolution_scale, 0.75);
     let low = h.app.renderer_options().quality;
     assert_eq!(low, Quality::Low.render(0.75));
@@ -2611,7 +2617,7 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     h.pad(PadButton::Start);
     let saved = store.0.borrow().clone().expect("saved");
     assert!(saved.contains("\"quality\": \"low\""), "{saved}");
-    assert!(saved.contains("\"frame_rate\": \"third\""), "{saved}");
+    assert!(saved.contains("\"frame_rate\": \"panel\""), "{saved}");
     // A forced preset wins for the session with its own scale, unsaved.
     h.app.force_quality(Some(Quality::Ultra));
     assert_eq!(
@@ -2622,7 +2628,7 @@ fn quality_presets_apply_to_the_renderer_and_save() {
     // `--quality battery` brings its cap too, for the session.
     h.app.force_quality(Some(Quality::Battery));
     assert_eq!(h.app.frame_rate(), FrameRate::Half);
-    assert_eq!(h.app.settings().frame_rate, FrameRate::Third);
+    assert_eq!(h.app.settings().frame_rate, FrameRate::Panel);
 }
 
 /// The images of `texture` on the HUD the app last laid out.
@@ -2650,49 +2656,38 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         (Page::Worlds, 0),
         "on the world it is"
     );
-    // A card per world, side by side: left and right (and up and down) move, wrapping.
+    // Every world in one list; the focused one's still and facts beside it.
     let text = h.hud_text();
     for line in [
         "Pacific Shore",
-        "Beach town, 1984",
-        "20 cars",
         "Mirage Bowl",
-        "5 stations",
         "Bay Loop",
-        "here",
+        "Lake City",
+        "Beach town, 1984",
+        "20 cars, 7 stations",
+        "You are here",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
-    assert!(!text.contains("coming"), "every world is built: {text}");
+    assert!(
+        !text.contains("Coming soon"),
+        "every world is built: {text}"
+    );
     let stills = images(&mut h, render::HudTexture::Still);
-    assert_eq!(stills.len(), 3, "three cards a page");
-    for (k, s) in stills.iter().enumerate() {
-        assert_eq!(s.uv, crate::scenario::still_uv(k));
-    }
-    assert!(
-        stills.iter().all(|s| s.color[0] == 255),
-        "no still is greyed"
-    );
-    h.pad(PadButton::DpadRight);
-    assert_eq!(h.focus(), 1);
-    h.pad(PadButton::DpadRight);
-    h.pad(PadButton::DpadRight);
-    h.pad(PadButton::DpadRight);
-    assert_eq!(h.focus(), 0, "wraps");
-    h.pad(PadButton::DpadLeft);
-    assert_eq!(h.focus(), 3, "wraps back");
-    // The fourth world on the next page of cards.
-    let text = h.hud_text();
-    assert!(
-        text.contains("Lake City") && text.contains("Lake city, 1986"),
-        "{text}"
-    );
-    h.pad(PadButton::DpadLeft);
-    h.pad(PadButton::DpadLeft);
-    assert_eq!(h.focus(), 1);
-    h.pad(PadButton::DpadDown);
+    assert_eq!(stills.len(), 1, "the focused world's");
+    assert_eq!(stills[0].uv, crate::scenario::still_uv(0));
+    assert_eq!(stills[0].color[0], 255, "not greyed");
+    // Up and down move, wrapping.
     h.pad(PadButton::DpadUp);
+    assert_eq!(h.focus(), 3, "wraps back");
+    assert!(h.hud_text().contains("Lake city, 1986"), "{}", h.hud_text());
+    h.pad(PadButton::DpadDown);
+    h.pad(PadButton::DpadDown);
     assert_eq!(h.focus(), 1);
+    assert_eq!(
+        images(&mut h, render::HudTexture::Still)[0].uv,
+        crate::scenario::still_uv(1)
+    );
     assert_eq!(h.app.take_world_pick(), None, "nothing picked yet");
     // Select closes the menu, remembers the world and asks the platform to load it.
     h.pad(PadButton::South);
@@ -2723,8 +2718,12 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
         audio::deck::Kind::Cd,
         "a CD in 2001"
     );
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Audio)]);
-    assert!(h.ui().items().iter().any(|i| i.id == ItemId::AddMusic));
+    h.open(&[ItemId::Open(Page::Audio)]);
+    assert!(h
+        .ui()
+        .items()
+        .iter()
+        .any(|i| i.id == ItemId::Open(Page::Music)));
     h.pad(PadButton::Start);
     assert!(
         h.hud_text().contains("Mirage Bowl, 2001"),
@@ -2749,7 +2748,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
             ..settings
         }
     );
-    // The pause menu's World page now opens on it.
+    // The Worlds tab now opens on it.
     h.open(&[ItemId::Open(Page::Worlds)]);
     assert_eq!(h.focus(), 1);
     // The next session starts there unless the scene names a place.
@@ -2790,23 +2789,14 @@ fn a_world_switch_fires_no_one_shot_sounds() {
 }
 
 #[test]
-fn the_world_page_pages_one_card_at_a_tv_scale() {
+fn the_worlds_tab_lists_every_world_at_a_tv_scale() {
     let mut h = Harness::new();
     h.app.ui.force_ui_scale(2.0);
     h.open(&[ItemId::Open(Page::Worlds)]);
-    let stills = images(&mut h, render::HudTexture::Still);
-    assert_eq!(stills.len(), 1, "one card a page");
-    // Beside its text, and bigger than a third of the card width would give.
-    assert!(stills[0].h >= 100.0, "{:?}", stills[0]);
-    assert!(h.hud_text().contains("< 1 / 4 >"), "{}", h.hud_text());
-    assert!(h.hud_text().contains("Pacific Shore"));
-    h.pad(PadButton::DpadRight);
-    assert!(h.hud_text().contains("< 2 / 4 >"));
-    assert!(h.hud_text().contains("Mirage Bowl") && !h.hud_text().contains("Pacific Shore"));
-    assert_eq!(
-        images(&mut h, render::HudTexture::Still)[0].uv,
-        crate::scenario::still_uv(1)
-    );
+    let text = h.hud_text();
+    for world in ["Pacific Shore", "Mirage Bowl", "Bay Loop", "Lake City"] {
+        assert!(text.contains(world), "{world}: {text}");
+    }
 }
 
 #[test]
@@ -2829,7 +2819,7 @@ fn an_unknown_world_says_where_the_game_starts() {
 #[test]
 fn the_vehicle_page_lists_this_worlds_cars() {
     let mut h = Harness::new();
-    h.open(&[ItemId::Open(Page::Vehicle)]);
+    h.open(&[ItemId::Open(Page::Car)]);
     let Widget::Choice { options, .. } = h.item(0).widget else {
         panic!("{:?}", h.item(0))
     };
@@ -2861,7 +2851,7 @@ fn hud_frames_allocate_nothing_after_warmup() {
     };
     for menu in [false, true] {
         if menu {
-            app.ui.open(Page::Pause, &InputState::default());
+            app.ui.open(Page::Game, &InputState::default());
         }
         app.ui.draw(&ctx);
         assert!(!app.ui.hud().items.is_empty(), "menu {menu}");

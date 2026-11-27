@@ -23,12 +23,13 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Horn | button | B (H until the controls card took it) | Left stick click |
 | Flash brights (`Flash`) | button (held) | N | B / Circle |
 | Nitrous (`Nitrous`): burns a charge a donut and a burger made | button | Left Shift | X / Square |
-| Next vehicle (`VehicleNext`) | button | V | — (pause menu › Vehicle) |
+| Next vehicle (`VehicleNext`) | button | V | — (menu › Car) |
 | Reset car (`Reset`) | button | R | Back / Share held 1 s (also pause menu › Reset car) |
 | Map toggle | button | M | Back / Share |
 | Map zoom (full map) | axis −1..1 | − / = (and the mouse wheel) | L1 / R1 |
 | Time of day scrub | axis | , / . (hold) | hold View + right stick X |
 | Pause/menu | button | Esc | Start / Options (tap) |
+| Menu tab left / right | button | Q / E | L1 / R1 |
 | Screenshot | button | F12 | — |
 | Performance overlay (`DebugOverlay`) | button | F3 | — |
 | Controls card (`Controls`) | button | H, F1 | Start / Options held 1 s (also pause menu › Show controls) |
@@ -41,8 +42,7 @@ reverse, where the brake drives and the throttle brakes; the throttle at a stand
 F3 cycles the performance overlay Off → FPS → Full → Off. FPS is the frame rate alone (one decimal, the
 same average the full overlay shows) in the top left corner, which the driving HUD leaves empty; Full is
 every counter and the frame graph. The mode is saved (`hud.overlay`: `"off"`, `"fps"` or `"full"`; default
-off) and is also on Settings › HUD › Performance overlay. Any menu (pause, settings, vehicle select,
-worlds), the full map and the controls card hide the overlay while open and bring it back when they close,
+off) and is also on the menu's Display tab. The menu, the full map and the controls card hide the overlay while open and bring it back when they close,
 without changing the mode. F3 still cycles the saved mode under a menu, so it can be set from there; it
 shows once the menu closes. The window in the background hides it too. While a station toast is up the FPS
 number sits below its two lines (a long station name reaches the corner at large UI scales). Holding F3
@@ -70,23 +70,31 @@ Pause close it (Pause does not open the menu over it). The wheel is read raw as 
 heading, at rest unless it was rolling under 5 m/s, odometer from zero, camera and headlights kept; the new
 car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the car the next session starts in
 unless the scene names one (`car=`, with `paint=`). It is unbound on the pad by default: the pad path is the
-pause menu's Vehicle page (Resume · Reset car · Vehicle › · Settings › · Worlds ›): Car (left/right through
+menu's Car tab: Model (left/right through
 every car the world has, all twenty on the coast, wrapping;
-the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car in a
-studio beside the panel (the game is not drawn under the page; the look stick, or a mouse
+the car being driven marked), Paint (a swatch per palette entry), Driver and Drive this car, with the car in a
+studio beside the list (the game is not drawn under the page; the look stick, or a mouse
 look drag, turns the car, which otherwise stands still) and its stat strip and specs (class, era, peak power and torque, drive and
 gearbox, 0–60 mph and top speed, measured with the sim) under the rows. It opens on the car driven, in its
 paint; another car starts in its first paint. Select on any row swaps the car shown in, in the paint shown,
 the same way, and closes the menu; the car and paint become the `vehicle` and `paint` settings. At a UI scale
 over 1.5 there is no room for the turntable and the specs shorten to what fits.
 
-The pause menu's World page (Worlds ›) shows a card per world (`docs/SCENARIOS.md`), three a page side by
-side (one a page, its text beside the still, past a UI scale of 1.5; "< 1 / 2 >" under them when they page): its still, its
-title, the kind of place and year, and how many cars and radio stations it has; the world the game is in
-says "here", a world still being built is greyed and says "coming" but can be picked. Left/right (and
-up/down) move between the cards, wrapping, and it opens on the current world. Select closes the menu and
-reloads the game in that world, settings kept and the radio off; the world becomes the `scenario` setting,
-where the next session starts. Back returns to the pause page.
+The menu's Worlds tab lists every world (`docs/SCENARIOS.md`) on one page, the one the game is in marked
+"here"; beside the list, the focused world's still, title, kind of place and year, and how many cars and
+radio stations it has ("You are here", or "Coming soon" greyed for a world still being built, which can
+still be picked). It opens on the current world. Select closes the menu and reloads the game in that
+world, settings kept and the radio off; the world becomes the `scenario` setting, where the next session
+starts.
+
+**The menu** (Pause: Start or Esc) is full screen: the game is not drawn behind it. Tabs run across the
+top (Game · Car · Worlds · Driving · Camera · Display · Audio · Controls); the shoulder buttons (LB / RB)
+or Q / E move between them, wrapping, from any page. The open tab's items are a list on the left (d-pad,
+left stick or arrows move; left/right change a value; A or Enter selects); the right side shows what the
+focused item does, or the tab's own picture (the turntable, a world, the credits). A few rows open one page
+under their tab (Gamepad buttons, Keyboard keys, Stations, Music), never deeper. B or Esc goes back, and
+on a tab closes the menu. The full tree is in `crates/app/src/ui/pages.rs`. The menu's tab buttons
+share the shoulders with the full map's zoom (`Context::Map`), which is never open under the menu.
 
 `Reset` puts the car at rest, upright, on the centerline of the nearest road lane (`world::lanes`: the
 place's lane table, or each road's lanes laid out from its cross section, driving on the right), heading
@@ -105,8 +113,8 @@ its neon tubes glow and two short-reaching lights pool its color on the road rou
 keyboard switch only by default; the pad can bind it on the Bindings page.
 On the pad both share D-pad up: a tap is the headlights, a hold of 1 s or more (`Binding::long`, as for
 `Reset`) the high beams, so the headlights act on release there. The cockpit dash shows a green tell-tale
-on the first dial while the headlights are on and a blue one beside it with the high beams. Settings ›
-Drive › Headlights is Auto (the default) or Manual: Auto switches them on at dusk and off at dawn (when the
+on the first dial while the headlights are on and a blue one beside it with the high beams. The menu's
+Driving › Headlights is Auto (the default) or Manual: Auto switches them on at dusk and off at dawn (when the
 NPC drivers' first lamps switch: 25 min after sunset, 25 min before sunrise) and the switch overrides them in
 between until the next dusk or dawn; Manual leaves them to the switch. Brake lamps light while the service
 brakes are asked for anything: the brake pedal, or the throttle while reversing (reversing on the brake
@@ -119,7 +127,7 @@ switches between them: the one playing stops and the other starts. On the pad D-
 (play/pause) and right/left the tracks; with Back / Share held (already the map's and the time scrub's
 modifier, so it opens no map) the D-pad is the deck's: down the source, right and left the albums, up the
 mode. The d-pad itself stays a plain button, so the menus and the controls card read it on press as
-before. The pause menu's Audio page has Source, Deck mode and Library (every album as "Artist - Album",
+before. The menu's Audio tab has Source, Deck mode and Music (every album as "Artist - Album",
 select to play it) too. O and P on the radio put the tape in: the deck becomes the source on that album.
 The automatic respawn (a car that falls through the world, or whose state goes non-finite, starts again)
 is separate and stays.
@@ -142,7 +150,7 @@ the HUD font is ASCII, so there are no arrow glyphs.
   drives, Esc opens the pause menu); the card's own key only dismisses it. After the player has dismissed
   it in 3 separate sessions it stops showing at the start (`hud.controls_dismissed` in the settings
   counts them). While the start card has more lines than fit (UI scale over 1), up and down scroll it
-  and its 6 s start again instead of dismissing it. Settings › HUD › Show controls at start (default on) turns the start card off; switching it
+  and its 6 s start again instead of dismissing it. Display › Show controls at start (default on) turns the start card off; switching it
   back on gives it its 3 sessions again. After the start, only the key or the menu item shows it.
 - **On the key:** H or F1 on the keyboard; on the pad, Start held 1 s (`Binding::long`), so a tap of Start
   is still the pause menu (which now opens on release) and play stays gamepad-only. Like every long

@@ -60,6 +60,8 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::MenuRight, _) => "Menu right",
         (Action::MenuConfirm, _) => "Menu select",
         (Action::MenuBack, _) => "Menu back",
+        (Action::MenuTabPrev, _) => "Menu tab left",
+        (Action::MenuTabNext, _) => "Menu tab right",
         (Action::FlyForward, _) => "Fly forward",
         (Action::FlyBack, _) => "Fly back",
         (Action::FlyLeft, _) => "Fly left",
@@ -72,13 +74,6 @@ pub fn action_label(action: Action, sign: Sign) -> &'static str {
         (Action::FlyLookY, N) => "Fly look up",
         (Action::FlyLookY, P) => "Fly look down",
         (Action::FlyLookY, _) => "Fly look up / down",
-    }
-}
-
-pub fn device_label(device: DeviceKind) -> &'static str {
-    match device {
-        DeviceKind::KeyboardMouse => "Keyboard & mouse",
-        DeviceKind::Gamepad => "Gamepad",
     }
 }
 
