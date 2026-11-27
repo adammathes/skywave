@@ -120,7 +120,7 @@
     "params": { "seed": "1", "scenario": "mirage_valley_2001", "car": "halberd_coupe", "cam": "chase-far", "lights": "1", "t": "12:00", "pos": "795,1946", "yaw": "92", "still": "1", "stream": "1" }
   },
   "coast-dawn-haze": {
-    "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera: the morning haze over the town before it burns off.",
+    "about": "Dawn on the coast (05:50, just before sunrise) east up a local street toward the ridges from the far chase camera, the sky lightening behind them.",
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-far", "t": "05:50", "lights": "1", "pos": "400.3,1510.7", "yaw": "103", "still": "1", "stream": "1" }
   }
 }

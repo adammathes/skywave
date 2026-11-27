@@ -16,6 +16,9 @@ RegionTemplate(
     edges: Edges(north: Forest, east: Lake, south: RailYards, west: RailYards),
 
     roadside: [RoadsideKit(kit: "hot_dog_stand", variant: 'A')],
+    // A grid city: a side street that stops short of a river, the expressway or a park is
+    // cut back to its last crossing rather than left dead-ended.
+    through_streets: true,
 
     zones: Zones(
         downtown: ZoneRule(

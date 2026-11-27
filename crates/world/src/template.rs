@@ -636,11 +636,11 @@ pub struct RegionTemplate {
     /// (`docs/WORLD_GENERATION.md`, "Hero landmarks"). A basin sites its own set.
     #[cfg_attr(feature = "serde", serde(default))]
     pub roadside: Vec<RoadsideKit>,
-    /// Takes back the side streets and alleys that end at nothing to their last junction,
-    /// outside the zones whose streets have dead ends, and drops the streets cut off from
-    /// the main network (`docs/WORLD_GENERATION.md`, "The map audit").
+    /// Side streets never dead-end except in the zones whose pattern has them (`Curvy`,
+    /// `Switchback`, `Beachfront`): one that stops short (at a river, a right of way, a
+    /// park) is cut back to its last crossing. Off by default.
     #[cfg_attr(feature = "serde", serde(default))]
-    pub no_dead_ends: bool,
+    pub through_streets: bool,
     pub zones: Zones,
 }
 

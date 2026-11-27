@@ -15,7 +15,7 @@ RegionTemplate(
 
     edges: Edges(north: Ocean, east: Hills, south: Hills, west: Ocean),
 
-    no_dead_ends: true,
+    through_streets: true,
     zones: Zones(
         downtown: ZoneRule(
             score: Some(Score(

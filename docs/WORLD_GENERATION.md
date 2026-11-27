@@ -602,9 +602,3 @@ cargo test -p app every_world_passes_the_map_audit -- --nocapture
 
 Each world's count is pinned in `MAP_FAULTS` and may only go down: a change that adds a fault fails, a
 change that removes some lowers the pin in the same PR. A new world starts at 0.
-
-A region template with `no_dead_ends: true` tidies its streets before anything is built on them: every
-side street and alley that ends at nothing (in a bulb or not) is taken back to its last junction, unless
-its zone's streets have dead ends or it runs off the map, and the streets left cut off from the main
-network are dropped. Lots are cut from what is left, so no lot fronts a street that is gone. The Bay
-Loop's and the Mirage Bowl's templates set it; both audit clean.
