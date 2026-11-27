@@ -344,7 +344,6 @@ impl App {
         ui.vehicle_switched(vehicle_index, paint, false, false);
         ui.set_map(map::view::MapGeom::of(&map), map::labels(&place));
         ui.set_map_skin(skin);
-        ui.set_districts(map::districts::Districts::of(&place));
         let ground = world::WorldCollider::with_plan(&place, grammar, &plan);
         let lanes = world::lanes::LaneLines::of(&place);
         let chunk_size = place.header.chunk_size_m;
@@ -2018,7 +2017,7 @@ mod tests {
         // deliberately.
         assert_eq!(
             a.state_hash(),
-            0x38e5_0ff8_2dc0_4d2f,
+            0x555c_25a9_1bce_a9af,
             "{:#x}",
             a.state_hash()
         );

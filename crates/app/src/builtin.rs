@@ -26,6 +26,7 @@ pub const GREAT_LAKES_CITY: &str = include_str!("../../../assets/regions/great_l
 pub const CALIFORNIA_COAST_80S: &str =
     include_str!("../../../assets/grammar/california_coast_80s.ron");
 pub const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+pub const BAY_AREA_2005: &str = include_str!("../../../assets/grammar/bay_area_2005.ron");
 pub const GREAT_LAKES_80S: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
 pub const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 pub const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
@@ -55,9 +56,10 @@ pub const LAYOUTS: [(&str, &str); 4] = [
     ("lake_city", LAKE_CITY),
 ];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
-pub const GRAMMARS: [(&str, &str); 3] = [
+pub const GRAMMARS: [(&str, &str); 4] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
     ("socal_basin_2001.ron", SOCAL_BASIN_2001),
+    ("bay_area_2005.ron", BAY_AREA_2005),
     ("great_lakes_80s.ron", GREAT_LAKES_80S),
 ];
 

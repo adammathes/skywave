@@ -1,0 +1,46 @@
+// Ibis Crossover: a mid-2000s car-based all-wheel-drive crossover with a 3.0 L six.
+//
+// Intent: the tall wagon that replaced the minivan in the school pickup line. A smooth six
+// through a five-speed automatic, all-wheel drive, a high seat, soft springs and more body
+// roll than a sedan; it rides like a car and never leaves the pavement.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "ibis_crossover",
+    name: "Ibis Crossover",
+    era: Aughts,
+    year: 2004,
+    class: Utility,
+
+    mass_kg: 1700,
+    dims_m: (4.60, 1.82, 1.72),    // length, width, height
+    wheelbase_m: 2.62,
+    track_m: 1.56,
+    cg_height_m: 0.66,
+    cg_fore_aft: 0.43,
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 6200,
+        torque_nm: [(1000, 200), (2500, 255), (4000, 275), (5200, 262), (6200, 235)],
+    ),
+    gears: [3.40, 2.00, 1.30, 0.95, 0.75],
+    final_drive: 3.9,
+    reverse: 2.8,
+    shift_ms: 340,
+    auto: true,
+    drive: All,
+
+    tires: Tires(grip_lat: 0.96, grip_long: 0.98, load_sens: 0.11, slip_peak_deg: 8.5),
+    suspension: Susp(spring_n_m: 32000, damper: 2900, travel_m: 0.20, antiroll: 0.32),
+    steering: Steer(max_deg: 34, speed_sens: 0.6, return_rate: 7.0),
+    brakes: Brakes(max_nm: 3800, bias_front: 0.66, abs: true, handbrake_nm: 2400),
+    aero: Aero(cd: 0.37, frontal_m2: 2.6, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.2, body_roll: 0.65, engine_sound: "v6", shift_jerk: 0.08),
+    interior: Interior(
+        dash: "sport_00s",
+        gauges: [Speedo(0, 140, mph), Tach(0, 7000)],
+        radio: "amber_seek",
+    ),
+    shape: "ibis_crossover.shape.ron",
+)

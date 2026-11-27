@@ -315,7 +315,7 @@ Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, 
 camera on open ground facing its landmark).
 
 ## Region templates
-A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above). Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
+A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above); the Bay Loop ships `bay_area`, zone rules only, for its authored layout (`docs/LAYOUTS.md`). A zone rule may set `street_grade`, its local streets' steepest grade (default 12%: the Bay's city takes 22% to climb its crests), and `streets: Open` makes a zone open space: no local streets and no lots. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
 ## Facade grammars
 A `world::grammar::Grammar` is data (RON, `assets/grammar/<template>_<era>.ron`, ADR 0002):
@@ -620,5 +620,5 @@ Side streets and the procedural coast's arterials are not eased yet: they follow
 their junctions as before.
 
 `places::tests::every_world_rides_smooth_at_speed` drives each world's longest straight at 40 m/s
-and fails on a wheel off the road, on a vertical acceleration over 1.25 m/s² rms, or on a main road
+and fails on a wheel off the road, on a vertical acceleration over 2 m/s² rms (a crest at the curve bound gives 1.6 at that speed), or on a main road
 whose grade changes by more than 0.8% per meter.

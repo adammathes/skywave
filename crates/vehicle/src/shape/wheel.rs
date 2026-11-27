@@ -15,6 +15,7 @@ const AXIS: V3 = [1.0, 0.0, 0.0];
 pub fn rim_radius(r: f32, rims: Rims) -> f32 {
     match rims {
         Rims::Twin => r * 0.73,
+        Rims::Split | Rims::Spoke7 => r * 0.68,
         _ => r * 0.62,
     }
 }
@@ -446,8 +447,45 @@ pub fn build(w: &Wheels, parts: &Parts, lod: u8, m: &Materials) -> Soup {
             lugs(&mut s, hub_x + 0.022, 0.04, 5, m.chrome.shade(0.8));
             s.disc([hub_x + 0.028, 0.0, 0.0], AXIS, 0.02, 10, m.trim);
         }
+        Rims::Split => modern(&mut s, face, hub_x, rr, 5, &[-0.13, 0.13], m),
+        Rims::Spoke7 => modern(&mut s, face, hub_x, rr, 7, &[0.0], m),
     }
     s
+}
+
+/// Thin spokes from a cap to a bright lip, `n` groups of `per` arms `split` radians apart:
+/// the big rims of the 2000s.
+fn modern(s: &mut Soup, face: f32, hub_x: f32, rr: f32, n: usize, split: &[f32], m: &Materials) {
+    s.annulus(
+        [face - 0.003, 0.0, 0.0],
+        AXIS,
+        rr - 0.028,
+        rr - 0.008,
+        24,
+        m.rim.shade(1.1),
+    );
+    for k in 0..n {
+        for &d in split {
+            let a = 2.0 * PI * k as f32 / n as f32;
+            let (sn, cs) = sin_cos(a);
+            let (sn1, cs1) = sin_cos(a + d);
+            let p0 = [hub_x + 0.014, cs * 0.06, sn * 0.06];
+            let p1 = [face - 0.008, cs1 * (rr - 0.024), sn1 * (rr - 0.024)];
+            s.beam(p0, p1, AXIS, 0.016, 0.012, m.rim);
+        }
+    }
+    s.cylinder(
+        [hub_x - 0.02, 0.0, 0.0],
+        [hub_x + 0.02, 0.0, 0.0],
+        0.07,
+        12,
+        false,
+        false,
+        m.rim,
+    );
+    s.disc([hub_x + 0.02, 0.0, 0.0], AXIS, 0.07, 14, m.rim.shade(1.08));
+    lugs(s, hub_x + 0.022, 0.046, 5, m.chrome.shade(0.85));
+    s.disc([hub_x + 0.028, 0.0, 0.0], AXIS, 0.026, 10, m.trim);
 }
 
 fn lugs(s: &mut Soup, x: f32, r: f32, n: usize, mat: Mat) {

@@ -18,7 +18,8 @@
 //! (faces with an `Alley` aisle). Faces cut by the boundary or cell lines, and closed faces
 //! with water in them, are **open**: they get lots along their roads only, and the land
 //! beyond is not parceled (nor are lots on water, beach or the highway corridor, or lots
-//! far larger than their zone's).
+//! far larger than their zone's). Open space (a zone whose streets are
+//! `StreetPattern::Open`) gets no lots at all.
 //!
 //! [`ParcelPlan::chunk`] then builds every face that overlaps the chunk and keeps the
 //! parcels whose centroid (the vertex mean, as `place::Place::chunk_of` computes it) lies in
@@ -74,7 +75,7 @@ use super::macro_map::MacroMap;
 use super::streets::DRIVEWAY_WIDTH_M;
 use super::{stage, CHUNK_M};
 use crate::math::{abs, floor, intersect_lines, sqrt, V2};
-use crate::template::{Lots, RegionTemplate};
+use crate::template::{Lots, RegionTemplate, StreetPattern};
 
 /// No road (an interior cut) or no run.
 const NONE: u32 = u32::MAX;
@@ -399,6 +400,9 @@ impl<'a> ParcelPlan<'a> {
             }
             for (piece, role) in pieces {
                 if f.open && (self.unwanted(&piece) || self.oversized(&piece, role)) {
+                    continue;
+                }
+                if self.open_space(&piece) {
                     continue;
                 }
                 match self.parcel(f, &piece, role) {
@@ -1038,6 +1042,17 @@ impl<'a> ParcelPlan<'a> {
             Role::Field => zone != ZoneId::Farmland,
             _ => false,
         }
+    }
+
+    /// Whether `piece` lies in open space (a zone whose streets are
+    /// [`StreetPattern::Open`]): no lots there, open or closed face.
+    fn open_space(&self, piece: &[Vx]) -> bool {
+        let c = area_centroid(piece);
+        let zone = self.m.zone_at(c.x, c.y);
+        self.t
+            .zones
+            .get(zone)
+            .is_some_and(|r| r.streets == StreetPattern::Open)
     }
 
     /// Whether a piece of an open face touches water, beach or the highway corridor.

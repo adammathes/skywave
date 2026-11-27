@@ -1,0 +1,88 @@
+// Lake City from real data (`cargo run -p realmap -- tools/realmap/lake_city.ron`): a great
+// lake city's north and west sides at about 200 m to the mile, from the river mouth and
+// downtown out to the city's west line and the inner suburbs past its north limits. The
+// mile-line streets, the old diagonal trails, the shore drive and the expressways come from
+// the county's roads by their real names (only here; every name in the game is invented).
+// Rivers and districts are drawn here in degrees so they move with the warp.
+Import(
+    layout: "assets/layouts/lake_city.ron",
+    state: "17",
+    county: Some("17031"),
+    classes: ["S1100"],
+    names: [
+        // Mile-line streets, north to south, and the half-mile ones that carry traffic.
+        "W Touhy Ave", "W Devon Ave", "W Peterson Ave", "W Foster Ave", "W Lawrence Ave",
+        "W Montrose Ave", "W Irving Park Rd", "W Addison St", "W Belmont Ave", "W Diversey Ave",
+        "W Fullerton Ave", "W North Ave", "W Chicago Ave", "W Madison St",
+        // ...west to east.
+        "N Harlem Ave", "N Narragansett Ave", "N Central Ave", "N Cicero Ave", "N Pulaski Rd",
+        "N Kedzie Ave", "N Western Ave", "N Ashland Ave", "N Halsted St",
+        // The old trails and the shore.
+        "N Milwaukee Ave", "N Elston Ave", "N Lincoln Ave", "N Clark St", "N Northwest Hwy",
+        "N Lake Shore Dr", "Lake Shore Dr", "N Sheridan Rd",
+        // Downtown, east of the river.
+        "N Michigan Ave", "S Michigan Ave", "N State St", "S State St", "E Chicago Ave",
+        "E Grand Ave", "W Grand Ave", "E Madison St", "W Lake St", "E Randolph St", "W Randolph St",
+    ],
+    datum_m: 176,
+    x_warp: [(-87.8163, 0), (-87.69, 1300), (-87.61, 2048)],
+    z_warp: [(42.0192, 0), (41.8710, 2048)],
+    slope: 1,
+    smooth: 2,
+    sea_below_m: 177,
+    water_kind: "Lake",
+    terrain_cell_m: 32,
+    merge_m: 12,
+    // The north expressway runs beside a mile street the whole way out, too close for its
+    // overpasses at this squeeze: leave it out past its split from the north-west one.
+    // Downtown, the expressways' tangle sits a few squeezed blocks from the river: they come
+    // off at the edge of downtown onto its streets instead. The west expressway runs along
+    // the south edge, under the frame's last mile street: left out.
+    skip: [(-87.752, 41.9685, -87.73, 42.03), (-87.66, 41.86, -87.60, 41.897), (-87.82, 41.86, -87.60, 41.879)],
+    channels: [
+        Channel(name: "river", line: [(-87.6060, 41.8890), (-87.6375, 41.8868)], width_m: 10, depth_m: 2.5, wet: true),
+        Channel(name: "south branch", line: [(-87.6375, 41.8868), (-87.6385, 41.8700)], width_m: 9, depth_m: 2.5, wet: true),
+        // The north branch, to a culvert short of the expressway: further out it winds between
+        // the mile streets and under the expressway's overpasses, too tight to bridge at this
+        // squeeze.
+        Channel(name: "north branch", line: [
+            (-87.6375, 41.8868), (-87.6425, 41.8955), (-87.6470, 41.9040),
+        ], width_m: 8, depth_m: 2.5, wet: true),
+    ],
+    districts: [
+        // The inner suburbs past the north limits' mile road: houses under big trees.
+        District(name: "north suburbs", zone: "Suburb", polygon: [(-87.8163, 42.0192), (-87.6990, 42.0192), (-87.6990, 41.9978), (-87.8163, 41.9978)]),
+        // The bungalow belt: the far west side, every lot alike.
+        District(name: "bungalow belt", zone: "Suburb", polygon: [(-87.8163, 41.9978), (-87.7275, 41.9978), (-87.7275, 41.8710), (-87.8163, 41.8710)]),
+        // Industry along the north branch near downtown.
+        District(name: "river yards", zone: "Industrial", band_m: 50, band: [
+            (-87.6400, 41.8900), (-87.6470, 41.9040), (-87.6640, 41.9200), (-87.6800, 41.9390),
+        ]),
+        // Storefronts with flats above along the old trails and the cross-town street.
+        District(name: "trail stores", zone: "Commercial", band_m: 25, band: [
+            (-87.6420, 41.9180), (-87.6600, 41.9320), (-87.6890, 41.9600), (-87.7130, 41.9800),
+        ]),
+        District(name: "clark stores", zone: "Commercial", band_m: 25, band: [
+            (-87.6320, 41.9100), (-87.6560, 41.9420), (-87.6680, 41.9800), (-87.6720, 42.0050),
+        ]),
+        District(name: "crosstown stores", zone: "Commercial", band_m: 25, band: [(-87.8066, 41.9538), (-87.6460, 41.9545)]),
+        // The plank road's run near the north-west corner: the drive-in, the car wash, the
+        // muffler shop.
+        District(name: "drive-in stretch", zone: "Strip", band_m: 90, band: [(-87.7590, 41.9665), (-87.7735, 41.9825), (-87.7890, 41.9990), (-87.7960, 42.0060)]),
+        // Parks: the lakefront the length of the city, the big park by the zoo, and the
+        // west side's lagoon park.
+        District(name: "lakefront", zone: "Park", band_m: 60, band: [
+            (-87.6235, 41.8970), (-87.6260, 41.9110), (-87.6330, 41.9250), (-87.6385, 41.9400),
+            (-87.6400, 41.9500), (-87.6440, 41.9620), (-87.6490, 41.9750), (-87.6550, 41.9860),
+        ]),
+        District(name: "lincoln woods", zone: "Park", polygon: [(-87.6450, 41.9400), (-87.6335, 41.9400), (-87.6250, 41.9100), (-87.6340, 41.9100)]),
+        District(name: "west park", zone: "Park", polygon: [(-87.7080, 41.9070), (-87.6970, 41.9070), (-87.6970, 41.8990), (-87.7080, 41.8990)]),
+        // Downtown: towers by the river mouth, between the branches and the lake.
+        District(name: "downtown", zone: "Downtown", polygon: [(-87.6375, 41.8966), (-87.6080, 41.8966), (-87.6080, 41.8710), (-87.6375, 41.8710)]),
+    ],
+    // On the plank road a block past the six-way corner, heading north-west to the drive-in.
+    start: (-87.7625, 41.9697),
+    start_toward: Some((-87.7876, 41.9975)),
+    // A dense grid: the freeways pass over it.
+    separate_highways: true,
+)

@@ -970,8 +970,13 @@ mod tests {
         d.step(VehicleInput::default(), &ground);
         assert!(!d.braking(), "coasting");
         let mut out = Vec::new();
-        for _ in 0..600 {
-            d.step(pedal(0.0, 1.0), &ground);
+        // Brake to a stop (it holds there), lift, and press again to reverse.
+        for k in 0..900 {
+            let lift = (600..610).contains(&k);
+            d.step(pedal(0.0, if lift { 0.0 } else { 1.0 }), &ground);
+            if lift {
+                continue;
+            }
             if d.state.gear >= 0 {
                 assert!(d.braking(), "braking at {}", d.state.speed_mps);
                 out.clear();

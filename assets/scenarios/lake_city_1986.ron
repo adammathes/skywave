@@ -15,5 +15,7 @@ Scenario(
     default_time: (16, 50),
     default_vehicle: "homestead_wagon",
     years: (1977, 1989),
-    heroes: [],
+    // The cars of the North Side's summer nights, kept on the road past their age: the late
+    // pony hatch with its T-tops and stripes, and the plastic-bodied V8 sports car.
+    heroes: ["corvid_hatch", "longbow_coupe"],
 )
