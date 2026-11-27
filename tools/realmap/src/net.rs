@@ -622,7 +622,9 @@ fn join(nodes: &[P], chains: &[Chain], drop_stubs: bool) -> Vec<Road> {
                 }
                 let (u, v) = (leaving(&chains[ci], ai), leaving(&chains[cj], aj));
                 let dot = u.0 * v.0 + u.1 * v.1;
-                if dot < cos_max {
+                // Two ends alone at a node bending less than 60 degrees are a bend, not a
+                // corner: one road, eased round it.
+                if dot < cos_max || ends.len() == 2 && dot < -0.5 {
                     pairs.push((dot, x, y));
                 }
             }
