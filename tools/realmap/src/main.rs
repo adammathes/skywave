@@ -71,7 +71,8 @@ pub struct Import {
     /// S1200 secondary (as arterials).
     #[serde(default = "classes")]
     pub classes: Vec<String>,
-    /// Real-world boxes (west, south, east, north) whose roads are cut out.
+    /// Real-world boxes (west, south, east, north) whose highways are cut out (where one
+    /// runs too close to the streets or a river for its overpasses at the frame's squeeze).
     #[serde(default)]
     pub skip: Vec<(f64, f64, f64, f64)>,
     /// Invented links, (lon, lat) polylines imported like secondary roads: a stand-in for a
@@ -391,7 +392,7 @@ fn run(path: &str) -> Result<(), String> {
 
     // Roads.
     let skip: Vec<[f64; 4]> = cfg.skip.iter().map(|&(a, b, c, d)| [a, b, c, d]).collect();
-    // Cut out the parts of lines inside a skip box, splitting them there.
+    // Cut out the parts of highways inside a skip box, splitting them there.
     let skipped = |(lon, lat): (f64, f64)| {
         skip.iter()
             .any(|s| lon >= s[0] && lat >= s[1] && lon <= s[2] && lat <= s[3])
@@ -404,7 +405,7 @@ fn run(path: &str) -> Result<(), String> {
             .iter()
             .chain(core::iter::once(&(f64::NAN, f64::NAN)))
         {
-            if p.0.is_nan() || skipped(p) {
+            if p.0.is_nan() || (l.mtfcc == "S1100" && skipped(p)) {
                 if part.len() >= 2 {
                     lines.push(sources::Line {
                         mtfcc: l.mtfcc.clone(),

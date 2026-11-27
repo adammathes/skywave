@@ -274,6 +274,9 @@ pub fn network(
     join(&nodes, &chains)
 }
 
+/// Shorter highways are left out.
+const MIN_HIGHWAY_M: f32 = 300.0;
+
 /// A highway end this close to a street junction meets it.
 const ATTACH_M: f32 = 90.0;
 
@@ -640,6 +643,8 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
         .collect();
         lines.push((chains[i0].highway, chains[i0].suspension, pts));
     }
+    // A highway stub (a few hundred meters between two street corners) is no freeway.
+    lines.retain(|l| !l.0 || length(&l.2) >= MIN_HIGHWAY_M);
     lines.sort_by(|a, b| length(&b.2).total_cmp(&length(&a.2)));
 
     let (mut nh, mut na) = (0, 0);

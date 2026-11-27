@@ -117,8 +117,16 @@ layout's generated sections, each between `// realmap:<name> begin` and `// real
   it, 500 m apart. Names are invented (`freeway 3`, `road 12`). `links` adds invented
   connections where the real one runs outside the box. A `suspension` point marks the
   chain through it as its own road with `suspension: true` (the layout must have that field).
+- `channels` (optional), drawn in the import file in degrees like districts.
 - `districts`, drawn in the import file in degrees (a polygon, or a band along a line), and
   `start`, the road nearest a real point.
+
+A city's main streets are mostly not state routes, so an import may name a `county`: its
+all-roads file is read instead, and the streets whose TIGER names are in `names` come in as
+arterials (the names stay in the import file; the game's are invented). Highways are traced
+apart from the streets, so they pass over them; a highway's loose end is cut back to the
+first street junction it passes and meets the streets there. `skip` boxes cut highways out where they run too close to streets or a river for their
+overpasses at the squeeze.
 
 Everything else in the layout (extra hand-drawn roads, channels, edges) stays as written.
 
