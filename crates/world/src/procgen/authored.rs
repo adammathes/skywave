@@ -31,6 +31,7 @@ use super::arterials::grade_limit;
 use super::macro_map::{
     ccw, flatten_by_zone, paint_bands, raise_walls, Frame, MacroMap, Strip, WaterBody, WaterKind,
 };
+use super::profile::{ease, grade_at, ROAD_CURVE, STREET_CURVE};
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
 use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};
@@ -562,26 +563,50 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     }
     let mut node_y: Vec<f32> = elev.iter().map(|e| e.unwrap_or(0.0)).collect();
 
-    // The highways first: the roads over them and the ramps beside them take their heights.
+    // A road takes its heights whole, along its length, so it runs smooth through its
+    // junctions; the roads it meets are then held to it there. The highways first (the roads
+    // over them and the ramps beside them take their heights), then the wider before the
+    // narrower.
     let mut ys: Vec<Vec<f32>> = vec![Vec::new(); pieces.len()];
+    let mut fixed = vec![false; nodes.len()];
+    let mut order: Vec<usize> = (0..lines.len()).collect();
+    order.sort_by_key(|&i| {
+        let r = &layout.roads[road[i]];
+        let class = match r.class {
+            RoadClass::Highway => 0,
+            RoadClass::Arterial => 1,
+            RoadClass::Collector => 2,
+            _ => 3,
+        };
+        (class, u8::MAX - r.lanes, i)
+    });
     let mut highway: Vec<([f32; 3], [f32; 3])> = Vec::new();
-    for (pc, ys) in pieces.iter().zip(&mut ys) {
-        if kind[pc.line] != Kind::Highway {
-            continue;
-        }
-        let r = &layout.roads[road[pc.line]];
-        let tgt: Vec<f32> = pc.pts.iter().map(|&p| target(p, r.deck_m)).collect();
-        *ys = grade_limit(
-            &tgt,
-            &arcs(&pc.pts),
-            r.max_grade.unwrap_or(HIGHWAY_GRADE),
-            Some(node_y[pc.a]),
-            Some(node_y[pc.b]),
-            None,
-        );
-        for k in 0..pc.pts.len() - 1 {
-            let (p, q) = (pc.pts[k], pc.pts[k + 1]);
-            highway.push(([p.x, ys[k], p.y], [q.x, ys[k + 1], q.y]));
+    for &i in order.iter().filter(|&&i| kind[i] == Kind::Highway) {
+        let r = &layout.roads[road[i]];
+        let of_line = |q: &Piece| q.line == i;
+        let parts: Vec<Part> = pieces
+            .iter()
+            .filter(|q| of_line(q))
+            .map(|pc| Part {
+                a: pc.a,
+                b: pc.b,
+                s: arcs(&pc.pts),
+                target: pc.pts.iter().map(|&p| target(p, r.deck_m)).collect(),
+            })
+            .collect();
+        let g = r.max_grade.unwrap_or(HIGHWAY_GRADE);
+        let got = grade_line(&parts, g, ROAD_CURVE, &mut node_y, &mut fixed);
+        for ((pc, ys), y) in pieces
+            .iter()
+            .zip(&mut ys)
+            .filter(|(q, _)| of_line(q))
+            .zip(got)
+        {
+            for k in 0..pc.pts.len() - 1 {
+                let (p, q) = (pc.pts[k], pc.pts[k + 1]);
+                highway.push(([p.x, y[k], p.y], [q.x, y[k + 1], q.y]));
+            }
+            *ys = y;
         }
     }
     // The highway's height beside `p`.
@@ -615,6 +640,42 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
             }
         }
     }
+    for &i in order.iter().filter(|&&i| kind[i] == Kind::Road) {
+        let r = &layout.roads[road[i]];
+        let of_line = |q: &Piece| q.line == i;
+        let parts: Vec<Part> = pieces
+            .iter()
+            .filter(|q| of_line(q))
+            .map(|pc| {
+                let s = arcs(&pc.pts);
+                let target = (0..pc.pts.len())
+                    .map(|k| target(pc.pts[k], r.deck_m).max(lift(i, pc.s0 + s[k])))
+                    .collect();
+                Part {
+                    a: pc.a,
+                    b: pc.b,
+                    s,
+                    target,
+                }
+            })
+            .collect();
+        let g = r.max_grade.unwrap_or(MAX_GRADE);
+        // A steep road is a slow one: it may turn over a crest sooner.
+        let k = if g > MAX_GRADE {
+            STREET_CURVE
+        } else {
+            ROAD_CURVE
+        };
+        let got = grade_line(&parts, g, k, &mut node_y, &mut fixed);
+        for ((_, ys), y) in pieces
+            .iter()
+            .zip(&mut ys)
+            .filter(|(q, _)| of_line(q))
+            .zip(got)
+        {
+            *ys = y;
+        }
+    }
 
     let mut bridged: Vec<Vec<bool>> = Vec::new();
     let edges: Vec<Edge> = pieces
@@ -637,7 +698,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                     .collect(),
             );
             let ys = match kind[pc.line] {
-                Kind::Highway => hy,
+                Kind::Highway | Kind::Road => hy,
                 // Level with the highway to past the gore, then up (or down) to the road.
                 Kind::Ramp => {
                     let merge = RAMP_MERGE_M.min(0.4 * total);
@@ -653,19 +714,6 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                             lerp(highway_y(pc.pts[k]), foot, smoothstep(merge, total, d))
                         })
                         .collect()
-                }
-                Kind::Road => {
-                    let tgt: Vec<f32> = (0..pc.pts.len())
-                        .map(|k| target(pc.pts[k], r.deck_m).max(lift(pc.line, pc.s0 + s[k])))
-                        .collect();
-                    grade_limit(
-                        &tgt,
-                        &s,
-                        r.max_grade.unwrap_or(MAX_GRADE),
-                        Some(node_y[pc.a]),
-                        Some(node_y[pc.b]),
-                        None,
-                    )
                 }
             };
             let (width_m, speed) = match (r.class, r.lanes) {
@@ -725,6 +773,91 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     };
     let start = start(layout, &lines, &graph);
     (graph, start)
+}
+
+/// A stretch of a road between two of its junctions (nodes `a` and `b`): the arc length and
+/// the height asked at each of its points.
+struct Part {
+    a: usize,
+    b: usize,
+    s: Vec<f32>,
+    target: Vec<f32>,
+}
+
+/// A grade is read across this far either side of a junction.
+const JUNCTION_REACH_M: f32 = 30.0;
+
+/// The heights of one road along its `parts`, in order: near their targets, no steeper than
+/// `g`, the grade changing by no more than `k` per meter ([`ease`]) and unbroken through the
+/// road's own junctions. A junction a road before this one `fixed` keeps its height
+/// (`node_y`); the rest take theirs from this road and are fixed for the next.
+fn grade_line(
+    parts: &[Part],
+    g: f32,
+    k: f32,
+    node_y: &mut [f32],
+    fixed: &mut [bool],
+) -> Vec<Vec<f32>> {
+    let mut out = Vec::with_capacity(parts.len());
+    let mut from = 0;
+    while from < parts.len() {
+        // A run of parts joined end to end.
+        let mut to = from + 1;
+        while to < parts.len() && parts[to].a == parts[to - 1].b {
+            to += 1;
+        }
+        let run = &parts[from..to];
+        let (mut s, mut y, mut held) = (Vec::new(), Vec::new(), Vec::new());
+        let mut first = Vec::with_capacity(run.len());
+        for (j, p) in run.iter().enumerate() {
+            let skip = usize::from(j > 0);
+            let s0 = s.last().copied().unwrap_or(0.0);
+            first.push(s.len() - skip);
+            let n = p.s.len();
+            for q in skip..n {
+                s.push(s0 + p.s[q]);
+                let node = if q == 0 {
+                    Some(p.a)
+                } else if q == n - 1 {
+                    Some(p.b)
+                } else {
+                    None
+                };
+                y.push(node.map_or(p.target[q], |nd| node_y[nd]));
+                held.push(node.is_some_and(|nd| fixed[nd]));
+            }
+        }
+        let n = y.len();
+        let mut stops: Vec<usize> = (1..n - 1).filter(|&i| held[i]).collect();
+        stops.insert(0, 0);
+        stops.push(n - 1);
+        let mut limited = y.clone();
+        for w in stops.windows(2) {
+            let (i, j) = (w[0], w[1]);
+            let v = grade_limit(&y[i..=j], &s[i..=j], g, None, None, None);
+            limited[i..=j].copy_from_slice(&v);
+        }
+        let at_stop = |i: usize| {
+            (i > 0 && i < n - 1).then(|| clamp(grade_at(&limited, &s, i, JUNCTION_REACH_M), -g, g))
+        };
+        let mut eased = limited.clone();
+        for w in stops.windows(2) {
+            let (i, j) = (w[0], w[1]);
+            let v = ease(&limited[i..=j], &s[i..=j], k, at_stop(i), at_stop(j));
+            eased[i..=j].copy_from_slice(&v);
+        }
+        for (j, p) in run.iter().enumerate() {
+            let at = first[j];
+            let part = eased[at..at + p.s.len()].to_vec();
+            for (nd, h) in [(p.a, part[0]), (p.b, part[part.len() - 1])] {
+                node_y[nd] = h;
+                fixed[nd] = true;
+            }
+            out.push(part);
+        }
+        from = to;
+    }
+    out
 }
 
 /// Cuts and fills the ground to meet the roads: under a road and its shoulders the ground

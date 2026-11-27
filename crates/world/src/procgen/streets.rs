@@ -60,9 +60,10 @@ use place::{Edge, Node, RoadClass, RoadGraph, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::{hash64, hash_bytes, Seed};
 
 use super::arterials::{
-    coast_tangent, grade_limit, major_of, sample_nodes, seg_intersect, tensor, HIGHWAY_WIDTH_M,
+    coast_tangent, graded, major_of, sample_nodes, seg_intersect, tensor, HIGHWAY_WIDTH_M,
 };
 use super::macro_map::{MacroMap, MacroPoiKind};
+use super::profile::STREET_CURVE;
 use super::zones::{chamfer, ALL_ZONES};
 use super::{stage, CELL_M, CHUNK_M};
 use crate::math::{abs, clamp, floor, lerp, segment_distance, sin_cos, PI, TAU, V2};
@@ -1093,10 +1094,11 @@ impl<'a> StreetPlan<'a> {
             }
             s.push(acc);
         }
-        let ys = grade_limit(
+        let ys = graded(
             &ground,
             &s,
             FILTER_GRADE,
+            STREET_CURVE,
             Some(y0),
             Some(y1),
             Some((&ground, PROFILE_BAND_M)),
@@ -2064,10 +2066,11 @@ impl<'a> StreetPlan<'a> {
             // solution (the cut/fill test below rejects what it cannot follow).
             let reach = 0.95 * FILTER_GRADE * arc[n - 1];
             let y1 = clamp(ground[n - 1], ground[0] - reach, ground[0] + reach);
-            let ys = grade_limit(
+            let ys = graded(
                 &ground,
                 &arc,
                 FILTER_GRADE,
+                STREET_CURVE,
                 Some(ground[0]),
                 Some(y1),
                 Some((&ground, PROFILE_BAND_M)),
@@ -2128,10 +2131,11 @@ impl<'a> StreetPlan<'a> {
                 }
                 arc.push(acc);
             }
-            let mut ys = grade_limit(
+            let mut ys = graded(
                 &ground,
                 &arc,
                 FILTER_GRADE,
+                STREET_CURVE,
                 Some(ground[0]),
                 Some(ground[0]),
                 Some((&ground, PROFILE_BAND_M)),
@@ -3470,10 +3474,11 @@ impl<'a> StreetPlan<'a> {
             }
             let ground: Vec<f32> = e.pts.iter().map(|&p| self.hgt(p)).collect();
             let last = e.ys.len() - 1;
-            let ys = grade_limit(
+            let ys = graded(
                 &e.ys,
                 &s,
                 FILTER_GRADE,
+                STREET_CURVE,
                 Some(e.ys[0]),
                 Some(e.ys[last]),
                 Some((&ground, PROFILE_BAND_M)),
