@@ -158,11 +158,62 @@ impl Palette {
         }
     }
 
+    /// The lake city of the 1980s (Lake City): built to work, warm inside. Walls of red,
+    /// brown and buff common brick and pale limestone where a sunnier place has stucco and
+    /// pastels, greystone and slate for the cool ones, gravel roofs, deep Midwestern lawns
+    /// and elms, a steel-green lake, orange sodium lamps, and the warmth all in the
+    /// windows and the neon of taverns and stands.
+    pub const fn brick_and_limestone() -> Palette {
+        Palette {
+            stucco_cream: srgb(0xCFC3A6),
+            stucco_white: srgb(0xD8D2C4),
+            salmon: srgb(0xA0583F),
+            pastel_pink: srgb(0xC4A078),
+            peach: srgb(0xB4875C),
+            mint: srgb(0xA5A194),
+            sky_blue: srgb(0x8C949A),
+            lavender: srgb(0x6E4638),
+            sand: srgb(0xCBBE9E),
+            brick_red: srgb(0x8E4232),
+            brick_brown: srgb(0x6C4634),
+            teal: srgb(0x2F5A58),
+            terracotta: srgb(0x9C4E36),
+            navy: srgb(0x26324A),
+            concrete: srgb(0xB2AEA6),
+            concrete_dark: srgb(0x86847E),
+            asphalt: srgb(0x3C3C3E),
+            asphalt_worn: srgb(0x52514E),
+            paint_white: srgb(0xE2E2DA),
+            paint_yellow: srgb(0xE0B02C),
+            roof_gravel: srgb(0x6E6A64),
+            lawn: srgb(0x587A36),
+            lawn_dry: srgb(0x86884C),
+            scrub: srgb(0x5E6A3C),
+            soil: srgb(0x6A5440),
+            water: srgb(0x3A6670),
+            palm_green: srgb(0x40662E),
+            leaf_green: srgb(0x385E28),
+            leaf_light: srgb(0x5E8436),
+            bark: srgb(0x4E4034),
+            glass: srgb(0x2C3A48),
+            metal_dark: srgb(0x34383C),
+            metal_light: srgb(0x949AA0),
+            hydrant_red: srgb(0xC4A020),
+            sodium: srgb(0xFF9438),
+            window_warm: srgb(0xFFCC88),
+            neon_pink: srgb(0xFF4A7A),
+            neon_cyan: srgb(0x48B8FF),
+            neon_red: srgb(0xFF2A1E),
+            neon_green: srgb(0x50F078),
+        }
+    }
+
     /// The built-in palette called `name` (a scenario's or a template's `era.palette`).
     pub fn named(name: &str) -> Option<Palette> {
         match name {
             "socal_1985" => Some(Palette::socal_1985()),
             "sodium_night" => Some(Palette::sodium_night()),
+            "brick_and_limestone" => Some(Palette::brick_and_limestone()),
             _ => None,
         }
     }

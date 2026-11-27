@@ -596,6 +596,15 @@ pub struct Basin {
     pub overlooks: CountRange,
 }
 
+/// A landmark kit and the variant (by letter) a place sites by its start.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct RoadsideKit {
+    pub kit: String,
+    pub variant: char,
+}
+
 /// A kind of place: everything world generation needs besides the seed and the era. A
 /// coastal place has `coast`, `elevation` and `layout`; an inland basin has `basin` and
 /// none of them; a template with none of them carries only zone rules, to dress an
@@ -618,6 +627,16 @@ pub struct RegionTemplate {
     pub layout: Option<Layout>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub basin: Option<Basin>,
+    /// Landmark kits a place without a basin sites by its start, in order: each on the
+    /// commercial or strip lot on an arterial nearest the start that fits it
+    /// (`docs/WORLD_GENERATION.md`, "Hero landmarks"). A basin sites its own set.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub roadside: Vec<RoadsideKit>,
+    /// Side streets never dead-end except in the zones whose pattern has them (`Curvy`,
+    /// `Switchback`, `Beachfront`): one that stops short (at a river, a right of way, a
+    /// park) is cut back to its last crossing. Off by default.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub through_streets: bool,
     pub zones: Zones,
 }
 
@@ -855,6 +874,11 @@ impl RegionTemplate {
             (None, None, None, None) => false,
             _ => return Err(TemplateError::BadShape),
         };
+        let letter = |r: &RoadsideKit| r.variant.is_ascii_uppercase() && !r.kit.is_empty();
+        if !self.roadside.iter().all(letter) || (self.basin.is_some() && !self.roadside.is_empty())
+        {
+            return Err(TemplateError::OutOfRange { field: "roadside" });
+        }
 
         let mut scored = 0;
         for zone in LAND_ZONES {

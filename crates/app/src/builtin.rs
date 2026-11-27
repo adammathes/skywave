@@ -15,35 +15,46 @@ use world::Grammar;
 
 pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
 pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+pub const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 pub const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
+pub const LAKE_CITY: &str = include_str!("../../../assets/layouts/lake_city.ron");
+pub const GREAT_LAKES_CITY: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 pub const CALIFORNIA_COAST_80S: &str =
     include_str!("../../../assets/grammar/california_coast_80s.ron");
 pub const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+pub const GREAT_LAKES_80S: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
 pub const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 pub const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 
 /// The landmark kits compiled into the game: a `place::PropKind::Landmark`'s `kit` is an
 /// index into this list.
-pub const LANDMARKS: [(&str, &str); 9] = world::landmarks::BUILTIN;
+pub const LANDMARKS: [(&str, &str); 10] = world::landmarks::BUILTIN;
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.
 pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-pub const REGIONS: [(&str, &str); 3] = [
+pub const REGIONS: [(&str, &str); 5] = [
     ("california_coast", CALIFORNIA_COAST),
     ("socal_basin", SOCAL_BASIN),
+    ("socal_bowl", SOCAL_BOWL),
     ("bay_area", BAY_AREA),
+    ("great_lakes_city", GREAT_LAKES_CITY),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.
-pub const LAYOUTS: [(&str, &str); 2] = [("bay_loop", BAY_LOOP), ("mirage_bowl", MIRAGE_BOWL)];
+pub const LAYOUTS: [(&str, &str); 3] = [
+    ("bay_loop", BAY_LOOP),
+    ("mirage_bowl", MIRAGE_BOWL),
+    ("lake_city", LAKE_CITY),
+];
 /// The facade grammars compiled into the game, as `(file name, RON text)`.
-pub const GRAMMARS: [(&str, &str); 2] = [
+pub const GRAMMARS: [(&str, &str); 3] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
     ("socal_basin_2001.ron", SOCAL_BASIN_2001),
+    ("great_lakes_80s.ron", GREAT_LAKES_80S),
 ];
 
 /// The text of the built-in region template `id`.
@@ -63,7 +74,7 @@ pub fn grammar_text(file: &str) -> Option<&'static str> {
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them (`crate::scenario::BUILTIN`).
-pub const SCENARIOS: [(&str, &str); 4] = [
+pub const SCENARIOS: [(&str, &str); 5] = [
     (
         "socal_beach_1984",
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
@@ -79,6 +90,10 @@ pub const SCENARIOS: [(&str, &str); 4] = [
     (
         "mirage_bowl_2001",
         include_str!("../../../assets/scenarios/mirage_bowl_2001.ron"),
+    ),
+    (
+        "lake_city_1986",
+        include_str!("../../../assets/scenarios/lake_city_1986.ron"),
     ),
 ];
 

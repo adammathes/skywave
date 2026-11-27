@@ -16,7 +16,6 @@ use traffic::{
     Car, Clock, Control, Density, Inputs, Junction, Lane, LaneGraph, Light, Player, ShapeRule,
     Traffic, TrafficBudget, Turn, TurnKind, View, NONE,
 };
-use world::procgen::build_place;
 use world::template::RegionTemplate;
 
 /// Counts heap allocations made on the current thread, so stepping can be shown to make
@@ -209,6 +208,18 @@ const NO_VIEW: View = View {
     dir: [0.0, -1.0],
     tan_half: 1.0,
 };
+
+/// `t`'s place for `seed`: generated, or for a template with only zone rules (the lake
+/// city's) its authored layout dressed by them.
+fn build_place(seed: Seed, t: &RegionTemplate, g: &world::Grammar) -> place::Place {
+    if t.coast.is_some() || t.basin.is_some() {
+        return world::procgen::build_place(seed, t, g);
+    }
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/lake_city.ron")).expect("layout");
+    layout.validate().expect("validate layout");
+    world::procgen::authored::build_place(seed, &layout, t, g)
+}
 
 /// The shipped coast grammar: `build_place` dresses buildings from it.
 fn grammar() -> world::Grammar {
@@ -1540,15 +1551,16 @@ fn a_car_behind_a_semi_keeps_clear_of_its_tail() {
     assert!(closest > 1.0, "{closest}");
 }
 
-/// A car holding its claim when its light turns red too close to the line to stop at its
-/// normal braking keeps the claim and clears the junction instead of stopping dead at the
-/// line; one that has not claimed stops. None brakes harder than the emergency limit.
+/// A car that claims a sharp turn on the last of the green or the yellow reckons with
+/// slowing for it, so it is over the line before red: none is still short of the line with
+/// its claim when the light turns, none brakes harder than the emergency limit, and those
+/// that cannot make it stop.
 #[test]
-fn a_car_too_close_to_stop_at_the_red_goes_on_through() {
+fn a_car_claiming_a_sharp_turn_on_the_yellow_clears_the_line_before_red() {
     let _quiet = shared();
     let mut g = crossing();
-    // A tight turn: a car that claimed on the last of the green slows for it so much that
-    // the red finds it just short of the line.
+    // A tight turn: a car slows for it so much that, reckoned at its approach speed, the red
+    // would find it just short of the line.
     g.turns[0].min_radius_m = 4.0;
     let len = g.lanes[0].length_m;
     // Lane 0 is green until tick 3000, yellow to 3420, red after.
@@ -1561,16 +1573,19 @@ fn a_car_too_close_to_stop_at_the_red_goes_on_through() {
             let mut t = Traffic::new(&g, TrafficBudget::default(), Seed(start));
             let id = t.spawn_at(&g, 0, len - d0, 12.0).expect("pool");
             let car = |t: &Traffic| *t.cars().iter().find(|c| c.id == id).expect("car");
-            let mut claimed_at_red = false;
+            let mut gone_at = None;
             for tick in start..red + 600 {
                 let before = car(&t);
                 t.step(&g, &scripted(tick, Player::ABSENT));
                 if before.seg != 0 {
+                    gone_at.get_or_insert(tick);
                     continue;
                 }
-                if tick == red {
-                    claimed_at_red = before.held != NONE;
-                }
+                assert!(
+                    tick != red || before.held == NONE,
+                    "start {start}, {d0} m out: {:.2} m short of the line with a claim at red",
+                    len - before.s
+                );
                 let decel = (before.speed - car(&t).speed) * HZ as f32;
                 worst = worst.max(decel);
                 assert!(
@@ -1581,19 +1596,16 @@ fn a_car_too_close_to_stop_at_the_red_goes_on_through() {
                     before.speed
                 );
             }
-            if claimed_at_red {
-                assert_ne!(
-                    car(&t).seg,
-                    0,
-                    "start {start}, {d0} m out: kept a claim, stayed"
-                );
-                went += 1;
-            } else if car(&t).seg == 0 {
-                stopped += 1;
+            match gone_at {
+                Some(tick) => {
+                    assert!(tick <= red, "start {start}, {d0} m out: crossed on the red");
+                    went += 1;
+                }
+                None => stopped += 1,
             }
         }
     }
-    println!("red claim: {went} went on through, {stopped} stopped, hardest {worst:.2} m/s²");
+    println!("sharp turn on the yellow: {went} cleared before red, {stopped} stopped, hardest {worst:.2} m/s²");
     assert!(went > 0 && stopped > 0, "the sweep met both cases");
 }
 
@@ -1674,4 +1686,57 @@ fn a_semis_claim_reserves_its_own_length() {
         assert!(!(on(&s) && on(&c)), "tick {tick}: both claim the turn");
     }
     assert_eq!(find(&t, car).seg, 2, "the car got through");
+}
+
+/// Spawns favor main roads: near one, main roads carry well over half their share of the
+/// lanes around. Spawning evenly, the cars on them drove off and side streets kept theirs, so
+/// main roads held a third of their share (15% of the cars on 51% of the lanes).
+#[test]
+fn main_roads_carry_more_than_their_share() {
+    let _quiet = shared();
+    let mut b = Coast::new(COAST, 1);
+    let main = |l: &traffic::Lane| l.speed_mps >= 15.0;
+    // Stand beside the middle of the longest main-road lane.
+    let (i, _) = b
+        .graph
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| main(l))
+        .max_by(|x, y| x.1.length_m.total_cmp(&y.1.length_m))
+        .expect("the coast has main roads");
+    let pose = b.graph.pose(i as u32, 0.5 * b.graph.lanes[i].length_m);
+    b.player.pos = pose.pos;
+    let g = &b.graph;
+    // Lane length near the player, where cars spawn and live.
+    let (mut total, mut main_len) = (0.0, 0.0);
+    for (i, l) in g.lanes.iter().enumerate() {
+        let p = g.pose(i as u32, 0.5 * l.length_m).pos;
+        let d = [p[0] - pose.pos[0], p[2] - pose.pos[2]];
+        if (d[0] * d[0] + d[1] * d[1]).sqrt() < 360.0 {
+            total += l.length_m;
+            main_len += if main(l) { l.length_m } else { 0.0 };
+        }
+    }
+    let mut t = b.traffic.clone();
+    let (mut on_main, mut on_lanes, mut tick) = (0usize, 0usize, 0);
+    drive(&b, &mut t, 60, Density::Normal, |t, _, _| {
+        if tick >= 30 * HZ {
+            for c in t.cars() {
+                if let Some(l) = g.lanes.get(c.seg as usize) {
+                    on_lanes += 1;
+                    on_main += usize::from(main(l));
+                }
+            }
+        }
+        tick += 1;
+    });
+    let lane_share = main_len / total;
+    let car_share = on_main as f32 / on_lanes.max(1) as f32;
+    println!(
+        "main roads: {:.0}% of lane length near, {:.0}% of cars",
+        100.0 * lane_share,
+        100.0 * car_share
+    );
+    assert!(car_share >= 0.6 * lane_share, "{car_share} vs {lane_share}");
 }

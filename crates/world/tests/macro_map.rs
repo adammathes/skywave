@@ -12,7 +12,6 @@ use world::procgen::{MacroMap, MacroPoiKind, WaterKind, ZONE_CELL_M};
 use world::template::RegionTemplate;
 
 const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-const GREAT_LAKES: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 const NORTH_SHORE: &str = include_str!("../../../assets/regions/north_shore_suburb.ron");
 const SIZE: [u16; 2] = [16, 16];
 
@@ -193,11 +192,7 @@ fn strip_runs_beside_the_beach() {
 
 #[test]
 fn heights_are_finite_and_within_the_template() {
-    for (text, hilly) in [
-        (CALIFORNIA, true),
-        (GREAT_LAKES, false),
-        (NORTH_SHORE, false),
-    ] {
+    for (text, hilly) in [(CALIFORNIA, true), (NORTH_SHORE, false)] {
         let t = template(text);
         let (lo, hi) = t.height_bounds();
         for seed in 1..=3 {
