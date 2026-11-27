@@ -1,0 +1,56 @@
+// The Bay Loop from real data (`cargo run -p realmap -- tools/realmap/bay_loop.ron`): the
+// Bay Area from the Golden Gate to the South Bay foothills, squeezed into a 4 km frame. The
+// city gets about twice the room of the land around it (about 1:9 against 1:20), so its
+// crests and grid read at driving scale. Districts are drawn here in degrees so they move
+// with the warp.
+Import(
+    layout: "assets/layouts/bay_loop.ron",
+    state: "06",
+    x_warp: [(-122.53, 0), (-122.36, 1700), (-121.85, 4096)],
+    z_warp: [(37.90, 0), (37.81, 500), (37.70, 1800), (37.24, 4096)],
+    slope: 2.5,
+    smooth: 2,
+    foothill_m: 150,
+    max_height_m: 220,
+    sea_below_m: 0.5,
+    terrain_cell_m: 32,
+    merge_m: 16,
+    // The real way round the north of the bay (the bridge from the north shore to the
+    // East Bay) lies north of the box: the headlands road stands in for it.
+    links: [
+        [(-122.4775, 37.808), (-122.4785, 37.835), (-122.48, 37.855), (-122.455, 37.874),
+         (-122.40, 37.884), (-122.31, 37.889)],
+    ],
+    // The red bridge over the strait.
+    suspension: [(-122.4783, 37.8199)],
+    districts: [
+        District(name: "east bay", zone: "Residential", polygon: [
+            (-122.33, 37.90), (-122.24, 37.90), (-122.16, 37.78), (-122.00, 37.60),
+            (-121.88, 37.48), (-121.93, 37.44), (-122.08, 37.57), (-122.22, 37.71), (-122.31, 37.79),
+        ]),
+        District(name: "college town", zone: "Commercial", polygon: [(-122.285, 37.882), (-122.25, 37.882), (-122.25, 37.86), (-122.285, 37.86)]),
+        District(name: "old port", zone: "Commercial", polygon: [(-122.285, 37.812), (-122.26, 37.812), (-122.26, 37.795), (-122.285, 37.795)]),
+        District(name: "peninsula", zone: "Suburb", polygon: [
+            (-122.50, 37.708), (-122.385, 37.708), (-122.37, 37.62), (-122.20, 37.49),
+            (-122.08, 37.41), (-122.18, 37.38), (-122.30, 37.45), (-122.42, 37.55), (-122.48, 37.63),
+        ]),
+        District(name: "bayshore", zone: "Industrial", band_m: 45, band: [
+            (-122.392, 37.705), (-122.385, 37.64), (-122.30, 37.565), (-122.21, 37.495), (-122.10, 37.425),
+        ]),
+        District(name: "the strip", zone: "Strip", band_m: 40, band: [
+            (-122.468, 37.700), (-122.415, 37.632), (-122.33, 37.565), (-122.235, 37.485),
+            (-122.145, 37.43), (-122.03, 37.37), (-121.95, 37.352),
+        ]),
+        District(name: "university", zone: "Park", polygon: [(-122.19, 37.44), (-122.15, 37.44), (-122.15, 37.415), (-122.19, 37.415)]),
+        District(name: "south bay", zone: "Residential", polygon: [
+            (-122.10, 37.41), (-121.97, 37.42), (-121.85, 37.45), (-121.85, 37.27), (-122.06, 37.26), (-122.12, 37.33),
+        ]),
+        District(name: "office parks", zone: "Industrial", polygon: [(-122.05, 37.42), (-121.93, 37.425), (-121.93, 37.385), (-122.05, 37.385)]),
+        District(name: "south downtown", zone: "Commercial", polygon: [(-121.905, 37.345), (-121.88, 37.345), (-121.88, 37.325), (-121.905, 37.325)]),
+        District(name: "village", zone: "Suburb", polygon: [(-122.05, 37.278), (-122.01, 37.278), (-122.01, 37.252), (-122.05, 37.252)]),
+        District(name: "city", zone: "Residential", hilly: true, polygon: [(-122.515, 37.812), (-122.385, 37.812), (-122.385, 37.708), (-122.515, 37.708)]),
+        District(name: "downtown", zone: "Downtown", polygon: [(-122.42, 37.812), (-122.388, 37.812), (-122.388, 37.776), (-122.42, 37.776)]),
+    ],
+    // The city's crests, on the hill road over the top.
+    start: (-122.447, 37.752),
+)
