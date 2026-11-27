@@ -659,6 +659,14 @@ impl Network {
     /// Junction `j`'s asphalt as a fan: the center, then the ring of trimmed ends and curb
     /// returns (counter-clockwise), each with its surface height. Empty for dead ends.
     pub fn junction_ring(&self, j: &Junction) -> Vec<V3> {
+        self.junction_ring_split(j, f32::INFINITY)
+    }
+
+    /// [`Self::junction_ring`] with each road's end split every `step` m or less. A road's
+    /// height across its end is not a straight line near a change of grade (the profile
+    /// blends its bends by distance), so a fan spanning the end in one edge leaves a step of
+    /// a few centimeters where the road meets it; the collider's fan follows it instead.
+    pub fn junction_ring_split(&self, j: &Junction, step: f32) -> Vec<V3> {
         let n = j.ends.len();
         let mut ring: Vec<V3> = Vec::with_capacity(n * 10);
         if n < 2 {
@@ -672,6 +680,11 @@ impl Network {
             let pr = c + e.dir * e.trim + e.dir.right() * e.hw;
             let pl = c + e.dir * e.trim + e.dir.left() * e.hw;
             ring.push(pr.at(path.y_at(pr)));
+            let parts = (2.0 * e.hw / step) as u32 + 1;
+            for k in 1..parts {
+                let q = pr + (pl - pr) * (k as f32 / parts as f32);
+                ring.push(q.at(path.y_at(q)));
+            }
             ring.push(pl.at(path.y_at(pl)));
             match j.corners[i] {
                 Corner::Fillet { q, r, ta, tb, .. } => {

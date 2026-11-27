@@ -707,16 +707,18 @@ mod ledges {
     /// overlapped (a junction's fan over its neighbor's, a road running on into a junction)
     /// the first one stood, and wherever it ended over another sitting a few centimeters
     /// off the car hit a ledge: about 30, 200, 260 and 250 of them, up to 35 cm, a 10 g jolt at
-    /// 40 mph. The collider now blends overlapping pieces. What is left sits where roads
-    /// cross a deck's height apart or less without a bridge; lower a pin when a world gets
-    /// fixed, never raise one.
+    /// 40 mph. The collider now blends overlapping pieces, follows each road's end across a
+    /// junction's fan and fills the gaps of folded fans. What is left: merges whose roads
+    /// disagree in height by up to a meter, carriageways side by side a meter apart with no
+    /// bridge, and a few seams of a few centimeters. Lower a pin when a world gets fixed,
+    /// never raise one.
     #[test]
     fn pavement_has_no_ledges() {
         let pins = [
             ("socal_beach_1984", 0),
-            ("mirage_bowl_2001", 29),
-            ("bay_loop_2005", 22),
-            ("lake_city_1986", 13),
+            ("mirage_bowl_2001", 17),
+            ("bay_loop_2005", 15),
+            ("lake_city_1986", 5),
         ];
         let mut over = Vec::new();
         for (id, pin) in pins {
