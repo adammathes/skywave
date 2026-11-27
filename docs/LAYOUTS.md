@@ -61,7 +61,10 @@ Layout(
 
 Road fields beyond the line: `lanes`, `speed_kph` (default from class and lanes), `max_grade`
 (default 0.12; hill streets may take more), `sidewalk` (default true), `dead_end` (default
-false) and `deck_m` (a bridge's deck height over the water, default 3).
+false), `deck_m` (a bridge's deck height over the water, default 3) and `suspension` (default
+false: a suspension bridge, two towers standing 12% in from either shore of the road's longest
+crossing, rising 0.36 of the span between them, with main cables, hangers, back cables to
+anchorages and the deck's rails; `PropKind::BridgeTower`).
 
 How roads are built: an end within 30 m of another road snaps onto it; ends and crossings become
 junctions. Over water a road rides its deck; on land it follows the ground, limited

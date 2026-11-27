@@ -369,6 +369,10 @@ pub struct ZoneRule {
     /// How the zone's lots are built on (stage 6); `None` (the default): no buildings.
     #[cfg_attr(feature = "serde", serde(default))]
     pub massing: Option<Massing>,
+    /// Steepest grade of the zone's local streets; `None` (the default): the usual 12%. A
+    /// city laid straight over its hills climbs steeper.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub street_grade: Option<f32>,
 }
 
 /// How a zone's lots are built on (`docs/WORLD_GENERATION.md` stage 6): how much of each

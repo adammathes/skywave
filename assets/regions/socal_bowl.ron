@@ -13,6 +13,7 @@ RegionTemplate(
     edges: Edges(north: Mountains, east: Mountains, south: RailYards, west: Hills),
 
 
+    through_streets: true,
     zones: Zones(
         downtown: ZoneRule(
             score: Some(Score(
