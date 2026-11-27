@@ -157,13 +157,17 @@ fn main_roads_are_one_network_with_bridges_over_water() {
 #[test]
 fn a_road_to_nowhere_is_refused() {
     let mut l = layout();
-    let r = l.roads.iter_mut().find(|r| r.name == "road 1").unwrap();
+    // A street no interchange names, so moving it breaks nothing else.
+    let ramped: Vec<String> = l.roads.iter().flat_map(|r| r.ramps.clone()).collect();
+    let r = l
+        .roads
+        .iter_mut()
+        .find(|r| r.class != RoadClass::Highway && !ramped.contains(&r.name))
+        .unwrap();
+    let name = r.name.clone();
     // Out to sea off the Peninsula's coast.
     r.points = vec![r.points[0], (100.0, 2200.0)];
-    assert_eq!(
-        l.validate(),
-        Err(LayoutError::RoadToNowhere("road 1".into()))
-    );
+    assert_eq!(l.validate(), Err(LayoutError::RoadToNowhere(name)));
 }
 
 /// Steepest grade a Bay Loop street may have over any 2.5 m or more (about a wheelbase):

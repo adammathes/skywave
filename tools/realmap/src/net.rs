@@ -142,6 +142,16 @@ fn seg_dist(p: P, a: P, b: P) -> f32 {
     dist(p, (a.0 + dx * t, a.1 + dz * t))
 }
 
+/// Union-find: the root of `i`'s set.
+fn root(c: &mut [usize], i: usize) -> usize {
+    let mut i = i;
+    while c[i] != i {
+        c[i] = c[c[i]];
+        i = c[i];
+    }
+    i
+}
+
 /// The skeleton grid: which cells hold a road.
 struct Grid {
     w: usize,
@@ -240,6 +250,8 @@ struct Chain {
 /// The road network of `lines` in the frame.
 /// Chains passing within this of a `suspension` point are that bridge.
 const SUSPENSION_NEAR_M: f32 = 40.0;
+/// Cosine of the widest angle at which a street still runs along a highway (30°).
+const ALONG_COS: f32 = 0.866;
 
 /// The road network of `lines` in the frame. A chain that passes one of the `suspension`
 /// points is a suspension bridge and stays a road of its own.
@@ -250,10 +262,11 @@ pub fn network(
     cell: f32,
     suspension: &[P],
     separate_highways: bool,
+    beside_m: f32,
 ) -> Vec<Road> {
     if !separate_highways {
         let all: Vec<&Line> = lines.iter().collect();
-        let (mut nodes, mut chains) = skeleton(&all, warp, ext, cell, None, suspension);
+        let (mut nodes, mut chains) = skeleton(&all, warp, ext, cell, None, suspension, &[]);
         cleanup(&mut nodes, &mut chains);
         // A short street piece with a highway at both ends is the highway through an
         // interchange whose knot was cleaned up: keep the highway whole.
@@ -280,8 +293,22 @@ pub fn network(
     // junction (it passes over) and a street corner never drags it off its line.
     let art: Vec<&Line> = lines.iter().filter(|l| l.mtfcc != "S1100").collect();
     let hwy: Vec<&Line> = lines.iter().filter(|l| l.mtfcc == "S1100").collect();
-    let (mut nodes, mut chains) = skeleton(&art, warp, ext, cell, Some(false), suspension);
-    let (hn, hc) = skeleton(&hwy, warp, ext, cell, Some(true), suspension);
+    // A street running along a highway (a frontage road) is left out there: it would
+    // cross it at a glancing angle, on a long deck. The highway carries that traffic.
+    let beside: Vec<(P, P, f32)> = hwy
+        .iter()
+        .filter(|_| beside_m > 0.0)
+        .flat_map(|l| {
+            let pts: Vec<P> = l.lonlat.iter().map(|&(a, b)| warp.fwd(a, b)).collect();
+            pts.windows(2)
+                .map(|s| (s[0], s[1], beside_m))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let (mut nodes, mut chains) = skeleton(&art, warp, ext, cell, Some(false), suspension, &beside);
+    // The streets' own dead ends go first: a highway meets the streets that stay.
+    cleanup(&mut nodes, &mut chains);
+    let (hn, hc) = skeleton(&hwy, warp, ext, cell, Some(true), suspension, &[]);
     let off = nodes.len();
     nodes.extend(hn);
     chains.extend(hc.into_iter().map(|mut c| {
@@ -329,6 +356,31 @@ pub fn network(
             c.pts.remove(1);
         }
     }
+    // A highway too short to be a freeway goes before the cleanup, so streets kept only by
+    // its end go too (no street is left ending where it was).
+    let mut comp: Vec<usize> = (0..chains.len()).collect();
+    for i in 0..chains.len() {
+        for j in i + 1..chains.len() {
+            let (a, b) = (&chains[i], &chains[j]);
+            let touch = a.a == b.a || a.a == b.b || a.b == b.a || a.b == b.b;
+            if a.highway && b.highway && touch {
+                let (ri, rj) = (root(&mut comp, i), root(&mut comp, j));
+                comp[ri] = rj;
+            }
+        }
+    }
+    let mut total = vec![0.0f32; chains.len()];
+    for i in 0..chains.len() {
+        if chains[i].highway {
+            let r = root(&mut comp, i);
+            total[r] += length(&chains[i].pts);
+        }
+    }
+    for i in 0..chains.len() {
+        if chains[i].highway && total[root(&mut comp, i)] < MIN_HIGHWAY_M {
+            chains[i].alive = false;
+        }
+    }
     cleanup(&mut nodes, &mut chains);
     join(&nodes, &chains, true)
 }
@@ -347,6 +399,7 @@ fn skeleton(
     cell: f32,
     highways: Option<bool>,
     suspension: &[P],
+    beside: &[(P, P, f32)],
 ) -> (Vec<P>, Vec<Chain>) {
     let w = (ext[0] / cell).ceil() as usize;
     let h = (ext[1] / cell).ceil() as usize;
@@ -363,6 +416,16 @@ fn skeleton(
         let pts: Vec<P> = l.lonlat.iter().map(|&(a, b)| warp.fwd(a, b)).collect();
         for s in pts.windows(2) {
             let n = (dist(s[0], s[1]) / (cell * 0.25)).ceil().max(1.0) as usize;
+            // The highway segments this one runs along, within their reach.
+            let along = |p: P| {
+                let d = (s[1].0 - s[0].0, s[1].1 - s[0].1);
+                beside.iter().any(|&(a, b, reach)| {
+                    let e = (b.0 - a.0, b.1 - a.1);
+                    let dot = (d.0 * e.0 + d.1 * e.1).abs();
+                    let len = d.0.hypot(d.1) * e.0.hypot(e.1);
+                    len > 0.0 && dot > len * ALONG_COS && seg_dist(p, a, b) < reach
+                })
+            };
             let mut last: Option<(i32, i32)> = None;
             for k in 0..=n {
                 let t = k as f32 / n as f32;
@@ -371,7 +434,12 @@ fn skeleton(
                     s[0].1 + (s[1].1 - s[0].1) * t,
                 );
                 // Keep a cell's margin off the frame's edge.
-                if p.0 < cell || p.1 < cell || p.0 > ext[0] - cell || p.1 > ext[1] - cell {
+                if p.0 < cell
+                    || p.1 < cell
+                    || p.0 > ext[0] - cell
+                    || p.1 > ext[1] - cell
+                    || along(p)
+                {
                     last = None;
                     continue;
                 }
@@ -746,7 +814,73 @@ fn join(nodes: &[P], chains: &[Chain], drop_stubs: bool) -> Vec<Road> {
         })
         .collect();
 
-    snap_ends(&mut roads);
+    // A road a dropped stub left ending nowhere goes too, and so on until none is left;
+    // ends that met a road gone meet the next one within reach.
+    loop {
+        trim_highways(&mut roads);
+        snap_ends(&mut roads);
+        // Ends within `within` of a road of the given kind other than `i`.
+        let on = |p: P, i: usize, hwy: bool, within: f32| {
+            roads.iter().enumerate().any(|(j, r)| {
+                j != i
+                    && r.highway == hwy
+                    && r.points
+                        .windows(2)
+                        .any(|s| seg_dist(p, s[0], s[1]) <= within)
+            })
+        };
+        // A street must end on a street, never at grade on a highway it only came near.
+        let lost: Vec<usize> = (0..roads.len())
+            .filter(|&i| {
+                let r = &roads[i];
+                [r.points[0], r.points[r.points.len() - 1]]
+                    .iter()
+                    .any(|&p| {
+                        let street = on(p, i, false, world::layout::SNAP_M);
+                        if r.highway {
+                            !street && !on(p, i, true, world::layout::SNAP_M)
+                        } else {
+                            !street
+                        }
+                    })
+            })
+            .collect();
+        let mut lost = lost;
+        if lost.is_empty() {
+            // Then only the largest network stays: streets that met it only beside a
+            // highway are an island.
+            let mut comp: Vec<usize> = (0..roads.len()).collect();
+            for i in 0..roads.len() {
+                let r = &roads[i];
+                for p in [r.points[0], r.points[r.points.len() - 1]] {
+                    for (j, o) in roads.iter().enumerate() {
+                        if j != i
+                            && o.points
+                                .windows(2)
+                                .any(|s| seg_dist(p, s[0], s[1]) <= world::layout::SNAP_M)
+                        {
+                            let (a, b) = (root(&mut comp, i), root(&mut comp, j));
+                            comp[a] = b;
+                        }
+                    }
+                }
+            }
+            let mut size = vec![0usize; roads.len()];
+            for i in 0..roads.len() {
+                size[root(&mut comp, i)] += 1;
+            }
+            let big = (0..roads.len()).max_by_key(|&i| size[i]).unwrap_or(0);
+            lost = (0..roads.len())
+                .filter(|&i| root(&mut comp, i) != big)
+                .collect();
+        }
+        if lost.is_empty() {
+            break;
+        }
+        for &i in lost.iter().rev() {
+            roads.remove(i);
+        }
+    }
 
     // Ramps to the arterials that cross each highway, well clear of its ends and each other.
     for h in 0..roads.len() {
@@ -792,6 +926,47 @@ fn join(nodes: &[P], chains: &[Chain], drop_stubs: bool) -> Vec<Road> {
     roads
 }
 
+/// A highway end that meets no road is cut back to the first street it crosses, and
+/// ends there at grade (the freeway turning into a street).
+fn trim_highways(roads: &mut [Road]) {
+    for h in 0..roads.len() {
+        if !roads[h].highway {
+            continue;
+        }
+        for _ in 0..2 {
+            let p = roads[h].points[0];
+            let met = roads.iter().enumerate().any(|(j, r)| {
+                j != h
+                    && r.points
+                        .windows(2)
+                        .any(|s| seg_dist(p, s[0], s[1]) <= world::layout::SNAP_M)
+            });
+            if !met {
+                let pts = &roads[h].points;
+                let cut = (0..pts.len() - 1).find_map(|k| {
+                    roads
+                        .iter()
+                        .enumerate()
+                        .filter(|r| !r.1.highway)
+                        .find_map(|(j, r)| {
+                            r.points.windows(2).enumerate().find_map(|(m, s)| {
+                                cross(pts[k], pts[k + 1], s[0], s[1]).map(|x| (k, j, m, x))
+                            })
+                        })
+                });
+                if let Some((k, j, m, x)) = cut {
+                    let x = ((x.0 * 10.0).round() / 10.0, (x.1 * 10.0).round() / 10.0);
+                    roads[j].points.insert(m + 1, x);
+                    let r = &mut roads[h].points;
+                    r.drain(..=k);
+                    r.insert(0, x);
+                }
+            }
+            roads[h].points.reverse();
+        }
+    }
+}
+
 /// Moves each road end onto the nearest road it meets (as `world` snaps it, within
 /// `SNAP_M`) and makes that a point of both, so `world` joins them there rather than adding
 /// a kinked stub. Then every road runs straight for `STRAIGHT_IN_M` into each joint: a bend
@@ -808,6 +983,8 @@ fn snap_ends(roads: &mut [Road]) {
                 if j == i {
                     continue;
                 }
+                // A highway passes over a street: a street meets one only where it ends.
+                let over = r.highway && !roads[i].highway;
                 for (k, s) in r.points.windows(2).enumerate() {
                     let (a, b) = (s[0], s[1]);
                     let ab = (b.0 - a.0, b.1 - a.1);
@@ -825,12 +1002,24 @@ fn snap_ends(roads: &mut [Road]) {
                         }
                     }
                     let d = dist(p, q.0);
+                    // Another road's end may move in its own turn: join onto it only where
+                    // the two already meet.
+                    let on_end = q.0 == r.points[0] || q.0 == r.points[r.points.len() - 1];
+                    if on_end && d >= 0.05 || over && !on_end {
+                        continue;
+                    }
                     if d <= world::layout::SNAP_M && best.is_none_or(|b| d < b.0) {
                         best = Some((d, j, q.1, q.0));
                     }
                 }
             }
-            if let Some((_, j, at, q)) = best {
+            if let Some((d, j, at, q)) = best {
+                // An end already on a road (two roads ending at one junction) stays put: a
+                // road ending there may have joined it already.
+                if d < 0.05 {
+                    joints.push(p);
+                    continue;
+                }
                 roads[i].points[end] = q;
                 if at < usize::MAX / 2 && !roads[j].points.contains(&q) {
                     roads[j].points.insert(at, q);

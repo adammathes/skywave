@@ -96,6 +96,13 @@ pub struct Import {
     /// Channels, in degrees.
     #[serde(default)]
     pub channels: Vec<Channel>,
+    /// Roads keep this far inside the frame (the edge's hills rise there).
+    #[serde(default)]
+    pub edge_margin_m: f32,
+    /// A street within this of a highway, running along it (a frontage road), is left out
+    /// there: it would cross it at a glancing angle, on a long deck. Separate highways only.
+    #[serde(default)]
+    pub beside_m: f32,
     /// Trace highways apart from the streets, so they pass over them (a dense grid); else
     /// one network, highways meeting streets where they touch (a sparse one).
     #[serde(default)]
@@ -420,7 +427,14 @@ fn run(path: &str) -> Result<(), String> {
             .iter()
             .chain(core::iter::once(&(f64::NAN, f64::NAN)))
         {
-            if p.0.is_nan() || (l.mtfcc == "S1100" && skipped(p)) {
+            let (x, z) = if p.0.is_nan() {
+                (0.0, 0.0)
+            } else {
+                warp.fwd(p.0, p.1)
+            };
+            let m = cfg.edge_margin_m;
+            let outside = x < m || z < m || x > ext[0] - m || z > ext[1] - m;
+            if p.0.is_nan() || (m > 0.0 && outside) || (l.mtfcc == "S1100" && skipped(p)) {
                 if part.len() >= 2 {
                     lines.push(sources::Line {
                         mtfcc: l.mtfcc.clone(),
@@ -449,6 +463,7 @@ fn run(path: &str) -> Result<(), String> {
         cfg.merge_m,
         &susp,
         cfg.separate_highways,
+        cfg.beside_m,
     );
     // Start: the nearest point on any road.
     let sp = warp.fwd(cfg.start.0, cfg.start.1);

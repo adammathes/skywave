@@ -8,7 +8,7 @@ Import(
     state: "06",
     // The counties' all-roads files, so the main streets that are not state routes come in
     // by name (their real names stay here; the game's are invented).
-    counties: ["06075", "06081", "06085", "06001"],
+    counties: ["06075", "06081", "06085", "06001", "06041"],
     names: [
         "14th St", "16th St", "19th Ave", "1st St", "3rd Ave", "3rd St", "98th Ave", "A St",
         "Airport Blvd", "Alameda de Las Pulgas", "Alemany Blvd", "Alma St", "Almaden Expy",
@@ -102,4 +102,8 @@ Import(
     start: (-122.447, 37.752),
     // A dense net of streets: the freeways pass over it.
     separate_highways: true,
+    // Clear of the hills that rise at the frame's edges.
+    edge_margin_m: 0,
+    // The frontage roads beside the freeways.
+    beside_m: 40,
 )
