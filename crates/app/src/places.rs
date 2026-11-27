@@ -112,16 +112,13 @@ pub fn load(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan
 fn generate_planned(seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan), String> {
     let t = template_of(s)?;
     let pal = palette_of(s);
-    Ok(match &s.layout {
-        Some(id) => world::procgen::authored::build_place_planned(
-            seed,
-            &builtin::layout(id)?,
-            &t,
-            grammar_of(s),
-            &pal,
-        ),
-        None => world::procgen::build_place_planned(seed, &t, grammar_of(s), &pal),
-    })
+    Ok(world::procgen::authored::build_place_planned(
+        seed,
+        &builtin::layout(&s.layout)?,
+        &t,
+        grammar_of(s),
+        &pal,
+    ))
 }
 
 /// Scenario `s`'s region template, checked.
@@ -141,7 +138,7 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
         }
         PlaceKey::Coast => match baked(seed, s) {
             Some(bytes) => place::decode(bytes).map_err(|e| format!("baked place: {e:?}")),
-            None => builtin::generate(seed, &s.region, s.layout.as_deref(), grammar_of(s)),
+            None => builtin::generate(seed, &s.region, &s.layout, grammar_of(s)),
         },
         PlaceKey::Gallery => {
             let t = template_of(s)?;
@@ -223,11 +220,6 @@ mod tests {
         for s in crate::scenario::all() {
             assert!(region_text(&s.region).is_some());
             assert!(core::ptr::eq(grammar_of(s), grammar_of(s)), "parsed once");
-            // A world still being built, or one from an authored layout that has no grammar of
-            // its own yet, may dress in another's grammar.
-            if !s.stub && s.layout.is_none() {
-                assert_eq!(grammar_of(s).template, s.region);
-            }
             assert!(palette(&s.palette).is_some());
         }
         // The first scenario's grammar is the coast's.
@@ -293,7 +285,7 @@ mod tests {
     /// Faults the map audit (`world::audit`) still finds in each world, seed 1. A world's
     /// count may only go down: fix the map, then lower its number here. New worlds start at 0.
     const MAP_FAULTS: [(&str, usize); 4] = [
-        ("socal_beach_1984", 41),
+        ("socal_beach_1984", 0),
         ("bay_loop_2005", 0),
         ("mirage_bowl_2001", 0),
         ("lake_city_1986", 0),
@@ -310,10 +302,7 @@ mod tests {
         for s in crate::scenario::all() {
             let place = build_in(PlaceKey::Coast, Seed(1), s).expect("the world builds");
             let t = crate::builtin::template(&s.region).unwrap();
-            let layout = s
-                .layout
-                .as_deref()
-                .map(|id| crate::builtin::layout(id).unwrap());
+            let layout = [crate::builtin::layout(&s.layout).unwrap()];
             // Where the layout says a road ends, and the far end of a runway.
             let runway = layout
                 .iter()

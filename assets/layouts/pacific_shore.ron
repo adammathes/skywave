@@ -1,0 +1,91 @@
+// Pacific Shore (docs/LAYOUTS.md; docs/SCENARIOS.md): a beach town on a shallow bay, drawn the
+// way such towns are built. The beach and the ocean front along the water, the shore boulevard
+// and its strip one block in, a square mile of bungalow grid behind it, a small downtown where
+// the pier's avenue crosses the center street, and the coast range behind the foothill road.
+// The pier avenue runs dead straight from the pier to the foot of the range, where a road
+// climbs to a lookout back down it to the sea; a head of land north of town carries another.
+//
+// Meters, x east, z south, (0, 0) the north-west corner; 16 x 16 chunks, 2048 m square.
+Layout(
+    id: "pacific_shore",
+    size_chunks: (16, 16),
+    ground_m: 4,
+    water_level_m: 0,
+    edges: Edges(north: Hills, east: Mountains, south: Hills, west: Ocean),
+
+    ridges: [
+        // The coast range behind the town.
+        Ridge(name: "coast range", line: [(1900, 0), (1860, 700), (1900, 1430), (1870, 2048)],
+              heights_m: [170, 230, 190, 150], falloff_m: 420, relief_m: 16),
+        // The plain tilts up from the beach to the foot of the range.
+        Ridge(name: "the rise", line: [(1450, 0), (1450, 2048)], height_m: 14, falloff_m: 900),
+    ],
+    peaks: [
+        Peak(name: "north head", at: (345, 120), height_m: 34, falloff_m: 170),
+        Peak(name: "lookout point", at: (1560, 1000), height_m: 30, falloff_m: 150),
+    ],
+
+    water: [
+        Water(kind: Sea, depth_m: 4.2, polygon: [
+            (0, 0), (250, 0), (290, 260), (340, 650), (360, 1040), (335, 1430), (285, 1820), (250, 2048), (0, 2048),
+        ]),
+    ],
+
+    // Open hillside wherever no district is: the range, the head, the bluffs north and south.
+    default_zone: Hills,
+    districts: [
+        District(name: "the beach", zone: Beach, polygon: [
+            (250, 0), (290, 260), (340, 650), (360, 1040), (335, 1430), (285, 1820), (250, 2048),
+            (320, 2048), (370, 1820), (420, 1430), (460, 1040), (425, 650), (375, 260), (320, 0),
+        ]),
+        // The town stops at the avenues that frame it.
+        District(name: "the town", zone: Residential, polygon: [
+            (375, 260), (425, 650), (460, 1040), (420, 1430), (370, 1820), (1400, 1820), (1400, 260),
+        ]),
+        District(name: "the strip", zone: Strip, polygon: [
+            (375, 260), (425, 650), (460, 1040), (420, 1430), (370, 1820),
+            (580, 1820), (630, 1430), (655, 1040), (635, 650), (585, 260),
+        ]),
+        District(name: "midtown", zone: Commercial, polygon: [(655, 975), (812, 975), (812, 1105), (655, 1105)]),
+        District(name: "downtown", zone: Downtown, polygon: [(812, 910), (1148, 910), (1148, 1170), (812, 1170)]),
+        District(name: "palm park", zone: Park, polygon: [(896, 1430), (1064, 1430), (1064, 1690), (896, 1690)]),
+        District(name: "the boat yards", zone: Industrial, polygon: [(1064, 1690), (1400, 1690), (1400, 1820), (1064, 1820)]),
+    ],
+
+    roads: [
+        // Along the water: the ocean front on the sand's edge, the shore boulevard a block in.
+        Road(name: "ocean front", class: Beachfront, lanes: 1, points: [
+            (375, 260), (425, 650), (460, 1040), (420, 1430), (370, 1820),
+        ]),
+        Road(name: "shore boulevard", class: Arterial, lanes: 2, points: [
+            (530, 260), (580, 650), (600, 1040), (575, 1430), (525, 1820),
+        ]),
+
+        // The avenues, from the ocean front to the foothill road.
+        Road(name: "north avenue", class: Arterial, lanes: 2, points: [(375, 260), (1400, 260)]),
+        Road(name: "palm street", class: Collector, lanes: 1, points: [(425, 650), (1400, 650)]),
+        Road(name: "pier avenue", class: Arterial, lanes: 2, points: [(460, 1040), (1400, 1040)]),
+        Road(name: "orange street", class: Arterial, lanes: 2, points: [(420, 1430), (1400, 1430)]),
+        Road(name: "south avenue", class: Arterial, lanes: 2, points: [(370, 1820), (1400, 1820)]),
+
+        // Across them, inland.
+        Road(name: "center street", class: Arterial, lanes: 2, points: [(980, 260), (980, 1820)]),
+        Road(name: "foothill road", class: Arterial, lanes: 2, points: [(1400, 260), (1400, 1820)]),
+
+        // Up to the lookouts.
+        Road(name: "ridge road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
+            (1400, 1040), (1470, 1040), (1520, 1075), (1575, 1050), (1560, 1000),
+        ]),
+        Road(name: "head road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
+            (375, 260), (372, 190), (345, 125),
+        ]),
+    ],
+
+    // One grid for the whole town, counted from the corner of center street and north avenue:
+    // every avenue above is on one of its lines.
+    grid: Some(Grid(origin: (980, 260), block_m: (84, 130))),
+
+    pier: Some(Pier(at: (372, 1040), toward: (0, 1040))),
+
+    start: Start(road: "shore boulevard", along_m: 600),
+)

@@ -10,7 +10,7 @@ use world::template::RegionTemplate;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
-const REGION: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const REGION: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 const TOWN: &str = include_str!("fixtures/freeway_town.ron");
 
 fn layout() -> Layout {

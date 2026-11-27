@@ -278,3 +278,46 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
     assert!(m.height_at(1900.0, 150.0) > floor + 200.0);
     assert!(m.height_at(1500.0, 200.0) > floor + 150.0);
 }
+
+/// Pinned `Place::content_hash` of Pacific Shore for seed 1; the same rule as [`GOLDEN`].
+const SHORE_GOLDEN: u64 = 0x36e2c2e0808dbc5b;
+
+/// Pacific Shore: a valid, deterministic place with its pier, and its side streets on one
+/// grid, so each one that meets the pier's avenue from the north has one opposite it.
+#[test]
+fn pacific_shore_validates_and_its_streets_cross_the_avenues() {
+    let l: Layout = ron::from_str(include_str!("../../../assets/layouts/pacific_shore.ron"))
+        .expect("parse layout");
+    l.validate().expect("validate layout");
+    let t: RegionTemplate =
+        ron::from_str(include_str!("../../../assets/regions/pacific_shore.ron")).expect("parse");
+    t.validate().expect("validate template");
+    let g = grammar();
+    let p = authored::build_place(Seed(1), &l, &t, &g);
+    println!("pacific shore: hash {:#018x}", p.content_hash());
+    place::validate::validate(&p).expect("Pacific Shore validates");
+    let again = authored::build_place(Seed(1), &l, &t, &g);
+    assert_eq!(p.content_hash(), again.content_hash(), "deterministic");
+    assert_eq!(p.content_hash(), SHORE_GOLDEN, "golden moved");
+    let piers = |q: &&place::Prop| matches!(q.kind, place::PropKind::Pier { .. });
+    assert_eq!(p.props.items.iter().filter(piers).count(), 1);
+    // Junctions on the pier's avenue (z = 1040) inland of the strip: all four-way.
+    let mut degree = vec![0; p.roads.nodes.len()];
+    for e in &p.roads.edges {
+        degree[e.a as usize] += 1;
+        degree[e.b as usize] += 1;
+    }
+    let on = |n: &&(usize, &place::Node)| {
+        (n.1.pos[1] - 1040.0).abs() < 1.0 && n.1.pos[0] > 640.0 && n.1.pos[0] < 1399.0
+    };
+    let nodes: Vec<(usize, &place::Node)> = p.roads.nodes.iter().enumerate().collect();
+    let (mut four, mut three) = (0, 0);
+    for (i, _) in nodes.iter().filter(on) {
+        four += usize::from(degree[*i] == 4);
+        three += usize::from(degree[*i] == 3);
+    }
+    assert!(
+        four >= 8 && three == 0,
+        "{four} four-way, {three} three-way"
+    );
+}

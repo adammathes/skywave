@@ -11,24 +11,15 @@ use place::{
     PLACE_VERSION,
 };
 use skywave_core::{Rng, Seed};
-use world::procgen::{
-    arterials, hash_chunk, hash_graph, streets, MacroMap, NodeRef, StreetChunk, StreetPlan,
-};
+use world::procgen::{hash_chunk, hash_graph, streets, MacroMap, NodeRef, StreetChunk, StreetPlan};
 use world::template::RegionTemplate;
 
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-const SIZE: [u16; 2] = [16, 16];
-
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
-}
+mod common;
+use common::*;
 
 fn generate(t: &RegionTemplate, seed: u64) -> (MacroMap, RoadGraph) {
-    let m = MacroMap::generate(Seed(seed), t, SIZE);
-    let g = arterials(Seed(seed), t, &m);
-    (m, g)
+    let _ = t;
+    common::skeleton(seed)
 }
 
 fn chunks_of(plan: &StreetPlan<'_>) -> Vec<StreetChunk> {
@@ -57,7 +48,11 @@ fn border_nodes(c: &StreetChunk, dx: i32, dz: i32) -> Vec<BorderNode> {
         let NodeRef::Border { key } = *r else {
             continue;
         };
-        if !on(n.pos) {
+        // A street of the town grid may run along a chunk border (the Shore's does at
+        // x = 896): the chunk it lies in holds it, with nodes at the chunk's corners that
+        // its neighbor across the line has no part of.
+        let corner = n.pos.iter().all(|c| c % CHUNK_SIZE_M == 0.0);
+        if !on(n.pos) || corner {
             continue;
         }
         let edges: Vec<&Edge> = c
@@ -224,17 +219,17 @@ fn every_border_matches() {
 /// message says why they moved.
 const CHUNKS: [[i32; 2]; 5] = [[3, 7], [7, 7], [10, 6], [7, 13], [4, 13]];
 const GOLDEN_CHUNKS: [u64; 5] = [
-    0x943F_4D04_47D9_F761,
-    0x718C_C069_A824_A9C0,
-    0xCA69_52A0_8BDF_E25E,
-    0xA780_D102_6DA9_BB82,
-    0xD18D_04C8_FB2D_7C5C,
+    0xA040_AFF6_D3AE_547C,
+    0x01AF_CDF0_C263_19D6,
+    0x9951_D18F_7D15_2EFD,
+    0x7020_17BD_830F_B88A,
+    0xBCB1_BFDB_2DE1_E5F7,
 ];
 const GOLDEN_MERGED: [u64; 4] = [
-    0x5A3A_9A2E_86D2_8BD4,
-    0x56F3_3185_4DBB_4B2A,
-    0x7C25_6C17_5B43_D678,
-    0xC71B_6DC3_282C_5AA8,
+    0xF4F1_AD10_3F31_B8B2,
+    0xE391_904B_7D00_666B,
+    0xB34B_8D1A_5EC7_332C,
+    0x742D_FBEE_E33A_2586,
 ];
 
 fn table(hs: &[u64]) -> String {
@@ -344,7 +339,8 @@ fn skeleton(m: &MacroMap, graded: &[f32], g: &RoadGraph) -> Place {
     let cells: Vec<ZoneId> = (0..zw * zh)
         .map(|i| m.zones[(i / zw / 4) * mzw + (i % zw) / 4])
         .collect();
-    let mid = m.strip.centerline[m.strip.centerline.len() / 2];
+    // The start: a point on the first main road.
+    let mid = [g.edges[0].profile[0][0], g.edges[0].profile[0][2]];
     let y = graded[(mid[1] / 4.0) as usize * w + (mid[0] / 4.0) as usize];
     let mut place = Place {
         header,
@@ -448,8 +444,15 @@ fn merged_graphs_validate_climb_gently_and_stay_dry() {
                 if matches!(e.class, RoadClass::Local | RoadClass::Alley) {
                     worst = worst.max(grade);
                 }
+                // (The Shore's two lookout roads are drawn to climb 14%, measured along
+                // the road; a bend's short chords read a little more.)
+                let limit = if e.class == RoadClass::Rural {
+                    0.145
+                } else {
+                    0.12
+                };
                 assert!(
-                    grade <= 0.12 + 1e-4,
+                    grade <= limit + 1e-4,
                     "seed {seed} edge {i} ({:?}) grade {grade:.3} at {:?}",
                     e.class,
                     w[0]
@@ -471,71 +474,6 @@ fn merged_graphs_validate_climb_gently_and_stay_dry() {
         }
         println!("  steepest street {:.1}%", worst * 100.0);
     }
-}
-
-/// Downtown lattices draw their blocks from the template, and the streets in the graph are
-/// spaced by whole blocks.
-#[test]
-fn downtown_blocks_match_the_template() {
-    let t = template();
-    let ((l0, l1), (d0, d1)) = t.zones.downtown.block_m;
-    let mut gaps_seen = 0;
-    for seed in 1..=4u64 {
-        let (m, g) = generate(&t, seed);
-        let plan = StreetPlan::new(Seed(seed), &t, &m, &g);
-        let merged = plan.merged();
-        for cell in plan
-            .grid_cells()
-            .iter()
-            .filter(|c| c.zone == ZoneId::Downtown)
-        {
-            let [len, dep] = cell.block_m;
-            assert!(
-                (l0..=l1).contains(&len) && (d0..=d1).contains(&dep),
-                "seed {seed}: block {len}×{dep}"
-            );
-            let d = cell.dir;
-            let n = [d[1], -d[0]];
-            // Offsets of the local streets in this lattice, per family.
-            let mut offs: [Vec<f32>; 2] = [Vec::new(), Vec::new()];
-            for e in merged.edges.iter().filter(|e| e.class == RoadClass::Local) {
-                let (p, q) = (e.profile[0], e.profile[e.profile.len() - 1]);
-                let mid = [(p[0] + q[0]) * 0.5, (p[2] + q[2]) * 0.5];
-                if plan.comp_at(mid) != Some(cell.comp) {
-                    continue;
-                }
-                let v = [q[0] - p[0], q[2] - p[2]];
-                let l = (v[0] * v[0] + v[1] * v[1]).sqrt();
-                if l < 10.0 {
-                    continue;
-                }
-                let along = (v[0] * d[0] + v[1] * d[1]) / l;
-                let rel = [mid[0] - cell.origin[0], mid[1] - cell.origin[1]];
-                if along.abs() > 0.999 {
-                    offs[0].push(rel[0] * n[0] + rel[1] * n[1]);
-                } else if along.abs() < 0.001 {
-                    offs[1].push(rel[0] * d[0] + rel[1] * d[1]);
-                }
-            }
-            for (k, sp) in [(0, dep), (1, len)] {
-                let o = &mut offs[k];
-                o.sort_by(|a, b| a.total_cmp(b));
-                // Merged junctions move street ends a few meters; cluster within 6 m.
-                o.dedup_by(|a, b| (*a - *b).abs() < 6.0);
-                for w in o.windows(2) {
-                    let gap = w[1] - w[0];
-                    let blocks = (gap / sp).round();
-                    assert!(
-                        blocks >= 1.0 && (gap - blocks * sp).abs() < 6.0,
-                        "seed {seed}: downtown streets {gap:.1} m apart, block {sp:.1} m"
-                    );
-                    gaps_seen += 1;
-                }
-            }
-        }
-    }
-    println!("downtown: {gaps_seen} street spacings checked");
-    assert!(gaps_seen >= 8, "only {gaps_seen} downtown spacings");
 }
 
 #[test]

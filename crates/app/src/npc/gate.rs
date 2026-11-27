@@ -187,13 +187,11 @@ fn along(g: &LaneGraph, lane: u32, p: [f32; 3]) -> f32 {
     g.lanes[lane as usize].length_m - 10.0 + dot([p[0] - a.pos[0], p[2] - a.pos[2]], a.dir)
 }
 
-/// The end of the approach the junction scenario runs: a two-lane arterial (14 m/s, one
-/// 319 m lane bending gently) into a signalized four-way junction on the coast's north
-/// side. Moved with the map edges (the old point is off every lane there): of the
-/// signalized four-way approaches with 200 m or more of run-up, the one with the most
-/// cross traffic at its junction at busy density (7.5 NPC cars on the other phases within
-/// 40 m on average over 60 s at noon; the next has 6.9).
-const APPROACH_END: [f32; 2] = [952.21, 347.89];
+/// The end of the approach the junction scenario runs: center street northbound through
+/// palm park (a two-lane arterial, one 361 m lane with no street off it) into its signalized
+/// four-way junction with orange street. The town's only main-road approach long enough to
+/// reach 60 mph from a standstill with traffic all round it.
+const APPROACH_END: [f32; 2] = [981.64, 1447.85];
 
 /// The signalized lane whose end lies at `end`.
 fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
@@ -384,11 +382,10 @@ fn sixty_through_a_red_light_touches_no_car() {
     assert!(app.drive.state.upset_s == 0.0);
 }
 
-/// The end of a signalized approach downtown whose crosswalk people use the most. Moved
-/// with the map edges: of the signalized four-way approaches, the one with the most people
-/// about at busy density (91 after the warm-up, 10.1 within 30 m of the junction on
-/// average over 30 s at noon).
-const DOWNTOWN_END: [f32; 2] = [855.18, 826.82];
+/// The end of a signalized approach downtown with people about: center street northbound
+/// into pier avenue, the middle of town (4 to 5 people on its crosswalk at a time at busy
+/// density, noon).
+const DOWNTOWN_END: [f32; 2] = [981.64, 1057.85];
 
 /// A pedestrian sim beside the app (seeded like the place), fed the app's player and
 /// camera at busy density.
@@ -819,7 +816,8 @@ fn a_car_pushed_back_from_a_stop_line_turns_without_mounting_the_curb() {
     let lane = *lanes.first().expect("a stop lane that must turn");
     let len = g.lanes[lane as usize].length_m;
     let wait = g.pose(lane, len - 30.0);
-    let mut app = app_at(wait.pos, wait.heading, "t=12:00&traffic=busy");
+    // Normal traffic: Busy can fill the pool at the start and leave no room for this car.
+    let mut app = app_at(wait.pos, wait.heading, "t=12:00&traffic=normal");
     let graph = app.npcs.graph.clone();
     let id = app
         .npcs

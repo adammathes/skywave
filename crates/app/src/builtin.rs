@@ -13,10 +13,10 @@ use world::layout::Layout;
 use world::template::RegionTemplate;
 use world::Grammar;
 
-pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/california_coast.ron");
-pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 pub const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
+pub const PACIFIC_SHORE_REGION: &str = include_str!("../../../assets/regions/pacific_shore.ron");
+pub const PACIFIC_SHORE: &str = include_str!("../../../assets/layouts/pacific_shore.ron");
 pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 pub const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 pub const LAKE_CITY: &str = include_str!("../../../assets/layouts/lake_city.ron");
@@ -38,15 +38,15 @@ pub const LANDMARKS: [(&str, &str); 10] = world::landmarks::BUILTIN;
 pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-pub const REGIONS: [(&str, &str); 5] = [
-    ("california_coast", CALIFORNIA_COAST),
-    ("socal_basin", SOCAL_BASIN),
+pub const REGIONS: [(&str, &str); 4] = [
+    ("pacific_shore", PACIFIC_SHORE_REGION),
     ("socal_bowl", SOCAL_BOWL),
     ("bay_area", BAY_AREA),
     ("great_lakes_city", GREAT_LAKES_CITY),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.
-pub const LAYOUTS: [(&str, &str); 3] = [
+pub const LAYOUTS: [(&str, &str); 4] = [
+    ("pacific_shore", PACIFIC_SHORE),
     ("bay_loop", BAY_LOOP),
     ("mirage_bowl", MIRAGE_BOWL),
     ("lake_city", LAKE_CITY),
@@ -156,19 +156,16 @@ pub fn layout(id: &str) -> Result<Layout, String> {
     Ok(l)
 }
 
-/// The procedural place for `seed` of authored layout `layout` dressed by region template
-/// `region`'s zone rules, or without one of the region template alone, its buildings
-/// planned by `grammar`: what the build bakes and what a load generates
-/// (`crate::places`), so a new way to make a world changes both.
+/// The place for `seed` of layout `layout` dressed by region template `region`'s zone
+/// rules, its buildings planned by `grammar`: what the build bakes and what a load
+/// generates (`crate::places`), so a new way to make a world changes both.
 pub fn generate(
     seed: Seed,
     region: &str,
-    layout: Option<&str>,
+    layout: &str,
     grammar: &Grammar,
 ) -> Result<Place, String> {
     let t = template(region)?;
-    Ok(match layout {
-        Some(id) => world::procgen::authored::build_place(seed, &self::layout(id)?, &t, grammar),
-        None => world::procgen::build_place(seed, &t, grammar),
-    })
+    let l = self::layout(layout)?;
+    Ok(world::procgen::authored::build_place(seed, &l, &t, grammar))
 }

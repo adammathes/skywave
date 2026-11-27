@@ -6,24 +6,16 @@ Goal: a **place**, not a ribbon. Coherent macro structure you can learn, with lo
 Everything is a pure function of `(seed, region_template, era, chunk)`; macro stages are computed once per Place (cheap, coarse) and cached; chunk stages run on demand.
 
 ```
-Macro (whole place, ~ms):   coast & terrain → zone map → arterial network → highway
+Macro (whole place, ~ms):   authored layout → terrain, zone map, main roads
 Chunk (on demand, ≤ 2 ms):  local streets → blocks → parcels → buildings → detailing (facades, props, lights, lanes)
 ```
 
-### 1. Coast and terrain (macro)
-- Region template `california_coast`: ocean along the west edge (configurable side), a coastline as a low-frequency curve with a bay or two; beach band 60–120 m; a coastal plain rising inland via 2–3 ridges to hills (120–250 m) at the east edge; one or two valleys with flat farmland.
-- Heightfield: layered `fastnoise-lite` simplex + ridge noise, domain-warped, shaped by distance-to-coast and the template's elevation profile; then hydraulic-ish smoothing (a few box-blur passes at zone transitions) so roads sit well. Resolution 4 m. Water bodies: ocean below `water_level`; optional lagoon/canal network in `Residential` near the coast (the Venice/Naples canal motif).
-
-### 2. Zone map (macro)
-Zones drive everything downstream. Painted by rules on the coarse grid, then smoothed:
-- `Beach` on the band along the coast. `Strip` (the main drag) parallel to the beach 1–2 blocks inland for 800–1500 m centered on the bay.
-- `Downtown` 4–8 blocks behind the strip center; `Commercial` ringing it; `Residential` grid filling the plain; `Suburb` (curvy) on gentle slopes; `Hills` (winding roads, sparse houses) on steep terrain; `Farmland` on flat valley floor far from downtown; `Industrial` near the highway and the harbor; `Park` 2–4 patches including one on the shore; `Highway` corridor round the town (stage 3). The edge bands take their own zones (see "Map edges").
-- Rules are weighted scores per cell (distance to coast, slope, distance to downtown seed) + noise; the template sets weights. Different seeds move the bay, the downtown and the pass.
-
-### 3. Arterials and highway (macro)
-- Tensor field (Chen et al. 2008 style): a grid tensor aligned to the coast tangent in `Strip`/`Downtown`/`Residential`; radial tensor around downtown center; terrain-following tensor (perpendicular to gradient) in `Hills`; axis-aligned section grid in `Farmland` (1-mile sections subdivided to half/quarter miles).
-- Trace arterials as streamlines of the major eigenvector from seed points (strip ends, downtown, the highway's highest point), with minimum spacing 250–400 m, snapping to existing nodes within 40 m, stopping at water and at the edge bands. The beachfront road follows the beach band. One `Highway` is a bypass that loops: it leaves the coast at the harbor's end of the place, runs inland 60 m inside that side's band, turns along the foot of the hills (a fixed distance behind the smoothed shore, clear of downtown) and comes back to the coast along the other side, its two ends on the beachfront road. Town roads that stop just short of it join it at grade (up to five, 320 m apart); a road that crosses it on a straight, level stretch with shallow banks gets a diamond interchange, and other crossings are overpasses (road profile includes height, bridges are implied by profile > terrain + 3 m).
-- Graph cleanup: merge near nodes, remove dead-end stubs < 60 m except in `Suburb`/`Hills`, ensure connectivity.
+### 1–3. Terrain, zones and main roads (macro)
+Drawn, not generated: every shipped world is an authored layout (`assets/layouts/<id>.ron`,
+`docs/LAYOUTS.md`), and `procgen::authored::skeleton` turns it into the heightfield, the zone map and
+the main roads (arterials, highways with their ramps and overpasses, channels, rail). The procedural
+coast, basin and arterial generators that used to stand here were deleted once all four worlds were
+drawn; the seed still picks everything below this line. The region template supplies the zone rules.
 
 ### 4. Local streets (chunk)
 Per zone pattern, seeded by chunk, constrained to arterial cells:
@@ -78,67 +70,14 @@ car's wheels would otherwise read a steep face as a step and ride up it): the ca
 and stops there, even launched at it at 45 m/s. Across the
 water the walls of the neighboring sides rise out of the sea as headlands. Water deeper than a car's hubs
 drags it to a stop; after 1.5 s in deep water it goes back to its start with a "Deep water: resetting" toast.
-`california_coast`: ocean west, mountains east, highway loops north and south. Tests: every road of seeds
-1–8 stays in the playable rectangle and the highway is one chain whose ends are on the beachfront road
-(`world/tests/place.rs`), the walls rise at least 50 m (85 m for mountains) from the band's foot, and the cars
-cannot climb them or drive out to sea (`app::drive` tests).
+Tests: every road stays in the playable rectangle (`world/tests/place.rs`), the walls rise at least 50 m
+(85 m for mountains) from the band's foot, and the cars cannot climb them or drive out to sea
+(`app::drive` tests).
 
-## Inland basins
-A template with a `basin` (and no `coast`, `elevation` or `layout`) is an inland place: `socal_basin`, the 2001
-world's (`assets/regions/socal_basin.ron`; `procgen::basin`, `template::Basin`). Every side is land: hills on
-`basin.hills.side` (a `Hills` edge), a desert fringe on `basin.desert.side` beside it (a `Desert` edge), the
-other two any land kind (`socal_basin`: rail yards south, mountains west). There is no water; `water_level_m`
-lies under all ground. The macro stage, in the frame of the hills' side:
-- **Floor and hills.** The floor tilts up toward the hills (`tilt`) and rolls a little (`relief_m`); the foot
-  of the hills lies `hills.depth_m` in from their side, wandering ±20 m, and the hills rise from it to
-  `hills.height_m` at their band (smoothstep, swelling and gullied by `hills.relief_m`).
-- **Grid.** Arterials every `grid.spacing_m` both ways: "cross" lines parallel to the hills, the first along
-  their foot (24 m out), the last leaving room for the airfield before the far band; "out" lines from the
-  first cross line to the last, from 40 m inside the far side's band to the desert. One interior line each way
-  is a boulevard: two one-way carriageways of `grid.boulevard_lanes` lanes (3.4 m each) either side of a
-  `grid.median_m` median, their median-side sidewalks and street trees making the planted median; a
-  boulevard's end that meets no other line gets a short link between its carriageways. The local streets lay
-  the grid's blocks square to its axes (the industrial zone shares the grid pattern with its commercial
-  frontage, at 100 m blocks with truck-width streets).
-- **Freeway.** Between two cross lines near the middle, from the first out line (where it ends at grade, a
-  T) east into the desert, round a 220 m turn along the desert's band 60 m in, back to the last cross line
-  (where it ends at grade): the desert highway that turns back along the edge. The cross lines between it
-  and the last stop 150 m short of its desert leg. Every out line crosses it on an overpass (the coast's deck
-  rule); `freeway.interchanges` of the crossings (not the boulevards') get ramps: diamonds, and `loops` of
-  them a partial cloverleaf: in the quadrant before the bridge on the side its traffic keeps to, a loop
-  on-ramp leaves the crossing road 85 m out, turns 225° on a 38 m radius and merges 220 m past the bridge;
-  that direction's off-ramp runs round the outside of the loop to the road 132 m out; the other direction
-  has the diamond's two ramps.
-- **Channel.** Between the first two out lines, from 80 m into the hills to the far edge (cut through its
-  wall): a trapezoid `channel.depth_m` under the ground beside it (7.5 m, under the 8 m a road profile may
-  stand off the terrain), a `bed_m` bed and `wall_m` walls, deepening over its first 40 m. Every road over
-  it is a bridge: the arterial stage reads the ground with the channel filled (`BasinPlan::bridge_heights`),
-  so profiles run level across and the road mesh draws the deck and its piers. At the first bridge past
-  every `ramp_every_m` along it a ramp 8 m wide runs down one wall (alternating) at `ramp_grade`, from 16 m
-  off the bridge. Its right of way (`row_m`) is `Highway` zone, so streets, lots and buildings stop at its
-  banks; the Place carries its concrete as `WaterKind::Channel` bodies (lip to lip, and the ramps), which
-  the ground mesh paints concrete (paler bed, darker walls) with a darker low-flow strip down the middle
-  of the bed and expansion joints across it every 6 m (flat marks 2 cm over the ground), and the map grey.
-- **Rail.** Between the first two cross lines, edge to edge (into the bands' walls), at grade with every road
-  it crosses; `rail.spurs` sidings 4.5 m beside it (off a 30 m turnout, ending at a bumper) between the out
-  lines in industrial land; its right of way (`row_m`) is `Highway` zone. The detailing lays it as
-  `PropKind::Track` pieces (ballast; flush crossing panels where it crosses a road, with a `CrossingGate` on
-  each approach (see "The grade crossings" below); a girder deck over the channel; a bumper at a spur's end).
-- **Airfield.** Between the last cross line and the far band, past the channel: a `Park`-zone field
-  `airfield.width_m` across and `length_m` long (no trees), its runway (`runway_m` wide, no sidewalks; the
-  future drag strip) and a taxiway to the last cross line.
-- **Zones.** Scored as on the coast with four more curves for basins (`Score::hills`, `rail`, `arterial`,
-  `boulevard`: distance out from the foot of the hills, from the rail line, from the nearest arterial and
-  from the nearest boulevard), then by structure: the hills, the desert fringe (`Farmland`: open dirt and
-  section roads), the rights of way (`Highway`), the airfield and parks (`Park`), the bands.
-- **Overlooks** stand on the highest benches of the hills (no steeper than 14% over 32 m, a third to two
-  thirds of the way up; gentler ground where there is none) and the arterial stage's hill roads climb to them.
-
+## Rights of way
 A non-freeway lane through a right of way takes the zone at either end of it (else industry's), so a shape
 weighed only for freeway lanes (the semi) never starts on a road across the rail line or the channel.
-Set pieces (below) are landmark kinds placed on this layout. Tests: `world/tests/basin.rs` (seeds 1–4 pinned; every road in the
-playable rectangle, the freeway one chain ending at grade, overpasses, a loop, the bridges, the crossings,
-the runway, a road to an overlook).
+Set pieces (below) are landmark kinds placed on Mirage Bowl's layout.
 
 ## Set pieces
 A basin's set pieces (`docs/backlog/MIRAGE2001.md` item 7) are places and NPC behaviour, never missions:
@@ -315,7 +254,7 @@ Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, 
 camera on open ground facing its landmark).
 
 ## Region templates
-A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. v1 ships `california_coast`; the 2001 world ships `socal_basin` (above); the Bay Loop ships `bay_area`, zone rules only, for its authored layout (`docs/LAYOUTS.md`). A zone rule may set `street_grade`, its local streets' steepest grade (default 12%: the Bay's city takes 22% to climb its crests), and `streets: Open` makes a zone open space: no local streets and no lots. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
+A `RegionTemplate` is data (RON): per zone, the block sizes, street pattern, lots, massing, building styles, tree species and prop densities; plus the era, sign language and driving side. Each world ships one (`pacific_shore`, `socal_bowl`, `bay_area`, `great_lakes_city`), read for its zone rules: the layout (`docs/LAYOUTS.md`) draws the terrain and the main roads. A zone rule may set `street_grade`, its local streets' steepest grade (default 12%: the Bay's city takes 22% to climb its crests), and `streets: Open` makes a zone open space: no local streets and no lots. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
 ## Facade grammars
 A `world::grammar::Grammar` is data (RON, `assets/grammar/<template>_<era>.ron`, ADR 0002):
@@ -616,7 +555,7 @@ it runs smooth through its own junctions; the wider road goes first and the road
 held to its height there, arriving on the grade they leave with. The ground is cut and filled to
 the road afterwards, so easing costs the road nothing.
 
-Side streets and the procedural coast's arterials are not eased yet: they follow the ground between
+Side streets are not eased yet: they follow the ground between
 their junctions as before.
 
 `places::tests::every_world_rides_smooth_at_speed` drives each world's longest straight at 40 m/s

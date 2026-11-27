@@ -13,22 +13,22 @@ use traffic::{Control, LaneGraph, Light, TurnKind, NONE};
 use world::roads::Network;
 use world::template::RegionTemplate;
 
-/// `t`'s place for `seed`: generated, or for a template with only zone rules (the lake
-/// city's) its authored layout dressed by them.
+/// `t`'s place for `seed`: its world's authored layout, dressed by its zone rules.
 fn build_place(seed: Seed, t: &RegionTemplate, g: &world::Grammar) -> Place {
-    if t.coast.is_some() || t.basin.is_some() {
-        return world::procgen::build_place(seed, t, g);
-    }
-    let layout: world::layout::Layout =
-        ron::from_str(include_str!("../../../assets/layouts/lake_city.ron")).expect("layout");
+    let text = match t.name.as_str() {
+        "pacific_shore" => include_str!("../../../assets/layouts/pacific_shore.ron"),
+        "socal_bowl" => include_str!("../../../assets/layouts/mirage_bowl.ron"),
+        _ => include_str!("../../../assets/layouts/lake_city.ron"),
+    };
+    let layout: world::layout::Layout = ron::from_str(text).expect("layout");
     layout.validate().expect("validate layout");
     world::procgen::authored::build_place(seed, &layout, t, g)
 }
 
 const REGIONS: [(&str, &str); 3] = [
     (
-        "california_coast",
-        include_str!("../../../assets/regions/california_coast.ron"),
+        "pacific_shore",
+        include_str!("../../../assets/regions/pacific_shore.ron"),
     ),
     (
         "great_lakes_city",
@@ -45,7 +45,7 @@ const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s
 /// Pinned [`LaneGraph::hash`] of the coast at seed 1. The graph is a pure function of the
 /// place, so this moves when lane building or the place's roads or props change; update it
 /// in its own commit with the reason.
-const COAST_SEED1_HASH: u64 = 0x63a3_8e5b_71ba_c82e;
+const COAST_SEED1_HASH: u64 = 0xb4d5_363d_8a71_364b;
 
 /// Size ceilings for the coast's graph (16×16 chunks); about twice what seed 1 needs.
 const MAX_LANES: usize = 2_400;
@@ -108,7 +108,7 @@ fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
 #[test]
 fn coast_graph_hash_is_pinned() {
     let b = coast();
-    assert_eq!(b.name, "california_coast seed 1");
+    assert_eq!(b.name, "pacific_shore seed 1");
     assert_eq!(
         LaneGraph::new(&b.place),
         b.graph,
@@ -472,7 +472,7 @@ fn a_car_at_the_limit_rides_a_green_wave_down_the_main_roads() {
         if links > 0 {
             assert!(share(wave) > share(random), "{}", b.name);
         }
-        if b.name == "california_coast seed 1" {
+        if b.name == "pacific_shore seed 1" {
             coast_best = best;
             assert!(share(wave) >= 0.7, "{}", b.name);
         }
@@ -519,7 +519,7 @@ fn longest_wave(b: &Built) -> (Vec<(bool, u32, f32)>, u64, u32) {
     };
     let mut path = vec![(false, from, 40.0f32.min(g.lanes[from as usize].length_m))];
     let (mut lane, mut prev) = (first, from);
-    let mut signals = 0;
+    let (mut signals, mut last) = (0, 1);
     while signals < n {
         let t = turn_id(prev, lane);
         path.push((true, t, g.turns[t as usize].length_m));
@@ -531,15 +531,18 @@ fn longest_wave(b: &Built) -> (Vec<(bool, u32, f32)>, u64, u32) {
             .iter()
             .find(|x| x.kind == TurnKind::Straight && main[x.to as usize]);
         if signals == n {
-            // On across the last junction.
+            // On across the last junction, unless the road ends at it (a T: the drive stops
+            // short of that light).
             if let Some(x) = next {
                 path.push((true, turn_id(lane, x.to), x.length_m));
+            } else {
+                last = 0;
             }
             break;
         }
         (prev, lane) = (lane, next.unwrap().to);
     }
-    (path, tick, n + 1)
+    (path, tick, n + last)
 }
 
 /// Drives `path` (from [`longest_wave`]) at `speed(seconds, posted)` m/s through a

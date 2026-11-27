@@ -7,7 +7,7 @@ Scenario(
     year: 1986,
     kind: "Lake city",
     region: "great_lakes_city",
-    layout: Some("lake_city"),
+    layout: "lake_city",
     grammar: "great_lakes_80s.ron",
     radio: "1977_chicago",
     palette: "brick_and_limestone",

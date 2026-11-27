@@ -11,23 +11,16 @@ use place::{
 };
 use skywave_core::{Rng, Seed};
 use world::procgen::{
-    arterials, hash_parcels, parcels, FaceKind, MacroMap, ParcelChunk, ParcelPlan, StreetPlan,
+    hash_parcels, parcels, FaceKind, MacroMap, ParcelChunk, ParcelPlan, StreetPlan,
 };
 use world::template::RegionTemplate;
 
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-const SIZE: [u16; 2] = [16, 16];
-
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
-}
+mod common;
+use common::*;
 
 /// The macro map, the merged road graph and the graded terrain for `seed`.
 fn generate(t: &RegionTemplate, seed: u64) -> (MacroMap, RoadGraph, Vec<f32>) {
-    let m = MacroMap::generate(Seed(seed), t, SIZE);
-    let g = arterials(Seed(seed), t, &m);
+    let (m, g) = common::skeleton(seed);
     let plan = StreetPlan::new(Seed(seed), t, &m, &g);
     let merged = plan.merged();
     let graded = plan.graded().to_vec();
@@ -112,7 +105,8 @@ fn skeleton(m: &MacroMap, graded: &[f32], g: &RoadGraph, parcels: Vec<Parcel>) -
     let cells: Vec<ZoneId> = (0..zw * zh)
         .map(|i| m.zones[(i / zw / 4) * mzw + (i % zw) / 4])
         .collect();
-    let mid = m.strip.centerline[m.strip.centerline.len() / 2];
+    // The start: a point on the first main road.
+    let mid = [g.edges[0].profile[0][0], g.edges[0].profile[0][2]];
     let y = graded[(mid[1] / 4.0) as usize * w + (mid[0] / 4.0) as usize];
     let mut place = Place {
         header,
@@ -317,10 +311,10 @@ fn places_with_parcels_validate() {
 /// PNGs for seeds 1–2 before and after, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 4] = [
-    0xF681_DFFC_1BD4_815A,
-    0x2A4D_B770_CA8D_4C18,
-    0x64AB_7C4E_F67D_A1C2,
-    0x15C6_90CF_4B0E_F58C,
+    0xF2E5_CF94_955A_FE2F,
+    0x0D65_7C36_12C5_6D5F,
+    0x8A86_8C75_E1B4_A6EE,
+    0xC319_26E5_65F4_FEEE,
 ];
 
 fn table(hs: &[u64]) -> String {

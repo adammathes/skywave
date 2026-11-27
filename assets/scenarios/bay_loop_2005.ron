@@ -7,7 +7,7 @@ Scenario(
     year: 2005,
     kind: "Bay and hills",
     region: "bay_area",
-    layout: Some("bay_loop"),
+    layout: "bay_loop",
     grammar: "bay_area_2005.ron",
     radio: "2001_basin",
     palette: "bay_2005",

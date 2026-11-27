@@ -1,11 +1,7 @@
-//! The procedural pipeline end to end: a skeleton [`Place`] from a seed and a template.
-//!
-//! [`build_place`] runs the macro map (stages 1–2) and the arterial network (stage 3), then
-//! fills the Place skeleton: terrain from the macro heights (which already carry the
-//! highway corridor) at [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph and
-//! one `PlayerStart` in the outer lane of the strip's spine; then the chunk stages over
-//! the whole place: local streets (stage 4), parcels (stage 5), buildings (stage 6) and
-//! the detailing (stage 7: props and lights).
+//! The chunk stages end to end: [`fill`] takes a macro map and its main roads (from an
+//! authored layout, [`super::authored`]) and builds the [`Place`]: terrain at
+//! [`DEFAULT_RES_PER_CHUNK`], zones, water bodies, the road graph, then local streets
+//! (stage 4), parcels (stage 5), buildings (stage 6) and the detailing (stage 7).
 
 use alloc::vec::Vec;
 
@@ -16,7 +12,6 @@ use place::{
 };
 use skywave_core::Seed;
 
-use super::arterials::arterials;
 use super::buildings::buildings_all;
 use super::detail::detail;
 use super::macro_map::{MacroMap, WaterKind};
@@ -53,36 +48,6 @@ pub fn era_of(year: u16) -> Era {
         2010..=2019 => Era::Tens,
         _ => Era::Twenties,
     }
-}
-
-/// A skeleton Place for `(seed, template)`: see the module docs. `template` must have
-/// passed [`RegionTemplate::validate`], `grammar` [`Grammar::validate`]. Deterministic.
-pub fn build_place(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> Place {
-    build_detailed(seed, template, grammar).0
-}
-
-/// [`build_place`] and its [`ChunkPlan`], the one the detail pass read, brought up to date
-/// for meshes painted with `palette` ([`ChunkPlan::redetail`]). A load hands the plan on to
-/// the collider and the meshes instead of making it again.
-pub fn build_place_planned(
-    seed: Seed,
-    template: &RegionTemplate,
-    grammar: &Grammar,
-    palette: &Palette,
-) -> (Place, ChunkPlan) {
-    let (place, mut plan) = build_detailed(seed, template, grammar);
-    plan.redetail(&place, palette);
-    (place, plan)
-}
-
-/// The Place and the plan its detail pass read (props and terrain colors as they were
-/// before it).
-fn build_detailed(seed: Seed, template: &RegionTemplate, grammar: &Grammar) -> (Place, ChunkPlan) {
-    let m = MacroMap::generate(seed, template, PLACE_CHUNKS);
-    let arterials = arterials(seed, template, &m);
-    // The start is found on the arterials as they are, before the streets split them.
-    let start = player_start(&m, &arterials);
-    fill(seed, template, grammar, &m, &arterials, start)
 }
 
 /// Stages 4–7 over a macro map and its arterials, however they were made (procedurally

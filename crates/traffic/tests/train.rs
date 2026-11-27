@@ -10,10 +10,9 @@ use traffic::peds::{PedInput, PedestrianBudget, Pedestrians};
 use traffic::train::{Obstacle, Railway, HALF_W_M};
 use traffic::walks::WalkGraph;
 use traffic::{Clock, Density, Inputs, LaneGraph, Player, Traffic, TrafficBudget, View};
-use world::procgen::build_place;
 use world::template::RegionTemplate;
 
-const BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
+const BASIN: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 
@@ -26,7 +25,9 @@ fn basin(seed: u64) -> Place {
         .iter()
         .map(|(_, text)| ron::from_str(text).expect("parse landmark kit"))
         .collect();
-    build_place(Seed(seed), &t, &g)
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/mirage_bowl.ron")).expect("layout");
+    world::procgen::authored::build_place(Seed(seed), &layout, &t, &g)
 }
 
 const DT: f32 = 1.0 / 120.0;
@@ -402,7 +403,8 @@ fn run_with(
 #[test]
 fn nobody_is_ever_inside_the_train_and_nobody_crosses_a_closed_crossing() {
     // Long enough for the train to warn, run the whole line and clear its last crossing.
-    for (seed, k) in [(1u64, 3usize), (2, 3)] {
+    // Crossings the train reaches in that time (the first three of the Bowl's six).
+    for (seed, k) in [(1u64, 0usize), (2, 2)] {
         let c = run(seed, k, 3.1, 0.0);
         println!("seed {seed} crossing {k}: {c:?}");
         assert_eq!(c.people_in_train, 0, "seed {seed}: {c:?}");

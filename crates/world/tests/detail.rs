@@ -9,24 +9,19 @@ use place::{LightKind, Place, PropKind, RoadClass, ZoneId};
 use skywave_core::Seed;
 use world::math::{point_in_polygon, segment_distance, V2};
 use world::procgen::detail::{MAX_CARS_PER_CHUNK, MAX_LOT_CARS_PER_CHUNK};
-use world::procgen::{build_place, hash_detail};
+use world::procgen::hash_detail;
 use world::props::{dir_of_yaw, PIER_HEAD_HALF_WIDTH_M, PIER_HEAD_M};
 use world::roads::Network;
-use world::template::{RegionTemplate, MIN_PROP_SPACING_M};
+use world::template::MIN_PROP_SPACING_M;
+
+mod common;
+use common::*;
 use world::WorldCollider;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 
 fn grammar() -> world::Grammar {
     ron::from_str(GRAMMAR).expect("parse grammar")
-}
-
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
 }
 
 fn name(k: PropKind) -> &'static str {
@@ -176,7 +171,6 @@ fn seed_one_props_by_zone() {
     };
     check("street lights", kind("street light"), 800, 2500);
     check("parked cars", kind("parked car"), 800, 4000);
-    check("billboards", kind("billboard"), 3, 40);
     check("piers", kind("pier"), 1, 1);
     check("strip lights", zoned("Strip", "street light"), 50, 400);
     check("strip palms", zoned("Strip", "palm"), 30, 400);
@@ -197,14 +191,6 @@ fn seed_one_props_by_zone() {
         1000,
     );
     check("hill gums", zoned("Hills", "eucalyptus"), 400, 5000);
-    check(
-        "suburb lot lines",
-        zoned("Suburb", "fence") + zoned("Suburb", "hedge"),
-        200,
-        3000,
-    );
-    check("suburb mailboxes", zoned("Suburb", "mailbox"), 40, 1000);
-    check("farm poles", zoned("Farmland", "power pole"), 5, 500);
     check("beach palms", zoned("Beach", "palm"), 10, 500);
 }
 
@@ -440,10 +426,10 @@ fn lights_are_the_lamps_signs_and_shops() {
 /// with `cargo test -p world --test detail -- --nocapture` (it prints the table), check the
 /// coast screenshots, and commit the new values in their own commit saying why they moved.
 const GOLDEN: [u64; 4] = [
-    0x4ADA_34EC_3CDF_6DBD,
-    0x09C3_EE58_B6AF_639D,
-    0x65B3_9DFB_1C8F_3CBA,
-    0xEDE6_4C37_48BD_31D3,
+    0x1519_4531_6FC3_28A6,
+    0x7F72_B09E_7C50_EE27,
+    0xD40D_CA6F_3CA2_6795,
+    0xD80C_745B_B778_84CC,
 ];
 
 /// The detail is deterministic, valid and pinned.

@@ -59,15 +59,17 @@ use core::f32::consts::FRAC_1_SQRT_2;
 use place::{Edge, Node, RoadClass, RoadGraph, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::{hash64, hash_bytes, Seed};
 
-use super::arterials::{
-    coast_tangent, grade_limit, major_of, sample_nodes, seg_intersect, tensor, HIGHWAY_WIDTH_M,
-};
 use super::macro_map::{MacroMap, MacroPoiKind};
+use super::profile::grade_limit;
 use super::zones::{chamfer, ALL_ZONES};
 use super::{stage, CELL_M, CHUNK_M};
-use crate::math::{abs, clamp, floor, lerp, segment_distance, sin_cos, PI, TAU, V2};
+use crate::math::{
+    abs, clamp, floor, lerp, seg_intersect, segment_distance, sin_cos, sqrt, PI, TAU, V2,
+};
 use crate::template::{RegionTemplate, StreetPattern};
 
+/// Curb-to-curb width of a highway.
+const HIGHWAY_WIDTH_M: f32 = 22.0;
 /// Curb-to-curb width of a local street.
 pub const LOCAL_WIDTH_M: f32 = 10.0;
 /// Width of an industrial (truck) street.
@@ -657,7 +659,7 @@ pub struct StreetPlan<'a> {
 
 impl<'a> StreetPlan<'a> {
     /// The plan for a place: `macro_map` and its `arterials` (from
-    /// [`super::arterials()`]) under `template`.
+    /// [`super::authored::skeleton`]) under `template`.
     pub fn new(
         seed: Seed,
         template: &'a RegionTemplate,
@@ -876,8 +878,11 @@ impl<'a> StreetPlan<'a> {
                 .zones
                 .get(zone)
                 .map_or(((100.0, 100.0), (80.0, 80.0)), |r| r.block_m);
-            let len = lerp(lr.0, lr.1, unit(key, 1));
-            let dep = lerp(dr.0, dr.1, unit(key, 2));
+            // A town drawn on one grid: its lattice for every gridded superblock.
+            let town = self.m.grid.filter(|_| p == P_GRID);
+            let dir = town.map_or(dir, |_| V2::new(1.0, 0.0));
+            let len = town.map_or(lerp(lr.0, lr.1, unit(key, 1)), |g| g[1][0]);
+            let dep = town.map_or(lerp(dr.0, dr.1, unit(key, 2)), |g| g[1][1]);
             // No lattice where it could never reach an arterial or hold a block.
             let area = cells as f32 * RASTER_M * RASTER_M;
             let lat = (p != P_CURVY && contacts > 0 && area >= 1.5 * len * dep).then(|| {
@@ -901,7 +906,9 @@ impl<'a> StreetPlan<'a> {
                 let off_n = anchor[0].map_or(dep * unit(key, 4), |a| a.1);
                 let off_d = anchor[1].map_or(len * unit(key, 3), |a| a.1);
                 Lattice {
-                    origin: centroid + dir * off_d + n * off_n,
+                    origin: town.map_or(centroid + dir * off_d + n * off_n, |g| {
+                        V2::new(g[0][0], g[0][1])
+                    }),
                     d: dir,
                     n,
                     len,
@@ -3662,12 +3669,6 @@ impl<'a> StreetPlan<'a> {
                 }
             }
         }
-        // The inland grid's streets stop at its rights of way; the coast's are left as
-        // they are.
-        if let (Some(rule), Some(plan)) = (&self.t.basin, &self.m.basin) {
-            stitch_rail(&nodes, &mut edges, &plan.rail, rule.rail.row_m);
-            prune_stubs(&mut nodes, &mut edges);
-        }
         if self.t.through_streets {
             let dead_ends_ok = |p: [f32; 2]| {
                 let rule = self.t.zones.get(self.m.zone_at(p[0], p[1]));
@@ -3684,148 +3685,6 @@ impl<'a> StreetPlan<'a> {
         }
         RoadGraph { nodes, edges }
     }
-}
-
-/// How far past the rail line's right of way a side street may stop and still be joined
-/// across it, m.
-const RAIL_STITCH_M: f32 = 24.0;
-/// Least cosine between a dead end's heading and the way across to its partner.
-const RAIL_STITCH_COS: f32 = 0.9;
-
-/// Side streets that stop at the rail line's right of way, joined across it at grade: each
-/// dead end near the line meets the nearest dead end on the far side that lies straight
-/// ahead of it (and it straight ahead of that one), when the way between crosses the main
-/// line once (a yard's spurs it may cross too, as streets do). The grade crossings then
-/// find them like any road.
-fn stitch_rail(nodes: &[Node], edges: &mut Vec<Edge>, rail: &[[f32; 2]], row_m: f32) {
-    let crossings = |line: &[[f32; 2]], a: V2, b: V2| {
-        line.windows(2)
-            .filter(|w| segments_cross(a, b, V2::from_array(w[0]), V2::from_array(w[1])))
-            .count()
-    };
-    let mut deg = vec![0u32; nodes.len()];
-    let mut via = vec![usize::MAX; nodes.len()];
-    for (k, e) in edges.iter().enumerate() {
-        for n in [e.a, e.b] {
-            deg[n as usize] += 1;
-            via[n as usize] = k;
-        }
-    }
-    // Each dead end near the line: its node, heading out of its street and side of the line.
-    let mut ends: Vec<(u32, V2, bool)> = Vec::new();
-    for (i, n) in nodes.iter().enumerate() {
-        if deg[i] != 1 {
-            continue;
-        }
-        let e = &edges[via[i]];
-        if e.oneway
-            || !matches!(
-                e.class,
-                RoadClass::Local | RoadClass::Collector | RoadClass::Rural
-            )
-        {
-            continue;
-        }
-        let p = V2::from_array(n.pos);
-        let mut near = (f32::INFINITY, false);
-        for w in rail.windows(2) {
-            let (a, b) = (V2::from_array(w[0]), V2::from_array(w[1]));
-            let d = segment_distance(p, a, b).0;
-            if d < near.0 {
-                let (t, q) = (b - a, p - a);
-                near = (d, t.x * q.y - t.y * q.x > 0.0);
-            }
-        }
-        if near.0 > 0.5 * row_m + RAIL_STITCH_M {
-            continue;
-        }
-        let prof = &e.profile;
-        let back = if e.a as usize == i {
-            prof[1]
-        } else {
-            prof[prof.len() - 2]
-        };
-        let heading = (p - V2::new(back[0], back[2])).normalize();
-        ends.push((i as u32, heading, near.1));
-    }
-    let mut pairs: Vec<(f32, u32, u32)> = Vec::new();
-    for (j, &(a, ha, sa)) in ends.iter().enumerate() {
-        for &(b, hb, sb) in &ends[j + 1..] {
-            if sa == sb {
-                continue;
-            }
-            let (pa, pb) = (
-                V2::from_array(nodes[a as usize].pos),
-                V2::from_array(nodes[b as usize].pos),
-            );
-            let v = pb - pa;
-            let len = v.length();
-            if len > row_m + 2.0 * RAIL_STITCH_M || len < 1.0 {
-                continue;
-            }
-            let u = v * (1.0 / len);
-            if u.dot(ha) < RAIL_STITCH_COS || -u.dot(hb) < RAIL_STITCH_COS {
-                continue;
-            }
-            if crossings(rail, pa, pb) != 1 {
-                continue;
-            }
-            pairs.push((len, a, b));
-        }
-    }
-    pairs.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
-    let mut used = vec![false; nodes.len()];
-    for (len, a, b) in pairs {
-        if used[a as usize] || used[b as usize] {
-            continue;
-        }
-        used[a as usize] = true;
-        used[b as usize] = true;
-        let (na, nb) = (&nodes[a as usize], &nodes[b as usize]);
-        let steps = ((len / 8.0) as usize).max(1);
-        let profile = (0..=steps)
-            .map(|k| {
-                let t = k as f32 / steps as f32;
-                [
-                    lerp(na.pos[0], nb.pos[0], t),
-                    lerp(na.elevation, nb.elevation, t),
-                    lerp(na.pos[1], nb.pos[1], t),
-                ]
-            })
-            .collect();
-        let mut e = edges[via[a as usize]].clone();
-        e.a = a;
-        e.b = b;
-        e.profile = profile;
-        edges.push(e);
-    }
-}
-
-/// Whether segments `a`–`b` and `c`–`d` cross (touching ends count).
-fn segments_cross(a: V2, b: V2, c: V2, d: V2) -> bool {
-    let cross = |o: V2, p: V2, q: V2| (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
-    let (d1, d2) = (cross(c, d, a), cross(c, d, b));
-    let (d3, d4) = (cross(a, b, c), cross(a, b, d));
-    d1 * d2 <= 0.0 && d3 * d4 <= 0.0
-}
-
-/// Longest dead-end side street or alley the merged graph drops, m: the stubs left where
-/// chunks' streets meet a right of way, an arterial or each other, which read as roads to
-/// nowhere.
-const MERGED_STUB_M: f32 = 45.0;
-/// Longest dead-end arterial piece it drops, m.
-const ARTERIAL_STUB_M: f32 = 25.0;
-
-/// Drops the merged graph's short dead ends (side streets and alleys under
-/// [`MERGED_STUB_M`], arterial pieces under [`ARTERIAL_STUB_M`]) until none is left, then
-/// the nodes no edge uses. The arterials' own nodes come first in `nodes` and keep their
-/// indices: an arterial node always has an edge left.
-fn prune_stubs(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
-    drop_dead(nodes, edges, |e, _, len| match e.class {
-        RoadClass::Local | RoadClass::Alley => len < MERGED_STUB_M,
-        RoadClass::Arterial => len < ARTERIAL_STUB_M,
-        _ => false,
-    });
 }
 
 /// Cuts every side street and alley that dead-ends where `ok` says it may not back to its
@@ -4059,6 +3918,79 @@ fn add_node(nodes: &mut Vec<BNode>, pos: V2, y: f32, end: PEnd) -> u32 {
     nodes.len() as u32 - 1
 }
 
+/// Bilinear sample of a node-centered grid of 4 m samples (the `MacroMap::heights`
+/// layout), clamped like `MacroMap::height_at`.
+fn sample_nodes(v: &[f32], w: usize, h: usize, p: V2) -> f32 {
+    let fx = clamp(p.x / CELL_M, 0.0, (w - 1) as f32);
+    let fz = clamp(p.y / CELL_M, 0.0, (h - 1) as f32);
+    let (ix, iz) = ((fx as usize).min(w - 2), (fz as usize).min(h - 2));
+    let (tx, tz) = (fx - ix as f32, fz - iz as f32);
+    let at = |i: usize, j: usize| v[j * w + i];
+    let a = lerp(at(ix, iz), at(ix + 1, iz), tx);
+    let b = lerp(at(ix, iz + 1), at(ix + 1, iz + 1), tx);
+    lerp(a, b, tz)
+}
+
+/// The symmetric tensor of a unit direction, as `(cos 2θ, sin 2θ)`.
+fn tensor(d: V2) -> [f32; 2] {
+    [d.x * d.x - d.y * d.y, 2.0 * d.x * d.y]
+}
+
+/// Major eigenvector (unit, sign arbitrary) and coherence `|t|` of a blended tensor.
+fn major_of(t: [f32; 2]) -> (V2, f32) {
+    let c = sqrt(t[0] * t[0] + t[1] * t[1]);
+    if c < 1e-6 {
+        return (V2::new(1.0, 0.0), 0.0);
+    }
+    let (a, b) = (t[0] / c, t[1] / c);
+    // Half the angle: bisect (1, 0) and (a, b), or (a, b) and (-1, 0) near 180°.
+    let d = if a >= 0.0 {
+        V2::new(1.0 + a, b)
+    } else {
+        V2::new(b, 1.0 - a)
+    };
+    (d.normalize(), c)
+}
+
+/// Unit coast tangent (along increasing `v`) at a world point, from the smoothed
+/// shoreline differenced over 400 m.
+fn coast_tangent(m: &MacroMap, p: V2) -> V2 {
+    let (_, v) = m.frame.to_canon([p.x, p.y]);
+    let slope = (m.shore.road_u(v + 200.0) - m.shore.road_u(v - 200.0)) / 400.0;
+    let k = 1.0 / sqrt(1.0 + slope * slope);
+    V2::from_array(m.frame.dir_to_world(slope * k, k))
+}
+
+/// Content hash of a road graph (every field, in order), for determinism tests.
+pub fn hash_graph(g: &RoadGraph) -> u64 {
+    let mut b: Vec<u8> = Vec::new();
+    let f = |b: &mut Vec<u8>, x: f32| b.extend_from_slice(&x.to_bits().to_le_bytes());
+    for n in &g.nodes {
+        f(&mut b, n.pos[0]);
+        f(&mut b, n.pos[1]);
+        f(&mut b, n.elevation);
+    }
+    for e in &g.edges {
+        b.extend_from_slice(&e.a.to_le_bytes());
+        b.extend_from_slice(&e.b.to_le_bytes());
+        b.extend_from_slice(&[
+            e.class as u8,
+            e.lanes_fwd,
+            e.lanes_back,
+            e.sidewalk as u8,
+            e.speed_kph,
+            e.oneway as u8,
+        ]);
+        f(&mut b, e.width_m);
+        for p in &e.profile {
+            f(&mut b, p[0]);
+            f(&mut b, p[1]);
+            f(&mut b, p[2]);
+        }
+    }
+    hash_bytes(0x0041_5254_4552, &b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4079,5 +4011,21 @@ mod tests {
         let (t0, t1) = clip_line(V2::new(-10.0, 64.0), V2::new(1.0, 0.0), &b).unwrap();
         assert!((t0 - 10.0).abs() < 1e-4 && (t1 - 138.0).abs() < 1e-4);
         assert!(clip_line(V2::new(-10.0, 200.0), V2::new(1.0, 0.0), &b).is_none());
+    }
+
+    #[test]
+    fn tensor_round_trips_directions() {
+        for &(x, z) in &[
+            (1.0f32, 0.0f32),
+            (0.0, 1.0),
+            (0.6, 0.8),
+            (-0.6, 0.8),
+            (0.8, -0.6),
+        ] {
+            let d = V2::new(x, z);
+            let (m, c) = major_of(tensor(d));
+            assert!((c - 1.0).abs() < 1e-5);
+            assert!(abs(m.dot(d)) > 0.9999, "{d:?} -> {m:?}");
+        }
     }
 }

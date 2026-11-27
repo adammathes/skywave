@@ -8,10 +8,27 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use place::{RoadClass, ZoneId};
+use place::{EdgeKind, RoadClass, ZoneId};
 
 use crate::math::{seg_intersect, segment_distance, sin_cos, PI, V2};
-use crate::template::Edges;
+
+/// What bounds the place on each side (`docs/WORLD_GENERATION.md`, "Map edges").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Edges {
+    pub north: EdgeKind,
+    pub east: EdgeKind,
+    pub south: EdgeKind,
+    pub west: EdgeKind,
+}
+
+impl Edges {
+    /// `[north, east, south, west]`, the order of `place::Terrain::edges`.
+    pub fn sides(&self) -> [EdgeKind; 4] {
+        [self.north, self.east, self.south, self.west]
+    }
+}
 
 /// A point `(x, z)` in meters in the place's frame: x east, z south, `(0, 0)` the corner of
 /// chunk `(0, 0)`.
@@ -193,6 +210,28 @@ fn deck() -> f32 {
     DECK_M
 }
 
+/// A pier: a deck on piles from `at` on the shore out over the water toward `toward`, with a
+/// short street from the nearest road to its foot.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Pier {
+    pub at: Pt,
+    pub toward: Pt,
+}
+
+/// The town's one street grid: every gridded superblock lays its side streets on the same
+/// lattice, square to the map, `block_m` apart along x and along z and counted from `origin`,
+/// so a street carries on across an avenue instead of meeting it a few meters from the street
+/// opposite. Draw the avenues on its lines and the blocks beside them come out whole.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Grid {
+    pub origin: Pt,
+    pub block_m: (f32, f32),
+}
+
 /// A railway: a single track along `line`, with `spurs` beside it (each from its turnout on
 /// the line to its bumper). Every road it meets crosses it at grade, with gates; nothing is
 /// built within [`RAIL_ROW_M`] of it.
@@ -270,6 +309,10 @@ pub struct Layout {
     pub roads: Vec<Road>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub channels: Vec<Channel>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub pier: Option<Pier>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub grid: Option<Grid>,
     /// Whether the world's set pieces are sited here (`docs/WORLD_GENERATION.md`, "Set
     /// pieces"): the garage, the stands and roadside landmarks on lots that suit them, the
     /// tunnel on the highway, turnouts at the lookouts, the drag strip on the runway.

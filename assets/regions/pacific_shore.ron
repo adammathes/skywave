@@ -1,72 +1,18 @@
-// California coast: a beach town on a bay. Ocean west, a beach band, a neon strip one or
-// two blocks inland, a small downtown behind it, a residential grid on the coastal plain,
-// curvy suburbs on the foothills, brown ridges with a highway pass, a farm valley.
-//
-// Layout and units: crates/world/src/template.rs and docs/WORLD_GENERATION.md. Distances
-// are meters, slopes are rise over run. Zone scores: every scored zone sums
-// base + coast(d) + slope(s) + downtown(d) + highway(d) + noise per 16 m cell and the
-// highest total wins; Beach, Strip and Highway are placed by structure, Park patches are
-// placed on top.
+// Pacific Shore's zone rules (assets/layouts/pacific_shore.ron, docs/LAYOUTS.md): what a
+// district of each zone looks like (the layout says where everything is). Streets are straight grids wherever a street goes, with no local streets on
+// the open hillsides or in the parks, so nothing winds off into the brush and stops.
 RegionTemplate(
-    name: "california_coast",
+    name: "pacific_shore",
     driving_side: Right,
     sign_language: EnUs,
     era: EraDefaults(year: 1984, street_lights: Sodium, palette: "sunbleached_pastel"),
 
-    coast: Some(Coast(
-        side: West,
-        water: Ocean,
-        offset_m: (140, 220),
-        wiggle_m: 45,
-        bays: (1, 2),
-        bay_depth_m: (200, 320),
-        bay_width_m: (1000, 1400),
-        // The canal motif: a few finger canals behind one end of the strip.
-        canals: Some(Canals(chance: 0.8, fingers: (3, 4), spacing_m: 64, length_m: (180, 260), width_m: 16)),
-    )),
-
-    // Edges: open ocean to the horizon west, mountains east; north and south the highway loops
-    // back along a ridge (crates/world/src/edges.rs).
-    edges: Edges(north: HighwayLoop, east: Mountains, south: HighwayLoop, west: Ocean),
-
-    elevation: Some(Elevation(
-        water_level_m: 0,
-        shelf_depth_m: 14,
-        beach_width_m: (60, 120),
-        beach_height_m: 2.5,
-        plain_width_m: (720, 860),
-        plain_rise_m: (12, 22),
-        relief_m: 3,
-        warp_m: 140,
-        ridge_count: (2, 3),
-        ridge_height_m: (120, 250),
-        ridge_width_m: (170, 240),
-        valley_count: (1, 2),
-        valley_length_m: (520, 760),
-        valley_width_m: (300, 420),
-        valley_floor_m: (8, 20),
-    )),
-
-    layout: Some(Layout(
-        strip: StripRule(length_m: (800, 1500), inland_m: (60, 110), width_m: (70, 96)),
-        downtown_inland_m: (260, 400),
-        highway: HighwayRule(corridor_m: 44),
-        parks: ParkRule(count: (2, 4), radius_m: (60, 110)),
-        pier: true,
-        overlooks: (1, 2),
-    )),
+    // A grid town: a side street that stops short of the beach or the range is cut back to its
+    // last crossing rather than left dead-ended.
+    through_streets: true,
 
     zones: Zones(
         downtown: ZoneRule(
-            score: Some(Score(
-                base: 0,
-                coast: [],
-                slope: [(0.06, 0), (0.14, -3)],
-                downtown: [(0, 3.2), (150, 2.6), (240, -1), (400, -4)],
-                highway: [],
-                noise: 0.7,
-                noise_scale_m: 160,
-            )),
             block_m: ((80, 120), (60, 90)),
             streets: Grid,
             alleys: true,
@@ -80,7 +26,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.85, floors: (2, 30), floors_mean: 8, floors_spread: 0.6, style_weights: [3, 2, 3, 2])),
         ),
         strip: ZoneRule(
-            score: None,
             block_m: ((90, 140), (50, 80)),
             streets: Grid,
             alleys: true,
@@ -94,15 +39,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.8, floors: (1, 3), floors_mean: 1.7, floors_spread: 0.4, style_weights: [3, 2, 1.5, 1.5, 0.7])),
         ),
         residential: ZoneRule(
-            score: Some(Score(
-                base: 1.0,
-                coast: [(0, 0.6), (950, 0.6), (1250, -1.0)],
-                slope: [(0.05, 0.3), (0.1, -0.6), (0.16, -2)],
-                downtown: [(0, -1.5), (260, 0), (500, 0.2)],
-                highway: [],
-                noise: 0.3,
-                noise_scale_m: 240,
-            )),
             block_m: ((90, 130), (60, 80)),
             streets: Grid,
             alleys: false,
@@ -116,15 +52,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.35, floors: (1, 2), floors_mean: 1.5, floors_spread: 0.4, style_weights: [2, 2, 3, 2])),
         ),
         suburb: ZoneRule(
-            score: Some(Score(
-                base: 0.6,
-                coast: [(0, -3), (500, -1), (800, 0.6)],
-                slope: [(0, 0.2), (0.04, 1.1), (0.12, 1.5), (0.2, 0.5), (0.28, -2)],
-                downtown: [(0, -3), (300, -0.8), (600, 0.3)],
-                highway: [],
-                noise: 0.35,
-                noise_scale_m: 260,
-            )),
             block_m: ((110, 180), (70, 110)),
             streets: Curvy,
             alleys: false,
@@ -138,15 +65,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.3, floors: (1, 2), floors_mean: 1.4, floors_spread: 0.4, style_weights: [3, 3, 1])),
         ),
         industrial: ZoneRule(
-            score: Some(Score(
-                base: -0.4,
-                coast: [(0, -0.5), (120, 0.4)],
-                slope: [(0, 0.4), (0.05, 0.1), (0.09, -3)],
-                downtown: [(0, -4), (450, -1.5), (650, 0.3)],
-                highway: [(0, 1.8), (140, 1.4), (300, -1.5)],
-                noise: 0.8,
-                noise_scale_m: 300,
-            )),
             block_m: ((180, 260), (140, 220)),
             streets: Industrial,
             alleys: false,
@@ -160,15 +78,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.5, floors: (1, 2), floors_mean: 1.2, floors_spread: 0.3, style_weights: [4, 1])),
         ),
         commercial: ZoneRule(
-            score: Some(Score(
-                base: 0,
-                coast: [],
-                slope: [(0.06, 0), (0.14, -3)],
-                downtown: [(0, 1.6), (300, 1.6), (430, 0.9), (580, -1.5)],
-                highway: [(0, 0.3), (200, 0)],
-                noise: 0.5,
-                noise_scale_m: 180,
-            )),
             block_m: ((90, 130), (60, 90)),
             streets: Grid,
             alleys: true,
@@ -182,9 +91,8 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.6, floors: (1, 4), floors_mean: 2, floors_spread: 0.45, style_weights: [2, 2, 1, 1])),
         ),
         park: ZoneRule(
-            score: None,
             block_m: ((120, 240), (100, 200)),
-            streets: Curvy,
+            streets: Open,
             alleys: false,
             styles: [],
             trees: [(Palm, 0.3), (Oak, 0.3), (Sycamore, 0.2), (Cypress, 0.2)],
@@ -195,7 +103,6 @@ RegionTemplate(
             lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
         ),
         beach: ZoneRule(
-            score: None,
             block_m: ((150, 300), (60, 120)),
             streets: Beachfront,
             alleys: false,
@@ -209,15 +116,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.4, floors: (1, 2), floors_mean: 1.6, floors_spread: 0.3, style_weights: [2, 1])),
         ),
         farmland: ZoneRule(
-            score: Some(Score(
-                base: 0,
-                coast: [(0, -5), (700, -2), (880, 1.2)],
-                slope: [(0, 1.6), (0.05, 1.0), (0.09, -2)],
-                downtown: [(0, -5), (350, -2), (600, 0.5), (800, 1.0)],
-                highway: [(0, -1), (120, 0)],
-                noise: 0.3,
-                noise_scale_m: 300,
-            )),
             block_m: ((400, 805), (400, 805)),
             streets: Sections,
             alleys: false,
@@ -231,17 +129,8 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.05, floors: (1, 2), floors_mean: 1.2, floors_spread: 0.3, style_weights: [1, 1])),
         ),
         hills: ZoneRule(
-            score: Some(Score(
-                base: 0.4,
-                coast: [(0, -4), (600, -1), (900, 0.4)],
-                slope: [(0.1, -2), (0.18, 1.4), (0.3, 3)],
-                downtown: [],
-                highway: [],
-                noise: 0.2,
-                noise_scale_m: 200,
-            )),
             block_m: ((200, 400), (150, 300)),
-            streets: Switchback,
+            streets: Open,
             alleys: false,
             styles: [Ranch, Craftsman, Glass],
             trees: [(Eucalyptus, 0.5), (Oak, 0.4), (Pine, 0.1)],
@@ -253,7 +142,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.2, floors: (1, 2), floors_mean: 1.5, floors_spread: 0.4, style_weights: [2, 1, 1])),
         ),
         highway: ZoneRule(
-            score: None,
             block_m: ((400, 800), (44, 44)),
             streets: Grid,
             alleys: false,

@@ -13,15 +13,15 @@ use vehicle::{step, Assists, VehicleInput, VehicleSpec, VehicleState};
 use world::collide::Surface;
 use world::lots::{self, ParkingLot, ISLAND_H_M, STOP_H_M};
 use world::math::{point_in_polygon, V2};
-use world::procgen::build_place;
 use world::props::parked_now;
 use world::roads::Network;
-use world::template::RegionTemplate;
+
+mod common;
+use common::*;
 use world::{resolve, WorldCollider};
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
 const GANNET: &str = include_str!("../../../assets/vehicles/gannet_gt.ron");
 const STEPS_PER_S: usize = 120;
 
@@ -31,20 +31,30 @@ fn grammar() -> world::Grammar {
     g
 }
 
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
-}
-
-/// The coast of `seed`, its network with the lots' curb cuts, and its lots.
-fn coast(seed: u64) -> (Place, Network, Vec<ParkingLot>) {
+/// `place` with its network (the lots' curb cuts in it) and its lots.
+fn with_lots(place: Place) -> (Place, Network, Vec<ParkingLot>) {
     let g = grammar();
-    let place = build_place(Seed(seed), &template(), &g);
     let mut net = Network::new(&place);
     let lots = lots::plan(&place, &net, &g.lots);
     net.cuts = lots::cuts(&lots);
     (place, net, lots)
+}
+
+/// The Shore of `seed`: beach lots and the strip's.
+fn coast(seed: u64) -> (Place, Network, Vec<ParkingLot>) {
+    with_lots(build_place(Seed(seed), &template(), &grammar()))
+}
+
+/// The Mirage Bowl: downtown offices' lots, shopping lots, strip-mall front lots.
+fn bowl() -> (Place, Network, Vec<ParkingLot>) {
+    with_lots(common::bowl(&grammar()))
+}
+
+/// The Shore at `seeds` (0 stands for the Bowl).
+fn worlds(
+    seeds: std::ops::RangeInclusive<u64>,
+) -> impl Iterator<Item = (u64, (Place, Network, Vec<ParkingLot>))> {
+    seeds.map(|s| (s, if s == 0 { bowl() } else { coast(s) }))
 }
 
 /// `q` shrunk toward its middle by `by` (so quads sharing an edge do not count as
@@ -101,8 +111,7 @@ fn road_distance(net: &Network, e: usize, p: V2) -> f32 {
 fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
     let mut totals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let stall_w = grammar().lots.stall_w;
-    for seed in 1..=8 {
-        let (place, net, lots) = coast(seed);
+    for (seed, (place, net, lots)) in worlds(0..=3) {
         assert!(!lots.is_empty(), "seed {seed}: no lots");
         let parcels: Vec<(Vec<V2>, (V2, V2))> = place
             .parcels
@@ -277,7 +286,7 @@ fn lots_are_laid_clear_and_every_stall_reaches_the_street() {
             }
         }
     }
-    println!("lots and stalls per zone, seeds 1-8: {totals:?}");
+    println!("lots and stalls per zone, the Bowl and the Shore at seeds 1-3: {totals:?}");
     // Strip-mall front lots and alley lots on the strip, beach lots on the beach.
     for z in ["Beach", "Strip", "Commercial", "Downtown"] {
         assert!(totals.contains_key(z), "no lots in {z}: {totals:?}");
@@ -312,8 +321,7 @@ fn parked(place: &Place, z: ZoneId, h: f32) -> usize {
 fn lots_fill_and_empty_by_zone_and_hour() {
     let g = grammar();
     let mut by: BTreeMap<u8, [usize; 24]> = BTreeMap::new();
-    for seed in 1..=4 {
-        let (place, _, _) = coast(seed);
+    for (_, (place, _, _)) in worlds(0..=2) {
         for z in [
             ZoneId::Beach,
             ZoneId::Strip,
@@ -402,8 +410,18 @@ fn lot_furniture_lifts_or_stops_the_car_and_paint_does_not() {
         y - ground(sc)
     );
     // A stripe is paint: the lot's own height and asphalt.
-    let st = lot.stripes[lot.stripes.len() / 2];
-    let m = (st[0] + st[1]) * 0.5;
+    // (Not one along an end island's side: the island's curb stands on that line.)
+    let m = lot
+        .stripes
+        .iter()
+        .map(|st| (st[0] + st[1]) * 0.5)
+        .find(|&m| {
+            lot.islands.iter().all(|i| {
+                let c = (i.q[0] + i.q[1] + i.q[2] + i.q[3]) * 0.25;
+                (m - c).length() > 4.0
+            })
+        })
+        .unwrap();
     let (y, surface) = c.level_at([m.x, m.y]);
     let lift = lots::LOT_LIFT_M;
     assert!(
@@ -624,8 +642,7 @@ fn corners(b: &world::collide::BoxSolid) -> [V2; 4] {
 
 #[test]
 fn lot_cars_never_overlap_cars_or_poles() {
-    for seed in 1..=8 {
-        let (place, _, _) = coast(seed);
+    for (seed, (place, _, _)) in worlds(0..=3) {
         let c = WorldCollider::build(&place, &grammar());
         let cars: Vec<[V2; 4]> = c
             .boxes

@@ -15,8 +15,7 @@ mod builtin;
 #[derive(serde::Deserialize)]
 struct Scenario {
     region: String,
-    #[serde(default)]
-    layout: Option<String>,
+    layout: String,
     grammar: String,
 }
 
@@ -35,13 +34,8 @@ fn main() {
         let s: Scenario = ron::from_str(text).unwrap_or_else(|e| panic!("scenario {id}: {e}"));
         let text = builtin::grammar_text(&s.grammar).unwrap_or_else(|| panic!("{id}: grammar"));
         let grammar = builtin::load_builtin_grammar(text).unwrap_or_else(|e| panic!("{id}: {e}"));
-        let place = builtin::generate(
-            builtin::BAKED_SEED,
-            &s.region,
-            s.layout.as_deref(),
-            &grammar,
-        )
-        .unwrap_or_else(|e| panic!("{id}: {e}"));
+        let place = builtin::generate(builtin::BAKED_SEED, &s.region, &s.layout, &grammar)
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
         let file = Path::new(&out).join(format!("{id}.place"));
         std::fs::write(&file, place::encode(&place)).expect("write the baked place");
         if embed {

@@ -27,12 +27,11 @@ use alloc::vec::Vec;
 use place::{Edge, Node, Place, RoadClass, RoadGraph, Spawn, SpawnKind, ZoneId};
 use skywave_core::Seed;
 
-use super::arterials::grade_limit;
 use super::macro_map::{
     ccw, flatten_by_zone, paint_bands, raise_walls, BasinPlan, Frame, GridLine, MacroMap, MacroPoi,
     MacroPoiKind, Strip, WaterBody, WaterKind,
 };
-use super::profile::{ease, grade_at, ROAD_CURVE, STREET_CURVE};
+use super::profile::{ease, grade_at, grade_limit, ROAD_CURVE, STREET_CURVE};
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
 use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};
@@ -505,10 +504,25 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
         highway: Vec::new(),
         highway_bed: Vec::new(),
         pass: None,
-        pois: Vec::new(),
+        pois: layout
+            .pier
+            .iter()
+            .map(|p| {
+                let out = (V2::new(p.toward.0, p.toward.1) - V2::new(p.at.0, p.at.1)).normalize();
+                MacroPoi {
+                    kind: MacroPoiKind::Pier,
+                    pos: [p.at.0, p.at.1],
+                    facing: [out.x, out.y],
+                }
+            })
+            .collect(),
         edges,
         bands,
         basin: None,
+        grid: layout
+            .grid
+            .as_ref()
+            .map(|g| [[g.origin.0, g.origin.1], [g.block_m.0, g.block_m.1]]),
     }
 }
 
