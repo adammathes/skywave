@@ -32,8 +32,10 @@ player chooses to listen to, and nothing of theirs is in the repo.
 | IEC 61966-2-1 (sRGB) and ITU-R BT.709 | Published standards; transfer function, primaries and white point (facts) | 2026-10-26 | The sRGB transfer curve, the D65 white point and the Rec. 709 luminance weights | `crates/world/src/palette.rs`, `crates/render/src/sky.rs`, `crates/app/src/daylight.rs` |
 
 ## Shipped data
-None yet. Terrain, roads, water and footprints for compiled places (M6) will be listed here
-with their vintages, per ADR 0005.
+| Source | License / rights | Retrieved | What we took | Where |
+|---|---|---|---|---|
+| US Census Bureau, TIGER/Line Shapefiles 2023, All Roads, Cook County, Illinois (`tl_2023_17031_roads`) | US federal work, public domain | 2026-11-26 | Expressway and main-street centerlines picked by class and name, squeezed and simplified into invented-name roads; no names shipped | `assets/layouts/lake_city.ron` (via `tools/realmap/lake_city.ron`) |
+| US Geological Survey, 3D Elevation Program (3DEP), National Map elevation image service | US federal work, public domain | 2026-11-26 | Ground heights resampled to a 32 m grid, and the lake shore traced from them | `assets/layouts/lake_city.ron` (via `tools/realmap/lake_city.ron`) |
 
 ## Fitted references (photographs, drawings, datasets, CC0 kits)
 None yet. The facade grammar (`assets/grammar/`) holds starting values only; the fit pass
