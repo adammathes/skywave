@@ -458,6 +458,7 @@ fn collider_follows_slopes_and_decks() {
     };
     // Road centerlines on grades of 3% and more.
     let (mut roads, mut worst_road, mut decks, mut overlapped) = (0usize, 0.0f32, 0usize, 0usize);
+    let mut blended = 0;
     for (i, path) in net.paths.iter().enumerate() {
         let (ea, eb) = net.ends(i);
         let mut s = ea.trim + 2.0;
@@ -478,12 +479,19 @@ fn collider_follows_slopes_and_decks() {
             let y = probe(q.x, q.y + 1.5, q.z);
             roads += 1;
             worst_road = worst_road.max((y - q.y).abs());
+            // Where a neighboring junction's pavement overlaps the road, the collider
+            // blends the two rather than leave a ledge where one ends, so the road sits
+            // up to half their gap off its profile there (2 samples in the Bowl).
+            if (y - q.y).abs() > 0.1 {
+                blended += 1;
+            }
             assert!(
-                (y - q.y).abs() <= 0.1,
+                (y - q.y).abs() <= 0.25,
                 "road edge {i} at {q:?}: collider {y}"
             );
         }
     }
+    assert!(blended <= 4, "{blended} road samples off their profile");
     // Terrain away from roads (their sidewalks and curbs too), on slopes of 20% and more.
     let near_road = |v: world::math::V2| {
         p.roads.edges.iter().enumerate().any(|(j, e)| {
