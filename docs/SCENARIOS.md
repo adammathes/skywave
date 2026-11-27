@@ -87,6 +87,8 @@ shows it) and the tuner the Siskin Coupe (body kit, tall wing, aftermarket rims,
 Part 2 (M8 #5): the rotary coupe is the Shrike Coupe, the rally sedan the Glaive Turbo (hood scoop, tall
 wing, mud flaps), the compact sedan the Falchion Sedan (body kit) and the V8 sports car the Courser V8 (T-top).
 The two late-90s roadsters, the Dunlin Roadster and the Palfrey Roadster (AWD), joined them after.
+Lake City's heroes are its North Side summer-night cars, kept on the road past their age: the Corvid
+Hatch (a 1988 pony car in top trim: T-tops, ground effects, stripes) and the Longbow Coupe.
 The traffic cars (M8 #6) are the Plover Sedan, Sorrel Utility, Wren Minivan, Percheron Crew Cab, Linnet
 Hatch, Sledge Box Truck and the Anvil Semi, which only traffic drives, on the freeway.
 
@@ -113,9 +115,14 @@ headlands road round to an East Bay college town under its hills and an overlook
 crossing back; south from the city the ridge and its ridge road, the foothill freeway, the strip on
 the old highway, the university's open ground and the bayshore's office flats, to the flat South Bay
 and the foothill village, with a causeway across the bay's south end. Zone rules are the
-`bay_area` region template (`StreetPattern::Open` keeps the hills free of local streets). It
-borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
-and radio follow.
+`bay_area` region template. Its look is the art direction's: the open space is a hard line
+(`StreetPattern::Open`: no local streets, no lots, gold grass under oak stands), the city is painted
+stucco row houses shoulder to shoulder over garage doors with bay windows and cornices (its own
+grammar, `bay_area_2005.ron`), its grid climbing the crests at up to 22% (`street_grade`), and the
+flats round the bay are long straight blocks of ranch and craftsman houses under oaks. Its palette is
+`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and
+bridge towers, its own 2005 cars and its own radio follow; every car of 1996 to 2005 drives
+there.
 
 ## Mirage Valley redrawn: the Mirage Bowl (2001)
 **`mirage_bowl_2001` — Mirage Bowl, 2001.** Mirage Valley's point of view drawn as an authored

@@ -2018,7 +2018,7 @@ mod tests {
         // deliberately.
         assert_eq!(
             a.state_hash(),
-            0x38e5_0ff8_2dc0_4d2f,
+            0x555c_25a9_1bce_a9af,
             "{:#x}",
             a.state_hash()
         );

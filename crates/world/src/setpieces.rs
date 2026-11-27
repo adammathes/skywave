@@ -26,6 +26,19 @@ const PORTAL_M: f32 = 1.6;
 /// A tunnel's ceiling lamps: a strip this far in from each wall, m.
 const TUNNEL_LAMP_IN_M: f32 = 2.5;
 
+/// A bridge tower's lower legs' half extents along the deck and across it, m; the upper
+/// legs step in to [`TOWER_UPPER_M`].
+const TOWER_LEG_M: [f32; 2] = [2.0, 1.6];
+const TOWER_UPPER_M: [f32; 2] = [1.6, 1.25];
+/// How far a bridge tower's legs reach down under the deck into the water, m.
+const TOWER_FOOT_M: f32 = 18.0;
+/// Its main cables' lowest point over the deck, mid-span, m.
+const CABLE_LOW_M: f32 = 2.5;
+/// Spacing of the hangers along the main span, m.
+const HANGER_M: f32 = 8.0;
+/// The bridge's own red, whatever the era's palette.
+const BRIDGE_RED: crate::palette::Rgb = [0xA8, 0x34, 0x1E];
+
 /// A crew garage's front width, depth and wall height, m (three bays).
 pub const GARAGE_M: (f32, f32, f32) = (20.0, 14.0, 5.4);
 /// Its bays' clear width and height, and the piers between them, m.
@@ -48,6 +61,7 @@ pub fn is_set_piece(kind: PropKind) -> bool {
             | PropKind::TacoStand { .. }
             | PropKind::PicnicTable
             | PropKind::CrossingGate { .. }
+            | PropKind::BridgeTower { .. }
     )
 }
 
@@ -78,6 +92,17 @@ pub fn build(m: &mut WorldMesh, p: &Prop, pal: &Palette, lex: &Lexicon) {
         PropKind::TacoStand { name_seed } => taco_stand(m, base, p.dir, name_seed, pal, lex),
         PropKind::PicnicTable => picnic_table(m, base, p.dir, pal),
         PropKind::CrossingGate { .. } => crossing_gate(m, base, p.dir, pal),
+        PropKind::BridgeTower {
+            span_m,
+            rise_m,
+            width_m,
+        } => bridge_tower(
+            m,
+            base,
+            p.dir,
+            [f32::from(span_m), f32::from(rise_m), f32::from(width_m)],
+            pal,
+        ),
         _ => {}
     }
 }
@@ -153,6 +178,21 @@ pub fn slabs(p: &Prop, out: &mut Vec<Slab>) {
             slab(c, p.dir.left(), [0.5 * w, 0.5 * d], y - 0.5, y + h);
         }
         PropKind::PicnicTable => slab(p.pos, along, [1.0, 0.85], y, y + 0.78),
+        PropKind::BridgeTower {
+            rise_m, width_m, ..
+        } => {
+            let half = 0.5 * f32::from(width_m);
+            for sigma in [-1.0f32, 1.0] {
+                let c = p.pos + across * (sigma * half);
+                slab(
+                    c,
+                    along,
+                    [TOWER_LEG_M[0], TOWER_LEG_M[1]],
+                    y - TOWER_FOOT_M,
+                    y + f32::from(rise_m),
+                );
+            }
+        }
         _ => {}
     }
 }
@@ -898,6 +938,125 @@ fn picnic_table(m: &mut WorldMesh, base: V3, along: V2, pal: &Palette) {
 
 /// A crossing gate's frame: x across the road (its middle toward -x), z toward the drivers
 /// it stops.
+/// A suspension bridge's tower at `base` (its middle, on the deck) facing the other tower
+/// `span` meters along `dir`, `rise` meters over the deck with its legs `width` apart: the
+/// stepped legs and their portals, its half of both main cables down to mid-span and the
+/// hangers from them, the back cables down to an anchorage a third of the span behind,
+/// the deck's rails along its half, and red lamps on top that light at dusk.
+fn bridge_tower(
+    m: &mut WorldMesh,
+    base: V3,
+    dir: V2,
+    [span, rise, width]: [f32; 3],
+    pal: &Palette,
+) {
+    use crate::landmarks::strut;
+    let f = Frame::upright(base, dir);
+    let red = Paint::new(BRIDGE_RED, Pattern::Paint);
+    let concrete = Paint::new(pal.concrete, Pattern::Concrete);
+    let half = 0.5 * width;
+    let [lx, lz] = TOWER_LEG_M;
+    let [ux, uz] = TOWER_UPPER_M;
+    let step = 0.55 * rise;
+    for s in [-1.0f32, 1.0] {
+        let z = s * half;
+        boxf(
+            m,
+            &f,
+            [-lx, -TOWER_FOOT_M, z - lz],
+            [lx, step, z + lz],
+            face::NO_BOTTOM,
+            red,
+        );
+        boxf(
+            m,
+            &f,
+            [-ux, step, z - uz],
+            [ux, rise, z + uz],
+            face::NO_BOTTOM,
+            red,
+        );
+        boxf(
+            m,
+            &f,
+            [-lx, rise, z - lz],
+            [lx, rise + 1.2, z + lz],
+            face::ALL,
+            red,
+        );
+        let lamp = Paint::new(BRIDGE_RED, Pattern::Paint).glowing([255, 48, 32], Glow::Lamp);
+        boxf(
+            m,
+            &f,
+            [-0.4, rise + 1.2, z - 0.4],
+            [0.4, rise + 1.9, z + 0.4],
+            face::NO_BOTTOM,
+            lamp,
+        );
+    }
+    // Portals: under the deck and three over it, the top one deepest.
+    for (y0, y1) in [
+        (-2.4, -0.4),
+        (0.4 * rise, 0.4 * rise + 2.2),
+        (0.7 * rise, 0.7 * rise + 2.2),
+        (rise - 3.6, rise),
+    ] {
+        boxf(
+            m,
+            &f,
+            [-0.8 * ux, y0, -half],
+            [0.8 * ux, y1, half],
+            face::ALL,
+            red,
+        );
+    }
+    // The main cables, a parabola from the top to mid-span; their hangers to the rails.
+    let mid = 0.5 * span;
+    let top = rise + 0.6;
+    let cable = |x: f32| {
+        let t = (mid - x) / mid;
+        CABLE_LOW_M + (top - CABLE_LOW_M) * t * t
+    };
+    let rail = 1.1;
+    let rail_z = half - lz - 1.0;
+    for s in [-1.0f32, 1.0] {
+        let z = s * half;
+        let n = 12;
+        for k in 0..n {
+            let (x0, x1) = (mid * k as f32 / n as f32, mid * (k + 1) as f32 / n as f32);
+            strut(m, f.p(x0, cable(x0), z), f.p(x1, cable(x1), z), 0.8, red);
+        }
+        let mut x = HANGER_M;
+        while x < mid - 0.5 {
+            strut(m, f.p(x, cable(x), z), f.p(x, rail, s * rail_z), 0.18, red);
+            x += HANGER_M;
+        }
+        // The back cable sags a little to the anchorage.
+        let back = span / 3.0;
+        let n = 6;
+        let at = |t: f32| (-back * t, top + (0.5 - top) * t - 3.0 * t * (1.0 - t));
+        for k in 0..n {
+            let (a, b) = (at(k as f32 / n as f32), at((k + 1) as f32 / n as f32));
+            strut(m, f.p(a.0, a.1, z), f.p(b.0, b.1, z), 0.8, red);
+        }
+        boxf(
+            m,
+            &f,
+            [-back - 4.0, -4.0, z - 2.5],
+            [-back + 4.0, 1.5, z + 2.5],
+            face::NO_BOTTOM,
+            concrete,
+        );
+        strut(
+            m,
+            f.p(-lx, rail, s * rail_z),
+            f.p(mid, rail, s * rail_z),
+            0.25,
+            red,
+        );
+    }
+}
+
 fn gate_frame(base: V3, facing: V2) -> Frame {
     Frame::upright(base, facing.left())
 }
@@ -1199,7 +1358,7 @@ mod tests {
         }
     }
 
-    const KINDS: [PropKind; 10] = [
+    const KINDS: [PropKind; 11] = [
         PropKind::TunnelPiece {
             len_dm: 160,
             width_dm: 250,
@@ -1214,6 +1373,11 @@ mod tests {
         PropKind::TacoStand { name_seed: 12 },
         PropKind::PicnicTable,
         PropKind::CrossingGate { arm_dm: 80 },
+        PropKind::BridgeTower {
+            span_m: 180,
+            rise_m: 46,
+            width_m: 22,
+        },
     ];
 
     #[test]

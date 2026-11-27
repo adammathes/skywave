@@ -18,7 +18,7 @@ pub const MAX_PAINTS: usize = 12;
 
 /// `(id, seconds from rest to 60 mph, top speed in mph)` of every built-in car, as the sim
 /// measures them (see the module docs).
-const MEASURED: [(&str, f32, f32); 38] = [
+const MEASURED: [(&str, f32, f32); 39] = [
     ("gannet_gt", 5.60, 155.0),
     ("homestead_wagon", 12.60, 110.0),
     ("seabreeze_convertible", 12.51, 106.0),
@@ -50,6 +50,7 @@ const MEASURED: [(&str, f32, f32); 38] = [
     ("courser_v8", 6.29, 140.0),
     ("dunlin_roadster", 8.22, 128.0),
     ("palfrey_roadster", 6.73, 131.0),
+    ("corvid_hatch", 6.13, 140.0),
     ("plover_sedan", 9.83, 125.0),
     ("sorrel_utility", 10.37, 95.0),
     ("wren_minivan", 11.07, 102.0),
@@ -333,14 +334,16 @@ mod tests {
                 car.id
             );
         }
-        // The 1980s roster, then the 2001 heroes and traffic cars of their own decades.
+        // The 1980s roster, then the 2001 heroes, Lake City's 1988 hero and the 2001 traffic
+        // cars, of their own decades.
         let eras: Vec<&str> = r.iter().map(|c| c.era).collect();
         assert!(eras[..20].iter().all(|&e| e == "1980s"));
         assert_eq!(
             eras[20..],
             [
                 "1990s", "1990s", "1990s", "1960s", "2000s", "1990s", "1990s", "1990s", "1990s",
-                "1990s", "1990s", "1990s", "1990s", "1990s", "2000s", "2000s", "1990s", "2000s"
+                "1990s", "1990s", "1980s", "1990s", "1990s", "1990s", "2000s", "2000s", "1990s",
+                "2000s"
             ]
         );
         // docs/VEHICLES.md: the Gannet 5.6 s and 70 m/s, the Regent 9.9 s and 55 m/s.

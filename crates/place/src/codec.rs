@@ -337,6 +337,15 @@ fn put_record(w: &mut Vec<u8>, place: &Place, table: Table, i: usize) {
                     w.push(variant);
                 }
                 PropKind::LotLabel { letter } => w.push(letter),
+                PropKind::BridgeTower {
+                    span_m,
+                    rise_m,
+                    width_m,
+                } => {
+                    w.extend_from_slice(&span_m.to_le_bytes());
+                    w.push(rise_m);
+                    w.push(width_m);
+                }
                 PropKind::StreetLight
                 | PropKind::PalmTree
                 | PropKind::Oak
@@ -401,6 +410,7 @@ fn prop_tag(k: PropKind) -> u8 {
         PropKind::CrossingGate { .. } => 32,
         PropKind::Landmark { .. } => 33,
         PropKind::LotLabel { .. } => 34,
+        PropKind::BridgeTower { .. } => 35,
     }
 }
 
@@ -653,6 +663,7 @@ fn region(v: u8) -> Option<RegionId> {
         2 => RegionId::GreatLakesCity,
         3 => RegionId::NorthShoreSuburb,
         4 => RegionId::SocalBasin,
+        5 => RegionId::BayArea,
         _ => return None,
     })
 }
@@ -1116,6 +1127,11 @@ fn read_record(r: &mut Reader, p: &mut Place, table: Table) -> Result<(), PlaceE
                     variant: r.u8()?,
                 },
                 34 => PropKind::LotLabel { letter: r.u8()? },
+                35 => PropKind::BridgeTower {
+                    span_m: r.u16()?,
+                    rise_m: r.u8()?,
+                    width_m: r.u8()?,
+                },
                 _ => return Err(r.bad()),
             };
             p.props.items.push(Prop { pos, yaw, kind });
@@ -1635,6 +1651,11 @@ mod tests {
             PropKind::CrossingGate { arm_dm: 74 },
             PropKind::Landmark { kit: 2, variant: 1 },
             PropKind::LotLabel { letter: b'C' },
+            PropKind::BridgeTower {
+                span_m: 180,
+                rise_m: 46,
+                width_m: 22,
+            },
         ];
         let props = kinds
             .iter()
