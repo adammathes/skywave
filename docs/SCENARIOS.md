@@ -41,7 +41,7 @@ that is not built in starts the first world and says so); with none saved, a bar
 reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
 ## Launch scenario
-**`socal_beach_1984` — Pacific Shore, 1984.** Beach strip with neon and palms, a small downtown, a residential grid with a canal pocket, a highway through brown hills to a farm valley. Golden hour, yacht rock and soft rock, pastels and stucco. The test of the whole idea.
+**`socal_beach_1984` — Pacific Shore, 1984.** A beach town drawn as a layout (`assets/layouts/pacific_shore.ron`): the beach and its pier, the strip with neon and palms a block in, a small downtown where the pier's avenue meets the center street, a park, and bungalow blocks on one grid to the foot of the coast range, with a lookout at each end. Golden hour, yacht rock and soft rock, pastels and stucco. The test of the whole idea.
 
 ## Next two (M7, after the slice works)
 **`chicago_1977` — Lake City, 1977.** Region template `great_lakes_city`: a flat grid city on a lake. Lakefront drive with a beach and harbor, a dense Loop with mid-century towers, elevated rail (the L as a prop system: steel structure over streets, stations, the rumble), brick three-flats and bungalows in neighborhoods, wide boulevards, expressways with sodium lights, industrial river corridor with bridges. Winter-adjacent light (low sun, long shadows), brown brick and limestone palette. Radio: soul, disco, AOR, Chicago blues presets.

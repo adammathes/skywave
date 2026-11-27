@@ -61,6 +61,14 @@ Layout(
   // An airfield: a runway on a level field, and a taxiway from its first end to a road.
   airfield: Some(Airfield(runway: ((2620, 1960), (2620, 2740)), runway_m: 30, width_m: 150,
                           taxiway: (2620, 1850))),
+  // A pier: a deck on piles from `at` on the shore out toward `toward`, with a short street
+  // from the nearest road to its foot.
+  pier: Some(Pier(at: (372, 1040), toward: (0, 1040))),
+  // One street grid for the whole town: every gridded superblock lays its side streets on the
+  // same lattice, square to the map, `block_m` apart along x and z and counted from `origin`,
+  // so a street runs straight on across an avenue. Draw the avenues on its lines and the
+  // blocks beside them come out whole. Without it each superblock picks its own spacing.
+  grid: Some(Grid(origin: (980, 260), block_m: (84, 130))),
   set_pieces: true,                 // site the world's set pieces here (default false)
   start: Start(road: "crest street", along_m: 160),   // the player starts this far along this road
 )
