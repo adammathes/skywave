@@ -37,6 +37,9 @@ pub struct Import {
     /// A county's FIPS code: read its all-roads file, and take the `names` too.
     #[serde(default)]
     pub county: Option<String>,
+    /// Several counties' FIPS codes, read the same way (a region across county lines).
+    #[serde(default)]
+    pub counties: Vec<String>,
     /// TIGER `FULLNAME`s of main streets to import as arterials (with `county`).
     #[serde(default)]
     pub names: Vec<String>,
@@ -307,14 +310,22 @@ fn run(path: &str) -> Result<(), String> {
 
     let cache = std::path::Path::new("target/realmap");
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
-    let roads = sources::tiger_roads(
-        cache,
-        &cfg.state,
-        cfg.county.as_deref(),
-        &cfg.names,
-        &warp,
-        &cfg.classes,
-    )?;
+    let counties: Vec<Option<&str>> = if cfg.counties.is_empty() {
+        vec![cfg.county.as_deref()]
+    } else {
+        cfg.counties.iter().map(|c| Some(c.as_str())).collect()
+    };
+    let mut roads = Vec::new();
+    for county in counties {
+        roads.extend(sources::tiger_roads(
+            cache,
+            &cfg.state,
+            county,
+            &cfg.names,
+            &warp,
+            &cfg.classes,
+        )?);
+    }
     let dem = sources::dem(cache, &warp, 1024)?;
     eprintln!("realmap: {} TIGER lines in the box", roads.len());
 

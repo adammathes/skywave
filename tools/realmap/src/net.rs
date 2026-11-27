@@ -94,10 +94,12 @@ fn average(pts: &[P]) -> Vec<P> {
 /// Points in `fixed` (junctions) stay as they are.
 fn ease(pts: &[P], fixed: &[P]) -> Vec<P> {
     let mut pts = pts.to_vec();
+    pts.dedup_by(|b, a| dist(*a, *b) < 0.5);
     loop {
         let bend = (1..pts.len().saturating_sub(1)).find(|&i| {
             let (a, b, c) = (pts[i - 1], pts[i], pts[i + 1]);
-            if fixed.contains(&b) {
+            // Junctions stay put, and a bend already cut to under a meter is left.
+            if fixed.contains(&b) || dist(a, b) < 1.0 || dist(b, c) < 1.0 {
                 return false;
             }
             let d = (c.1 - b.1).atan2(c.0 - b.0) - (b.1 - a.1).atan2(b.0 - a.0);
@@ -253,6 +255,25 @@ pub fn network(
         let all: Vec<&Line> = lines.iter().collect();
         let (mut nodes, mut chains) = skeleton(&all, warp, ext, cell, None, suspension);
         cleanup(&mut nodes, &mut chains);
+        // A short street piece with a highway at both ends is the highway through an
+        // interchange whose knot was cleaned up: keep the highway whole.
+        let hwy_at = |chains: &[Chain], n: usize, not: usize| {
+            chains
+                .iter()
+                .enumerate()
+                .any(|(k, c)| k != not && c.alive && c.highway && (c.a == n || c.b == n))
+        };
+        for i in 0..chains.len() {
+            let c = &chains[i];
+            if c.alive
+                && !c.highway
+                && length(&c.pts) < MIN_HIGHWAY_M
+                && hwy_at(&chains, c.a, i)
+                && hwy_at(&chains, c.b, i)
+            {
+                chains[i].highway = true;
+            }
+        }
         return join(&nodes, &chains, false);
     }
     // Highways on a skeleton of their own, so where one crosses a street there is no
