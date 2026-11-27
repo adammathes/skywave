@@ -237,6 +237,78 @@ pub struct GroundSample {
     pub surface: Surface,
 }
 
+/// Cells whose steps a collider made by [`WorldCollider::with_plan`] keeps at once: the
+/// cells within the app's look-ahead of the car are a hundred or so.
+pub const STEP_SLOTS: usize = 384;
+/// Steps a slot has room for from the start (the worlds' busiest cells hold about 80); a
+/// cell with more grows its slot once.
+const SLOT_STEPS: usize = 96;
+
+/// The steps near grid cells, a fixed number of cells' at a time: finding every step of a
+/// place up front was most of the collider's build time, and a car is only ever near a
+/// few cells. Slots are reused first in, first out. A cache, not part of what the collider
+/// is: two colliders are equal whatever theirs hold.
+#[derive(Clone, Debug, Default)]
+struct StepCache {
+    /// Per grid cell, its slot, or `u32::MAX`.
+    slot_of: Vec<u32>,
+    /// Per slot, its cell (`u32::MAX` while unused) and that cell's steps.
+    slots: Vec<(u32, Vec<Step>)>,
+    /// The slot to reuse next.
+    next: usize,
+    /// Scratch for finding a cell's steps.
+    near: Vec<u32>,
+    v2s: Vec<V2>,
+    found: Vec<Step>,
+}
+
+impl PartialEq for StepCache {
+    fn eq(&self, _: &StepCache) -> bool {
+        true
+    }
+}
+
+impl StepCache {
+    /// Room for `slots` of `cells` cells' steps, each with room for `room` steps to start.
+    fn new(cells: usize, slots: usize, room: usize) -> StepCache {
+        StepCache {
+            slot_of: alloc::vec![u32::MAX; cells],
+            slots: (0..slots.max(1))
+                .map(|_| (u32::MAX, Vec::with_capacity(room)))
+                .collect(),
+            next: 0,
+            near: Vec::with_capacity(1024),
+            v2s: Vec::with_capacity(256),
+            found: Vec::with_capacity(1024),
+        }
+    }
+
+    /// The steps kept for `cell`.
+    fn of(&self, cell: usize) -> Option<&[Step]> {
+        match self.slot_of.get(cell) {
+            Some(&s) if s != u32::MAX => Some(&self.slots[s as usize].1),
+            _ => None,
+        }
+    }
+
+    /// The next slot's buffer, for `cell`'s steps; the cell that had it has none kept now.
+    /// Give it back with [`StepCache::put_slot`].
+    fn take_slot(&mut self, cell: usize) -> Vec<Step> {
+        let (old, steps) = &mut self.slots[self.next];
+        if *old != u32::MAX {
+            self.slot_of[*old as usize] = u32::MAX;
+        }
+        *old = cell as u32;
+        core::mem::take(steps)
+    }
+
+    fn put_slot(&mut self, cell: usize, steps: Vec<Step>) {
+        self.slots[self.next].1 = steps;
+        self.slot_of[cell] = self.next as u32;
+        self.next = (self.next + 1) % self.slots.len();
+    }
+}
+
 /// Indices of the shapes overlapping each grid cell, compressed row storage.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Bins {
@@ -278,7 +350,6 @@ pub struct WorldCollider {
     /// Outlines of the paved pieces patches are parts of ([`Patch::piece`]):
     /// `points[r[0]..r[0] + r[1]]`.
     pub pieces: Vec<[u32; 4]>,
-    pub steps: Vec<Step>,
     pub walls: Vec<Wall>,
     pub posts: Vec<Post>,
     pub boxes: Vec<BoxSolid>,
@@ -288,7 +359,8 @@ pub struct WorldCollider {
     /// Whether the lot cars have been put where the clock says, once, unseen.
     lots_settled: bool,
     patch_bins: Bins,
-    step_bins: Bins,
+    /// The steps near the grid cells round the car ([`WorldCollider::warm_steps`]).
+    steps: StepCache,
     wall_bins: Bins,
     post_bins: Bins,
     box_bins: Bins,
@@ -465,11 +537,19 @@ impl WorldCollider {
     /// Collision shapes of `place`, consistent with what [`crate::build_chunk_meshes`] draws.
     pub fn build(place: &Place, grammar: &Grammar) -> WorldCollider {
         let plan = ChunkPlan::new(place, &Palette::socal_1985(), grammar);
-        WorldCollider::with_plan(place, grammar, &plan)
+        let mut c = WorldCollider::with_plan(place, grammar, &plan);
+        // Every step found now, and room kept for them all: tests and tools ask anywhere,
+        // through a shared reference.
+        let cells = (c.cells[0] * c.cells[1]) as usize;
+        c.steps = StepCache::new(cells, cells, 0);
+        c.warm_steps([0.0, 0.0], f32::MAX, usize::MAX);
+        c
     }
 
     /// [`WorldCollider::build`] from the place's [`ChunkPlan`], made already: the roads,
     /// lots, graded terrain and the test town's props are the meshes' own, not built again.
+    /// Its curb steps are not found yet: call [`WorldCollider::warm_steps`] round whatever
+    /// drives on it.
     pub fn with_plan(place: &Place, grammar: &Grammar, plan: &ChunkPlan) -> WorldCollider {
         let net = plan.net();
         let lots = plan.lots();
@@ -560,14 +640,13 @@ impl WorldCollider {
             points: shapes.points,
             patches: shapes.patches,
             pieces: shapes.pieces,
-            steps: Vec::new(),
             walls,
             posts,
             boxes,
             lot_cars,
             lots_settled: false,
             patch_bins: Bins::default(),
-            step_bins: Bins::default(),
+            steps: StepCache::default(),
             wall_bins: Bins::default(),
             post_bins: Bins::default(),
             box_bins: Bins::default(),
@@ -580,10 +659,7 @@ impl WorldCollider {
         }
         let patch_boxes: Vec<_> = c.patches.iter().map(|p| (p.lo, p.hi)).collect();
         c.patch_bins = c.bin(&patch_boxes, 0.0);
-        c.steps = c.find_steps();
-        let reach = WHEEL_RADIUS_M;
-        let step_boxes: Vec<_> = c.steps.iter().map(|s| bounds_of(&[s.a, s.b])).collect();
-        c.step_bins = c.bin(&step_boxes, reach);
+        c.steps = StepCache::new((c.cells[0] * c.cells[1]) as usize, STEP_SLOTS, SLOT_STEPS);
         let wall_boxes: Vec<_> = c.walls.iter().map(|w| bounds_of(&[w.a, w.b])).collect();
         c.wall_bins = c.bin(&wall_boxes, 0.0);
         let post_boxes: Vec<_> = c
@@ -954,8 +1030,23 @@ impl WorldCollider {
         let mut normal = self.normal_of(u, p);
         let mut stepped = false;
         let r = WHEEL_RADIUS_M;
-        for &i in self.cell_items(&self.step_bins, p) {
-            let s = &self.steps[i as usize];
+        let found;
+        let steps: &[Step] = match self.cell_range(p, p) {
+            Some([x, _, z, _]) => match self.steps.of((z * self.cells[0] + x) as usize) {
+                Some(steps) => steps,
+                // Not warmed: found for this call alone (it allocates; the app warms ahead
+                // of the car so the sim never gets here).
+                None => {
+                    let (mut near, mut v2s) = (Vec::new(), Vec::new());
+                    let mut all = Vec::new();
+                    self.cell_steps(x, z, &mut near, &mut v2s, &mut all);
+                    found = all;
+                    &found
+                }
+            },
+            None => &[],
+        };
+        for s in steps {
             if s.y_high <= y0 + STEP_MIN_M * 0.5 || s.y_high > y0 + MAX_STEP_UP_M {
                 continue;
             }
@@ -989,51 +1080,150 @@ impl WorldCollider {
         y_now - self.under_height(u, now)
     }
 
-    /// Every patch edge piece across which the level changes, emitted once: from its lower
-    /// patch, or from the upper one where the lower side is the apron.
-    fn find_steps(&self) -> Vec<Step> {
-        let mut out = Vec::new();
-        for patch in &self.patches {
-            let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
-            let own = |p: [f32; 2]| self.patch_height(patch, p) + LAYER_STEP_M * 0.5;
-            let v2s: Vec<V2> = poly.iter().map(|&p| v2(p)).collect();
-            let ccw = signed_area(&v2s) > 0.0;
-            let n = poly.len();
-            for i in 0..n {
-                let (a, b) = (v2(poly[i]), v2(poly[(i + 1) % n]));
-                let len = (b - a).length();
-                if len < 1e-4 {
+    /// Finds and keeps the steps of up to `budget` cells within `radius_m` of `p` that have
+    /// none kept, and returns how many it found. The app calls this every sim step round
+    /// the car: the cells under it at once, the ones ahead a few at a time. A cell's steps
+    /// are those within a wheel's radius of it, in patch order. Only [`STEP_SLOTS`] cells'
+    /// are kept (every cell's after [`WorldCollider::build`]); the longest kept make way,
+    /// and nothing allocates once the slots have grown to the cells they meet.
+    pub fn warm_steps(&mut self, p: [f32; 2], radius_m: f32, budget: usize) -> usize {
+        let r = radius_m;
+        let Some([x0, x1, z0, z1]) = self.cell_range([p[0] - r, p[1] - r], [p[0] + r, p[1] + r])
+        else {
+            return 0;
+        };
+        let mut made = 0;
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                let cell = (z * self.cells[0] + x) as usize;
+                if self.steps.of(cell).is_some() {
                     continue;
                 }
-                let d = (b - a) * (1.0 / len);
-                let out_n = if ccw { d.right() } else { d.left() };
-                let pieces = (len / STEP_PIECE_M) as u32 + 1;
-                for k in 0..pieces {
-                    let p0 = a.lerp(b, k as f32 / pieces as f32);
-                    let p1 = a.lerp(b, (k + 1) as f32 / pieces as f32);
-                    let mid = (p0 + p1) * 0.5;
-                    let inside = arr(mid - out_n * STEP_SAMPLE_M);
-                    let (_, y_in) = self.under(inside, own(inside));
-                    let outside = arr(mid + out_n * STEP_SAMPLE_M);
-                    let (u_out, y_out) = self.under(outside, own(outside));
-                    let apron = u_out == Under::Open;
-                    let up = if y_out > y_in + STEP_MIN_M {
-                        out_n
-                    } else if apron && y_in > y_out + STEP_MIN_M {
-                        -out_n
-                    } else {
-                        continue;
-                    };
-                    out.push(Step {
-                        a: arr(p0),
-                        b: arr(p1),
-                        up: arr(up),
-                        y_high: y_in.max(y_out),
-                    });
+                if made == budget {
+                    return made;
                 }
+                // The cache's buffers leave it while the collider is read, then go back.
+                let mut near = core::mem::take(&mut self.steps.near);
+                let mut v2s = core::mem::take(&mut self.steps.v2s);
+                let mut found = core::mem::take(&mut self.steps.found);
+                self.cell_steps(x, z, &mut near, &mut v2s, &mut found);
+                let mut kept = self.steps.take_slot(cell);
+                kept.clear();
+                kept.extend_from_slice(&found);
+                self.steps.near = near;
+                self.steps.v2s = v2s;
+                self.steps.found = found;
+                self.steps.put_slot(cell, kept);
+                made += 1;
             }
         }
+        made
+    }
+
+    /// The steps kept for the cell `p` is in; `None` if [`WorldCollider::warm_steps`] has
+    /// not reached it (or it has made way).
+    pub fn kept_steps(&self, p: [f32; 2]) -> Option<&[Step]> {
+        let [x, _, z, _] = self.cell_range(p, p)?;
+        self.steps.of((z * self.cells[0] + x) as usize)
+    }
+
+    /// The steps of cell `(x, z)` into `all` (see [`WorldCollider::warm_steps`]); `near`
+    /// and `v2s` are scratch.
+    fn cell_steps(
+        &self,
+        x: u32,
+        z: u32,
+        near: &mut Vec<u32>,
+        v2s: &mut Vec<V2>,
+        all: &mut Vec<Step>,
+    ) {
+        let reach = WHEEL_RADIUS_M;
+        let has = |lo: [f32; 2], hi: [f32; 2]| {
+            self.cell_range(
+                [lo[0] - reach, lo[1] - reach],
+                [hi[0] + reach, hi[1] + reach],
+            )
+            .is_some_and(|[x0, x1, z0, z1]| x0 <= x && x <= x1 && z0 <= z && z <= z1)
+        };
+        // A patch within reach of this cell is binned in it or in a neighbor.
+        near.clear();
+        for cz in z.saturating_sub(1)..=(z + 1).min(self.cells[1] - 1) {
+            for cx in x.saturating_sub(1)..=(x + 1).min(self.cells[0] - 1) {
+                let c = (cz * self.cells[0] + cx) as usize;
+                let b = &self.patch_bins;
+                near.extend_from_slice(&b.items[b.start[c] as usize..b.start[c + 1] as usize]);
+            }
+        }
+        near.sort_unstable();
+        near.dedup();
+        all.clear();
+        for &i in near.iter() {
+            let patch = &self.patches[i as usize];
+            // (A centimeter of slack: a step's ends are interpolated along its patch's
+            // edges and may round a hair past its box.)
+            let (lo, hi) = (patch.lo, patch.hi);
+            if has([lo[0] - 0.01, lo[1] - 0.01], [hi[0] + 0.01, hi[1] + 0.01]) {
+                self.patch_steps(patch, v2s, all);
+            }
+        }
+        all.retain(|s| {
+            let (lo, hi) = bounds_of(&[s.a, s.b]);
+            has(lo, hi)
+        });
+    }
+
+    /// Every step of the place, in patch order (what [`WorldCollider::warm_steps`] finds cell
+    /// by cell): for tests and tools.
+    pub fn all_steps(&self) -> Vec<Step> {
+        let (mut out, mut v2s) = (Vec::new(), Vec::new());
+        for patch in &self.patches {
+            self.patch_steps(patch, &mut v2s, &mut out);
+        }
         out
+    }
+
+    /// Every edge piece of `patch` across which the level changes, emitted once: from the
+    /// lower patch, or from the upper one where the lower side is the apron.
+    fn patch_steps(&self, patch: &Patch, v2s: &mut Vec<V2>, out: &mut Vec<Step>) {
+        let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
+        let own = |p: [f32; 2]| self.patch_height(patch, p) + LAYER_STEP_M * 0.5;
+        v2s.clear();
+        v2s.extend(poly.iter().map(|&p| v2(p)));
+        let ccw = signed_area(v2s) > 0.0;
+        let n = poly.len();
+        for i in 0..n {
+            let (a, b) = (v2(poly[i]), v2(poly[(i + 1) % n]));
+            let len = (b - a).length();
+            if len < 1e-4 {
+                continue;
+            }
+            let d = (b - a) * (1.0 / len);
+            let out_n = if ccw { d.right() } else { d.left() };
+            let pieces = (len / STEP_PIECE_M) as u32 + 1;
+            for k in 0..pieces {
+                let p0 = a.lerp(b, k as f32 / pieces as f32);
+                let p1 = a.lerp(b, (k + 1) as f32 / pieces as f32);
+                let mid = (p0 + p1) * 0.5;
+                let inside = arr(mid - out_n * STEP_SAMPLE_M);
+                let (_, y_in) = self.under(inside, own(inside));
+                let outside = arr(mid + out_n * STEP_SAMPLE_M);
+                let (u_out, y_out) = self.under(outside, own(outside));
+                let apron = u_out == Under::Open;
+                let up = if y_out > y_in + STEP_MIN_M {
+                    out_n
+                } else if apron && y_in > y_out + STEP_MIN_M {
+                    -out_n
+                } else {
+                    continue;
+                };
+                out.push(Step {
+                    a: arr(p0),
+                    b: arr(p1),
+                    up: arr(up),
+                    y_high: y_in.max(y_out),
+                });
+            }
+        }
     }
 }
 
