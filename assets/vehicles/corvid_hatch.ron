@@ -1,0 +1,48 @@
+// Corvid Hatch: a late-80s American pony car, third generation of its line: a long, low
+// wedge with a big glass hatch and a fuel-injected V8, dressed in its top trim.
+//
+// Intent: the North Side's Saturday-night car. A torquey small V8 through a four-speed
+// automatic with a tall overdrive, a live axle and wide tires on a low, stiff body: it
+// pulls hard from a light, sits flat through a corner, grips better than the older pony
+// notchback and lets its tail out when asked. A Lake City hero.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "corvid_hatch",
+    name: "Corvid Hatch",
+    era: Eighties,
+    year: 1988,
+    class: Coupe,
+
+    mass_kg: 1500,
+    dims_m: (4.88, 1.84, 1.27),    // length, width, height
+    wheelbase_m: 2.56,
+    track_m: 1.52,
+    cg_height_m: 0.48,
+    cg_fore_aft: 0.47,             // 53% front
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 5200,
+        torque_nm: [(1000, 330), (2400, 440), (3200, 468), (4000, 450), (4600, 400), (5200, 330)],
+    ),
+    gears: [3.06, 1.63, 1.0, 0.70],
+    final_drive: 3.27,
+    reverse: 2.29,
+    shift_ms: 240,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.17, grip_long: 1.0, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 32000, damper: 3000, travel_m: 0.15, antiroll: 0.4),
+    steering: Steer(max_deg: 33, speed_sens: 0.6, return_rate: 10.0),
+    brakes: Brakes(max_nm: 3400, bias_front: 0.64, abs: false, handbrake_nm: 3000),
+    aero: Aero(cd: 0.48, frontal_m2: 2.1, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: 0.15, body_roll: 0.4, engine_sound: "v8_lazy", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_80s",
+        gauges: [Speedo(0, 150, mph), Tach(0, 6000)],
+        radio: "digital_blue",
+    ),
+    shape: "corvid_hatch.shape.ron",
+)

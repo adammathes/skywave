@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(t.drive_hash, 0x38e5_0ff8_2dc0_4d2f);
         assert_eq!(
             t.replay_hashes,
-            [0xc04b_fb7b_66b8_8405, 0x33d2_0d44_2325_51a6]
+            [0xc04b_fb7b_66b8_8405, 0x4c58_ec02_11e2_a98e]
         );
         let committed: Value = serde_json::from_str(COMMITTED).expect("selftest.json parses");
         assert_eq!(

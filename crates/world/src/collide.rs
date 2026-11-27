@@ -703,8 +703,8 @@ impl WorldCollider {
     }
 
     /// The ground under `p` seen from height `y_from`: the first patch containing it; where
-    /// patches (or a deck and the open ground) lie a deck's height apart, the highest at
-    /// most [`LAYER_STEP_M`] above `y_from`, else the lowest.
+    /// patches (or a deck and the open ground) lie a deck's height apart, the first of the
+    /// highest layer at most [`LAYER_STEP_M`] above `y_from`, else of the lowest.
     fn under(&self, p: [f32; 2], y_from: f32) -> (Under, f32) {
         let mut first: Option<(u32, f32)> = None;
         let mut layered = false;
@@ -724,10 +724,12 @@ impl WorldCollider {
                 None => first = Some((i, h)),
                 Some((_, h0)) => layered |= abs(h - h0) > LAYER_M,
             }
-            if h <= y_from + LAYER_STEP_M && reach.is_none_or(|r| h > r.1) {
+            // Within a layer the earlier patch keeps its place: only a patch a layer above
+            // (or below) the one held takes over.
+            if h <= y_from + LAYER_STEP_M && reach.is_none_or(|r| h > r.1 + LAYER_M) {
                 reach = Some((i, h));
             }
-            if low.is_none_or(|l| h < l.1) {
+            if low.is_none_or(|l| h < l.1 - LAYER_M) {
                 low = Some((i, h));
             }
         }
@@ -1431,7 +1433,8 @@ fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Ve
             | PropKind::ChainLink { .. }
             | PropKind::CrewGarage { .. }
             | PropKind::TacoStand { .. }
-            | PropKind::PicnicTable => {
+            | PropKind::PicnicTable
+            | PropKind::BridgeTower { .. } => {
                 let mut slabs = Vec::new();
                 crate::setpieces::slabs(p, &mut slabs);
                 boxes.extend(slabs.iter().map(|s| BoxSolid {

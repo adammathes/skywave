@@ -14,6 +14,7 @@ members = [
     "tools/shape-preview",
     "tools/mapdump",
     "tools/audio-preview",
+    "tools/realmap",
 ]
 
 [workspace.package]

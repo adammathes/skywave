@@ -66,6 +66,7 @@ fn name(k: PropKind) -> &'static str {
         PropKind::CrossingGate { .. } => "crossing gate",
         PropKind::Landmark { .. } => "landmark",
         PropKind::LotLabel { .. } => "lot label",
+        PropKind::BridgeTower { .. } => "bridge tower",
     }
 }
 
