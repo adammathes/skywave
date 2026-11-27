@@ -24,6 +24,12 @@ const SMALL_LOOP_M: f32 = 700.0;
 const STRAIGHT_DEG: f32 = 50.0;
 /// Road simplification tolerance, meters.
 const TOLERANCE_M: f32 = 6.0;
+/// No bend in a road turns more than this at one point: cars follow the polyline.
+const MAX_BEND_DEG: f32 = 12.0;
+/// A road end meeting another road this close to one of its points joins at that point.
+const JOIN_AT_BEND_M: f32 = 15.0;
+/// Roads run straight this far into a joint.
+const STRAIGHT_IN_M: f32 = 25.0;
 /// Ramps sit at least this far along the highway from its ends and from each other.
 const RAMP_CLEAR_M: f32 = 200.0;
 const RAMP_SPACING_M: f32 = 500.0;
@@ -84,6 +90,31 @@ fn average(pts: &[P]) -> Vec<P> {
 }
 
 /// One round of corner cutting; keeps both ends.
+/// Cuts every bend sharper than `MAX_BEND_DEG` into two gentler ones until none is left.
+/// Points in `fixed` (junctions) stay as they are.
+fn ease(pts: &[P], fixed: &[P]) -> Vec<P> {
+    let mut pts = pts.to_vec();
+    loop {
+        let bend = (1..pts.len().saturating_sub(1)).find(|&i| {
+            let (a, b, c) = (pts[i - 1], pts[i], pts[i + 1]);
+            if fixed.contains(&b) {
+                return false;
+            }
+            let d = (c.1 - b.1).atan2(c.0 - b.0) - (b.1 - a.1).atan2(b.0 - a.0);
+            let d = (d + core::f32::consts::PI).rem_euclid(core::f32::consts::TAU)
+                - core::f32::consts::PI;
+            d.abs() > MAX_BEND_DEG.to_radians()
+        });
+        let Some(i) = bend else { return pts };
+        let (a, b, c) = (pts[i - 1], pts[i], pts[i + 1]);
+        let cut = |to: P| {
+            let k = (12.0 / dist(b, to)).min(0.25);
+            (b.0 + (to.0 - b.0) * k, b.1 + (to.1 - b.1) * k)
+        };
+        pts.splice(i..=i, [cut(a), cut(c)]);
+    }
+}
+
 fn chaikin(pts: &[P]) -> Vec<P> {
     if pts.len() < 3 {
         return pts.to_vec();
@@ -634,12 +665,15 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
             i = j;
             forward = at_a;
         }
-        let pts: Vec<P> = simplify(
-            &chaikin(&chaikin(&average(&average(&average(&pts))))),
-            TOLERANCE_M,
+        let pts: Vec<P> = ease(
+            &simplify(
+                &chaikin(&chaikin(&average(&average(&average(&pts))))),
+                TOLERANCE_M,
+            ),
+            &[],
         )
         .into_iter()
-        .map(|(x, z)| (x.round(), z.round()))
+        .map(|(x, z)| ((x * 10.0).round() / 10.0, (z * 10.0).round() / 10.0))
         .collect();
         lines.push((chains[i0].highway, chains[i0].suspension, pts));
     }
@@ -667,6 +701,8 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
             }
         })
         .collect();
+
+    snap_ends(&mut roads);
 
     // Ramps to the arterials that cross each highway, well clear of its ends and each other.
     for h in 0..roads.len() {
@@ -712,9 +748,130 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
     roads
 }
 
+/// Moves each road end onto the nearest road it meets (as `world` snaps it, within
+/// `SNAP_M`) and makes that a point of both, so `world` joins them there rather than adding
+/// a kinked stub. Then every road runs straight for `STRAIGHT_IN_M` into each joint: a bend
+/// inside a junction's trim puts the stop line off its painted bar.
+fn snap_ends(roads: &mut [Road]) {
+    let round = |q: P| ((q.0 * 10.0).round() / 10.0, (q.1 * 10.0).round() / 10.0);
+    let mut joints: Vec<P> = Vec::new();
+    for i in 0..roads.len() {
+        for end in [0, roads[i].points.len() - 1] {
+            let p = roads[i].points[end];
+            // (distance, road, insert-before index or usize::MAX for an existing point, point)
+            let mut best: Option<(f32, usize, usize, P)> = None;
+            for (j, r) in roads.iter().enumerate() {
+                if j == i {
+                    continue;
+                }
+                for (k, s) in r.points.windows(2).enumerate() {
+                    let (a, b) = (s[0], s[1]);
+                    let ab = (b.0 - a.0, b.1 - a.1);
+                    let l2 = ab.0 * ab.0 + ab.1 * ab.1;
+                    let t = if l2 > 0.0 {
+                        (((p.0 - a.0) * ab.0 + (p.1 - a.1) * ab.1) / l2).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let mut q = (round((a.0 + ab.0 * t, a.1 + ab.1 * t)), k + 1);
+                    // Near a bend, join at the bend: no kink inside the junction.
+                    for (v, at) in [(a, k), (b, k + 1)] {
+                        if dist(q.0, v) < JOIN_AT_BEND_M {
+                            q = (v, at + usize::MAX / 2);
+                        }
+                    }
+                    let d = dist(p, q.0);
+                    if d <= world::layout::SNAP_M && best.is_none_or(|b| d < b.0) {
+                        best = Some((d, j, q.1, q.0));
+                    }
+                }
+            }
+            if let Some((_, j, at, q)) = best {
+                roads[i].points[end] = q;
+                if at < usize::MAX / 2 && !roads[j].points.contains(&q) {
+                    roads[j].points.insert(at, q);
+                }
+                joints.push(q);
+            }
+        }
+    }
+    // Where two streets cross, both get the crossing as a point.
+    for i in 0..roads.len() {
+        for j in i + 1..roads.len() {
+            if roads[i].highway || roads[j].highway {
+                continue;
+            }
+            let mut k = 0;
+            while k + 1 < roads[i].points.len() {
+                let (a, b) = (roads[i].points[k], roads[i].points[k + 1]);
+                let mut m = 0;
+                while m + 1 < roads[j].points.len() {
+                    let (c, d) = (roads[j].points[m], roads[j].points[m + 1]);
+                    if let Some(x) = cross(a, b, c, d) {
+                        let x = round(x);
+                        if [a, b].iter().all(|&v| dist(v, x) > 1.0) {
+                            roads[i].points.insert(k + 1, x);
+                        }
+                        if [c, d].iter().all(|&v| dist(v, x) > 1.0) {
+                            roads[j].points.insert(m + 1, x);
+                        }
+                        joints.push(x);
+                        break;
+                    }
+                    m += 1;
+                }
+                k += 1;
+            }
+        }
+    }
+    for r in roads.iter_mut() {
+        let n = r.points.len();
+        let keep: Vec<bool> = (0..n)
+            .map(|k| {
+                let v = r.points[k];
+                k == 0
+                    || k == n - 1
+                    || joints.contains(&v)
+                    || !joints.iter().any(|&j| dist(v, j) < STRAIGHT_IN_M)
+            })
+            .collect();
+        let mut k = 0;
+        r.points.retain(|_| {
+            k += 1;
+            keep[k - 1]
+        });
+        r.points = ease(&r.points, &joints).into_iter().map(round).collect();
+    }
+}
+
+/// Where segment ab properly crosses cd, strictly inside both.
+fn cross(a: P, b: P, c: P, d: P) -> Option<P> {
+    let r = (b.0 - a.0, b.1 - a.1);
+    let s = (d.0 - c.0, d.1 - c.1);
+    let den = r.0 * s.1 - r.1 * s.0;
+    if den.abs() < 1e-6 {
+        return None;
+    }
+    let t = ((c.0 - a.0) * s.1 - (c.1 - a.1) * s.0) / den;
+    let u = ((c.0 - a.0) * r.1 - (c.1 - a.1) * r.0) / den;
+    (t > 1e-4 && t < 1.0 - 1e-4 && u > 1e-4 && u < 1.0 - 1e-4)
+        .then_some((a.0 + r.0 * t, a.1 + r.1 * t))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ease_rounds_a_square_corner_into_gentle_bends() {
+        let l = ease(&[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)], &[]);
+        assert_eq!((l[0], l[l.len() - 1]), ((0.0, 0.0), (100.0, 100.0)));
+        for w in l.windows(3) {
+            let h = |a: P, b: P| (b.1 - a.1).atan2(b.0 - a.0);
+            let d = (h(w[1], w[2]) - h(w[0], w[1])).abs();
+            assert!(d <= MAX_BEND_DEG.to_radians() + 1e-4, "{d}");
+        }
+    }
 
     #[test]
     fn simplify_keeps_ends_and_corners() {

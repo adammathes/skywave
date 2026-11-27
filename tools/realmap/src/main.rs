@@ -476,7 +476,7 @@ fn run(path: &str) -> Result<(), String> {
         let pts: Vec<String> = road
             .points
             .iter()
-            .map(|&(x, z)| format!("({}, {})", x.round(), z.round()))
+            .map(|&(x, z)| format!("({x}, {z})"))
             .collect();
         let ramps = if road.ramps.is_empty() {
             String::new()
