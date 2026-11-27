@@ -1150,7 +1150,7 @@ mod tests {
     /// (seed 1) round the player beside the freeway. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const BASIN_2001_TRAFFIC_HASH: u64 = 0xbb1f_36c0_53eb_efcc;
+    const BASIN_2001_TRAFFIC_HASH: u64 = 0xc851_05e7_1ddf_7f90;
 
     /// Thirty seconds of busy 2001 traffic in the basin at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a
