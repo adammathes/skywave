@@ -3,8 +3,8 @@
 //! glue (the `sfx` script in `web/index.html`), whose AudioWorklet plays them from a ring.
 //!
 //! Each frame `skywaveSfx.wanted(dt)` says how many frames to render (0 until the first
-//! gesture has started the AudioContext): enough to keep 50 ms plus one animation
-//! frame queued. The blocks go to `skywaveSfx.push` as a view into wasm memory, which the
+//! gesture has started the AudioContext): enough to keep 50 ms plus the slowest recent
+//! animation frame queued. The blocks go to `skywaveSfx.push` as a view into wasm memory, which the
 //! glue copies at once. Without the glue (another page) the game is silent.
 
 use audio::mixer::{Mixer, BLOCK_FRAMES};
@@ -12,8 +12,9 @@ use audio::synth::AudioParams;
 use js_sys::{Float32Array, Function, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
-/// Most frames rendered in one animation frame (~170 ms; a longer stall is not caught up).
-const MAX_FRAMES: usize = BLOCK_FRAMES * 32;
+/// Most frames rendered in one animation frame (~340 ms, the glue's largest lead; a
+/// longer stall is not caught up).
+const MAX_FRAMES: usize = BLOCK_FRAMES * 64;
 
 pub struct Sfx {
     mixer: Box<Mixer>,
