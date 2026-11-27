@@ -793,11 +793,22 @@ fn steering_at_speed_is_grip_limited() {
             spec.id
         );
         assert!(new30 < 0.5 * old30);
-        // Sliding sideways to the left, hands off: the wheels follow the travel (counter-
-        // steer) instead of pointing straight.
+        // Sliding sideways to the left, hands off: the wheels follow the part of the travel
+        // past the tires' peak slip (counter-steer) instead of pointing straight...
         let mut s = spawn(&spec);
-        s.vel = [-4.0, 0.0, -20.0];
-        assert!(steer_target(&spec, &on, &s, 0.0) < -0.15);
+        s.vel = [-6.0, 0.0, -20.0];
+        let past_peak = (6.0f32 / 20.0).atan() - spec.tires.slip_peak_deg.to_radians();
+        let hands_off = steer_target(&spec, &on, &s, 0.0);
+        assert!(hands_off < -0.1, "{} {hands_off}", spec.id);
+        assert!(
+            (hands_off + past_peak).abs() < 0.01,
+            "{} {hands_off}",
+            spec.id
+        );
+        // ...and drifting less than that, they stay straight: following it all, the fronts
+        // made no force against a yaw and a tap at speed set the car weaving.
+        s.vel = [-1.0, 0.0, -20.0];
+        assert_eq!(steer_target(&spec, &on, &s, 0.0), 0.0);
         assert_eq!(steer_target(&spec, &off, &s, 0.0), 0.0);
         for mps in [15.0, 25.0] {
             let before = Assists {
@@ -887,7 +898,7 @@ fn replay_is_deterministic_and_pinned() {
     // Pinned hashes of the 10 s scripted drive. A deliberate change to the sim, a spec or the
     // script moves them: run `cargo test -p vehicle --test sim replay -- --nocapture`, copy the
     // printed hashes here, and commit that on its own with the reason.
-    const PINNED: [u64; 2] = [0x1fc2_d4cb_26fc_88d8, 0x426d_e1ec_f884_d4ca];
+    const PINNED: [u64; 2] = [0xd5af_4975_7cea_8e82, 0xf585_c02e_6317_c1bc];
     let specs = cars();
     let mut hashes = [0u64; 2];
     for (k, spec) in specs.iter().enumerate() {

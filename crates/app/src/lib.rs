@@ -2039,7 +2039,7 @@ mod tests {
         // deliberately.
         assert_eq!(
             a.state_hash(),
-            0xd79a_1c64_622a_cc40,
+            0x00ca_2945_cfce_8472,
             "{:#x}",
             a.state_hash()
         );
