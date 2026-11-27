@@ -93,6 +93,10 @@ pub struct Import {
     /// Channels, in degrees.
     #[serde(default)]
     pub channels: Vec<Channel>,
+    /// Trace highways apart from the streets, so they pass over them (a dense grid); else
+    /// one network, highways meeting streets where they touch (a sparse one).
+    #[serde(default)]
+    pub separate_highways: bool,
 }
 
 /// A channel or river (`docs/LAYOUTS.md`), its line in degrees.
@@ -427,7 +431,14 @@ fn run(path: &str) -> Result<(), String> {
         .iter()
         .map(|&(a, b)| warp.fwd(a, b))
         .collect();
-    let mut net = net::network(&lines, &warp, ext, cfg.merge_m, &susp);
+    let mut net = net::network(
+        &lines,
+        &warp,
+        ext,
+        cfg.merge_m,
+        &susp,
+        cfg.separate_highways,
+    );
     // Start: the nearest point on any road.
     let sp = warp.fwd(cfg.start.0, cfg.start.1);
     let mut best = (f32::INFINITY, 0usize, 0.0f32, (0.0f32, 0.0f32));
@@ -492,7 +503,21 @@ fn run(path: &str) -> Result<(), String> {
         let class = if road.highway {
             "class: Highway, lanes: 2".to_string()
         } else {
-            "class: Arterial, lanes: 2, max_grade: Some(0.16)".to_string()
+            // A street mostly over a hilly district climbs it as steeply as its streets may.
+            let up = road
+                .points
+                .iter()
+                .filter(|&&(x, z)| {
+                    let (lon, lat) = warp.inv(x, z);
+                    hilly.iter().any(|p| point_in(lon, lat, p))
+                })
+                .count();
+            let grade = if up * 2 > road.points.len() {
+                0.22
+            } else {
+                0.16
+            };
+            format!("class: Arterial, lanes: 2, max_grade: Some({grade})")
         };
         writeln!(
             r,
