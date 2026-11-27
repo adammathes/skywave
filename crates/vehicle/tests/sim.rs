@@ -793,11 +793,18 @@ fn steering_at_speed_is_grip_limited() {
             spec.id
         );
         assert!(new30 < 0.5 * old30);
-        // Sliding sideways to the left, hands off: the wheels follow the travel (counter-
-        // steer) instead of pointing straight.
+        // Sliding sideways to the left, hands off: the wheels follow the part of the travel
+        // past the tires' peak slip (counter-steer) instead of pointing straight...
         let mut s = spawn(&spec);
-        s.vel = [-4.0, 0.0, -20.0];
-        assert!(steer_target(&spec, &on, &s, 0.0) < -0.15);
+        s.vel = [-6.0, 0.0, -20.0];
+        let past_peak = (6.0f32 / 20.0).atan() - spec.tires.slip_peak_deg.to_radians();
+        let hands_off = steer_target(&spec, &on, &s, 0.0);
+        assert!(hands_off < -0.1, "{} {hands_off}", spec.id);
+        assert!((hands_off + past_peak).abs() < 0.01, "{} {hands_off}", spec.id);
+        // ...and drifting less than that, they stay straight: following it all, the fronts
+        // made no force against a yaw and a tap at speed set the car weaving.
+        s.vel = [-1.0, 0.0, -20.0];
+        assert_eq!(steer_target(&spec, &on, &s, 0.0), 0.0);
         assert_eq!(steer_target(&spec, &off, &s, 0.0), 0.0);
         for mps in [15.0, 25.0] {
             let before = Assists {

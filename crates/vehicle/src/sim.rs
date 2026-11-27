@@ -114,6 +114,10 @@ const STEER_LIMIT_MARGIN: f32 = 1.0;
 /// ...fading in between these forward speeds, m/s, so full lock is always there for
 /// parking and tight junctions.
 const STEER_LIMIT_SPEED: [f32; 2] = [8.0, 11.0];
+/// Steering out from center takes at least this long from zero to full, s, at the top of
+/// `STEER_OUT_MPS` (m/s forward), none at its bottom, in proportion between.
+const STEER_OUT_S: f32 = 0.6;
+const STEER_OUT_MPS: [f32; 2] = [10.0, 40.0];
 /// Reverse tops out at this speed, m/s; drive torque fades out over the last
 /// `REVERSE_FADE_MPS` below it (reverse used to run up to first gear's ~20 m/s).
 pub const REVERSE_MAX_MPS: f32 = 8.0;
@@ -254,8 +258,9 @@ impl Assists {
 
 /// The road-wheel angle, rad (positive right), that steering input `steer` (`[-1, 1]`)
 /// asks for in `state`: the spec's lock less its speed sensitivity, times the input; then,
-/// by `assists.steering` and above 8 m/s forward, the front axle's direction of travel plus
-/// `steer` times the tires' peak slip angle, within that lock.
+/// by `assists.steering` and above 8 m/s forward, `|steer|` of the front axle's direction
+/// of travel (all of it past the tires' peak slip) plus `steer` times that peak slip angle,
+/// within that lock.
 pub fn steer_target(
     spec: &VehicleSpec,
     assists: &Assists,
@@ -268,10 +273,7 @@ pub fn steer_target(
     let speed_frac = unit(abs(fwd_speed) / STEER_SENS_SPEED);
     let lock = spec.steering.max_deg * DEG_TO_RAD * (1.0 - spec.steering.speed_sens * speed_frac);
     let plain = lock * steer;
-    let [lo, hi] = STEER_LIMIT_SPEED;
-    // Forward only: rolling backward the travel direction is behind the car.
-    let ramp = unit((fwd_speed - lo) / (hi - lo));
-    let k = unit(assists.steering) * ramp * ramp * (3.0 - 2.0 * ramp);
+    let k = grip_share(assists, fwd_speed);
     if k <= 0.0 {
         return plain;
     }
@@ -279,13 +281,45 @@ pub fn steer_target(
     let axle = rotate(q, [0.0, 0.0, -spec.cg_fore_aft * spec.wheelbase_m]);
     let v = add(state.vel, cross(state.ang_vel, axle));
     let travel = atan2(dot(v, right), dot(v, fwd));
-    let mut aimed = travel + steer * STEER_LIMIT_MARGIN * spec.tires.slip_peak_deg * DEG_TO_RAD;
+    // The wheels follow the travel in proportion to the stick. Hands off they follow only
+    // the part of it past the tires' peak slip, a counter-steer that catches a slide: had
+    // they followed it all, the fronts would make no force against a yaw, castering like
+    // a shopping cart's, and one tap at speed left the car weaving three times.
+    let alpha_peak = spec.tires.slip_peak_deg * DEG_TO_RAD;
+    let past_peak = travel - clamp_abs(travel, alpha_peak);
+    let follow = past_peak + (travel - past_peak) * abs(steer);
+    let mut aimed = follow + steer * STEER_LIMIT_MARGIN * alpha_peak;
     if aimed > lock {
         aimed = lock;
     } else if aimed < -lock {
         aimed = -lock;
     }
     plain + (aimed - plain) * k
+}
+
+/// The stick `stick` as the car takes it this step from `prev`: back toward center at
+/// once, out from it no faster than full in `STEER_OUT_S` at forward speed `fwd_speed`.
+/// A key or a flicked stick is full lock in a few frames, and at speed full lock is the
+/// tightest turn the tires hold: a 0.15 s tap at 80 mph swung the car 10°, a lane and a
+/// half. Hands at speed are slow on the wheel; this is that.
+fn steer_rate_limit(prev: f32, stick: f32, fwd_speed: f32) -> f32 {
+    let [lo, hi] = STEER_OUT_MPS;
+    let out_s = STEER_OUT_S * unit((fwd_speed - lo) / (hi - lo));
+    let from = if prev * stick < 0.0 { 0.0 } else { prev };
+    if abs(stick) <= abs(from) || out_s <= 0.0 {
+        return stick;
+    }
+    let max = DT / out_s;
+    from + clamp_abs(stick - from, max)
+}
+
+/// How much of the steering is grip-limited at forward speed `fwd_speed`, `[0, 1]`: the
+/// steering assist, faded in between `STEER_LIMIT_SPEED` (forward only: rolling backward
+/// the travel direction is behind the car).
+fn grip_share(assists: &Assists, fwd_speed: f32) -> f32 {
+    let [lo, hi] = STEER_LIMIT_SPEED;
+    let ramp = unit((fwd_speed - lo) / (hi - lo));
+    unit(assists.steering) * ramp * ramp * (3.0 - 2.0 * ramp)
 }
 
 impl Default for Assists {
@@ -667,11 +701,12 @@ pub fn step(
     let k = PEDAL_RATE * DT;
     state.throttle += (unit(input.throttle) - state.throttle) * k;
     state.brake += (unit(input.brake) - state.brake) * k;
-    state.steer = if input.steer > 0.0 {
+    let stick = if input.steer > 0.0 {
         unit(input.steer)
     } else {
         -unit(-input.steer)
     };
+    state.steer = steer_rate_limit(state.steer, stick, fwd_speed);
     state.handbrake = input.handbrake;
     let target = steer_target(spec, assists, state, state.steer);
     let chase = unit(spec.steering.return_rate * DT);
@@ -1084,6 +1119,12 @@ pub fn step(
         let mut wanted = -fwd_speed * s / (c * wheelbase);
         let limit = tires.grip_lat * grip_boost * GRAVITY / abs(fwd_speed);
         wanted = clamp_abs(wanted, limit);
+        // Grip-limited steering bends the road wheels to follow the front axle's travel,
+        // so their angle swings with any yaw: read from it, a tap's release asked for the
+        // opposite yaw and the assist pushed the car into a weave. The driver's stick says
+        // what they want: full stick the tightest turn the tires hold, none straight on.
+        let k = grip_share(assists, fwd_speed);
+        wanted += (-state.steer * limit - wanted) * k;
         let excess = yaw - wanted;
         if yaw * excess > 0.0 || yaw * wanted < 0.0 {
             let t = -unit(assists.stability) * STABILITY_GAIN * excess * inertia[1] * gate;
