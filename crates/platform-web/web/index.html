@@ -97,12 +97,18 @@
   // the main thread every animation frame and pushes it here; an AudioWorklet, registered
   // from a Blob URL so it needs no extra file, plays it from a ring buffer (resampling if
   // the browser would not run the context at 48 kHz). The context starts on the first key,
-  // click or tap (browsers allow sound only after a gesture) and later gestures resume it.
+  // click or tap (browsers allow sound only after a gesture), and every later gesture
+  // resumes it while it is not running (a browser may refuse the first gesture, or suspend
+  // or interrupt the context later); each try also plays one silent sample, which some
+  // browsers need before they let a context make sound. The lead kept queued grows after
+  // a slow frame (loading and streaming stall the first seconds) and shrinks back over a
+  // few seconds, so the sound does not drop out while the game is starting up.
   // window.skywaveSfx.start() starts it from any other gesture handler. window.skywaveAudio
   // reports { state, worklet, sampleRate, pushed, consumed, underruns, queued, error }.
   (() => {
-    const RATE = 48000, BLOCK = 256, RING = 16384; // frames; the ring holds ~340 ms
+    const RATE = 48000, BLOCK = 256, RING = 32768; // frames; the ring holds ~680 ms
     const LEAD = 2400; // frames (50 ms) kept queued on top of a frame's worth, to ride out stalls
+    const SLOW_MAX = 0.3, SLOW_DECAY = 0.1; // s: the slowest recent frame counted, and how fast it is forgotten (s/s)
     const processor = `
       class SkywaveSfx extends AudioWorkletProcessor {
         constructor(options) {
@@ -156,10 +162,21 @@
     const audio = (window.skywaveAudio = {
       state: "off", worklet: false, sampleRate: 0, pushed: 0, consumed: 0, underruns: 0, queued: 0, error: null,
     });
-    let ctx = null, node = null, starting = null, written = 0;
+    let ctx = null, node = null, starting = null, written = 0, slow = 0;
+    // Inside a gesture: ask to run, and play one silent sample (some browsers only unlock
+    // a context that starts a source in a gesture).
+    function wake() {
+      if (ctx.state !== "running") ctx.resume().catch(() => {});
+      try {
+        const src = ctx.createBufferSource();
+        src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+        src.connect(ctx.destination);
+        src.start();
+      } catch {}
+    }
     function start() {
       if (ctx) {
-        if (ctx.state === "suspended") ctx.resume().catch(() => {});
+        if (ctx.state !== "running") wake();
         return starting;
       }
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -180,17 +197,19 @@
         written = ctx.currentTime * RATE;
         audio.worklet = true;
       }).catch((e) => { audio.error = String(e); }).finally(() => URL.revokeObjectURL(url));
-      if (ctx.state === "suspended") ctx.resume().catch(() => {});
+      wake();
       return starting;
     }
-    // 48 kHz frames the game should render now: enough for LEAD plus one animation frame
-    // (dt seconds, capped) queued ahead of what the context has played, so a frame spike of
-    // up to ~50 ms does not starve the worklet.
+    // 48 kHz frames the game should render now: enough for LEAD plus the slowest recent
+    // animation frame (up to SLOW_MAX seconds) queued ahead of what the context has played,
+    // so a frame spike of up to ~50 ms over the recent worst does not starve the worklet.
     function wanted(dt) {
+      dt = Math.max(0, Math.min(dt, 1));
+      slow = Math.min(SLOW_MAX, Math.max(dt, slow - SLOW_DECAY * dt));
       if (!node || ctx.state !== "running") return 0;
       const played = ctx.currentTime * RATE;
       if (written < played) written = played; // ran dry, or just started
-      const lead = Math.min(RING / 2, LEAD + Math.ceil(Math.min(dt, 0.1) * RATE));
+      const lead = Math.min(RING / 2, LEAD + Math.ceil(slow * RATE));
       const need = lead - (written - played);
       return need > 0 ? Math.ceil(need / BLOCK) * BLOCK : 0;
     }
@@ -204,7 +223,7 @@
       audio.pushed += frames;
     }
     window.skywaveSfx = { start, wanted, push };
-    for (const t of ["keydown", "pointerdown", "pointerup", "touchend"]) {
+    for (const t of ["keydown", "keyup", "pointerdown", "pointerup", "click", "touchend"]) {
       window.addEventListener(t, start, { capture: true, passive: true });
     }
   })();

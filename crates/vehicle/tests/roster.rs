@@ -1,7 +1,9 @@
 //! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster", the 2001
-//! hero cars and traffic cars, Lake City's pony hatch), driven with the real specs from
+//! hero cars and traffic cars, Lake City's pony hatch, the 2005 Bay heroes and
+//! traffic cars), driven with the real specs from
 //! `assets/vehicles/`: every car's 0–60 mph time in its band, each distinct from the other
-//! cars of its class in 0–60, top speed and skidpad grip, the class orderings, the mid-engined exotics ahead of everything and the pony car
+//! cars of its class in 0–60, top speed and skidpad grip, the class orderings, the
+//! mid-engined exotics ahead of everything and the pony car
 //! behind the other sports cars, the 2001 heroes' launches and the rotary's redline, and
 //! nothing rolls at full lock or needs more than 60 m to stop. Run with `--nocapture` for
 //! the table: `cargo test -p vehicle --test roster -- --nocapture`.
@@ -30,7 +32,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 38] = [
+const ROSTER: [Entry; 46] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -66,6 +68,17 @@ const ROSTER: [Entry; 38] = [
     (car!("palfrey_roadster"), (6.5, 7.0)),
     // Lake City's hero: the late pony hatch, quicker than the older pony notchback.
     (car!("corvid_hatch"), (5.8, 6.8)),
+    // The 2005 Bay heroes: the turbo commuter, the luxury six, the featherweight roadster
+    // and the V8 four-door.
+    (car!("goshawk_turbo"), (7.0, 8.0)),
+    (car!("tulwar_sedan"), (7.3, 8.3)),
+    (car!("petrel_roadster"), (5.3, 6.2)),
+    (car!("lipizzan_sedan"), (5.3, 6.0)),
+    // The 2005 traffic cars: the hybrid, the family sedan, the compact and the crossover.
+    (car!("egret_hybrid"), (10.5, 12.5)),
+    (car!("heron_sedan"), (8.0, 9.5)),
+    (car!("tern_compact"), (8.8, 10.5)),
+    (car!("ibis_crossover"), (7.8, 9.5)),
     // The 2001 traffic cars (the semi, which only traffic drives, is not driven here).
     (car!("plover_sedan"), (9.3, 10.3)),
     (car!("sorrel_utility"), (9.9, 10.9)),

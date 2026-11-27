@@ -1,0 +1,48 @@
+// Lipizzan Sedan: a mid-2000s big four-door grand touring sedan from an Italian school, a
+// racing-bred V8 up front and the gearbox at the back.
+//
+// Intent: the venture capitalist's car. Long, low and loud for a four-door: a V8 that
+// howls past six thousand, more speed than anything with four doors should have, a heavy
+// body that leans a little and settles. Quick in a straight line, grand on a fast sweeper,
+// a handful in the hills.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "lipizzan_sedan",
+    name: "Lipizzan Sedan",
+    era: Aughts,
+    year: 2004,
+    class: Luxury,
+
+    mass_kg: 1930,
+    dims_m: (5.05, 1.90, 1.44),    // length, width, height
+    wheelbase_m: 3.06,
+    track_m: 1.58,
+    cg_height_m: 0.52,
+    cg_fore_aft: 0.53,             // 47% front: the gearbox sits at the rear axle
+
+    engine: Engine(
+        idle_rpm: 800,
+        redline_rpm: 7500,
+        torque_nm: [(1000, 280), (2500, 380), (4250, 451), (5500, 440), (6500, 420), (7500, 360)],
+    ),
+    gears: [3.29, 2.13, 1.57, 1.20, 1.00, 0.84],
+    final_drive: 3.40,
+    reverse: 3.0,
+    shift_ms: 240,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 1.02, grip_long: 1.14, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 40000, damper: 4000, travel_m: 0.15, antiroll: 0.45),
+    steering: Steer(max_deg: 33, speed_sens: 0.65, return_rate: 10.0),
+    brakes: Brakes(max_nm: 4600, bias_front: 0.60, abs: true, handbrake_nm: 3200),
+    aero: Aero(cd: 0.37, frontal_m2: 2.60, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: 0.05, body_roll: 0.4, engine_sound: "v8_flatplane", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 200, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "lipizzan_sedan.shape.ron",
+)

@@ -16,6 +16,10 @@ const FWD: V3 = [0.0, 0.0, -1.0];
 const BACK: V3 = [0.0, 0.0, 1.0];
 /// How low a body kit's air dam, skirts and valance come, m above the ground.
 const KIT_GROUND: f32 = 0.09;
+/// Width of a swept headlamp across the nose, m, and how far back it reaches over the
+/// fender.
+const SWEPT_W: f32 = 0.40;
+const SWEPT_LEN: f32 = 0.42;
 /// Underglow tube glow, intensity scale.
 const UNDERGLOW_GLOW: f32 = 3.0;
 
@@ -482,6 +486,56 @@ impl<'a, 'b> Parts<'a, 'b> {
                     self.lamp_round(band.s, band.dir, sx * (half - r - 0.01), yc, r, head, bezel);
                 }
             }
+            HeadLights::Swept => {
+                // Outer two thirds full height, the inner third stepped down toward the
+                // grille, and two projectors behind the clear lens.
+                let h = (bh * 0.9).min(0.17);
+                // A smoked housing behind clear glass reads against any paint; the
+                // projectors are what light.
+                let housing = m.chrome.shade(0.45);
+                for sx in [-1.0f32, 1.0] {
+                    let span = |a: f32, b: f32| if sx > 0.0 { (a, b) } else { (-b, -a) };
+                    let (x0, x1) = span(half - SWEPT_W * 0.66, half);
+                    self.lamp_rect(
+                        band.s,
+                        band.dir,
+                        x0,
+                        x1,
+                        yc - h * 0.5,
+                        yc + h * 0.5,
+                        housing,
+                        Some(m.trim),
+                    );
+                    let (x0, x1) = span(half - SWEPT_W, half - SWEPT_W * 0.66);
+                    self.lamp_rect(
+                        band.s,
+                        band.dir,
+                        x0,
+                        x1,
+                        yc - h * 0.5,
+                        yc + h * 0.1,
+                        housing,
+                        Some(m.trim),
+                    );
+                    let r = (h * 0.28).min(0.04);
+                    for k in [0.2f32, 0.52] {
+                        let x = sx * (half - SWEPT_W * k);
+                        self.lamp_round(band.s, band.dir, x, yc - h * 0.05, r, head, m.chrome);
+                    }
+                    // Up over the corner and swept back into the fender beside the hood.
+                    let top_half = self.side(0.06, self.top(0.06, half * 0.8)) - 0.05;
+                    let (o, i) = (top_half, top_half - SWEPT_W * 0.95);
+                    let (o1, i1) = (top_half - 0.03, top_half - SWEPT_W * 0.45);
+                    if sx > 0.0 {
+                        self.top_lamp(0.015, SWEPT_LEN, (i, o), (i1, o1), housing, 3);
+                    } else {
+                        self.top_lamp(0.015, SWEPT_LEN, (-o, -i), (-o1, -i1), housing, 3);
+                    }
+                    // Round the corner and back along the fender, the amber turn lamp last.
+                    self.side_lamp(sx, 0.03, 0.17, yc - h * 0.45, yc + h * 0.5, housing);
+                    self.side_lamp(sx, 0.17, 0.25, yc - h * 0.2, yc + h * 0.5, m.amber);
+                }
+            }
             HeadLights::Hidden => {
                 let h = (bh * 0.35).min(0.05);
                 for sx in [-1.0f32, 1.0] {
@@ -628,6 +682,35 @@ impl<'a, 'b> Parts<'a, 'b> {
         }
     }
 
+    /// A lens on the top surface just proud of it, from `s0` to `s1`, its outer and inner
+    /// edges going from `xa0..xb0` at `s0` to `xa1..xb1` at `s1`, in `n` strips: the part
+    /// of a lamp swept back over a fender.
+    #[allow(clippy::too_many_arguments)]
+    fn top_lamp(&mut self, s0: f32, s1: f32, x0: (f32, f32), x1: (f32, f32), lens: Mat, n: usize) {
+        for i in 0..n {
+            let (ta, tb) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+            let (sa, sb) = (lerp(s0, s1, ta), lerp(s0, s1, tb));
+            let xa = (lerp(x0.0, x1.0, ta), lerp(x0.1, x1.1, ta));
+            let xb = (lerp(x0.0, x1.0, tb), lerp(x0.1, x1.1, tb));
+            let q = [
+                self.p(sa, xa.0, self.top(sa, xa.0) + 0.008),
+                self.p(sb, xb.0, self.top(sb, xb.0) + 0.008),
+                self.p(sb, xb.1, self.top(sb, xb.1) + 0.008),
+                self.p(sa, xa.1, self.top(sa, xa.1) + 0.008),
+            ];
+            self.lights.quad_dir(q[0], q[1], q[2], q[3], lens, UP);
+        }
+    }
+
+    /// A lens on the right or left body side (`sx`) just proud of it, from `s0` to `s1`
+    /// between heights `y0` and `y1`: the part of a lamp that wraps round a corner.
+    fn side_lamp(&mut self, sx: f32, s0: f32, s1: f32, y0: f32, y1: f32, lens: Mat) {
+        let q = [[s0, y0], [s1, y0], [s1, y1], [s0, y1]]
+            .map(|[s, y]| self.p(s, sx * (self.side(s, y) + 0.004), y));
+        self.lights
+            .quad_dir(q[0], q[1], q[2], q[3], lens, [sx, 0.0, 0.0]);
+    }
+
     /// A decal on the right or left body side (`sx`), following the surface.
     #[allow(clippy::too_many_arguments)]
     fn side_patch(
@@ -660,6 +743,7 @@ impl<'a, 'b> Parts<'a, 'b> {
             HeadLights::Round => 2.0 * (bh * 0.42).min(0.09) + 0.04,
             HeadLights::Hidden => 0.0,
             HeadLights::PopUp => 0.23,
+            HeadLights::Swept => SWEPT_W,
         };
         let xg = (half - lamp_w - 0.02).max(0.15);
         let az = band.s - self.b.axle[0];
@@ -816,6 +900,40 @@ impl<'a, 'b> Parts<'a, 'b> {
                             );
                         }
                     }
+                }
+            }
+            TailLights::Wrap => {
+                let h = (bh * 0.62).min(0.17);
+                let w = 0.40f32;
+                let top = y1 - 0.01;
+                let l = self.b.length;
+                for sx in [-1.0f32, 1.0] {
+                    let span = |a: f32, b: f32| if sx > 0.0 { (a, b) } else { (-b, -a) };
+                    let (x0, x1) = span(half - w * 0.7, half);
+                    self.lamp_rect(band.s, band.dir, x0, x1, top - h, top, m.tail, bezel);
+                    self.facets(band.s, band.dir, x0, x1, top - h, top, m.tail);
+                    let (x0, x1) = span(half - w, half - w * 0.7);
+                    self.lamp_rect(
+                        band.s,
+                        band.dir,
+                        x0,
+                        x1,
+                        top - h * 0.5,
+                        top,
+                        m.tail.shade(0.8),
+                        bezel,
+                    );
+                    self.lamp_rect(
+                        band.s,
+                        band.dir,
+                        x0,
+                        x1,
+                        top - h,
+                        top - h * 0.5 - 0.008,
+                        m.reverse,
+                        bezel,
+                    );
+                    self.side_lamp(sx, l - 0.24, l - 0.02, top - h * 0.7, top, m.tail);
                 }
             }
             TailLights::Dual => {

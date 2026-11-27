@@ -78,11 +78,11 @@ fn plain_map() -> String {
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them. The first is the world a scene is in unless it names another (a bare start
 /// is in [`DEFAULT`]).
-pub const BUILTIN: [(&str, &str); 5] = crate::builtin::SCENARIOS;
+pub const BUILTIN: [(&str, &str); 4] = crate::builtin::SCENARIOS;
 
 /// The world a bare start opens (a scene with no keys and no world saved from the World
 /// page; `SceneSetup::with_saved_world`): the one the game is judged in.
-pub const DEFAULT: &str = "mirage_valley_2001";
+pub const DEFAULT: &str = "mirage_bowl_2001";
 
 impl Scenario {
     /// Checks the fields against each other and against what the game has built in.
@@ -163,7 +163,10 @@ pub fn all() -> &'static [Scenario] {
 /// Built-in scenario ids that were renamed, `(old, new)`: a saved world choice, a saved
 /// radio preset or a `?scenario=` / `--scenario` naming the old id gets the world under its
 /// new one.
-pub const RENAMED: [(&str, &str); 1] = [("inland_basin_2001", "mirage_valley_2001")];
+pub const RENAMED: [(&str, &str); 2] = [
+    ("inland_basin_2001", "mirage_bowl_2001"),
+    ("mirage_valley_2001", "mirage_bowl_2001"),
+];
 
 /// `id`, or the id it was renamed to.
 pub fn current_id(id: &str) -> &str {
@@ -420,22 +423,18 @@ pub const STILLS_PER_ROW: u32 = 4;
 /// Each scenario's still for the World page (`assets/stills/<id>.still`, rendered with
 /// `tools/screenshot`), in [`BUILTIN`] order: a 256-color palette (768 bytes of sRGB) and
 /// then one palette index per texel, row-major from the top-left.
-const STILLS: [(&str, &[u8]); 5] = [
+const STILLS: [(&str, &[u8]); 4] = [
     (
         "socal_beach_1984",
         include_bytes!("../../../assets/stills/socal_beach_1984.still"),
     ),
     (
-        "mirage_valley_2001",
-        include_bytes!("../../../assets/stills/mirage_valley_2001.still"),
+        "mirage_bowl_2001",
+        include_bytes!("../../../assets/stills/mirage_bowl_2001.still"),
     ),
     (
         "bay_loop_2005",
         include_bytes!("../../../assets/stills/bay_loop_2005.still"),
-    ),
-    (
-        "mirage_bowl_2001",
-        include_bytes!("../../../assets/stills/mirage_bowl_2001.still"),
     ),
     (
         "lake_city_1986",
@@ -537,20 +536,15 @@ mod tests {
         assert_eq!((coast.years, coast.stub), ((1979, 1987), false));
         assert_eq!(coast.default_time_s(), crate::lighting::DEFAULT_TIME_S);
         assert_eq!(coast.default_vehicle, crate::DEFAULT_VEHICLE);
-        let basin = &all[1];
+        let bowl = &all[1];
         assert_eq!(
-            (basin.id.as_str(), basin.years, basin.stub),
-            ("mirage_valley_2001", (1995, 2001), false)
+            (bowl.id.as_str(), bowl.years, bowl.layout.as_deref()),
+            ("mirage_bowl_2001", (1995, 2001), Some("mirage_bowl"))
         );
         let bay = &all[2];
         assert_eq!(
             (bay.id.as_str(), bay.years, bay.layout.as_deref()),
-            ("bay_loop_2005", (1996, 2005), Some("bay_loop"))
-        );
-        let bowl = &all[3];
-        assert_eq!(
-            (bowl.id.as_str(), bowl.years, bowl.layout.as_deref()),
-            ("mirage_bowl_2001", (1995, 2001), Some("mirage_bowl"))
+            ("bay_loop_2005", (2000, 2005), Some("bay_loop"))
         );
         assert_eq!(
             (coast.haze, bowl.haze),
@@ -558,8 +552,10 @@ mod tests {
             "clear air over the bowl"
         );
         assert_eq!(index_of("atlantis"), None);
-        assert_eq!(index_of("inland_basin_2001"), Some(1), "the old id");
-        let lake = &all[4];
+        for old in ["inland_basin_2001", "mirage_valley_2001"] {
+            assert_eq!(index_of(old), Some(1), "the old ids");
+        }
+        let lake = &all[3];
         assert_eq!(
             (lake.id.as_str(), lake.years, lake.stub),
             ("lake_city_1986", (1977, 1989), false)
@@ -634,11 +630,24 @@ mod tests {
         assert_eq!(w, [0, 0]);
     }
 
-    /// The 1980s roster: the first twenty built-in cars; then the eleven 2001 heroes, Lake
-    /// City's 1988 pony hatch and the seven 2001 traffic cars.
+    /// The 1980s roster: the first twenty built-in cars; then the eleven 2001 heroes, Lake City's
+    /// 1988 pony hatch, the four 2005 Bay heroes, the four 2005 traffic cars and the seven 2001 traffic cars.
     const EIGHTIES: usize = 20;
     const HEROES: usize = 11;
     const LAKE_CITY_HEROES: [&str; 1] = ["corvid_hatch"];
+    const BAY_HEROES: [&str; 4] = [
+        "goshawk_turbo",
+        "tulwar_sedan",
+        "petrel_roadster",
+        "lipizzan_sedan",
+    ];
+    /// The 2005 traffic cars, listed after the Bay heroes.
+    const BAY_TRAFFIC: [&str; 4] = [
+        "egret_hybrid",
+        "heron_sedan",
+        "tern_compact",
+        "ibis_crossover",
+    ];
     const TRAFFIC_2001: [&str; 7] = [
         "plover_sedan",
         "sorrel_utility",
@@ -653,7 +662,8 @@ mod tests {
     fn the_2001_traffic_cars_never_list_in_1984_and_list_last_in_2001() {
         let (l84, l01) = (lineup(0), lineup(1));
         let names = crate::ui::roster::names();
-        let first = EIGHTIES + HEROES + LAKE_CITY_HEROES.len();
+        let first =
+            EIGHTIES + HEROES + LAKE_CITY_HEROES.len() + BAY_HEROES.len() + BAY_TRAFFIC.len();
         let ids: Vec<&str> = vehicles::BUILTIN[first..].iter().map(|c| c.0).collect();
         assert_eq!(ids, TRAFFIC_2001);
         for (j, id) in TRAFFIC_2001.iter().enumerate() {
@@ -714,12 +724,20 @@ mod tests {
         let l01 = lineup(1);
         let n = vehicles::BUILTIN.len();
         assert_eq!(vehicles::BUILTIN[n - 1].0, "anvil_semi");
-        assert_eq!(l01.cars, (0..n - 1).collect::<Vec<_>>());
+        let bay = |k: usize| {
+            let id = vehicles::BUILTIN[k].0;
+            BAY_HEROES.contains(&id) || BAY_TRAFFIC.contains(&id)
+        };
+        assert_eq!(
+            l01.cars,
+            (0..n - 1).filter(|&k| !bay(k)).collect::<Vec<_>>()
+        );
         for (k, (id, _)) in vehicles::BUILTIN.iter().enumerate() {
             let w = l01.weights[k];
             match *id {
                 "destrier_coupe" => assert_eq!(w, era_weight(1969, (1995, 2001), true)),
                 "corvid_hatch" => assert_eq!(w, era_weight(1988, (1995, 2001), false)),
+                _ if bay(k) => assert_eq!(w, 0, "{id}: newer than 2001"),
                 _ if k >= EIGHTIES => assert_eq!(w, WEIGHT_ONE, "{id}"),
                 _ => assert!(w > 0 && w < WEIGHT_ONE, "{id}: {w}"),
             }
@@ -813,7 +831,7 @@ mod tests {
         assert_eq!((all.w, all.h), atlas_size(BUILTIN.len() as u32));
         // `h = h * 31 + byte` mod 2^61 over each still's RGBA, as Pillow reads the
         // quantized frame the file was written from.
-        let expected = [2_138_132_481_716_855_108u128, 404_338_617_954_390_931];
+        let expected = [2_138_132_481_716_855_108u128, 552_286_110_203_383_030];
         for (k, ((id, bytes), want)) in STILLS.iter().zip(expected).enumerate() {
             assert_eq!(*id, BUILTIN[k].0);
             let [u, v, u1, v1] = still_uv(k);

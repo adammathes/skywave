@@ -34,7 +34,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 35] = [
+const ROSTER: [(&str, &str); 43] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -70,6 +70,14 @@ const ROSTER: [(&str, &str); 35] = [
     car!("dunlin_roadster"),
     car!("palfrey_roadster"),
     car!("corvid_hatch"),
+    car!("goshawk_turbo"),
+    car!("tulwar_sedan"),
+    car!("petrel_roadster"),
+    car!("lipizzan_sedan"),
+    car!("egret_hybrid"),
+    car!("heron_sedan"),
+    car!("tern_compact"),
+    car!("ibis_crossover"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -534,7 +542,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 39] = [
+    let expected: [u64; 47] = [
         0x423b_5062_5fd3_cf8a,
         0x3029_8378_2176_2c55,
         0xc45e_2768_5549_171f,
@@ -574,8 +582,16 @@ fn builds_are_deterministic() {
         0xd114_d3e5_6950_98e7,
         0xbf73_75be_c260_c310,
         0x5476_b566_4779_e087,
+        0x07ad_1f3e_8829_c0a4,
+        0x044a_5cf7_ae88_a0ee,
+        0x62a7_6e5d_04a3_fa88,
+        0x3f7f_a565_bd57_160a,
+        0x3a6c_0682_b5f3_b8c0,
+        0x375e_7ee2_8f7a_a608,
+        0xbf8f_9066_fced_b52f,
+        0x7f6d_4d69_750c_e0c8,
     ];
-    let mut got = [0u64; 39];
+    let mut got = [0u64; 47];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();
@@ -1155,6 +1171,7 @@ fn every_option_builds() {
         HeadLights::Quad,
         HeadLights::Round,
         HeadLights::Hidden,
+        HeadLights::Swept,
     ];
     let grilles = [Grille::Slot, Grille::Egg, Grille::Wide, Grille::None];
     let bumpers = [Bumper::Chrome, Bumper::Body, Bumper::Rubber];
@@ -1163,6 +1180,7 @@ fn every_option_builds() {
         TailLights::Dual,
         TailLights::Triple,
         TailLights::Round,
+        TailLights::Wrap,
     ];
     let spoilers = [
         Spoiler::None,
@@ -1178,6 +1196,8 @@ fn every_option_builds() {
         Rims::Dish,
         Rims::Slotted,
         Rims::Twin,
+        Rims::Split,
+        Rims::Spoke7,
     ];
     let details = [
         Detail::Louvers,

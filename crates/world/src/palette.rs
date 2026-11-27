@@ -109,7 +109,7 @@ impl Palette {
         }
     }
 
-    /// The 2001 inland basin at night (Mirage Valley): stucco in beiges, tans and dusty
+    /// The 2001 inland basin at night (Mirage Bowl): stucco in beiges, tans and dusty
     /// whites rather than pastels, terracotta tile roofs, sun-baked concrete and dry lawns,
     /// hills of straw-gold grass under gray-green chaparral,
     /// deep sodium-orange lamps, and neon in the period's colors (purple, blue, green).

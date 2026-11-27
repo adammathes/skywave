@@ -876,7 +876,7 @@ mod tests {
             overlay: Overlay::Fps,
             clock_speed: 60.0,
             traffic: traffic::Density::Busy,
-            scenario: Some("mirage_valley_2001"),
+            scenario: Some("mirage_bowl_2001"),
             minimap: false,
             minimap_rotate: false,
             minimap_range_m: 600.0,
@@ -917,12 +917,9 @@ mod tests {
             r#"{ "world": { "scenario": "inland_basin_2001" },
                  "radio": { "presets": { "inland_basin_2001": "1977_chicago" } } }"#,
         );
-        assert_eq!(s.scenario, Some("mirage_valley_2001"));
+        assert_eq!(s.scenario, Some("mirage_bowl_2001"));
         assert_eq!(
-            s.radio
-                .presets
-                .get("mirage_valley_2001")
-                .map(String::as_str),
+            s.radio.presets.get("mirage_bowl_2001").map(String::as_str),
             Some("1977_chicago")
         );
         assert!(!s.radio.presets.contains_key("inland_basin_2001"));

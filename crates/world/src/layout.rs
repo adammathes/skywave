@@ -193,6 +193,45 @@ fn deck() -> f32 {
     DECK_M
 }
 
+/// A railway: a single track along `line`, with `spurs` beside it (each from its turnout on
+/// the line to its bumper). Every road it meets crosses it at grade, with gates; nothing is
+/// built within [`RAIL_ROW_M`] of it.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Rail {
+    pub line: Vec<Pt>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub spurs: Vec<Vec<Pt>>,
+}
+
+/// An airfield: a runway `runway_m` wide between two points on a level field `width_m`
+/// wide, and a taxiway from the runway's first point to `taxiway`, a point on a road.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Airfield {
+    pub runway: (Pt, Pt),
+    pub runway_m: f32,
+    pub width_m: f32,
+    pub taxiway: Pt,
+}
+
+impl Airfield {
+    /// The field's corners: the runway's length and [`AIRFIELD_END_M`] past each end, its
+    /// width across.
+    pub fn corners(&self) -> [V2; 4] {
+        let (a, b) = (
+            V2::new(self.runway.0 .0, self.runway.0 .1),
+            V2::new(self.runway.1 .0, self.runway.1 .1),
+        );
+        let d = (b - a).normalize();
+        let (a, b) = (a - d * AIRFIELD_END_M, b + d * AIRFIELD_END_M);
+        let r = d.right() * (0.5 * self.width_m);
+        [a - r, b - r, b + r, a + r]
+    }
+}
+
 /// Where the player starts: on road `road`, `along_m` from its first point, driving away
 /// from it.
 #[derive(Clone, Debug, PartialEq)]
@@ -231,6 +270,15 @@ pub struct Layout {
     pub roads: Vec<Road>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub channels: Vec<Channel>,
+    /// Whether the world's set pieces are sited here (`docs/WORLD_GENERATION.md`, "Set
+    /// pieces"): the garage, the stands and roadside landmarks on lots that suit them, the
+    /// tunnel on the highway, turnouts at the lookouts, the drag strip on the runway.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub set_pieces: bool,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rail: Option<Rail>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub airfield: Option<Airfield>,
     pub start: Start,
 }
 
@@ -242,6 +290,10 @@ pub const MAX_GRADE: f32 = 0.12;
 pub const DECK_M: f32 = 3.0;
 /// How far a road profile may leave the ground; `place::validate` allows 8 m.
 pub const PROFILE_BAND_M: f32 = 7.8;
+/// Half the width of a railway's right of way.
+pub const RAIL_ROW_M: f32 = 16.0;
+/// An airfield reaches this far past each end of its runway.
+pub const AIRFIELD_END_M: f32 = 20.0;
 /// A ramp leaves the highway this far along it from the crossing it serves.
 pub const RAMP_RUN_M: f32 = 150.0;
 
@@ -451,6 +503,23 @@ impl Layout {
             };
             if c.width_m <= 0.0 || c.depth_m <= 0.0 || drop > PROFILE_BAND_M {
                 return Err(LayoutError::Value(c.name.clone()));
+            }
+        }
+        if let Some(r) = &self.rail {
+            check("rail", &pts(&r.line), 2)?;
+            for s in &r.spurs {
+                check("rail spur", &pts(s), 2)?;
+            }
+        }
+        if let Some(a) = &self.airfield {
+            check("airfield", &a.corners(), 4)?;
+            let t = V2::new(a.taxiway.0, a.taxiway.1);
+            let short = (a.corners()[1] - a.corners()[0]).length() < 200.0;
+            if short || a.runway_m < 10.0 || a.width_m < a.runway_m + 20.0 {
+                return Err(LayoutError::Value("airfield".into()));
+            }
+            if !lines.iter().any(|l| distance_to_line(t, l) <= SNAP_M) {
+                return Err(LayoutError::RoadToNowhere("airfield taxiway".into()));
             }
         }
         // Every road end meets another road (or itself, for a loop) unless it is a dead end.

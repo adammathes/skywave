@@ -21,7 +21,7 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 | Idea | Verdict | Notes |
 |---|---|---|
 | Ambient traffic on a path-node graph, density by zone and hour, spawn out of view | **already: M4** | `docs/NPCS.md`. Hour-dependent density is added there. |
-| Zone names popping up on entry; per-zone traffic density, ambience, radio reception | **later: M2 (names + ambience), M3 (reception)** | Named neighborhoods are part of what makes a place a place. Invented names from the region template; radio static when far from a station's transmitter is a nice M3 touch. |
+| Zone names popping up on entry; per-zone traffic density, ambience, radio reception | **no (names); later: M3 (ambience, reception)** | Name cards on entry were built and cut by the owner (2026-11-27): don't bring them back. Per-zone ambience stays; radio static when far from a station's transmitter is a nice M3 touch. |
 | Separate low-poly collision meshes, never the render mesh | **already** | `world::WorldCollider` is built from Place data, not from meshes. |
 | Game clock at one game minute per real second (a day in 24 min) | **setting; default stays 10×** | The classic open-world pacing is 60×. Ours defaults to 10× (a day in 2.4 h) because the drive is the game and golden hour should last. 60× is in the clock-speed options; the owner can flip the default at the feel gate. |
 
@@ -52,7 +52,7 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 ## Performance follow-ups noted during M2
 - Parcels: a face spanning several chunks is rebuilt by every chunk it touches (worst chunk ~7 ms vs the 2 ms target). Cache built faces in the plan, keyed by face id, so each chunk only slices.
 - Streaming stages: buildings and light tiles on dense chunks exceeded the step budget; now built in ~2 ms pieces (done).
-- Web chunk pool is 4.96M vertices (~208 MB of GPU buffers) to hold the densest 11×11 coast area with buildings. Reduce per-building vertices (blank unseen facades, LOD by distance) to bring it back under 128 MB.
+- Web chunk pool is 5.7M vertices (~239 MB of GPU buffers) to hold the densest 9×9 chunks of the Mirage Bowl with buildings. Reduce per-building vertices (blank unseen facades, LOD by distance) to bring it back under 128 MB.
 - With the detailing's street lamps the densest 11×11 coast area took 1078 of the web pool's then 1099 pages: the light tiles' cuts add ~15% to the lit chunks. Cutting tiles by whole triangles (no clipping) on terrain places, or fewer, larger tiles, would win most of it back.
 
 - Parked-car paint as a per-instance attribute: the instancer already carries a per-instance

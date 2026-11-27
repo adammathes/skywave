@@ -58,6 +58,8 @@ or golden.
 | Wren Minivan | 1999 | Percheron Crew Cab | 2000 | Anvil Semi | 2000 |
 | Linnet Hatch | 2001 | Dunlin Roadster | 1997 | Palfrey Roadster | 1999 |
 | Corvid Hatch | 1988 | | | | |
+| Goshawk Turbo | 2004 | Tulwar Sedan | 2005 | Petrel Roadster | 2002 |
+| Lipizzan Sedan | 2004 | | | | |
 
 **`built`** (optional) dates an old car carrying later parts: the Destrier Coupe is a 1969 car with a
 2001 blower and wheels, so it weighs by its 1969 age in the 2001 world (0.105, above the hero floor) and
@@ -97,7 +99,8 @@ ShapeSpec(
   belt: [(x, y)...],         // beltline where the glass starts, held flat beyond its ends
   section: Section(shoulder: 0.93, tumblehome_deg: 24, greenhouse_frac: 0.70,
                    crown: 0.04,   // centerline rise of hood, roof and deck over their edges, m
-                   tuck: 0.05),   // rocker tuck under the side, m
+                   tuck: 0.05,    // rocker tuck under the side, m
+                   bulge: 0.0),   // optional: the side curving in above and below its widest line, m
   glass: Glass(windshield: (x0, x1), backlight: (x0, x1), side: [(x0, x1)...]),  // gaps between side windows are the B/C pillars
   wheels: Wheels(radius, width, arch_clearance, front_x, rear_x, track),         // rear_x − front_x and track equal the VehicleSpec's
   front: Front(lights: PopUp|Rect|Quad|Round|Hidden, grille: Slot|Egg|Wide|None, bumper: Chrome|Body|Rubber, bumper_y: (lo, hi)),
@@ -199,6 +202,10 @@ As built (LOD0 exterior / interior triangles; LOD1 and LOD2 exterior):
 | Dunlin Roadster | 10,500 | 6,174 | 3,096 | 1,916 |
 | Palfrey Roadster | 10,236 | 6,178 | 3,012 | 1,800 |
 | Corvid Hatch | 12,586 | 7,100 | 3,542 | 2,178 |
+| Goshawk Turbo | 11,436 | 7,128 | 3,222 | 2,094 |
+| Tulwar Sedan | 12,132 | 7,152 | 3,258 | 2,118 |
+| Petrel Roadster | 11,540 | 6,194 | 3,052 | 1,860 |
+| Lipizzan Sedan | 13,398 | 7,164 | 3,246 | 2,142 |
 
 Budgets (`docs/backlog/ART.md`): exterior 8,000–14,000, interior 4,000–8,000, LOD1 exterior 3,000–5,000 and ≤ 40% of LOD0 (27–30%), LOD2 1,500–2,500.
 
@@ -238,7 +245,7 @@ Export path: `tools/shape-preview` renders a spec to PNG from fixed angles so ag
 | `drayman_van` | full-size panel van | Van | 1,900 kg, ~104 kW six, 3-speed, RWD; tall, tippy, the lowest top speed; 13.5 s, 37 m/s, 0.70 g |
 | `meadow_minivan` | front-drive minivan, wood-grain edition | Van | 1,450 kg, ~86 kW four, 3-speed, FWD; tall, roomy, wallowy; 15.0 s, 44 m/s, 0.73 g |
 
-The 2001 hero cars (`docs/backlog/MIRAGE2001.md` item 4), player cars of the Mirage Valley and never of an
+The 2001 hero cars (`docs/backlog/MIRAGE2001.md` item 4), player cars of the Mirage Bowl and never of an
 earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics still out-sprint them all:
 
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
@@ -256,8 +263,31 @@ earlier world; the era's band is 0–60 mph in 4.5–6.5 s, and the 80s exotics 
 | `palfrey_roadster` | late-90s round-shouldered turbo-four roadster: domed hood, short steep windshield in a bright frame, high door tops, half-round tail, wheels at the corners, top down | Convertible | 1,470 kg, ~145 kW turbo four, 6-speed, AWD; a flat wall of torque, clean launches, calm grip; 6.7 s, 58.7 m/s, 1.03 g |
 | `corvid_hatch` | late-80s American pony car, third generation of its line, in top trim: long low wedge nose with slim rectangular lamps, raked windshield, T-tops, a big curved glass hatch with a wrapped lip spoiler, a full ground-effects kit, a low tape stripe, full-width tail lamps, five-hole alloys | Coupe | 1,500 kg, ~180 kW fuel-injected V8, 4-speed automatic, RWD; strong from a light, flat and grippy, a tail that comes out when asked; 6.1 s, 62.4 m/s, 0.99 g |
 
+The 2005 Bay heroes, the Bay Loop's own (`docs/SCENARIOS.md`, "The Bay Loop"): the Peninsula's
+commuter and its luxury six, which the lots of 2005 were full of, and two toys of new money. They
+drive in the Bay Loop's traffic at a hero's weight, never park, and never appear in an earlier
+world (they are newer than 2001). Luxury cars are outside the class orderings.
+
+| id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
+|---|---|---|---|
+| `goshawk_turbo` | mid-2000s compact premium sport sedan: broad grille, arched roof, short high deck, five-spoke alloys, mostly silver | Sedan | 1,540 kg, ~125 kW turbo four with a flat torque plateau, 5-speed, AWD; sure-footed, gently nose-heavy; 7.9 s, 61 m/s, 0.85 g |
+| `tulwar_sedan` | mid-2000s small rear-drive luxury sport sedan: long hood, steep windshield, roof arcing to a high lipped deck, bright window trim | Luxury | 1,580 kg, ~145 kW V6, 6-speed, RWD; calm, balanced, quiet; 8.2 s, 64 m/s, 0.86 g |
+| `petrel_roadster` | early-2000s tiny mid-engined two-seat roadster: round lamps, wide mouth, strakes into flank intakes, rising engine deck, round tail lamps, top off | Convertible | 900 kg, ~125 kW four to 7,800 rpm, 5-speed, RWD; the lightest car, turns in on a thought; 5.7 s, 62 m/s, 1.06 g |
+| `lipizzan_sedan` | mid-2000s big grand touring four-door: long hood, oval grille, long cabin, bright trim, big multi-spoke wheels | Luxury | 1,930 kg, ~285 kW V8 with a rear transaxle, 6-speed, RWD; fast and heavy, leans and settles; 5.3 s, 72 m/s, 0.93 g |
+
+The 2005 traffic cars, the Bay's everyday cars: they drive and park in the Bay Loop and never in an earlier
+world. All but the crossover park (it is too long for a small stall and too narrow for a sedan's); all are
+player-drivable.
+
+| id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
+|---|---|---|---|
+| `egret_hybrid` | mid-2000s hybrid hatchback: one arc nose to tail, chopped tail with split rear glass, wheel covers | Sedan | 1,310 kg, 1.5 L four and a motor, stepless-feeling automatic, FWD; quiet, slow, calm; 11.6 s, 50 m/s, 0.82 g |
+| `heron_sedan` | early-2000s mid-size family sedan: tall arched roof, high short deck, straight strong beltline | Sedan | 1,450 kg, ~120 kW four, 5-speed auto, FWD; smooth, roomy, safe understeer; 8.4 s, 59 m/s, 0.89 g |
+| `tern_compact` | early-2000s compact four-door sedan: small, neat, tall for its size, steel wheels with covers | Sedan | 1,150 kg, ~95 kW four, 4-speed auto, FWD; light and eager; 9.9 s, 54 m/s, 0.90 g |
+| `ibis_crossover` | mid-2000s car-based crossover: tall, upright, roof rails, gray lower cladding | Utility | 1,700 kg, ~150 kW six, 5-speed auto, AWD; rides like a car, leans more; 8.7 s, 56 m/s, 0.85 g |
+
 The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
-Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
+Mirage Bowl and never in an earlier world. All but the semi are player-drivable and list at the end of the
 Vehicle page in 2001; the semi is `traffic_only`.
 
 | id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
@@ -297,9 +327,10 @@ Later eras add rosters the same way (90s: bubble sedans, SUVs; 00s: crossovers, 
 - Straight-line: 0–60 mph times within a band per car (`tests/roster.rs`: Sports 4–8 s, Wagon 10–16 s, Convertible: Seabreeze 11–14 s, Regent 9–12 s, and a band for each roster car); top speed ordering Sports > Coupe > Sedan > Wagon > Van (every car of a class beats every car of the next).
 - Skidpad: steady-state lateral g per class ordered Sports > Hatch > Sedan > Wagon > Van.
 - Exotics and pony cars: the Basilisk and the Avocet (and their open versions) beat every other car in 0–60 and top speed; every other sports car (Gannet, Longbow) beats both Appaloosas.
+- 2005 Bay heroes: each in its band; the Lipizzan, the quickest four-door, still behind the exotics.
 - 2001 traffic cars: each in its band and its class's orderings like the rest (the semi, traffic only, is not driven).
 - 2001 heroes: each in its band within 4.5–6.5 s; the Destrier spins its driven tires more than any other car off the line under every assist preset (peak slip ratio over 0.5 in the first 1.5 s) and the Courser over 0.5 too, the Tanager and the Glaive under 0.1 with every assist off; the Shrike has the highest redline. The part 2 heroes fill the gaps the roster left: the Glaive is the only Sports car that fits between the Longbow Convertible and the Longbow in top speed (0.7 m/s either side, so its gearing is set to the hundredth), the Shrike sits under every Sports car as a Coupe, the Falchion under every Coupe and Hatch as a Sedan, the Courser (Muscle, outside the orderings) in the gaps left. The two roadsters (Convertible, outside the orderings) sit outside the hero band: the Dunlin at 8.2 s, the Palfrey at 6.7 s, its top speed set by its gearing to fit a gap. Lake City's Corvid Hatch (Coupe, a 1988 car) beats the older pony notchback to 60 (6.1 s) and sits between the Coupes in top speed and grip. Gaps are kept between cars of a class: with forty cars a gap between every pair has no room left.
-- Distinct: all of them differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
+- Distinct: the cars of each class differ pairwise by at least 0.05 s in 0–60 (the Homestead and the Seabreeze, tuned first, are 0.09 s apart; every other pair at least 0.15 s), 0.7 m/s in top speed and 0.01 g on the skidpad; every car stops from 60 mph without assists within 60 m.
 - Stability: full-lock at 30 mph does not flip any car; wagon flips at a lower lateral g than the sports car when struck by a scripted impulse.
 - Feel bands (`tests/handling.rs`): every car, steered as a keyboard steers, through a 25 mph junction turn on full throttle, a 45 mph full-key turn braked hard, and a 45 mph full-key turn lifted off the throttle. The rear axle's peak slip angle stays below 1.5× the tires' peak in Arcade and 2× in Light; in Light the handbrake slides the rear past 1.5× (in Arcade the grip boost lets a few rears out-grip it).
 - Determinism: scripted 10 s input replay produces identical state hashes.
