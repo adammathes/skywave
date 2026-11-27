@@ -10,9 +10,20 @@ use skywave_core::Seed;
 use traffic::lanes::{CURVE_STEPS, WAVE_DELAY_TICKS};
 use traffic::signal::cycle_ticks;
 use traffic::{Control, LaneGraph, Light, TurnKind, NONE};
-use world::procgen::build_place;
 use world::roads::Network;
 use world::template::RegionTemplate;
+
+/// `t`'s place for `seed`: generated, or for a template with only zone rules (the lake
+/// city's) its authored layout dressed by them.
+fn build_place(seed: Seed, t: &RegionTemplate, g: &world::Grammar) -> Place {
+    if t.coast.is_some() || t.basin.is_some() {
+        return world::procgen::build_place(seed, t, g);
+    }
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/lake_city.ron")).expect("layout");
+    layout.validate().expect("validate layout");
+    world::procgen::authored::build_place(seed, &layout, t, g)
+}
 
 const REGIONS: [(&str, &str); 3] = [
     (
@@ -48,7 +59,7 @@ const SHARP_RADIUS_M: f32 = 3.0;
 const MAX_SHARP_SHARE: f32 = 0.05;
 
 /// Share of lanes that must lie in the largest strongly connected component: from any of
-/// them a car can reach any other. The rest are on road islands (validation allows 5% of
+/// them a car can reach any other, turning and changing lanes. The rest are on road islands (validation allows 5% of
 /// edges off the main component) and one-way dead ends.
 const MIN_CONNECTED_SHARE: f32 = 0.95;
 
@@ -108,10 +119,32 @@ fn coast_graph_hash_is_pinned() {
     assert_eq!(h, COAST_SEED1_HASH);
 }
 
-/// Largest strongly connected component of the lane graph (lanes linked by turns), as a
-/// count of lanes. Iterative Tarjan.
+/// Where a car on each lane can go next: the lanes its turns lead to, and the lanes beside
+/// it on the same road and direction, which it changes into on the way.
+fn successors(g: &LaneGraph) -> Vec<Vec<usize>> {
+    let beside = |a: usize, b: usize| {
+        let (l, m) = (&g.lanes[a], &g.lanes[b]);
+        m.edge == l.edge && m.forward == l.forward
+    };
+    (0..g.lanes.len())
+        .map(|v| {
+            let mut next: Vec<usize> = g.next(v as u32).iter().map(|t| t.to as usize).collect();
+            if v > 0 && beside(v, v - 1) {
+                next.push(v - 1);
+            }
+            if v + 1 < g.lanes.len() && beside(v, v + 1) {
+                next.push(v + 1);
+            }
+            next
+        })
+        .collect()
+}
+
+/// Largest strongly connected component of the lane graph (lanes linked by turns and lane
+/// changes), as a count of lanes. Iterative Tarjan.
 fn largest_component(g: &LaneGraph) -> usize {
     let n = g.lanes.len();
+    let succ = successors(g);
     let (mut index, mut low) = (vec![u32::MAX; n], vec![0u32; n]);
     let mut on_stack = vec![false; n];
     let (mut stack, mut next, mut best) = (Vec::new(), 0u32, 0usize);
@@ -129,9 +162,9 @@ fn largest_component(g: &LaneGraph) -> usize {
                 stack.push(v);
                 on_stack[v] = true;
             }
-            let turns = g.next(v as u32);
-            if *k < turns.len() {
-                let w = turns[*k].to as usize;
+            let next = &succ[v];
+            if *k < next.len() {
+                let w = next[*k];
                 *k += 1;
                 if index[w] == u32::MAX {
                     work.push((w, 0));

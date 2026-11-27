@@ -18,7 +18,6 @@ use traffic::peds::{
 use traffic::walks::{LinkKind, WalkGraph, CELL_M};
 use traffic::{Density, LaneGraph, Light, Player, View, NONE};
 use world::collide::{Surface, WorldCollider};
-use world::procgen::build_place;
 use world::template::RegionTemplate;
 
 thread_local! {
@@ -51,6 +50,18 @@ static QUIET: RwLock<()> = RwLock::new(());
 
 fn shared() -> RwLockReadGuard<'static, ()> {
     QUIET.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `t`'s place for `seed`: generated, or for a template with only zone rules (the lake
+/// city's) its authored layout dressed by them.
+fn build_place(seed: Seed, t: &RegionTemplate, g: &world::Grammar) -> Place {
+    if t.coast.is_some() || t.basin.is_some() {
+        return world::procgen::build_place(seed, t, g);
+    }
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/lake_city.ron")).expect("layout");
+    layout.validate().expect("validate layout");
+    world::procgen::authored::build_place(seed, &layout, t, g)
 }
 
 const REGIONS: [(&str, &str); 3] = [

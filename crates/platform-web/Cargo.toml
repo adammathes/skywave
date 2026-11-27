@@ -38,6 +38,7 @@ web-sys = { workspace = true, features = [
     "Navigator",
     "Node",
     "Performance",
+    "Response",
     "Storage",
     "WheelEvent",
     "Window",

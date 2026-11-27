@@ -257,6 +257,24 @@ pub fn point_in_polygon(p: V2, poly: &[V2]) -> bool {
     inside
 }
 
+/// Segment intersection parameters `(t, u)` along `p1→p2` and `q1→q2`, both in `[0, 1]`.
+pub fn seg_intersect(p1: V2, p2: V2, q1: V2, q2: V2) -> Option<(f32, f32)> {
+    let r = p2 - p1;
+    let s = q2 - q1;
+    let den = r.x * s.y - r.y * s.x;
+    if abs(den) < 1e-9 {
+        return None;
+    }
+    let w = q1 - p1;
+    let t = (w.x * s.y - w.y * s.x) / den;
+    let u = (w.x * r.y - w.y * r.x) / den;
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+        Some((t, u))
+    } else {
+        None
+    }
+}
+
 /// Distance from `p` to the segment `a..b`, and the parameter of the closest point.
 pub fn segment_distance(p: V2, a: V2, b: V2) -> (f32, f32) {
     let ab = b - a;

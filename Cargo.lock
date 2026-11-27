@@ -143,6 +143,8 @@ name = "audio-preview"
 version = "0.1.0"
 dependencies = [
  "audio",
+ "ron",
+ "vehicle",
 ]
 
 [[package]]
