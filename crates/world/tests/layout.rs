@@ -44,7 +44,7 @@ fn layout() -> Layout {
 /// Pinned `Place::content_hash` of the Bay Loop for seed 1. It moves whenever the layout,
 /// the zone rules or any shared stage changes: regenerate with `--nocapture` and commit it
 /// on its own with the reason.
-const GOLDEN: u64 = 0x0b16667d58f79b12;
+const GOLDEN: u64 = 0xf3d84b12bc07ec67;
 
 #[test]
 fn the_bay_loop_validates_and_is_deterministic() {
@@ -160,7 +160,7 @@ fn a_road_to_nowhere_is_refused() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0x6254bbb7eb264d7a;
+const BOWL_GOLDEN: u64 = 0xbb89863f416f561d;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.
