@@ -24,9 +24,7 @@ pub mod zones;
 pub use build::{place_from, PLACE_CHUNKS};
 pub use buildings::{buildings, buildings_all, hash_buildings, lot_buildings};
 pub use detail::{detail, hash_detail};
-pub use macro_map::{
-    BasinPlan, Frame, GridLine, MacroMap, MacroPoi, MacroPoiKind, Strip, WaterBody, WaterKind,
-};
+pub use macro_map::{BasinPlan, GridLine, MacroMap, MacroPoi, MacroPoiKind, WaterBody, WaterKind};
 pub use parcels::{
     hash_parcels, parcels, parcels_all, Block, Face, FaceKind, FaceParcels, FaceStats, ParcelChunk,
     ParcelPlan,
