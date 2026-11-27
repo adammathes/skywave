@@ -147,7 +147,7 @@ fn edges_bound_the_coast() {
     for seed in 1..=2u64 {
         let p = build_place(Seed(seed), &t, &grammar());
         let edges = p.terrain.edges;
-        assert_eq!(edges, t.edges.sides());
+        assert_eq!(edges, layout().edges.sides());
         let ext = p.header.extent_m();
         let bands = edges.map(band_m);
         let in_play = |q: [f32; 2], margin: f32| {

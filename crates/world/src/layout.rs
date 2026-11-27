@@ -8,10 +8,27 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use place::{RoadClass, ZoneId};
+use place::{EdgeKind, RoadClass, ZoneId};
 
 use crate::math::{seg_intersect, segment_distance, sin_cos, PI, V2};
-use crate::template::Edges;
+
+/// What bounds the place on each side (`docs/WORLD_GENERATION.md`, "Map edges").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Edges {
+    pub north: EdgeKind,
+    pub east: EdgeKind,
+    pub south: EdgeKind,
+    pub west: EdgeKind,
+}
+
+impl Edges {
+    /// `[north, east, south, west]`, the order of `place::Terrain::edges`.
+    pub fn sides(&self) -> [EdgeKind; 4] {
+        [self.north, self.east, self.south, self.west]
+    }
+}
 
 /// A point `(x, z)` in meters in the place's frame: x east, z south, `(0, 0)` the corner of
 /// chunk `(0, 0)`.

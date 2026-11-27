@@ -13,9 +13,7 @@ the scenario's region template's zone rules (block sizes, street patterns, style
 and grammar. The result is an ordinary `place::Place`; nothing downstream knows how it was made. A
 future real-map import emits the same thing.
 
-A scenario opts in with `layout: Some("<id>")`. Its region template then only supplies zone rules:
-a template with no scored zones (`downtown`, `strip`, `industrial` and `coast` all `None`) is
-valid for exactly this use.
+A scenario names its layout (`layout: "<id>"`) and a region template, which supplies the zone rules.
 
 Everything is still deterministic from the seed: the seed varies the fine grain (which lot gets
 which building, the terrain's small relief), never the structure.

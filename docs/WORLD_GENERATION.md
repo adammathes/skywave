@@ -254,7 +254,7 @@ Tests: `world::landmarks`' unit tests (inheritance, refusals, boxes and lights, 
 camera on open ground facing its landmark).
 
 ## Region templates
-A `RegionTemplate` is data (RON): elevation profile, zone weights, block sizes, street patterns, tree species, prop densities, sign languages, driving side. Each world ships one (`pacific_shore`, `socal_bowl`, `bay_area`, `great_lakes_city`), read for its zone rules: the layout (`docs/LAYOUTS.md`) draws the terrain and the main roads. A zone rule may set `street_grade`, its local streets' steepest grade (default 12%: the Bay's city takes 22% to climb its crests), and `streets: Open` makes a zone open space: no local streets and no lots. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
+A `RegionTemplate` is data (RON): per zone, the block sizes, street pattern, lots, massing, building styles, tree species and prop densities; plus the era, sign language and driving side. Each world ships one (`pacific_shore`, `socal_bowl`, `bay_area`, `great_lakes_city`), read for its zone rules: the layout (`docs/LAYOUTS.md`) draws the terrain and the main roads. A zone rule may set `street_grade`, its local streets' steepest grade (default 12%: the Bay's city takes 22% to climb its crests), and `streets: Open` makes a zone open space: no local streets and no lots. Later: `midwest_river_town`, `desert_highway`, `new_england`, then `tokyo_ward` (requires narrow streets, mixed-use, elevated rail props; design later).
 
 ## Facade grammars
 A `world::grammar::Grammar` is data (RON, `assets/grammar/<template>_<era>.ron`, ADR 0002):

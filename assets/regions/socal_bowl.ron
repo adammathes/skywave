@@ -1,6 +1,5 @@
-// The Mirage Bowl's zone rules (assets/layouts/mirage_bowl.ron, docs/LAYOUTS.md): the basin's
-// districts as Mirage Valley dresses them, minus the scored basin (the layout says where
-// everything is). Streets follow the region's real habit: straight grids everywhere a street
+// The Mirage Bowl's zone rules (assets/layouts/mirage_bowl.ron, docs/LAYOUTS.md): what a
+// district of each zone looks like (the layout says where everything is). Streets follow the region's real habit: straight grids everywhere a street
 // goes, foothill grids running straight up to the mountain's foot (`suburb` is a grid here,
 // not loops and cul-de-sacs), and no local streets on the open hillsides or in the parks, so
 // nothing winds off into the brush and stops.
@@ -10,24 +9,12 @@ RegionTemplate(
     sign_language: EnUs,
     era: EraDefaults(year: 2001, street_lights: Sodium, palette: "sodium_night"),
 
-    edges: Edges(north: Mountains, east: Mountains, south: RailYards, west: Hills),
-
-
     // A grid city: a side street that stops short of the freeway, the wash or the rail line is
     // cut back to its last crossing rather than left dead-ended.
     through_streets: true,
 
     zones: Zones(
         downtown: ZoneRule(
-            score: Some(Score(
-                base: 0,
-                coast: [],
-                slope: [(0.06, 0), (0.14, -3)],
-                downtown: [(0, 3.6), (130, 3.0), (210, -1), (360, -5)],
-                highway: [],
-                noise: 0.5,
-                noise_scale_m: 140,
-            )),
             block_m: ((90, 110), (60, 80)),
             streets: Grid,
             alleys: true,
@@ -42,7 +29,6 @@ RegionTemplate(
         ),
         strip: ZoneRule(
             // Unused: the basin's main drags are its boulevards' commercial frontage.
-            score: None,
             block_m: ((90, 140), (50, 80)),
             streets: Grid,
             alleys: true,
@@ -56,16 +42,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.7, floors: (1, 2), floors_mean: 1.3, floors_spread: 0.3, style_weights: [1, 1])),
         ),
         residential: ZoneRule(
-            score: Some(Score(
-                base: 1.0,
-                coast: [],
-                slope: [(0.06, 0), (0.12, -1)],
-                downtown: [(0, -1.5), (220, 0)],
-                highway: [(0, -1.2), (140, -0.6), (240, 0)],
-                rail: [(0, -1.4), (200, -0.8), (300, 0)],
-                noise: 0.35,
-                noise_scale_m: 220,
-            )),
             block_m: ((100, 130), (60, 80)),
             streets: Grid,
             alleys: true,
@@ -80,17 +56,6 @@ RegionTemplate(
         ),
         suburb: ZoneRule(
             // Tract houses of the 1990s up against the foothills.
-            score: Some(Score(
-                base: 0.4,
-                coast: [],
-                slope: [(0, 0), (0.08, 0.4), (0.16, -2)],
-                downtown: [(0, -3), (300, 0)],
-                highway: [],
-                hills: [(0, 1.6), (200, 1.2), (320, -1.5)],
-                rail: [(0, -2), (150, -1), (220, 0)],
-                noise: 0.35,
-                noise_scale_m: 200,
-            )),
             block_m: ((110, 170), (70, 110)),
             streets: Grid,
             alleys: false,
@@ -105,16 +70,6 @@ RegionTemplate(
         ),
         industrial: ZoneRule(
             // Tilt-up warehouses, auto shops and yards along the rail line and the freeway.
-            score: Some(Score(
-                base: -0.2,
-                coast: [],
-                slope: [(0, 0.3), (0.06, 0), (0.1, -3)],
-                downtown: [(0, -4), (260, -1), (400, 0)],
-                highway: [(0, 1.5), (90, 1.2), (160, -0.5)],
-                rail: [(0, 2.6), (130, 2.0), (200, -0.6)],
-                noise: 0.6,
-                noise_scale_m: 240,
-            )),
             // The grid's pattern (so the blocks run on from the frontage), truck-width.
             block_m: ((100, 100), (100, 100)),
             streets: Grid,
@@ -130,17 +85,6 @@ RegionTemplate(
         ),
         commercial: ZoneRule(
             // Mini-malls, stucco boxes and motels along the boulevards and the arterials.
-            score: Some(Score(
-                base: -0.3,
-                coast: [],
-                slope: [(0.06, 0), (0.14, -3)],
-                downtown: [(0, 1.2), (360, 0.8), (520, 0)],
-                highway: [],
-                arterial: [(0, 1.45), (30, 1.25), (46, -0.6)],
-                boulevard: [(0, 1.4), (50, 1.2), (72, -0.4)],
-                noise: 0.5,
-                noise_scale_m: 120,
-            )),
             block_m: ((90, 130), (60, 90)),
             streets: Grid,
             alleys: true,
@@ -155,7 +99,6 @@ RegionTemplate(
         ),
         park: ZoneRule(
             // The parks, and the airfield's open ground.
-            score: None,
             block_m: ((120, 240), (100, 200)),
             streets: Open,
             alleys: false,
@@ -169,7 +112,6 @@ RegionTemplate(
         ),
         beach: ZoneRule(
             // Unused: there is no coast.
-            score: None,
             block_m: ((150, 300), (60, 120)),
             streets: Beachfront,
             alleys: false,
@@ -183,7 +125,6 @@ RegionTemplate(
         ),
         farmland: ZoneRule(
             // The desert fringe: open dirt, section roads, a few yards and sheds.
-            score: None,
             block_m: ((400, 400), (400, 400)),
             streets: Sections,
             alleys: false,
@@ -197,7 +138,6 @@ RegionTemplate(
             massing: Some(Massing(coverage: 0.04, floors: (1, 1), floors_mean: 1, floors_spread: 0, style_weights: [2, 1])),
         ),
         hills: ZoneRule(
-            score: None,
             block_m: ((200, 400), (150, 300)),
             streets: Open,
             alleys: false,
@@ -212,7 +152,6 @@ RegionTemplate(
         ),
         highway: ZoneRule(
             // The rights of way: the freeway corridor, the rail line and the channel.
-            score: None,
             block_m: ((400, 800), (48, 48)),
             streets: Grid,
             alleys: false,
