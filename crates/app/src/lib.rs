@@ -35,7 +35,7 @@ mod nitrous;
 pub mod npc;
 pub mod pacing;
 mod peds;
-mod places;
+pub mod places;
 pub mod preview;
 mod propinst;
 pub mod radio;
@@ -365,7 +365,7 @@ impl App {
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let mut marquees = marquee::Marquees::of(&place, &grammar.landmarks);
         let mut drivethru = drivethru::DriveThru::of(&place, &grammar.landmarks, seed);
-        let sound = sound::Sound::new(&place, &drive);
+        let sound = sound::Sound::new(&place, &drive, world.foghorn);
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         let mut signals = signals::Signals::of(&place, &npcs.graph, |p| {
             [

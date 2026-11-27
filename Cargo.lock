@@ -142,8 +142,11 @@ dependencies = [
 name = "audio-preview"
 version = "0.1.0"
 dependencies = [
+ "app",
  "audio",
+ "place",
  "ron",
+ "skywave-core",
  "vehicle",
 ]
 

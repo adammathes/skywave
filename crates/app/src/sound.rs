@@ -5,8 +5,10 @@
 //! Each sim step notes the collider's [`world::Impact`] (new curb kicks and wall hits are
 //! counted, so none is lost between frames); each frame [`Sound::params`] samples the rest.
 
-use audio::synth::{AudioParams, EngineParams, EngineProfile, Surface, WheelParams};
-use place::{Place, ZoneId, Zones};
+use audio::synth::{
+    AmbienceParams, AudioParams, EngineParams, EngineProfile, Surface, WheelParams,
+};
+use place::{Place, RoadClass, ZoneId, Zones};
 use vehicle::sim::{GRAVITY, WHEEL_RADIUS_M};
 
 use crate::daylight::Daylight;
@@ -17,8 +19,18 @@ use crate::settings::Settings;
 const HIT_MIN_MPS: f32 = 0.5;
 /// Ambience looks at the zones this far round the car, m.
 const AMBIENCE_RADIUS_M: f32 = 60.0;
-/// Birds sing with the sun between these elevations, degrees (none at night).
+/// ...and, for the foghorn, the open water this far round, m.
+const FOGHORN_RADIUS_M: f32 = 350.0;
+/// Birds sing with the sun between these elevations, degrees (none at night); crickets
+/// start as it sets below the lower one and are in full voice by the second.
 const BIRDS_SUN_DEG: [f32; 2] = [-2.0, 8.0];
+const CRICKETS_SUN_DEG: [f32; 2] = [-1.0, -7.0];
+/// A freeway is heard in full this near, m, fading as a line of traffic does (half as
+/// loud four times as far), and not at all past [`FREEWAY_GONE_M`].
+const FREEWAY_NEAR_M: f32 = 40.0;
+const FREEWAY_GONE_M: f32 = 900.0;
+/// The city's traffic at night, against the day's.
+const CITY_NIGHT: f32 = 0.55;
 
 /// The place's zone grid, kept for the ambience (the place itself is not kept).
 #[derive(Clone, Debug, Default)]
@@ -58,11 +70,28 @@ impl ZoneGrid {
     }
 }
 
+/// The shares of the ground round a point the ambience is made from, `[0, 1]`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Shares {
+    ocean: f32,
+    /// Yards and parks: birds by day, crickets by night.
+    yards: f32,
+    city: f32,
+    trees: f32,
+    industry: f32,
+    /// Open water further out, for the foghorn.
+    open_water: f32,
+}
+
 /// The sound state the app keeps between steps and frames.
 #[derive(Clone, Debug)]
 pub struct Sound {
     profile: EngineProfile,
     zones: ZoneGrid,
+    /// The highways' segments, `[ax, az, bx, bz]`.
+    freeways: Vec<[f32; 4]>,
+    /// The world has a foghorn ([`crate::scenario::Scenario::foghorn`]).
+    foghorn: bool,
     /// Half the car's width, m: how far out a bump counts as fully on one side.
     half_width: f32,
     curb_kicks: u32,
@@ -76,11 +105,24 @@ pub struct Sound {
 }
 
 impl Sound {
-    /// For the car `drive` in `place`.
-    pub fn new(place: &Place, drive: &Drive) -> Sound {
+    /// For the car `drive` in `place`, in a world with a foghorn or not.
+    pub fn new(place: &Place, drive: &Drive, foghorn: bool) -> Sound {
+        let nodes = &place.roads.nodes;
+        let freeways = place
+            .roads
+            .edges
+            .iter()
+            .filter(|e| e.class == RoadClass::Highway)
+            .filter_map(|e| {
+                let (a, b) = (nodes.get(e.a as usize)?, nodes.get(e.b as usize)?);
+                Some([a.pos[0], a.pos[1], b.pos[0], b.pos[1]])
+            })
+            .collect();
         Sound {
             profile: EngineProfile::from_name(&drive.spec.feel.engine_sound),
             zones: ZoneGrid::of(place),
+            freeways,
+            foghorn,
             half_width: 0.5 * drive.spec.dims_m[1],
             curb_kicks: 0,
             curb_speed: 0.0,
@@ -148,10 +190,22 @@ impl Sound {
                 },
             };
         }
-        let (ocean, birds) = self.ambience([s.pos[0], s.pos[2]]);
-        let [lo, hi] = BIRDS_SUN_DEG;
-        let t = ((daylight.sun_elevation_deg - lo) / (hi - lo)).clamp(0.0, 1.0);
-        let day = t * t * (3.0 - 2.0 * t);
+        let p = [s.pos[0], s.pos[2]];
+        let shares = self.shares(p);
+        let ease = |[lo, hi]: [f32; 2]| {
+            let t = ((daylight.sun_elevation_deg - lo) / (hi - lo)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        let day = ease(BIRDS_SUN_DEG);
+        let night = ease(CRICKETS_SUN_DEG);
+        let ambience = AmbienceParams {
+            city: shares.city * (CITY_NIGHT + (1.0 - CITY_NIGHT) * (1.0 - night)),
+            freeway: self.freeway(p),
+            trees: shares.trees,
+            crickets: shares.yards * night,
+            industry: shares.industry,
+            foghorn: if self.foghorn { shares.open_water } else { 0.0 },
+        };
         AudioParams {
             master: settings.master_volume,
             engine_volume: settings.engine_volume,
@@ -180,8 +234,9 @@ impl Sound {
             curb_side: self.curb_side,
             hit_side: self.hit_side,
             horn: drive.horn,
-            ocean,
-            birds: birds * day,
+            ocean: shares.ocean,
+            birds: shares.yards * day,
+            ambience,
             // Set by the app from the railway (`App::frame`).
             bell: 0.0,
             // Set by the app from the traffic (`App::frame`).
@@ -197,9 +252,10 @@ impl Sound {
         }
     }
 
-    /// Shares of the ground round `p` that are beach or water, and residential or park.
-    /// The point itself counts twice.
-    fn ambience(&self, p: [f32; 2]) -> (f32, f32) {
+    /// Shares of the ground round `p` (the zones at it, counted twice, and
+    /// [`AMBIENCE_RADIUS_M`] round it in eight directions; the open water
+    /// [`FOGHORN_RADIUS_M`] round it); all 0 without zones.
+    fn shares(&self, p: [f32; 2]) -> Shares {
         const RING: [[f32; 2]; 8] = [
             [1.0, 0.0],
             [0.707, 0.707],
@@ -210,28 +266,77 @@ impl Sound {
             [0.0, -1.0],
             [0.707, -0.707],
         ];
-        let mut ocean = 0.0;
-        let mut birds = 0.0;
+        let around = |d: &[f32; 2], r: f32| [p[0] + d[0] * r, p[1] + d[1] * r];
+        let mut s = Shares::default();
         let mut total = 0.0;
-        let ring = RING.iter().map(|d| {
-            let q = [
-                p[0] + d[0] * AMBIENCE_RADIUS_M,
-                p[1] + d[1] * AMBIENCE_RADIUS_M,
-            ];
-            (q, 1.0)
-        });
+        let ring = RING.iter().map(|d| (around(d, AMBIENCE_RADIUS_M), 1.0));
         for (q, weight) in [(p, 2.0)].into_iter().chain(ring) {
             let Some(zone) = self.zones.at(q) else {
-                return (0.0, 0.0);
+                return Shares::default();
             };
             total += weight;
+            // How busy, how leafy, and the rest, per zone.
+            let (city, trees) = match zone {
+                ZoneId::Downtown => (1.0, 0.0),
+                ZoneId::Commercial => (0.8, 0.1),
+                ZoneId::Strip => (0.7, 0.05),
+                ZoneId::Highway => (0.6, 0.0),
+                ZoneId::Industrial => (0.5, 0.0),
+                ZoneId::Residential => (0.3, 0.6),
+                ZoneId::Suburb => (0.15, 0.7),
+                ZoneId::Park => (0.15, 1.0),
+                ZoneId::Beach | ZoneId::Water => (0.1, 0.0),
+                ZoneId::Hills => (0.0, 0.8),
+                ZoneId::Farmland => (0.0, 0.4),
+            };
+            s.city += city * weight;
+            s.trees += trees * weight;
             match zone {
-                ZoneId::Beach | ZoneId::Water => ocean += weight,
-                ZoneId::Residential | ZoneId::Suburb | ZoneId::Park => birds += weight,
+                ZoneId::Beach | ZoneId::Water => s.ocean += weight,
+                ZoneId::Residential | ZoneId::Suburb | ZoneId::Park => s.yards += weight,
+                ZoneId::Industrial => s.industry += weight,
                 _ => {}
             }
         }
-        (ocean / total, birds / total)
+        for v in [
+            &mut s.ocean,
+            &mut s.yards,
+            &mut s.city,
+            &mut s.trees,
+            &mut s.industry,
+        ] {
+            *v /= total;
+        }
+        let water = RING
+            .iter()
+            .filter(|d| self.zones.at(around(d, FOGHORN_RADIUS_M)) == Some(ZoneId::Water))
+            .count();
+        s.open_water = (water as f32 / 4.0).min(1.0);
+        s
+    }
+
+    /// How near the nearest freeway is, `[0, 1]`: 1 within [`FREEWAY_NEAR_M`], then as
+    /// the square root of the distance falls off, gone by [`FREEWAY_GONE_M`].
+    fn freeway(&self, p: [f32; 2]) -> f32 {
+        let mut d2 = f32::INFINITY;
+        for &[ax, az, bx, bz] in &self.freeways {
+            let (dx, dz) = (bx - ax, bz - az);
+            let len2 = dx * dx + dz * dz;
+            let t = if len2 > 0.0 {
+                (((p[0] - ax) * dx + (p[1] - az) * dz) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let (ex, ez) = (ax + t * dx - p[0], az + t * dz - p[1]);
+            d2 = d2.min(ex * ex + ez * ez);
+        }
+        let d = d2.sqrt();
+        if d >= FREEWAY_GONE_M {
+            return 0.0;
+        }
+        let near = (FREEWAY_NEAR_M / d.max(FREEWAY_NEAR_M)).sqrt();
+        let fade = 1.0 - d / FREEWAY_GONE_M;
+        near * fade.sqrt()
     }
 }
 
@@ -302,6 +407,8 @@ mod tests {
     fn sound() -> Sound {
         Sound {
             profile: EngineProfile::Default,
+            freeways: vec![[0.0, 1000.0, 100.0, 1000.0]],
+            foghorn: true,
             zones: ZoneGrid {
                 cells: vec![
                     ZoneId::Residential,
@@ -345,18 +452,33 @@ mod tests {
     #[test]
     fn ambience_follows_the_zones() {
         let s = sound();
-        // Deep in the residential cell: birds only.
-        let (o, b) = s.ambience([-150.0, -150.0]);
-        assert_eq!((o, b), (0.0, 1.0));
-        // In the beach/water row: all ocean.
-        let (o, b) = s.ambience([-100.0, 150.0]);
-        assert_eq!((o, b), (1.0, 0.0));
+        // Deep in the residential cell: yards and trees, a little city.
+        let a = s.shares([-150.0, -150.0]);
+        assert_eq!((a.ocean, a.yards), (0.0, 1.0));
+        assert!(
+            (a.city - 0.3).abs() < 1e-6 && (a.trees - 0.6).abs() < 1e-6,
+            "{a:?}"
+        );
+        // In the beach/water row: all ocean, and the open water further out.
+        let a = s.shares([-100.0, 150.0]);
+        assert_eq!((a.ocean, a.yards), (1.0, 0.0));
+        assert!(a.open_water > 0.0);
         // Without zones, nothing.
         let none = Sound {
             zones: ZoneGrid::default(),
             ..sound()
         };
-        assert_eq!(none.ambience([0.0, 0.0]), (0.0, 0.0));
+        assert_eq!(none.shares([0.0, 0.0]), Shares::default());
+    }
+
+    #[test]
+    fn the_freeway_fades_with_distance() {
+        let s = sound();
+        assert!(s.freeway([50.0, 1010.0]) > 0.99);
+        let mid = s.freeway([50.0, 1160.0]);
+        assert!(mid > 0.3 && mid < 0.6, "{mid}");
+        assert!(s.freeway([50.0, 1600.0]) < mid);
+        assert_eq!(s.freeway([50.0, 2000.0]), 0.0);
     }
 
     #[test]

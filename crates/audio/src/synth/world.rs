@@ -17,12 +17,13 @@
 //! - **Horn**: two tones a minor third apart (410 and 500 Hz), brassy through a band-pass,
 //!   on its own output for the ui bus.
 //! - **Ambience**: an ocean wash (low-passed noise swelling every ~12 s) and, by day, the
-//!   odd bird call (a few swept chirps panned somewhere), each scaled by its amount.
+//!   odd bird call (a few swept chirps panned somewhere), each scaled by its amount; the
+//!   rest of the place's life is [`super::ambience`].
 //! - **Traffic**: each passing car's engine (`AudioParams::traffic`) a buzzy pulse at its
 //!   firing frequency, low-passed, with a little rumble under it, at its level and pan.
 
 use super::dsp::{fract, pan_gains, sin_turns, smoothstep, unit, Decay, Noise, Slew, Svf, DT};
-use super::{AudioParams, Surface, TRAFFIC_VOICES};
+use super::{AmbienceSynth, AudioParams, Surface, TRAFFIC_VOICES};
 
 /// Filter coefficients, targets and events are updated every this many samples.
 const TICK: usize = 32;
@@ -106,6 +107,8 @@ pub struct WorldSynth {
     bell_clock: f32,
     bell: Decay,
     bell_phase: [f32; 3],
+
+    ambience: AmbienceSynth,
 }
 
 /// A crossing bell: strikes a second, and its partials (Hz) and their levels.
@@ -206,6 +209,7 @@ impl WorldSynth {
             bell_clock: 0.0,
             bell: Decay::SILENT,
             bell_phase: [0.0; 3],
+            ambience: AmbienceSynth::new(),
         }
     }
 
@@ -232,6 +236,7 @@ impl WorldSynth {
         }
         self.fresh = false;
         self.target = *p;
+        self.ambience.set_params(&p.ambience);
     }
 
     /// Fills `world` and `ui` (interleaved stereo, the same length) with the next frames:
@@ -315,6 +320,8 @@ impl WorldSynth {
         self.wind_target = level * v * v * gust;
         self.wind_l.set(hz, 0.6);
         self.wind_r.set(hz * 1.07, 0.6);
+
+        self.ambience.tick(dt);
 
         // Ocean swell.
         self.swell_phase[0] = fract(self.swell_phase[0] + 0.083 * dt);
@@ -481,6 +488,10 @@ impl WorldSynth {
             }
         }
 
+        let [al, ar] = self.ambience.sample();
+        l += al;
+        r += ar;
+
         // Crossing bells: a struck ding a little over twice a second while they ring.
         let bell = self.bell_level.step(p.bell);
         if bell > 1e-4 || self.bell.active() {
@@ -530,6 +541,7 @@ impl WorldSynth {
             e.lp.reset();
         }
         self.brown = 0.0;
+        self.ambience.reset();
     }
 }
 

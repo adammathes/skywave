@@ -11,3 +11,6 @@ rust-version.workspace = true
 audio.workspace = true
 ron.workspace = true
 vehicle.workspace = true
+app.workspace = true
+place.workspace = true
+skywave-core.workspace = true

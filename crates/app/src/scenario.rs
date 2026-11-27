@@ -62,6 +62,9 @@ pub struct Scenario {
     /// range stand over a basin.
     #[serde(default = "one")]
     pub haze: f32,
+    /// A foghorn sounds across the open water (`audio::synth::ambience`).
+    #[serde(default)]
+    pub foghorn: bool,
     /// Still being built: the World page marks it "coming" (it can be picked).
     #[serde(default)]
     pub stub: bool,
