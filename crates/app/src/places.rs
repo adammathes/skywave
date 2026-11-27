@@ -409,11 +409,10 @@ mod tests {
                 handbrake: false,
             };
             let mut car = VehicleState::spawn(&spec, [a[0], a[1] + 0.3, a[2]], (-dx).atan2(-dz));
-            car.vel = [
-                SPEED * dx / len,
-                SPEED * (b[1] - a[1]).signum() * 0.0,
-                SPEED * dz / len,
-            ];
+            // Along the road as it leaves, so a straight that starts on a grade is not a jump.
+            let ahead = [a[0] + 4.0 * dx / len, a[2] + 4.0 * dz / len];
+            let grade = (ground.level_from(ahead, a[1] + 1.0).0 - a[1]) / 4.0;
+            car.vel = [SPEED * dx / len, SPEED * grade, SPEED * dz / len];
             for w in car.wheels.iter_mut() {
                 w.spin = SPEED / 0.32;
             }
