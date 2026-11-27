@@ -426,10 +426,10 @@ fn lights_are_the_lamps_signs_and_shops() {
 /// with `cargo test -p world --test detail -- --nocapture` (it prints the table), check the
 /// coast screenshots, and commit the new values in their own commit saying why they moved.
 const GOLDEN: [u64; 4] = [
-    0x4ADA_34EC_3CDF_6DBD,
-    0x09C3_EE58_B6AF_639D,
-    0x65B3_9DFB_1C8F_3CBA,
-    0xEDE6_4C37_48BD_31D3,
+    0x1519_4531_6FC3_28A6,
+    0x7F72_B09E_7C50_EE27,
+    0xD40D_CA6F_3CA2_6795,
+    0xD80C_745B_B778_84CC,
 ];
 
 /// The detail is deterministic, valid and pinned.

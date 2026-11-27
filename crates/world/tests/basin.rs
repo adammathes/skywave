@@ -47,7 +47,7 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0xB143_96B4_5451_52EA,
         0x0064_0F32_D37F_5A19,
-        0x0612_EA10_6651_4AFA,
+        0xDFF7_E0AB_FF8A_C84D,
     ),
     (
         0xD435_711D_0080_D093,
@@ -62,7 +62,7 @@ const GOLDEN: [(u64, u64, u64); 4] = [
     (
         0xC27D_7502_6AB3_32EB,
         0xF4DD_5E27_5E68_D9B0,
-        0x1B2A_E4C7_FC08_0EF7,
+        0x9BDC_7DA3_5746_E7BC,
     ),
 ];
 

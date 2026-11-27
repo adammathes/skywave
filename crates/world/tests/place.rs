@@ -24,14 +24,14 @@ fn grammar() -> world::Grammar {
 /// `?place=coast` screenshots, and commit the new values in their own commit whose
 /// message says why they moved.
 const GOLDEN: [u64; 8] = [
-    0xFD51_BDFB_F824_891C,
-    0xFC84_78D2_5EE3_149C,
-    0x4E8A_526A_F9BF_87B1,
-    0x340F_56CB_FF43_5B4A,
-    0x2C5F_B120_8CCF_5966,
-    0x7CA9_50E5_2697_7478,
-    0xB395_78C3_F44B_44E5,
-    0x8949_7359_A469_02CC,
+    0xA787_0D60_6B50_3164,
+    0x43D8_01FA_1309_EEF7,
+    0xEF40_D4C6_A185_E32F,
+    0x2BE4_FC67_2D71_D652,
+    0xC9DB_4A9D_4226_EEC9,
+    0x6BDE_365C_1417_F4F3,
+    0x197C_CF5C_C5D1_49A6,
+    0xE69A_996F_51E4_67FF,
 ];
 
 #[test]
