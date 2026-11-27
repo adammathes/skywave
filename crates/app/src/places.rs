@@ -352,3 +352,154 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod bay_hills {
+    use super::*;
+    use skywave_core::Seed;
+    use vehicle::{Assists, VehicleInput, VehicleState};
+
+    /// The `n` steepest `len`-m stretches of the Bay Loop's roads (one per edge), as
+    /// (start, end, grade), start downhill.
+    fn crests(p: &Place, len: f32, n: usize) -> Vec<([f32; 3], [f32; 3], f32)> {
+        let mut out = Vec::new();
+        for e in &p.roads.edges {
+            let pr = &e.profile;
+            let mut d = vec![0.0f32];
+            for w in pr.windows(2) {
+                let (dx, dz) = (w[1][0] - w[0][0], w[1][2] - w[0][2]);
+                d.push(d.last().unwrap() + (dx * dx + dz * dz).sqrt());
+            }
+            let mut best: Option<([f32; 3], [f32; 3], f32)> = None;
+            let mut j = 0;
+            for i in 0..pr.len() {
+                while j < pr.len() && d[j] - d[i] < len {
+                    j += 1;
+                }
+                if j == pr.len() {
+                    break;
+                }
+                let g = (pr[j][1] - pr[i][1]) / (d[j] - d[i]);
+                let (a, b) = if g > 0.0 {
+                    (pr[i], pr[j])
+                } else {
+                    (pr[j], pr[i])
+                };
+                if best.is_none_or(|x| g.abs() > x.2) {
+                    best = Some((a, b, g.abs()));
+                }
+            }
+            out.extend(best);
+        }
+        out.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        out.truncate(n);
+        out
+    }
+
+    fn input(throttle: f32, brake: f32) -> VehicleInput {
+        VehicleInput {
+            throttle,
+            brake,
+            steer: 0.0,
+            handbrake: false,
+        }
+    }
+
+    /// On `ground`, from `a` facing `b`: rolling uphill at 5 m/s, brake to a stop for 3 s,
+    /// then (after `gap` s off both pedals) full throttle for 6 s. Returns (rolled back m,
+    /// uphill speed after 2 s, after 6 s, m/s).
+    fn restart(
+        spec: &vehicle::VehicleSpec,
+        ground: &world::WorldCollider,
+        a: [f32; 3],
+        b: [f32; 3],
+        gap: f32,
+    ) -> (f32, f32, f32) {
+        let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
+        let h = (-dx).atan2(-dz);
+        let mid = [
+            a[0] + 0.2 * dx,
+            a[1] + 0.2 * (b[1] - a[1]) + 0.3,
+            a[2] + 0.2 * dz,
+        ];
+        let mut s = VehicleState::spawn(spec, mid, h);
+        let dir = {
+            let dy = b[1] - a[1];
+            let l = (dx * dx + dy * dy + dz * dz).sqrt();
+            [dx / l, dy / l, dz / l]
+        };
+        s.vel = [5.0 * dir[0], 5.0 * dir[1], 5.0 * dir[2]];
+        let ar = Assists::ARCADE;
+        for _ in 0..360 {
+            vehicle::step(spec, &mut s, &input(0.0, 1.0), &ar, ground);
+        }
+        assert!(
+            s.gear > 0 && s.speed_mps.abs() < 0.2,
+            "{} held: gear {} {}",
+            spec.id,
+            s.gear,
+            s.speed_mps
+        );
+        let p0 = s.pos;
+        let along = |p: [f32; 3]| {
+            (p[0] - p0[0]) * dir[0] + (p[1] - p0[1]) * dir[1] + (p[2] - p0[2]) * dir[2]
+        };
+        let mut back = 0.0f32;
+        let mut v2 = 0.0;
+        let n_gap = (gap * 120.0) as usize;
+        for k in 0..720 {
+            let i = if k < n_gap {
+                input(0.0, 0.0)
+            } else {
+                input(1.0, 0.0)
+            };
+            vehicle::step(spec, &mut s, &i, &ar, ground);
+            back = back.max(-along(s.pos));
+            if k == 240 {
+                v2 = s.speed_mps;
+            }
+        }
+        (back, v2, s.speed_mps)
+    }
+
+    /// Every car the player can pick (the traffic-only semi aside), braked to a stop on
+    /// each of the Bay Loop's three steepest 30 m stretches, on the real collider: it stays
+    /// in drive, pulls away at once and climbs; after half a second off both pedals it
+    /// rolls back well under a car length. Prints the table.
+    #[test]
+    fn every_car_restarts_on_the_bay_loops_steepest_crests() {
+        let sc = crate::scenario::get(crate::scenario::index_of("bay_loop_2005").unwrap());
+        let p = build_in(PlaceKey::Coast, Seed(1), sc).unwrap();
+        let ground = world::WorldCollider::build(&p, grammar_of(sc));
+        let cs = crests(&p, 30.0, 3);
+        assert!(cs.len() == 3 && cs[2].2 > 0.2, "{cs:?}");
+        for (a, _, g) in &cs {
+            println!(
+                "crest {:.1}% over 30 m at ({:.0}, {:.0})",
+                g * 100.0,
+                a[0],
+                a[2]
+            );
+        }
+        for (id, text) in crate::vehicles::BUILTIN
+            .iter()
+            .filter(|c| c.0 != "anvil_semi")
+        {
+            let (id, text) = (*id, *text);
+            let spec = crate::vehicles::load_spec(text).unwrap();
+            let mut line = format!("{id:22}");
+            for (a, b, _) in &cs {
+                for gap in [0.0, 0.5] {
+                    let (back, v2, v6) = restart(&spec, &ground, *a, *b, gap);
+                    line += &format!(" | back {back:4.2} v2s {v2:4.1} v6s {v6:4.1}");
+                    let limit = if gap > 0.0 { 1.2 } else { 0.2 };
+                    assert!(
+                        back < limit && v6 > 4.0,
+                        "{id} gap {gap}: back {back} m, {v6} m/s"
+                    );
+                }
+            }
+            println!("{line}");
+        }
+    }
+}
