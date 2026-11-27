@@ -1807,20 +1807,18 @@ mod tests {
     /// draws in the worst frame and in the median frame after the first, forward and shadow
     /// triangles a frame (`docs/PERFORMANCE.md`): the measured numbers plus about 10%.
     const JUNCTION_BUDGET: [(Quality, u32, u32, u64, u64); 2] = [
-        (Quality::Deck, 959, 572, 284_000, 840_000),
-        (Quality::Medium, 975, 506, 284_000, 1_381_000),
+        (Quality::Deck, 1554, 990, 1_052_000, 1_241_000),
+        (Quality::Medium, 1477, 708, 1_051_000, 1_968_000),
     ];
     // Measured over 8 frames driving at 100 km/h with the world running after it streamed
-    // held still (the same in release and debug; 96 cars and 25 people live, 190 car and
-    // figure-part instances more in the forward pass than with traffic off): the most draws
-    // in a frame (the first draws every cascade; at Deck the depth pre-pass draws the
-    // forward pass's meshes twice), the median frame's after it (no far cascade), forward
-    // triangles and shadow triangles a frame (moving casters redraw the far cascade on its
-    // interval): Deck 828, 481, 235k, 743k; Medium 854, 434, 235k, 1223k; with drivers,
-    // see-through glass and the near cars' cabins Deck 872, 520, 258k, 763k; Medium 886,
-    // 460, 258k, 1255k. Main's junction
-    // before the map edges (another layout): Deck 1134, 681, 428k, 672k; Medium 1121, 503,
-    // 428k, 1206k.
+    // held still (96 cars and 21 people live, 157 car and figure-part instances more in the
+    // forward pass than with traffic off): the most draws in a frame (the first draws every
+    // cascade; at Deck the depth pre-pass draws the forward pass's meshes twice), the median
+    // frame's after it (no far cascade), forward triangles and shadow triangles a frame
+    // (moving casters redraw the far cascade on its interval): Deck 1413, 900, 956k, 1128k;
+    // Medium 1343, 644, 955k, 1789k. This is the authored Pacific Shore, looking up center
+    // street at downtown: a whole built grid in view. The procedural coast it replaced was
+    // sparse (its junction: Deck 872, 520, 258k, 763k; Medium 886, 460, 258k, 1255k).
     /// Instances one pedestrian adds: a figure's parts.
     const FIGURE_PARTS: u32 = app::FIGURE_PARTS as u32;
 

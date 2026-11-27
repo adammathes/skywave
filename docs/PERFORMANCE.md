@@ -386,7 +386,14 @@ draw per shape) and their cabins: **Deck 872, 520, 258k, 763k; Medium 886, 460, 
 frame, 284k forward and 840k shadow triangles; Medium 975, 506, 284k and 1381k** (about
 10% over; the shadow limits sit
 above main's, 740k and 1325k, which this junction's casters measure 743k and 1223k
-against), and if fewer than three cars' and three people's instances more are in the
+against). That coast was the procedural one, a sparse town. On the authored Pacific Shore
+(a whole built grid; `docs/LAYOUTS.md`) the junction is center street's approach to orange
+street at 981.6,1483 heading north, with downtown ahead, and it measures, busy: **Deck 1413
+draws, 900 in the median frame, 956k forward, 1128k shadow; Medium 1343, 644, 955k,
+1789k**. Town views there measure 650k to 750k forward triangles at Medium, in line with
+the other authored worlds' starts and streets (Mirage Bowl's boulevard 752k, Lake City
+652k, Bay Loop 591k); the downtown approach is the heaviest. The test now fails above
+**Deck 1554, 990, 1052k and 1241k; Medium 1477, 708, 1051k and 1968k**, and if fewer than three cars' and three people's instances more are in the
 forward pass than with traffic off. The traffic sim (step and populate, busy) and the
 pedestrian sim (busy) each have a median under 0.5 ms a step in a debug build
 (`app::npc` and the `traffic` budget tests), the best of three 5 s windows; the app's

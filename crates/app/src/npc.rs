@@ -1057,13 +1057,12 @@ mod tests {
     use super::*;
     use crate::{App, InputState, SceneSetup};
 
-    /// The coast junction of the `coast-traffic-noon` golden, 35 m back from its stop line:
-    /// of the signalized four-way approaches within the junction draw budget
-    /// (`platform-native`'s `JUNCTION_BUDGET`), the one whose frame shows the most NPC cars
-    /// stopped at the lights (at `phase=1440`; busy, noon). Back from the line the queue
-    /// stands beside and ahead of the player, not on the chase camera.
+    /// The coast junction of the `coast-traffic-noon` golden and of `platform-native`'s
+    /// `JUNCTION_BUDGET`: center street's approach to orange street, back from the stop line
+    /// so the queue stands beside and ahead of the player, not on the chase camera (busy,
+    /// noon).
     pub(crate) const JUNCTION: &str =
-        "place=coast&car=gannet_gt&cam=chase-mid&pos=747.7,493.9&yaw=-20.5";
+        "place=coast&car=gannet_gt&cam=chase-mid&pos=981.6,1483&yaw=0";
 
     fn app(query: &str) -> App {
         App::from_setup(&SceneSetup::from_query(query).unwrap()).unwrap()
