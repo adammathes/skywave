@@ -9,9 +9,11 @@
 //! engine, the squeal band for the tires. Also prints the synth's cost per 256-frame block.
 //!
 //! `audio-preview drive [OUT_DIR] [CAR_ID...]` renders real cars driven through the sim
-//! instead (see [`drive`]).
+//! instead (see [`drive`]). `audio-preview places [OUT_DIR] [SCENARIO...]` sits a car in
+//! each kind of district of each world and renders what it hears (see [`places`]).
 
 mod drive;
+mod places;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -134,11 +136,150 @@ fn engine_line(label: &str, x: &[f32], rpm: f32, cylinders: f32) {
     );
 }
 
+/// `audio-preview ambience [OUT_DIR]`: each part of the place's ambience alone, in full,
+/// with the engine silent: `ambience_<part>.wav`, 30 s each.
+fn ambience(dir: &Path) -> std::io::Result<()> {
+    use audio::synth::AmbienceParams;
+    std::fs::create_dir_all(dir)?;
+    let none = AmbienceParams::default();
+    let parts = [
+        ("city", AmbienceParams { city: 1.0, ..none }),
+        (
+            "freeway",
+            AmbienceParams {
+                freeway: 1.0,
+                ..none
+            },
+        ),
+        (
+            "freeway_far",
+            AmbienceParams {
+                freeway: 0.3,
+                ..none
+            },
+        ),
+        ("trees", AmbienceParams { trees: 1.0, ..none }),
+        (
+            "crickets",
+            AmbienceParams {
+                crickets: 1.0,
+                ..none
+            },
+        ),
+        (
+            "industry",
+            AmbienceParams {
+                industry: 1.0,
+                ..none
+            },
+        ),
+        (
+            "foghorn",
+            AmbienceParams {
+                foghorn: 1.0,
+                ..none
+            },
+        ),
+        (
+            "el_train",
+            AmbienceParams {
+                el_train: 1.0,
+                ..none
+            },
+        ),
+        (
+            "cable_car",
+            AmbienceParams {
+                cable_car: 1.0,
+                ..none
+            },
+        ),
+        ("gulls", AmbienceParams { gulls: 1.0, ..none }),
+        (
+            "helicopter",
+            AmbienceParams {
+                helicopter: 1.0,
+                ..none
+            },
+        ),
+        (
+            "ice_cream",
+            AmbienceParams {
+                ice_cream: 1.0,
+                ..none
+            },
+        ),
+        (
+            "carhop",
+            AmbienceParams {
+                carhop: 1.0,
+                ..none
+            },
+        ),
+    ];
+    for (name, a) in parts {
+        let x = render(30.0, |_| AudioParams {
+            engine_volume: 0.0,
+            ambience: a,
+            ..AudioParams::default()
+        });
+        let name = format!("ambience_{name}.wav");
+        write_wav(&dir.join(&name), &x)?;
+        levels(&name, &x);
+    }
+    let x = render(30.0, |_| AudioParams {
+        engine_volume: 0.0,
+        ocean: 1.0,
+        ..AudioParams::default()
+    });
+    levels("ocean (for scale)", &x);
+    let x = render(30.0, |_| AudioParams::default());
+    levels("idle engine (for scale)", &x);
+    // Cost: the whole mixer with every part playing, against none.
+    let all = AmbienceParams {
+        city: 1.0,
+        freeway: 1.0,
+        trees: 1.0,
+        crickets: 1.0,
+        industry: 1.0,
+        foghorn: 1.0,
+        el_train: 1.0,
+        cable_car: 1.0,
+        gulls: 1.0,
+        helicopter: 1.0,
+        ice_cream: 1.0,
+        carhop: 1.0,
+    };
+    for (label, a) in [("no ambience", none), ("all of it", all)] {
+        let mut mixer = Mixer::new();
+        mixer.set_params(&AudioParams {
+            ambience: a,
+            ..AudioParams::default()
+        });
+        let mut buf = [0.0f32; BLOCK_SAMPLES];
+        let t = Instant::now();
+        for _ in 0..4000 {
+            mixer.render(&mut buf);
+        }
+        let ms = t.elapsed().as_secs_f64() * 1000.0 / 4000.0;
+        println!("mixer with {label}: {ms:.4} ms per 256-frame block");
+    }
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("drive") {
         let dir = args.get(1).map_or("audio-preview-out", String::as_str);
         return drive::run(Path::new(dir), args.get(2..).unwrap_or(&[]));
+    }
+    if args.first().map(String::as_str) == Some("ambience") {
+        let dir = Path::new(args.get(1).map_or("audio-preview-out", String::as_str));
+        return ambience(dir);
+    }
+    if args.first().map(String::as_str) == Some("places") {
+        let dir = args.get(1).map_or("audio-preview-out", String::as_str);
+        return places::run(Path::new(dir), args.get(2..).unwrap_or(&[]));
     }
     let out_dir = PathBuf::from(
         std::env::args()

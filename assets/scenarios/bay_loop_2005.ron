@@ -6,6 +6,9 @@ Scenario(
     title: "Bay Loop",
     year: 2005,
     kind: "Bay and hills",
+    // The Bay's own sounds: a foghorn across the water, the cable cars' bells downtown,
+    // gulls along the shore.
+    sounds: ["foghorn", "cable_car", "gulls"],
     region: "bay_area",
     layout: "bay_loop",
     grammar: "bay_area_2005.ron",

@@ -62,6 +62,10 @@ pub struct Scenario {
     /// range stand over a basin.
     #[serde(default = "one")]
     pub haze: f32,
+    /// The place's own sounds, by name ([`crate::sound::SOUNDS`]): a foghorn, an
+    /// elevated train, a cable car's bell, gulls, a helicopter, an ice cream truck.
+    #[serde(default)]
+    pub sounds: Vec<String>,
     /// Still being built: the World page marks it "coming" (it can be picked).
     #[serde(default)]
     pub stub: bool,
@@ -100,6 +104,13 @@ impl Scenario {
         }
         if self.default_time.0 > 23 || self.default_time.1 > 59 {
             return err("bad default_time");
+        }
+        if let Some(s) = self
+            .sounds
+            .iter()
+            .find(|s| !crate::sound::SOUNDS.contains(&s.as_str()))
+        {
+            return err(&format!("unknown sound `{s}`"));
         }
         if crate::builtin::region_text(&self.region).is_none() {
             return err("unknown region");

@@ -8,6 +8,8 @@ Scenario(
     title: "Mirage Bowl",
     year: 2001,
     kind: "Basin in the mountains",
+    // A news helicopter crossing the bowl; an ice cream truck in the neighborhoods.
+    sounds: ["helicopter", "ice_cream"],
     region: "socal_bowl",
     layout: "mirage_bowl",
     grammar: "socal_basin_2001.ron",

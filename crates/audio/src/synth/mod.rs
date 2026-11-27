@@ -9,13 +9,16 @@
 //! parameter update (the native audio thread reads them without waiting) never loses one,
 //! and one that sees the same update twice never doubles it.
 
+pub mod ambience;
 pub mod chime;
 pub mod deck;
 pub mod dsp;
 pub mod engine;
+pub mod signature;
 pub mod tune;
 pub mod world;
 
+pub use ambience::{AmbienceParams, AmbienceSynth};
 pub use chime::ChimeSynth;
 pub use deck::DeckSynth;
 pub use engine::{EngineProfile, EngineSynth};
@@ -127,6 +130,9 @@ pub struct AudioParams {
     /// residential streets and parks.
     pub ocean: f32,
     pub birds: f32,
+    /// The rest of the place's life: the city, a freeway, trees, crickets, industry and a
+    /// foghorn ([`ambience`]).
+    pub ambience: AmbienceParams,
     /// A railroad crossing's bells at the listener, `[0, 1]`.
     pub bell: f32,
     /// The nearest passing cars' engines.
@@ -177,6 +183,7 @@ impl Default for AudioParams {
             horn: false,
             ocean: 0.0,
             birds: 0.0,
+            ambience: AmbienceParams::default(),
             bell: 0.0,
             traffic: [TrafficVoice::default(); TRAFFIC_VOICES],
             tunes: 0,
@@ -231,6 +238,7 @@ impl AudioParams {
             hit_side: clamp(fin(self.hit_side, 0.0), -1.0, 1.0),
             ocean: unit(self.ocean),
             birds: unit(self.birds),
+            ambience: self.ambience.sanitized(),
             bell: unit(self.bell),
             traffic,
             tune_volume: unit(self.tune_volume),
