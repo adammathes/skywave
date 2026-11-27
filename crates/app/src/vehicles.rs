@@ -443,7 +443,8 @@ pub const TRAFFIC_SHAPES: [usize; 40] = [
 /// cars alike. A shape not listed weighs [`ZONES_ALIKE`]: the 1980s cars weigh by their
 /// age alone. SUVs and minivans in the residential and strip zones, pickups and box trucks
 /// in the industrial ones, the semi on the freeway alone; the 2001 hero cars at half an
-/// everyday car's weight everywhere, so they turn up without crowding the street.
+/// everyday car's weight everywhere, so they turn up without crowding the street; the 2005
+/// traffic cars at twice it, so the 2005 Bay is mostly its own cars.
 pub const ZONE_WEIGHTS: [(&str, [u8; 12]); 26] = [
     ("plover_sedan", [3, 3, 3, 3, 2, 3, 2, 2, 2, 2, 3, 2]),
     ("sorrel_utility", [2, 4, 4, 4, 1, 2, 2, 2, 2, 3, 2, 2]),
@@ -467,10 +468,10 @@ pub const ZONE_WEIGHTS: [(&str, [u8; 12]); 26] = [
     ("tulwar_sedan", [1; 12]),
     ("petrel_roadster", [1; 12]),
     ("lipizzan_sedan", [1; 12]),
-    ("egret_hybrid", [4, 3, 4, 4, 2, 4, 3, 3, 1, 2, 4, 2]),
-    ("heron_sedan", [4, 4, 4, 4, 3, 4, 3, 3, 2, 2, 4, 2]),
-    ("tern_compact", [4, 4, 4, 3, 2, 4, 3, 3, 2, 2, 3, 2]),
-    ("ibis_crossover", [2, 4, 4, 5, 1, 3, 3, 2, 2, 3, 3, 2]),
+    ("egret_hybrid", [8, 6, 8, 8, 4, 8, 6, 6, 2, 4, 8, 4]),
+    ("heron_sedan", [8, 8, 8, 8, 6, 8, 6, 6, 4, 4, 8, 4]),
+    ("tern_compact", [8, 8, 8, 6, 4, 8, 6, 6, 4, 4, 6, 4]),
+    ("ibis_crossover", [4, 8, 8, 10, 2, 6, 6, 4, 4, 6, 6, 4]),
 ];
 
 /// The zone weights of a shape [`ZONE_WEIGHTS`] does not list.

@@ -545,7 +545,7 @@ mod tests {
         let bay = &all[2];
         assert_eq!(
             (bay.id.as_str(), bay.years, bay.layout.as_deref()),
-            ("bay_loop_2005", (1996, 2005), Some("bay_loop"))
+            ("bay_loop_2005", (2000, 2005), Some("bay_loop"))
         );
         let bowl = &all[3];
         assert_eq!(

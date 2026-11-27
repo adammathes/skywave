@@ -117,7 +117,8 @@ and the foothill village, with a causeway across the bay's south end. Zone rules
 borrows the basin's grammar, palette and radio for now; its own cars, district looks, bridge towers
 and radio follow. Its four `heroes` are the 2005 Bay heroes (`docs/VEHICLES.md`): the player starts in
 the Goshawk Turbo, the Peninsula's turbo commuter, beside the Tulwar Sedan, the Petrel Roadster and the
-Lipizzan Sedan; every car of 1996 to 2005 drives there too.
+Lipizzan Sedan. The 2005 traffic cars fill its streets and lots; every car of 2000 to 2005
+drives there at full weight, older ones rarer.
 
 ## Mirage Valley redrawn: the Mirage Bowl (2001)
 **`mirage_bowl_2001` — Mirage Bowl, 2001.** Mirage Valley's point of view drawn as an authored
