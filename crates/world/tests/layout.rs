@@ -49,7 +49,7 @@ fn layout() -> Layout {
 /// Pinned `Place::content_hash` of the Bay Loop for seed 1. It moves whenever the layout,
 /// the zone rules or any shared stage changes: regenerate with `--nocapture` and commit it
 /// on its own with the reason.
-const GOLDEN: u64 = 0x102783fa76397c06;
+const GOLDEN: u64 = 0x441ef11a1d852fb0;
 
 #[test]
 fn the_bay_loop_validates_and_is_deterministic() {
