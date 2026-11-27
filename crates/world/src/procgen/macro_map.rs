@@ -1,5 +1,5 @@
 //! The macro map: a whole place's heightfield and zone map, with the structure the chunk
-//! stages read (shore, strip, grid lines, water bodies, points of interest). An authored
+//! stages read (grid lines, water bodies, points of interest). An authored
 //! layout fills one ([`super::authored::skeleton`], `docs/LAYOUTS.md`); this module holds
 //! the type and the terrain work every layout shares (smoothing by zone, the edge walls).
 //!
@@ -15,70 +15,11 @@ use alloc::vec::Vec;
 use place::{EdgeKind, ZoneId, EAST, NORTH, SOUTH, WEST};
 use skywave_core::Seed;
 
-use super::terrain::{self, Shore};
+use super::terrain;
 use super::zones::cell_center;
 use super::{CELL_M, ZONE_CELL_M, ZONE_SAMPLES};
 use crate::edges;
 use crate::math::{clamp, floor, lerp, signed_area, V2};
-use crate::template::CoastSide;
-
-/// Maps between world coordinates and the canonical frame terrain is built in: `u` inland
-/// from the place edge the water lies along, `v` along that edge.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Frame {
-    pub side: CoastSide,
-    /// Height samples in x and z.
-    pub samples: [u32; 2],
-}
-
-impl Frame {
-    pub fn new(side: CoastSide, nx: u32, nz: u32) -> Frame {
-        Frame {
-            side,
-            samples: [nx, nz],
-        }
-    }
-
-    fn across(&self) -> bool {
-        matches!(self.side, CoastSide::West | CoastSide::East)
-    }
-
-    /// Samples along `v`.
-    pub fn n_v(&self) -> u32 {
-        if self.across() {
-            self.samples[1]
-        } else {
-            self.samples[0]
-        }
-    }
-
-    pub fn extent(&self) -> [f32; 2] {
-        [
-            (self.samples[0] - 1) as f32 * CELL_M,
-            (self.samples[1] - 1) as f32 * CELL_M,
-        ]
-    }
-
-    pub fn to_canon(&self, p: [f32; 2]) -> (f32, f32) {
-        let [ex, ez] = self.extent();
-        match self.side {
-            CoastSide::West => (p[0], p[1]),
-            CoastSide::East => (ex - p[0], p[1]),
-            CoastSide::North => (p[1], p[0]),
-            CoastSide::South => (ez - p[1], p[0]),
-        }
-    }
-
-    /// A canonical direction `(du, dv)` in world axes.
-    pub fn dir_to_world(&self, du: f32, dv: f32) -> [f32; 2] {
-        match self.side {
-            CoastSide::West => [du, dv],
-            CoastSide::East => [-du, dv],
-            CoastSide::North => [dv, du],
-            CoastSide::South => [dv, -du],
-        }
-    }
-}
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,25 +58,11 @@ pub struct MacroPoi {
     pub facing: [f32; 2],
 }
 
-/// The main drag: a band parallel to the beach.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Strip {
-    /// Centerline of the band, every 16 m along the coast, world coordinates.
-    pub centerline: Vec<[f32; 2]>,
-    /// Gap between the beach's inland edge and the band.
-    pub inland_m: f32,
-    /// Depth of the band.
-    pub width_m: f32,
-    /// Length along the coast.
-    pub length_m: f32,
-}
-
 /// Stages 1–2 for a whole place. See the module docs for the grids.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MacroMap {
     pub seed: Seed,
     pub size_chunks: [u16; 2],
-    pub frame: Frame,
     /// Height samples in x and z.
     pub width: u32,
     pub height: u32,
@@ -145,22 +72,10 @@ pub struct MacroMap {
     pub zone_width: u32,
     pub zone_height: u32,
     pub zones: Vec<ZoneId>,
-    /// The shoreline in the canonical frame; see [`MacroMap::coast_distance`].
-    pub shore: Shore,
     /// Downtown seed point.
     pub downtown: [f32; 2],
-    pub strip: Strip,
     /// Highway centerline from the coast to the inland edge, every ~16 m.
     pub highway: Vec<[f32; 2]>,
-    /// The corridor bed's height at every point of `highway` :
-    /// at most 4.8% steep, carved into `heights`.
-    pub highway_bed: Vec<f32>,
-    /// How far carving the corridor moved each height sample (carved minus before;
-    /// negative in cuts, zero away from the corridor). The arterial stage keeps roads off
-    /// its cut and fill slopes.
-    pub corridor: Vec<f32>,
-    /// The highway's highest point; `None` on flat places.
-    pub pass: Option<[f32; 2]>,
     pub pois: Vec<MacroPoi>,
     /// What bounds the place on each side, `[north, east, south, west]`.
     pub edges: [EdgeKind; 4],
@@ -269,7 +184,10 @@ impl MacroMap {
     /// The playable rectangle `[x0, z0, x1, z1]`: the place less the edge bands. Roads,
     /// lots and points of interest stay inside it.
     pub fn playable(&self) -> [f32; 4] {
-        let ext = self.frame.extent();
+        let ext = [
+            (self.width - 1) as f32 * CELL_M,
+            (self.height - 1) as f32 * CELL_M,
+        ];
         let b = self.bands;
         [b[WEST], b[NORTH], ext[0] - b[EAST], ext[1] - b[SOUTH]]
     }
@@ -278,13 +196,6 @@ impl MacroMap {
     pub fn in_playable(&self, x: f32, z: f32, margin: f32) -> bool {
         let r = self.playable();
         x >= r[0] + margin && z >= r[1] + margin && x <= r[2] - margin && z <= r[3] - margin
-    }
-
-    /// Signed distance inland from the shoreline at world `(x, z)`: negative in the big
-    /// water, measured perpendicular to the local shore.
-    pub fn coast_distance(&self, x: f32, z: f32) -> f32 {
-        let (u, v) = self.frame.to_canon([x, z]);
-        self.shore.distance(u, v)
     }
 }
 

@@ -29,16 +29,6 @@ pub enum DrivingSide {
     Left,
 }
 
-/// The place edge the big water lies along. North is `-Z`, west is `-X`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum CoastSide {
-    West,
-    East,
-    North,
-    South,
-}
-
 /// Local street layout of a zone (`docs/WORLD_GENERATION.md` stage 4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
