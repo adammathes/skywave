@@ -400,7 +400,7 @@ mod tests {
         eprintln!("nearest drawn driver vertex to the cockpit eye: {worst:.3} m");
     }
 
-    /// The 1980s coast dresses the presets for the eighties, Mirage Valley for 2001.
+    /// The 1980s coast dresses the presets for the eighties, Mirage Bowl for 2001.
     #[test]
     fn worlds_pick_their_wardrobe() {
         assert_eq!(wardrobe_for(place::Era::Eighties), Wardrobe::Eighties);

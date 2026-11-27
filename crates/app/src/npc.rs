@@ -1150,13 +1150,13 @@ mod tests {
     /// (seed 1) round the player beside the freeway. Moves when the 2001
     /// cars, their weights or the traffic sim change; update it in its own commit with the
     /// reason.
-    const BASIN_2001_TRAFFIC_HASH: u64 = 0x1e96_11f7_9514_2305;
+    const BASIN_2001_TRAFFIC_HASH: u64 = 0x5855_0c90_55ae_9bcd;
 
     /// Thirty seconds of busy 2001 traffic in the basin at seed 1 after the warm-up: cars
     /// seen of each built-in shape (counted once per car), whether every semi started on a
     /// freeway lane, how many freeway lanes there are, and the pool's hash.
     fn basin_2001() -> (Vec<usize>, bool, usize, u64) {
-        let app = app("scenario=mirage_valley_2001&t=12:00&still=1&stream=0");
+        let app = app("scenario=mirage_bowl_2001&t=12:00&still=1&stream=0");
         let place = crate::places::build_in(
             crate::scene::PlaceKey::Coast,
             skywave_core::Seed(1),

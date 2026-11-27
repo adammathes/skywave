@@ -74,22 +74,18 @@ pub fn grammar_text(file: &str) -> Option<&'static str> {
 
 /// The scenarios compiled into the game, as `(id, RON text)`, in the order the World page
 /// lists them (`crate::scenario::BUILTIN`).
-pub const SCENARIOS: [(&str, &str); 5] = [
+pub const SCENARIOS: [(&str, &str); 4] = [
     (
         "socal_beach_1984",
         include_str!("../../../assets/scenarios/socal_beach_1984.ron"),
     ),
     (
-        "mirage_valley_2001",
-        include_str!("../../../assets/scenarios/mirage_valley_2001.ron"),
+        "mirage_bowl_2001",
+        include_str!("../../../assets/scenarios/mirage_bowl_2001.ron"),
     ),
     (
         "bay_loop_2005",
         include_str!("../../../assets/scenarios/bay_loop_2005.ron"),
-    ),
-    (
-        "mirage_bowl_2001",
-        include_str!("../../../assets/scenarios/mirage_bowl_2001.ron"),
     ),
     (
         "lake_city_1986",

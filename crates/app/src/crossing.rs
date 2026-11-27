@@ -348,7 +348,7 @@ mod tests {
 
     /// The 2001 world, seed 1, its train held resting far off.
     fn basin() -> App {
-        let q = "?seed=1&scenario=mirage_valley_2001&stream=1";
+        let q = "?seed=1&scenario=mirage_bowl_2001&stream=1";
         let mut app = App::from_setup(&SceneSetup::from_query(q).unwrap()).unwrap();
         app.rail.as_mut().expect("a railway").railway.train.phase = Phase::Resting { t: 0.0 };
         app
@@ -393,6 +393,15 @@ mod tests {
         (mid, [-b.facing[0], -b.facing[1]], g.crossing)
     }
 
+    /// The first gate of a crossing with 400 m of track clear of other crossings before it:
+    /// room to set a train running at it.
+    fn clear(app: &App) -> usize {
+        let r = &app.rail.as_ref().unwrap().railway;
+        let cs = &r.train.line.crossings;
+        let ok = |c: usize| cs[c] > 400.0 && (c == 0 || cs[c] - cs[c - 1] > 400.0);
+        r.gates.iter().position(|g| ok(g.crossing)).unwrap()
+    }
+
     /// The train's head put `ahead_m` short of crossing `c`, running at `speed`.
     fn running(app: &mut App, c: usize, ahead_m: f32, speed: f32) {
         let t = &mut app.rail.as_mut().unwrap().railway.train;
@@ -405,7 +414,7 @@ mod tests {
     #[test]
     fn a_lowered_arm_holds_a_car_out_and_the_trains_side_is_a_thud() {
         let mut app = basin();
-        let (mid, dir, c) = approach(&app, 0);
+        let (mid, dir, c) = approach(&app, clear(&app));
         // The train coming: the crossing closes and its arms come down.
         running(&mut app, c, 230.0, 0.0);
         put(
@@ -431,7 +440,7 @@ mod tests {
         // Its side: the car put on the crossing's far approach, the train standing
         // across it, driven into its side at full throttle from 25 m.
         let mut app = basin();
-        let (mid, dir, c) = approach(&app, 0);
+        let (mid, dir, c) = approach(&app, clear(&app));
         running(&mut app, c, -60.0, 0.0);
         let start = [mid[0] - dir[0] * 20.0, mid[1] - dir[1] * 20.0];
         put(&mut app, start, dir);
@@ -457,7 +466,7 @@ mod tests {
     fn a_glancing_hit_on_the_running_train_stops_it_and_never_launches_the_car() {
         for sigma in [-1.0f32, 1.0] {
             let mut app = basin();
-            let (_, dir, c) = approach(&app, 0);
+            let (_, dir, c) = approach(&app, clear(&app));
             let line = app.rail.as_ref().unwrap().railway.train.line.clone();
             let (x, _) = line.at(line.crossings[c]);
             // The train running across the crossing at its cruise, its arms lifted.
@@ -483,7 +492,7 @@ mod tests {
     #[test]
     fn a_reset_by_the_standing_train_puts_the_car_clear_of_it() {
         let mut app = basin();
-        let (mid, dir, c) = approach(&app, 0);
+        let (mid, dir, c) = approach(&app, clear(&app));
         // The train standing across the crossing, its nose 60 m past it.
         running(&mut app, c, -60.0, 0.0);
         let line = app.rail.as_ref().unwrap().railway.train.line.clone();
@@ -521,7 +530,7 @@ mod tests {
     #[test]
     fn the_train_stops_short_of_a_car_stopped_on_the_track() {
         let mut app = basin();
-        let (_, _, c) = approach(&app, 0);
+        let (_, _, c) = approach(&app, clear(&app));
         let line = app.rail.as_ref().unwrap().railway.train.line.clone();
         let (x, d) = line.at(line.crossings[c]);
         // Stopped across the track on the crossing, square to it.
@@ -540,11 +549,12 @@ mod tests {
     /// comes: the only lit crossing lamps (a crossbuck's are baked dark).
     #[test]
     fn the_gate_lamps_flash_only_while_the_crossing_warns() {
-        // Which of the two lit lamp meshes gate 0 draws now.
+        // Which of the two lit lamp meshes the gate draws now.
         fn lit(app: &mut App, clock: f32) -> Vec<usize> {
+            let gate = clear(app);
             let r = app.rail.as_mut().unwrap();
             r.clock = clock;
-            let eye = glam::Vec3::from(r.railway.gates[0].pos);
+            let eye = glam::Vec3::from(r.railway.gates[gate].pos);
             let mut out = Vec::new();
             r.push(0.0, eye, &app.lights, &mut out);
             let id = |k: usize| r.ids[usize::from(r.lamp_mesh[k])];
@@ -553,7 +563,7 @@ mod tests {
                 .collect()
         }
         let mut app = basin();
-        let (_, _, c) = approach(&app, 0);
+        let (_, _, c) = approach(&app, clear(&app));
         assert!(lit(&mut app, 0.25).is_empty(), "lit with no train");
         running(&mut app, c, 230.0, 0.0);
         run(&mut app, 1.0, false);

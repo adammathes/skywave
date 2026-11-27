@@ -1,7 +1,8 @@
-// Mirage Bowl, 2001 (docs/LAYOUTS.md, docs/SCENARIOS.md): Mirage Valley redrawn from the
+// Mirage Bowl, 2001 (docs/SCENARIOS.md, docs/LAYOUTS.md, docs/backlog/MIRAGE2001.md): the
 // authored `mirage_bowl` layout, a basin floor in a ring of mountains, dressed by the
-// `socal_bowl` zone rules with Mirage Valley's grammar, radio, palette and cars. It sits
-// beside Mirage Valley until the layout format can draw its freeway and flood channel.
+// `socal_bowl` zone rules, the `socal_basin_2001` grammar, the `sodium_night` palette and the
+// `2001_basin` radio preset. Its years filter the roster: the 2001 hero cars are its own and
+// start it, the 1980s cars are old here and weigh less by their age.
 Scenario(
     id: "mirage_bowl_2001",
     title: "Mirage Bowl",

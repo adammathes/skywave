@@ -19,6 +19,7 @@ pub mod buildings;
 pub mod detail;
 pub mod macro_map;
 pub mod parcels;
+mod profile;
 pub mod setpieces;
 pub mod streets;
 pub mod terrain;

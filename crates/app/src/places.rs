@@ -292,11 +292,10 @@ mod tests {
 
     /// Faults the map audit (`world::audit`) still finds in each world, seed 1. A world's
     /// count may only go down: fix the map, then lower its number here. New worlds start at 0.
-    const MAP_FAULTS: [(&str, usize); 5] = [
+    const MAP_FAULTS: [(&str, usize); 4] = [
         ("socal_beach_1984", 41),
-        ("mirage_valley_2001", 92),
-        ("bay_loop_2005", 152),
-        ("mirage_bowl_2001", 156),
+        ("bay_loop_2005", 150),
+        ("mirage_bowl_2001", 0),
         ("lake_city_1986", 0),
     ];
 
@@ -315,7 +314,11 @@ mod tests {
                 .layout
                 .as_deref()
                 .map(|id| crate::builtin::layout(id).unwrap());
-            // Where the layout says a road ends.
+            // Where the layout says a road ends, and the far end of a runway.
+            let runway = layout
+                .iter()
+                .filter_map(|l| l.airfield.as_ref())
+                .flat_map(|a| [a.runway.0, a.runway.1].map(|p| world::math::V2::new(p.0, p.1)));
             let ends: Vec<world::math::V2> = layout
                 .iter()
                 .flat_map(|l| {
@@ -325,6 +328,7 @@ mod tests {
                         .map(|r| l.road_line(r))
                 })
                 .filter_map(|line| line?.last().copied())
+                .chain(runway)
                 .collect();
             let ok = |p: [f32; 2]| {
                 let p = world::math::V2::new(p[0], p[1]);
@@ -349,6 +353,125 @@ mod tests {
             wrong.is_empty(),
             "map faults (world, found, pinned in MAP_FAULTS): {wrong:?}; more: fix the map, \
              fewer: lower the pin"
+        );
+    }
+    /// The longest dead-straight stretch of a highway or arterial in `place`: its ends, in
+    /// the order its edge runs.
+    fn longest_straight(place: &Place) -> ([f32; 3], [f32; 3]) {
+        use place::RoadClass::{Arterial, Highway};
+        let flat = |p: [f32; 3]| world::math::V2::new(p[0], p[2]);
+        let mut best = ([0.0; 3], [0.0; 3], 0.0);
+        let main = |e: &&place::Edge| matches!(e.class, Highway | Arterial) && !e.oneway;
+        for e in place.roads.edges.iter().filter(main) {
+            let pr = &e.profile;
+            let mut i = 0;
+            while i + 1 < pr.len() {
+                let dir = (flat(pr[i + 1]) - flat(pr[i])).normalize();
+                let mut j = i + 1;
+                while j + 1 < pr.len() {
+                    let off = flat(pr[j + 1]) - flat(pr[i]);
+                    if (off - dir * off.dot(dir)).length() > 0.25 {
+                        break;
+                    }
+                    j += 1;
+                }
+                let len = (flat(pr[j]) - flat(pr[i])).length();
+                if len > best.2 {
+                    best = (pr[i], pr[j], len);
+                }
+                i = j;
+            }
+        }
+        (best.0, best.1)
+    }
+
+    /// The ride at speed (`docs/WORLD_GENERATION.md`, "Vertical curves"): down each world's
+    /// longest straight at 40 m/s no wheel leaves the road and the car's vertical
+    /// acceleration stays calm, and no main road's grade changes faster than its bound.
+    /// A road profile with a kink at every sample fails all three.
+    #[test]
+    fn every_world_rides_smooth_at_speed() {
+        use vehicle::{Assists, VehicleInput, VehicleState};
+        let spec = crate::vehicles::builtin_spec("gannet_gt").unwrap();
+        let mut rough = Vec::new();
+        for s in crate::scenario::all() {
+            let place = build_in(PlaceKey::Coast, Seed(1), s).expect("the world builds");
+            let ground = world::WorldCollider::build(&place, grammar_of(s));
+            let (a, b) = longest_straight(&place);
+            let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
+            let len = (dx * dx + dz * dz).sqrt();
+            assert!(len > 100.0, "{}: a straight of {len} m", s.id);
+            const SPEED: f32 = 40.0;
+            let input = VehicleInput {
+                throttle: 0.5,
+                brake: 0.0,
+                steer: 0.0,
+                handbrake: false,
+            };
+            let mut car = VehicleState::spawn(&spec, [a[0], a[1] + 0.3, a[2]], (-dx).atan2(-dz));
+            car.vel = [
+                SPEED * dx / len,
+                SPEED * (b[1] - a[1]).signum() * 0.0,
+                SPEED * dz / len,
+            ];
+            for w in car.wheels.iter_mut() {
+                w.spin = SPEED / 0.32;
+            }
+            // A second to settle on the springs, then to within 20 m of the far end.
+            let steps = ((len - 20.0) / SPEED * 120.0) as usize;
+            let (mut lifts, mut sum, mut n) = (0, 0.0f32, 0);
+            let mut vy = 0.0;
+            for k in 0..steps {
+                vehicle::step(&spec, &mut car, &input, &Assists::ARCADE, &ground);
+                if k >= 120 {
+                    lifts += car.wheels.iter().filter(|w| !w.grounded).count();
+                    let acc = (car.vel[1] - vy) * 120.0;
+                    sum += acc * acc;
+                    n += 1;
+                }
+                vy = car.vel[1];
+            }
+            let rms = (sum / n.max(1) as f32).sqrt();
+            // The sharpest change of grade on a main road, per meter.
+            let mut bend = 0.0f32;
+            for e in &place.roads.edges {
+                if !matches!(
+                    e.class,
+                    place::RoadClass::Highway | place::RoadClass::Arterial
+                ) {
+                    continue;
+                }
+                for w in e.profile.windows(3) {
+                    let run = |p: [f32; 3], q: [f32; 3]| {
+                        ((q[0] - p[0]).powi(2) + (q[2] - p[2]).powi(2))
+                            .sqrt()
+                            .max(0.01)
+                    };
+                    let (d0, d1) = (run(w[0], w[1]), run(w[1], w[2]));
+                    let turn = (w[2][1] - w[1][1]) / d1 - (w[1][1] - w[0][1]) / d0;
+                    // Two samples a step apart; a sliver at a junction says nothing.
+                    if d0 < 4.0 || d1 < 4.0 {
+                        continue;
+                    }
+                    let x = turn.abs() / (0.5 * (d0 + d1));
+                    bend = bend.max(x);
+                }
+            }
+            eprintln!(
+                "{}: {len:.0} m straight from ({:.0}, {:.0}): {lifts} wheel lifts, vertical \
+                 acceleration {rms:.2} m/s2 rms; sharpest main-road bend {:.2}% per meter",
+                s.id,
+                a[0],
+                a[2],
+                bend * 100.0
+            );
+            if lifts > 0 || rms > 1.25 || bend > 0.008 {
+                rough.push((s.id.clone(), lifts, rms, bend));
+            }
+        }
+        assert!(
+            rough.is_empty(),
+            "rough rides (world, wheel lifts, rms, bend): {rough:?}"
         );
     }
 }

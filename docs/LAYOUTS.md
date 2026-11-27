@@ -52,6 +52,13 @@ Layout(
   ],
   // Channels cut along polylines: a dry concrete flood channel, or with `wet: true` a river.
   channels: [ Channel(name: "wash", line: [(1280, 60), (1290, 1480)], width_m: 14, depth_m: 5) ],
+  // A railway: one track, with spurs beside it. Roads cross it at grade, with gates.
+  rail: Some(Rail(line: [(300, 3072), (470, 2800), (2600, 2800), (2770, 3072)],
+                  spurs: [[(1380, 2800), (1440, 2826), (1700, 2826)]])),
+  // An airfield: a runway on a level field, and a taxiway from its first end to a road.
+  airfield: Some(Airfield(runway: ((2620, 1960), (2620, 2740)), runway_m: 30, width_m: 150,
+                          taxiway: (2620, 1850))),
+  set_pieces: true,                 // site the world's set pieces here (default false)
   start: Start(road: "crest street", along_m: 160),   // the player starts this far along this road
 )
 ```
@@ -62,7 +69,8 @@ false) and `deck_m` (a bridge's deck height over the water, default 3).
 
 How roads are built: an end within 30 m of another road snaps onto it; ends and crossings become
 junctions. Over water a road rides its deck; on land it follows the ground, limited
-to its `max_grade`, and the terrain is then cut and filled under it (with a blended shoulder) so it
+to its `max_grade` and eased so its crests and dips are rounded (`docs/WORLD_GENERATION.md`,
+"Vertical curves"), and the terrain is then cut and filled under it (with a blended shoulder) so it
 sits on the ground.
 
 A `Highway` road is grade-separated. A road that crosses it does not meet it: it rises (4%
@@ -79,11 +87,23 @@ level and it is water, for land that stands a few meters above the water level (
 depth within 7.8 m). An end inside the place is a headwall; run the line to the place's edge to
 carry it out.
 
+The rail line and its spurs keep a right of way 16 m either side (zoned `Highway`); every road
+that meets the line crosses it at grade and gets gates, side streets that stop at it are joined
+across it, and it bridges a channel. Bring the line in from the place's edge and take it out
+again: a train appears at one end and leaves at the other. The airfield is a level field zoned
+`Highway`; its runway and taxiway are roads, and the taxiway's far point must lie on a road.
+
+`set_pieces: true` sites the set pieces of `docs/WORLD_GENERATION.md` on what the layout offers:
+the crew garage, the stands and the roadside landmarks on lots that suit them (nearest a road of
+three lanes or more, the layout's boulevards), the tunnel on the first highway, a turnout at each
+`dead_end` road's end, the drag strip on the runway, the hillside letters above the straight road
+with the highest ground beside it, the city hall where a boulevard ends at a T.
+
 Rules the loader checks (`Layout::validate`): names unique; every point inside the place; sane
 values; a deck low enough to stay in the road profile band; every road end on another road unless
 the road is a closed loop or a `dead_end`, so a road to nowhere is an error, not a default; ramps
 only on a highway, each naming a road that crosses it at least 160 m from its ends; a channel
-shallow enough to bridge; the start names a road and lies along it.
+shallow enough to bridge; an airfield at least 200 m long with its taxiway on a road; the start names a road and lies along it.
 
 `tools/mapdump --layout assets/layouts/<id>.ron` draws the macro map and main roads to check a
 layout by eye.

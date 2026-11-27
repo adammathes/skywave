@@ -862,7 +862,7 @@ impl<'a> StreetPlan<'a> {
                 coast_tangent(self.m, centroid)
             };
             // A basin's grid is square to its axes, whatever its ramps and curves say.
-            let dir = if self.m.basin.is_some() {
+            let dir = if self.m.basin.as_ref().is_some_and(|b| b.square) {
                 if abs(dir.x) >= abs(dir.y) {
                     V2::new(1.0f32.copysign(dir.x), 0.0)
                 } else {
@@ -3813,6 +3813,17 @@ fn prune_stubs(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
 /// Cuts every side street and alley that dead-ends where `ok` says it may not back to its
 /// last crossing ([`RegionTemplate::through_streets`]), then drops the nodes no edge uses.
 fn cut_back_dead_ends(nodes: &mut Vec<Node>, edges: &mut Vec<Edge>, ok: impl Fn([f32; 2]) -> bool) {
+    // A side street left with no crossing at either end goes whole.
+    let mut deg = vec![0u32; nodes.len()];
+    for e in edges.iter() {
+        deg[e.a as usize] += 1;
+        deg[e.b as usize] += 1;
+    }
+    edges.retain(|e| {
+        let alone = deg[e.a as usize] == 1 && deg[e.b as usize] == 1;
+        let side = matches!(e.class, RoadClass::Local | RoadClass::Alley);
+        !(alone && side && !ok(nodes[e.a as usize].pos))
+    });
     drop_dead(nodes, edges, |e, dead, _| {
         matches!(e.class, RoadClass::Local | RoadClass::Alley) && !ok(dead)
     });
