@@ -294,7 +294,7 @@ mod tests {
     /// count may only go down: fix the map, then lower its number here. New worlds start at 0.
     const MAP_FAULTS: [(&str, usize); 4] = [
         ("socal_beach_1984", 41),
-        ("bay_loop_2005", 152),
+        ("bay_loop_2005", 150),
         ("mirage_bowl_2001", 0),
         ("lake_city_1986", 0),
     ];

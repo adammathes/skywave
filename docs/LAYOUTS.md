@@ -69,7 +69,8 @@ false) and `deck_m` (a bridge's deck height over the water, default 3).
 
 How roads are built: an end within 30 m of another road snaps onto it; ends and crossings become
 junctions. Over water a road rides its deck; on land it follows the ground, limited
-to its `max_grade`, and the terrain is then cut and filled under it (with a blended shoulder) so it
+to its `max_grade` and eased so its crests and dips are rounded (`docs/WORLD_GENERATION.md`,
+"Vertical curves"), and the terrain is then cut and filled under it (with a blended shoulder) so it
 sits on the ground.
 
 A `Highway` road is grade-separated. A road that crosses it does not meet it: it rises (4%

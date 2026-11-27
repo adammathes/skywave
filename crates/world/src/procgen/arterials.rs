@@ -47,7 +47,6 @@ use place::{Edge, Node, RoadClass, RoadGraph, ZoneId};
 use skywave_core::{hash_bytes, Rng, Seed};
 
 use super::macro_map::{BasinPlan, MacroMap, MacroPoiKind};
-use super::profile::{ease, ROAD_CURVE};
 use super::terrain::{box_blur, bump, smoothstep};
 use super::{stage, CELL_M, ZONE_CELL_M};
 pub(crate) use crate::math::seg_intersect;
@@ -1408,26 +1407,6 @@ pub(crate) fn grade_limit(
     let mut y: Vec<f32> = f.iter().zip(&r).map(|(x, z)| 0.5 * (x + z)).collect();
     y[0] = a;
     y[n - 1] = b;
-    y
-}
-
-/// [`grade_limit`], then eased so the grade changes by no more than `k` per meter
-/// ([`ease`]) and held to the band again.
-pub(crate) fn graded(
-    target: &[f32],
-    s: &[f32],
-    g: f32,
-    k: f32,
-    a: Option<f32>,
-    b: Option<f32>,
-    band: Option<(&[f32], f32)>,
-) -> Vec<f32> {
-    let mut y = ease(&grade_limit(target, s, g, a, b, band), s, k, None, None);
-    if let Some((ground, r)) = band {
-        for i in 1..y.len().saturating_sub(1) {
-            y[i] = clamp(y[i], ground[i] - r, ground[i] + r);
-        }
-    }
     y
 }
 
@@ -3994,11 +3973,10 @@ fn finish(ctx: &Ctx<'_>, m: &MacroMap, g: Graph) -> RoadGraph {
                     deck(d, y, g0)
                 })
                 .collect();
-        profiles[i] = graded(
+        profiles[i] = grade_limit(
             &target,
             &e.s,
             FILTER_GRADE,
-            ROAD_CURVE,
             Some(ya),
             Some(yb),
             Some((&gr, PROFILE_BAND_M)),

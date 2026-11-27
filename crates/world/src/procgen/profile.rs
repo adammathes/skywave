@@ -8,10 +8,10 @@ use alloc::vec::Vec;
 
 use crate::math::clamp;
 
-/// Grade change per meter a main road allows (a crest at 40 m/s unloads the car by a third
+/// Grade change per meter a main road allows (a crest at 40 m/s unloads the car by a sixth
 /// of its weight).
 pub(crate) const ROAD_CURVE: f32 = 0.001;
-/// The same for a side street, which is driven slower and has a block to do it in.
+/// The same for a steep road, which is driven slower and has less room to do it in.
 pub(crate) const STREET_CURVE: f32 = 0.004;
 
 /// `y` (heights at arc lengths `s`) with its grade changing by no more than `k` per meter:
