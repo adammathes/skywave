@@ -19,7 +19,9 @@
 //!   firmware is newer than the database falls back to raw evdev codes on Linux. There we
 //!   follow SDL's own fallback for unmapped Linux pads ([`Quirks`]): `BTN_X` (which evdev
 //!   also calls `BTN_NORTH`) is the left face button except on Sony and Nintendo pads, and
-//!   `ABS_Z`/`ABS_RZ` are the analog triggers when the right stick is on `ABS_RX`/`ABS_RY`.
+//!   `ABS_Z`/`ABS_RZ` are the analog triggers when the right stick is on `ABS_RX`/`ABS_RY`,
+//!   else they are the right stick. `ABS_BRAKE`/`ABS_GAS`, which gilrs leaves unnamed, are
+//!   the analog triggers (Xbox pads over Bluetooth report them so, right stick on Z/RZ).
 //!
 //! The first connected pad is "the" pad; others are ignored until it disconnects. On macOS a
 //! controller Apple's Game Controller framework knows takes precedence (`pad_mac`).
@@ -75,9 +77,28 @@ fn axis_index(a: Axis) -> Option<(usize, f32)> {
 pub struct Quirks {
     /// `North` and `West` are swapped: evdev's `BTN_X` is the left face button.
     pub swap_xy: bool,
-    /// `LeftZ`/`RightZ` are the analog triggers, `-1` released to `1` fully pulled.
-    pub z_triggers: bool,
+    /// What `LeftZ`/`RightZ` are.
+    pub z: ZAxes,
+    /// Unnamed `ABS_BRAKE`/`ABS_GAS` readings are the left/right analog triggers.
+    pub gas_brake: bool,
 }
+
+/// The role of an unmapped Linux pad's `ABS_Z`/`ABS_RZ` (gilrs `LeftZ`/`RightZ`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ZAxes {
+    /// Not there, or not ours to guess: ignored.
+    #[default]
+    Ignored,
+    /// The analog triggers, `-1` released to `1` fully pulled.
+    Triggers,
+    /// The right stick: `LeftZ` is X, `RightZ` is Y (raw evdev, +Y down).
+    RightStick,
+}
+
+/// evdev's `ABS_BRAKE` and `ABS_GAS` as gilrs packs an unnamed axis's code on Linux
+/// (`EV_ABS << 16 | code`).
+const ABS_BRAKE: u32 = 0x3_000a;
+const ABS_GAS: u32 = 0x3_0009;
 
 /// USB vendors whose Linux drivers name the face buttons by position.
 const POSITIONAL_VENDORS: [u16; 2] = [0x054c, 0x057e];
@@ -92,14 +113,20 @@ impl Quirks {
             return Quirks::default();
         }
         let has = |a| pad.axis_code(a).is_some();
+        let z = match (
+            has(Axis::LeftZ) && has(Axis::RightZ),
+            has(Axis::RightStickX) && has(Axis::RightStickY),
+        ) {
+            (true, true) => ZAxes::Triggers,
+            (true, false) => ZAxes::RightStick,
+            (false, _) => ZAxes::Ignored,
+        };
         Quirks {
             swap_xy: !pad
                 .vendor_id()
                 .is_some_and(|v| POSITIONAL_VENDORS.contains(&v)),
-            z_triggers: has(Axis::LeftZ)
-                && has(Axis::RightZ)
-                && has(Axis::RightStickX)
-                && has(Axis::RightStickY),
+            z,
+            gas_brake: true,
         }
     }
 
@@ -112,18 +139,30 @@ impl Quirks {
             PadEvent::Button(Button::West, v, p) if self.swap_xy => {
                 PadEvent::Button(Button::North, v, p)
             }
-            PadEvent::Axis(a @ (Axis::LeftZ | Axis::RightZ), v) if self.z_triggers => {
-                let b = if a == Axis::LeftZ {
-                    Button::LeftTrigger2
-                } else {
-                    Button::RightTrigger2
-                };
-                let v = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
-                PadEvent::Button(b, v, v >= TRIGGER_PRESSED)
+            PadEvent::Axis(Axis::LeftZ, v) if self.z == ZAxes::Triggers => {
+                trigger(Button::LeftTrigger2, v)
             }
+            PadEvent::Axis(Axis::RightZ, v) if self.z == ZAxes::Triggers => {
+                trigger(Button::RightTrigger2, v)
+            }
+            PadEvent::Axis(Axis::LeftZ, v) if self.z == ZAxes::RightStick => {
+                PadEvent::Axis(Axis::RightStickX, v)
+            }
+            // gilrs flips only the axes it knows are Y; this one is still +Y down.
+            PadEvent::Axis(Axis::RightZ, v) if self.z == ZAxes::RightStick => {
+                PadEvent::Axis(Axis::RightStickY, -v)
+            }
+            PadEvent::Unnamed(ABS_BRAKE, v) if self.gas_brake => trigger(Button::LeftTrigger2, v),
+            PadEvent::Unnamed(ABS_GAS, v) if self.gas_brake => trigger(Button::RightTrigger2, v),
             ev => ev,
         }
     }
+}
+
+/// A trigger read as an axis, `-1` released to `1` fully pulled, as its trigger button.
+fn trigger(b: Button, v: f32) -> PadEvent {
+    let v = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
+    PadEvent::Button(b, v, v >= TRIGGER_PRESSED)
 }
 
 /// One gamepad reading, apart from gilrs's `EventType` (whose `Code` cannot be built
@@ -134,6 +173,8 @@ pub enum PadEvent {
     Button(Button, f32, bool),
     /// An axis value in gilrs's convention (`[-1, 1]`, +Y up).
     Axis(Axis, f32),
+    /// An axis gilrs has no name for, by its packed platform code ([`gilrs::ev::Code`]).
+    Unnamed(u32, f32),
 }
 
 /// Feeds one reading to the mapper. Unknown controls are ignored.
@@ -149,6 +190,7 @@ pub fn apply(input: &mut InputMapper, ev: PadEvent) {
                 pad_table::feed_axis(input, i, value * sign);
             }
         }
+        PadEvent::Unnamed(..) => {}
     }
 }
 
@@ -361,6 +403,9 @@ impl Pads {
                     let (value, pressed) = button_state(&g.gamepad(id), Some(code));
                     self.apply(input, PadEvent::Button(b, value, pressed));
                 }
+                EventType::AxisChanged(Axis::Unknown, value, code) => {
+                    self.apply(input, PadEvent::Unnamed(code.into_u32(), value));
+                }
                 EventType::AxisChanged(a, value, _) => {
                     self.apply(input, PadEvent::Axis(a, value));
                 }
@@ -390,11 +435,18 @@ impl Pads {
             let value = pad.axis_data(a).map_or(0.0, |d| d.value());
             self.apply(input, PadEvent::Axis(a, value));
         }
-        if self.quirks.z_triggers {
-            // An untouched trigger has no reading yet: it is released.
+        // Axes the quirks turn into triggers or a stick. One untouched since the pad
+        // connected has no reading yet, and stays as the loops above left it: released.
+        if self.quirks.z != ZAxes::Ignored {
             for a in [Axis::LeftZ, Axis::RightZ] {
-                let value = pad.axis_data(a).map_or(-1.0, |d| d.value());
-                self.apply(input, PadEvent::Axis(a, value));
+                if let Some(d) = pad.axis_data(a) {
+                    self.apply(input, PadEvent::Axis(a, d.value()));
+                }
+            }
+        }
+        if self.quirks.gas_brake {
+            for (code, d) in pad.state().axes() {
+                self.apply(input, PadEvent::Unnamed(code.into_u32(), d.value()));
             }
         }
     }
@@ -503,7 +555,8 @@ mod tests {
 
         let q = Quirks {
             swap_xy: true,
-            z_triggers: true,
+            z: ZAxes::Triggers,
+            gas_brake: true,
         };
         // evdev's BTN_X (gilrs North) is the left face button; Y is the top one.
         assert_eq!(
@@ -535,6 +588,69 @@ mod tests {
         let mut m = InputMapper::default();
         apply(&mut m, q.fix(PadEvent::Axis(Axis::RightZ, 1.0)));
         assert_eq!(m.sample(0.01).axis(Action::Throttle), 1.0);
+    }
+
+    #[test]
+    fn a_bluetooth_style_linux_pad_drives_with_its_gas_and_brake_axes() {
+        // Right stick on ABS_Z/ABS_RZ, triggers on ABS_BRAKE/ABS_GAS (0..max, so gilrs
+        // reads them -1 released to 1 pulled), all without an SDL mapping.
+        let q = Quirks {
+            swap_xy: true,
+            z: ZAxes::RightStick,
+            gas_brake: true,
+        };
+        assert_eq!(
+            q.fix(PadEvent::Unnamed(ABS_GAS, 1.0)),
+            PadEvent::Button(Button::RightTrigger2, 1.0, true)
+        );
+        assert_eq!(
+            q.fix(PadEvent::Unnamed(ABS_BRAKE, -1.0)),
+            PadEvent::Button(Button::LeftTrigger2, 0.0, false)
+        );
+        // Other unnamed axes stay unnamed, and the mapper ignores them.
+        let other = PadEvent::Unnamed(0x3_0006, 1.0);
+        assert_eq!(q.fix(other), other);
+        // Z is the right stick's X; RZ its Y, raw evdev +Y down, so gilrs's +Y up after.
+        assert_eq!(
+            q.fix(PadEvent::Axis(Axis::LeftZ, -0.5)),
+            PadEvent::Axis(Axis::RightStickX, -0.5)
+        );
+        assert_eq!(
+            q.fix(PadEvent::Axis(Axis::RightZ, 0.8)),
+            PadEvent::Axis(Axis::RightStickY, -0.8)
+        );
+
+        let mut m = InputMapper::default();
+        let mut feed = |events: &[PadEvent]| {
+            for &e in events {
+                apply(&mut m, q.fix(e));
+            }
+            m.sample(0.01).clone()
+        };
+        let s = feed(&[
+            PadEvent::Unnamed(ABS_GAS, 0.0),
+            PadEvent::Unnamed(ABS_BRAKE, -1.0),
+            PadEvent::Unnamed(0x3_0006, 1.0),
+        ]);
+        assert!((s.axis(Action::Throttle) - 0.5).abs() < 1e-6);
+        assert_eq!(s.axis(Action::Brake), 0.0);
+        let s = feed(&[
+            PadEvent::Unnamed(ABS_GAS, -1.0),
+            PadEvent::Unnamed(ABS_BRAKE, 1.0),
+            PadEvent::Axis(Axis::LeftZ, -1.0),
+        ]);
+        assert_eq!(s.axis(Action::Throttle), 0.0);
+        assert_eq!(s.axis(Action::Brake), 1.0);
+        assert_eq!(s.axis(Action::LookX), -1.0);
+
+        // Without the quirks (an SDL-mapped pad, or macOS and Windows) nothing changes.
+        let none = Quirks::default();
+        for ev in [
+            PadEvent::Unnamed(ABS_GAS, 1.0),
+            PadEvent::Axis(Axis::RightZ, 1.0),
+        ] {
+            assert_eq!(none.fix(ev), ev);
+        }
     }
 
     #[test]

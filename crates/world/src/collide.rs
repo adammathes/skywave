@@ -349,7 +349,7 @@ pub struct WorldCollider {
     pub patches: Vec<Patch>,
     /// Outlines of the paved pieces patches are parts of ([`Patch::piece`]):
     /// `points[r[0]..r[0] + r[1]]`.
-    pub pieces: Vec<[u32; 2]>,
+    pub pieces: Vec<[u32; 4]>,
     pub walls: Vec<Wall>,
     pub posts: Vec<Post>,
     pub boxes: Vec<BoxSolid>,
@@ -446,8 +446,8 @@ fn abs(x: f32) -> f32 {
 struct Shapes {
     points: Vec<[f32; 2]>,
     patches: Vec<Patch>,
-    /// Outlines of the paved pieces, `points[start..start + len]`.
-    pieces: Vec<[u32; 2]>,
+    /// The paved pieces: outline `points[start..start + len]`, patches `first..end`.
+    pieces: Vec<[u32; 4]>,
 }
 
 impl Shapes {
@@ -500,7 +500,9 @@ impl Shapes {
         let id = self.pieces.len() as u32;
         let start = self.points.len() as u32;
         self.points.extend(outline.iter().map(|&p| arr(p)));
-        self.pieces.push([start, outline.len() as u32]);
+        let end = self.patches.len() as u32;
+        self.pieces
+            .push([start, outline.len() as u32, first as u32, end]);
         for p in &mut self.patches[first..] {
             p.piece = id;
         }
@@ -520,6 +522,9 @@ const LAYER_M: f32 = crate::roads::DECK_CLEARANCE_M;
 /// Overlapping paved pieces blend their heights over this far in from their outlines, m
 /// ([`WorldCollider::blend`]).
 const BLEND_M: f32 = 4.0;
+/// A junction's fan meets each road end in pieces no wider than this, m
+/// ([`crate::roads::Network::junction_ring_split`]).
+const CAP_STEP_M: f32 = 2.5;
 /// Pieces this far apart in height (m) start to fade out of the blend, and are out by the
 /// second: that far apart they are two roads (one dipping under the other), not a seam.
 const BLEND_DY_M: [f32; 2] = [0.5, 1.2];
@@ -897,40 +902,25 @@ impl WorldCollider {
         let mut n = 0;
         let (mut sum, mut weight) = (0.0f32, 0.0f32);
         for &j in self.cell_items(&self.patch_bins, p) {
-            let patch = &self.patches[j as usize];
-            if patch.piece == NO_PIECE
-                || seen[..n].contains(&patch.piece)
-                || p[0] < patch.lo[0]
-                || p[0] > patch.hi[0]
-                || p[1] < patch.lo[1]
-                || p[1] > patch.hi[1]
-            {
+            let piece = self.patches[j as usize].piece;
+            if piece == NO_PIECE || seen[..n].contains(&piece) || n == seen.len() {
                 continue;
             }
-            let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
-            if !point_in(p, poly) {
+            let [s, len, first, end] = self.pieces[piece as usize];
+            let outline = &self.points[s as usize..(s + len) as usize];
+            if !point_in(p, outline) {
                 continue;
             }
-            let hj = if j == i {
+            seen[n] = piece;
+            n += 1;
+            let hj = if piece == own {
                 h
             } else {
-                self.patch_height(patch, p)
+                self.piece_height(first..end, p)
             };
             let dy = abs(hj - h);
-            if dy >= BLEND_DY_M[1] || n == seen.len() {
-                continue;
-            }
-            seen[n] = patch.piece;
-            n += 1;
-            // Outside its outline (a fan folded past its ring) a piece weighs nothing.
-            let [s, len] = self.pieces[patch.piece as usize];
-            let outline = &self.points[s as usize..(s + len) as usize];
-            let w = if point_in(p, outline) {
-                inside_depth(p, outline).min(BLEND_M)
-                    * (1.0 - unit_ramp(dy, BLEND_DY_M[0], BLEND_DY_M[1]))
-            } else {
-                0.0
-            };
+            let w = inside_depth(p, outline).min(BLEND_M)
+                * (1.0 - unit_ramp(dy, BLEND_DY_M[0], BLEND_DY_M[1]));
             sum += w * hj;
             weight += w;
         }
@@ -938,6 +928,25 @@ impl WorldCollider {
             return h;
         }
         sum / weight
+    }
+
+    /// The height at `p` of the paved piece made of `patches`: the first of them under `p`,
+    /// else (a junction's fan folded short of its outline) the nearest, its surface
+    /// extended.
+    fn piece_height(&self, patches: core::ops::Range<u32>, p: [f32; 2]) -> f32 {
+        let mut best = (f32::INFINITY, 0.0);
+        for k in patches {
+            let patch = &self.patches[k as usize];
+            let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
+            if point_in(p, poly) {
+                return self.patch_height(patch, p);
+            }
+            let d = inside_depth(p, poly);
+            if d < best.0 {
+                best = (d, self.patch_height(patch, p));
+            }
+        }
+        best.1
     }
 
     fn surface_of(&self, u: Under) -> Surface {
@@ -1308,7 +1317,7 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
         }
     }
     for j in &net.junctions {
-        let ring = net.junction_ring(j);
+        let ring = net.junction_ring_split(j, CAP_STEP_M);
         if ring.is_empty() {
             continue;
         }
