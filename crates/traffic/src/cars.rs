@@ -35,11 +35,11 @@
 //! always out of the camera's view. Everything is deterministic (one seeded PCG, IEEE
 //! basic arithmetic, a fixed car order) and nothing allocates after [`Traffic::new`].
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use skywave_core::{hash64, Rng, Seed, SIM_HZ};
 
-use crate::lanes::{bezier, heading, Control, LaneGraph, Pose, TurnKind, CURVE_STEPS, NONE};
+use crate::lanes::{bezier, heading, At, Control, LaneGraph, Pose, TurnKind, CURVE_STEPS, NONE};
 use crate::math::{dist2, dot, len2, right, sin_cos, sqrt, unit2};
 use crate::signal::Light;
 use crate::walks::WalkGraph;
@@ -1061,11 +1061,28 @@ impl Traffic {
         let mut list = Vec::new();
         // A segment's poses over a span, sampled once: every crossing at a turn's junction
         // (and every one at the same end of a lane) samples the same span.
-        let mut spans: Vec<(f32, f32, Vec<Pose>)> = Vec::new();
+        let mut spans: Vec<(f32, f32, Vec<At>)> = Vec::new();
+        // The crossings at each junction, in order: a segment looks only at its own ends'.
+        let mut at_node = vec![0u32; g.junctions.len() + 1];
+        for x in &walks.crossings {
+            at_node[x.node as usize + 1] += 1;
+        }
+        for i in 1..at_node.len() {
+            at_node[i] += at_node[i - 1];
+        }
+        let mut by_node = vec![0u32; walks.crossings.len()];
+        let mut fill = at_node.clone();
+        for (k, x) in walks.crossings.iter().enumerate() {
+            by_node[fill[x.node as usize] as usize] = k as u32;
+            fill[x.node as usize] += 1;
+        }
+        let mut ends: Vec<u32> = Vec::new();
+        let of = |n: u32| &by_node[at_node[n as usize] as usize..at_node[n as usize + 1] as usize];
         for seg in 0..nseg as u32 {
             first.push(list.len() as u32);
             spans.clear();
             let len = self.seg_len(g, seg);
+            let chords = (seg >= self.lanes).then(|| g.turn_chords(seg - self.lanes));
             // A lane's crossings are at its ends' junctions, near those ends; a turn's at
             // its junction, anywhere along it.
             let (n0, n1, near) = if seg < self.lanes {
@@ -1075,11 +1092,17 @@ impl Traffic {
                 let t = &g.turns[(seg - self.lanes) as usize];
                 (t.node, t.node, len)
             };
-            for (k, x) in walks.crossings.iter().enumerate() {
+            // Both ends' crossings, lowest first, as one pass over all of them would meet them.
+            ends.clear();
+            ends.extend_from_slice(of(n0));
+            if n1 != n0 {
+                ends.extend_from_slice(of(n1));
+                ends.sort_unstable();
+            }
+            for &k in &ends {
+                let k = k as usize;
+                let x = &walks.crossings[k];
                 let at_start = x.node == n0;
-                if !at_start && x.node != n1 {
-                    continue;
-                }
                 let a = walks.nodes[x.curbs[0] as usize].pos;
                 let b = walks.nodes[x.curbs[1] as usize].pos;
                 let (lo, hi) = if seg >= self.lanes || (at_start && x.node == n1) {
@@ -1095,20 +1118,25 @@ impl Traffic {
                 let span = match spans.iter().position(|sp| sp.0 == lo && sp.1 == hi) {
                     Some(j) => j,
                     None => {
-                        let poses = (0..=n).map(|i| self.seg_pose(g, seg, at(i))).collect();
+                        let poses = (0..=n)
+                            .map(|i| match &chords {
+                                Some(c) => g.turn_at(seg - self.lanes, c, at(i)),
+                                None => g.lane_at(seg, at(i)),
+                            })
+                            .collect();
                         spans.push((lo, hi, poses));
                         spans.len() - 1
                     }
                 };
-                for (i, p) in spans[span].2.iter().enumerate() {
+                for (i, &(pos, dir)) in spans[span].2.iter().enumerate() {
                     let s = at(i as u32);
-                    if (p.pos[1] - a[1]).abs() > 2.0 {
+                    if (pos[1] - a[1]).abs() > 2.0 {
                         continue;
                     }
-                    let r = right(p.dir);
+                    let r = right(dir);
                     let on = [0.0, 1.0, -1.0].iter().any(|&k| {
                         let w = k * half_w;
-                        let q = [p.pos[0] + r[0] * w, p.pos[2] + r[1] * w];
+                        let q = [pos[0] + r[0] * w, pos[2] + r[1] * w];
                         point_seg(q, xz(a), xz(b)).0 < XING_HALF_M
                     });
                     if on {
