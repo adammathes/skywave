@@ -289,6 +289,11 @@ struct RegisteredCar {
     layout: CarLayout,
 }
 
+/// How far round the car the collider's curb steps are found at once
+/// (`WorldCollider::warm_steps`), and how far ahead a few at a time, m.
+const STEPS_NEAR_M: f32 = 24.0;
+const STEPS_AHEAD_M: f32 = 72.0;
+
 impl App {
     /// The default car at the start of the strip.
     pub fn new(seed: Seed) -> App {
@@ -1013,6 +1018,12 @@ impl App {
                 drive::vehicle_input(input)
             };
             self.drive.assists.power_boost = self.nitrous.step(dt);
+            // The collider finds its curb steps cell by cell: the cells under the car and
+            // the camera now, the ones ahead a couple a step, so the sim never waits on one.
+            let at = self.drive.state.pos;
+            self.ground
+                .warm_steps([at[0], at[2]], STEPS_NEAR_M, usize::MAX);
+            self.ground.warm_steps([at[0], at[2]], STEPS_AHEAD_M, 2);
             self.drive.step(car_input, &self.ground);
             // A car that went back to its start on its own takes the camera with it,
             // rather than the chase camera flying across the map to it.

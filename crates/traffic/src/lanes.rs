@@ -370,6 +370,29 @@ pub(crate) fn bezier(c: &[[f32; 3]; 4], t: f32) -> [f32; 3] {
     p
 }
 
+/// A position and the unit direction of travel there: a [`Pose`] without its heading.
+pub(crate) type At = ([f32; 3], [f32; 2]);
+
+/// The curve parameter `s` meters along a cubic, on its chord `k` (from 1) of length `d`
+/// that starts `acc` meters along.
+fn chord_t(k: usize, s: f32, acc: f32, d: f32) -> f32 {
+    let f = if d > 0.0 { (s - acc) / d } else { 0.0 };
+    (k as f32 - 1.0 + f) / CURVE_STEPS as f32
+}
+
+/// Position on cubic `c` at `t` and the unit direction along it there, from its derivative.
+fn curve_at(c: &[[f32; 3]; 4], t: f32) -> At {
+    let u = 1.0 - t;
+    let (d0, d1, d2) = (3.0 * u * u, 6.0 * u * t, 3.0 * t * t);
+    let tx = (c[1][0] - c[0][0]) * d0 + (c[2][0] - c[1][0]) * d1 + (c[3][0] - c[2][0]) * d2;
+    let tz = (c[1][2] - c[0][2]) * d0 + (c[2][2] - c[1][2]) * d1 + (c[3][2] - c[2][2]) * d2;
+    let mut d = unit2([tx, tz]);
+    if d == [0.0, 0.0] {
+        d = dir(c[0], c[3]);
+    }
+    (bezier(c, t), d)
+}
+
 /// Cubic `c` with its length over [`CURVE_STEPS`] chords and its tightest radius (chord
 /// length over the heading change from the previous chord, starting from `d0`).
 fn measure(c: [[f32; 3]; 4], d0: [f32; 2]) -> ([[f32; 3]; 4], f32, f32) {
@@ -1080,6 +1103,17 @@ impl LaneGraph {
 
     /// Pose `s` meters along `lane` (clamped to the lane).
     pub fn pose(&self, lane: u32, s: f32) -> Pose {
+        let (pos, d) = self.lane_at(lane, s);
+        Pose {
+            pos,
+            heading: heading(d),
+            dir: d,
+        }
+    }
+
+    /// Position and unit direction `s` meters along `lane` (clamped): [`LaneGraph::pose`]
+    /// without the heading.
+    pub(crate) fn lane_at(&self, lane: u32, s: f32) -> At {
         let l = &self.lanes[lane as usize];
         let range = l.first_point as usize..(l.first_point + l.point_count) as usize;
         let (pts, arc) = (&self.points[range.clone()], &self.arc[range]);
@@ -1087,12 +1121,7 @@ impl LaneGraph {
         let k = arc[1..].partition_point(|&v| v < s).min(pts.len() - 2);
         let span = arc[k + 1] - arc[k];
         let t = if span > 0.0 { (s - arc[k]) / span } else { 0.0 };
-        let d = dir(pts[k], pts[k + 1]);
-        Pose {
-            pos: lerp3(pts[k], pts[k + 1], t),
-            heading: heading(d),
-            dir: d,
-        }
+        (lerp3(pts[k], pts[k + 1], t), dir(pts[k], pts[k + 1]))
     }
 
     /// Pose at the end of `lane`.
@@ -1111,27 +1140,46 @@ impl LaneGraph {
             let p = bezier(c, k as f32 / CURVE_STEPS as f32);
             let d = dist2(prev, p);
             if acc + d >= s {
-                let f = if d > 0.0 { (s - acc) / d } else { 0.0 };
-                t = (k as f32 - 1.0 + f) / CURVE_STEPS as f32;
+                t = chord_t(k, s, acc, d);
                 break;
             }
             acc += d;
             prev = p;
         }
-        // Tangent from the derivative of the cubic.
-        let u = 1.0 - t;
-        let (d0, d1, d2) = (3.0 * u * u, 6.0 * u * t, 3.0 * t * t);
-        let tx = (c[1][0] - c[0][0]) * d0 + (c[2][0] - c[1][0]) * d1 + (c[3][0] - c[2][0]) * d2;
-        let tz = (c[1][2] - c[0][2]) * d0 + (c[2][2] - c[1][2]) * d1 + (c[3][2] - c[2][2]) * d2;
-        let mut d = unit2([tx, tz]);
-        if d == [0.0, 0.0] {
-            d = dir(c[0], c[3]);
-        }
+        let (pos, d) = curve_at(c, t);
         Pose {
-            pos: bezier(c, t),
+            pos,
             heading: heading(d),
             dir: d,
         }
+    }
+
+    /// The lengths of `turn`'s [`CURVE_STEPS`] chords, for [`LaneGraph::turn_at`].
+    pub(crate) fn turn_chords(&self, turn: u32) -> [f32; CURVE_STEPS] {
+        let c = &self.turns[turn as usize].curve;
+        let mut prev = c[0];
+        core::array::from_fn(|k| {
+            let p = bezier(c, (k + 1) as f32 / CURVE_STEPS as f32);
+            let d = dist2(prev, p);
+            prev = p;
+            d
+        })
+    }
+
+    /// Position and unit direction `s` meters along `turn`, whose chords are `chords`:
+    /// [`LaneGraph::turn_pose`] without the heading, for sampling one turn many times.
+    pub(crate) fn turn_at(&self, turn: u32, chords: &[f32; CURVE_STEPS], s: f32) -> At {
+        let s = s.max(0.0);
+        let mut acc = 0.0;
+        let mut t = 1.0;
+        for (k, &d) in chords.iter().enumerate() {
+            if acc + d >= s {
+                t = chord_t(k + 1, s, acc, d);
+                break;
+            }
+            acc += d;
+        }
+        curve_at(&self.turns[turn as usize].curve, t)
     }
 
     /// The turns leaving `lane` at its end.
@@ -1256,6 +1304,26 @@ mod tests {
         // 0 faces north (-z), east is -PI/2.
         assert_eq!(heading([0.0, -1.0]), 0.0);
         assert!((heading([1.0, 0.0]) + core::f32::consts::FRAC_PI_2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sampling_without_a_heading_is_the_pose() {
+        let g = LaneGraph::new(&Place::test_grid());
+        for id in 0..g.lanes.len() as u32 {
+            for k in 0..=40 {
+                let s = g.lanes[id as usize].length_m * (k as f32 / 32.0 - 0.1);
+                let p = g.pose(id, s);
+                assert_eq!(g.lane_at(id, s), (p.pos, p.dir));
+            }
+        }
+        for id in 0..g.turns.len() as u32 {
+            let chords = g.turn_chords(id);
+            for k in 0..=40 {
+                let s = g.turns[id as usize].length_m * (k as f32 / 32.0 - 0.1);
+                let p = g.turn_pose(id, s);
+                assert_eq!(g.turn_at(id, &chords, s), (p.pos, p.dir));
+            }
+        }
     }
 
     #[test]

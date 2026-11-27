@@ -586,6 +586,27 @@ the GUI, the Event Browser timings (Tools → Performance counters, or the clock
 - **Thermals and power**: the Deck's TDP slider and a warm APU change clocks; note them.
 - **Debug build**: numbers only mean something from `--release`.
 
+## Startup, measured
+What `App::from_setup` spends before the first frame, ms, native release on the cloud dev box
+(one core; the web build is slower by its usual factor). Stages in the order they run:
+
+| World | load (decode + chunk plan) | map image | collider | props | traffic graph | resident meshes | total |
+|---|---|---|---|---|---|---|---|
+| Pacific Shore | 150 | 120 | 110 → 8 | 80 | 85 | 47 | 615 → 570 |
+| Mirage Bowl | 690 | 170 | 490 → 29 | 115 | 410 | 77 | 2010 → 1690 |
+| Bay Loop | 445 | 105 | 410 → 17 | 85 | 150 | 94 | 1310 → 935 |
+| Lake City | 290 | 175 | 330 → 12 | 80 | 280 | 38 | 1200 → 785 |
+
+The arrow is the collider no longer finding every curb step of the place at load (533,000 edge
+pieces probed twice each in the Bowl, for 149,000 steps): `WorldCollider::warm_steps` finds them
+cell by cell round the car, the cells within 24 m at once and those within 72 m two a sim step,
+into a fixed 384-cell cache whose buffers are reused, so driving still allocates nothing. A wheel over a cell not found yet gets the same answer the slow way.
+
+Decoding the baked place is 12 ms of the Bowl's load; the rest is the chunk plan: every
+building's facade plan (265 ms), the graded terrain grid and its colors (305 ms) and the prop
+table (175 ms). Those, the traffic graph and the map image are what is left to move off the
+start.
+
 ## Performance follow-ups
 
 What could not be verified without a GPU here:

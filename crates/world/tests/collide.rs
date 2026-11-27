@@ -289,7 +289,7 @@ fn collider_builds_fast_and_matches_the_meshes() {
     println!(
         "collider: {} patches, {} steps, {} walls, {} posts, {} boxes on a {:?} grid in {ms:.1} ms",
         c.patches.len(),
-        c.steps.len(),
+        c.all_steps().len(),
         c.walls.len(),
         c.posts.len(),
         c.boxes.len(),
@@ -1511,4 +1511,71 @@ fn side_swipe_lets_both_drive_on() {
         );
         assert!(run.max_up < 0.5 && run.max_rise < 0.1, "{run:?}");
     }
+}
+
+/// The steps kept cell by cell are the place's steps within a wheel's radius of each cell,
+/// in the same order, and a collider that finds them late (as the app's does, round the
+/// car) keeps the same ones: nothing a wheel can feel changes.
+#[test]
+fn a_cells_steps_are_the_places_steps_near_it() {
+    use world::collide::{CELL_M, STEP_SLOTS};
+    let place = Place::test_grid();
+    let g = grammar();
+    let c = WorldCollider::build(&place, &g);
+    let all = c.all_steps();
+    assert!(all.len() > 1000, "{} steps", all.len());
+    let r = vehicle::sim::WHEEL_RADIUS_M;
+    let cell = |v: f32, k: usize| ((v - c.origin[k]) / CELL_M).floor();
+    let center = |x: u32, z: u32| {
+        [
+            c.origin[0] + (x as f32 + 0.5) * CELL_M,
+            c.origin[1] + (z as f32 + 0.5) * CELL_M,
+        ]
+    };
+    for z in 0..c.cells[1] {
+        for x in 0..c.cells[0] {
+            let (xf, zf) = (x as f32, z as f32);
+            let want: Vec<_> = all
+                .iter()
+                .filter(|s| {
+                    let lo = [s.a[0].min(s.b[0]) - r, s.a[1].min(s.b[1]) - r];
+                    let hi = [s.a[0].max(s.b[0]) + r, s.a[1].max(s.b[1]) + r];
+                    cell(lo[0], 0) <= xf
+                        && xf <= cell(hi[0], 0)
+                        && cell(lo[1], 1) <= zf
+                        && zf <= cell(hi[1], 1)
+                })
+                .copied()
+                .collect();
+            assert_eq!(
+                c.kept_steps(center(x, z)),
+                Some(&want[..]),
+                "cell ({x}, {z})"
+            );
+        }
+    }
+
+    // Found late, a few cells at a time, with fewer slots than the town has cells.
+    let plan = world::ChunkPlan::new(&place, &world::Palette::socal_1985(), &g);
+    let mut lazy = WorldCollider::with_plan(&place, &g, &plan);
+    assert!(lazy == c, "the cache is not part of the collider");
+    assert!((c.cells[0] * c.cells[1]) as usize > STEP_SLOTS);
+    let mid = center(c.cells[0] / 2, c.cells[1] / 2);
+    assert!(lazy.kept_steps(mid).is_none());
+    // A wheel over a cell not warmed yet rests where it does once it is.
+    assert_eq!(lazy.ground_at(mid), c.ground_at(mid));
+    assert_eq!(lazy.warm_steps(mid, 40.0, 3), 3);
+    while lazy.warm_steps(mid, 40.0, 5) > 0 {}
+    assert_eq!(lazy.kept_steps(mid), c.kept_steps(mid));
+    // Warming the whole town one row at a time reuses the slots: what is kept is right,
+    // and the first cells have made way.
+    for z in 0..c.cells[1] {
+        for x in 0..c.cells[0] {
+            let p = center(x, z);
+            lazy.warm_steps(p, 1.0, usize::MAX);
+            assert_eq!(lazy.kept_steps(p), c.kept_steps(p), "cell ({x}, {z})");
+        }
+    }
+    assert!(lazy.kept_steps(center(0, 0)).is_none());
+    assert_eq!(lazy.ground_at(center(0, 0)), c.ground_at(center(0, 0)));
 }
