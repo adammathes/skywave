@@ -35,7 +35,8 @@ player chooses to listen to, and nothing of theirs is in the repo.
 | Source | License / rights | Retrieved | What we took | Where |
 |---|---|---|---|---|
 | US Census Bureau, TIGER/Line Shapefiles 2023, All Roads, Cook County, Illinois (`tl_2023_17031_roads`) | US federal work, public domain | 2026-11-26 | Expressway and main-street centerlines picked by class and name, squeezed and simplified into invented-name roads; no names shipped | `assets/layouts/lake_city.ron` (via `tools/realmap/lake_city.ron`) |
-| US Geological Survey, 3D Elevation Program (3DEP), National Map elevation image service | US federal work, public domain | 2026-11-26 | Ground heights resampled to a 32 m grid, and the lake shore traced from them | `assets/layouts/lake_city.ron` (via `tools/realmap/lake_city.ron`) |
+| US Census Bureau, TIGER/Line Shapefiles 2023, Primary and Secondary Roads, California (`tl_2023_06_prisecroads`) | US federal work, public domain | 2026-11-26 | Main road centerlines and their class (`MTFCC`), squeezed, merged and simplified into invented-name roads; no names taken | `assets/layouts/bay_loop.ron` (via `tools/realmap/bay_loop.ron`) |
+| US Geological Survey, 3D Elevation Program (3DEP), National Map elevation image service | US federal work, public domain | 2026-11-26 | Ground heights resampled to 32 m grids, and the lake shore and bay shoreline traced from them | `assets/layouts/lake_city.ron`, `assets/layouts/bay_loop.ron` (via `tools/realmap/*.ron`) |
 
 ## Fitted references (photographs, drawings, datasets, CC0 kits)
 None yet. The facade grammar (`assets/grammar/`) holds starting values only; the fit pass

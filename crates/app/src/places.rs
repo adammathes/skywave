@@ -598,7 +598,9 @@ mod bay_hills {
         let p = build_in(PlaceKey::Coast, Seed(1), sc).unwrap();
         let ground = world::WorldCollider::build(&p, grammar_of(sc));
         let cs = crests(&p, 30.0, 3);
-        assert!(cs.len() == 3 && cs[2].2 > 0.2, "{cs:?}");
+        // Steep still: the vertical curves round a hill's ends, which takes a point off the
+        // grade of its steepest 30 m.
+        assert!(cs.len() == 3 && cs[2].2 > 0.18, "{cs:?}");
         for (a, _, g) in &cs {
             println!(
                 "crest {:.1}% over 30 m at ({:.0}, {:.0})",

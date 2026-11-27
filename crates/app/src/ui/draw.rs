@@ -856,9 +856,6 @@ impl Ui {
         if let Some(d) = &ctx.radio_display {
             self.draw_radio_display(hud, d);
         }
-        if let Some((name, a)) = self.district_card() {
-            self.draw_district(hud, name, a);
-        }
         // The source's toast: two lines centered at the top.
         if self.source() == Source::Deck {
             if let Some(t) = self.deck.toast() {
@@ -870,24 +867,6 @@ impl Ui {
             self.draw_toast(hud, format_args!("{title}"), format_args!("{detail}"));
         }
         avoid
-    }
-
-    /// The district just entered: its name, centered a fifth of the way down, at opacity
-    /// `a`.
-    fn draw_district(&self, hud: &mut HudBuilder, name: &str, a: f32) {
-        let [sx, sy, sw, sh] = hud.safe_rect();
-        let cx = sx + sw * 0.5;
-        let y = sy + sh * 0.2;
-        let fade = |c: [u8; 4]| [c[0], c[1], c[2], (f32::from(c[3]) * a) as u8];
-        text_center(
-            hud,
-            cx + 2.0,
-            y + 2.0,
-            3.0,
-            fade(SHADOW),
-            format_args!("{name}"),
-        );
-        text_center(hud, cx, y, 3.0, fade(TEXT), format_args!("{name}"));
     }
 
     /// The source's toast: a bright title over a dim detail, centered at the top.

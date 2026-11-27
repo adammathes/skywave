@@ -247,13 +247,20 @@ pub fn network(
     ext: [f32; 2],
     cell: f32,
     suspension: &[P],
+    separate_highways: bool,
 ) -> Vec<Road> {
+    if !separate_highways {
+        let all: Vec<&Line> = lines.iter().collect();
+        let (mut nodes, mut chains) = skeleton(&all, warp, ext, cell, None, suspension);
+        cleanup(&mut nodes, &mut chains);
+        return join(&nodes, &chains, false);
+    }
     // Highways on a skeleton of their own, so where one crosses a street there is no
     // junction (it passes over) and a street corner never drags it off its line.
     let art: Vec<&Line> = lines.iter().filter(|l| l.mtfcc != "S1100").collect();
     let hwy: Vec<&Line> = lines.iter().filter(|l| l.mtfcc == "S1100").collect();
-    let (mut nodes, mut chains) = skeleton(&art, warp, ext, cell, false, suspension);
-    let (hn, hc) = skeleton(&hwy, warp, ext, cell, true, suspension);
+    let (mut nodes, mut chains) = skeleton(&art, warp, ext, cell, Some(false), suspension);
+    let (hn, hc) = skeleton(&hwy, warp, ext, cell, Some(true), suspension);
     let off = nodes.len();
     nodes.extend(hn);
     chains.extend(hc.into_iter().map(|mut c| {
@@ -302,7 +309,7 @@ pub fn network(
         }
     }
     cleanup(&mut nodes, &mut chains);
-    join(&nodes, &chains)
+    join(&nodes, &chains, true)
 }
 
 /// Shorter highways are left out.
@@ -317,7 +324,7 @@ fn skeleton(
     warp: &Warp,
     ext: [f32; 2],
     cell: f32,
-    highways: bool,
+    highways: Option<bool>,
     suspension: &[P],
 ) -> (Vec<P>, Vec<Chain>) {
     let w = (ext[0] / cell).ceil() as usize;
@@ -327,8 +334,11 @@ fn skeleton(
         h,
         on: vec![false; w * h],
     };
+    // Cells a highway runs through (for chains whose kind is not given).
+    let mut hwy = vec![false; w * h];
     // Rasterize: step a quarter cell along each segment; 4-connect diagonal steps.
     for l in lines {
+        let hw = l.mtfcc == "S1100";
         let pts: Vec<P> = l.lonlat.iter().map(|&(a, b)| warp.fwd(a, b)).collect();
         for s in pts.windows(2) {
             let n = (dist(s[0], s[1]) / (cell * 0.25)).ceil().max(1.0) as usize;
@@ -348,6 +358,7 @@ fn skeleton(
                 let mut mark = |c: (i32, i32)| {
                     let i = c.1 as usize * w + c.0 as usize;
                     g.on[i] = true;
+                    hwy[i] |= hw;
                 };
                 if let Some(q) = last {
                     if q.0 != c.0 && q.1 != c.1 {
@@ -428,12 +439,14 @@ fn skeleton(
                 }
                 let (mut prev, mut cur) = ((x, z), start);
                 let mut pts = vec![nodes[a]];
+                let mut on_hwy = 0;
                 let b = loop {
                     let k = cur.1 as usize * w + cur.0 as usize;
                     if node_of[k] != usize::MAX {
                         break node_of[k];
                     }
                     walked[k] = true;
+                    on_hwy += usize::from(hwy[k]);
                     pts.push(center(cur.0, cur.1));
                     let nb = neighbours(&g, cur.0, cur.1);
                     let Some(&nx) = nb.iter().find(|&&q| q != prev) else {
@@ -449,6 +462,8 @@ fn skeleton(
                 if pts.len() == 1 && b < a {
                     continue;
                 }
+                // Mostly on highway cells: a highway.
+                let highway = highways.unwrap_or(on_hwy * 2 > pts.len() - 1);
                 pts.push(nodes[b]);
                 let suspended = pts
                     .iter()
@@ -457,7 +472,7 @@ fn skeleton(
                     a,
                     b,
                     pts,
-                    highway: highways,
+                    highway,
                     suspension: suspended,
                     alive: true,
                 });
@@ -573,7 +588,9 @@ fn leaving(c: &Chain, at_a: bool) -> P {
 
 /// Joins chains into roads that run straight on through junctions, names them and gives
 /// each highway ramps to the arterials that cross it.
-fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
+/// `drop_stubs`: a highway too short to be a freeway is left out (it ends on its own
+/// skeleton's streets); else it is kept as a street (it joins the one network).
+fn join(nodes: &[P], chains: &[Chain], drop_stubs: bool) -> Vec<Road> {
     // Ends: (chain, is the `a` end). Pair ends at each node, straightest first.
     let live: Vec<usize> = (0..chains.len()).filter(|&i| chains[i].alive).collect();
     let mut partner: Vec<[Option<(usize, bool)>; 2]> = vec![[None, None]; chains.len()];
@@ -678,7 +695,13 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
         lines.push((chains[i0].highway, chains[i0].suspension, pts));
     }
     // A highway stub (a few hundred meters between two street corners) is no freeway.
-    lines.retain(|l| !l.0 || length(&l.2) >= MIN_HIGHWAY_M);
+    if drop_stubs {
+        lines.retain(|l| !l.0 || length(&l.2) >= MIN_HIGHWAY_M);
+    } else {
+        for l in lines.iter_mut() {
+            l.0 &= length(&l.2) >= MIN_HIGHWAY_M;
+        }
+    }
     lines.sort_by(|a, b| length(&b.2).total_cmp(&length(&a.2)));
 
     let (mut nh, mut na) = (0, 0);
