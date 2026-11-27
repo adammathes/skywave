@@ -57,9 +57,7 @@ fn the_card_lists_the_live_bindings_and_follows_a_remap() {
     // Put the horn on J with the Bindings page: the card says so.
     let kb = DeviceKind::KeyboardMouse;
     h.open(&[
-        ItemId::Open(Page::Settings),
         ItemId::Open(Page::Controls),
-        ItemId::Open(Page::Device(kb)),
         ItemId::Open(Page::Bindings(kb)),
     ]);
     h.focus_on(ItemId::Bind(kb, Action::Horn, Sign::Full));
@@ -141,7 +139,7 @@ fn it_goes_on_any_input_or_when_its_time_is_up() {
     let mut h = Harness::with_store(&SharedStore::default());
     h.key(Key::Escape);
     assert_eq!(shown(&h), None);
-    assert_eq!(h.page(), Page::Pause);
+    assert_eq!(h.page(), Page::Game);
 }
 
 #[test]
@@ -165,7 +163,7 @@ fn after_three_dismissed_sessions_it_stops_showing_at_the_start() {
     h.key(Key::F1);
 
     // Settings › HUD › Show controls at start, back on: three more sessions.
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    h.open(&[ItemId::Open(Page::Display)]);
     h.focus_on(ItemId::ControlsAtStart);
     assert_eq!(h.ui().items()[h.focus()].widget, Widget::Toggle(false));
     h.pad(PadButton::DpadRight);
@@ -181,7 +179,7 @@ fn after_three_dismissed_sessions_it_stops_showing_at_the_start() {
     let off = SharedStore::default();
     let mut h = Harness::with_store(&off);
     h.key(Key::KeyW);
-    h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
+    h.open(&[ItemId::Open(Page::Display)]);
     h.focus_on(ItemId::ControlsAtStart);
     h.pad(PadButton::DpadRight);
     while h.app.menu_open() {
@@ -208,7 +206,7 @@ fn the_pause_menu_and_the_pad_alone_open_and_close_it() {
     assert!(!h.app.menu_open());
     // A tap of Start is still the pause menu; its Controls item shows the card over it.
     h.pad(PadButton::Start);
-    assert_eq!(h.page(), Page::Pause);
+    assert_eq!(h.page(), Page::Game);
     h.focus_on(ItemId::Controls);
     h.pad(PadButton::South);
     assert_eq!(shown(&h), Some(Shown::Asked));
@@ -218,14 +216,14 @@ fn the_pause_menu_and_the_pad_alone_open_and_close_it() {
     // Start (a tap) closes the card and leaves the menu as it was, still paused.
     h.pad(PadButton::Start);
     assert_eq!(shown(&h), None);
-    assert_eq!(h.page(), Page::Pause);
+    assert_eq!(h.page(), Page::Game);
     assert_eq!(h.ui().items()[h.focus()].id, ItemId::Controls);
     assert_eq!(h.app.ticks(), paused);
     // Start held toggles it too.
     h.pad(PadButton::South);
     hold(&mut h, PadButton::Start, 1.1);
     assert_eq!(shown(&h), None);
-    assert_eq!(h.page(), Page::Pause);
+    assert_eq!(h.page(), Page::Game);
 }
 
 #[test]

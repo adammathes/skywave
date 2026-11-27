@@ -121,7 +121,7 @@ figures drew about 50 more at Deck on the busiest block).
 
 ## Quality presets
 
-Settings → Video → Quality. `Settings::quality` is `None` until the player picks one; then
+Display › Quality. `Settings::quality` is `None` until the player picks one; then
 it is saved (`"video": { "quality": "deck" }`). Until then the game picks per device each
 run (`Quality::auto`): **Deck** when the adapter is the Deck's APU ("Van Gogh",
 "Sephiroth", "Custom GPU 0405"), an AMD integrated GPU, or the surface is 1280×800 on
@@ -141,11 +141,11 @@ changed (a kept cascade within half a shadow texel of a fresh one). The pre-pass
 1 024 000 on the coast, where two triangles of one mesh tie in depth and its
 less-or-equal test lets the later one win (`depth_prepass_keeps_the_image`).
 
-Choosing a preset sets the resolution scale slider to the preset's value (Battery also sets
-Frame rate to half the panel's; `--quality battery` brings that cap for the session too); the
-slider can then move it (50–100%). Far terrain detail is the same at every preset: it is one mesh of
-~8k triangles drawn last (a coarser level is a follow-up). Bloom on/off stays its own
-toggle.
+Choosing a preset sets the resolution scale and the frame rate to the preset's (Battery: half the
+panel's; `--quality battery` brings that cap for the session too; the others the panel's). There is
+no separate slider, frame-rate or bloom setting in the menu: the preset is the one knob. Far terrain
+detail is the same at every preset: it is one mesh of ~8k triangles drawn last (a coarser level is a
+follow-up).
 
 The screenshot goldens are taken on the web build in a fresh profile (SwiftShader), so
 they render at **Medium**. Medium keeps the fifth bloom level for them: with four, the wide
@@ -189,7 +189,7 @@ world every frame, uncapped. `--stats` ends its line with `last=World|Ui|Skip` a
 counts of each; the full F3 overlay shows the same (with an overlay up, it changes every
 frame, so frames are at least Ui; menus and the map hide it, so they idle).
 
-**Frame rate** (Settings › Video › Frame rate): the panel's rate, or every Nth refresh, so
+**Frame rate** (set by the Quality preset): the panel's rate, or every Nth refresh, so
 frames are always evenly paced. Offered: the panel's rate, then each whole divisor of at
 least 20 fps (90 Hz: 45, 30; 60 Hz: 30, 20; 144 Hz: 72, 48, 36; `FrameRate::offered`). The
 simulation stays at 120 Hz; rendering interpolates as before. Natively the loop sleeps to
@@ -208,7 +208,7 @@ and resumes when the focus comes back; the loop runs at most 4 times a second
 it draws nothing at all; winit 0.30 reports that (`Occluded`) on X11 and macOS but not on
 Windows or Wayland, where minimizing is the unfocused path. On the web a hidden page (a tab
 switch) pauses the game; a visible page without the focus (an unclicked frame) runs. The
-radio keeps playing unless Settings › Audio › Radio in background is Mute (the web's
+radio keeps playing unless Audio › Radio in background is Mute (the web's
 player; the native radio has no player yet, #15).
 
 Measured on the no-op device at 1280×800 (`idle_frames_draw_the_world_once`, in CI; and

@@ -3,8 +3,8 @@
 // layout says where the lake, the river, the districts and the main roads are; these
 // rules say what a district of each zone looks like. Built to work, warm
 // inside: brick three-flats and bungalows, two-storey brick storefronts on the arterials, a
-// dense downtown of towers. Its hero landmark is a drive-in hot dog stand on the first arterial
-// lot ahead of the start (`roadside`).
+// dense downtown of towers. Its hero landmark is a drive-in hot dog stand on the arterial lot
+// nearest the layout's `hero` point (`roadside`).
 RegionTemplate(
     name: "great_lakes_city",
     driving_side: Right,

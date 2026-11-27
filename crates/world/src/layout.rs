@@ -113,7 +113,8 @@ pub struct District {
 ///
 /// A `Highway` is grade-separated: the roads that cross it pass over on a deck and do not
 /// meet it, except those named in `ramps`, which get a diamond of four one-way ramps. Its
-/// own ends meet roads at grade like any road's.
+/// own ends meet roads at grade like any road's. An `elevated` highway rides a viaduct over
+/// the ground instead, so the roads crossing it pass under at grade and its ramps climb.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -148,6 +149,9 @@ pub struct Road {
     /// A `Highway`'s interchanges: the crossing roads joined to it by ramps.
     #[cfg_attr(feature = "serde", serde(default))]
     pub ramps: Vec<String>,
+    /// A `Highway` on a viaduct: the crossing roads keep to the ground.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub elevated: bool,
 }
 
 /// A channel cut along a polyline: a flat bed `width_m` wide, `depth_m` under the ground
@@ -292,6 +296,10 @@ pub struct Layout {
     /// Land height where no shape says otherwise.
     pub ground_m: f32,
     pub water_level_m: f32,
+    /// How wide the land's slope down to the water is (default
+    /// [`crate::procgen::authored::SHORE_M`]): wider for a flat shore.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub shore_m: Option<f32>,
     pub edges: Edges,
     /// Heights over `ground_m` from a grid, under the ridges and peaks.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -318,6 +326,10 @@ pub struct Layout {
     /// tunnel on the highway, turnouts at the lookouts, the drag strip on the runway.
     #[cfg_attr(feature = "serde", serde(default))]
     pub set_pieces: bool,
+    /// Where the hero landmark stands (the region template's `roadside` set): on the
+    /// arterial lot nearest this point, instead of the one just ahead of the start.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub hero: Option<Pt>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub rail: Option<Rail>,
     #[cfg_attr(feature = "serde", serde(default))]

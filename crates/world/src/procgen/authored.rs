@@ -15,7 +15,9 @@
 //!   `max_grade` steep and rides `deck_m` over the water on bridges. A `Highway` is
 //!   grade-separated: a road crossing it meets nothing and rises to a deck
 //!   [`OVERPASS_LIFT_M`] over it; the roads its `ramps` name get a diamond of one-way
-//!   ramps; its right of way is zoned `Highway`, which keeps streets and lots off it.
+//!   ramps; its right of way is zoned `Highway`, which keeps streets and lots off it. An
+//!   `elevated` highway rides a viaduct [`OVERPASS_LIFT_M`] over the ground instead, and the
+//!   roads crossing it stay level and pass under.
 //! - **Channels** ([`channels`]): cut into the ground after the roads are laid, so the
 //!   roads that cross one bridge it; zoned `Highway` (dry) or `Water` (wet).
 //!
@@ -65,6 +67,8 @@ pub const OVERPASS_LIFT_M: f32 = 7.0;
 /// ... level for this far past the highway's edge, then down at this grade.
 const OVERPASS_FLAT_M: f32 = 9.0;
 const APPROACH_GRADE: f32 = 0.04;
+/// An elevated highway is a viaduct where it stands this far over the ground.
+const DECK_CLEARANCE_M: f32 = 2.0;
 /// Steepest highway grade unless the road says otherwise.
 const HIGHWAY_GRADE: f32 = 0.05;
 /// Passes that ease junction heights on steep ground toward their streets' grades.
@@ -314,6 +318,7 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
     let w = usize::from(size_chunks[0]) * RES_PER_CHUNK as usize;
     let h = usize::from(size_chunks[1]) * RES_PER_CHUNK as usize;
     let wl = layout.water_level_m;
+    let shore = layout.shore_m.unwrap_or(SHORE_M);
     let edges = layout.edges.sides();
     let bands = edges::bands(&edges);
 
@@ -333,7 +338,7 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
         .iter()
         .map(|wb| {
             let p = pts(&wb.polygon);
-            let bb = bbox(&p, SHORE_M);
+            let bb = bbox(&p, shore);
             (p, wb.depth_m, bb)
         })
         .collect();
@@ -374,8 +379,8 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
                     break;
                 }
                 let lip = wl + SHORE_LIP_M;
-                if edge < SHORE_M && y > lip {
-                    y = lerp(lip, y, smoothstep(0.0, SHORE_M, edge));
+                if edge < shore && y > lip {
+                    y = lerp(lip, y, smoothstep(0.0, shore, edge));
                 }
             }
             heights[iz * w + ix] = y;
@@ -523,6 +528,7 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
             .grid
             .as_ref()
             .map(|g| [[g.origin.0, g.origin.1], [g.block_m.0, g.block_m.1]]),
+        hero: layout.hero.map(|(x, z)| [x, z]),
     }
 }
 
@@ -624,6 +630,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                 deck_m: layout::DECK_M,
                 ramps: Vec::new(),
                 suspension: false,
+                elevated: false,
             });
         }
     }
@@ -803,12 +810,36 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     let ground = |p: V2| m.height_at(p.x, p.y);
     let over_water = |p: V2| ground(p) < wl + 0.3;
     let target = |p: V2, deck: f32| if over_water(p) { wl + deck } else { ground(p) };
+    // An elevated highway asks for its viaduct; its ramps leave their ends to the highway
+    // and the road they join.
+    let elevated = |line: usize| roads[road[line]].elevated && kind[line] != Kind::Road;
+    let viaduct = |line: usize, p: V2, deck: f32| {
+        let y = target(p, deck);
+        if elevated(line) && kind[line] == Kind::Highway {
+            y.max(ground(p) + OVERPASS_LIFT_M)
+        } else {
+            y
+        }
+    };
+    // A viaduct comes down to the roads its ends meet.
+    let mut street = vec![false; nodes.len()];
+    for pc in pieces.iter().filter(|pc| !elevated(pc.line)) {
+        street[pc.a] = true;
+        street[pc.b] = true;
+    }
     let mut elev: Vec<Option<f32>> = vec![None; nodes.len()];
     let mut on_highway = vec![false; nodes.len()];
-    for pc in &pieces {
+    for pc in pieces
+        .iter()
+        .filter(|pc| !(elevated(pc.line) && kind[pc.line] == Kind::Ramp))
+    {
         let deck = roads[road[pc.line]].deck_m;
         for nd in [pc.a, pc.b] {
-            let y = target(nodes[nd], deck);
+            let y = if street[nd] {
+                target(nodes[nd], deck)
+            } else {
+                viaduct(pc.line, nodes[nd], deck)
+            };
             elev[nd] = Some(elev[nd].map_or(y, |e: f32| e.max(y)));
             on_highway[nd] |= kind[pc.line] == Kind::Highway;
         }
@@ -843,7 +874,7 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                 a: pc.a,
                 b: pc.b,
                 s: arcs(&pc.pts),
-                target: pc.pts.iter().map(|&p| target(p, r.deck_m)).collect(),
+                target: pc.pts.iter().map(|&p| viaduct(i, p, r.deck_m)).collect(),
             })
             .collect();
         let g = r.max_grade.unwrap_or(HIGHWAY_GRADE);
@@ -872,9 +903,13 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
         }
         best.1
     };
-    // Overpasses per line: (arc, deck height, half the level span).
+    // Overpasses per line: (arc, deck height, half the level span). A road passes under a
+    // viaduct where it stands at full height.
     let mut decks: Vec<Vec<(f32, f32, f32)>> = vec![Vec::new(); lines.len()];
     for &(i, s, j, p) in &over {
+        if elevated(j) && highway_y(p) > ground(p) + OVERPASS_LIFT_M - 0.5 {
+            continue;
+        }
         let flat = highway_half(roads[road[j]].lanes) + OVERPASS_FLAT_M;
         decks[i].push((s, highway_y(p) + OVERPASS_LIFT_M, flat));
     }
@@ -986,9 +1021,15 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                     .iter()
                     .any(|&(c, _, flat)| abs(at - c) < flat - 1.0)
             };
+            // A viaduct spans the ground under it.
+            let up = |k: usize| {
+                kind[pc.line] == Kind::Highway
+                    && elevated(pc.line)
+                    && hy[k] > ground(pc.pts[k]) + DECK_CLEARANCE_M
+            };
             bridged.push(
                 (0..pc.pts.len())
-                    .map(|k| over_water(pc.pts[k]) || spans(k))
+                    .map(|k| over_water(pc.pts[k]) || spans(k) || up(k))
                     .collect(),
             );
             let ys = match kind[pc.line] {

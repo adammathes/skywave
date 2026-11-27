@@ -99,6 +99,14 @@ pub struct Import {
     /// one network, highways meeting streets where they touch (a sparse one).
     #[serde(default)]
     pub separate_highways: bool,
+    /// The highways ride viaducts (`Road.elevated`): the streets pass under them level, as
+    /// in a flat city.
+    #[serde(default)]
+    pub elevated_highways: bool,
+    /// Low ground within this far of a road stays land (0: off), so a shore drive keeps to
+    /// the shore instead of crossing the harbors beside it.
+    #[serde(default)]
+    pub dry_roads_m: f32,
 }
 
 /// A channel or river (`docs/LAYOUTS.md`), its line in degrees.
@@ -383,26 +391,6 @@ fn run(path: &str) -> Result<(), String> {
     }
     t.push_str("    ])),\n");
 
-    // Water: the sea and the bays it reaches.
-    let polys = water::sea(&dem, &warp, ext, cfg.sea_below_m);
-    let mut w = String::new();
-    for p in &polys {
-        writeln!(
-            w,
-            "        Water(kind: {}, depth_m: 4.2, polygon: [",
-            cfg.water_kind
-        )
-        .unwrap();
-        for chunk in p.chunks(8) {
-            w.push_str("            ");
-            for &(x, z) in chunk {
-                write!(w, "({}, {}), ", x.round(), z.round()).unwrap();
-            }
-            w.push('\n');
-        }
-        w.push_str("        ]),\n");
-    }
-
     // Roads.
     let skip: Vec<[f64; 4]> = cfg.skip.iter().map(|&(a, b, c, d)| [a, b, c, d]).collect();
     // Cut out the parts of highways inside a skip box, splitting them there.
@@ -448,6 +436,31 @@ fn run(path: &str) -> Result<(), String> {
         &susp,
         cfg.separate_highways,
     );
+    // Water: the sea and the bays it reaches.
+    let dry: Vec<&[(f32, f32)]> = if cfg.dry_roads_m > 0.0 {
+        net.iter().map(|r| r.points.as_slice()).collect()
+    } else {
+        Vec::new()
+    };
+    let polys = water::sea(&dem, &warp, ext, cfg.sea_below_m, &dry, cfg.dry_roads_m);
+    let mut w = String::new();
+    for p in &polys {
+        writeln!(
+            w,
+            "        Water(kind: {}, depth_m: 4.2, polygon: [",
+            cfg.water_kind
+        )
+        .unwrap();
+        for chunk in p.chunks(8) {
+            w.push_str("            ");
+            for &(x, z) in chunk {
+                write!(w, "({}, {}), ", x.round(), z.round()).unwrap();
+            }
+            w.push('\n');
+        }
+        w.push_str("        ]),\n");
+    }
+
     // Start: the nearest point on any road.
     let sp = warp.fwd(cfg.start.0, cfg.start.1);
     let mut best = (f32::INFINITY, 0usize, 0.0f32, (0.0f32, 0.0f32));
@@ -512,7 +525,11 @@ fn run(path: &str) -> Result<(), String> {
             ramps
         };
         let class = if road.highway {
-            "class: Highway, lanes: 2".to_string()
+            if cfg.elevated_highways {
+                "class: Highway, lanes: 2, elevated: true".to_string()
+            } else {
+                "class: Highway, lanes: 2".to_string()
+            }
         } else {
             // A street mostly over a hilly district climbs it as steeply as its streets may.
             let up = road

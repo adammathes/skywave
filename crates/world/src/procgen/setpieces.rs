@@ -179,7 +179,8 @@ pub const HERO_AHEAD_M: f32 = 60.0;
 
 /// A place without a basin: its template's roadside kits, in order, each on the commercial
 /// or strip lot on an arterial nearest its start at least [`HERO_AHEAD_M`] ahead of it (the
-/// nearest at all when none is ahead), [`ROADSIDE_APART_M`] from the others.
+/// nearest at all when none is ahead), or nearest the layout's hero point when it has one,
+/// [`ROADSIDE_APART_M`] from the others.
 fn by_start(m: &MacroMap, place: &Place, kits: &[Kit], list: &[RoadsideKit]) -> SetPieces {
     let mut s = SetPieces::default();
     let Some(start) = place
@@ -189,9 +190,13 @@ fn by_start(m: &MacroMap, place: &Place, kits: &[Kit], list: &[RoadsideKit]) -> 
     else {
         return s;
     };
-    let at = V2::new(start.pos[0], start.pos[2]);
-    let (sin, cos) = crate::math::sin_cos(start.heading);
-    let ahead = V2::new(-sin, -cos);
+    let (at, ahead) = match m.hero {
+        Some(h) => (V2::from_array(h), V2::new(0.0, 0.0)),
+        None => {
+            let (sin, cos) = crate::math::sin_cos(start.heading);
+            (V2::new(start.pos[0], start.pos[2]), V2::new(-sin, -cos))
+        }
+    };
     for r in list {
         let Some(k) = kits.iter().position(|k| k.id == r.kit) else {
             continue;
@@ -217,7 +222,11 @@ fn by_start(m: &MacroMap, place: &Place, kits: &[Kit], list: &[RoadsideKit]) -> 
         };
         let key = |l: &Lot| {
             let d = l.at(0.0, 0.5 * size.1) - at;
-            (d.dot(ahead) < HERO_AHEAD_M, d.length(), l.key)
+            (
+                m.hero.is_none() && d.dot(ahead) < HERO_AHEAD_M,
+                d.length(),
+                l.key,
+            )
         };
         let lot = lots(
             place,

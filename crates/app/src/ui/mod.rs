@@ -27,7 +27,7 @@ mod readout;
 pub mod roster;
 
 pub use menu::{Effect, Item, MenuInput, MenuNav, Nav, Repeat, Unit, Widget};
-pub use pages::{ItemId, Page};
+pub use pages::{ItemId, Page, TABS};
 
 use crate::camera::CameraMode;
 use crate::daylight::{Clock, CLOCK_SPEEDS, DAY_SECONDS};
@@ -87,7 +87,8 @@ pub enum Toast {
     WrongDevice(DeviceKind),
     Southpaw,
     SwapTriggers,
-    Reset(DeviceKind),
+    /// Both devices' controls back to the defaults.
+    ControlsReset,
     /// Switched to the built-in car with this index (its name).
     Vehicle(usize),
     /// The car was put back on the road.
@@ -454,11 +455,8 @@ impl Ui {
         self.hud.view()
     }
 
-    /// `sky` with the video settings applied (bloom off zeroes its strength).
+    /// `sky` with the video settings applied.
     pub fn video_sky(&self, mut sky: Sky) -> Sky {
-        if !self.settings.bloom {
-            sky.bloom_strength = 0.0;
-        }
         sky.look = self.look();
         sky
     }
@@ -554,11 +552,11 @@ impl Ui {
         self.vehicle_paint
     }
 
-    /// The Vehicle page opens on the car being driven, in its paint, the car chooser
-    /// focused; the World page on the world the app is.
-    fn focus_current_vehicle(&mut self) {
+    /// The Car tab opens on the car being driven, in its paint, the car chooser focused;
+    /// the Worlds tab on the world the app is.
+    fn focus_current(&mut self) {
         if let Some(menu) = &mut self.menu {
-            if menu.page() == Page::Vehicle {
+            if menu.page() == Page::Car {
                 self.browse = [self.vehicle, self.vehicle_paint];
                 menu.set_focus(0);
             } else if menu.page() == Page::Worlds {
@@ -572,7 +570,7 @@ impl Ui {
     pub fn preview(&self) -> Option<(usize, usize, [f32; 4])> {
         let page = self.menu.as_ref()?.page();
         let stage = self.stage?;
-        (page == Page::Vehicle && self.capture.is_none()).then_some((
+        (page == Page::Car && self.capture.is_none()).then_some((
             self.browse[0],
             self.browse[1],
             stage,
@@ -647,14 +645,29 @@ impl Ui {
         self.dirty = false;
     }
 
-    /// Opens the menu on `page`, over the pause page so Back leads there.
+    /// Opens the menu on `page`, over its tab so Back leads there.
     pub fn open(&mut self, page: Page, input: &InputState) {
-        let mut nav = MenuNav::new(Page::Pause);
-        if page != Page::Pause {
+        let tab = pages::tab_of(page);
+        let mut nav = MenuNav::new(tab);
+        if page != tab {
             nav.push(page);
         }
         self.menu = Some(nav);
+        self.focus_current();
         self.repeat.reset(&MenuInput::from_state(input));
+    }
+
+    /// Moves `step` tabs along (wrapping), onto that tab's first page.
+    fn switch_tab(&mut self, step: i8) {
+        let Some(menu) = &mut self.menu else { return };
+        let n = pages::TABS.len();
+        let at = pages::TABS
+            .iter()
+            .position(|&t| t == menu.root())
+            .unwrap_or(0);
+        let next = (at as isize + isize::from(step)).rem_euclid(n as isize) as usize;
+        menu.switch(pages::TABS[next]);
+        self.focus_current();
     }
 
     pub fn close(&mut self) {
@@ -676,8 +689,6 @@ impl Ui {
             music_again: self.music_again,
             quality: self.quality(),
             look: self.look(),
-            frame_rate: self.frame_rate(),
-            panel_hz: self.panel_hz,
             browse: self.browse,
             driver: self.driver(),
             scenario: self.scenario,
@@ -746,7 +757,7 @@ impl Ui {
                 return;
             }
             if s.just_pressed(Action::Pause) {
-                self.open(Page::Pause, s);
+                self.open(Page::Game, s);
                 self.rebuild(clock);
             }
             return;
@@ -757,19 +768,20 @@ impl Ui {
             self.close();
             return;
         }
+        // The shoulder buttons (Q and E) move along the tabs from any page but the
+        // conflict question, which wants an answer.
+        if input.tab != 0 && menu.page() != Page::Conflict {
+            self.switch_tab(input.tab);
+            self.repeat.reset(&input);
+            self.rebuild(clock);
+            return;
+        }
         self.rebuild(clock);
         if let Some(nav) = self.repeat.update(&input, dt) {
             let effect = match &mut self.menu {
-                // Select drives the car shown from any row of the Vehicle page.
-                Some(menu) if menu.page() == Page::Vehicle && nav == Nav::Confirm => {
+                // Select drives the car shown from any row of the Car page.
+                Some(menu) if menu.page() == Page::Car && nav == Nav::Confirm => {
                     Effect::Activate(ItemId::Vehicle(self.browse[0]))
-                }
-                // The World page's cards sit side by side: left and right move between them.
-                Some(menu)
-                    if menu.page() == Page::Worlds && matches!(nav, Nav::Left | Nav::Right) =>
-                {
-                    let along = if nav == Nav::Left { Nav::Up } else { Nav::Down };
-                    menu.apply(along, &self.items)
                 }
                 Some(menu) => menu.apply(nav, &self.items),
                 None => Effect::None,
@@ -781,7 +793,6 @@ impl Ui {
 
     fn apply(&mut self, effect: Effect, clock: &mut Clock, mapper: &mut InputMapper) {
         match effect {
-            Effect::Opened(Page::Vehicle | Page::Worlds) => self.focus_current_vehicle(),
             Effect::None | Effect::Moved | Effect::Opened(_) => {}
             Effect::Toggle(id, on) => self.set_toggle(id, on),
             Effect::Slide(id, v) => self.set_slider(id, v, clock),
@@ -834,10 +845,6 @@ impl Ui {
                 self.camera_changed = true;
                 self.dirty = true;
             }
-            Effect::Choose(ItemId::Dashboard, i) => {
-                self.settings.dashboard = i == 0;
-                self.dirty = true;
-            }
             Effect::Choose(ItemId::RadioPreset, i) => {
                 radio::choose_preset(&mut self.settings.radio, self.radio.scenario(), i);
                 self.radio_settings_changed();
@@ -846,15 +853,8 @@ impl Ui {
                 let q = Quality::ALL[i.min(Quality::ALL.len() - 1)];
                 self.settings.quality = Some(q);
                 self.settings.resolution_scale = q.resolution_scale();
-                if let Some(f) = q.frame_rate() {
-                    self.settings.frame_rate = f;
-                }
+                self.settings.frame_rate = q.frame_rate().unwrap_or_default();
                 self.forced_quality = None;
-                self.dirty = true;
-            }
-            Effect::Choose(ItemId::FrameRate, i) => {
-                let offered = FrameRate::offered(self.panel_hz);
-                self.settings.frame_rate = offered[i.min(offered.len() - 1)];
                 self.dirty = true;
             }
             Effect::Choose(ItemId::Source, i) => {
@@ -919,11 +919,13 @@ impl Ui {
 
     fn set_toggle(&mut self, id: ItemId, on: bool) {
         match id {
-            ItemId::InvertLookY(d) => self.edit_axes(d, &pages::LOOK_Y, |o| o.invert = on),
-            ItemId::InvertLookX(d) => self.edit_axes(d, &pages::LOOK_X, |o| o.invert = on),
-            ItemId::Invert(d, a) => self.edit_axes(d, &[a], |o| o.invert = on),
-            ItemId::Bloom => {
-                self.settings.bloom = on;
+            ItemId::InvertLook => {
+                for d in [DeviceKind::Gamepad, DeviceKind::KeyboardMouse] {
+                    self.edit_axes(d, &pages::LOOK_Y, |o| o.invert = on);
+                }
+            }
+            ItemId::Dashboard => {
+                self.settings.dashboard = on;
                 self.dirty = true;
             }
             ItemId::Minimap => {
@@ -950,10 +952,6 @@ impl Ui {
                 self.settings.camera_shake = on;
                 self.dirty = true;
             }
-            ItemId::Mute => {
-                self.settings.mute = on;
-                self.radio_settings_changed();
-            }
             ItemId::Station(i) => {
                 if let Some(row) = self.radio.rows().get(i) {
                     let id = row.id.clone();
@@ -974,15 +972,8 @@ impl Ui {
         ];
         match id {
             ItemId::LookSensitivity(d) => self.edit_axes(d, &look, |o| o.sensitivity = v),
-            ItemId::Sensitivity(d, a) => self.edit_axes(d, &[a], |o| o.sensitivity = v),
-            ItemId::Deadzone(d, a) => self.edit_axes(d, &[a], |o| o.deadzone = v),
-            ItemId::Curve(d, a) => self.edit_axes(d, &[a], |o| o.curve = v),
             ItemId::UiScale => {
                 self.settings.ui_scale = v;
-                self.dirty = true;
-            }
-            ItemId::ResolutionScale => {
-                self.settings.resolution_scale = v;
                 self.dirty = true;
             }
             ItemId::CockpitFov => {
@@ -1067,14 +1058,12 @@ impl Ui {
                 self.bindings_edited();
                 self.show(Toast::SwapTriggers);
             }
-            ItemId::ResetDevice(d) => {
-                self.bindings.reset_device(d);
+            ItemId::ResetControls => {
+                for d in [DeviceKind::Gamepad, DeviceKind::KeyboardMouse] {
+                    self.bindings.reset_device(d);
+                }
                 self.bindings_edited();
-                self.show(Toast::Reset(d));
-            }
-            ItemId::ResetAction(d, a) => {
-                self.bindings.reset_action(d, a);
-                self.bindings_edited();
+                self.show(Toast::ControlsReset);
             }
             ItemId::KeepExisting | ItemId::UseNew => self.settle_conflict(id == ItemId::UseNew),
             ItemId::AddStream => self.radio.request_url(),
@@ -1187,10 +1176,10 @@ impl Ui {
         self.settings.radio.deck.source
     }
 
-    /// The master volume scales the radio too, and mute silences it (and so does the
-    /// window going to the background, when the setting says so).
+    /// The master volume scales the radio too; the window going to the background
+    /// silences it, when the setting says so.
     fn radio_gain(&self) -> f32 {
-        if self.settings.mute || (self.settings.mute_radio_unfocused && !self.focused) {
+        if self.settings.mute_radio_unfocused && !self.focused {
             0.0
         } else {
             self.settings.master_volume
@@ -1875,15 +1864,9 @@ impl App {
         }
     }
 
-    /// Opens the settings menu (over the pause menu), e.g. at startup for screenshots.
-    pub fn open_settings(&mut self) {
-        self.open_menu(Page::Settings);
-    }
-
-    /// Opens the menu on `page` (over the pause menu), e.g. at startup for screenshots.
+    /// Opens the menu on `page` (over its tab), e.g. at startup for screenshots.
     pub fn open_menu(&mut self, page: Page) {
         self.ui.open(page, &InputState::default());
-        self.ui.focus_current_vehicle();
         self.ui.rebuild(&self.time.clock);
     }
 

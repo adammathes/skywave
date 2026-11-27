@@ -82,6 +82,9 @@ pub enum Action {
     MenuRight,
     MenuConfirm,
     MenuBack,
+    /// The menu's tab to the left / right (the shoulder buttons, Q and E).
+    MenuTabPrev,
+    MenuTabNext,
     /// Free-fly camera (until the car exists), `[0, 1]` each.
     FlyForward,
     FlyBack,
@@ -102,11 +105,13 @@ pub enum Action {
 pub enum Context {
     Drive,
     Menu,
+    /// The full map: its zoom shares the shoulder buttons with the menu's tabs.
+    Map,
     Fly,
 }
 
 impl Action {
-    pub const COUNT: usize = 45;
+    pub const COUNT: usize = 47;
     pub const ALL: [Action; Action::COUNT] = [
         Action::Throttle,
         Action::Brake,
@@ -145,6 +150,8 @@ impl Action {
         Action::MenuRight,
         Action::MenuConfirm,
         Action::MenuBack,
+        Action::MenuTabPrev,
+        Action::MenuTabNext,
         Action::FlyForward,
         Action::FlyBack,
         Action::FlyLeft,
@@ -200,7 +207,9 @@ impl Action {
             | Action::MenuRight
             | Action::MenuConfirm
             | Action::MenuBack
-            | Action::MapZoom => Context::Menu,
+            | Action::MenuTabPrev
+            | Action::MenuTabNext => Context::Menu,
+            Action::MapZoom => Context::Map,
             Action::FlyForward
             | Action::FlyBack
             | Action::FlyLeft
@@ -264,6 +273,8 @@ impl Action {
             Action::MenuRight => "MenuRight",
             Action::MenuConfirm => "MenuConfirm",
             Action::MenuBack => "MenuBack",
+            Action::MenuTabPrev => "MenuTabPrev",
+            Action::MenuTabNext => "MenuTabNext",
             Action::FlyForward => "FlyForward",
             Action::FlyBack => "FlyBack",
             Action::FlyLeft => "FlyLeft",
@@ -380,7 +391,8 @@ mod tests {
         assert!(!Action::Horn.is_analog() && !Action::Horn.is_bipolar());
         assert!(Action::Throttle.is_analog() && !Action::Throttle.is_bipolar());
         assert_eq!(Action::MenuBack.context(), Context::Menu);
-        assert_eq!(Action::MapZoom.context(), Context::Menu);
+        assert_eq!(Action::MenuTabNext.context(), Context::Menu);
+        assert_eq!(Action::MapZoom.context(), Context::Map);
         assert!(Action::MapZoom.is_analog() && Action::MapZoom.is_bipolar());
         assert_eq!(Action::FlyLookY.context(), Context::Fly);
         assert_eq!(Action::Pause.context(), Context::Drive);

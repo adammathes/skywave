@@ -3,11 +3,11 @@
 A **scenario** is the thing you pick on the title screen and share as a code: a kind of place, an era, the cars on the road, the radio, the light. People will want the place of their childhood. The procedural templates give the *kind* of place; the place compiler (M6) gives the *specific* one. Both use the same era layers, rosters and presets.
 
 As built (`assets/scenarios/<id>.ron`, read by `crates/app/src/scenario.rs` with
-`deny_unknown_fields`; the World page lists them in the fixed order of `scenario::BUILTIN`):
+`deny_unknown_fields`; the Worlds tab lists them in the fixed order of `scenario::BUILTIN`):
 ```
 Scenario(
   id: "socal_beach_1984",              // the file stem; `?scenario=` / `--scenario`
-  title: "Pacific Shore", year: 1984,  // what the World page's card says
+  title: "Pacific Shore", year: 1984,  // what the Worlds tab says
   kind: "Beach town",                  // the kind of place, on the card
   region: "pacific_shore",             // assets/regions/<id>.ron: the zone rules
   layout: "pacific_shore",             // assets/layouts/<id>.ron: the drawn place
@@ -30,15 +30,15 @@ world choice, a saved radio pick or a `?scenario=` / `--scenario` naming an old 
 `heroes` are the eleven 2001 hero cars (`docs/VEHICLES.md`), which no earlier world shows. The era filter and its weights are in
 `docs/VEHICLES.md` (`year`). Each scenario has a 320×200 still, `assets/stills/<id>.still` (a 256-color palette and an index per texel,
 64,768 bytes, committed; rendered with `tools/screenshot`, cropped clear of the HUD and quantized, see
-`assets/stills/README.md`), laid out in an atlas four to a row for the World page.
+`assets/stills/README.md`), laid out in an atlas four to a row for the Worlds tab.
 
-**Switching worlds.** The pause menu's World page (`docs/CONTROLS_INPUT.md`) shows a card per scenario;
+**Switching worlds.** The menu's Worlds tab (`docs/CONTROLS_INPUT.md`) lists every scenario;
 picking one saves it as the `scenario` setting and the platform reloads the game in it: the session's scene
 moved to that world's procedural place, its start and default time (`SceneSetup::for_world`), the settings
 kept, the radio off; the old app and renderer are dropped whole. A session starts in the world last picked
 unless its scene names a place or a world (`?scenario=<id>` on the web, `--scenario <id>` natively; an id
 that is not built in starts the first world and says so); with none saved, a bare start opens Mirage Bowl
-(`scenario::DEFAULT`) and a scene with other keys the hand-laid test town (`SceneSetup::with_saved_world`). There is no title screen yet: the World page (Pause › Worlds) is
+(`scenario::DEFAULT`) and a scene with other keys the hand-laid test town (`SceneSetup::with_saved_world`). There is no title screen yet: the Worlds tab is
 reached from the pause menu (and `?menu=worlds` opens the web build on it).
 
 ## Launch scenario
@@ -60,7 +60,7 @@ palms on wide medians, a concrete flood-control channel you can drive down, a ti
 tunnel, freeway overpasses and an on-ramp loop, a rail line with a grade crossing, an airfield
 drag strip at the edge, a hills overlook at night with the city grid lit below, a desert highway
 leaving town past truck stops. It is the world the game is judged in: a bare start (no scene keys, no
-`--scene` flags, no world saved on the World page) opens it (`scenario::DEFAULT`). Daylight is its default
+`--scene` flags, no world saved on the Worlds tab) opens it (`scenario::DEFAULT`). Daylight is its default
 time, 15:30: hard afternoon sun on stucco and concrete, palm shadows across the boulevards (the
 `sodium_night` palette's beiges, tans and terracotta read well in sun; its lamp and neon colors show only
 when they light). Night is a clock away: sodium-orange street lamps, neon underglow on the tuner cars, a
