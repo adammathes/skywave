@@ -45,7 +45,7 @@ const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s
 /// Pinned [`LaneGraph::hash`] of the coast at seed 1. The graph is a pure function of the
 /// place, so this moves when lane building or the place's roads or props change; update it
 /// in its own commit with the reason.
-const COAST_SEED1_HASH: u64 = 0x63a3_8e5b_71ba_c82e;
+const COAST_SEED1_HASH: u64 = 0xb4d5_363d_8a71_364b;
 
 /// Size ceilings for the coast's graph (16×16 chunks); about twice what seed 1 needs.
 const MAX_LANES: usize = 2_400;
