@@ -619,3 +619,119 @@ mod bay_hills {
         }
     }
 }
+
+#[cfg(test)]
+mod ledges {
+    use super::*;
+    use skywave_core::Seed;
+    use world::collide::Surface;
+
+    /// Spacing of the samples along each lane, m.
+    const DS: f32 = 0.25;
+    /// A jump in the pavement's height this big over a millimeter is a ledge, m.
+    const LEDGE_M: f32 = 0.03;
+
+    /// The ledges a car meets driving down the middle of every lane of `p`'s roads (not
+    /// alleys) on its collider: places where the asphalt's height jumps, found by bisecting
+    /// every sample-to-sample rise over 3 cm down to a millimeter (a slope or a crest
+    /// spreads its rise out and falls away; a step stays). Returns the count and the worst.
+    fn ledges(p: &Place, g: &world::WorldCollider) -> (usize, f32) {
+        let (mut count, mut worst) = (0, 0.0f32);
+        for e in p
+            .roads
+            .edges
+            .iter()
+            .filter(|e| e.class != place::RoadClass::Alley)
+        {
+            let pr = &e.profile;
+            for lane in [-0.25f32, 0.25] {
+                // The lane's line: the profile moved sideways, then walked in DS steps.
+                let off = lane * e.width_m;
+                let mut line: Vec<[f32; 3]> = Vec::new();
+                for k in 0..pr.len() {
+                    let (a, b) = if k + 1 < pr.len() {
+                        (pr[k], pr[k + 1])
+                    } else {
+                        (pr[k - 1], pr[k])
+                    };
+                    let l = ((b[0] - a[0]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+                    if l < 0.01 {
+                        continue;
+                    }
+                    let (dx, dz) = ((b[0] - a[0]) / l, (b[2] - a[2]) / l);
+                    line.push([pr[k][0] - dz * off, pr[k][1], pr[k][2] + dx * off]);
+                }
+                let mut prev: Option<([f32; 2], f32, f32)> = None;
+                let mut carry = 0.0f32;
+                for w in line.windows(2) {
+                    let (a, b) = (w[0], w[1]);
+                    let l = ((b[0] - a[0]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+                    let mut t = carry;
+                    while t < l {
+                        let f = t / l;
+                        let q = [a[0] + (b[0] - a[0]) * f, a[2] + (b[2] - a[2]) * f];
+                        let road_y = a[1] + (b[1] - a[1]) * f;
+                        let (y, surface) = g.level_from(q, road_y + 1.0);
+                        let on_road = surface == Surface::Asphalt && (y - road_y).abs() < 1.0;
+                        if let (true, Some((pq, py, from))) = (on_road, prev) {
+                            if (y - py).abs() > LEDGE_M {
+                                let level = |q: [f32; 2]| g.level_from(q, from).0;
+                                let (mut qa, mut qb) = (pq, q);
+                                for _ in 0..12 {
+                                    let m = [(qa[0] + qb[0]) * 0.5, (qa[1] + qb[1]) * 0.5];
+                                    let (ya, ym, yb) = (level(qa), level(m), level(qb));
+                                    if (ym - ya).abs() > (yb - ym).abs() {
+                                        qb = m;
+                                    } else {
+                                        qa = m;
+                                    }
+                                }
+                                let d = (level(qb) - level(qa)).abs();
+                                if d > LEDGE_M {
+                                    count += 1;
+                                    worst = worst.max(d);
+                                }
+                            }
+                        }
+                        prev = on_road.then_some((q, y, road_y + 1.0));
+                        t += DS;
+                    }
+                    carry = t - l;
+                }
+            }
+        }
+        (count, worst)
+    }
+
+    /// No world's pavement has more ledges than pinned here. Where pieces of pavement
+    /// overlapped (a junction's fan over its neighbor's, a road running on into a junction)
+    /// the first one stood, and wherever it ended over another sitting a few centimeters
+    /// off the car hit a ledge: about 30, 200, 260 and 250 of them, up to 35 cm, a 10 g jolt at
+    /// 40 mph. The collider now blends overlapping pieces. What is left sits where roads
+    /// cross a deck's height apart or less without a bridge; lower a pin when a world gets
+    /// fixed, never raise one.
+    #[test]
+    fn pavement_has_no_ledges() {
+        let pins = [
+            ("socal_beach_1984", 0),
+            ("mirage_bowl_2001", 29),
+            ("bay_loop_2005", 22),
+            ("lake_city_1986", 13),
+        ];
+        let mut over = Vec::new();
+        for (id, pin) in pins {
+            let sc = crate::scenario::get(crate::scenario::index_of(id).unwrap());
+            let p = build_in(PlaceKey::Coast, Seed(1), sc).unwrap();
+            let g = world::WorldCollider::build(&p, grammar_of(sc));
+            let (count, worst) = ledges(&p, &g);
+            println!("{id:18} {count} ledges, worst {worst:.2} m (pinned at most {pin})");
+            if count > pin {
+                over.push((id, count, pin));
+            }
+        }
+        assert!(
+            over.is_empty(),
+            "more ledges than pinned (world, ledges, pin): {over:?}"
+        );
+    }
+}
