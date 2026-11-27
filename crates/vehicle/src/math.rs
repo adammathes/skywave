@@ -1,15 +1,12 @@
-//! The crate's vector, quaternion and scalar math, for the sim and the mesh generator, built
-//! from IEEE basic operations only.
-//!
-//! `vehicle` is `no_std`, so `f32::sqrt`/`sin`/`atan2` are not available; the versions here
-//! are also bit-identical on every target (no libm, no `mul_add`, IEEE basic operations
-//! only), which keeps replays deterministic. Accuracy is ~1e-6 or better, plenty for a car.
+//! The car's vector and quaternion math, for the sim and the mesh generator. The scalars
+//! (`sqrt`, `sin_cos`, `atan2`, ...) are `skywave_core::math`'s: IEEE basic operations only,
+//! bit-identical on every target, which keeps replays deterministic.
 
 pub type V3 = [f32; 3];
 /// Unit quaternion `[x, y, z, w]` rotating body space into world space.
 pub type Quat = [f32; 4];
 
-pub const PI: f32 = core::f32::consts::PI;
+pub use skywave_core::math::{abs, atan2, clamp, lerp, sin_cos, sqrt, PI};
 pub const ZERO: V3 = [0.0, 0.0, 0.0];
 
 pub fn add(a: V3, b: V3) -> V3 {
@@ -157,14 +154,6 @@ pub fn q_from_yaw(angle: f32) -> Quat {
     [0.0, sin(h), 0.0, cos(h)]
 }
 
-pub fn abs(x: f32) -> f32 {
-    if x < 0.0 {
-        -x
-    } else {
-        x
-    }
-}
-
 /// `x` clamped to `[0, 1]`; NaN becomes 0.
 pub fn unit(x: f32) -> f32 {
     if x > 0.0 {
@@ -187,69 +176,9 @@ pub fn deg(d: f32) -> f32 {
     d * (PI / 180.0)
 }
 
-pub fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
-    if x < lo {
-        lo
-    } else if x > hi {
-        hi
-    } else {
-        x
-    }
-}
-
-pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
 pub fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
-}
-
-/// Square root by Newton iteration in f64; `0.0` for zero, negative or NaN input.
-pub fn sqrt(x: f32) -> f32 {
-    if x.is_nan() || x <= 0.0 {
-        return 0.0;
-    }
-    if x == f32::INFINITY {
-        return x;
-    }
-    let xd = x as f64;
-    // Halving the exponent bits gives a guess within a factor of ~1.5.
-    let mut y = f64::from_bits((xd.to_bits() >> 1) + 0x1ff8_0000_0000_0000);
-    for _ in 0..6 {
-        y = 0.5 * (y + xd / y);
-    }
-    y as f32
-}
-
-/// `sin` and `cos` of `x` radians, by range reduction to [-pi/4, pi/4] and Taylor series in
-/// f64 (error well below f32 precision).
-pub fn sin_cos(x: f32) -> (f32, f32) {
-    let xd = x as f64;
-    let half_pi = core::f64::consts::FRAC_PI_2;
-    // Quadrant k: x = k * pi/2 + r with |r| <= pi/4.
-    let kf = xd / half_pi;
-    let k = if kf >= 0.0 {
-        (kf + 0.5) as i64
-    } else {
-        (kf - 0.5) as i64
-    };
-    let r = xd - (k as f64) * half_pi;
-    let r2 = r * r;
-    let s = r
-        * (1.0
-            - r2 / 6.0
-                * (1.0 - r2 / 20.0 * (1.0 - r2 / 42.0 * (1.0 - r2 / 72.0 * (1.0 - r2 / 110.0)))));
-    let c = 1.0
-        - r2 / 2.0 * (1.0 - r2 / 12.0 * (1.0 - r2 / 30.0 * (1.0 - r2 / 56.0 * (1.0 - r2 / 90.0))));
-    let (s, c) = match k.rem_euclid(4) {
-        0 => (s, c),
-        1 => (c, -s),
-        2 => (-s, -c),
-        _ => (-c, s),
-    };
-    (s as f32, c as f32)
 }
 
 pub fn sin(x: f32) -> f32 {
@@ -258,35 +187,6 @@ pub fn sin(x: f32) -> f32 {
 
 pub fn cos(x: f32) -> f32 {
     sin_cos(x).1
-}
-
-/// Arctangent on `[-1, 1]`, a minimax polynomial (error < 2e-6 rad).
-fn atan_unit(z: f32) -> f32 {
-    let z2 = z * z;
-    let p = 0.052_653_32 - z2 * 0.011_721_2;
-    let p = 0.193_543_46 + z2 * (-0.116_432_87 + z2 * p);
-    z * (0.999_977_26 + z2 * (-0.332_623_47 + z2 * p))
-}
-
-/// Four-quadrant arctangent of `y / x`, in `[-pi, pi]`; 0 for `(0, 0)`.
-pub fn atan2(y: f32, x: f32) -> f32 {
-    let (ax, ay) = (abs(x), abs(y));
-    if ax == 0.0 && ay == 0.0 {
-        return 0.0;
-    }
-    let mut a = if ay <= ax {
-        atan_unit(ay / ax)
-    } else {
-        0.5 * PI - atan_unit(ax / ay)
-    };
-    if x < 0.0 {
-        a = PI - a;
-    }
-    if y < 0.0 {
-        -a
-    } else {
-        a
-    }
 }
 
 #[cfg(test)]
