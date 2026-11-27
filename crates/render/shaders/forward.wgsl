@@ -394,13 +394,10 @@ fn shade(in: MeshOut) -> vec3<f32> {
     let to_frag = in.world_pos - frame.camera_pos.xyz;
     let dist = length(to_frag);
     let density = frame.camera_pos.w * look_fog_scale(look);
-    let fog = 1.0 - exp(-dist * density);
-    // A fog thicker than any weather's (a morning haze, over 0.002/m) lies on the ground
-    // too: its in-scatter fades into the ground's over a wider band below the horizon, so
-    // no line marks the eye height. Thinner fog keeps the sky's own band exactly.
-    var d = to_frag / max(dist, 1e-4);
-    let band = 0.03 + 0.5 * clamp((density - 0.002) / 0.002, 0.0, 1.0);
-    d.y = select(d.y, d.y * (0.03 / band), d.y < 0.0);
+    // The faint aerial perspective, and the last stretch before the far plane fading into
+    // the sky so nothing pops at the edge of the view.
+    let fog = max(1.0 - exp(-dist * density), smoothstep(FAR_FADE_M, FAR_M, dist));
+    let d = to_frag / max(dist, 1e-4);
     if look == LOOK_DUSK {
         c = dusk_layers(c, dist);
     } else {
@@ -419,10 +416,6 @@ fn look_light(look: u32, albedo: vec3<f32>, color: vec3<f32>, sun: f32, ambient:
     var sun_tint = vec3<f32>(1.0);
     var shade_tint = vec3<f32>(1.0);
     switch look {
-        case LOOK_SMOG: {
-            sun_tint = vec3<f32>(1.3, 1.06, 0.72);
-            shade_tint = vec3<f32>(0.78, 0.98, 1.08);
-        }
         case LOOK_POSTER: {
             // Lit or not, no falloff; shadow in one violet tone; a dozen paint colors and
             // no pattern.
@@ -463,12 +456,14 @@ fn poster_paint(albedo: vec3<f32>) -> vec3<f32> {
     return srgb_to_linear(best);
 }
 
+// The camera's far plane (`app::camera`'s `far_m`) and where the view starts fading into
+// the sky before it.
+const FAR_M: f32 = 6000.0;
+const FAR_FADE_M: f32 = 4500.0;
+
 // How much thicker a look's fog is than the weather's.
 fn look_fog_scale(look: u32) -> f32 {
     switch look {
-        case LOOK_SMOG: {
-            return 3.0;
-        }
         case LOOK_AMBER: {
             return 14.0;
         }
@@ -482,11 +477,6 @@ fn look_fog_scale(look: u32) -> f32 {
 fn look_sky(look: u32, c: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
     let l = dot(c, LUMA);
     switch look {
-        case LOOK_SMOG: {
-            // A brown-gold smog band low, the sky's own blue faded above it.
-            let low = 1.0 - smoothstep(0.0, 0.35, dir.y);
-            return mix(mix(c, vec3<f32>(l), 0.3), l * vec3<f32>(1.3, 1.0, 0.62), low);
-        }
         case LOOK_AMBER: {
             return l * vec3<f32>(1.7, 0.85, 0.3);
         }

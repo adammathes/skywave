@@ -414,9 +414,6 @@ pub enum Look {
     /// The physically based image.
     #[default]
     Standard,
-    /// A faded vacation snapshot: warm sun, teal shadows, a brown smog fog that eats the
-    /// distance, lifted blacks and grain.
-    Smog,
     /// Distance as color: near things dark plum, far things warming through red and orange
     /// toward the sky, in a few flat steps.
     Dusk,
@@ -437,9 +434,8 @@ pub enum Look {
 
 impl Look {
     /// Every look, in menu order; the index is the shaders' look id.
-    pub const ALL: [Look; 9] = [
+    pub const ALL: [Look; 8] = [
         Look::Standard,
-        Look::Smog,
         Look::Dusk,
         Look::Amber,
         Look::Poster,
@@ -453,7 +449,6 @@ impl Look {
     pub fn name(self) -> &'static str {
         match self {
             Look::Standard => "standard",
-            Look::Smog => "smog",
             Look::Dusk => "dusk",
             Look::Amber => "amber",
             Look::Poster => "poster",
