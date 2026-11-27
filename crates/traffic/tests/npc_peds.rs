@@ -10,7 +10,6 @@ use traffic::cars::ShapeRule;
 use traffic::peds::{OtherCar, PedInput, PedestrianBudget, Pedestrians};
 use traffic::walks::WalkGraph;
 use traffic::{Car, Clock, Density, Inputs, LaneGraph, Player, Traffic, TrafficBudget, View};
-use world::procgen::build_place;
 use world::template::RegionTemplate;
 
 const HZ: u64 = 120;
@@ -26,12 +25,14 @@ struct Built {
 
 fn build(seed: u64) -> Built {
     let t: RegionTemplate =
-        ron::from_str(include_str!("../../../assets/regions/california_coast.ron")).expect("parse");
+        ron::from_str(include_str!("../../../assets/regions/pacific_shore.ron")).expect("parse");
     let grammar: world::Grammar = ron::from_str(include_str!(
         "../../../assets/grammar/california_coast_80s.ron"
     ))
     .expect("grammar");
-    let place = build_place(Seed(seed), &t, &grammar);
+    let layout: world::layout::Layout =
+        ron::from_str(include_str!("../../../assets/layouts/pacific_shore.ron")).expect("layout");
+    let place = world::procgen::authored::build_place(Seed(seed), &layout, &t, &grammar);
     let lanes = LaneGraph::new(&place);
     let walks = WalkGraph::new(&place, &lanes);
     Built {
