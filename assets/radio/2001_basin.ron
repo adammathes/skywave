@@ -1,4 +1,4 @@
-// Radio preset: 2001 Basin, for Mirage Valley. Ad-free stations only (docs/AUDIO_RADIO.md,
+// Radio preset: 2001 Basin, for Mirage Bowl. Ad-free stations only (docs/AUDIO_RADIO.md,
 // "the ad-free rule"): listener-supported, public and college broadcasters that publish their
 // stream URLs for listening in other players, each checked for pre-roll and mid-roll ads as
 // its `ad-free:` note says. Nothing is rehosted. Unlike the older presets, the dash names
@@ -9,7 +9,7 @@
 RadioPreset(
     id: "2001_basin",
     title: "2001 Basin",
-    scenario: "mirage_valley_2001",
+    scenario: "mirage_bowl_2001",
     stations: [
         // ad-free: 2026-10-28, two 60 s cold starts: no pre-roll, no break, no ad mark;
         // dublab, a non-profit Los Angeles community station on the air since 1999; a DJ

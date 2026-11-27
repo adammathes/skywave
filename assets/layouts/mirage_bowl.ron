@@ -1,4 +1,4 @@
-// Mirage Bowl (docs/LAYOUTS.md; the LA direction in docs/SCENARIOS.md, "Mirage Valley 2001"):
+// Mirage Bowl (docs/LAYOUTS.md; the LA direction in docs/SCENARIOS.md, "Mirage Bowl 2001"):
 // a city made to be seen from a car, in a bowl you can always see the rim of. A flat floor of
 // one-story sheds and bungalows, a long mountain front across the north with one high summit
 // that the main avenue drives straight at, lower ranges east and west, rail yards to the
@@ -18,10 +18,12 @@ Layout(
         // The mountain front: the rim you see down every north-south street.
         Ridge(name: "front range", line: [(0, 230), (700, 200), (1500, 170), (2300, 190), (3072, 240)],
               heights_m: [150, 210, 250, 220, 170], falloff_m: 460, relief_m: 18),
+        // The side ranges rise from the edge of the flats: a foot reaching in under the
+        // avenues would leave a step where the floor is levelled.
         Ridge(name: "east range", line: [(3010, 300), (2990, 1200), (3020, 2400)],
-              heights_m: [170, 120, 70], falloff_m: 330, relief_m: 12),
+              heights_m: [170, 120, 70], falloff_m: 190, relief_m: 12),
         Ridge(name: "west hills", line: [(60, 400), (90, 1400), (70, 2500)],
-              heights_m: [110, 80, 50], falloff_m: 250, relief_m: 10),
+              heights_m: [110, 80, 50], falloff_m: 150, relief_m: 10),
     ],
     peaks: [
         Peak(name: "summit", at: (1900, 110), height_m: 300, falloff_m: 520),
@@ -54,7 +56,8 @@ Layout(
         Road(name: "foothill boulevard", class: Arterial, lanes: 2, points: [(250, 680), (2800, 680)]),
         Road(name: "mirage boulevard", class: Arterial, lanes: 3, speed_kph: Some(70), points: [(250, 1250), (2800, 1250)]),
         Road(name: "tamarisk boulevard", class: Arterial, lanes: 2, points: [(250, 1850), (2800, 1850)]),
-        Road(name: "oleander avenue", class: Arterial, lanes: 2, points: [(250, 2450), (2800, 2450)]),
+        // Oleander stops at palm avenue: the airfield lies beyond.
+        Road(name: "oleander avenue", class: Arterial, lanes: 2, points: [(250, 2450), (2400, 2450)]),
         Road(name: "yard road", class: Arterial, lanes: 1, points: [(250, 2950), (2800, 2950)]),
 
         // The avenues, south to north: every one ends at the mountain front.
@@ -92,6 +95,24 @@ Layout(
         Channel(name: "the wash", line: [(1300, 560), (1250, 1000), (1160, 1700), (1100, 2400), (1050, 3072)],
                 width_m: 14, depth_m: 5),
     ],
+
+    // The rail line through the yards, in from the south and out again, across the avenues
+    // at grade and over the wash on a bridge, with two spurs into the sheds.
+    rail: Some(Rail(
+        line: [(300, 3072), (306, 2960), (334, 2876), (390, 2822), (470, 2800),
+               (2600, 2800), (2680, 2822), (2736, 2876), (2764, 2960), (2770, 3072)],
+        spurs: [
+            [(1380, 2800), (1440, 2826), (1700, 2826)],
+            [(2000, 2800), (2060, 2774), (2320, 2774)],
+        ],
+    )),
+
+    // The airfield at the south-east corner of the flats, off tamarisk boulevard: its runway
+    // is the drag strip.
+    airfield: Some(Airfield(runway: ((2620, 1960), (2620, 2740)), runway_m: 30, width_m: 150, taxiway: (2620, 1850))),
+
+    // The garage, the stands, the roadside landmarks, the tunnel and the lookouts' turnouts.
+    set_pieces: true,
 
     start: Start(road: "summit avenue", along_m: 700),
 )

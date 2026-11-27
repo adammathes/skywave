@@ -896,11 +896,10 @@ mod tests {
                 ItemId::World(0),
                 ItemId::World(1),
                 ItemId::World(2),
-                ItemId::World(3),
-                ItemId::World(4)
+                ItemId::World(3)
             ]
         );
-        assert_eq!(items[1].label, "Mirage Valley");
+        assert_eq!(items[1].label, "Mirage Bowl");
         assert!(items.iter().all(|i| i.widget == Widget::Action));
         build(Page::Vehicle, &ctx, &mut items);
         let ids: Vec<ItemId> = items.iter().map(|i| i.id).collect();
