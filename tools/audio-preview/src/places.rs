@@ -15,7 +15,7 @@ use skywave_core::Seed;
 /// The worlds heard by default.
 pub const WORLDS: [&str; 3] = ["mirage_bowl_2001", "bay_loop_2005", "lake_city_1986"];
 /// Seconds at each spot, and of the crossfade between spots.
-const SPOT_S: f32 = 8.0;
+const SPOT_S: f32 = 12.0;
 const FADE_S: f32 = 0.6;
 /// The day and night clocks.
 const TIMES: [(&str, &str); 2] = [("day", "13:00"), ("night", "22:30")];
@@ -68,6 +68,25 @@ fn spot(place: &Place, zones: &[ZoneId]) -> Option<[f32; 2]> {
         }
     }
     best.map(|(_, p)| p)
+}
+
+/// The junction nearest a hot dog or burger stand, if the place has one.
+fn stand(place: &Place, scenario: &app::scenario::Scenario) -> Option<[f32; 2]> {
+    let kits = &app::places::grammar_of(scenario).landmarks;
+    let at = place.props.items.iter().find_map(|p| match p.kind {
+        place::PropKind::Landmark { kit, .. } => kits
+            .get(usize::from(kit))
+            .filter(|k| k.id == "hot_dog_stand" || k.id == "burger_stand")
+            .map(|_| [p.pos[0], p.pos[2]]),
+        _ => None,
+    })?;
+    let d2 = |q: [f32; 2]| (q[0] - at[0]).powi(2) + (q[1] - at[1]).powi(2);
+    place
+        .roads
+        .nodes
+        .iter()
+        .map(|n| n.pos)
+        .min_by(|a, b| d2(*a).total_cmp(&d2(*b)))
 }
 
 /// `seconds` of the game's sound with the car idling at `pos` in `scenario` at `clock`.
@@ -125,10 +144,13 @@ pub fn run(dir: &Path, worlds: &[String]) -> std::io::Result<()> {
         let scenario = app::scenario::get(setup.scenario);
         let (place, _) =
             app::places::load(setup.place, Seed(setup.seed), scenario).expect("the place builds");
-        let spots: Vec<(&str, [f32; 2])> = KINDS
+        let mut spots: Vec<(&str, [f32; 2])> = KINDS
             .iter()
             .filter_map(|(name, zones)| spot(&place, zones).map(|p| (*name, p)))
             .collect();
+        if let Some(p) = stand(&place, scenario) {
+            spots.push(("stand", p));
+        }
         for (time, clock) in TIMES {
             let mut out = Vec::new();
             for (i, (name, pos)) in spots.iter().enumerate() {

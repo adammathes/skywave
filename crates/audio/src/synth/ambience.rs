@@ -23,6 +23,7 @@
 //! of a second apart, low-passed in the loop): the city's walls and the water answering.
 
 use super::dsp::{fract, pan_gains, sin_turns, unit, Decay, Noise, Slew, Svf, DT};
+use super::signature::Signatures;
 
 /// How much of each part to play, `[0, 1]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -40,6 +41,15 @@ pub struct AmbienceParams {
     pub industry: f32,
     /// Open water near enough to hear a foghorn across it (worlds that have one).
     pub foghorn: f32,
+    /// The place's own sounds ([`super::signature`]), each where its world has it: an
+    /// elevated train, a cable car's bell, gulls, a helicopter, an ice cream truck, and
+    /// the carhop speaker at a hot dog or burger stand (by how near it is).
+    pub el_train: f32,
+    pub cable_car: f32,
+    pub gulls: f32,
+    pub helicopter: f32,
+    pub ice_cream: f32,
+    pub carhop: f32,
 }
 
 impl AmbienceParams {
@@ -52,6 +62,12 @@ impl AmbienceParams {
             crickets: unit(self.crickets),
             industry: unit(self.industry),
             foghorn: unit(self.foghorn),
+            el_train: unit(self.el_train),
+            cable_car: unit(self.cable_car),
+            gulls: unit(self.gulls),
+            helicopter: unit(self.helicopter),
+            ice_cream: unit(self.ice_cream),
+            carhop: unit(self.carhop),
         }
     }
 }
@@ -146,6 +162,8 @@ pub struct AmbienceSynth {
     fog_phase: f32,
     fog_lp: Svf,
 
+    signatures: Signatures,
+
     echo: [Vec<f32>; 2],
     echo_at: usize,
     echo_lp: [f32; 2],
@@ -234,6 +252,7 @@ impl AmbienceSynth {
             fog_level: 0.0,
             fog_phase: 0.0,
             fog_lp: Svf::new(700.0, 0.7),
+            signatures: Signatures::new(),
             echo: [vec![0.0; ECHO[0]], vec![0.0; ECHO[1]]],
             echo_at: 0,
             echo_lp: [0.0; 2],
@@ -331,6 +350,7 @@ impl AmbienceSynth {
             self.fog_t = 0.0;
         }
         self.fog_level = p.foghorn;
+        self.signatures.tick(&p, &mut self.noise, dt);
     }
 
     /// The next frame, left and right.
@@ -346,7 +366,7 @@ impl AmbienceSynth {
         // City.
         let city = self.city.step(p.city);
         if city > 1e-4 {
-            let g = 0.15 * city * self.breath;
+            let g = 0.09 * city * self.breath;
             l += self.city_l.low(wl) * g;
             r += self.city_r.low(wr) * g;
             if self.pass_t < self.pass_dur {
@@ -399,7 +419,7 @@ impl AmbienceSynth {
             // (Noise low-passed at ~9 Hz, its size around 0.011.)
             self.flutter[0] += (wl - self.flutter[0]) * 0.0012;
             self.flutter[1] += (wr - self.flutter[1]) * 0.0012;
-            let g = 0.06 * trees * (0.08 + self.gust);
+            let g = 0.04 * trees * (0.08 + self.gust);
             l += self.leaves_l.band(wr) * g * (0.5 + 25.0 * self.flutter[0].abs());
             r += self.leaves_r.band(wl) * g * (0.5 + 25.0 * self.flutter[1].abs());
         }
@@ -487,6 +507,12 @@ impl AmbienceSynth {
             }
         }
 
+        let (dry, sent) = self.signatures.sample(&p, &mut self.noise);
+        l += dry[0];
+        r += dry[1];
+        send[0] += sent[0];
+        send[1] += sent[1];
+
         // The echo: what was sent plays dry and into the delay lines, which feed back
         // crossed (left into right), low-passed.
         let i = self.echo_at;
@@ -525,6 +551,7 @@ impl AmbienceSynth {
             e.iter_mut().for_each(|v| *v = 0.0);
         }
         self.echo_lp = [0.0; 2];
+        self.signatures.reset();
     }
 }
 
@@ -586,6 +613,42 @@ mod tests {
                 "foghorn",
                 AmbienceParams {
                     foghorn: 1.0,
+                    ..none
+                },
+            ),
+            (
+                "el_train",
+                AmbienceParams {
+                    el_train: 1.0,
+                    ..none
+                },
+            ),
+            (
+                "cable_car",
+                AmbienceParams {
+                    cable_car: 1.0,
+                    ..none
+                },
+            ),
+            ("gulls", AmbienceParams { gulls: 1.0, ..none }),
+            (
+                "helicopter",
+                AmbienceParams {
+                    helicopter: 1.0,
+                    ..none
+                },
+            ),
+            (
+                "ice_cream",
+                AmbienceParams {
+                    ice_cream: 1.0,
+                    ..none
+                },
+            ),
+            (
+                "carhop",
+                AmbienceParams {
+                    carhop: 1.0,
                     ..none
                 },
             ),

@@ -8,7 +8,7 @@
 use audio::synth::{
     AmbienceParams, AudioParams, EngineParams, EngineProfile, Surface, WheelParams,
 };
-use place::{Place, RoadClass, ZoneId, Zones};
+use place::{Place, PropKind, RoadClass, ZoneId, Zones};
 use vehicle::sim::{GRAVITY, WHEEL_RADIUS_M};
 
 use crate::daylight::Daylight;
@@ -29,6 +29,21 @@ const CRICKETS_SUN_DEG: [f32; 2] = [-1.0, -7.0];
 /// loud four times as far), and not at all past [`FREEWAY_GONE_M`].
 const FREEWAY_NEAR_M: f32 = 40.0;
 const FREEWAY_GONE_M: f32 = 900.0;
+/// The carhop speaker is heard in full this near a hot dog or burger stand, m, and not
+/// at all this far.
+const CARHOP_M: [f32; 2] = [12.0, 110.0];
+/// The landmark kits whose lots have a carhop speaker.
+const CARHOP_KITS: [&str; 2] = ["hot_dog_stand", "burger_stand"];
+/// The place sounds a world can name in its scenario's `sounds`
+/// (`audio::synth::signature`), in [`Signatures`] order.
+pub const SOUNDS: [&str; 6] = [
+    "foghorn",
+    "el_train",
+    "cable_car",
+    "gulls",
+    "helicopter",
+    "ice_cream",
+];
 /// The city's traffic at night, against the day's.
 const CITY_NIGHT: f32 = 0.55;
 
@@ -83,6 +98,32 @@ struct Shares {
     open_water: f32,
 }
 
+/// Which of [`SOUNDS`] the world has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Signatures {
+    pub foghorn: bool,
+    pub el_train: bool,
+    pub cable_car: bool,
+    pub gulls: bool,
+    pub helicopter: bool,
+    pub ice_cream: bool,
+}
+
+impl Signatures {
+    /// From a scenario's `sounds` (names not in [`SOUNDS`] are left out).
+    pub fn of(names: &[String]) -> Signatures {
+        let has = |s: &str| names.iter().any(|n| n == s);
+        Signatures {
+            foghorn: has(SOUNDS[0]),
+            el_train: has(SOUNDS[1]),
+            cable_car: has(SOUNDS[2]),
+            gulls: has(SOUNDS[3]),
+            helicopter: has(SOUNDS[4]),
+            ice_cream: has(SOUNDS[5]),
+        }
+    }
+}
+
 /// The sound state the app keeps between steps and frames.
 #[derive(Clone, Debug)]
 pub struct Sound {
@@ -90,8 +131,10 @@ pub struct Sound {
     zones: ZoneGrid,
     /// The highways' segments, `[ax, az, bx, bz]`.
     freeways: Vec<[f32; 4]>,
-    /// The world has a foghorn ([`crate::scenario::Scenario::foghorn`]).
-    foghorn: bool,
+    /// The world's own sounds ([`crate::scenario::Scenario::sounds`]).
+    signatures: Signatures,
+    /// The hot dog and burger stands, `[x, z]`.
+    stands: Vec<[f32; 2]>,
     /// Half the car's width, m: how far out a bump counts as fully on one side.
     half_width: f32,
     curb_kicks: u32,
@@ -105,8 +148,26 @@ pub struct Sound {
 }
 
 impl Sound {
-    /// For the car `drive` in `place`, in a world with a foghorn or not.
-    pub fn new(place: &Place, drive: &Drive, foghorn: bool) -> Sound {
+    /// For the car `drive` in `place`, a world with `signatures` whose landmarks are
+    /// `kits`.
+    pub fn new(
+        place: &Place,
+        drive: &Drive,
+        signatures: Signatures,
+        kits: &[world::landmarks::Kit],
+    ) -> Sound {
+        let stands = place
+            .props
+            .items
+            .iter()
+            .filter_map(|p| match p.kind {
+                PropKind::Landmark { kit, .. } => kits
+                    .get(usize::from(kit))
+                    .filter(|k| CARHOP_KITS.contains(&k.id.as_str()))
+                    .map(|_| [p.pos[0], p.pos[2]]),
+                _ => None,
+            })
+            .collect();
         let nodes = &place.roads.nodes;
         let freeways = place
             .roads
@@ -122,7 +183,8 @@ impl Sound {
             profile: EngineProfile::from_name(&drive.spec.feel.engine_sound),
             zones: ZoneGrid::of(place),
             freeways,
-            foghorn,
+            signatures,
+            stands,
             half_width: 0.5 * drive.spec.dims_m[1],
             curb_kicks: 0,
             curb_speed: 0.0,
@@ -198,13 +260,28 @@ impl Sound {
         };
         let day = ease(BIRDS_SUN_DEG);
         let night = ease(CRICKETS_SUN_DEG);
+        let w = self.signatures;
+        let on = |has: bool, amount: f32| if has { amount } else { 0.0 };
+        let unit = |v: f32| v.clamp(0.0, 1.0);
         let ambience = AmbienceParams {
             city: shares.city * (CITY_NIGHT + (1.0 - CITY_NIGHT) * (1.0 - night)),
             freeway: self.freeway(p),
             trees: shares.trees,
             crickets: shares.yards * night,
             industry: shares.industry,
-            foghorn: if self.foghorn { shares.open_water } else { 0.0 },
+            foghorn: on(w.foghorn, shares.open_water),
+            el_train: on(
+                w.el_train,
+                (1.2 * shares.city + 0.5 * shares.yards).min(1.0),
+            ),
+            cable_car: on(w.cable_car, unit((shares.city - 0.3) / 0.5)),
+            gulls: on(
+                w.gulls,
+                (shares.ocean + 0.5 * shares.open_water).min(1.0) * day,
+            ),
+            helicopter: on(w.helicopter, 0.5 + 0.5 * shares.city),
+            ice_cream: on(w.ice_cream, shares.yards * day),
+            carhop: self.carhop(p),
         };
         AudioParams {
             master: settings.master_volume,
@@ -315,6 +392,19 @@ impl Sound {
         s
     }
 
+    /// How near the nearest hot dog or burger stand is, `[0, 1]`: 1 within
+    /// `CARHOP_M[0]`, 0 past `CARHOP_M[1]`.
+    fn carhop(&self, p: [f32; 2]) -> f32 {
+        let d2 = self
+            .stands
+            .iter()
+            .map(|s| (s[0] - p[0]) * (s[0] - p[0]) + (s[1] - p[1]) * (s[1] - p[1]))
+            .fold(f32::INFINITY, f32::min);
+        let [near, far] = CARHOP_M;
+        let t = 1.0 - ((d2.sqrt() - near) / (far - near)).clamp(0.0, 1.0);
+        t * t
+    }
+
     /// How near the nearest freeway is, `[0, 1]`: 1 within [`FREEWAY_NEAR_M`], then as
     /// the square root of the distance falls off, gone by [`FREEWAY_GONE_M`].
     fn freeway(&self, p: [f32; 2]) -> f32 {
@@ -408,7 +498,8 @@ mod tests {
         Sound {
             profile: EngineProfile::Default,
             freeways: vec![[0.0, 1000.0, 100.0, 1000.0]],
-            foghorn: true,
+            signatures: Signatures::of(&["foghorn".to_string()]),
+            stands: vec![[0.0, 0.0]],
             zones: ZoneGrid {
                 cells: vec![
                     ZoneId::Residential,
@@ -469,6 +560,19 @@ mod tests {
             ..sound()
         };
         assert_eq!(none.shares([0.0, 0.0]), Shares::default());
+    }
+
+    #[test]
+    fn the_carhop_speaker_plays_near_a_stand() {
+        let s = sound();
+        assert_eq!(s.carhop([5.0, 0.0]), 1.0);
+        assert!(s.carhop([60.0, 0.0]) > 0.0 && s.carhop([60.0, 0.0]) < 0.5);
+        assert_eq!(s.carhop([200.0, 0.0]), 0.0);
+        let none = Sound {
+            stands: Vec::new(),
+            ..sound()
+        };
+        assert_eq!(none.carhop([0.0, 0.0]), 0.0);
     }
 
     #[test]

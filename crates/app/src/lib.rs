@@ -365,7 +365,12 @@ impl App {
         let mut rail = crossing::Rail::of(&place, TRAIN_FIRST_S);
         let mut marquees = marquee::Marquees::of(&place, &grammar.landmarks);
         let mut drivethru = drivethru::DriveThru::of(&place, &grammar.landmarks, seed);
-        let sound = sound::Sound::new(&place, &drive, world.foghorn);
+        let sound = sound::Sound::new(
+            &place,
+            &drive,
+            sound::Signatures::of(&world.sounds),
+            &grammar.landmarks,
+        );
         let mut npcs = npc::Npcs::new(&place, seed, &lineup.shapes);
         let mut signals = signals::Signals::of(&place, &npcs.graph, |p| {
             [

@@ -6,6 +6,8 @@ Scenario(
     title: "Lake City",
     year: 1986,
     kind: "Lake city",
+    // The elevated train rattling over the streets on its steel.
+    sounds: ["el_train"],
     region: "great_lakes_city",
     layout: Some("lake_city"),
     grammar: "great_lakes_80s.ron",

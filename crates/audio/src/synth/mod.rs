@@ -14,6 +14,7 @@ pub mod chime;
 pub mod deck;
 pub mod dsp;
 pub mod engine;
+pub mod signature;
 pub mod tune;
 pub mod world;
 

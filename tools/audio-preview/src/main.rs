@@ -180,6 +180,42 @@ fn ambience(dir: &Path) -> std::io::Result<()> {
                 ..none
             },
         ),
+        (
+            "el_train",
+            AmbienceParams {
+                el_train: 1.0,
+                ..none
+            },
+        ),
+        (
+            "cable_car",
+            AmbienceParams {
+                cable_car: 1.0,
+                ..none
+            },
+        ),
+        ("gulls", AmbienceParams { gulls: 1.0, ..none }),
+        (
+            "helicopter",
+            AmbienceParams {
+                helicopter: 1.0,
+                ..none
+            },
+        ),
+        (
+            "ice_cream",
+            AmbienceParams {
+                ice_cream: 1.0,
+                ..none
+            },
+        ),
+        (
+            "carhop",
+            AmbienceParams {
+                carhop: 1.0,
+                ..none
+            },
+        ),
     ];
     for (name, a) in parts {
         let x = render(30.0, |_| AudioParams {
@@ -207,6 +243,12 @@ fn ambience(dir: &Path) -> std::io::Result<()> {
         crickets: 1.0,
         industry: 1.0,
         foghorn: 1.0,
+        el_train: 1.0,
+        cable_car: 1.0,
+        gulls: 1.0,
+        helicopter: 1.0,
+        ice_cream: 1.0,
+        carhop: 1.0,
     };
     for (label, a) in [("no ambience", none), ("all of it", all)] {
         let mut mixer = Mixer::new();
