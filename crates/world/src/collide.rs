@@ -127,7 +127,13 @@ pub struct Patch {
     /// Height change per meter along x and z, and the point it is measured from.
     pub grad: [f32; 2],
     pub at: [f32; 2],
+    /// The paved piece it is part of, an index into [`WorldCollider::pieces`] (a road's
+    /// ribbon, a junction, a merge wedge), or [`NO_PIECE`].
+    pub piece: u32,
 }
+
+/// [`Patch::piece`] of a patch that is no paved piece's part.
+pub const NO_PIECE: u32 = u32::MAX;
 
 /// [`Patch::edge`] of a patch that does not follow a road profile.
 pub const NO_EDGE: u32 = u32::MAX;
@@ -269,6 +275,9 @@ pub struct WorldCollider {
     pub profile_range: Vec<[u32; 2]>,
     pub points: Vec<[f32; 2]>,
     pub patches: Vec<Patch>,
+    /// Outlines of the paved pieces patches are parts of ([`Patch::piece`]):
+    /// `points[r[0]..r[0] + r[1]]`.
+    pub pieces: Vec<[u32; 2]>,
     pub steps: Vec<Step>,
     pub walls: Vec<Wall>,
     pub posts: Vec<Post>,
@@ -322,6 +331,22 @@ fn point_in(p: [f32; 2], poly: &[[f32; 2]]) -> bool {
 }
 
 /// Closest point to `p` on the segment `a..b`.
+/// How far `p` lies from the nearest edge of the closed polygon `poly`, m.
+/// 0 at or below `a`, 1 at or above `b`, linear between.
+fn unit_ramp(x: f32, a: f32, b: f32) -> f32 {
+    ((x - a) / (b - a)).clamp(0.0, 1.0)
+}
+
+fn inside_depth(p: [f32; 2], poly: &[[f32; 2]]) -> f32 {
+    let mut best = f32::INFINITY;
+    for k in 0..poly.len() {
+        let e = closest_on_segment(p, poly[k], poly[(k + 1) % poly.len()]);
+        let (dx, dz) = (p[0] - e[0], p[1] - e[1]);
+        best = best.min(dx * dx + dz * dz);
+    }
+    sqrt(best)
+}
+
 fn closest_on_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
     let ab = [b[0] - a[0], b[1] - a[1]];
     let l2 = ab[0] * ab[0] + ab[1] * ab[1];
@@ -349,6 +374,8 @@ fn abs(x: f32) -> f32 {
 struct Shapes {
     points: Vec<[f32; 2]>,
     patches: Vec<Patch>,
+    /// Outlines of the paved pieces, `points[start..start + len]`.
+    pieces: Vec<[u32; 2]>,
 }
 
 impl Shapes {
@@ -389,7 +416,22 @@ impl Shapes {
             edge,
             grad,
             at,
+            piece: NO_PIECE,
         });
+    }
+
+    /// Makes the patches from `first` on the parts of one paved piece outlined by `outline`.
+    fn piece(&mut self, first: usize, outline: &[V2]) {
+        if first == self.patches.len() || outline.len() < 3 {
+            return;
+        }
+        let id = self.pieces.len() as u32;
+        let start = self.points.len() as u32;
+        self.points.extend(outline.iter().map(|&p| arr(p)));
+        self.pieces.push([start, outline.len() as u32]);
+        for p in &mut self.patches[first..] {
+            p.piece = id;
+        }
     }
 }
 
@@ -403,6 +445,12 @@ enum Under {
 /// Patches more than this far apart in height under one point are layered (a road over
 /// another): the probe then picks by height instead of taking the first.
 const LAYER_M: f32 = crate::roads::DECK_CLEARANCE_M;
+/// Overlapping paved pieces blend their heights over this far in from their outlines, m
+/// ([`WorldCollider::blend`]).
+const BLEND_M: f32 = 4.0;
+/// Pieces this far apart in height (m) start to fade out of the blend, and are out by the
+/// second: that far apart they are two roads (one dipping under the other), not a seam.
+const BLEND_DY_M: [f32; 2] = [0.5, 1.2];
 /// A wheel takes the highest layer at most this far above it.
 const LAYER_STEP_M: f32 = 1.0;
 /// Steps higher than this above the ground under a wheel are another layer, not a curb.
@@ -424,6 +472,7 @@ impl WorldCollider {
         let mut shapes = Shapes {
             points: Vec::new(),
             patches: Vec::new(),
+            pieces: Vec::new(),
         };
         // Patches in priority order: asphalt, then dropped curbs and sidewalks, then
         // parking lots (their raised pieces first), then lot pads.
@@ -505,6 +554,7 @@ impl WorldCollider {
             profile_range: Vec::new(),
             points: shapes.points,
             patches: shapes.patches,
+            pieces: shapes.pieces,
             steps: Vec::new(),
             walls,
             posts,
@@ -741,18 +791,77 @@ impl WorldCollider {
             let g = self.open_height(p);
             if g <= y_from + LAYER_STEP_M && h0 - g > LAYER_M {
                 return match reach {
-                    Some((i, h)) if h > g => (Under::Patch(i), h),
+                    Some((i, h)) if h > g => (Under::Patch(i), self.blend(i, p, h)),
                     _ => (Under::Open, g),
                 };
             }
         }
-        if !layered {
-            return (Under::Patch(i0), h0);
+        let (i, h) = if layered {
+            reach.or(low).unwrap_or((i0, h0))
+        } else {
+            (i0, h0)
+        };
+        (Under::Patch(i), self.blend(i, p, h))
+    }
+
+    /// The pavement's height at `p`, where patch `i` (height `h` there) is the one
+    /// [`Self::under`] found. Where paved pieces of one layer overlap (a junction over its
+    /// neighbor, a road running on into a junction), the mean of their heights, each
+    /// weighted by how far inside its own outline `p` lies, up to [`BLEND_M`]. The first
+    /// piece alone left a ledge wherever it ended over another whose surface sat a few
+    /// centimeters off: hundreds on every world, up to 35 cm, a 10 g jolt at 40 mph. A
+    /// piece weighs nothing at its own edge, so the surface runs on without a step.
+    fn blend(&self, i: u32, p: [f32; 2], h: f32) -> f32 {
+        let own = self.patches[i as usize].piece;
+        if own == NO_PIECE {
+            return h;
         }
-        match reach.or(low) {
-            Some((i, h)) => (Under::Patch(i), h),
-            None => (Under::Patch(i0), h0),
+        // Few pieces ever overlap at a point: the first eight are plenty.
+        let mut seen = [NO_PIECE; 8];
+        let mut n = 0;
+        let (mut sum, mut weight) = (0.0f32, 0.0f32);
+        for &j in self.cell_items(&self.patch_bins, p) {
+            let patch = &self.patches[j as usize];
+            if patch.piece == NO_PIECE
+                || seen[..n].contains(&patch.piece)
+                || p[0] < patch.lo[0]
+                || p[0] > patch.hi[0]
+                || p[1] < patch.lo[1]
+                || p[1] > patch.hi[1]
+            {
+                continue;
+            }
+            let poly = &self.points[patch.start as usize..(patch.start + patch.len) as usize];
+            if !point_in(p, poly) {
+                continue;
+            }
+            let hj = if j == i {
+                h
+            } else {
+                self.patch_height(patch, p)
+            };
+            let dy = abs(hj - h);
+            if dy >= BLEND_DY_M[1] || n == seen.len() {
+                continue;
+            }
+            seen[n] = patch.piece;
+            n += 1;
+            // Outside its outline (a fan folded past its ring) a piece weighs nothing.
+            let [s, len] = self.pieces[patch.piece as usize];
+            let outline = &self.points[s as usize..(s + len) as usize];
+            let w = if point_in(p, outline) {
+                inside_depth(p, outline).min(BLEND_M)
+                    * (1.0 - unit_ramp(dy, BLEND_DY_M[0], BLEND_DY_M[1]))
+            } else {
+                0.0
+            };
+            sum += w * hj;
+            weight += w;
         }
+        if n < 2 || weight <= 0.0 {
+            return h;
+        }
+        sum / weight
     }
 
     fn surface_of(&self, u: Under) -> Surface {
@@ -801,7 +910,14 @@ impl WorldCollider {
             return [0.0, 1.0, 0.0];
         }
         let e = 0.25;
-        let h = |dx: f32, dz: f32| self.under_height(u, [p[0] + dx, p[1] + dz]);
+        let h = |dx: f32, dz: f32| {
+            let q = [p[0] + dx, p[1] + dz];
+            let y = self.under_height(u, q);
+            match u {
+                Under::Patch(i) => self.blend(i, q, y),
+                Under::Open => y,
+            }
+        };
         let gx = (h(e, 0.0) - h(-e, 0.0)) / (2.0 * e);
         let gz = (h(0.0, e) - h(0.0, -e)) / (2.0 * e);
         let inv = 1.0 / sqrt(gx * gx + 1.0 + gz * gz);
@@ -980,6 +1096,8 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
         let (ea, eb) = net.ends(i);
         let (s0, s1, hw) = (ea.trim, path.len() - eb.trim, ea.hw);
         if s1 > s0 {
+            let first = out.patches.len();
+            let (mut left, mut right) = (Vec::new(), Vec::new());
             path.pieces(s0, s1, |a, b| {
                 let q = [
                     path.xz(a, -hw),
@@ -988,7 +1106,15 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
                     path.xz(a, hw),
                 ];
                 out.patch_with(&q, height(i, 0.0), Surface::Asphalt);
+                if left.is_empty() {
+                    left.push(q[0]);
+                    right.push(q[3]);
+                }
+                left.push(q[1]);
+                right.push(q[2]);
             });
+            left.extend(right.into_iter().rev());
+            out.piece(first, &left);
         }
     }
     for j in &net.junctions {
@@ -996,6 +1122,8 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
         if ring.is_empty() {
             continue;
         }
+        let first = out.patches.len();
+        let outline: Vec<V2> = ring.iter().map(xz).collect();
         if ring.iter().all(|p| p.y == j.y) {
             let poly: Vec<V2> = ring.iter().map(xz).collect();
             out.patch(&poly, j.y, Surface::Asphalt);
@@ -1006,14 +1134,22 @@ fn road_patches(place: &Place, net: &Network, out: &mut Shapes) {
                 fan(out, &[c, a, b], Surface::Asphalt);
             }
         }
+        out.piece(first, &outline);
     }
     for j in &net.junctions {
         for mg in &j.merges {
             let w = net.merge_wedge(j, mg);
+            let first = out.patches.len();
             for k in 0..w.len().saturating_sub(1) {
                 let q = [w[k].0, w[k + 1].0, w[k + 1].1, w[k].1];
                 fan(out, &q, Surface::Asphalt);
             }
+            let outline: Vec<V2> = w
+                .iter()
+                .map(|p| xz(&p.0))
+                .chain(w.iter().rev().map(|p| xz(&p.1)))
+                .collect();
+            out.piece(first, &outline);
         }
     }
     // Dropped curbs: the apron halfway up to the walk (level with the road where there is
