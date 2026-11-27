@@ -210,7 +210,8 @@ pub struct Assists {
     pub power_boost: f32,
     /// Hill help, `[0, 1]`: in a forward gear on the throttle, extra drive at the wheels
     /// that cancels this share of the grade's pull back on the car, fading out by
-    /// `HILL_FADE_MPS`. Every car pulls away up a steep street as on the flat; on the flat
+    /// `HILL_FADE_MPS` (traction control does not cut it: one wheel spinning on a lip
+    /// would otherwise take it away while the car rolls back). Every car pulls away up a steep street as on the flat; on the flat
     /// it adds nothing.
     pub hill: f32,
 }
@@ -811,7 +812,7 @@ pub fn step(
         if grade > 1e-3 {
             let fade = unit(1.0 - fwd_speed / HILL_FADE_MPS);
             let pull = mass * GRAVITY * grade * radius;
-            axle_torque += unit(assists.hill) * drive_pedal * state.traction_cut * fade * pull;
+            axle_torque += unit(assists.hill) * drive_pedal * fade * pull;
         }
     }
     let reflected_inertia = if coupled {
