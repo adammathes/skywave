@@ -69,11 +69,16 @@ const MAP_SHADE: [u8; 4] = [8, 10, 18, 250];
 const ARROW_EDGE: [u8; 4] = [24, 16, 8, 255];
 /// Minimap rim width and arrow size, virtual units.
 const RIM: f32 = 4.0;
-const MINI_ARROW: f32 = 24.0;
+const MINI_ARROW: f32 = 28.0;
+/// Landmarks past the minimap's edge: how many show as pips on its rim, the farthest they
+/// may be (in minimap ranges) and the pip's radius.
+const RIM_PIPS: usize = 6;
+const RIM_PIP_REACH: f32 = 2.5;
+const RIM_PIP: f32 = 6.0;
 /// The most names the full map places at once.
 const MAX_MAP_LABELS: usize = 64;
 /// Radius of a point of interest's dot on the minimap (with its dark ring).
-const MINI_POI: f32 = 6.0;
+const MINI_POI: f32 = 7.0;
 const FULL_ARROW: f32 = 26.0;
 /// Lines in the full overlay's stats block, under the graph.
 const STAT_LINES: f32 = 13.0;
@@ -957,21 +962,48 @@ impl Ui {
         let [gr, gg, gb] = skin.zones[place::ZoneId::Hills as usize];
         hud.image(HudImage::disc(center[0], center[1], r, [gr, gg, gb, 255]));
         hud.image(m.image(geom));
-        // Landmarks: crisp dots over the image, kept inside the circle.
-        for poi in &self.map.pois {
+        // Landmarks: crisp dots inside the circle; past its edge, the nearest few within
+        // RIM_PIP_REACH ranges ride the rim as smaller pips pointing the way to them.
+        let reach = RIM_PIP_REACH * m.range_m;
+        let mut pips = [(f32::MAX, 0usize); RIM_PIPS];
+        for (i, poi) in self.map.pois.iter().enumerate() {
             let q = m.to_screen(poi.pos);
             let (dx, dy) = (q[0] - center[0], q[1] - center[1]);
-            if dx * dx + dy * dy > (r - MINI_POI) * (r - MINI_POI) {
+            let [pr, pg, pb] = map::poi_color(poi.kind);
+            if dx * dx + dy * dy <= (r - MINI_POI) * (r - MINI_POI) {
+                hud.image(HudImage::disc(q[0], q[1], MINI_POI, skin.poi_ring));
+                hud.image(HudImage::disc(
+                    q[0],
+                    q[1],
+                    MINI_POI - 2.0,
+                    [pr, pg, pb, 255],
+                ));
                 continue;
             }
+            let (wx, wz) = (poi.pos[0] - ctx.car[0], poi.pos[1] - ctx.car[1]);
+            let d = (wx * wx + wz * wz).sqrt();
+            if d < reach && d < pips[RIM_PIPS - 1].0 {
+                // Keep the nearest, sorted: drop the farthest, slide this one in.
+                let mut k = RIM_PIPS - 1;
+                while k > 0 && pips[k - 1].0 > d {
+                    pips[k] = pips[k - 1];
+                    k -= 1;
+                }
+                pips[k] = (d, i);
+            }
+        }
+        for &(d, i) in pips.iter().filter(|p| p.0 < f32::MAX) {
+            let poi = &self.map.pois[i];
+            let q = m.to_screen(poi.pos);
+            let (dx, dy) = (q[0] - center[0], q[1] - center[1]);
+            let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+            let at = r - RIM_PIP;
+            let (px, py) = (center[0] + dx / len * at, center[1] + dy / len * at);
+            // Nearer ones are bigger.
+            let size = RIM_PIP * (1.0 - 0.4 * (d / reach).min(1.0));
             let [pr, pg, pb] = map::poi_color(poi.kind);
-            hud.image(HudImage::disc(q[0], q[1], MINI_POI, skin.poi_ring));
-            hud.image(HudImage::disc(
-                q[0],
-                q[1],
-                MINI_POI - 2.0,
-                [pr, pg, pb, 255],
-            ));
+            hud.image(HudImage::disc(px, py, size + 1.5, skin.poi_ring));
+            hud.image(HudImage::disc(px, py, size, [pr, pg, pb, 255]));
         }
         // The player: a light halo, a dark edge, the accent.
         let rot = m.arrow_rotation();
