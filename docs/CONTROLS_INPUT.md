@@ -72,8 +72,9 @@ car's name shows on the HUD for 2 s and it becomes the `vehicle` setting, the ca
 unless the scene names one (`car=`, with `paint=`). It is unbound on the pad by default: the pad path is the
 pause menu's Vehicle page (Resume · Reset car · Vehicle › · Settings › · Worlds ›): Car (left/right through
 every car the world has, all twenty on the coast, wrapping;
-the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car turning on a
-turntable beside the panel and its stat strip and specs (class, era, peak power and torque, drive and
+the car being driven marked), Paint (a swatch per palette entry) and Drive this car, with the car on a
+turntable in a studio beside the panel (the game is not drawn under the page; the look stick, or a mouse
+look drag, turns the car, which otherwise stands still) and its stat strip and specs (class, era, peak power and torque, drive and
 gearbox, 0–60 mph and top speed, measured with the sim) under the rows. It opens on the car driven, in its
 paint; another car starts in its first paint. Select on any row swaps the car shown in, in the paint shown,
 the same way, and closes the menu; the car and paint become the `vehicle` and `paint` settings. At a UI scale

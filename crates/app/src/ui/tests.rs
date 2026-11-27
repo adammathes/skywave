@@ -1351,14 +1351,13 @@ fn vehicle_page_swaps_the_car_in_place_and_remembers_it() {
         "{text}"
     );
     assert!(text.contains("155 mph") && text.contains("1980s"), "{text}");
-    // From the cockpit the turntable stands where the cabin was: no car of our own.
+    // The page is a studio: the backdrop and the turntable, no world and no car of our own.
     assert_eq!(turntable(&mut h).len(), PREVIEW);
-    let world = h.app.world_instances;
-    let _ = h.app.scene_view(1.0, 16.0 / 9.0);
-    let turntable_at = h.app.preview_instances().start;
-    assert!(h.app.instances[world..turntable_at]
-        .iter()
-        .all(|i| i.mesh != gannet_ids.lods[0].interior));
+    let backdrop = h.app.backdrop;
+    let view = h.app.scene_view(1.0, 16.0 / 9.0);
+    assert_eq!(view.instances.len(), 1 + PREVIEW);
+    assert_eq!(view.instances[0].mesh, backdrop);
+    assert!(view.lights.is_empty());
     let (at, heading) = spot(&h.app);
 
     // Right: the wagon on the turntable, built and queued once; Select drives it, the menu
@@ -1718,10 +1717,10 @@ fn fits(h: &mut Harness, what: &str, scale: f32) {
 }
 
 #[test]
-fn nothing_near_the_eye_cuts_into_the_turntable() {
-    // Busy traffic round the start, then the page: no NPC car or prop instance is left
-    // within CLEAR_M of the eye, and the turntable's own instances are all there.
-    let setup = crate::SceneSetup::from_query("place=town&t=12:00&traffic=busy&stream=0").unwrap();
+fn the_vehicle_page_is_a_still_studio_the_look_stick_turns() {
+    // Busy traffic round the start, then the page: none of it (nor the place) is drawn,
+    // only the backdrop and the car on its disc.
+    let setup = crate::SceneSetup::from_query("place=town&t=22:00&traffic=busy&stream=0").unwrap();
     let mut h = Harness {
         app: App::from_setup(&setup).unwrap(),
         input: InputMapper::default(),
@@ -1731,19 +1730,49 @@ fn nothing_near_the_eye_cuts_into_the_turntable() {
     }
     assert!(h.app.npcs.count() > 0, "traffic is running");
     h.open(&[ItemId::Open(Page::Vehicle)]);
-    let n = turntable(&mut h).len();
-    assert_eq!(n, PREVIEW);
-    let world = h.app.world_instances;
-    let eye = h.app.camera.pose(&h.app.drive, 1.0).eye;
-    let range = h.app.preview_instances();
+    assert_eq!(turntable(&mut h).len(), PREVIEW);
+    let backdrop = h.app.backdrop;
     let view = h.app.scene_view(1.0, 16.0 / 9.0);
-    for inst in &view.instances[world..range.start] {
-        let at = glam::Vec3::from_slice(&inst.transform[3][..3]);
-        assert!(
-            at.distance(eye) > crate::preview::CLEAR_M,
-            "{at} by the eye {eye}"
-        );
+    assert_eq!(view.instances.len(), 1 + PREVIEW);
+    assert_eq!(view.instances[0].mesh, backdrop);
+    // Lit the same at any hour: a noon sun, not the night's.
+    assert!(view.sun.illuminance[0] > 10.0, "{:?}", view.sun);
+
+    // It opens on the three-quarter view and stays there untouched.
+    let spin = h.app.spin;
+    assert_eq!(spin, crate::preview::STILL_SPIN_RAD);
+    for _ in 0..60 {
+        h.frame();
     }
+    assert_eq!(h.app.spin, spin, "no turning by itself");
+    // The right stick turns it (a quarter second at full, about 0.6 rad), and it stays.
+    h.input.axis(RawInput::PadAxis(PadAxis::RightX), 1.0);
+    for _ in 0..15 {
+        h.frame();
+    }
+    h.input.axis(RawInput::PadAxis(PadAxis::RightX), 0.0);
+    let turned = h.app.spin - spin;
+    assert!((0.4..0.9).contains(&turned), "{turned}");
+    let held = h.app.spin;
+    for _ in 0..60 {
+        h.frame();
+    }
+    assert_eq!(h.app.spin, held);
+    // A right-button drag to the right turns it the same way; a plain move does not.
+    let right = RawInput::MouseButton(crate::input::MOUSE_RIGHT);
+    h.input.mouse_delta(40.0, 0.0);
+    h.frame();
+    assert_eq!(h.app.spin, held, "not dragging");
+    h.input.press(right);
+    h.frame();
+    h.input.mouse_delta(40.0, 0.0);
+    h.frame();
+    h.input.release(right);
+    h.frame();
+    assert!(h.app.spin > held, "{} {held}", h.app.spin);
+    // The page and the car are unchanged by it.
+    assert_eq!(h.page(), Page::Vehicle);
+    assert_eq!(browsed(&h), (0, 0));
 }
 
 /// `draw::SHADE`, the dimming round the menu (it covers the whole target on purpose).

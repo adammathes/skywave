@@ -1,22 +1,15 @@
-//! The Vehicle page's turntable: the car being browsed, slowly rotating on a plain disc in
-//! the page's stage (a screen rectangle beside the menu panel), drawn in the main pass from
-//! its own camera.
+//! The Vehicle page's studio: the car being browsed, on a plain disc in front of a bright
+//! backdrop, in the page's stage (a screen rectangle beside the menu panel). The world is not
+//! drawn under the page; the car turns only when the player turns it (the look stick, or the
+//! mouse's look drag).
 //!
-//! **Its own camera, in the main pass.** The renderer has one camera per frame, so the
-//! preview is a scale model placed in the world just in front of the frame's camera, where
-//! that camera sees it exactly as the turntable camera would see the full-size car: the
-//! stage rectangle is turned into a view-space box at [`DISTANCE_M`], the car (on its disc,
+//! **A studio, not the street.** Under the page the frame is the studio alone: a level camera
+//! at the eye, a fixed noon sun from over the viewer's left shoulder, the backdrop (an
+//! emissive sphere round the eye, [`backdrop_mesh`]) and the car on its disc. The stage
+//! rectangle is turned into a view-space box at [`DISTANCE_M`], the car (on its disc,
 //! tilted [`TILT_RAD`] toward the eye) scaled to fill it, and the result carried to the
-//! world by the inverse view. At that distance it is in front of everything else the chase
-//! cameras see (the first-person ones would put the cabin round it, and two of the same car
-//! read oddly anyway, so the app draws no player car, nor its lamps, under the page). It is
-//! lit like everything else (the current sun, sky ambient and exposure) plus, after dark,
-//! the cabin's fill light (`Sky::cabin_light`) so a car is never a silhouette; it takes no
-//! street lamps and neither casts nor receives a sun shadow (the world's shadow at the eye
-//! is not the turntable's). Traffic and props within [`CLEAR_M`] of the eye are left out
-//! while it shows. No render pass or uniform; the one renderer change is the per-instance
-//! `receives_shadow` bit. The cost is [`MAX_INSTANCES`] instances while the page is open
-//! and none otherwise.
+//! world by the inverse view. Nothing in it casts or receives a sun shadow or takes a street
+//! lamp. The cost is [`MAX_INSTANCES`] instances while the page is open and none otherwise.
 
 use glam::{Mat4, Vec3};
 use render::{Mesh, MeshId, MeshInstance, Vertex};
@@ -27,29 +20,45 @@ use crate::drive::CarGlow;
 /// How far in front of the eye the model's center sits, m: as near as keeps its near edge
 /// past the cameras' 0.25 m near plane.
 pub const DISTANCE_M: f32 = 0.5;
-/// While it shows, the app draws no traffic or prop instance whose origin is this close to
-/// the eye (m), so nothing that moves or stands nearby can cut into the model.
-pub const CLEAR_M: f32 = 4.0;
 /// The turntable tilts its top this far toward the eye: the car is seen from a little above.
 pub const TILT_RAD: f32 = 0.33;
-/// Turn rate, rad/s: a lap in about 18 s.
-pub const SPIN_RAD_PER_S: f32 = 0.35;
-/// The turn a still scene shows: a three-quarter view from the front left.
+/// Turn rate at full stick, rad/s (a lap in about 2.5 s); mouse look turns it as far as the
+/// same motion turns the camera.
+pub const TURN_RAD_PER_S: f32 = 2.5;
+/// The turn the page opens on: a three-quarter view from the front left.
 pub const STILL_SPIN_RAD: f32 = 2.45;
+/// The studio camera's vertical field of view, degrees: long enough that the car reads as a
+/// product shot, not a wide-angle one.
+pub const STUDIO_FOV_DEG: f32 = 34.0;
+/// Toward the studio's sun (world space, `+z` behind the level camera, which looks down
+/// `-z`): high over the viewer's left shoulder.
+pub const STUDIO_SUN: [f32; 3] = [-0.45, 0.78, 0.43];
+/// The backdrop sphere's radius round the eye, m: past the model, inside the far plane.
+pub const BACKDROP_M: f32 = 3.0;
+/// Post-exposure brightness of a full-white backdrop vertex (tonemapper input, 0.18 mid
+/// grey): the backdrop's colors below land near their sRGB values.
+pub const BACKDROP_EXPOSED: f32 = 0.75;
+/// The backdrop's colors, sRGB, by elevation: overhead, at the horizon, and underfoot. A
+/// deep blue sky over a bright cyan horizon and a lighter floor.
+const BACKDROP_TOP: [u8; 3] = [24, 64, 178];
+const BACKDROP_HORIZON: [u8; 3] = [70, 186, 250];
+const BACKDROP_FLOOR: [u8; 3] = [120, 206, 246];
+const BACKDROP_RINGS: u32 = 24;
+const BACKDROP_SEGMENTS: u32 = 32;
 /// Share of the stage the car's turning circle may fill, across and up (the disc's rim
 /// may reach a little past it).
 const FILL: [f32; 2] = [0.96, 0.86];
 /// Disc radius past the car's corners, and its thickness, m (full scale).
 const DISC_MARGIN_M: f32 = 0.2;
 const DISC_THICKNESS_M: f32 = 0.12;
-/// Disc color, linear: a plain light grey with a darker rim.
-const DISC_TOP: [u8; 4] = [120, 122, 126, 255];
-const DISC_RIM: [u8; 4] = [46, 48, 52, 255];
+/// Disc color, linear: a light podium with the menu's amber round its rim.
+const DISC_TOP: [u8; 4] = [150, 156, 168, 255];
+const DISC_RIM: [u8; 4] = [255, 110, 12, 255];
 const DISC_SEGMENTS: u32 = 64;
 
 /// Instances [`push`] adds at most: body, glass, lamps, four wheels, the interior and
-/// steering wheel, the disc and the driver's parts.
-pub const MAX_INSTANCES: usize = 10 + traffic::figure::PARTS;
+/// steering wheel, the disc and the driver's parts; and the backdrop.
+pub const MAX_INSTANCES: usize = 11 + traffic::figure::PARTS;
 
 /// The disc: radius 1, its top at `y = 0`, [`DISC_THICKNESS_M`] thick; scaled across to
 /// each car.
@@ -83,6 +92,50 @@ pub fn turntable_mesh() -> Mesh {
     for k in 0..n {
         let (a, b) = (base + 2 * k, base + 2 * ((k + 1) % n));
         m.indices.extend_from_slice(&[a, b, a + 1, b, b + 1, a + 1]);
+    }
+    m
+}
+
+/// The backdrop: a sphere of radius 1 round its origin seen from inside, black (it takes no
+/// light) and emissive (scale 1) from [`BACKDROP_FLOOR`] below through [`BACKDROP_HORIZON`]
+/// to [`BACKDROP_TOP`] overhead.
+pub fn backdrop_mesh() -> Mesh {
+    let linear = |c: [u8; 3]| c.map(|v| (v as f32 / 255.0).powf(2.2));
+    let (top, horizon, floor) = (
+        linear(BACKDROP_TOP),
+        linear(BACKDROP_HORIZON),
+        linear(BACKDROP_FLOOR),
+    );
+    let mut m = Mesh::default();
+    let (rings, segs) = (BACKDROP_RINGS, BACKDROP_SEGMENTS);
+    for i in 0..=rings {
+        // Elevation from straight down to straight up.
+        let el = (i as f32 / rings as f32 - 0.5) * core::f32::consts::PI;
+        let (sy, cy) = el.sin_cos();
+        // Up: the horizon's cyan deepening to the top's blue; down, quickly to the floor.
+        let (a, b, t) = if sy >= 0.0 {
+            (horizon, top, sy.sqrt())
+        } else {
+            (horizon, floor, (-sy * 3.0).min(1.0))
+        };
+        let c: [f32; 3] = core::array::from_fn(|k| a[k] + (b[k] - a[k]) * t);
+        let e = render::emissive(c.map(|v| (v * 255.0).round() as u8), 1.0);
+        for j in 0..=segs {
+            let az = j as f32 / segs as f32 * core::f32::consts::TAU;
+            let p = [cy * az.cos(), sy, cy * az.sin()];
+            let inward = p.map(|v| -v);
+            m.vertices
+                .push(Vertex::new(p, inward, [0, 0, 0, 255]).with_emissive(e));
+        }
+    }
+    let row = segs + 1;
+    for i in 0..rings {
+        for j in 0..segs {
+            let (a, b) = (i * row + j, i * row + j + 1);
+            let (c, d) = (a + row, b + row);
+            // Counter-clockwise seen from the center.
+            m.indices.extend_from_slice(&[a, b, c, b, d, c]);
+        }
     }
     m
 }
@@ -215,6 +268,17 @@ pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<
     out.push(instance(model.turntable, disc, 1.0));
 }
 
+/// Appends the backdrop round `eye`, its emissive times `glow`.
+pub fn push_backdrop(backdrop: MeshId, eye: Vec3, glow: f32, out: &mut Vec<MeshInstance>) {
+    let m = Mat4::from_translation(eye) * Mat4::from_scale(Vec3::splat(BACKDROP_M));
+    out.push(MeshInstance {
+        glow,
+        casts_shadow: false,
+        receives_shadow: false,
+        ..MeshInstance::new(backdrop, m.to_cols_array_2d())
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +341,32 @@ mod tests {
             assert!(fill > 0.65, "{fill}");
         }
         assert!(table_to_world(view, proj, [0.5, 0.0, 0.5, 1.0], &layout, 0.0).is_none());
+    }
+
+    #[test]
+    fn the_backdrop_faces_in_and_is_bright_blue() {
+        let m = backdrop_mesh();
+        assert!(m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
+        for t in m.indices.chunks(3) {
+            let p = [t[0], t[1], t[2]].map(|i| Vec3::from(m.vertices[i as usize].pos));
+            let face = (p[1] - p[0]).cross(p[2] - p[0]);
+            if face.length() < 1e-6 {
+                continue; // At a pole.
+            }
+            // Counter-clockwise seen from the center, which every normal points to.
+            assert!(face.dot(-p[0]) > 0.0, "{p:?}");
+            let n = Vec3::from(m.vertices[t[0] as usize].normal);
+            assert!(n.dot(-p[0]) > 0.0);
+        }
+        for v in &m.vertices {
+            // Unlit: black, all of it emissive, blue the strongest channel above the floor.
+            assert_eq!(v.color[..3], [0, 0, 0]);
+            let e = v.emissive;
+            assert!(e[3] > 0);
+            if v.pos[1] > 0.0 {
+                assert!(e[2] > e[0] && e[2] >= e[1], "{e:?}");
+            }
+        }
     }
 
     #[test]
