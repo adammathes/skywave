@@ -156,9 +156,33 @@ pub fn layout(id: &str) -> Result<Layout, String> {
     Ok(l)
 }
 
+/// `place` encoded, then its terrain as `plan` graded it (`TerrainGrid::bake`), then that
+/// part's length (u32, little-endian): what the build script, which compiles this file
+/// too, keeps of each world.
+#[allow(dead_code)]
+pub fn pack(place: &Place, plan: &world::ChunkPlan) -> Vec<u8> {
+    let mut bytes = place::encode(place);
+    let graded = plan.grid().map_or_else(Vec::new, |g| g.bake(place));
+    bytes.extend_from_slice(&graded);
+    bytes.extend_from_slice(&(graded.len() as u32).to_le_bytes());
+    bytes
+}
+
+/// The place [`pack`] wrote and its graded terrain.
+pub fn unbake(bytes: &[u8]) -> Result<(Place, Option<world::TerrainGrid>), String> {
+    let cut = bytes.len().checked_sub(4).ok_or("baked place: too short")?;
+    let len = u32::from_le_bytes([bytes[cut], bytes[cut + 1], bytes[cut + 2], bytes[cut + 3]]);
+    let split = cut
+        .checked_sub(len as usize)
+        .ok_or("baked place: bad length")?;
+    let place = place::decode(&bytes[..split]).map_err(|e| format!("baked place: {e:?}"))?;
+    let graded = world::TerrainGrid::unbake(&place, &bytes[split..cut]);
+    Ok((place, graded))
+}
+
 /// The place for `seed` of layout `layout` dressed by region template `region`'s zone
-/// rules, its buildings planned by `grammar`: what the build bakes and what a load
-/// generates (`crate::places`), so a new way to make a world changes both.
+/// rules, its buildings planned by `grammar`: what a load without a baked place generates
+/// (`crate::places`), and the place the build script bakes.
 pub fn generate(
     seed: Seed,
     region: &str,

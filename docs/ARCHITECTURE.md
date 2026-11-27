@@ -47,7 +47,7 @@ Dependency direction is strictly downward in the diagram. `app` is the only crat
 
 Producing should read only the Place, the data types and shared plans (road profiles, `lots::plan`, building plans); it must not import a mesh builder. Today `procgen::detail` and `procgen::buildings` still reach into the meshing modules; untangling that is open work.
 
-A release build bakes each built-in world's Place for the default seed (`seed=1`) at build time: `crates/app/build.rs` runs the same generation and `place::encode`s it into the binary, and a load `place::decode`s it (milliseconds, against about a second to generate). Any other seed, and every debug build, generates at load. Generation is deterministic, so both are the same Place; the content is never committed, so it cannot go stale.
+A release build bakes each built-in world's Place for the default seed (`seed=1`) at build time: `crates/app/build.rs` runs the same generation and `place::encode`s it into the binary, and a load `place::decode`s it (milliseconds, against about a second to generate). Beside it the build keeps the place's terrain with the roads graded in (`TerrainGrid::bake`: only the samples grading moved, about a fifth more bytes), so a load does not grade it again (0.1 to 0.3 s). Any other seed, and every debug build, generates at load. Generation is deterministic, so both are the same Place; the content is never committed, so it cannot go stale.
 
 ## Frame
 1. Platform collects events since last frame into `InputState` (digital actions + analog axes, already mapped through the user's bindings). Latest state wins; nothing is queued.
