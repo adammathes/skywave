@@ -21,8 +21,10 @@ use crate::{
     SIDEWALK_WIDTH_M,
 };
 
-/// How far an edge profile sample may be above or below the terrain, meters.
-pub const PROFILE_TERRAIN_TOLERANCE_M: f32 = 8.0;
+/// How far an edge profile sample may be above or below the terrain, meters: a bridge deck
+/// over the bed of the water it crosses (Lake City's river bridges stand 8.0 over theirs)
+/// with a little to spare.
+pub const PROFILE_TERRAIN_TOLERANCE_M: f32 = 8.5;
 
 /// How far a profile's ends may be from its edge's nodes, meters.
 pub const PROFILE_END_TOLERANCE_M: f32 = 0.05;
@@ -689,7 +691,7 @@ mod tests {
             Err(E::Profile { edge: 4 })
         );
         assert_eq!(
-            broken(&|p| p.roads.edges[5].profile[0][1] = 8.5),
+            broken(&|p| p.roads.edges[5].profile[0][1] = 9.0),
             Err(E::ProfileOffTerrain { edge: 5 })
         );
         assert_eq!(

@@ -602,3 +602,23 @@ cargo test -p app every_world_passes_the_map_audit -- --nocapture
 
 Each world's count is pinned in `MAP_FAULTS` and may only go down: a change that adds a fault fails, a
 change that removes some lowers the pin in the same PR. A new world starts at 0.
+
+## Vertical curves
+A road's height profile is a row of samples 8 to 16 m apart. One that only follows the ground under
+a slope limit has a kink at every sample and a sharp crest wherever the ground has one: at speed
+each kink is a jolt and a crest throws the car off the road. So a profile is **eased**
+(`procgen::profile::ease`): its grade may change by at most a bound per meter, the way a road
+engineer rounds every crest and sag. The bound is 0.1% per meter on a main road (a crest at 40 m/s
+unloads the car by a sixth of its weight) and 0.4% on a steep one, which is driven slower.
+
+An authored layout's road takes its heights whole, along its length (`authored::grade_line`), so
+it runs smooth through its own junctions; the wider road goes first and the roads that meet it are
+held to its height there, arriving on the grade they leave with. The ground is cut and filled to
+the road afterwards, so easing costs the road nothing.
+
+Side streets and the procedural coast's arterials are not eased yet: they follow the ground between
+their junctions as before.
+
+`places::tests::every_world_rides_smooth_at_speed` drives each world's longest straight at 40 m/s
+and fails on a wheel off the road, on a vertical acceleration over 2 m/s² rms (a crest at the curve bound gives 1.6 at that speed), or on a main road
+whose grade changes by more than 0.8% per meter.
