@@ -316,5 +316,8 @@ fn pacific_shore_validates_and_its_streets_cross_the_avenues() {
         four += usize::from(degree[*i] == 4);
         three += usize::from(degree[*i] == 3);
     }
-    assert!(four >= 8 && three == 0, "{four} four-way, {three} three-way");
+    assert!(
+        four >= 8 && three == 0,
+        "{four} four-way, {three} three-way"
+    );
 }
