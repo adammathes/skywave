@@ -1369,14 +1369,20 @@ impl<'a> Parcels<'a> {
     }
 }
 
+/// Spacing of a lot's [`samples`], m.
+const SAMPLE_M: f32 = 4.0;
+
 /// Points over a lot's rectangle `w` wide and `d` deep: what must lie on lots for the lot
 /// to be one.
 fn samples(l: &Lot, w: f32, d: f32) -> impl Iterator<Item = V2> + '_ {
-    (0..5).flat_map(move |i| {
-        (0..5).map(move |k| {
+    // No farther apart than an alley is wide, so no road slips between them.
+    let n = |len: f32| ((len / SAMPLE_M) as usize).max(4);
+    let (nw, nd) = (n(w), n(d));
+    (0..=nw).flat_map(move |i| {
+        (0..=nd).map(move |k| {
             l.at(
-                (i as f32 / 4.0 - 0.5) * (w - 1.0),
-                0.5 + k as f32 / 4.0 * (d - 1.0),
+                (i as f32 / nw as f32 - 0.5) * (w - 1.0),
+                0.5 + k as f32 / nd as f32 * (d - 1.0),
             )
         })
     })
