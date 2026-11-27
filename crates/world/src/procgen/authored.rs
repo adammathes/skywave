@@ -30,18 +30,18 @@ use place::{Edge, Node, Place, RoadClass, RoadGraph, Spawn, SpawnKind, ZoneId};
 use skywave_core::Seed;
 
 use super::macro_map::{
-    ccw, flatten_by_zone, paint_bands, raise_walls, BasinPlan, Frame, GridLine, MacroMap, MacroPoi,
-    MacroPoiKind, Strip, WaterBody, WaterKind,
+    ccw, flatten_by_zone, paint_bands, raise_walls, BasinPlan, GridLine, MacroMap, MacroPoi,
+    MacroPoiKind, WaterBody, WaterKind,
 };
 use super::profile::{ease, grade_at, grade_limit, ROAD_CURVE, STREET_CURVE};
-use super::terrain::{smoothstep, Noise, Shore};
+use super::terrain::{smoothstep, Noise};
 use super::zones::cell_center;
 use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};
 use crate::edges;
 use crate::grammar::Grammar;
 use crate::layout::{self, point_at, Layout, MAX_GRADE, RAMP_RUN_M, SNAP_M};
 use crate::math::{abs, atan2, clamp, lerp, point_in_polygon, seg_intersect, segment_distance, V2};
-use crate::template::{CoastSide, RegionTemplate};
+use crate::template::RegionTemplate;
 use crate::{ChunkPlan, Palette};
 
 /// Width of the slope from the water's edge up to the land.
@@ -484,31 +484,19 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
             let c = p.iter().fold(V2::new(0.0, 0.0), |a, &q| a + q) * (1.0 / p.len() as f32);
             [c.x, c.y]
         });
-    let frame = Frame::new(CoastSide::West, w as u32, h as u32);
     MacroMap {
         seed,
         size_chunks,
-        frame,
         width: w as u32,
         height: h as u32,
-        corridor: vec![0.0; w * h],
         heights,
         water_level: wl,
         water,
         zone_width: zw as u32,
         zone_height: zh as u32,
         zones,
-        shore: Shore::far(frame.n_v()),
         downtown,
-        strip: Strip {
-            centerline: Vec::new(),
-            inland_m: 0.0,
-            width_m: 0.0,
-            length_m: 0.0,
-        },
         highway: Vec::new(),
-        highway_bed: Vec::new(),
-        pass: None,
         pois: layout
             .pier
             .iter()

@@ -6,9 +6,9 @@
 use alloc::vec::Vec;
 
 use place::{
-    Era, Facades, Lanes, Lights, Place, PlaceHeader, Props, RegionId, RoadClass, RoadGraph,
-    Sidewalks, Spawn, SpawnKind, Terrain, WaterBody, WaterKind as PlaceWaterKind, Zones,
-    CHUNK_SIZE_M, DEFAULT_RES_PER_CHUNK, PLACE_VERSION,
+    Era, Facades, Lanes, Lights, Place, PlaceHeader, Props, RegionId, RoadGraph, Sidewalks, Spawn,
+    Terrain, WaterBody, WaterKind as PlaceWaterKind, Zones, CHUNK_SIZE_M, DEFAULT_RES_PER_CHUNK,
+    PLACE_VERSION,
 };
 use skywave_core::Seed;
 
@@ -19,7 +19,6 @@ use super::parcels::parcels_all;
 use super::streets::streets_all;
 use super::{RES_PER_CHUNK, ZONE_SAMPLES};
 use crate::grammar::Grammar;
-use crate::math::{atan2, segment_distance, V2};
 use crate::template::RegionTemplate;
 use crate::{ChunkPlan, Palette};
 
@@ -92,8 +91,7 @@ pub(super) fn fill(
 
 /// The Place skeleton for a macro map and its road graph, the start on its arterials.
 pub fn place_from(m: &MacroMap, template: &RegionTemplate, roads: RoadGraph) -> Place {
-    let start = player_start(m, &roads);
-    assemble(m, template, roads, start)
+    assemble(m, template, roads, None)
 }
 
 fn assemble(
@@ -170,40 +168,4 @@ fn assemble(
     };
     place.sort_by_chunk();
     place
-}
-
-/// The car's start: on the arterial edge nearest the middle of the strip, in the outer
-/// lane of the side traffic drives on (right), facing along the edge from `a` to `b`.
-fn player_start(m: &MacroMap, roads: &RoadGraph) -> Option<Spawn> {
-    let line = &m.strip.centerline;
-    let target = V2::from_array(*line.get(line.len() / 2)?);
-    let mut best: Option<(f32, usize, usize, f32)> = None;
-    for (i, e) in roads.edges.iter().enumerate() {
-        if e.class != RoadClass::Arterial || e.oneway {
-            continue;
-        }
-        for k in 0..e.profile.len().saturating_sub(1) {
-            let (a, b) = (e.profile[k], e.profile[k + 1]);
-            let (d, t) = segment_distance(target, V2::new(a[0], a[2]), V2::new(b[0], b[2]));
-            if best.is_none_or(|q| d < q.0) {
-                best = Some((d, i, k, t));
-            }
-        }
-    }
-    let (_, i, k, t) = best?;
-    let e = &roads.edges[i];
-    let (a, b) = (e.profile[k], e.profile[k + 1]);
-    let (pa, pb) = (V2::new(a[0], a[2]), V2::new(b[0], b[2]));
-    let dir = (pb - pa).normalize();
-    // The outer lane's center: lanes split the curb-to-curb half width less the gutter.
-    let inner = e.width_m * 0.5 - 0.45;
-    let lanes = f32::from(e.lanes_fwd.max(1));
-    let offset = inner - 0.5 * inner / lanes;
-    let p = pa.lerp(pb, t) + dir.right() * offset;
-    let y = a[1] + (b[1] - a[1]) * t;
-    Some(Spawn {
-        pos: [p.x, y, p.y],
-        heading: atan2(-dir.x, -dir.y),
-        kind: SpawnKind::PlayerStart,
-    })
 }

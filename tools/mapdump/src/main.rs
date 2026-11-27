@@ -205,24 +205,9 @@ pub fn render(map: &MacroMap, scale: usize) -> (usize, usize, Vec<u8>) {
     for seg in map.highway.windows(2) {
         img.line(px(seg[0]), px(seg[1]), 1.0, [255, 220, 60]);
     }
-    for (k, seg) in map.strip.centerline.windows(2).enumerate() {
-        if k % 2 == 0 {
-            img.line(px(seg[0]), px(seg[1]), 1.0, [255, 255, 255]);
-        }
-    }
-    if let (Some(a), Some(b)) = (map.strip.centerline.first(), map.strip.centerline.last()) {
-        img.disc(px(*a)[0], px(*a)[1], 3.0 * scale as f32, [255, 255, 255]);
-        img.disc(px(*b)[0], px(*b)[1], 3.0 * scale as f32, [255, 255, 255]);
-    }
     let d = px(map.downtown);
     img.disc(d[0], d[1], 7.0 * scale as f32, [0, 0, 0]);
     img.disc(d[0], d[1], 4.0 * scale as f32, [255, 255, 255]);
-    if let Some(p) = map.pass {
-        let p = px(p);
-        let r = 7.0 * scale as f32;
-        img.line([p[0] - r, p[1] - r], [p[0] + r, p[1] + r], 3.0, [220, 0, 0]);
-        img.line([p[0] - r, p[1] + r], [p[0] + r, p[1] - r], 3.0, [220, 0, 0]);
-    }
     for poi in &map.pois {
         let p = px(poi.pos);
         match poi.kind {
@@ -517,14 +502,12 @@ fn main() {
         );
     }
     println!(
-        "  markers: downtown black/white disc, strip centerline dashed white with end dots, highway yellow, pass red X, pier brown, harbor cyan, overlook orange"
+        "  markers: downtown black/white disc, highway yellow, pier brown, harbor cyan, overlook orange"
     );
     println!(
-        "downtown ({:.0}, {:.0}), strip {:.0} m, pass {:?}, water bodies {}",
+        "downtown ({:.0}, {:.0}), water bodies {}",
         map.downtown[0],
         map.downtown[1],
-        map.strip.length_m,
-        map.pass.map(|p| [p[0].round(), p[1].round()]),
         map.water.len()
     );
     let (w, h, mut rgb) = render(&map, scale.max(1));

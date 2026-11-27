@@ -634,7 +634,6 @@ pub struct StreetPlan<'a> {
     m: &'a MacroMap,
     art: &'a RoadGraph,
     graded: Vec<f32>,
-    ext: [f32; 2],
     rw: usize,
     rh: usize,
     /// Component per raster cell, `NONE` on arterials, water and pattern-less zones.
@@ -715,7 +714,6 @@ impl<'a> StreetPlan<'a> {
             m,
             art: arterials,
             graded,
-            ext,
             rw,
             rh,
             label: Vec::new(),
@@ -861,7 +859,7 @@ impl<'a> StreetPlan<'a> {
             let dir = if contacts >= 6 && coh >= 0.3 * contacts as f32 {
                 maj
             } else {
-                coast_tangent(self.m, centroid)
+                V2::new(0.0, 1.0)
             };
             // A basin's grid is square to its axes, whatever its ramps and curves say.
             let dir = if self.m.basin.as_ref().is_some_and(|b| b.square) {
@@ -950,13 +948,7 @@ impl<'a> StreetPlan<'a> {
         {
             return None;
         }
-        let mid = V2::new(self.ext[0] * 0.5, self.ext[1] * 0.5);
-        let ct = coast_tangent(self.m, mid);
-        let d = if abs(ct.x) >= abs(ct.y) {
-            V2::new(1.0, 0.0)
-        } else {
-            V2::new(0.0, 1.0)
-        };
+        let d = V2::new(0.0, 1.0);
         let n = d.left();
         let key = hash64(self.seed.0, &[stage::STREETS, key::SECTIONS]);
         // Best aligned rural edge per axis: (length, midpoint).
@@ -2884,7 +2876,7 @@ impl<'a> StreetPlan<'a> {
                 let tg = (pb - pa).normalize();
                 let mut nn = tg.left();
                 let probe = pa + nn * 20.0;
-                if self.m.coast_distance(probe.x, probe.y) > self.m.coast_distance(pa.x, pa.y) {
+                if probe.x > pa.x {
                     nn = -nn;
                 }
                 let side = pa.lerp(pb, 0.5) + nn * 14.0;
@@ -3950,15 +3942,6 @@ fn major_of(t: [f32; 2]) -> (V2, f32) {
         V2::new(b, 1.0 - a)
     };
     (d.normalize(), c)
-}
-
-/// Unit coast tangent (along increasing `v`) at a world point, from the smoothed
-/// shoreline differenced over 400 m.
-fn coast_tangent(m: &MacroMap, p: V2) -> V2 {
-    let (_, v) = m.frame.to_canon([p.x, p.y]);
-    let slope = (m.shore.road_u(v + 200.0) - m.shore.road_u(v - 200.0)) / 400.0;
-    let k = 1.0 / sqrt(1.0 + slope * slope);
-    V2::from_array(m.frame.dir_to_world(slope * k, k))
 }
 
 /// Content hash of a road graph (every field, in order), for determinism tests.
