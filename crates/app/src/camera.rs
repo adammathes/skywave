@@ -126,7 +126,7 @@ pub const TUNING: CameraTuning = CameraTuning {
     speed_fov_mps: [13.0, 45.0],
     cockpit_near_m: 0.1,
     near_m: 0.25,
-    far_m: 3000.0,
+    far_m: 6000.0,
 
     chase_distance_m: [5.0, 7.0, 10.5],
     chase_height_m: [1.65, 2.3, 3.25],

@@ -79,9 +79,9 @@ streamed chunks. The far terrain is the place's own ground and water at 32 m, su
 resident chunk always wins. The horizon continues past the place's sides on a grid that shares the far
 terrain's samples along them and steps out in widening rings to 2.15 km: ridges climbing to 300–600 m behind
 mountains, rolling hills behind hills and highway loops, a low forest, flat rail yards, a far shore across a
-bay, the sea floor (left out) past the coast, where the water plane runs on 3 km to the camera's far plane.
-Past a corner the two sides blend by angle, so headlands taper into the sea. The distance fog carries the
-ridgelines into the sky's haze; there is no rectangle to see. Chunks with an ocean or lake shore draw the
+bay, the sea floor (left out) past the coast, where the water plane runs on to the camera's far plane.
+Past a corner the two sides blend by angle, so headlands taper into the sea. The view runs to a 6 km far plane
+whose last 1.5 km fade into the sky; there is no rectangle to see, and almost no fog. Chunks with an ocean or lake shore draw the
 surf on the water: a foam band at the waterline and, at sea, a broken line of breakers further out. Every other street lamp also
 gets a small sodium point in the far terrain, 7 m up and lit only at night, so from a hill the flat beyond the
 streamed chunks reads as a carpet of lights (8 triangles a lamp; untextured, so the far terrain keeps
@@ -94,10 +94,10 @@ Meshes are drawn camera relative: each instance's translation goes to the GPU mi
 WebGL2 constraints (CI target, fallback in the wild): no compute, no storage buffers, uniform arrays ≤ 16 KiB, ≤ 16 textures per stage, depth sampling via comparison sampler, no texture arrays for cascades (use an atlas, cascades side by side: 3×1, or 2×1 in the two-cascade presets). Everything above fits. WebGPU/native get larger light lists and SSAO.
 
 ## Time of day and sky
-A `Daylight` struct is derived from `(latitude 34°N, day-of-year, seconds)`: sun elevation/azimuth, sun color/intensity (through a simple atmosphere: scattering tint by air mass), sky model params (turbidity by weather), moon phase/position, exposure, fog density/color, streetlight on/off (civil dusk) and the game seconds since that photocell last switched, the morning haze, window emissive scale, star brightness. Default clock runs at 10× real time (24 h in 2.4 h); configurable 0× (frozen), 1×, 10×, 60×, and a scrub control. Golden hour and blue hour are the showpieces; tune there first.
+A `Daylight` struct is derived from `(latitude 34°N, day-of-year, seconds)`: sun elevation/azimuth, sun color/intensity (through a simple atmosphere: scattering tint by air mass), sky model params (turbidity by weather), moon phase/position, exposure, fog density/color, streetlight on/off (civil dusk) and the game seconds since that photocell last switched, window emissive scale, star brightness. Default clock runs at 10× real time (24 h in 2.4 h); configurable 0× (frozen), 1×, 10×, 60×, and a scrub control. Golden hour and blue hour are the showpieces; tune there first.
 
 ## Night
-**Dusk moments.** The drive into evening is an event, all of it a pure function of the clock (`app::lighting::LampClock`, `DuskWave`; no state, nothing allocated per frame). At civil dusk the street lamps come on in a wave over about 20 game seconds: a front crossing the place east to west (following the dark) in 14 s, each 90 m block a moment of its own within 4 s, each lamp within 1 s more along its street; a switched lamp strikes, blinking at a third for 1.2 s, then warms to full by 3 s, as sodium does. Its lens (an instanced prop, keyed on its head) and its light (keyed on the same point) switch together. Sign, landmark, shop-fill and set-piece lights each switch at their own moment in the same window, following the front loosely. Lamps still warming up rank second in each draw's 8 lights, so they never crowd out the headlights. At dawn they go out in the same order, without the flicker. The morning haze (`Daylight::haze`) settles over the basin through the small hours, is thickest from an hour before sunrise and burns off by mid-morning (3.5 h after sunrise): it adds turbidity (a greyer, softer sun and sky) and up to 0.0028/m of fog, about a kilometre's visibility; fog thicker than any weather's (over 0.002/m) fades into the ground's color over a wider band below the horizon, so no line marks the eye height. No particles. Goldens: `basin-boulevard-dusk-wave` (12 s into the wave), `coast-dawn-haze` (05:50).
+**Dusk moments.** The drive into evening is an event, all of it a pure function of the clock (`app::lighting::LampClock`, `DuskWave`; no state, nothing allocated per frame). At civil dusk the street lamps come on in a wave over about 20 game seconds: a front crossing the place east to west (following the dark) in 14 s, each 90 m block a moment of its own within 4 s, each lamp within 1 s more along its street; a switched lamp strikes, blinking at a third for 1.2 s, then warms to full by 3 s, as sodium does. Its lens (an instanced prop, keyed on its head) and its light (keyed on the same point) switch together. Sign, landmark, shop-fill and set-piece lights each switch at their own moment in the same window, following the front loosely. Lamps still warming up rank second in each draw's 8 lights, so they never crowd out the headlights. At dawn they go out in the same order, without the flicker. No particles. Golden: `basin-boulevard-dusk-wave` (12 s into the wave).
 
 Street lights are warm sodium (80s) point lights with a 25 m radius; neon signs are emissive meshes with matching small point lights; windows are emissive quads with a mask; headlights are two spotlights with a 60 m cone casting no shadow (v1), lighting the road and props ahead; tail lights emissive. Light culling: every light in the resident chunks goes into the frame (up to 256, the nearest to the camera when there are more); each chunk's meshes are drawn as one and quartered, down to 32 m tiles, until the static lights reaching a tile fit a draw; per draw, the 8 lights that light its bounds most, each weighted down as the first left out closes on it (4 bits a light in the instance), so a light leaving a full set fades out instead of switching off a whole tile in one frame (`app::lighting::light_set`). Coronas (additive glow sprites) sit over lamp heads, headlamps, tail lamps, neon and the sun and moon, scaled by distance, faded by occlusion and by exposure (a halo at night, nothing by day), `Sky::corona_strength` 0.6 by default. Phase 2: clustered lighting on WebGPU/native.
 
@@ -169,7 +169,6 @@ Settings › Video › Look (saved; a scene's `look=` overrides it for the sessi
 | Look | Forward pass | Tonemap |
 |---|---|---|
 | Standard | — | — |
-| Smog | warm sun, teal shade; fog ×3 toward a brown-gold band low in the sky | warm, lifted blacks, grain |
 | Dusk layers | distance (15 m–1.8 km, log) replaces fog with a five-stop plum → gold ramp lit by the horizon; warm sky | 7 levels a channel |
 | Amber haze | fog ×14 in one amber hue; amber sky | brightness → dark-brown to orange ramp |
 | Poster | sun lit or not (no falloff), violet shade, vertex color snapped to 12 paints (no atlas pattern) | saturation ×1.2 |
@@ -188,3 +187,4 @@ A debug overlay (F3 cycles off, the frame rate alone, and the full overlay; see 
 - Golden screenshots at four fixed cameras/times for seed 1 compared with a perceptual threshold; changes require intent in the PR.
 - Frame budget: synthetic scene of 9×9 chunks + 64 cars at 1080p under 16.6 ms on the reference GPUs (manual gate), and under 2 ms CPU submit time on the CI runner.
 - No frame allocates GPU resources after warmup (assert in debug builds).
+

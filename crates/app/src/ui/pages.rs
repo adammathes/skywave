@@ -21,7 +21,7 @@
 //!            this device; select to remap
 //! Axes:      one row per analog action ›
 //! Axis:      Sensitivity · Deadzone · Response curve · Invert · Reset
-//! Video:     Look (Standard / Smog / Dusk layers / Amber haze / Poster / Toon / Night
+//! Video:     Look (Standard / Dusk layers / Amber haze / Poster / Toon / Night
 //!            video / Low-res / Ink) · Quality (Low / Battery / Deck / Medium / High /
 //!            Ultra) · Frame rate (the panel's, then its whole divisors: 45 / 30 at 90 Hz) ·
 //!            UI scale · Resolution scale · Bloom
@@ -221,7 +221,6 @@ pub const QUALITY_NAMES: [&str; Quality::ALL.len()] =
 /// Names of [`render::Look::ALL`].
 pub const LOOK_NAMES: [&str; render::Look::ALL.len()] = [
     "Standard",
-    "Smog",
     "Dusk layers",
     "Amber haze",
     "Poster",
@@ -997,8 +996,8 @@ mod tests {
         build(Page::Video, &ctx, &mut items);
         assert_eq!(items[0].id, ItemId::Look);
         assert!(
-            matches!(items[0].widget, Widget::Choice { index: 0, options } if options.len() == 9),
-            "standard of nine"
+            matches!(items[0].widget, Widget::Choice { index: 0, options } if options.len() == 8),
+            "standard of eight"
         );
         assert_eq!(items[1].id, ItemId::Quality);
         assert!(
