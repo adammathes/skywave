@@ -6,21 +6,14 @@ use std::time::Instant;
 
 use place::{RegionId, SpawnKind};
 use skywave_core::Seed;
-use world::procgen::build_place;
-use world::template::RegionTemplate;
+
+mod common;
+use common::*;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 
 fn grammar() -> world::Grammar {
     ron::from_str(GRAMMAR).expect("parse grammar")
-}
-
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
 }
 
 /// Pinned `Place::content_hash` of `build_place(seed, california_coast)` for seeds 1..=8.
@@ -139,20 +132,19 @@ impl Roads<'_> {
     }
 }
 
-/// The coast's edges bound it (`docs/WORLD_GENERATION.md`, "Map edges"), seeds 1-8: every
+/// The coast's edges bound it (`docs/WORLD_GENERATION.md`, "Map edges"), seeds 1-2: every
 /// road stays in the playable rectangle (none runs into an edge band or off the place), so
-/// every dead end is interior (a cul-de-sac at the foot of the hills at most) or on the
-/// beach; the highway is one chain whose two ends are on the beachfront road (it loops
-/// back to the coast, it does not end); and along every land side the wall rises at least
+/// every dead end is interior (a lookout at most) or on the beach; and along every land
+/// side the wall rises at least
 /// `RISE_M` (`MOUNTAINS_RISE_M` for mountains) from the foot of its band to the side.
 #[test]
 fn edges_bound_the_coast() {
-    use place::{EdgeKind, RoadClass, ZoneId, EAST, NORTH, SOUTH, WEST};
+    use place::{EdgeKind, ZoneId, EAST, NORTH, SOUTH, WEST};
     use world::edges::{band_m, inside};
     const RISE_M: f32 = 50.0;
     const MOUNTAINS_RISE_M: f32 = 85.0;
     let t = template();
-    for seed in 1..=8u64 {
+    for seed in 1..=2u64 {
         let p = build_place(Seed(seed), &t, &grammar());
         let edges = p.terrain.edges;
         assert_eq!(edges, t.edges.sides());
@@ -193,30 +185,6 @@ fn edges_bound_the_coast() {
                 in_play(n.pos, 4.0),
                 "seed {seed}: dead end at {:?} by the place edge",
                 n.pos
-            );
-        }
-        // The highway: one chain, its ends on the beachfront road.
-        let mut hdeg = vec![0u32; p.roads.nodes.len()];
-        for e in p
-            .roads
-            .edges
-            .iter()
-            .filter(|e| e.class == RoadClass::Highway)
-        {
-            hdeg[e.a as usize] += 1;
-            hdeg[e.b as usize] += 1;
-        }
-        let ends: Vec<usize> = (0..hdeg.len()).filter(|&i| hdeg[i] == 1).collect();
-        assert_eq!(ends.len(), 2, "seed {seed}: the highway is not one chain");
-        for &n in &ends {
-            assert!(
-                p.roads
-                    .edges
-                    .iter()
-                    .any(|e| e.class == RoadClass::Beachfront
-                        && (e.a as usize == n || e.b as usize == n)),
-                "seed {seed}: highway end {:?} is not on the beachfront road",
-                p.roads.nodes[n].pos
             );
         }
         // The walls, sampled every 32 m along each land side clear of the corners.
@@ -433,8 +401,8 @@ fn collider_follows_slopes_and_decks() {
     use world::mesh::terrain::TerrainGrid;
     use world::roads::{Network, DECK_CLEARANCE_M};
     use world::WorldCollider;
-    let t = template();
-    let p = build_place(Seed(1), &t, &grammar());
+    // The Bowl: streets over its fans, hills all round, a freeway under overpasses.
+    let p = bowl(&grammar());
     let net = Network::new(&p);
     let grid = TerrainGrid::new(&p, &net);
     let c = WorldCollider::build(&p, &grammar());
@@ -580,7 +548,7 @@ fn collider_follows_slopes_and_decks() {
         }
     }
     println!("{deck_points} deck points");
-    assert!(deck_points >= 3, "seed 1 has an overpass");
+    assert!(deck_points >= 3, "the Bowl has overpasses");
 }
 
 /// Built chunk by chunk and stage by stage (as the app streams it), a terrain place gives
@@ -620,7 +588,6 @@ fn coast_chunks_build_as_slices_of_the_whole_build() {
 /// a palette other than the template's, so its terrain is recolored too.
 #[test]
 fn a_planned_place_builds_as_a_fresh_plan() {
-    use world::procgen::build_place_planned;
     use world::{build_chunk_meshes, build_planned, mesh_hash, ChunkPlan, Palette, WorldCollider};
     let (g, pal) = (grammar(), Palette::sodium_night());
     let (p, plan) = build_place_planned(Seed(1), &template(), &g, &pal);

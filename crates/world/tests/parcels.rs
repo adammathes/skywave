@@ -11,23 +11,16 @@ use place::{
 };
 use skywave_core::{Rng, Seed};
 use world::procgen::{
-    arterials, hash_parcels, parcels, FaceKind, MacroMap, ParcelChunk, ParcelPlan, StreetPlan,
+    hash_parcels, parcels, FaceKind, MacroMap, ParcelChunk, ParcelPlan, StreetPlan,
 };
 use world::template::RegionTemplate;
 
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-const SIZE: [u16; 2] = [16, 16];
-
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
-}
+mod common;
+use common::*;
 
 /// The macro map, the merged road graph and the graded terrain for `seed`.
 fn generate(t: &RegionTemplate, seed: u64) -> (MacroMap, RoadGraph, Vec<f32>) {
-    let m = MacroMap::generate(Seed(seed), t, SIZE);
-    let g = arterials(Seed(seed), t, &m);
+    let (m, g) = common::skeleton(seed);
     let plan = StreetPlan::new(Seed(seed), t, &m, &g);
     let merged = plan.merged();
     let graded = plan.graded().to_vec();
@@ -112,7 +105,8 @@ fn skeleton(m: &MacroMap, graded: &[f32], g: &RoadGraph, parcels: Vec<Parcel>) -
     let cells: Vec<ZoneId> = (0..zw * zh)
         .map(|i| m.zones[(i / zw / 4) * mzw + (i % zw) / 4])
         .collect();
-    let mid = m.strip.centerline[m.strip.centerline.len() / 2];
+    // The start: a point on the first main road.
+    let mid = [g.edges[0].profile[0][0], g.edges[0].profile[0][2]];
     let y = graded[(mid[1] / 4.0) as usize * w + (mid[0] / 4.0) as usize];
     let mut place = Place {
         header,

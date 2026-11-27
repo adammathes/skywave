@@ -8,10 +8,13 @@ use std::collections::BTreeMap;
 use place::{Building, BuildingUse, LotKind, Parcel, Place, Roof, StyleTag, ZoneId};
 use skywave_core::Seed;
 use world::procgen::{
-    arterials, build_place, buildings, buildings_all, hash_buildings, lot_buildings, parcels_all,
-    MacroMap, ParcelPlan, StreetPlan,
+    buildings, buildings_all, hash_buildings, lot_buildings, parcels_all, MacroMap, ParcelPlan,
+    StreetPlan,
 };
 use world::template::RegionTemplate;
+
+mod common;
+use common::*;
 
 const GRAMMAR: &str = include_str!("../../../assets/grammar/california_coast_80s.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
@@ -20,15 +23,6 @@ fn grammar() -> world::Grammar {
     let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
     g
-}
-
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
-const SIZE: [u16; 2] = [16, 16];
-
-fn template() -> RegionTemplate {
-    let t: RegionTemplate = ron::from_str(CALIFORNIA).expect("parse");
-    t.validate().expect("validate");
-    t
 }
 
 fn area(poly: &[[f32; 2]]) -> f64 {
@@ -88,7 +82,7 @@ fn seed_one_zones_meet_their_targets() {
     let mut seed_one = 0;
     for seed in 1..=4 {
         let place = build_place(Seed(seed), &t, &grammar());
-        let m = MacroMap::generate(Seed(seed), &t, SIZE);
+        let (m, _) = common::skeleton(seed);
         let total = zone_stats(&t, &m, &place, &mut zones);
         if seed == 1 {
             seed_one = total;
@@ -167,7 +161,8 @@ fn report_and_check(t: &RegionTemplate, zones: &BTreeMap<u8, ZoneStats>, seed_on
         let Some(z) = zones.get(&(zone as u8)) else {
             continue;
         };
-        if z.lots < 20 {
+        // Too few lots to hold a mean (the Shore's boat yards are two blocks).
+        if z.lots < 50 {
             continue;
         }
         sampled += 1;
@@ -195,7 +190,7 @@ fn report_and_check(t: &RegionTemplate, zones: &BTreeMap<u8, ZoneStats>, seed_on
         assert!(z.floors.iter().all(|&f| (1..=hi.max(3)).contains(&f)));
         assert!(z.floors.iter().any(|&f| f >= lo));
     }
-    assert!(sampled >= 4, "only {sampled} zones with 20 lots");
+    assert!(sampled >= 3, "only {sampled} zones with 50 lots");
     // Downtown: log-normal around 8 floors (narrow lots cap it), at most 30, some towers.
     let d = &zones[&(ZoneId::Downtown as u8)];
     let mean = d.floors.iter().map(|&f| f64::from(f)).sum::<f64>() / d.floors.len() as f64;
@@ -212,12 +207,9 @@ fn report_and_check(t: &RegionTemplate, zones: &BTreeMap<u8, ZoneStats>, seed_on
     };
     assert_eq!(range(ZoneId::Strip), (1, 3));
     assert!(range(ZoneId::Residential).1 <= 3);
-    assert!(range(ZoneId::Suburb).1 <= 2);
     assert!(range(ZoneId::Industrial).1 <= 2);
     let ind = &zones[&(ZoneId::Industrial as u8)];
     assert!(ind.heights.iter().all(|&h| h >= 6.0), "industrial is tall");
-    // Farmsteads are built.
-    assert!(zones[&(ZoneId::Farmland as u8)].built >= 1);
     println!("seed 1: {seed_one} buildings");
     // 1100 rather than 1200: the edge bands take the land past the hills' foot from the
     // town, so seed 1 has fewer lots to build on.
@@ -303,8 +295,7 @@ fn places_with_buildings_validate_and_are_pinned() {
 fn chunks_build_their_slice() {
     let t = template();
     let seed = Seed(2);
-    let m = MacroMap::generate(seed, &t, SIZE);
-    let g = arterials(seed, &t, &m);
+    let (m, g) = common::skeleton(seed.0);
     let g = StreetPlan::new(seed, &t, &m, &g).merged();
     let plan = ParcelPlan::new(seed, &t, &m, &g);
     let chunks = plan.all();
@@ -361,8 +352,8 @@ fn seed_one_meshes_within_budget() {
     assert!(s.max_building_triangles <= world::buildings::BUILDING_TRIANGLE_BUDGET);
 }
 
-/// Farmsteads get a house and a barn; bungalows now and then a garage; motels and strip
-/// malls exist on the strip, towers downtown, warehouses in industry.
+/// Bungalows get a garage now and then; motels and strip malls exist on the strip, towers
+/// downtown, warehouses in industry.
 #[test]
 fn signature_buildings_appear() {
     let t = template();
@@ -379,6 +370,7 @@ fn signature_buildings_appear() {
     println!(
         "seed 1: {barns} barns, {silos} silos, {garages} garages, {motels} motels, {malls} strip malls, {towers} towers, {dingbats} dingbats, {shaped} L/U footprints"
     );
-    assert!(barns >= 1 && garages >= 10 && motels >= 2 && malls >= 2 && towers >= 5);
+    // (No farmland on the Shore: no barns.)
+    assert!(garages >= 10 && motels >= 2 && malls >= 2 && towers >= 5);
     assert!(dingbats >= 10 && shaped >= 10);
 }

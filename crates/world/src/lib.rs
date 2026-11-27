@@ -1064,10 +1064,13 @@ mod tests {
     /// ground has steps that climb to the floor from the ground (#100).
     #[test]
     fn house_walks_lie_on_sloped_ground() {
-        let text = include_str!("../../../assets/regions/california_coast.ron");
+        let text = include_str!("../../../assets/regions/pacific_shore.ron");
         let t: template::RegionTemplate = ron::from_str(text).expect("parse");
+        let layout: layout::Layout =
+            ron::from_str(include_str!("../../../assets/layouts/pacific_shore.ron"))
+                .expect("parse");
         let grammar = grammar::coast_80s();
-        let place = procgen::build_place(skywave_core::Seed(1), &t, &grammar);
+        let place = procgen::authored::build_place(skywave_core::Seed(1), &layout, &t, &grammar);
         let pal = Palette::socal_1985();
         let plan = ChunkPlan::new(&place, &pal, &grammar);
         let g = plan.grid().expect("a terrain place");
