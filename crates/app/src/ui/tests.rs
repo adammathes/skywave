@@ -1276,25 +1276,22 @@ fn browsed(h: &Harness) -> (usize, usize) {
     (index(0), index(1))
 }
 
-/// The turntable's meshes in a fresh scene view: its instances come last, the disc last of
-/// them, and none casts a shadow or takes a street lamp.
-/// Instances the turntable draws: body, glass, lamps, four wheels, the interior and
-/// steering wheel, the disc and the driver's parts.
-const PREVIEW: usize = 10 + traffic::figure::PARTS;
+/// Instances the preview draws: body, glass, lamps, four wheels, the interior and
+/// steering wheel, and the driver's parts.
+const PREVIEW: usize = 9 + traffic::figure::PARTS;
 
+/// The preview's meshes in a fresh scene view: its instances come last, and none casts a
+/// shadow or takes a street lamp.
 fn turntable(h: &mut Harness) -> Vec<render::MeshId> {
     h.app.scene_view(1.0, 16.0 / 9.0);
     let range = h.app.preview_instances();
-    let disc = h.app.turntable;
     let view = h.app.scene_view(1.0, 16.0 / 9.0);
     assert_eq!(range.end, view.instances.len());
     let shown = &view.instances[range];
     assert!(shown
         .iter()
         .all(|i| !i.casts_shadow && !i.receives_shadow && i.lights.is_empty()));
-    let meshes: Vec<_> = shown.iter().map(|i| i.mesh).collect();
-    assert!(meshes.is_empty() || meshes.last() == Some(&disc));
-    meshes
+    shown.iter().map(|i| i.mesh).collect()
 }
 
 #[test]

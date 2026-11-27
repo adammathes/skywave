@@ -52,13 +52,13 @@ Vehicle select (`app::preview`): the pause menu's Vehicle page is a studio of it
 world drawn under it. The frame is a level camera at the eye (34° field of view), a fixed noon sun from
 over the viewer's left shoulder (the same at any hour), an emissive backdrop sphere round the eye (deep blue
 overhead to bright cyan at the horizon and a lighter floor, unlit, its glow set so it lands at a fixed
-post-exposure brightness), and the car being browsed on a light disc with an amber rim, its real LOD0
-exterior in the paint chosen. The car is a scale model 0.5 m in front of that camera, aimed down the ray to
+post-exposure brightness), and the car being browsed, its real LOD0 exterior in the paint chosen, with
+no plate under it. The car is a scale model 0.5 m in front of that camera, aimed down the ray to
 the stage's center and sized to fill the stage beside the panel. It turns only when the player turns it
 (the look stick, or the mouse's look drag; `preview::TURN_RAD_PER_S` at full stick) and opens on a
 three-quarter view. Nothing in the studio casts or receives a sun shadow
 (`MeshInstance::receives_shadow`, one bit in the instance's packed params that `forward.wgsl` reads to skip
-the cascade test) or takes a street lamp. Cost: up to 11 instances while the page is open, and none of the
+the cascade test) or takes a street lamp. Cost: up to 10 instances while the page is open, and none of the
 world's; no pass or uniform.
 
 Map (`app::map`): the Place rasterized once at load into an image at 1 m per pixel up to 2048 px on the

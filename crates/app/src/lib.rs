@@ -196,8 +196,7 @@ pub struct App {
     paint_base: (&'static str, CarModel),
     /// The Vehicle page's turntable this frame: the car and its stage (virtual HUD units).
     preview: Option<(RegisteredCar, [f32; 4])>,
-    /// The turntable's disc, the studio's backdrop, and the car's turn, radians.
-    turntable: MeshId,
+    /// The studio's backdrop, and the car's turn, radians.
     backdrop: MeshId,
     spin: f32,
     /// The instances the turntable added in the last [`App::scene_view`].
@@ -403,8 +402,6 @@ impl App {
             meshes.push(m);
             MeshId(meshes.len() as u32 - 1)
         });
-        meshes.push(preview::turntable_mesh());
-        let turntable = MeshId(meshes.len() as u32 - 1);
         meshes.push(preview::backdrop_mesh());
         let backdrop = MeshId(meshes.len() as u32 - 1);
         if let Some(p) = &mut props {
@@ -517,7 +514,6 @@ impl App {
             cars,
             paint_base: (vehicles::BUILTIN[vehicle_index].0, base),
             preview: None,
-            turntable,
             backdrop,
             spin: preview::STILL_SPIN_RAD,
             preview_drawn: 0..0,
@@ -1251,7 +1247,7 @@ impl App {
         ]
     }
 
-    /// The Vehicle page's studio ([`preview`]): the backdrop and the car on its disc, in
+    /// The Vehicle page's studio ([`preview`]): the backdrop and the car, in
     /// front of a level camera at the eye under a fixed noon sun; none of the world.
     fn studio_view(&mut self, alpha: f32, aspect: f32) -> SceneView<'_> {
         let eye = if self.fly {
@@ -1283,7 +1279,6 @@ impl App {
                 let model = preview::Model {
                     car: &car.meshes,
                     layout: &car.layout,
-                    turntable: self.turntable,
                     driver: self.drivers.get(self.ui.driver()),
                 };
                 let glow = lighting::car_glow(&noon);
@@ -2305,19 +2300,18 @@ mod tests {
         let world = app.world_instances;
         let meshes = app.meshes().len();
         let ids = app.car_meshes;
-        let (turntable, backdrop) = (app.turntable, app.backdrop);
+        let backdrop = app.backdrop;
         let view = app.scene_view(steps.alpha, 16.0 / 9.0);
         // The world, then the car: body, glass, unlit lamps and four wheels (no cabin in
         // the chase view).
         assert_eq!(MeshId(world as u32), ids.lods[0].body[0]);
-        // ...then the turntable's disc and the studio's backdrop.
+        // ...then the studio's backdrop.
         let drivers = DRIVER_MESHES as u32;
-        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 5 - drivers));
+        assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 4 - drivers));
         assert_eq!(
             ids.telltales,
-            [4, 3].map(|k| MeshId(meshes as u32 - k - drivers))
+            [3, 2].map(|k| MeshId(meshes as u32 - k - drivers))
         );
-        assert_eq!(turntable, MeshId(meshes as u32 - 2));
         assert_eq!(backdrop, MeshId(meshes as u32 - 1));
         // Body, glass, lamps, four wheels, the cabin and steering wheel, the driver.
         assert_eq!(view.instances.len(), world + 9 + traffic::figure::PARTS);

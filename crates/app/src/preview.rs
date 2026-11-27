@@ -1,12 +1,12 @@
-//! The Vehicle page's studio: the car being browsed, on a plain disc in front of a bright
+//! The Vehicle page's studio: the car being browsed, in front of a bright
 //! backdrop, in the page's stage (a screen rectangle beside the menu panel). The world is not
 //! drawn under the page; the car turns only when the player turns it (the look stick, or the
 //! mouse's look drag).
 //!
 //! **A studio, not the street.** Under the page the frame is the studio alone: a level camera
 //! at the eye, a fixed noon sun from over the viewer's left shoulder, the backdrop (an
-//! emissive sphere round the eye, [`backdrop_mesh`]) and the car on its disc. The stage
-//! rectangle is turned into a view-space box at [`DISTANCE_M`], the car (on its disc,
+//! emissive sphere round the eye, [`backdrop_mesh`]) and the car. The stage
+//! rectangle is turned into a view-space box at [`DISTANCE_M`], the car (its ground plane,
 //! tilted [`TILT_RAD`] toward the eye) scaled to fill it, and the result carried to the
 //! world by the inverse view. Nothing in it casts or receives a sun shadow or takes a street
 //! lamp. The cost is [`MAX_INSTANCES`] instances while the page is open and none otherwise.
@@ -20,7 +20,7 @@ use crate::drive::CarGlow;
 /// How far in front of the eye the model's center sits, m: as near as keeps its near edge
 /// past the cameras' 0.25 m near plane.
 pub const DISTANCE_M: f32 = 0.5;
-/// The turntable tilts its top this far toward the eye: the car is seen from a little above.
+/// The car's ground plane tilts this far toward the eye: the car is seen from a little above.
 pub const TILT_RAD: f32 = 0.33;
 /// Turn rate at full stick, rad/s (a lap in about 2.5 s); mouse look turns it as far as the
 /// same motion turns the camera.
@@ -45,56 +45,11 @@ const BACKDROP_HORIZON: [u8; 3] = [70, 186, 250];
 const BACKDROP_FLOOR: [u8; 3] = [120, 206, 246];
 const BACKDROP_RINGS: u32 = 24;
 const BACKDROP_SEGMENTS: u32 = 32;
-/// Share of the stage the car's turning circle may fill, across and up (the disc's rim
-/// may reach a little past it).
+/// Share of the stage the car's turning circle may fill, across and up.
 const FILL: [f32; 2] = [0.96, 0.86];
-/// Disc radius past the car's corners, and its thickness, m (full scale).
-const DISC_MARGIN_M: f32 = 0.2;
-const DISC_THICKNESS_M: f32 = 0.12;
-/// Disc color, linear: a light podium with the menu's amber round its rim.
-const DISC_TOP: [u8; 4] = [150, 156, 168, 255];
-const DISC_RIM: [u8; 4] = [255, 110, 12, 255];
-const DISC_SEGMENTS: u32 = 64;
-
 /// Instances [`push`] adds at most: body, glass, lamps, four wheels, the interior and
-/// steering wheel, the disc and the driver's parts; and the backdrop.
-pub const MAX_INSTANCES: usize = 11 + traffic::figure::PARTS;
-
-/// The disc: radius 1, its top at `y = 0`, [`DISC_THICKNESS_M`] thick; scaled across to
-/// each car.
-pub fn turntable_mesh() -> Mesh {
-    let v = Vertex::new;
-    let mut m = Mesh::default();
-    let n = DISC_SEGMENTS;
-    let dir = |k: u32| {
-        let a = k as f32 * core::f32::consts::TAU / n as f32;
-        (a.cos(), a.sin())
-    };
-    // Top: a fan round the center.
-    m.vertices
-        .push(v([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], DISC_TOP));
-    for k in 0..n {
-        let (c, s) = dir(k);
-        m.vertices.push(v([c, 0.0, s], [0.0, 1.0, 0.0], DISC_TOP));
-    }
-    for k in 0..n {
-        // Counter-clockwise seen from above.
-        m.indices.extend_from_slice(&[0, 1 + (k + 1) % n, 1 + k]);
-    }
-    // Rim: a band of quads facing out.
-    let base = m.vertices.len() as u32;
-    for k in 0..n {
-        let (c, s) = dir(k);
-        m.vertices.push(v([c, 0.0, s], [c, 0.0, s], DISC_RIM));
-        m.vertices
-            .push(v([c, -DISC_THICKNESS_M, s], [c, 0.0, s], DISC_RIM));
-    }
-    for k in 0..n {
-        let (a, b) = (base + 2 * k, base + 2 * ((k + 1) % n));
-        m.indices.extend_from_slice(&[a, b, a + 1, b, b + 1, a + 1]);
-    }
-    m
-}
+/// steering wheel and the driver's parts; and the backdrop.
+pub const MAX_INSTANCES: usize = 10 + traffic::figure::PARTS;
 
 /// The backdrop: a sphere of radius 1 round its origin seen from inside, black (it takes no
 /// light) and emissive (scale 1) from [`BACKDROP_FLOOR`] below through [`BACKDROP_HORIZON`]
@@ -140,18 +95,17 @@ pub fn backdrop_mesh() -> Mesh {
     m
 }
 
-/// What [`push`] draws: a car's registered meshes and layout, and the disc.
+/// What [`push`] draws: a car's registered meshes and layout.
 #[derive(Clone, Copy, Debug)]
 pub struct Model<'a> {
     pub car: &'a CarMeshes,
     pub layout: &'a CarLayout,
-    pub turntable: MeshId,
     /// The player's driver, at the wheel.
     pub driver: Option<&'a crate::driver::Driver>,
 }
 
-/// The disc's frame (its top's center, `+y` up, scaled from meters of car) to world, so the
-/// turntable carrying a car of `layout` fills `stage` (normalized device coordinates
+/// The car's ground frame (under the middle of its wheelbase, `+y` up, scaled from meters of
+/// car) to world, so a car of `layout` fills `stage` (normalized device coordinates
 /// `[x0, y0, x1, y1]`, y up) as the camera `view`/`proj` sees it, turned `spin` radians.
 /// `None` for an empty stage.
 pub fn table_to_world(
@@ -198,18 +152,13 @@ pub fn table_to_world(
     Some(view.inverse() * model)
 }
 
-/// The circle a car of `layout` sweeps on the disc (half its diagonal), m.
+/// The circle a car of `layout` sweeps as it turns (half its diagonal), m.
 fn car_radius(layout: &CarLayout) -> f32 {
     let [l, w, _] = layout.dims;
     0.5 * (l * l + w * w).sqrt()
 }
 
-/// The disc under a car of `layout`: past its corners by [`DISC_MARGIN_M`], m.
-fn disc_radius(layout: &CarLayout) -> f32 {
-    car_radius(layout) + DISC_MARGIN_M
-}
-
-/// Body space to the disc's frame: the car stands on the disc's top, the middle of its
+/// Body space to the ground frame: the car stands on its plane, the middle of its
 /// wheelbase over the center.
 fn car_on_table(layout: &CarLayout) -> Mat4 {
     let c = &layout.wheel_centers;
@@ -218,10 +167,10 @@ fn car_on_table(layout: &CarLayout) -> Mat4 {
     Mat4::from_translation(-Vec3::new(mid.x, ground, mid.z))
 }
 
-/// Appends the turntable's instances with the disc's frame at `table` (from
+/// Appends the car's instances with its ground frame at `table` (from
 /// [`table_to_world`]): the car at rest (body with the lamps down and off, glass, lamps,
 /// four wheels, the interior and steering wheel seen through the glass, the driver at the
-/// wheel) and the disc, with `fill`
+/// wheel), with `fill`
 /// (0 to 1) of the cabin light. None cast a shadow or take street lamps. At most
 /// [`MAX_INSTANCES`].
 pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<MeshInstance>) {
@@ -263,9 +212,6 @@ pub fn push(table: Mat4, model: &Model, glow: CarGlow, fill: f32, out: &mut Vec<
             out.push(instance(d.ids[k], body * *m, 1.0));
         }
     }
-    let r = disc_radius(layout);
-    let disc = table * Mat4::from_scale(Vec3::new(r, 1.0, r));
-    out.push(instance(model.turntable, disc, 1.0));
 }
 
 /// Appends the backdrop round `eye`, its emissive times `glow`.
@@ -366,20 +312,6 @@ mod tests {
             if v.pos[1] > 0.0 {
                 assert!(e[2] > e[0] && e[2] >= e[1], "{e:?}");
             }
-        }
-    }
-
-    #[test]
-    fn the_disc_is_closed_and_faces_out() {
-        let m = turntable_mesh();
-        assert_eq!(m.indices.len() % 3, 0);
-        assert!(m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
-        // Every triangle's winding agrees with its normal (counter-clockwise from outside).
-        for t in m.indices.chunks(3) {
-            let p = [t[0], t[1], t[2]].map(|i| Vec3::from(m.vertices[i as usize].pos));
-            let n = Vec3::from(m.vertices[t[0] as usize].normal);
-            let face = (p[1] - p[0]).cross(p[2] - p[0]);
-            assert!(face.dot(n) > 0.0, "{p:?}");
         }
     }
 }
