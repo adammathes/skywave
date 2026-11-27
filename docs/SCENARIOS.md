@@ -9,7 +9,8 @@ Scenario(
   id: "socal_beach_1984",              // the file stem; `?scenario=` / `--scenario`
   title: "Pacific Shore", year: 1984,  // what the World page's card says
   kind: "Beach town",                  // the kind of place, on the card
-  region: "california_coast",          // assets/regions/<id>.ron
+  region: "pacific_shore",             // assets/regions/<id>.ron: the zone rules
+  layout: "pacific_shore",             // assets/layouts/<id>.ron: the drawn place
   grammar: "california_coast_80s.ron", // assets/grammar/<file>
   radio: "1984_socal",                 // assets/radio/<id>.ron: the dial starts on it
   palette: "socal_1985",               // a world::Palette

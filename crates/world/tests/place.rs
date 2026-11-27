@@ -436,7 +436,7 @@ fn collider_follows_slopes_and_decks() {
         .collect();
     let overlaps = |i: usize, q: world::math::V3| {
         use world::math::{segment_distance, V2};
-        use world::procgen::arterials::OVERPASS_LIFT_M;
+        use world::procgen::authored::OVERPASS_LIFT_M;
         let v = V2::new(q.x, q.z);
         let own = &p.roads.edges[i];
         p.roads.edges.iter().enumerate().any(|(j, e)| {

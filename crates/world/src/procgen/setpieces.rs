@@ -1369,6 +1369,9 @@ impl<'a> Parcels<'a> {
     }
 }
 
+/// Width of a channel's maintenance ramp, m.
+const RAMP_W_M: f32 = 8.0;
+
 /// Spacing of a lot's [`samples`], m.
 const SAMPLE_M: f32 = 4.0;
 
@@ -1925,7 +1928,7 @@ fn channel_fences(place: &Place, grid: &TerrainGrid, s: &SetPieces, out: &mut Ve
         })
         .collect();
     let lip = ch.2 + FENCE_OUT_M;
-    let ramp_out = ch.2 + crate::procgen::basin::RAMP_W_M + FENCE_OUT_M;
+    let ramp_out = ch.2 + RAMP_W_M + FENCE_OUT_M;
     // A fence line: `u` from `u0` to `u1` at `w` across, cut into runs, each run laid only
     // where it stands clear of the roads and inside the place.
     let mut line = |w: f32, u0: f32, u1: f32, skip: &dyn Fn(f32) -> bool| {

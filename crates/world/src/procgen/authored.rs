@@ -27,12 +27,11 @@ use alloc::vec::Vec;
 use place::{Edge, Node, Place, RoadClass, RoadGraph, Spawn, SpawnKind, ZoneId};
 use skywave_core::Seed;
 
-use super::arterials::grade_limit;
 use super::macro_map::{
     ccw, flatten_by_zone, paint_bands, raise_walls, BasinPlan, Frame, GridLine, MacroMap, MacroPoi,
     MacroPoiKind, Strip, WaterBody, WaterKind,
 };
-use super::profile::{ease, grade_at, ROAD_CURVE, STREET_CURVE};
+use super::profile::{ease, grade_at, grade_limit, ROAD_CURVE, STREET_CURVE};
 use super::terrain::{smoothstep, Noise, Shore};
 use super::zones::cell_center;
 use super::{stage, CELL_M, RES_PER_CHUNK, ZONE_CELL_M, ZONE_SAMPLES};

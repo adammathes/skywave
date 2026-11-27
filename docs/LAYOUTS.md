@@ -1,13 +1,14 @@
 # Authored layouts
 
-A procedural region template invents a place's structure from scored noise: where the water is, where
-the hills rise, where downtown sits, which way the arterials run. For a place someone knows, that is
-the wrong way round: the structure should be **authored**, and only the fine grain generated.
+Scored noise can invent a place's structure (where the water is, where the hills rise, where
+downtown sits, which way the arterials run), and the first worlds were made that way. For a place
+someone knows, that is the wrong way round: the structure should be **authored**, and only the fine
+grain generated. Every world is authored now; the generators for the structure are gone.
 
 An **authored layout** (`assets/layouts/<id>.ron`, `world::layout`) is a small hand-written map:
 terrain shapes, water, districts and the main roads. `world::procgen::authored::build_place` turns
-it into the same macro map and arterial road graph the procedural stages 1–3 produce, then runs the
-shared stages 4–7 (local streets, parcels, buildings, set pieces, detailing) over it, dressed by
+it into a macro map and an arterial road graph (stages 1–3 of `docs/WORLD_GENERATION.md`), then runs
+stages 4–7 (local streets, parcels, buildings, set pieces, detailing) over it, dressed by
 the scenario's region template's zone rules (block sizes, street patterns, styles, trees, props)
 and grammar. The result is an ordinary `place::Place`; nothing downstream knows how it was made. A
 future real-map import emits the same thing.

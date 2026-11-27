@@ -59,15 +59,17 @@ use core::f32::consts::FRAC_1_SQRT_2;
 use place::{Edge, Node, RoadClass, RoadGraph, ZoneId, SIDEWALK_WIDTH_M};
 use skywave_core::{hash64, hash_bytes, Seed};
 
-use super::arterials::{
-    coast_tangent, grade_limit, major_of, sample_nodes, seg_intersect, tensor, HIGHWAY_WIDTH_M,
-};
 use super::macro_map::{MacroMap, MacroPoiKind};
+use super::profile::grade_limit;
 use super::zones::{chamfer, ALL_ZONES};
 use super::{stage, CELL_M, CHUNK_M};
-use crate::math::{abs, clamp, floor, lerp, segment_distance, sin_cos, PI, TAU, V2};
+use crate::math::{
+    abs, clamp, floor, lerp, seg_intersect, segment_distance, sin_cos, sqrt, PI, TAU, V2,
+};
 use crate::template::{RegionTemplate, StreetPattern};
 
+/// Curb-to-curb width of a highway.
+const HIGHWAY_WIDTH_M: f32 = 22.0;
 /// Curb-to-curb width of a local street.
 pub const LOCAL_WIDTH_M: f32 = 10.0;
 /// Width of an industrial (truck) street.
@@ -657,7 +659,7 @@ pub struct StreetPlan<'a> {
 
 impl<'a> StreetPlan<'a> {
     /// The plan for a place: `macro_map` and its `arterials` (from
-    /// [`super::arterials()`]) under `template`.
+    /// [`super::authored::skeleton`]) under `template`.
     pub fn new(
         seed: Seed,
         template: &'a RegionTemplate,
@@ -4064,6 +4066,79 @@ fn add_node(nodes: &mut Vec<BNode>, pos: V2, y: f32, end: PEnd) -> u32 {
     nodes.len() as u32 - 1
 }
 
+/// Bilinear sample of a node-centered grid of 4 m samples (the `MacroMap::heights`
+/// layout), clamped like `MacroMap::height_at`.
+fn sample_nodes(v: &[f32], w: usize, h: usize, p: V2) -> f32 {
+    let fx = clamp(p.x / CELL_M, 0.0, (w - 1) as f32);
+    let fz = clamp(p.y / CELL_M, 0.0, (h - 1) as f32);
+    let (ix, iz) = ((fx as usize).min(w - 2), (fz as usize).min(h - 2));
+    let (tx, tz) = (fx - ix as f32, fz - iz as f32);
+    let at = |i: usize, j: usize| v[j * w + i];
+    let a = lerp(at(ix, iz), at(ix + 1, iz), tx);
+    let b = lerp(at(ix, iz + 1), at(ix + 1, iz + 1), tx);
+    lerp(a, b, tz)
+}
+
+/// The symmetric tensor of a unit direction, as `(cos 2θ, sin 2θ)`.
+fn tensor(d: V2) -> [f32; 2] {
+    [d.x * d.x - d.y * d.y, 2.0 * d.x * d.y]
+}
+
+/// Major eigenvector (unit, sign arbitrary) and coherence `|t|` of a blended tensor.
+fn major_of(t: [f32; 2]) -> (V2, f32) {
+    let c = sqrt(t[0] * t[0] + t[1] * t[1]);
+    if c < 1e-6 {
+        return (V2::new(1.0, 0.0), 0.0);
+    }
+    let (a, b) = (t[0] / c, t[1] / c);
+    // Half the angle: bisect (1, 0) and (a, b), or (a, b) and (-1, 0) near 180°.
+    let d = if a >= 0.0 {
+        V2::new(1.0 + a, b)
+    } else {
+        V2::new(b, 1.0 - a)
+    };
+    (d.normalize(), c)
+}
+
+/// Unit coast tangent (along increasing `v`) at a world point, from the smoothed
+/// shoreline differenced over 400 m.
+fn coast_tangent(m: &MacroMap, p: V2) -> V2 {
+    let (_, v) = m.frame.to_canon([p.x, p.y]);
+    let slope = (m.shore.road_u(v + 200.0) - m.shore.road_u(v - 200.0)) / 400.0;
+    let k = 1.0 / sqrt(1.0 + slope * slope);
+    V2::from_array(m.frame.dir_to_world(slope * k, k))
+}
+
+/// Content hash of a road graph (every field, in order), for determinism tests.
+pub fn hash_graph(g: &RoadGraph) -> u64 {
+    let mut b: Vec<u8> = Vec::new();
+    let f = |b: &mut Vec<u8>, x: f32| b.extend_from_slice(&x.to_bits().to_le_bytes());
+    for n in &g.nodes {
+        f(&mut b, n.pos[0]);
+        f(&mut b, n.pos[1]);
+        f(&mut b, n.elevation);
+    }
+    for e in &g.edges {
+        b.extend_from_slice(&e.a.to_le_bytes());
+        b.extend_from_slice(&e.b.to_le_bytes());
+        b.extend_from_slice(&[
+            e.class as u8,
+            e.lanes_fwd,
+            e.lanes_back,
+            e.sidewalk as u8,
+            e.speed_kph,
+            e.oneway as u8,
+        ]);
+        f(&mut b, e.width_m);
+        for p in &e.profile {
+            f(&mut b, p[0]);
+            f(&mut b, p[1]);
+            f(&mut b, p[2]);
+        }
+    }
+    hash_bytes(0x0041_5254_4552, &b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4084,5 +4159,21 @@ mod tests {
         let (t0, t1) = clip_line(V2::new(-10.0, 64.0), V2::new(1.0, 0.0), &b).unwrap();
         assert!((t0 - 10.0).abs() < 1e-4 && (t1 - 138.0).abs() < 1e-4);
         assert!(clip_line(V2::new(-10.0, 200.0), V2::new(1.0, 0.0), &b).is_none());
+    }
+
+    #[test]
+    fn tensor_round_trips_directions() {
+        for &(x, z) in &[
+            (1.0f32, 0.0f32),
+            (0.0, 1.0),
+            (0.6, 0.8),
+            (-0.6, 0.8),
+            (0.8, -0.6),
+        ] {
+            let d = V2::new(x, z);
+            let (m, c) = major_of(tensor(d));
+            assert!((c - 1.0).abs() < 1e-5);
+            assert!(abs(m.dot(d)) > 0.9999, "{d:?} -> {m:?}");
+        }
     }
 }

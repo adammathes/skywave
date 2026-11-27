@@ -4,7 +4,9 @@
 use place::ZoneId;
 use world::template::{CoastSide, CoastWater, RegionTemplate, TemplateError};
 
-const CALIFORNIA: &str = include_str!("../../../assets/regions/california_coast.ron");
+/// A full template with every optional block, kept as a fixture: no shipped world generates
+/// from one any more, but the format still validates them.
+const CALIFORNIA: &str = include_str!("fixtures/california_coast.ron");
 const GREAT_LAKES: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 const NORTH_SHORE: &str = include_str!("../../../assets/regions/north_shore_suburb.ron");
 

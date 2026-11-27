@@ -6,7 +6,8 @@
 //! ```text
 //! Scenario(
 //!   id: "socal_beach_1984", title: "Pacific Shore", year: 1984, kind: "Beach town",
-//!   region: "california_coast",          // assets/regions/<id>.ron
+//!   region: "pacific_shore",             // assets/regions/<id>.ron: the zone rules
+//!   layout: "pacific_shore",             // assets/layouts/<id>.ron: the map
 //!   grammar: "california_coast_80s.ron", // assets/grammar/<file>
 //!   radio: "1984_socal",                 // assets/radio/<id>.ron
 //!   palette: "socal_1985",               // a world::Palette
@@ -43,10 +44,9 @@ pub struct Scenario {
     /// What kind of place, for the World page ("Beach town").
     pub kind: String,
     pub region: String,
-    /// An authored layout (`assets/layouts/<id>.ron`, `docs/LAYOUTS.md`) for the place, dressed
-    /// by `region`'s zone rules; without one the region template generates the place.
-    #[serde(default)]
-    pub layout: Option<String>,
+    /// The place's layout (`assets/layouts/<id>.ron`, `docs/LAYOUTS.md`), dressed by
+    /// `region`'s zone rules.
+    pub layout: String,
     pub grammar: String,
     pub radio: String,
     pub palette: String,
@@ -104,10 +104,8 @@ impl Scenario {
         if crate::builtin::region_text(&self.region).is_none() {
             return err("unknown region");
         }
-        if let Some(l) = &self.layout {
-            if crate::builtin::layout_text(l).is_none() {
-                return err("unknown layout");
-            }
+        if crate::builtin::layout_text(&self.layout).is_none() {
+            return err("unknown layout");
         }
         if crate::builtin::grammar_text(&self.grammar).is_none() {
             return err("unknown grammar");
@@ -538,13 +536,13 @@ mod tests {
         assert_eq!(coast.default_vehicle, crate::DEFAULT_VEHICLE);
         let bowl = &all[1];
         assert_eq!(
-            (bowl.id.as_str(), bowl.years, bowl.layout.as_deref()),
-            ("mirage_bowl_2001", (1995, 2001), Some("mirage_bowl"))
+            (bowl.id.as_str(), bowl.years, bowl.layout.as_str()),
+            ("mirage_bowl_2001", (1995, 2001), "mirage_bowl")
         );
         let bay = &all[2];
         assert_eq!(
-            (bay.id.as_str(), bay.years, bay.layout.as_deref()),
-            ("bay_loop_2005", (2000, 2005), Some("bay_loop"))
+            (bay.id.as_str(), bay.years, bay.layout.as_str()),
+            ("bay_loop_2005", (2000, 2005), "bay_loop")
         );
         assert_eq!(
             (coast.haze, bowl.haze),

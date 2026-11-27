@@ -1,19 +1,15 @@
-//! The procedural place producer (`docs/WORLD_GENERATION.md`). So far the macro stages:
-//! coast and terrain (stage 1) and the zone map (stage 2), as a [`MacroMap`], and the
-//! arterial network with the highway (stage 3), as a `place::RoadGraph` ([`arterials()`]);
-//! then the chunk stages: local streets (stage 4: [`streets()`], [`streets_all()`]) and
-//! blocks and parcels (stage 5: [`parcels()`], [`ParcelPlan`]) and buildings (stage 6:
-//! [`buildings()`], [`buildings_all()`]) and detailing (stage 7: [`detail()`]: props and
-//! lights). [`build_place`] runs the macro stages, the streets, parcels, buildings and
-//! detailing and fills a `place::Place`.
+//! The place producer (`docs/WORLD_GENERATION.md`). An authored layout ([`authored`],
+//! `docs/LAYOUTS.md`) draws the macro stages: terrain and zones as a [`MacroMap`] and the
+//! main roads as a `place::RoadGraph`. The seed fills in the chunk stages: local streets
+//! (stage 4: [`streets()`], [`streets_all()`]), blocks and parcels (stage 5: [`parcels()`],
+//! [`ParcelPlan`]), buildings (stage 6: [`buildings()`], [`buildings_all()`]) and detailing
+//! (stage 7: [`detail()`]: props and lights).
 //!
-//! Everything is a pure function of `(seed, template, size)`. Each stage draws from its own
+//! Everything is a pure function of `(seed, template, layout)`. Each stage draws from its own
 //! `Rng::new(seed, &[stage, ..])` and its own noise keyed by `hash64(seed, [stage, ..])`, so
 //! changing one stage's draws never shifts another's.
 
-pub mod arterials;
 pub mod authored;
-pub mod basin;
 pub mod build;
 pub mod buildings;
 pub mod detail;
@@ -25,8 +21,7 @@ pub mod streets;
 pub mod terrain;
 pub mod zones;
 
-pub use arterials::{arterials, hash_graph};
-pub use build::{build_place, build_place_planned, place_from, PLACE_CHUNKS};
+pub use build::{place_from, PLACE_CHUNKS};
 pub use buildings::{buildings, buildings_all, hash_buildings, lot_buildings};
 pub use detail::{detail, hash_detail};
 pub use macro_map::{
@@ -37,7 +32,9 @@ pub use parcels::{
     ParcelPlan,
 };
 pub use setpieces::SetPieces;
-pub use streets::{hash_chunk, streets, streets_all, GridCell, NodeRef, StreetChunk, StreetPlan};
+pub use streets::{
+    hash_chunk, hash_graph, streets, streets_all, GridCell, NodeRef, StreetChunk, StreetPlan,
+};
 
 /// Stage ids, the first word of every stage's hash key.
 pub mod stage {

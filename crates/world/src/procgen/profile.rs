@@ -6,7 +6,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::math::clamp;
+use crate::math::{abs, clamp, lerp};
 
 /// Grade change per meter a main road allows (a crest at 40 m/s unloads the car by a sixth
 /// of its weight).
@@ -105,6 +105,64 @@ pub(crate) fn grade_at(y: &[f32], s: &[f32], i: usize, reach: f32) -> f32 {
     (y[hi] - y[lo]) / (s[hi] - s[lo]).max(1e-3)
 }
 
+/// A profile close to `target` (heights at arc lengths `s`) whose slope never exceeds
+/// `g`, starting at `a` and ending at `b` when given (else at the target's ends), and kept
+/// within `band` of the target where the slope bound allows. The average of a forward and
+/// a backward pass, each clamping to the reachable band from both pinned ends.
+pub(crate) fn grade_limit(
+    target: &[f32],
+    s: &[f32],
+    g: f32,
+    a: Option<f32>,
+    b: Option<f32>,
+    band: Option<(&[f32], f32)>,
+) -> Vec<f32> {
+    let n = target.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let a = a.unwrap_or(target[0]);
+    let b = b.unwrap_or(target[n - 1]);
+    if n == 1 {
+        return vec![a];
+    }
+    let len = s[n - 1] - s[0];
+    if abs(a - b) > g * len {
+        // No profile can join the ends within the bound: a straight ramp.
+        return (0..n)
+            .map(|i| lerp(a, b, if len > 0.0 { (s[i] - s[0]) / len } else { 0.0 }))
+            .collect();
+    }
+    let v: Vec<f32> = (0..n)
+        .map(|i| {
+            let si = s[i] - s[0];
+            let mut x = target[i];
+            if let Some((ground, r)) = band {
+                x = clamp(x, ground[i] - r, ground[i] + r);
+            }
+            let lo = (a - g * si).max(b - g * (len - si));
+            let hi = (a + g * si).min(b + g * (len - si));
+            clamp(x, lo, hi.max(lo))
+        })
+        .collect();
+    let mut f = vec![0.0; n];
+    f[0] = a;
+    for i in 1..n {
+        let d = g * (s[i] - s[i - 1]);
+        f[i] = clamp(v[i], f[i - 1] - d, f[i - 1] + d);
+    }
+    let mut r = vec![0.0; n];
+    r[n - 1] = b;
+    for i in (0..n - 1).rev() {
+        let d = g * (s[i + 1] - s[i]);
+        r[i] = clamp(v[i], r[i + 1] - d, r[i + 1] + d);
+    }
+    let mut y: Vec<f32> = f.iter().zip(&r).map(|(x, z)| 0.5 * (x + z)).collect();
+    y[0] = a;
+    y[n - 1] = b;
+    y
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +219,20 @@ mod tests {
             "{}",
             bend(&whole, &arc)
         );
+    }
+
+    #[test]
+    fn grade_limit_holds_slope_and_ends() {
+        let s: Vec<f32> = (0..40).map(|i| i as f32 * 16.0).collect();
+        let target: Vec<f32> = s
+            .iter()
+            .map(|&x| if x > 300.0 { 20.0 } else { 0.0 })
+            .collect();
+        let y = grade_limit(&target, &s, 0.05, Some(0.0), None, None);
+        assert_eq!(y[0], 0.0);
+        assert_eq!(*y.last().unwrap(), 20.0);
+        for k in 1..y.len() {
+            assert!(abs(y[k] - y[k - 1]) <= 0.05 * 16.0 + 1e-4);
+        }
     }
 }

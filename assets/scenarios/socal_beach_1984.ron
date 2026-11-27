@@ -7,7 +7,7 @@ Scenario(
     year: 1984,
     kind: "Beach town",
     region: "pacific_shore",
-    layout: Some("pacific_shore"),
+    layout: "pacific_shore",
     grammar: "california_coast_80s.ron",
     radio: "1984_socal",
     palette: "socal_1985",

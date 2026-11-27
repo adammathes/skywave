@@ -1,19 +1,17 @@
-//! Renders a generated macro map to a PNG: hillshaded zone colors, water shaded by depth,
-//! 20 m contours, and markers for the downtown seed, strip centerline, highway, pass and
-//! points of interest. One pixel per 4 m height sample, times `--scale`.
+//! Renders a layout's macro map (`docs/LAYOUTS.md`) to a PNG: hillshaded zone colors, water
+//! shaded by depth, 20 m contours and markers for its points of interest. One pixel per
+//! 4 m height sample, times `--scale`.
 //!
-//! With `--roads`, also generates the arterial network and highway (stage 3) and draws its
-//! edges by class on top, nodes as dots. With `--streets` (implies `--roads`), also
-//! generates the local streets of every chunk (stage 4), merges them with the arterials and
-//! draws locals thin and alleys faint under the arterials, with timings per chunk. With
-//! `--parcels` (implies `--streets`), also builds the blocks and parcels of every chunk
-//! (stage 5) and draws them under the roads: a faint outline per parcel, tinted by lot kind
-//! (lots pale, parks green, empty lots and fields tan).
+//! With `--roads`, also draws the layout's main roads by class, nodes as dots. With
+//! `--streets` (implies `--roads`), also generates the local streets of every chunk, merges
+//! them with the main roads and draws locals thin and alleys faint under them, with timings
+//! per chunk. With `--parcels` (implies `--streets`), also builds the blocks and parcels of
+//! every chunk and draws them under the roads: a faint outline per parcel, tinted by lot
+//! kind (lots pale, parks green, empty lots and fields tan).
 //!
-//! Usage: `cargo run -p mapdump -- --seed 1 --template assets/regions/california_coast.ron
-//! --out map.png [--size 16x16] [--scale 1] [--roads] [--streets] [--parcels]`. With
-//! `--layout assets/layouts/<id>.ron` the macro map and main roads come from that authored
-//! layout (`docs/LAYOUTS.md`) and the template only supplies zone rules.
+//! Usage: `cargo run -p mapdump -- --seed 1 --template assets/regions/pacific_shore.ron
+//! --layout assets/layouts/pacific_shore.ron --out map.png [--scale 1] [--roads]
+//! [--streets] [--parcels]`. The template supplies the zone rules.
 
 mod png;
 
@@ -23,9 +21,7 @@ use place::{LotKind, Parcel, RoadClass, RoadGraph, ZoneId};
 use skywave_core::Seed;
 use world::layout::Layout;
 use world::procgen::authored;
-use world::procgen::{
-    arterials, hash_graph, hash_parcels, MacroMap, MacroPoiKind, ParcelPlan, StreetPlan,
-};
+use world::procgen::{hash_graph, hash_parcels, MacroMap, MacroPoiKind, ParcelPlan, StreetPlan};
 use world::template::RegionTemplate;
 
 /// Zone colors by `ZoneId` discriminant (Water is shaded separately).
@@ -417,7 +413,7 @@ pub fn generate_parcels(
 
 fn usage() -> ! {
     eprintln!(
-        "usage: mapdump --seed N --template <region.ron> --out <map.png> [--layout <layout.ron>] [--size WxH] [--scale S] [--roads] [--streets] [--parcels]"
+        "usage: mapdump --seed N --template <region.ron> --layout <layout.ron> --out <map.png> [--scale S] [--roads] [--streets] [--parcels]"
     );
     std::process::exit(2);
 }
@@ -427,7 +423,6 @@ fn main() {
     let mut seed = 1u64;
     let mut template: Option<String> = None;
     let mut out: Option<String> = None;
-    let mut size = [16u16, 16];
     let mut scale = 1usize;
     let mut roads = false;
     let mut streets = false;
@@ -459,20 +454,12 @@ fn main() {
             "--template" => template = val,
             "--layout" => layout_path = val,
             "--out" => out = val,
-            "--size" => {
-                let v = val.unwrap_or_else(|| usage());
-                let parts: Vec<u16> = v.split('x').filter_map(|p| p.parse().ok()).collect();
-                if parts.len() != 2 {
-                    usage();
-                }
-                size = [parts[0], parts[1]];
-            }
             "--scale" => scale = val.and_then(|v| v.parse().ok()).unwrap_or_else(|| usage()),
             _ => usage(),
         }
         k += 2;
     }
-    let (Some(template), Some(out)) = (template, out) else {
+    let (Some(template), Some(out), Some(layout_path)) = (template, out, layout_path) else {
         usage();
     };
     let text = std::fs::read_to_string(&template).unwrap_or_else(|e| {
@@ -483,29 +470,21 @@ fn main() {
         eprintln!("{e}");
         std::process::exit(1);
     });
-    let layout = layout_path.map(|p| {
-        let text = std::fs::read_to_string(&p).unwrap_or_else(|e| {
-            eprintln!("{p}: {e}");
-            std::process::exit(1);
-        });
-        let l: Layout = ron::from_str(&text).unwrap_or_else(|e| {
-            eprintln!("{p}: {e}");
-            std::process::exit(1);
-        });
-        l.validate().unwrap_or_else(|e| {
-            eprintln!("{p}: {e}");
-            std::process::exit(1);
-        });
-        l
+    let p = layout_path;
+    let text = std::fs::read_to_string(&p).unwrap_or_else(|e| {
+        eprintln!("{p}: {e}");
+        std::process::exit(1);
+    });
+    let layout: Layout = ron::from_str(&text).unwrap_or_else(|e| {
+        eprintln!("{p}: {e}");
+        std::process::exit(1);
+    });
+    layout.validate().unwrap_or_else(|e| {
+        eprintln!("{p}: {e}");
+        std::process::exit(1);
     });
     let start = Instant::now();
-    let (map, main_roads) = match &layout {
-        Some(l) => {
-            let (m, g, _) = authored::skeleton(Seed(seed), l);
-            (m, Some(g))
-        }
-        None => (MacroMap::generate(Seed(seed), &t, size), None),
-    };
+    let (map, main_roads, _) = authored::skeleton(Seed(seed), &layout);
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let mut counts = [0usize; 12];
     for &z in &map.zones {
@@ -518,11 +497,8 @@ fn main() {
             (a.min(h), b.max(h))
         });
     println!(
-        "{} seed {seed}: {}x{} samples, generated in {ms:.1} ms, hash {:016x}",
-        t.name,
-        map.width,
-        map.height,
-        map.hash()
+        "{} seed {seed}: {}x{} samples, generated in {ms:.1} ms",
+        t.name, map.width, map.height
     );
     println!(
         "heights {lo:.1}..{hi:.1} m, water level {:.1} m",
@@ -554,7 +530,7 @@ fn main() {
     let (w, h, mut rgb) = render(&map, scale.max(1));
     if roads {
         let start = Instant::now();
-        let g = main_roads.unwrap_or_else(|| arterials(Seed(seed), &t, &map));
+        let g = main_roads;
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         // One-way edges are ramps whatever their class, and drawn as ramps, so count them apart.
         let mut count = [0usize; 7];
@@ -668,13 +644,15 @@ mod tests {
 
     #[test]
     fn renders_seed_one_small() {
-        let text = include_str!("../../../assets/regions/california_coast.ron");
+        let text = include_str!("../../../assets/regions/pacific_shore.ron");
         let t = load(text).expect("template");
-        let map = MacroMap::generate(Seed(1), &t, [4, 4]);
+        let layout: Layout =
+            ron::from_str(include_str!("../../../assets/layouts/pacific_shore.ron"))
+                .expect("layout");
+        let (map, g, _) = authored::skeleton(Seed(1), &layout);
         let (w, h, mut rgb) = render(&map, 1);
-        assert_eq!((w, h), (128, 128));
+        assert_eq!((w, h), (512, 512));
         assert_eq!(rgb.len(), w * h * 3);
-        let g = arterials(Seed(1), &t, &map);
         draw_roads(&mut rgb, w, h, 1, &g);
         let merged = generate_streets(Seed(1), &t, &map, &g);
         let ps = generate_parcels(Seed(1), &t, &map, &merged);
