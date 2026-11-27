@@ -882,6 +882,8 @@ fn join(nodes: &[P], chains: &[Chain], drop_stubs: bool) -> Vec<Road> {
         }
     }
 
+    merge_through(&mut roads);
+
     // Ramps to the arterials that cross each highway, well clear of its ends and each other.
     for h in 0..roads.len() {
         if !roads[h].highway {
@@ -924,6 +926,68 @@ fn join(nodes: &[P], chains: &[Chain], drop_stubs: bool) -> Vec<Road> {
         roads[h].ramps = ramps;
     }
     roads
+}
+
+/// Two roads of a kind that end at the same point, with no other road there, are one road
+/// (a junction a pruned road left behind): `world` would leave a corner nothing turns at.
+fn merge_through(roads: &mut Vec<Road>) {
+    'again: loop {
+        for i in 0..roads.len() {
+            for j in i + 1..roads.len() {
+                let (a, b) = (&roads[i], &roads[j]);
+                if a.highway != b.highway || a.suspension != b.suspension {
+                    continue;
+                }
+                let (an, bn) = (a.points.len() - 1, b.points.len() - 1);
+                // (a's end, b's end) that meet: 0 the start, 1 the end.
+                let Some((ea, eb)) = [(1, 0), (0, 1), (0, 0), (1, 1)]
+                    .into_iter()
+                    .find(|&(x, y)| dist(a.points[x * an], b.points[y * bn]) <= 0.05)
+                else {
+                    continue;
+                };
+                let p = a.points[ea * an];
+                let alone = roads.iter().enumerate().all(|(k, r)| {
+                    k == i
+                        || k == j
+                        || r.points
+                            .windows(2)
+                            .all(|s| seg_dist(p, s[0], s[1]) > world::layout::SNAP_M)
+                });
+                // The joined road's ends must still meet another road (no loop on itself).
+                let (fa, fb) = (a.points[(1 - ea) * an], b.points[(1 - eb) * bn]);
+                let met = |q: P| {
+                    roads.iter().enumerate().any(|(k, r)| {
+                        k != i
+                            && k != j
+                            && r.points
+                                .windows(2)
+                                .any(|s| seg_dist(q, s[0], s[1]) <= world::layout::SNAP_M)
+                    })
+                };
+                // Only a road running on through: a corner stays a junction of two.
+                let into = a.points[if ea == 1 { an - 1 } else { 1 }];
+                let out = b.points[if eb == 0 { 1 } else { bn - 1 }];
+                let (u, v) = ((p.0 - into.0, p.1 - into.1), (out.0 - p.0, out.1 - p.1));
+                let cos = (u.0 * v.0 + u.1 * v.1) / (u.0.hypot(u.1) * v.0.hypot(v.1)).max(1e-6);
+                let straight = cos > STRAIGHT_DEG.to_radians().cos();
+                if !alone || !straight || !met(fa) || !met(fb) {
+                    continue;
+                }
+                let mut b = roads.remove(j).points;
+                let a = &mut roads[i].points;
+                if ea == 0 {
+                    a.reverse();
+                }
+                if eb == 1 {
+                    b.reverse();
+                }
+                a.extend_from_slice(&b[1..]);
+                continue 'again;
+            }
+        }
+        break;
+    }
 }
 
 /// A highway end that meets no road is cut back to the first street it crosses, and
