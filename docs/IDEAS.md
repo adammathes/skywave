@@ -21,7 +21,7 @@ A ledger of suggestions (from the owner, from other agents, from play) with a ve
 | Idea | Verdict | Notes |
 |---|---|---|
 | Ambient traffic on a path-node graph, density by zone and hour, spawn out of view | **already: M4** | `docs/NPCS.md`. Hour-dependent density is added there. |
-| Zone names popping up on entry; per-zone traffic density, ambience, radio reception | **later: M2 (names + ambience), M3 (reception)** | Named neighborhoods are part of what makes a place a place. Invented names from the region template; radio static when far from a station's transmitter is a nice M3 touch. |
+| Zone names popping up on entry; per-zone traffic density, ambience, radio reception | **no (names); later: M3 (ambience, reception)** | Name cards on entry were built and cut by the owner (2026-11-27): don't bring them back. Per-zone ambience stays; radio static when far from a station's transmitter is a nice M3 touch. |
 | Separate low-poly collision meshes, never the render mesh | **already** | `world::WorldCollider` is built from Place data, not from meshes. |
 | Game clock at one game minute per real second (a day in 24 min) | **setting; default stays 10×** | The classic open-world pacing is 60×. Ours defaults to 10× (a day in 2.4 h) because the drive is the game and golden hour should last. 60× is in the clock-speed options; the owner can flip the default at the feel gate. |
 
