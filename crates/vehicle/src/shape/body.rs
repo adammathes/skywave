@@ -31,6 +31,8 @@ pub enum Slot {
     FloorIn,
     RockerB,
     SideLow,
+    /// The widest line of a bulged side (`Section::bulge`) where no crease marks it.
+    SideMid,
     /// Crease `k`, part -1 (lower edge), 0 (groove), 1 (upper edge).
     Crease(u8, i8),
     ShoulderLow,
@@ -148,6 +150,9 @@ impl<'a> Body<'a> {
             for k in 0..spec.seams.creases.len() as u8 {
                 slots.extend([Slot::Crease(k, -1), Slot::Crease(k, 0), Slot::Crease(k, 1)]);
             }
+        }
+        if spec.section.bulge > 0.0 && lod < 2 && !slots.contains(&Slot::Crease(0, 0)) {
+            slots.push(Slot::SideMid);
         }
         slots.push(Slot::ShoulderLow);
         if spec.section.shoulder < 0.92 || lod < 2 {
@@ -523,7 +528,27 @@ impl<'a> Body<'a> {
         let rocker_h = (0.07f32).min((f.y_ledge - f.yb) * 0.25);
         let y_sl = f.yb + rocker_h;
         let y_shl = f.y_ledge - r_sh;
-        let side_z = |y: f32| w - lean * clamp((y - y_sl) / (y_shl - y_sl).max(1e-4), 0.0, 1.0);
+        // The widest line: the first crease, else halfway up the side.
+        let y_peak = match spec.seams.creases.first() {
+            Some(&(x0, y0, x1, y1)) => {
+                let t = clamp((s - x0) / (x1 - x0), 0.0, 1.0);
+                clamp(lerp(y0, y1, t), y_sl, y_shl)
+            }
+            None => (y_sl + y_shl) * 0.5,
+        };
+        let bulge = spec.section.bulge;
+        let side_z = |y: f32| {
+            let flat = w - lean * clamp((y - y_sl) / (y_shl - y_sl).max(1e-4), 0.0, 1.0);
+            if bulge <= 0.0 {
+                return flat;
+            }
+            let d = if y < y_peak {
+                (y_peak - y) / (y_peak - y_sl).max(1e-4)
+            } else {
+                (y - y_peak) / (y_shl - y_peak).max(1e-4)
+            };
+            flat - bulge * clamp(d, 0.0, 1.0) * clamp(d, 0.0, 1.0)
+        };
         let z_gb = f.z_ledge - 0.025 * k;
         let rail = (0.04f32).min(f.h * 0.3) * k;
         let y_rr = f.y_edge - rail;
@@ -543,7 +568,8 @@ impl<'a> Body<'a> {
                 Slot::FloorC => [0.0, f.yb],
                 Slot::FloorIn => [self.z_in.min(w - tuck - 0.02), f.yb],
                 Slot::RockerB => [w - tuck, f.yb + 0.01],
-                Slot::SideLow => [w, y_sl],
+                Slot::SideLow => [side_z(y_sl), y_sl],
+                Slot::SideMid => [side_z(y_peak), y_peak],
                 Slot::Crease(c, part) => {
                     let (x0, y0, x1, y1) = spec.seams.creases[c as usize];
                     let t = clamp((s - x0) / (x1 - x0), 0.0, 1.0);
@@ -557,8 +583,8 @@ impl<'a> Body<'a> {
                     let y = yc + part as f32 * SEAM_HALF;
                     [side_z(y), y]
                 }
-                Slot::ShoulderLow => [w - lean, y_shl],
-                Slot::ShoulderMid => [w - lean - r_sh * 0.293, f.y_ledge - r_sh * 0.293],
+                Slot::ShoulderLow => [side_z(y_shl), y_shl],
+                Slot::ShoulderMid => [side_z(y_shl) - r_sh * 0.293, f.y_ledge - r_sh * 0.293],
                 Slot::Ledge => [f.z_ledge, f.y_ledge],
                 Slot::GlassB => [z_gb, f.y_ledge],
                 Slot::RoofRail => [z_rr, y_rr],

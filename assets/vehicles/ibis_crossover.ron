@@ -13,10 +13,10 @@ VehicleSpec(
     class: Utility,
 
     mass_kg: 1700,
-    dims_m: (4.60, 1.82, 1.68),    // length, width, height
+    dims_m: (4.60, 1.82, 1.72),    // length, width, height
     wheelbase_m: 2.62,
     track_m: 1.56,
-    cg_height_m: 0.62,
+    cg_height_m: 0.66,
     cg_fore_aft: 0.43,
 
     engine: Engine(

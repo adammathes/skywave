@@ -580,14 +580,14 @@ fn builds_are_deterministic() {
         0xebbe_b1b8_7826_cd46,
         0xd114_d3e5_6950_98e7,
         0xbf73_75be_c260_c310,
-        0xcfb5_6418_27b5_0c27,
-        0x8c52_4d2b_8324_a7d3,
-        0xf4f5_f8de_c06c_d457,
-        0xa854_c49d_20f7_a3eb,
-        0x06ee_6c1b_b7be_6a90,
-        0x1782_f1b3_1388_a2dc,
-        0xe798_6f7c_1da6_4bc9,
-        0xeec2_5963_d241_b987,
+        0x07ad_1f3e_8829_c0a4,
+        0x044a_5cf7_ae88_a0ee,
+        0x62a7_6e5d_04a3_fa88,
+        0x3f7f_a565_bd57_160a,
+        0x3a6c_0682_b5f3_b8c0,
+        0x375e_7ee2_8f7a_a608,
+        0xbf8f_9066_fced_b52f,
+        0x7f6d_4d69_750c_e0c8,
     ];
     let mut got = [0u64; 46];
     for (k, spec) in shapes().iter().enumerate() {

@@ -23,6 +23,10 @@ pub struct Section {
     pub crown: f32,
     /// How far the rocker tucks in under the side, m.
     pub tuck: f32,
+    /// How far the side curves in above and below its widest line (the first crease, or
+    /// halfway up), m, in `[0, 0.06]`: `0` is a flat slab side, the 2000s' sides bulge.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bulge: f32,
 }
 
 /// Where the glass is, as `x` ranges along the car.
@@ -593,6 +597,7 @@ impl ShapeSpec {
             s.greenhouse_frac,
             s.crown,
             s.tuck,
+            s.bulge,
             w.radius,
             w.width,
             w.arch_clearance,
@@ -715,6 +720,7 @@ impl ShapeSpec {
             || !within(s.greenhouse_frac, 0.4, 1.0)
             || !within(s.crown, 0.0, 0.15)
             || !within(s.tuck, 0.0, 0.15)
+            || !within(s.bulge, 0.0, 0.06)
         {
             return Err(ShapeError::SectionOutOfRange);
         }

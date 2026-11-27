@@ -20,7 +20,7 @@ ShapeSpec(
         (5.05, 0.84),
     ],
     belt: [(1.62, 0.99), (3.00, 1.03), (4.10, 1.08)],
-    section: Section(shoulder: 0.82, tumblehome_deg: 22, greenhouse_frac: 0.73, crown: 0.07, tuck: 0.07),
+    section: Section(shoulder: 0.82, tumblehome_deg: 22, greenhouse_frac: 0.73, crown: 0.07, tuck: 0.07, bulge: 0.035),
     glass: Glass(
         windshield: (1.64, 2.30),
         backlight: (3.40, 4.10),

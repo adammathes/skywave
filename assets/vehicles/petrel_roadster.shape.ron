@@ -19,7 +19,7 @@ ShapeSpec(
         (3.50, 0.86), (3.79, 0.78),
     ],
     belt: [(1.10, 0.77), (1.56, 0.80), (2.80, 0.88), (3.40, 0.915)],
-    section: Section(shoulder: 0.80, tumblehome_deg: 26, greenhouse_frac: 0.70, crown: 0.06, tuck: 0.07),
+    section: Section(shoulder: 0.80, tumblehome_deg: 26, greenhouse_frac: 0.70, crown: 0.06, tuck: 0.07, bulge: 0.035),
     glass: Glass(
         windshield: (1.12, 1.49),
         // No side glass; the backlight range is the boot behind the seats.

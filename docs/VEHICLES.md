@@ -98,7 +98,8 @@ ShapeSpec(
   belt: [(x, y)...],         // beltline where the glass starts, held flat beyond its ends
   section: Section(shoulder: 0.93, tumblehome_deg: 24, greenhouse_frac: 0.70,
                    crown: 0.04,   // centerline rise of hood, roof and deck over their edges, m
-                   tuck: 0.05),   // rocker tuck under the side, m
+                   tuck: 0.05,    // rocker tuck under the side, m
+                   bulge: 0.0),   // optional: the side curving in above and below its widest line, m
   glass: Glass(windshield: (x0, x1), backlight: (x0, x1), side: [(x0, x1)...]),  // gaps between side windows are the B/C pillars
   wheels: Wheels(radius, width, arch_clearance, front_x, rear_x, track),         // rear_x − front_x and track equal the VehicleSpec's
   front: Front(lights: PopUp|Rect|Quad|Round|Hidden, grille: Slot|Egg|Wide|None, bumper: Chrome|Body|Rubber, bumper_y: (lo, hi)),
@@ -270,6 +271,17 @@ world (they are newer than 2001). Luxury cars are outside the class orderings.
 | `tulwar_sedan` | mid-2000s small rear-drive luxury sport sedan: long hood, steep windshield, roof arcing to a high lipped deck, bright window trim | Luxury | 1,580 kg, ~145 kW V6, 6-speed, RWD; calm, balanced, quiet; 8.2 s, 64 m/s, 0.86 g |
 | `petrel_roadster` | early-2000s tiny mid-engined two-seat roadster: round lamps, wide mouth, strakes into flank intakes, rising engine deck, round tail lamps, top off | Convertible | 900 kg, ~125 kW four to 7,800 rpm, 5-speed, RWD; the lightest car, turns in on a thought; 5.7 s, 62 m/s, 1.06 g |
 | `lipizzan_sedan` | mid-2000s big grand touring four-door: long hood, oval grille, long cabin, bright trim, big multi-spoke wheels | Luxury | 1,930 kg, ~285 kW V8 with a rear transaxle, 6-speed, RWD; fast and heavy, leans and settles; 5.3 s, 72 m/s, 0.93 g |
+
+The 2005 traffic cars, the Bay's everyday cars: they drive and park in the Bay Loop and never in an earlier
+world. All but the crossover park (it is too long for a small stall and too narrow for a sedan's); all are
+player-drivable.
+
+| id | Archetype evoked | Class | Feel target, as tuned (0–60 mph, top speed, skidpad) |
+|---|---|---|---|
+| `egret_hybrid` | mid-2000s hybrid hatchback: one arc nose to tail, chopped tail with split rear glass, wheel covers | Sedan | 1,310 kg, 1.5 L four and a motor, stepless-feeling automatic, FWD; quiet, slow, calm; 11.6 s, 50 m/s, 0.82 g |
+| `heron_sedan` | early-2000s mid-size family sedan: tall arched roof, high short deck, straight strong beltline | Sedan | 1,450 kg, ~120 kW four, 5-speed auto, FWD; smooth, roomy, safe understeer; 8.4 s, 59 m/s, 0.89 g |
+| `tern_compact` | early-2000s compact four-door sedan: small, neat, tall for its size, steel wheels with covers | Sedan | 1,150 kg, ~95 kW four, 4-speed auto, FWD; light and eager; 9.9 s, 54 m/s, 0.90 g |
+| `ibis_crossover` | mid-2000s car-based crossover: tall, upright, roof rails, gray lower cladding | Utility | 1,700 kg, ~150 kW six, 5-speed auto, AWD; rides like a car, leans more; 8.7 s, 56 m/s, 0.85 g |
 
 The 2001 traffic cars (`docs/backlog/MIRAGE2001.md` item 6), the basin's everyday cars: they drive and park in
 Mirage Valley and never in an earlier world. All but the semi are player-drivable and list at the end of the
