@@ -416,39 +416,44 @@ pub fn assign(rules: &SignRules, lex: &Lexicon, era: Era, seed: u64, at: &[V2]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grammar::{basin_01, coast_80s};
+    use crate::grammar::{basin_01, coast_80s, lake_94};
     use crate::signs::testing::{blocklist, key};
 
     #[test]
     fn shipped_lexicon_validates() {
         shipped_lexicon_validates_in(coast_80s());
         shipped_lexicon_validates_in(basin_01());
+        shipped_lexicon_validates_in(lake_94());
     }
 
     #[test]
     fn no_word_is_a_known_brand() {
         no_word_is_a_known_brand_in(coast_80s());
         no_word_is_a_known_brand_in(basin_01());
+        no_word_is_a_known_brand_in(lake_94());
     }
 
     #[test]
     fn no_descriptor_names_a_chain_with_its_trade() {
-        // The coast leaves out three listed pairs; the basin leaves out ten
+        // The coast leaves out three listed pairs, the basin ten and Lake City seven
         // (their names are keys on the blocklist, never spelled here).
         assert_eq!(chains_left_out_in(coast_80s()), 3);
         assert_eq!(chains_left_out_in(basin_01()), 10);
+        assert_eq!(chains_left_out_in(lake_94()), 7);
     }
 
     #[test]
     fn no_sign_says_placeholder_words_or_repeats_itself() {
         no_sign_says_placeholder_words_or_repeats_itself_in(coast_80s());
         no_sign_says_placeholder_words_or_repeats_itself_in(basin_01());
+        no_sign_says_placeholder_words_or_repeats_itself_in(lake_94());
     }
 
     #[test]
     fn every_weighted_choice_is_reached() {
         every_weighted_choice_is_reached_in(coast_80s());
         every_weighted_choice_is_reached_in(basin_01());
+        every_weighted_choice_is_reached_in(lake_94());
     }
 
     /// Every sign the coast grammar can draw, over enough hashes to meet every word.

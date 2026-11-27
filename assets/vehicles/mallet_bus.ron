@@ -1,0 +1,47 @@
+// Mallet Bus: the city's forty-foot transit bus of the late 80s and 90s, a diesel in the
+// back and a long, square, high-floored body. Only NPC traffic drives it; never on the
+// Vehicle page. This spec gives it its mass for collisions.
+//
+// Intent: the slow, big, white thing pulling out from the curb on every main street.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "mallet_bus",
+    name: "Mallet Bus",
+    era: Nineties,
+    year: 1990,
+    class: Van,
+    traffic_only: true,
+
+    mass_kg: 13000,
+    dims_m: (12.20, 2.60, 3.05),    // length, width, height
+    wheelbase_m: 7.20,
+    track_m: 2.10,
+    cg_height_m: 1.10,
+    cg_fore_aft: 0.55,
+
+    engine: Engine(
+        idle_rpm: 600,
+        redline_rpm: 2200,
+        torque_nm: [(800, 1000), (1200, 1200), (1600, 1200), (2000, 1050), (2200, 950)],
+    ),
+    gears: [3.6, 2.2, 1.4, 1.0],
+    final_drive: 2.5,
+    reverse: 4.0,
+    shift_ms: 600,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.75, grip_long: 0.8, load_sens: 0.15, slip_peak_deg: 10.0),
+    suspension: Susp(spring_n_m: 260000, damper: 20000, travel_m: 0.16, antiroll: 0.3),
+    steering: Steer(max_deg: 40, speed_sens: 0.3, return_rate: 3.5),
+    brakes: Brakes(max_nm: 30000, bias_front: 0.5, abs: true, handbrake_nm: 16000),
+    aero: Aero(cd: 0.75, frontal_m2: 7.4, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.3, body_roll: 0.6, engine_sound: "diesel", shift_jerk: 0.3),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 80, mph), Tach(0, 3000)],
+        radio: "amber_seek",
+    ),
+    shape: "mallet_bus.shape.ron",
+)

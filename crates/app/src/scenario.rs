@@ -16,6 +16,7 @@
 //!   default_vehicle: "gannet_gt",      // the car it starts in unless one was picked
 //!   years: (1979, 1987),                 // the era: cars of these years are everyday cars
 //!   heroes: [],                          // cars rare by age but kept on the road
+//!   locals: [],                          // optional: cars only the worlds listing them show
 //!   stub: false,                         // optional: a world still being built ("coming")
 //! )
 //! ```
@@ -57,6 +58,10 @@ pub struct Scenario {
     pub default_vehicle: String,
     pub years: (u16, u16),
     pub heroes: Vec<String>,
+    /// The place's own cars: a car any built-in scenario lists here shows only in the worlds
+    /// that list it (Lake City's 1990s cars are not the 2001 basin's), by its age as any car.
+    #[serde(default)]
+    pub locals: Vec<String>,
     /// How thick the distance haze is, against what the weather and the hour make it
     /// (`Sky::fog_density`): 1 as made, less for clearer air that lets a far mountain
     /// range stand over a basin.
@@ -130,6 +135,9 @@ impl Scenario {
         if self.heroes.iter().any(|h| year_of(h).is_none()) {
             return err("a hero is not a built-in car");
         }
+        if self.locals.iter().any(|h| year_of(h).is_none()) {
+            return err("a local is not a built-in car");
+        }
         Ok(())
     }
 
@@ -161,9 +169,10 @@ pub fn all() -> &'static [Scenario] {
 /// Built-in scenario ids that were renamed, `(old, new)`: a saved world choice, a saved
 /// radio preset or a `?scenario=` / `--scenario` naming the old id gets the world under its
 /// new one.
-pub const RENAMED: [(&str, &str); 2] = [
+pub const RENAMED: [(&str, &str); 3] = [
     ("inland_basin_2001", "mirage_bowl_2001"),
     ("mirage_valley_2001", "mirage_bowl_2001"),
+    ("lake_city_1986", "lake_city_1994"),
 ];
 
 /// `id`, or the id it was renamed to.
@@ -243,6 +252,8 @@ pub struct RosterCar<'a> {
     /// Only traffic drives it (`VehicleSpec::traffic_only`): weighed for its body, never
     /// on the Vehicle page.
     pub traffic_only: bool,
+    /// A place's own car ([`Scenario::locals`]): shown only where a scenario lists it.
+    pub local: bool,
 }
 
 /// The cars a world shows: the roster indices the player may drive in it, in roster order,
@@ -268,7 +279,8 @@ impl Lineup {
             .iter()
             .map(|c| {
                 let hero = s.heroes.iter().any(|h| h == c.id);
-                if c.shown > s.years.1 {
+                let elsewhere = c.local && !s.locals.iter().any(|h| h == c.id);
+                if c.shown > s.years.1 || elsewhere {
                     0
                 } else {
                     era_weight(c.year, s.years, hero)
@@ -351,6 +363,7 @@ pub(crate) struct OwnedCar {
     shown: u16,
     shape: String,
     traffic_only: bool,
+    local: bool,
 }
 
 impl OwnedCar {
@@ -362,6 +375,7 @@ impl OwnedCar {
             shown: self.shown,
             shape: &self.shape,
             traffic_only: self.traffic_only,
+            local: self.local,
         }
     }
 }
@@ -379,6 +393,7 @@ fn builtin_roster(year_of: impl Fn(&str) -> Option<u16>) -> Vec<OwnedCar> {
             let year = year.unwrap_or(u16::MAX);
             let built = spec.as_ref().map_or(0, |s| s.built);
             let traffic_only = spec.as_ref().is_some_and(|s| s.traffic_only);
+            let local = all().iter().any(|s| s.locals.iter().any(|h| h == id));
             OwnedCar {
                 id,
                 name: names[i],
@@ -386,6 +401,7 @@ fn builtin_roster(year_of: impl Fn(&str) -> Option<u16>) -> Vec<OwnedCar> {
                 shown: year.max(built),
                 shape: spec.map(|s| s.shape).unwrap_or_default(),
                 traffic_only,
+                local,
             }
         })
         .collect()
@@ -435,8 +451,8 @@ const STILLS: [(&str, &[u8]); 4] = [
         include_bytes!("../../../assets/stills/bay_loop_2005.still"),
     ),
     (
-        "lake_city_1986",
-        include_bytes!("../../../assets/stills/lake_city_1986.still"),
+        "lake_city_1994",
+        include_bytes!("../../../assets/stills/lake_city_1994.still"),
     ),
 ];
 
@@ -553,10 +569,11 @@ mod tests {
         for old in ["inland_basin_2001", "mirage_valley_2001"] {
             assert_eq!(index_of(old), Some(1), "the old ids");
         }
+        assert_eq!(index_of("lake_city_1986"), Some(3), "the old id");
         let lake = &all[3];
         assert_eq!(
             (lake.id.as_str(), lake.years, lake.stub),
-            ("lake_city_1986", (1977, 1989), false)
+            ("lake_city_1994", (1988, 1994), false)
         );
         assert_eq!(get(99).id, lake.id, "past the end, the last");
     }
@@ -629,10 +646,19 @@ mod tests {
     }
 
     /// The 1980s roster: the first twenty built-in cars; then the eleven 2001 heroes, Lake City's
-    /// 1988 pony hatch, the four 2005 Bay heroes, the four 2005 traffic cars and the seven 2001 traffic cars.
+    /// 1994 cars, the four 2005 Bay heroes, the four 2005 traffic cars and the seven 2001 traffic cars.
     const EIGHTIES: usize = 20;
     const HEROES: usize = 11;
-    const LAKE_CITY_HEROES: [&str; 1] = ["corvid_hatch"];
+    /// Lake City's 1990s cars: its two heroes, its four everyday cars and its bus.
+    const LAKE_CITY_CARS: [&str; 7] = [
+        "corvid_hatch",
+        "longbow_targa",
+        "kestrel_sedan",
+        "whitcomb_sedan",
+        "roan_utility",
+        "oriole_sedan",
+        "mallet_bus",
+    ];
     const BAY_HEROES: [&str; 4] = [
         "goshawk_turbo",
         "tulwar_sedan",
@@ -660,8 +686,7 @@ mod tests {
     fn the_2001_traffic_cars_never_list_in_1984_and_list_last_in_2001() {
         let (l84, l01) = (lineup(0), lineup(1));
         let names = crate::ui::roster::names();
-        let first =
-            EIGHTIES + HEROES + LAKE_CITY_HEROES.len() + BAY_HEROES.len() + BAY_TRAFFIC.len();
+        let first = EIGHTIES + HEROES + LAKE_CITY_CARS.len() + BAY_HEROES.len() + BAY_TRAFFIC.len();
         let ids: Vec<&str> = vehicles::BUILTIN[first..].iter().map(|c| c.0).collect();
         assert_eq!(ids, TRAFFIC_2001);
         for (j, id) in TRAFFIC_2001.iter().enumerate() {
@@ -728,16 +753,42 @@ mod tests {
         };
         assert_eq!(
             l01.cars,
-            (0..n - 1).filter(|&k| !bay(k)).collect::<Vec<_>>()
+            (0..n - 1)
+                .filter(|&k| !bay(k) && !LAKE_CITY_CARS.contains(&vehicles::BUILTIN[k].0))
+                .collect::<Vec<_>>()
         );
         for (k, (id, _)) in vehicles::BUILTIN.iter().enumerate() {
             let w = l01.weights[k];
             match *id {
                 "destrier_coupe" => assert_eq!(w, era_weight(1969, (1995, 2001), true)),
-                "corvid_hatch" => assert_eq!(w, era_weight(1988, (1995, 2001), false)),
+                _ if LAKE_CITY_CARS.contains(id) => assert_eq!(w, 0, "{id}: Lake City's own"),
                 _ if bay(k) => assert_eq!(w, 0, "{id}: newer than 2001"),
                 _ if k >= EIGHTIES => assert_eq!(w, WEIGHT_ONE, "{id}"),
                 _ => assert!(w > 0 && w < WEIGHT_ONE, "{id}: {w}"),
+            }
+        }
+    }
+
+    #[test]
+    fn lake_city_shows_its_own_1990s_cars_and_no_other_world_does() {
+        let k = index_of("lake_city_1994").unwrap();
+        let lake = get(k);
+        assert_eq!(lake.locals, LAKE_CITY_CARS);
+        assert!(lake.locals.contains(&lake.default_vehicle));
+        let l = lineup(k);
+        for (i, (id, _)) in vehicles::BUILTIN.iter().enumerate() {
+            let spec = vehicles::builtin_spec(id).unwrap();
+            if LAKE_CITY_CARS.contains(id) {
+                assert!((1990..=1994).contains(&spec.year), "{id}: {}", spec.year);
+                assert_eq!(l.weights[i], WEIGHT_ONE, "{id}");
+                assert_eq!(l.allows(i), !spec.traffic_only, "{id}");
+            } else if spec.year > 1994 {
+                assert_eq!(l.weights[i], 0, "{id}: newer than 1994");
+            }
+            for other in (0..all().len()).filter(|&o| o != k) {
+                if LAKE_CITY_CARS.contains(id) {
+                    assert_eq!(lineup(other).weights[i], 0, "{id} in {}", get(other).id);
+                }
             }
         }
     }

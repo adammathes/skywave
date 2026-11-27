@@ -25,9 +25,10 @@ pub const CALIFORNIA_COAST_80S: &str =
     include_str!("../../../assets/grammar/california_coast_80s.ron");
 pub const SOCAL_BASIN_2001: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 pub const BAY_AREA_2005: &str = include_str!("../../../assets/grammar/bay_area_2005.ron");
-pub const GREAT_LAKES_80S: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
+pub const GREAT_LAKES_90S: &str = include_str!("../../../assets/grammar/great_lakes_90s.ron");
 pub const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
 pub const LEXICON_2001: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
+pub const LEXICON_1994: &str = include_str!("../../../assets/grammar/lexicon_1994.ron");
 
 /// The landmark kits compiled into the game: a `place::PropKind::Landmark`'s `kit` is an
 /// index into this list.
@@ -35,7 +36,11 @@ pub const LANDMARKS: [(&str, &str); 10] = world::landmarks::BUILTIN;
 
 /// The sign lexicons compiled into the game, as `(id, RON text)`: a grammar's
 /// `signs.lexicon` names its own.
-pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
+pub const LEXICONS: [(&str, &str); 3] = [
+    ("us_roadside", LEXICON),
+    ("us_basin", LEXICON_2001),
+    ("us_lake", LEXICON_1994),
+];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
 pub const REGIONS: [(&str, &str); 4] = [
@@ -56,7 +61,7 @@ pub const GRAMMARS: [(&str, &str); 4] = [
     ("california_coast_80s.ron", CALIFORNIA_COAST_80S),
     ("socal_basin_2001.ron", SOCAL_BASIN_2001),
     ("bay_area_2005.ron", BAY_AREA_2005),
-    ("great_lakes_80s.ron", GREAT_LAKES_80S),
+    ("great_lakes_90s.ron", GREAT_LAKES_90S),
 ];
 
 /// The text of the built-in region template `id`.
@@ -90,8 +95,8 @@ pub const SCENARIOS: [(&str, &str); 4] = [
         include_str!("../../../assets/scenarios/bay_loop_2005.ron"),
     ),
     (
-        "lake_city_1986",
-        include_str!("../../../assets/scenarios/lake_city_1986.ron"),
+        "lake_city_1994",
+        include_str!("../../../assets/scenarios/lake_city_1994.ron"),
     ),
 ];
 

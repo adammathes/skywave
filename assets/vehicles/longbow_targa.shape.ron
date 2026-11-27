@@ -1,0 +1,62 @@
+// Longbow Targa body: the Longbow late in its run, early 90s.
+//
+// Intent: the same long, low nose with pop-up lamps under a clamshell hood, now with
+// wraparound lamps in its corners, a raked windshield, a short roof whose panel lifts out,
+// then one big curved glass hatch nearly to the tail. Wide and flat, smoother than before:
+// body-colored side moldings, a rounder, convex tail with four lamps in a body-colored
+// panel, body-colored bumpers and five-spoke alloys. Front engine, rear drive: the hood is
+// very long. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "longbow_targa",
+    side: [
+        (0.00, 0.46), (0.06, 0.55), (0.40, 0.64), (1.70, 0.84), (1.82, 0.86),
+        (2.46, 1.17), (2.54, 1.19), (2.86, 1.18), (3.40, 1.08), (4.02, 0.98), (4.34, 0.95),
+        (4.44, 0.91), (4.48, 0.84),
+        (4.48, 0.32), (4.28, 0.22), (3.80, 0.18), (0.70, 0.16), (0.14, 0.19), (0.00, 0.28),
+    ],
+    plan: [
+        (0.00, 0.66), (0.15, 0.80), (0.60, 0.88), (1.00, 0.90), (3.90, 0.90), (4.30, 0.885),
+        (4.48, 0.86),
+    ],
+    belt: [(1.80, 0.85), (2.86, 0.90), (4.02, 0.96)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 24, greenhouse_frac: 0.72, crown: 0.05, tuck: 0.05),
+    glass: Glass(
+        windshield: (1.84, 2.40),
+        backlight: (2.92, 3.98),
+        side: [(1.92, 2.84), (2.90, 3.30)],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.24, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.42, track: 1.52),
+    front: Front(lights: PopUp, grille: Slot, bumper: Body, bumper_y: (0.26, 0.38)),
+    rear: Rear(lights: Round, spoiler: None, bumper: Body, bumper_y: (0.30, 0.44)),
+    seams: Seams(hood: true, trunk: false, doors: 2, hood_width: 0.95, creases: [(0.20, 0.50, 4.42, 0.54), (0.06, 0.62, 1.80, 0.80)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, Targa, Badge(Circle)],
+    // Bright red, white, black, bright yellow, dark green metallic, deep blue, dark plum,
+    // bright teal.
+    palette: ["#c01a22", "#eeede8", "#16171a", "#ecc21a", "#1d4034", "#1e3270", "#4a1e3a", "#14868a"],
+    accent: "#1a1a1c",
+    interior: InteriorShape(
+        dash_height: 0.84,
+        dash_x: 2.00,
+        wheel_pos: (2.38, 0.64),
+        wheel_radius: 0.18,
+        column_angle_deg: 22,
+        mirror_pos: (2.28, 1.12),
+        seat: (2.70, 0.36),
+        driver_offset: 0.38,
+        rear_seat: false,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: graphite dash and charcoal hide
+        // with light gray inserts, red piping, gray carpet, an orange-lit digital cluster.
+        colors: ["#26282d", "#3b3e45", "#34363c", "#6c6e72", "#33353a", "#d04a2a"],
+        display: "#ffb030",
+        insert: "#8a8d93",
+        piping: "#a8262c",
+        dash_top: "#2d2f34",
+        applique: None,
+        manual: true,
+    ),
+)

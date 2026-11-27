@@ -1,0 +1,47 @@
+// Roan Utility: the early-90s American four-door sport utility, a compact pickup's frame
+// under a tall wagon body: the family car's new shape.
+//
+// Intent: tall, upright and heavy for its power. A torquey pushrod V6, a four-speed
+// automatic, rear drive, soft springs and tall tires: it leans, pitches under the brakes
+// and runs out of breath past 70, but it sits high over the traffic and shrugs at potholes.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "roan_utility",
+    name: "Roan Utility",
+    era: Nineties,
+    year: 1991,
+    class: Utility,
+
+    mass_kg: 1880,
+    dims_m: (4.76, 1.78, 1.73),    // length, width, height
+    wheelbase_m: 2.84,
+    track_m: 1.48,
+    cg_height_m: 0.72,
+    cg_fore_aft: 0.46,
+
+    engine: Engine(
+        idle_rpm: 700,
+        redline_rpm: 5200,
+        torque_nm: [(800, 250), (2000, 300), (2600, 312), (3600, 290), (4400, 255), (5200, 210)],
+    ),
+    gears: [2.47, 1.47, 1.0, 0.75],
+    final_drive: 3.73,
+    reverse: 2.1,
+    shift_ms: 440,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.84, grip_long: 0.9, load_sens: 0.12, slip_peak_deg: 9.0),
+    suspension: Susp(spring_n_m: 30000, damper: 2300, travel_m: 0.22, antiroll: 0.18),
+    steering: Steer(max_deg: 33, speed_sens: 0.5, return_rate: 5.0),
+    brakes: Brakes(max_nm: 4000, bias_front: 0.66, abs: true, handbrake_nm: 2600),
+    aero: Aero(cd: 0.46, frontal_m2: 2.75, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.2, body_roll: 0.85, engine_sound: "v6", shift_jerk: 0.14),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 100, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "roan_utility.shape.ron",
+)

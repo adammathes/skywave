@@ -930,6 +930,16 @@ pub(crate) fn basin_01() -> Grammar {
     g
 }
 
+/// The shipped 1994 Lake City grammar with its lexicon, for this crate's tests.
+#[cfg(test)]
+pub(crate) fn lake_94() -> Grammar {
+    let text = include_str!("../../../assets/grammar/great_lakes_90s.ron");
+    let mut g: Grammar = ron::from_str(text).expect("parse");
+    let lexicon = include_str!("../../../assets/grammar/lexicon_1994.ron");
+    g.lexicon = ron::from_str(lexicon).expect("parse lexicon");
+    g
+}
+
 /// The shipped coast grammar with its lexicon, for this crate's tests.
 #[cfg(test)]
 pub(crate) fn coast_80s() -> Grammar {

@@ -1636,10 +1636,21 @@ fn the_paint_round_trips_through_the_settings_and_the_scene_key() {
 
 #[test]
 fn the_vehicle_page_fits_the_deck_and_a_tv() {
-    // The widest rows: the longest name, and the most paints.
+    // The widest rows of the world the harness opens: the longest name, and the most paints.
     let r = roster::roster();
-    let longest = (0..r.len()).max_by_key(|&i| r[i].name.len()).unwrap();
-    let most = (0..r.len()).max_by_key(|&i| r[i].paints.len()).unwrap();
+    let world = crate::scenario::lineup(Harness::new().app.scenario());
+    let longest = world
+        .cars
+        .iter()
+        .copied()
+        .max_by_key(|&i| r[i].name.len())
+        .unwrap();
+    let most = world
+        .cars
+        .iter()
+        .copied()
+        .max_by_key(|&i| r[i].paints.len())
+        .unwrap();
     // The Seabreeze and the Appaloosa Convertible tie.
     assert_eq!(r[longest].name.len(), "Seabreeze Convertible".len());
     assert_eq!(r[most].paints.len(), roster::MAX_PAINTS.min(8));
@@ -2680,7 +2691,7 @@ fn the_world_page_picks_a_world_with_the_pad_and_remembers_it() {
     // Up and down move, wrapping.
     h.pad(PadButton::DpadUp);
     assert_eq!(h.focus(), 3, "wraps back");
-    assert!(h.hud_text().contains("Lake city, 1986"), "{}", h.hud_text());
+    assert!(h.hud_text().contains("Lake city, 1994"), "{}", h.hud_text());
     h.pad(PadButton::DpadDown);
     h.pad(PadButton::DpadDown);
     assert_eq!(h.focus(), 1);

@@ -1,4 +1,4 @@
-// Great Lakes city of the 1980s (docs/SCENARIOS.md, "Lake City"): the zone rules that dress the
+// Great Lakes city of the 1990s (docs/SCENARIOS.md, "Lake City"): the zone rules that dress the
 // authored `lake_city` layout (assets/layouts/lake_city.ron, docs/LAYOUTS.md). The
 // layout says where the lake, the river, the districts and the main roads are; these
 // rules say what a district of each zone looks like. Built to work, warm
@@ -9,7 +9,7 @@ RegionTemplate(
     name: "great_lakes_city",
     driving_side: Right,
     sign_language: EnUs,
-    era: EraDefaults(year: 1986, street_lights: Sodium, palette: "brick_and_limestone"),
+    era: EraDefaults(year: 1994, street_lights: Sodium, palette: "brick_and_limestone"),
 
     roadside: [RoadsideKit(kit: "hot_dog_stand", variant: 'A')],
     // A grid city: a side street that stops short of a river, the expressway or a park is

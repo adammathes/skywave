@@ -1,0 +1,29 @@
+// Lake City, 1994 (docs/SCENARIOS.md): built to work, warm inside. The `great_lakes_city`
+// region template and its 1990s grammar, brick and limestone, the early-90s roster with the
+// family sedan to start in, the Chicago radio preset, late afternoon going to dusk.
+// Format: crates/app/src/scenario.rs.
+Scenario(
+    id: "lake_city_1994",
+    title: "Lake City",
+    year: 1994,
+    kind: "Lake city",
+    region: "great_lakes_city",
+    layout: "lake_city",
+    grammar: "great_lakes_90s.ron",
+    radio: "1994_chicago",
+    palette: "brick_and_limestone",
+    map_skin: "transit",
+    default_time: (16, 50),
+    default_vehicle: "kestrel_sedan",
+    years: (1988, 1994),
+    // The cars of the North Side's summer nights: the new pony hatch with its T-tops, and
+    // the plastic-bodied V8 sports car late in its run, its roof panel out.
+    heroes: ["corvid_hatch", "longbow_targa"],
+    // The city's own early-90s cars, seen in no other world: the two heroes, the aero
+    // family sedan, the full-size sedan (yellow ones are cabs), the sport utility, the
+    // imported midsize and the transit bus.
+    locals: [
+        "corvid_hatch", "longbow_targa", "kestrel_sedan", "whitcomb_sedan", "roan_utility",
+        "oriole_sedan", "mallet_bus",
+    ],
+)

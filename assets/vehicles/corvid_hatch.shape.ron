@@ -1,46 +1,46 @@
-// Corvid Hatch body: a late-80s American pony car in its top trim.
+// Corvid Hatch body: a mid-90s American pony car in its top trim.
 //
-// Intent: the wedge of its decade. A long, low, sharp nose with slim rectangular lamps
-// either side of a slot, no grille above the bumper, a long flat hood, a windshield laid
-// right back, a short roof with T-top panels, then one big curved glass hatch running
-// nearly to the tail with a lip spoiler wrapped round its end. A full ground-effects kit
-// (deep air dam, side skirts, rear valance), a tape stripe low along the doors, black
-// trim, full-width tail lamps, and wide five-hole alloys. Front engine, rear drive.
-// Generic period cues only.
+// Intent: the decade's soft dart. A low, rounded nose with flush composite lamps either
+// side of a thin slot and no grille above the bumper, a long sloping hood, a windshield laid
+// almost flat, a short roof with T-top panels, then one big curved glass hatch running
+// nearly to the tail with a low spoiler across its end. Smooth body-colored bumpers with
+// no ground-effects kit or stripes, black trim, full-width tail lamps and five-spoke
+// alloys. Front engine, rear drive. Generic period cues only.
 //
 // Units are meters; x runs rearward from the nose, y up from the ground. Layout:
 // docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
 ShapeSpec(
     id: "corvid_hatch",
     side: [
-        (0.00, 0.50), (0.05, 0.60), (0.30, 0.68), (1.70, 0.86), (1.80, 0.88),
-        (2.42, 1.24), (2.52, 1.27), (2.96, 1.26), (3.60, 1.10), (4.22, 0.99), (4.74, 0.97),
-        (4.88, 0.90),
-        (4.88, 0.30), (4.70, 0.22), (4.20, 0.18), (0.70, 0.16), (0.14, 0.20), (0.00, 0.30),
+        (0.00, 0.46), (0.08, 0.57), (0.34, 0.65), (1.60, 0.84), (1.72, 0.87),
+        (2.44, 1.28), (2.56, 1.31), (2.94, 1.30), (3.60, 1.12), (4.26, 1.00), (4.78, 0.98),
+        (4.91, 0.88),
+        (4.91, 0.32), (4.74, 0.22), (4.20, 0.18), (0.70, 0.16), (0.16, 0.19), (0.00, 0.30),
     ],
     plan: [
-        (0.00, 0.70), (0.12, 0.84), (0.50, 0.91), (3.90, 0.92), (4.60, 0.91), (4.88, 0.88),
+        (0.00, 0.62), (0.10, 0.78), (0.40, 0.89), (0.90, 0.93), (3.90, 0.94), (4.60, 0.925),
+        (4.91, 0.86),
     ],
-    belt: [(1.78, 0.87), (2.96, 0.92), (4.22, 0.98)],
-    section: Section(shoulder: 0.92, tumblehome_deg: 22, greenhouse_frac: 0.74, crown: 0.04, tuck: 0.05),
+    belt: [(1.70, 0.86), (2.94, 0.92), (4.26, 0.99)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 24, greenhouse_frac: 0.72, crown: 0.05, tuck: 0.06),
     glass: Glass(
-        windshield: (1.82, 2.42),
-        backlight: (3.00, 4.20),
-        side: [(1.90, 2.86), (2.92, 3.40)],
+        windshield: (1.74, 2.44),
+        backlight: (2.98, 4.24),
+        side: [(1.84, 2.86), (2.92, 3.44)],
     ),
-    wheels: Wheels(radius: 0.33, width: 0.245, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.54, track: 1.52),
+    wheels: Wheels(radius: 0.33, width: 0.245, arch_clearance: 0.05, front_x: 0.98, rear_x: 3.55, track: 1.54),
     front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.22, 0.36)),
     rear: Rear(lights: FullWidth, spoiler: Lip, bumper: Body, bumper_y: (0.30, 0.46)),
-    seams: Seams(hood: true, trunk: false, doors: 2, hood_width: 0.85, creases: [(0.10, 0.52, 4.80, 0.56)]),
-    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Dish, hubcaps: false),
-    details: [BodyKit, TTop, BlackTrim, SideStripe, Badge(Bar)],
-    // Bright red, black, white, bright blue, silver, dark red.
-    palette: ["#b0141c", "#141416", "#ecebe6", "#1f3f8f", "#b9bcc0", "#6b1520"],
+    seams: Seams(hood: true, trunk: false, doors: 2, hood_width: 0.85, creases: [(0.30, 0.56, 4.80, 0.60)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Dual, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [TTop, BlackTrim, Badge(Bar)],
+    // Bright red, black, white, bright teal, dark green metallic, bright blue, purple, silver.
+    palette: ["#c0141e", "#141416", "#ecebe6", "#14868a", "#1c4a3a", "#1f4fa8", "#3e2a62", "#b9bcc0"],
     accent: "#c8c8c8",
     interior: InteriorShape(
         dash_height: 0.84,
-        dash_x: 2.00,
-        wheel_pos: (2.42, 0.72),
+        dash_x: 1.96,
+        wheel_pos: (2.40, 0.72),
         wheel_radius: 0.19,
         column_angle_deg: 24,
         mirror_pos: (2.30, 1.16),

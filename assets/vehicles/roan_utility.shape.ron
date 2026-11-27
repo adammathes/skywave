@@ -1,0 +1,59 @@
+// Roan Utility body: the early-90s four-door sport utility.
+//
+// Intent: a box with its corners just rounded. A flat face with a wide grille between
+// rectangular lamps with wrapped corner lamps, a short square hood, a fairly upright
+// windshield, a long flat roof with rails, three windows a side behind a dark rear pillar,
+// an upright liftgate. Two-tone: the paint over a lower color below the rub line, black
+// bumpers, mud flaps, five-spoke alloys on tall tires. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "roan_utility",
+    side: [
+        (0.00, 0.90), (0.03, 1.02), (0.12, 1.08), (0.60, 1.12), (1.18, 1.15), (1.26, 1.16),
+        (1.70, 1.64), (1.80, 1.70), (2.10, 1.73), (4.50, 1.72), (4.66, 1.69), (4.72, 1.60),
+        (4.75, 1.18), (4.76, 1.12),
+        (4.76, 0.54), (4.64, 0.46), (4.06, 0.42), (0.90, 0.40), (0.12, 0.46), (0.00, 0.56),
+    ],
+    plan: [
+        (0.00, 0.82), (0.04, 0.87), (0.20, 0.89), (0.60, 0.89), (4.56, 0.89), (4.70, 0.88),
+        (4.76, 0.85),
+    ],
+    belt: [(1.26, 1.15), (4.20, 1.18), (4.74, 1.18)],
+    section: Section(shoulder: 0.95, tumblehome_deg: 8, greenhouse_frac: 0.88, crown: 0.03, tuck: 0.04),
+    glass: Glass(
+        windshield: (1.28, 1.78),
+        backlight: (4.64, 4.74),
+        side: [(1.86, 2.80), (2.90, 3.66), (3.84, 4.46)],
+    ),
+    wheels: Wheels(radius: 0.37, width: 0.235, arch_clearance: 0.05, front_x: 0.94, rear_x: 3.78, track: 1.48),
+    front: Front(lights: Rect, grille: Wide, bumper: Rubber, bumper_y: (0.42, 0.60)),
+    rear: Rear(lights: Dual, spoiler: None, bumper: Rubber, bumper_y: (0.46, 0.62)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.86, creases: [(0.06, 0.72, 4.74, 0.76)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 3, exhaust: Single, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, RoofRack, MudFlaps, Badge(Bar)],
+    // Dark red over silver, forest green over tan, white over silver, black over charcoal,
+    // medium blue over silver, tan over brown, teal over silver.
+    palette: ["#6a1a24/#a8acb2", "#24402f/#bca888", "#eeede8/#a8acb2", "#18191c/#3e4044", "#2a4a86/#a8acb2", "#c4b08a/#5a4632", "#1d5a5c/#a8acb2"],
+    accent: "#2a2b2e",
+    interior: InteriorShape(
+        dash_height: 1.04,
+        dash_x: 1.62,
+        wheel_pos: (2.06, 0.92),
+        wheel_radius: 0.19,
+        column_angle_deg: 30,
+        mirror_pos: (1.94, 1.56),
+        seat: (2.56, 0.66),
+        driver_offset: 0.40,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: gray plastic, gray cloth with a red
+        // insert, a gray carpet, amber-lit dials.
+        colors: ["#3c3e42", "#70727a", "#4a4c52", "#c8c6be", "#5a5c62", "#a0a2a8"],
+        display: "#ffb040",
+        insert: "#6a2a30",
+        piping: "#5a5c62",
+        dash_top: "#2e3034",
+    ),
+)

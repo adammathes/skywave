@@ -1,0 +1,58 @@
+// Kestrel Sedan body: the early-90s aero family sedan.
+//
+// Intent: soft but not yet oval. A low, smooth nose with a full-width light bar (slim
+// flush lamps either side of a lit slot, no grille above the bumper), a sloped hood, a
+// raked windshield, a rounded roof with six side windows (a small one in each rear
+// pillar), a short soft deck and wide tail lamps. Body-colored bumpers with a dark rub
+// strip, black window frames, plain alloys for the better trims. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "kestrel_sedan",
+    side: [
+        (0.00, 0.54), (0.04, 0.64), (0.16, 0.71), (0.50, 0.78), (1.00, 0.86), (1.22, 0.89),
+        (1.30, 0.91), (1.76, 1.24), (2.06, 1.36), (2.24, 1.38), (2.96, 1.38), (3.34, 1.33),
+        (3.66, 1.18), (3.94, 1.04), (4.04, 1.02), (4.58, 1.01), (4.72, 0.97), (4.80, 0.88),
+        (4.80, 0.34), (4.68, 0.24), (4.16, 0.19), (0.80, 0.18), (0.16, 0.22), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.72), (0.06, 0.81), (0.20, 0.87), (0.50, 0.895), (1.00, 0.90), (4.20, 0.90),
+        (4.60, 0.88), (4.74, 0.85), (4.80, 0.79),
+    ],
+    belt: [(1.30, 0.90), (2.40, 0.94), (3.90, 1.00)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 18, greenhouse_frac: 0.80, crown: 0.05, tuck: 0.06),
+    glass: Glass(
+        windshield: (1.32, 2.10),
+        backlight: (3.36, 3.92),
+        side: [(1.62, 2.66), (2.76, 3.30), (3.38, 3.62)],
+    ),
+    wheels: Wheels(radius: 0.32, width: 0.205, arch_clearance: 0.04, front_x: 0.98, rear_x: 3.67, track: 1.55),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.26, 0.42)),
+    rear: Rear(lights: FullWidth, spoiler: None, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.80, creases: [(0.20, 0.50, 4.76, 0.54)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Single, antenna: Mast, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, Badge(Circle)],
+    // Deep teal, burgundy, silver-blue, white, medium blue, champagne, black, bright red.
+    palette: ["#1d5a5c", "#5e1a2a", "#8a9aac", "#eeede8", "#2a4a86", "#cbbd9e", "#18191c", "#a8202a"],
+    accent: "#2a2b2e",
+    interior: InteriorShape(
+        dash_height: 0.88,
+        dash_x: 1.64,
+        wheel_pos: (2.08, 0.74),
+        wheel_radius: 0.19,
+        column_angle_deg: 26,
+        mirror_pos: (1.94, 1.26),
+        seat: (2.58, 0.46),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: blue-gray plastic and blue-gray
+        // cloth, a darker insert, a blue carpet, green-lit dials.
+        colors: ["#3a4250", "#5e6a7c", "#3c4658", "#c4c4c0", "#4e5868", "#8a96a8"],
+        display: "#58e090",
+        insert: "#4a5466",
+        piping: "#56607a",
+        dash_top: "#343c48",
+    ),
+)

@@ -1,0 +1,49 @@
+// Whitcomb Sedan: the early-90s full-size American sedan, body on frame, rear drive, a V8:
+// the last of the big ones, rounded off for the new decade.
+//
+// Intent: the cab at the curb and the car at the funeral home, the city's workhorse. A
+// lazy small-block V8 with all its torque low down, a four-speed automatic, soft springs
+// and a long wheelbase: it wallows, floats over the potholes, leans hard into a corner and
+// pushes wide; floor it and the tail can be swung out on a wet street.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "whitcomb_sedan",
+    name: "Whitcomb Sedan",
+    era: Nineties,
+    year: 1992,
+    class: Sedan,
+
+    mass_kg: 1820,
+    dims_m: (5.42, 1.96, 1.43),    // length, width, height
+    wheelbase_m: 2.95,
+    track_m: 1.58,
+    cg_height_m: 0.55,
+    cg_fore_aft: 0.47,
+
+    // A 5.7 L V8: ~150 kW, most of its torque by 2400 rpm.
+    engine: Engine(
+        idle_rpm: 650,
+        redline_rpm: 5000,
+        torque_nm: [(800, 300), (2000, 380), (2400, 400), (3200, 385), (4200, 330), (5000, 280)],
+    ),
+    gears: [3.06, 1.63, 1.0, 0.70],   // four-speed automatic with overdrive
+    final_drive: 2.93,
+    reverse: 2.29,
+    shift_ms: 380,
+    auto: true,
+    drive: Rear,
+
+    tires: Tires(grip_lat: 0.884, grip_long: 0.95, load_sens: 0.1, slip_peak_deg: 8.5),
+    suspension: Susp(spring_n_m: 26000, damper: 2200, travel_m: 0.19, antiroll: 0.22),
+    steering: Steer(max_deg: 33, speed_sens: 0.5, return_rate: 5.5),
+    brakes: Brakes(max_nm: 3800, bias_front: 0.66, abs: true, handbrake_nm: 2400),
+    aero: Aero(cd: 0.425, frontal_m2: 2.45, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.05, body_roll: 0.8, engine_sound: "v8_lazy", shift_jerk: 0.1),
+    interior: Interior(
+        dash: "plain_80s",
+        gauges: [Speedo(0, 100, mph), Tach(0, 5000)],
+        radio: "amber_seek",
+    ),
+    shape: "whitcomb_sedan.shape.ron",
+)
