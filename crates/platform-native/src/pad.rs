@@ -29,7 +29,8 @@
 use std::fmt::Write as _;
 
 use app::{pad_table, InputMapper};
-use gilrs::{Axis, Button, EventType, GamepadId, Gilrs, MappingSource};
+use gilrs::ev::filter::{axis_dpad_to_button, Filter};
+use gilrs::{Axis, Button, EventType, GamepadId, Gilrs, GilrsBuilder, MappingSource};
 
 /// gilrs's button at each W3C standard-mapping index (see `app::pad_table::BUTTONS`).
 pub(crate) const BUTTONS: [Button; 17] = [
@@ -213,24 +214,35 @@ pub(crate) fn note(verbose: bool, msg: std::fmt::Arguments) {
     }
 }
 
-/// How gilrs names a pad's buttons. Without an SDL mapping the GUID is included, so a
-/// field report says what to add to `SDL_GAMECONTROLLERCONFIG`.
+/// How gilrs names a pad's buttons. The GUID and the triggers' codes are always included, so a field report says what to
+/// add to `SDL_GAMECONTROLLERCONFIG` and where the triggers come from.
 fn mapping(pad: &gilrs::Gamepad) -> String {
-    match pad.mapping_source() {
+    let mut s = match pad.mapping_source() {
         MappingSource::SdlMappings => "SDL mapping".to_string(),
-        source => {
-            let kind = if source == MappingSource::Driver {
-                "driver"
-            } else {
-                "no"
-            };
-            let mut s = format!("{kind} mapping, GUID ");
-            for b in pad.uuid() {
-                let _ = write!(s, "{b:02x}");
+        MappingSource::Driver => "driver mapping".to_string(),
+        _ => "no mapping".to_string(),
+    };
+    s.push_str(", GUID ");
+    for b in pad.uuid() {
+        let _ = write!(s, "{b:02x}");
+    }
+    // A trigger is gilrs's trigger button, or a Z axis on unmapped Linux pads. The code is
+    // gilrs's packed one (on Linux `type << 16 | code`: 0x10138 is BTN_TL2, 0x30002 ABS_Z).
+    for (name, b, z) in [
+        ("L2", Button::LeftTrigger2, Axis::LeftZ),
+        ("R2", Button::RightTrigger2, Axis::RightZ),
+    ] {
+        match pad.button_code(b).or_else(|| pad.axis_code(z)) {
+            Some(c) => {
+                let flat = pad.deadzone(c).unwrap_or(0.0);
+                let _ = write!(s, ", {name} {:#x} flat {flat:.2}", c.into_u32());
             }
-            s
+            None => {
+                let _ = write!(s, ", {name} none");
+            }
         }
     }
+    s
 }
 
 /// A button's value and pressed state from gilrs's cached state. Looked up by code, not by
@@ -256,7 +268,16 @@ pub struct Pads {
 impl Pads {
     /// Opens the backend. Failure only disables gamepads; it is logged, never fatal.
     pub fn new(verbose: bool) -> Pads {
-        let gilrs = match Gilrs::new() {
+        // Not gilrs's default filters: its deadzone filter takes each axis's evdev `flat` as
+        // a deadzone, for the analog triggers too, and a pad that declares a flat of half its
+        // trigger range or more (`flat / range * 2 >= 1`) has every trigger value zeroed, so
+        // only the pressed threshold gets through. The mapper has its own stick deadzones.
+        // Only the hat-to-d-pad filter is kept, applied in `poll`, which updates the state.
+        let built = GilrsBuilder::new()
+            .with_default_filters(false)
+            .set_update_state(false)
+            .build();
+        let gilrs = match built {
             Ok(g) => Some(g),
             Err(gilrs::Error::NotImplemented(dummy)) => {
                 log::warn!("gamepads are not supported on this platform");
@@ -357,9 +378,15 @@ impl Pads {
         }
         let overridden = self.overridden();
         loop {
-            let Some(ev) = self.gilrs.as_mut().and_then(Gilrs::next_event) else {
-                return;
+            let Some(g) = self.gilrs.as_mut() else { return };
+            let Some(ev) = g.next_event() else { return };
+            let Some(ev) = ev.filter_ev(&axis_dpad_to_button, g) else {
+                continue;
             };
+            if ev.is_dropped() {
+                continue;
+            }
+            g.update(&ev);
             let Some(g) = &self.gilrs else { return };
             let id = ev.id;
             match ev.event {
@@ -650,6 +677,81 @@ mod tests {
             PadEvent::Axis(Axis::RightZ, 1.0),
         ] {
             assert_eq!(none.fix(ev), ev);
+        }
+    }
+
+    /// What gilrs hands us for one trigger at rest, half and fully pulled, on each way a
+    /// Linux pad can report it. Ranges are from the kernel drivers (`xpad.c`
+    /// `xpad_set_up_abs`, `hid-steam.c` `steam_input_register`, `hid-input.c`) and the
+    /// mappings from gilrs's bundled SDL database; gilrs normalises an SDL- or
+    /// driver-mapped trigger to `[0, 1]` and a plain axis to `[-1, 1]`.
+    fn trigger_fixtures() -> [(&'static str, Quirks, [PadEvent; 3]); 5] {
+        let driver = |z| Quirks {
+            swap_xy: true,
+            z,
+            gas_brake: true,
+        };
+        let rt = |v, p| PadEvent::Button(Button::RightTrigger2, v, p);
+        // xpad's 0..255 through gilrs's axis normalisation (odd range: +1 on both ends).
+        let z255 = |raw: f32| PadEvent::Axis(Axis::RightZ, (raw + 1.0) / 256.0 * 2.0 - 1.0);
+        [
+            // Steam Input's virtual pad (28de:11ff), SDL mapping `righttrigger:a5` (ABS_RZ):
+            // how a Steam Controller, and any pad Steam Input wraps, reaches the game.
+            (
+                "steam virtual pad",
+                Quirks::default(),
+                [rt(0.0, false), rt(0.5, false), rt(1.0, true)],
+            ),
+            // 8BitDo Ultimate 2 in XInput mode: xpad (2dc8:310b), ABS_RZ 0..255, and no Linux
+            // row in the database, so the driver mapping's RightZ.
+            (
+                "8bitdo xpad",
+                driver(ZAxes::Triggers),
+                [z255(0.0), z255(127.0), z255(255.0)],
+            ),
+            // Steam Controller on hid-steam without Steam: ABS_HAT2X 0..255, which gilrs's
+            // driver mapping (and the database's `righttrigger:a6`) names RightTrigger2.
+            (
+                "hid-steam",
+                driver(ZAxes::Ignored),
+                [rt(0.0, false), rt(0.5, false), rt(1.0, true)],
+            ),
+            // 8BitDo over Bluetooth / D-input on hid-generic: ABS_GAS, right stick on Z/RZ
+            // (the database's Ultimate 2C rows: `righttrigger:a4`, `rightx:a2`).
+            (
+                "8bitdo hid-generic",
+                driver(ZAxes::RightStick),
+                [
+                    PadEvent::Unnamed(ABS_GAS, -1.0),
+                    PadEvent::Unnamed(ABS_GAS, 0.0),
+                    PadEvent::Unnamed(ABS_GAS, 1.0),
+                ],
+            ),
+            // A pad whose triggers are only BTN_TR2: gilrs's ButtonChanged 0 or 1.
+            (
+                "digital BTN_TR2",
+                driver(ZAxes::Ignored),
+                [rt(0.0, false), rt(0.0, false), rt(1.0, true)],
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_linux_trigger_report_drives_the_throttle() {
+        for (name, q, [rest, half, full]) in trigger_fixtures() {
+            let mut m = InputMapper::default();
+            let mut throttle = |e| {
+                apply(&mut m, q.fix(e));
+                m.sample(0.01).axis(Action::Throttle)
+            };
+            assert!(throttle(rest) < 0.01, "{name}: rest");
+            let h = throttle(half);
+            assert!(
+                name.starts_with("digital") || (0.4..0.6).contains(&h),
+                "{name}: half {h}"
+            );
+            assert!(throttle(full) > 0.99, "{name}: full");
+            assert!(throttle(rest) < 0.01, "{name}: released");
         }
     }
 
