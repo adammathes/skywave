@@ -1249,7 +1249,7 @@ impl App {
         self.aspect = aspect;
         let (view, proj) = if self.fly {
             let cam = self.prev.lerp(&self.curr, alpha);
-            let proj = directx::perspective(FLY_FOV_DEG.to_radians(), aspect, 0.25, 3000.0);
+            let proj = directx::perspective(FLY_FOV_DEG.to_radians(), aspect, 0.25, 6000.0);
             (cam.view(), proj)
         } else {
             let pose = self.camera.pose(&self.drive, alpha);
