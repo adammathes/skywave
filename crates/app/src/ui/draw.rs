@@ -488,13 +488,10 @@ impl Ui {
             let y = (top + 0.5 * ph - 0.5 * h).max(sy);
             self.stage = Some([x, y + STAGE_TITLE_H, sx + sw - x, h - STAGE_TITLE_H]);
         }
-        // Dim the whole target, letterbox bars included, round the stage.
-        match self.stage {
-            Some([x, _, w, _]) => {
-                hud.rect(-vw, -vh, vw + x, 3.0 * vh, SHADE);
-                hud.rect(x + w, -vh, 2.0 * vw - x - w, 3.0 * vh, SHADE);
-            }
-            None => hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, SHADE),
+        // Dim the game under the menu, letterbox bars included; the Vehicle page's studio
+        // replaces it instead.
+        if self.stage.is_none() {
+            hud.rect(-vw, -vh, 3.0 * vw, 3.0 * vh, SHADE);
         }
         let bottom = top + ph;
         hud.rect(px, top, pw, ph, PANEL);
