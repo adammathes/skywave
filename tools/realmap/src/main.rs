@@ -84,8 +84,10 @@ pub struct Import {
     #[serde(default)]
     pub suspension: Vec<(f64, f64)>,
     /// Districts, in degrees.
+    #[serde(default)]
     pub districts: Vec<District>,
     /// The player starts on the road nearest this point...
+    #[serde(default)]
     pub start: (f64, f64),
     /// ...driving toward this one (the road's points are turned round to suit).
     #[serde(default)]
@@ -307,14 +309,21 @@ fn run(path: &str) -> Result<(), String> {
 
     let cache = std::path::Path::new("target/realmap");
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
-    let roads = sources::tiger_roads(
-        cache,
-        &cfg.state,
-        cfg.county.as_deref(),
-        &cfg.names,
-        &warp,
-        &cfg.classes,
-    )?;
+    // Only the sections the layout marks are rewritten; a layout that marks no roads keeps
+    // its own (and needs no road data).
+    let marked = |name: &str| layout_text.contains(&format!("// realmap:{name} begin"));
+    let roads = if marked("roads") {
+        sources::tiger_roads(
+            cache,
+            &cfg.state,
+            cfg.county.as_deref(),
+            &cfg.names,
+            &warp,
+            &cfg.classes,
+        )?
+    } else {
+        Vec::new()
+    };
     let dem = sources::dem(cache, &warp, 1024)?;
     eprintln!("realmap: {} TIGER lines in the box", roads.len());
 
@@ -463,7 +472,7 @@ fn run(path: &str) -> Result<(), String> {
     }
     // Facing away from `start_toward`: turn the road round.
     let (ri, mut along) = (best.1, best.2);
-    if let Some((lon, lat)) = cfg.start_toward {
+    if let Some((lon, lat)) = cfg.start_toward.filter(|_| !net.is_empty()) {
         let to = warp.fwd(lon, lat);
         let dir = best.3;
         if dir.0 * (to.0 - sp.0) + dir.1 * (to.1 - sp.1) < 0.0 {
@@ -476,11 +485,13 @@ fn run(path: &str) -> Result<(), String> {
             along = len - along;
         }
     }
-    let start = format!(
-        "    start: Start(road: \"{}\", along_m: {}),\n",
-        net[ri].name,
-        along.floor()
-    );
+    let start = net.get(ri).map_or(String::new(), |road| {
+        format!(
+            "    start: Start(road: \"{}\", along_m: {}),\n",
+            road.name,
+            along.floor()
+        )
+    });
 
     let mut r = String::new();
     for road in &net {
@@ -579,14 +590,18 @@ fn run(path: &str) -> Result<(), String> {
     }
 
     let mut text = layout_text.clone();
-    if !cfg.channels.is_empty() {
-        text = splice(&text, "channels", &ch)?;
+    for (name, body) in [
+        ("channels", &ch),
+        ("districts", &d),
+        ("start", &start),
+        ("terrain", &t),
+        ("water", &w),
+        ("roads", &r),
+    ] {
+        if marked(name) {
+            text = splice(&text, name, body)?;
+        }
     }
-    text = splice(&text, "districts", &d)?;
-    text = splice(&text, "start", &start)?;
-    text = splice(&text, "terrain", &t)?;
-    text = splice(&text, "water", &w)?;
-    text = splice(&text, "roads", &r)?;
     let new: world::layout::Layout =
         ron::from_str(&text).map_err(|e| format!("generated layout does not parse: {e}"))?;
     std::fs::write(&cfg.layout, &text).map_err(|e| e.to_string())?;

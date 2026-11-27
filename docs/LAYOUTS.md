@@ -156,7 +156,10 @@ are eased to 12° or less, road ends join exactly on the road they meet, and roa
 straight for 25 m into every junction, which traffic's lanes and stop lines need. `skip` boxes cut highways out where they run too close to streets or a river for their
 overpasses at the squeeze.
 
-Everything else in the layout (extra hand-drawn roads, channels, edges) stays as written.
+Only the sections a layout marks are rewritten: a layout drawn by hand can mark `terrain`
+alone and take real ground under its own roads (the Mirage Bowl does; its import names no
+roads and the tool fetches none). Everything else in the layout (extra hand-drawn roads,
+channels, edges) stays as written.
 
 ## Kept small on purpose
 No scoring, no noise fields, no tuning curves. If a world needs something a layout cannot say,
