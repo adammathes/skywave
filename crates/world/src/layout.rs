@@ -173,6 +173,18 @@ pub struct Pier {
     pub toward: Pt,
 }
 
+/// The town's one street grid: every gridded superblock lays its side streets on the same
+/// lattice, square to the map, `block_m` apart along x and along z and counted from `origin`,
+/// so a street carries on across an avenue instead of meeting it a few meters from the street
+/// opposite. Draw the avenues on its lines and the blocks beside them come out whole.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct Grid {
+    pub origin: Pt,
+    pub block_m: (f32, f32),
+}
+
 /// A railway: a single track along `line`, with `spurs` beside it (each from its turnout on
 /// the line to its bumper). Every road it meets crosses it at grade, with gates; nothing is
 /// built within [`RAIL_ROW_M`] of it.
@@ -249,6 +261,8 @@ pub struct Layout {
     pub channels: Vec<Channel>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub pier: Option<Pier>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub grid: Option<Grid>,
     /// Whether the world's set pieces are sited here (`docs/WORLD_GENERATION.md`, "Set
     /// pieces"): the garage, the stands and roadside landmarks on lots that suit them, the
     /// tunnel on the highway, turnouts at the lookouts, the drag strip on the runway.

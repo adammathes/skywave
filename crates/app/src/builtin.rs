@@ -17,6 +17,8 @@ pub const CALIFORNIA_COAST: &str = include_str!("../../../assets/regions/califor
 pub const SOCAL_BASIN: &str = include_str!("../../../assets/regions/socal_basin.ron");
 pub const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 pub const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
+pub const PACIFIC_SHORE_REGION: &str = include_str!("../../../assets/regions/pacific_shore.ron");
+pub const PACIFIC_SHORE: &str = include_str!("../../../assets/layouts/pacific_shore.ron");
 pub const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
 pub const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 pub const LAKE_CITY: &str = include_str!("../../../assets/layouts/lake_city.ron");
@@ -37,15 +39,17 @@ pub const LANDMARKS: [(&str, &str); 10] = world::landmarks::BUILTIN;
 pub const LEXICONS: [(&str, &str); 2] = [("us_roadside", LEXICON), ("us_basin", LEXICON_2001)];
 
 /// The region templates compiled into the game, as `(id, RON text)`.
-pub const REGIONS: [(&str, &str); 5] = [
+pub const REGIONS: [(&str, &str); 6] = [
     ("california_coast", CALIFORNIA_COAST),
+    ("pacific_shore", PACIFIC_SHORE_REGION),
     ("socal_basin", SOCAL_BASIN),
     ("socal_bowl", SOCAL_BOWL),
     ("bay_area", BAY_AREA),
     ("great_lakes_city", GREAT_LAKES_CITY),
 ];
 /// The authored layouts compiled into the game, as `(id, RON text)`.
-pub const LAYOUTS: [(&str, &str); 3] = [
+pub const LAYOUTS: [(&str, &str); 4] = [
+    ("pacific_shore", PACIFIC_SHORE),
     ("bay_loop", BAY_LOOP),
     ("mirage_bowl", MIRAGE_BOWL),
     ("lake_city", LAKE_CITY),

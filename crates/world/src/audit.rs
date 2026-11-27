@@ -164,6 +164,9 @@ pub fn roads(place: &Place, dead_end_ok: impl Fn([f32; 2]) -> bool) -> Vec<Findi
             }
             let (mut node, mut via, mut len) =
                 (other(first, u as u32), first, lens[first as usize]);
+            // The dead end's own road, back to its junction: a chunk border may cut it
+            // within a road's width of the tip, and a road does not fail to join itself.
+            let mut own = vec![first];
             if tip {
                 len = 0.5 * (lens[at[u][0] as usize] + lens[at[u][1] as usize]);
                 // Off the bulb's near node by its one other edge.
@@ -179,6 +182,7 @@ pub fn roads(place: &Place, dead_end_ok: impl Fn([f32; 2]) -> bool) -> Vec<Findi
                     len += lens[next as usize];
                     node = other(next, near as u32);
                     via = next;
+                    own.push(next);
                 }
             }
             let mut steps = 0;
@@ -192,6 +196,7 @@ pub fn roads(place: &Place, dead_end_ok: impl Fn([f32; 2]) -> bool) -> Vec<Findi
                 node = other(next, node);
                 via = next;
                 steps += 1;
+                own.push(next);
             }
             let p = g.nodes[u].pos;
             if off_the_map(p) {
@@ -199,9 +204,10 @@ pub fn roads(place: &Place, dead_end_ok: impl Fn([f32; 2]) -> bool) -> Vec<Findi
             }
             // On another road's asphalt, at its height, with no node there.
             let (tip, y) = (V2::new(p[0], p[1]), g.nodes[u].elevation);
-            let touches = g.edges.iter().any(|e| {
+            let touches = g.edges.iter().enumerate().any(|(k, e)| {
                 e.a != u as u32
                     && e.b != u as u32
+                    && !own.contains(&(k as u32))
                     && e.profile.windows(2).any(|w| {
                         let (a, b) = (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]));
                         segment_distance(tip, a, b).0 < 0.5 * e.width_m
@@ -353,6 +359,16 @@ mod tests {
             faults(&nodes, &edges, true),
             [(Fault::Unjoined, [500.0, 400.0])]
         );
+    }
+
+    #[test]
+    fn a_dead_end_cut_near_its_tip_is_not_unjoined_to_itself() {
+        // A lookout road cut by a node 3 m short of its end.
+        let mut nodes = BLOCK.to_vec();
+        nodes.extend([[697.0, 200.0], [700.0, 200.0]]);
+        let mut edges = RING.to_vec();
+        edges.extend([(2, 6), (6, 7)]);
+        assert_eq!(faults(&nodes, &edges, true), []);
     }
 
     #[test]

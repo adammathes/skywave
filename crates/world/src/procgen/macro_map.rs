@@ -233,6 +233,8 @@ pub struct MacroMap {
     /// An inland basin's grid, channel, rail line and airfield ([`super::basin`]);
     /// `None` on the coast.
     pub basin: Option<BasinPlan>,
+    /// An authored town's one street grid, `[origin, block]` ([`crate::layout::Grid`]).
+    pub grid: Option<[[f32; 2]; 2]>,
 }
 
 /// One arterial of a basin's grid: a straight line, world coordinates.
@@ -642,6 +644,7 @@ impl MacroMap {
             edges,
             bands,
             basin: None,
+            grid: None,
         };
         if !ridges.is_empty() {
             let mut best = (f32::NEG_INFINITY, None);

@@ -552,6 +552,7 @@ pub fn generate(seed: Seed, t: &RegionTemplate, b: &Basin, size_chunks: [u16; 2]
             out: c.frame.dir_to_world(1.0, 0.0),
             set_pieces: true,
         }),
+        grid: None,
     };
     // The overlooks face out over the basin, on benches the overlook roads can reach.
     let out = c.frame.dir_to_world(1.0, 0.0);

@@ -1,4 +1,4 @@
-// Pacific Shore, 1984: the launch world (docs/SCENARIOS.md). The procedural coast, the
+// Pacific Shore, 1984: the beach town (docs/SCENARIOS.md), drawn as a layout. The
 // 1980s roster, the 1984 SoCal radio preset, golden hour. Format:
 // crates/app/src/scenario.rs.
 Scenario(
@@ -6,7 +6,8 @@ Scenario(
     title: "Pacific Shore",
     year: 1984,
     kind: "Beach town",
-    region: "california_coast",
+    region: "pacific_shore",
+    layout: Some("pacific_shore"),
     grammar: "california_coast_80s.ron",
     radio: "1984_socal",
     palette: "socal_1985",

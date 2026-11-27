@@ -876,8 +876,11 @@ impl<'a> StreetPlan<'a> {
                 .zones
                 .get(zone)
                 .map_or(((100.0, 100.0), (80.0, 80.0)), |r| r.block_m);
-            let len = lerp(lr.0, lr.1, unit(key, 1));
-            let dep = lerp(dr.0, dr.1, unit(key, 2));
+            // A town drawn on one grid: its lattice for every gridded superblock.
+            let town = self.m.grid.filter(|_| p == P_GRID);
+            let dir = town.map_or(dir, |_| V2::new(1.0, 0.0));
+            let len = town.map_or(lerp(lr.0, lr.1, unit(key, 1)), |g| g[1][0]);
+            let dep = town.map_or(lerp(dr.0, dr.1, unit(key, 2)), |g| g[1][1]);
             // No lattice where it could never reach an arterial or hold a block.
             let area = cells as f32 * RASTER_M * RASTER_M;
             let lat = (p != P_CURVY && contacts > 0 && area >= 1.5 * len * dep).then(|| {
@@ -901,7 +904,9 @@ impl<'a> StreetPlan<'a> {
                 let off_n = anchor[0].map_or(dep * unit(key, 4), |a| a.1);
                 let off_d = anchor[1].map_or(len * unit(key, 3), |a| a.1);
                 Lattice {
-                    origin: centroid + dir * off_d + n * off_n,
+                    origin: town.map_or(centroid + dir * off_d + n * off_n, |g| {
+                        V2::new(g[0][0], g[0][1])
+                    }),
                     d: dir,
                     n,
                     len,

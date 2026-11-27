@@ -193,7 +193,7 @@ fn along(g: &LaneGraph, lane: u32, p: [f32; 3]) -> f32 {
 /// signalized four-way approaches with 200 m or more of run-up, the one with the most
 /// cross traffic at its junction at busy density (7.5 NPC cars on the other phases within
 /// 40 m on average over 60 s at noon; the next has 6.9).
-const APPROACH_END: [f32; 2] = [952.21, 347.89];
+const APPROACH_END: [f32; 2] = [981.64, 1410.40];
 
 /// The signalized lane whose end lies at `end`.
 fn lane_ending_at(g: &LaneGraph, end: [f32; 2]) -> u32 {
@@ -388,7 +388,7 @@ fn sixty_through_a_red_light_touches_no_car() {
 /// with the map edges: of the signalized four-way approaches, the one with the most people
 /// about at busy density (91 after the warm-up, 10.1 within 30 m of the junction on
 /// average over 30 s at noon).
-const DOWNTOWN_END: [f32; 2] = [855.18, 826.82];
+const DOWNTOWN_END: [f32; 2] = [906.87, 1057.85];
 
 /// A pedestrian sim beside the app (seeded like the place), fed the app's player and
 /// camera at busy density.
@@ -1185,4 +1185,56 @@ fn densities_hold_their_bands_on_the_arterial() {
         ),
         BANDS,
     );
+}
+
+#[test]
+fn zz_probe() {
+    let g = &coast().lanes;
+    let mut v: Vec<(f32, [f32; 3], f32)> = (0..g.lanes.len() as u32)
+        .filter(|&l| g.lanes[l as usize].control == Control::Signal)
+        .map(|l| (g.lanes[l as usize].length_m, g.end_pose(l).pos, g.lanes[l as usize].speed_mps))
+        .collect();
+    v.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (len, p, sp) in v {
+        eprintln!("SIG len {len:.0} end ({:.2}, {:.2}) speed {sp}", p[0], p[2]);
+    }
+}
+
+#[test]
+fn zz_probe_crowd() {
+    let c = coast();
+    let w = &c.walks;
+    for at in [[980.0f32, 0.0, 1040.0], [600.0, 0.0, 1040.0], [800.0, 0.0, 1040.0]] {
+        let mut app = app_at(at, 0.0, "t=12:00&traffic=busy");
+        let mut peds = people();
+        warm_people(&mut app, &mut peds, 20);
+        let mut best = vec![0usize; w.crossings.len()];
+        for _ in 0..120 {
+            warm_people(&mut app, &mut peds, 1);
+            let mut n = vec![0usize; w.crossings.len()];
+            for i in 0..peds.pedestrians().len() {
+                if peds.pedestrians()[i].alive {
+                    if let Some(x) = peds.crossing_of(w, i) {
+                        n[x as usize] += 1;
+                    }
+                }
+            }
+            for (b, n) in best.iter_mut().zip(n) {
+                *b = (*b).max(n);
+            }
+        }
+        let mut order: Vec<usize> = (0..best.len()).collect();
+        order.sort_by_key(|&x| core::cmp::Reverse(best[x]));
+        for &x in order.iter().take(8) {
+            let cr = &w.crossings[x];
+            let ends: Vec<_> = (0..c.lanes.lanes.len() as u32)
+                .filter(|&l| {
+                    let ln = &c.lanes.lanes[l as usize];
+                    ln.end_node == cr.node && ln.edge == cr.edge
+                })
+                .map(|l| (c.lanes.end_pose(l).pos, c.lanes.lanes[l as usize].control, c.lanes.lanes[l as usize].length_m))
+                .collect();
+            eprintln!("CROWD at {at:?}: max {} {:?}", best[x], ends);
+        }
+    }
 }

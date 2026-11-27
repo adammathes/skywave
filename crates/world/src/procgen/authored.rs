@@ -437,6 +437,10 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
         edges,
         bands,
         basin: None,
+        grid: layout
+            .grid
+            .as_ref()
+            .map(|g| [[g.origin.0, g.origin.1], [g.block_m.0, g.block_m.1]]),
     }
 }
 

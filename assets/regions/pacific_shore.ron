@@ -1,0 +1,174 @@
+// Pacific Shore's zone rules (assets/layouts/pacific_shore.ron, docs/LAYOUTS.md): the coast's
+// districts as the procedural coast dressed them, minus everything scored (the layout says where
+// everything is). Streets are straight grids wherever a street goes, with no local streets on
+// the open hillsides or in the parks, so nothing winds off into the brush and stops.
+RegionTemplate(
+    name: "pacific_shore",
+    driving_side: Right,
+    sign_language: EnUs,
+    era: EraDefaults(year: 1984, street_lights: Sodium, palette: "sunbleached_pastel"),
+
+
+    edges: Edges(north: Hills, east: Mountains, south: Hills, west: Ocean),
+
+    // A grid town: a side street that stops short of the beach or the range is cut back to its
+    // last crossing rather than left dead-ended.
+    through_streets: true,
+
+
+
+    zones: Zones(
+        downtown: ZoneRule(
+            score: None,
+            block_m: ((80, 120), (60, 90)),
+            streets: Grid,
+            alleys: true,
+            styles: [Deco, StuccoBox, Brick, Glass],
+            trees: [(Palm, 0.5), (Jacaranda, 0.5)],
+            props: Props(
+                street_light_m: 30, street_tree_m: 14, hydrant_m: 80, power_pole_m: 0,
+                bench_per_km: 10, billboard_per_km: 0, neon: 0.25, parked_cars: (0.4, 0.7),
+            ),
+            lots: Lots(width_m: (12, 25), depth_m: 40, setback_m: (0, 0, 3)),
+            massing: Some(Massing(coverage: 0.85, floors: (2, 30), floors_mean: 8, floors_spread: 0.6, style_weights: [3, 2, 3, 2])),
+        ),
+        strip: ZoneRule(
+            score: None,
+            block_m: ((90, 140), (50, 80)),
+            streets: Grid,
+            alleys: true,
+            styles: [StuccoBox, Deco, Motel, StripMall, Dingbat],
+            trees: [(Palm, 0.8), (FanPalm, 0.2)],
+            props: Props(
+                street_light_m: 30, street_tree_m: 18, hydrant_m: 90, power_pole_m: 0,
+                bench_per_km: 12, billboard_per_km: 2, neon: 0.7, parked_cars: (0.4, 0.7),
+            ),
+            lots: Lots(width_m: (15, 40), depth_m: 40, setback_m: (0, 0, 4)),
+            massing: Some(Massing(coverage: 0.8, floors: (1, 3), floors_mean: 1.7, floors_spread: 0.4, style_weights: [3, 2, 1.5, 1.5, 0.7])),
+        ),
+        residential: ZoneRule(
+            score: None,
+            block_m: ((90, 130), (60, 80)),
+            streets: Grid,
+            alleys: false,
+            styles: [StuccoBox, Dingbat, Craftsman, Bungalow],
+            trees: [(Palm, 0.35), (Jacaranda, 0.25), (Oak, 0.25), (Sycamore, 0.15)],
+            props: Props(
+                street_light_m: 60, street_tree_m: 16, hydrant_m: 110, power_pole_m: 45,
+                bench_per_km: 0.5, billboard_per_km: 0, neon: 0, parked_cars: (0.25, 0.5),
+            ),
+            lots: Lots(width_m: (15, 20), depth_m: 40, setback_m: (6, 1.5, 6)),
+            massing: Some(Massing(coverage: 0.35, floors: (1, 2), floors_mean: 1.5, floors_spread: 0.4, style_weights: [2, 2, 3, 2])),
+        ),
+        suburb: ZoneRule(
+            score: None,
+            block_m: ((110, 180), (70, 110)),
+            streets: Curvy,
+            alleys: false,
+            styles: [Ranch, Tract70s, StuccoBox],
+            trees: [(Oak, 0.4), (Pine, 0.2), (Eucalyptus, 0.2), (Jacaranda, 0.2)],
+            props: Props(
+                street_light_m: 70, street_tree_m: 22, hydrant_m: 140, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.1, 0.3),
+            ),
+            lots: Lots(width_m: (20, 30), depth_m: 40, setback_m: (8, 2, 8)),
+            massing: Some(Massing(coverage: 0.3, floors: (1, 2), floors_mean: 1.4, floors_spread: 0.4, style_weights: [3, 3, 1])),
+        ),
+        industrial: ZoneRule(
+            score: None,
+            block_m: ((180, 260), (140, 220)),
+            streets: Industrial,
+            alleys: false,
+            styles: [Warehouse, Brick],
+            trees: [(Eucalyptus, 1.0)],
+            props: Props(
+                street_light_m: 45, street_tree_m: 0, hydrant_m: 120, power_pole_m: 40,
+                bench_per_km: 0, billboard_per_km: 3, neon: 0, parked_cars: (0.05, 0.25),
+            ),
+            lots: Lots(width_m: (60, 120), depth_m: 60, setback_m: (6, 4, 6)),
+            massing: Some(Massing(coverage: 0.5, floors: (1, 2), floors_mean: 1.2, floors_spread: 0.3, style_weights: [4, 1])),
+        ),
+        commercial: ZoneRule(
+            score: None,
+            block_m: ((90, 130), (60, 90)),
+            streets: Grid,
+            alleys: true,
+            styles: [StripMall, StuccoBox, Deco, Brick],
+            trees: [(Palm, 0.6), (FanPalm, 0.4)],
+            props: Props(
+                street_light_m: 35, street_tree_m: 20, hydrant_m: 90, power_pole_m: 0,
+                bench_per_km: 4, billboard_per_km: 1, neon: 0.35, parked_cars: (0.3, 0.6),
+            ),
+            lots: Lots(width_m: (20, 40), depth_m: 40, setback_m: (3, 0, 4)),
+            massing: Some(Massing(coverage: 0.6, floors: (1, 4), floors_mean: 2, floors_spread: 0.45, style_weights: [2, 2, 1, 1])),
+        ),
+        park: ZoneRule(
+            score: None,
+            block_m: ((120, 240), (100, 200)),
+            streets: Open,
+            alleys: false,
+            styles: [],
+            trees: [(Palm, 0.3), (Oak, 0.3), (Sycamore, 0.2), (Cypress, 0.2)],
+            props: Props(
+                street_light_m: 40, street_tree_m: 12, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 20, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.2),
+            ),
+            lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
+        ),
+        beach: ZoneRule(
+            score: None,
+            block_m: ((150, 300), (60, 120)),
+            streets: Beachfront,
+            alleys: false,
+            styles: [StuccoBox, Motel],
+            trees: [(Palm, 0.7), (FanPalm, 0.3)],
+            props: Props(
+                street_light_m: 35, street_tree_m: 25, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 15, billboard_per_km: 0, neon: 0.1, parked_cars: (0.3, 0.6),
+            ),
+            lots: Lots(width_m: (30, 60), depth_m: 40, setback_m: (2, 2, 2)),
+            massing: Some(Massing(coverage: 0.4, floors: (1, 2), floors_mean: 1.6, floors_spread: 0.3, style_weights: [2, 1])),
+        ),
+        farmland: ZoneRule(
+            score: None,
+            block_m: ((400, 805), (400, 805)),
+            streets: Sections,
+            alleys: false,
+            styles: [Barn, Ranch],
+            trees: [(Orchard, 0.6), (Eucalyptus, 0.3), (Oak, 0.1)],
+            props: Props(
+                street_light_m: 0, street_tree_m: 0, hydrant_m: 0, power_pole_m: 50,
+                bench_per_km: 0, billboard_per_km: 1, neon: 0, parked_cars: (0.0, 0.05),
+            ),
+            lots: Lots(width_m: (120, 250), depth_m: 200, setback_m: (15, 10, 10)),
+            massing: Some(Massing(coverage: 0.05, floors: (1, 2), floors_mean: 1.2, floors_spread: 0.3, style_weights: [1, 1])),
+        ),
+        hills: ZoneRule(
+            score: None,
+            block_m: ((200, 400), (150, 300)),
+            streets: Open,
+            alleys: false,
+            styles: [Ranch, Craftsman, Glass],
+            trees: [(Eucalyptus, 0.5), (Oak, 0.4), (Pine, 0.1)],
+            props: Props(
+                street_light_m: 0, street_tree_m: 0, hydrant_m: 250, power_pole_m: 60,
+                bench_per_km: 0, billboard_per_km: 0, neon: 0, parked_cars: (0.0, 0.1),
+            ),
+            lots: Lots(width_m: (25, 45), depth_m: 40, setback_m: (8, 4, 8)),
+            massing: Some(Massing(coverage: 0.2, floors: (1, 2), floors_mean: 1.5, floors_spread: 0.4, style_weights: [2, 1, 1])),
+        ),
+        highway: ZoneRule(
+            score: None,
+            block_m: ((400, 800), (44, 44)),
+            streets: Grid,
+            alleys: false,
+            styles: [],
+            trees: [(Eucalyptus, 0.6), (Palm, 0.4)],
+            props: Props(
+                street_light_m: 50, street_tree_m: 0, hydrant_m: 0, power_pole_m: 0,
+                bench_per_km: 0, billboard_per_km: 4, neon: 0, parked_cars: (0.0, 0.0),
+            ),
+            lots: Lots(width_m: (40, 80), depth_m: 40, setback_m: (0, 0, 0)),
+        ),
+    ),
+)
