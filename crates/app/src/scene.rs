@@ -47,7 +47,7 @@
 //!   scene at rest (for screenshot goldens; input is ignored).
 //! - `map=1`: start with the full-screen map open.
 //! - `ui=<scale>`: the HUD's UI scale for this session (1 to 2), over the saved setting.
-//! - `look=<name>`: the look for this session (`render::Look::name`: standard, smog, dusk,
+//! - `look=<name>`: the look for this session (`render::Look::name`: standard, dusk,
 //!   amber, poster, toon, video, low-res, ink), over the saved setting.
 //! - `stream=0`: build the whole place at load instead of streaming it round the camera
 //!   (`stream=1`, the default; see `app::stream`). The screenshot goldens use it.
