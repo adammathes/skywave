@@ -600,8 +600,7 @@ What `App::from_setup` spends before the first frame, ms, native release on the 
 The arrow is the collider no longer finding every curb step of the place at load (533,000 edge
 pieces probed twice each in the Bowl, for 149,000 steps): `WorldCollider::warm_steps` finds them
 cell by cell round the car, the cells within 24 m at once and those within 72 m two a sim step,
-into a fixed 384-cell cache whose buffers are reused, so driving still allocates nothing. A cell
-costs about 10 µs to find. A wheel over a cell not found yet gets the same answer the slow way.
+into a fixed 384-cell cache whose buffers are reused, so driving still allocates nothing. A wheel over a cell not found yet gets the same answer the slow way.
 
 Decoding the baked place is 12 ms of the Bowl's load; the rest is the chunk plan: every
 building's facade plan (265 ms), the graded terrain grid and its colors (305 ms) and the prop
