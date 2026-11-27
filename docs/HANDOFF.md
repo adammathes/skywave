@@ -77,7 +77,7 @@ crossings and a freight train), #53 (music folders in the native app) merged.
   vehicle picker and credit line; art pass; the twelve-car 1980s roster (M4 #2); light collision
   physics; the hill-launch fix (wheel rays meet the ground's tangent plane); traffic lane graph
   (M4 #1), NPC car movement (M4 #4), pedestrian figure (M4 #3) and behaviour (M4 #5) in
-  `crates/traffic`; NPC traffic drawn in the game with Settings › World › Traffic and passing-car
+  `crates/traffic`; NPC traffic drawn in the game with Driving › Traffic and passing-car
   sound (M4 #6); vehicle select screen with turntable preview and paint picker (M4 #7); reference
   sources ADR 0005; facade grammar loader (B1, B2); three-band facades with real storefronts (B4);
   sign pictograms, stroke letterforms and the closed lexicon on blade signs (B5, B6); chunk pool
@@ -115,7 +115,7 @@ crossings and a freight train), #53 (music folders in the native app) merged.
   `music-ignored.txt`; every track ends through a silent prebuffer tail); the controls card
   (#41: keyboard and pad columns from the live bindings, 6 s at start for three sessions, H / F1
   / Start held / Show controls in the pause menu, modal over the road like the map; the horn moved
-  from H to B); overlay modes (#40: F3 cycles Off / FPS / Full, saved on Settings › HUD; menus,
+  from H to B); overlay modes (#40: F3 cycles Off / FPS / Full, saved on Display; menus,
   the map, the card and an unfocused window hide it; the FPS number drops under a station toast);
   player–NPC car collisions without damage (#38: impulses by mass, restitution 0.2; the hit car
   brakes, holds, steers back; its shove is capped to the road's measured room, 0.5 m side and

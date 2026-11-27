@@ -156,7 +156,7 @@ impl Sound {
             master: settings.master_volume,
             engine_volume: settings.engine_volume,
             world_volume: settings.world_volume,
-            muted: settings.mute,
+            muted: false,
             paused,
             // Set by the app from the car radio (`App::frame`).
             radio: 0.0,

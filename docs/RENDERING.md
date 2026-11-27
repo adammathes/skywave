@@ -48,7 +48,7 @@ in the shader), with the content rotated by any angle and an optional circle or 
 edges anti-aliased in the fragment shader. The HUD bind group holds the font atlas and the map (two textures,
 two samplers); each quad's flags pick one, so images cost no extra draw call or texture switch.
 
-Vehicle select (`app::preview`): the pause menu's Vehicle page is a studio of its own, with none of the
+Vehicle select (`app::preview`): the menu's Car tab is a studio of its own, with none of the
 world drawn under it. The frame is a level camera at the eye (34° field of view), a fixed noon sun from
 over the viewer's left shoulder (the same at any hour), an emissive backdrop sphere round the eye (deep blue
 overhead to bright cyan at the horizon and a lighter floor, unlit, its glow set so it lands at a fixed
@@ -131,7 +131,7 @@ Chunk meshes: pooled vertex/index buffers made once at load (`render::ChunkPool`
 A resolution-scale setting (50–100%) and a quality preset keep the Deck at its refresh rate (60 Hz LCD, 90 Hz OLED: 11.1 ms) at native res.
 
 ## Quality presets
-Settings → Video → Quality; `app::Quality` maps each to a `render::RenderQuality` carried in every `SceneView` (the
+Display › Quality; `app::Quality` maps each to a `render::RenderQuality` carried in every `SceneView` (the
 renderer rebuilds the shadow atlas when its cascade size or count changes and the scaled targets when their size does; a two-cascade preset allocates a 2×1 atlas). Unchosen, the game picks **Deck**
 on the Deck's APU / an AMD integrated GPU / a 1280×800 Linux surface and **Medium** elsewhere; the choice is saved.
 **Battery** is Deck at 85% resolution that also sets Frame rate to every other refresh.
@@ -167,7 +167,7 @@ The corona pass is optional: its pipeline is built in its own error scope and co
 `?diag=1` runs the same checks on each backend without the game, on small detached canvases, and shows a plain-text report to paste into a bug report (also on the console and in `window.skywaveDiag`): user agent, pixel ratio and whether `navigator.gpu` exists, then per backend a `[WebGPU]` / `[WebGL2]` block of `key: value` lines (adapter name, vendor, driver; adapter features; selected limits as adapter vs granted; surface formats, present and alpha modes; the `Rgba16Float` capabilities and the HDR path chosen; the surface configuration; `pipelines`, `probe frame (validation)`, `probe frame (present)` as `ok` or `FAILED: <message>`; the renderer's path; whether coronas passed and how they read depth; uncaptured errors), each ending in `verdict: OK` or `verdict: FAILED`, and finally which backend the game would start on.
 
 ## Looks
-Settings › Video › Look (saved; a scene's `look=` overrides it for the session) picks a `render::Look`, carried in `Sky::look` and the frame uniform's `look.x`. Each is a few branches in the forward and tonemap shaders: no extra pass, target or texture, and `Standard` is bit-identical to the plain pipeline.
+Display › Look (saved; a scene's `look=` overrides it for the session) picks a `render::Look`, carried in `Sky::look` and the frame uniform's `look.x`. Each is a few branches in the forward and tonemap shaders: no extra pass, target or texture, and `Standard` is bit-identical to the plain pipeline.
 
 | Look | Forward pass | Tonemap |
 |---|---|---|

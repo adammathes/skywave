@@ -111,12 +111,14 @@ pub const ROWS: [Row; 25] = [
     row("Menus", "Time of day", &[Action::TimeScrub]),
     merged(
         "Menus",
-        "Move",
+        "Move, tabs",
         &[
             Action::MenuUp,
             Action::MenuDown,
             Action::MenuLeft,
             Action::MenuRight,
+            Action::MenuTabPrev,
+            Action::MenuTabNext,
         ],
     ),
     row("Menus", "Select", &[Action::MenuConfirm]),
@@ -593,8 +595,14 @@ mod tests {
         assert_eq!(cell(&mut out, &mut part, pad, "Steer"), "LS");
         assert_eq!(cell(&mut out, &mut part, kb, "Look around"), "RMB + Mouse");
         assert_eq!(cell(&mut out, &mut part, pad, "Look around"), "RS");
-        assert_eq!(cell(&mut out, &mut part, kb, "Move"), "Arrows");
-        assert_eq!(cell(&mut out, &mut part, pad, "Move"), "D-pad / LS");
+        assert_eq!(
+            cell(&mut out, &mut part, kb, "Move, tabs"),
+            "Arrows / Q / E"
+        );
+        assert_eq!(
+            cell(&mut out, &mut part, pad, "Move, tabs"),
+            "D-pad / LS / LB / RB"
+        );
         assert_eq!(cell(&mut out, &mut part, kb, "Throttle"), "W / Up");
         assert_eq!(cell(&mut out, &mut part, pad, "Reset car"), "Select (hold)");
         assert_eq!(cell(&mut out, &mut part, kb, "This card"), "H / F1");

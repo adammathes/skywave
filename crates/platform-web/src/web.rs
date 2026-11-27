@@ -643,12 +643,8 @@ fn build_app(setup: &SceneSetup, query: &str) -> App {
     app.set_settings_store(Box::new(LocalStore));
     // The page can ask for a stream URL (window.prompt).
     app.set_text_entry(true);
-    if crate::menu_from_query(query) {
-        app.open_settings();
-    } else if crate::vehicle_menu_from_query(query) {
-        app.open_menu(app::ui::Page::Vehicle);
-    } else if crate::worlds_menu_from_query(query) {
-        app.open_menu(app::ui::Page::Worlds);
+    if let Some(tab) = crate::menu_from_query(query) {
+        app.open_menu(app::ui::TABS[tab]);
     }
     app
 }
