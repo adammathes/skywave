@@ -7,12 +7,12 @@
 //!              "paint": 0, "driver": "jacket" },
 //!   "camera": { "mode": "chase-mid", "cockpit_fov_deg": 62.0, "seat_height_cm": 0.0,
 //!               "seat_forward_cm": 0.0, "dashboard": true, "driver": true, "shake": true },
-//!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "bloom": true, "quality": "auto",
+//!   "video": { "ui_scale": 1.0, "resolution_scale": 1.0, "quality": "auto",
 //!              "frame_rate": "panel", "look": "standard" },
 //!   "hud": { "minimap": true, "minimap_rotate": true, "minimap_range_m": 0.0,
 //!            "overlay": "off", "controls_at_start": true, "controls_dismissed": 0 },
 //!   "world": { "clock_speed": 10.0, "traffic": "normal", "scenario": "socal_beach_1984" },
-//!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8, "mute": false,
+//!   "audio": { "master": 0.8, "engine": 0.8, "world": 0.8,
 //!              "mute_radio_unfocused": false },
 //!   "radio": { "volume": 0.8, "on": false, "last_station": null, "disabled": [],
 //!              "custom": [], "presets": {} },
@@ -384,7 +384,6 @@ pub struct Settings {
     /// Render resolution as a fraction of the window, 0.5–1: the scene draws at this
     /// size and is upscaled, the HUD stays sharp.
     pub resolution_scale: f32,
-    pub bloom: bool,
     /// The picture's style.
     pub look: render::Look,
     /// The graphics preset; `None` picks one for the device ([`Quality::auto`]).
@@ -415,7 +414,6 @@ pub struct Settings {
     pub master_volume: f32,
     pub engine_volume: f32,
     pub world_volume: f32,
-    pub mute: bool,
     /// The radio goes quiet while the window is in the background (off: it keeps playing,
     /// it is a radio). Only the web has a radio player so far.
     pub mute_radio_unfocused: bool,
@@ -440,7 +438,6 @@ impl Default for Settings {
             camera_shake: true,
             ui_scale: 1.0,
             resolution_scale: 1.0,
-            bloom: true,
             look: render::Look::Standard,
             quality: None,
             frame_rate: FrameRate::Panel,
@@ -456,7 +453,6 @@ impl Default for Settings {
             master_volume: 0.8,
             engine_volume: 0.8,
             world_volume: 0.8,
-            mute: false,
             mute_radio_unfocused: false,
             radio: RadioSettings::default(),
         }
@@ -467,7 +463,6 @@ pub const UI_SCALE_STEP: f32 = 0.25;
 /// Sessions with the start card dismissed after which it no longer shows at the start.
 pub const CONTROLS_DISMISSALS: u32 = 3;
 pub const RESOLUTION_SCALE_MIN: f32 = 0.5;
-pub const RESOLUTION_SCALE_STEP: f32 = 0.05;
 pub const VOLUME_STEP: f32 = 0.05;
 
 #[derive(Serialize, Deserialize)]
@@ -546,7 +541,6 @@ impl CameraSection {
 struct Video {
     ui_scale: f32,
     resolution_scale: f32,
-    bloom: bool,
     /// Read only: the on/off overlay before it had modes (on is now "full").
     #[serde(skip_serializing_if = "Option::is_none")]
     debug_overlay: Option<bool>,
@@ -564,7 +558,6 @@ impl Default for Video {
         Video {
             ui_scale: s.ui_scale,
             resolution_scale: s.resolution_scale,
-            bloom: s.bloom,
             debug_overlay: None,
             quality: quality_name(s.quality).to_owned(),
             frame_rate: s.frame_rate.name().to_owned(),
@@ -641,7 +634,6 @@ struct Audio {
     master: f32,
     engine: f32,
     world: f32,
-    mute: bool,
     mute_radio_unfocused: bool,
 }
 
@@ -652,7 +644,6 @@ impl Default for Audio {
             master: s.master_volume,
             engine: s.engine_volume,
             world: s.world_volume,
-            mute: s.mute,
             mute_radio_unfocused: s.mute_radio_unfocused,
         }
     }
@@ -741,7 +732,6 @@ impl Settings {
             "video": Video {
                 ui_scale: self.ui_scale,
                 resolution_scale: self.resolution_scale,
-                bloom: self.bloom,
                 debug_overlay: None,
                 quality: quality_name(self.quality).to_owned(),
                 frame_rate: self.frame_rate.name().to_owned(),
@@ -764,7 +754,6 @@ impl Settings {
                 master: self.master_volume,
                 engine: self.engine_volume,
                 world: self.world_volume,
-                mute: self.mute,
                 mute_radio_unfocused: self.mute_radio_unfocused,
             },
             "radio": &self.radio,
@@ -818,7 +807,6 @@ impl Settings {
             camera_shake: camera.shake,
             ui_scale: video.ui_scale,
             resolution_scale: video.resolution_scale,
-            bloom: video.bloom,
             look: render::Look::from_name(&video.look).unwrap_or_default(),
             quality: Quality::from_name(&video.quality),
             frame_rate: FrameRate::from_name(&video.frame_rate).unwrap_or_default(),
@@ -838,7 +826,6 @@ impl Settings {
             master_volume: audio.master,
             engine_volume: audio.engine,
             world_volume: audio.world,
-            mute: audio.mute,
             mute_radio_unfocused: audio.mute_radio_unfocused,
             radio,
         }
@@ -869,7 +856,6 @@ mod tests {
             camera_shake: false,
             ui_scale: 1.75,
             resolution_scale: 0.75,
-            bloom: false,
             look: render::Look::Ink,
             quality: Some(Quality::Low),
             frame_rate: FrameRate::Third,
@@ -885,7 +871,6 @@ mod tests {
             master_volume: 0.5,
             engine_volume: 0.25,
             world_volume: 1.0,
-            mute: true,
             mute_radio_unfocused: true,
             radio: RadioSettings {
                 volume: 0.45,
@@ -951,14 +936,12 @@ mod tests {
                 seat_height_cm: SEAT_HEIGHT_CM[0],
                 seat_forward_cm: 4.0,
                 ui_scale: 2.0,
-                bloom: false,
                 clock_speed: 10.0,
                 minimap_rotate: false,
                 minimap_range_m: 1000.0,
                 controls_dismissed: CONTROLS_DISMISSALS,
                 master_volume: 1.0,
                 engine_volume: 0.0,
-                mute: true,
                 ..Settings::default()
             }
         );

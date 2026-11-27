@@ -40,8 +40,8 @@ pick it. Back in Gaming Mode it is in your Library.
 
 Skywave is gamepad-first and the Deck's controls work as a standard gamepad, no layout needed.
 The controls card shows at the start; hold Start (or press H or F1) to see it again.
-It renders at the screen's native 1280×800; the pause menu has a Resolution scale setting under
-Video (saved now, applied once the renderer supports it). Settings live in
+It renders at the screen's native 1280×800; the menu's Display › Quality sets the resolution and
+frame rate with everything else. Settings live in
 `~/.config/skywave/settings.json`.
 
 ## Run

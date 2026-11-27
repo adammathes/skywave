@@ -97,8 +97,8 @@ pub enum Effect {
     Exit,
 }
 
-/// Deepest page stack (Pause → Settings → Controls → Gamepad → Analog axes → axis).
-pub const MAX_DEPTH: usize = 8;
+/// Deepest page stack: a tab, a page under it, and the conflict question over a remap.
+pub const MAX_DEPTH: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Level {
@@ -167,6 +167,16 @@ impl MenuNav {
             };
             self.depth += 1;
         }
+    }
+
+    /// Starts over on `tab` (a root page), focus on its first item.
+    pub fn switch(&mut self, tab: Page) {
+        *self = MenuNav::new(tab);
+    }
+
+    /// The bottom page: the tab.
+    pub fn root(&self) -> Page {
+        self.levels[0].page
     }
 
     /// Puts the top page's focus on item `index` (kept in range and in view by
@@ -301,6 +311,8 @@ pub struct MenuInput {
     pub pressed: [bool; 4],
     pub confirm: bool,
     pub back: bool,
+    /// The tab to the left (-1) or right (+1) was pressed this frame, else 0.
+    pub tab: i8,
 }
 
 const DIRECTIONS: [(Action, Nav); 4] = [
@@ -317,6 +329,8 @@ impl MenuInput {
             pressed: DIRECTIONS.map(|(a, _)| s.just_pressed(a)),
             confirm: s.just_pressed(Action::MenuConfirm),
             back: s.just_pressed(Action::MenuBack),
+            tab: i8::from(s.just_pressed(Action::MenuTabNext))
+                - i8::from(s.just_pressed(Action::MenuTabPrev)),
         }
     }
 }
@@ -377,8 +391,8 @@ mod tests {
     fn items() -> [Item; 5] {
         [
             Item {
-                id: ItemId::Bloom,
-                label: "Bloom",
+                id: ItemId::Minimap,
+                label: "Minimap",
                 widget: Widget::Toggle(true),
             },
             Item {
@@ -406,9 +420,9 @@ mod tests {
                 widget: Widget::Action,
             },
             Item {
-                id: ItemId::Open(Page::Video),
-                label: "Video",
-                widget: Widget::Submenu(Page::Video),
+                id: ItemId::Open(Page::Stations),
+                label: "Stations",
+                widget: Widget::Submenu(Page::Stations),
             },
         ]
     }
@@ -416,18 +430,18 @@ mod tests {
     #[test]
     fn focus_wraps_and_widgets_respond() {
         let items = items();
-        let mut m = MenuNav::new(Page::Settings);
+        let mut m = MenuNav::new(Page::Audio);
         assert_eq!(m.apply(Nav::Up, &items), Effect::Moved);
         assert_eq!(m.focus(), 4);
         assert_eq!(m.apply(Nav::Down, &items), Effect::Moved);
         assert_eq!(m.focus(), 0);
         assert_eq!(
             m.apply(Nav::Confirm, &items),
-            Effect::Toggle(ItemId::Bloom, false)
+            Effect::Toggle(ItemId::Minimap, false)
         );
         assert_eq!(
             m.apply(Nav::Left, &items),
-            Effect::Toggle(ItemId::Bloom, false)
+            Effect::Toggle(ItemId::Minimap, false)
         );
         m.apply(Nav::Down, &items);
         assert_eq!(m.apply(Nav::Left, &items), Effect::None, "at the minimum");
@@ -452,11 +466,14 @@ mod tests {
             Effect::Activate(ItemId::Resume)
         );
         m.apply(Nav::Down, &items);
-        assert_eq!(m.apply(Nav::Confirm, &items), Effect::Opened(Page::Video));
-        assert_eq!((m.page(), m.depth(), m.focus()), (Page::Video, 2, 0));
-        assert_eq!(m.path().collect::<Vec<_>>(), [Page::Settings, Page::Video]);
-        assert_eq!(m.apply(Nav::Back, &[]), Effect::Closed(Page::Video));
-        assert_eq!((m.page(), m.focus()), (Page::Settings, 4), "focus is kept");
+        assert_eq!(
+            m.apply(Nav::Confirm, &items),
+            Effect::Opened(Page::Stations)
+        );
+        assert_eq!((m.page(), m.depth(), m.focus()), (Page::Stations, 2, 0));
+        assert_eq!(m.path().collect::<Vec<_>>(), [Page::Audio, Page::Stations]);
+        assert_eq!(m.apply(Nav::Back, &[]), Effect::Closed(Page::Stations));
+        assert_eq!((m.page(), m.focus()), (Page::Audio, 4), "focus is kept");
         assert_eq!(m.apply(Nav::Back, &items), Effect::Exit);
         // An empty page only goes back.
         assert_eq!(m.apply(Nav::Down, &[]), Effect::None);
@@ -465,7 +482,7 @@ mod tests {
 
     #[test]
     fn scrolling_keeps_the_focus_visible() {
-        let mut m = MenuNav::new(Page::Settings);
+        let mut m = MenuNav::new(Page::Audio);
         let many = [items()[3]; 20];
         m.fit(20, 6);
         assert_eq!(m.scroll(), 0);
