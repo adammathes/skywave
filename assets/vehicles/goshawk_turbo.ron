@@ -1,0 +1,48 @@
+// Goshawk Turbo: a mid-2000s compact sport sedan from a European premium school, a small
+// turbocharged four and all-wheel drive.
+//
+// Intent: the quick, quiet commuter of the Peninsula in 2005. A light-pressure turbo four
+// with a flat wall of torque from low revs, all four wheels pulling, a solid, slightly
+// nose-heavy chassis that understeers gently and never surprises. Not fast, sure-footed:
+// the car you drive over the hill in the rain.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "goshawk_turbo",
+    name: "Goshawk Turbo",
+    era: Aughts,
+    year: 2004,
+    class: Sedan,
+
+    mass_kg: 1540,
+    dims_m: (4.55, 1.77, 1.43),    // length, width, height
+    wheelbase_m: 2.65,
+    track_m: 1.52,
+    cg_height_m: 0.52,
+    cg_fore_aft: 0.42,             // 58% front: the engine sits ahead of the front axle
+
+    engine: Engine(
+        idle_rpm: 750,
+        redline_rpm: 6500,
+        torque_nm: [(1000, 170), (1950, 240), (3000, 244), (5000, 238), (5900, 215), (6500, 178)],
+    ),
+    gears: [3.67, 2.00, 1.41, 1.00, 0.74],
+    final_drive: 4.50,
+    reverse: 3.4,
+    shift_ms: 260,
+    auto: true,
+    drive: All,
+
+    tires: Tires(grip_lat: 0.925, grip_long: 1.12, load_sens: 0.08, slip_peak_deg: 7.0),
+    suspension: Susp(spring_n_m: 34000, damper: 3400, travel_m: 0.14, antiroll: 0.45),
+    steering: Steer(max_deg: 34, speed_sens: 0.6, return_rate: 10.0),
+    brakes: Brakes(max_nm: 3600, bias_front: 0.64, abs: true, handbrake_nm: 2900),
+    aero: Aero(cd: 0.33, frontal_m2: 2.20, downforce_coef: 0.02),
+    feel: Feel(oversteer_bias: -0.15, body_roll: 0.3, engine_sound: "i4_turbo", shift_jerk: 0.15),
+    interior: Interior(
+        dash: "sport_90s",
+        gauges: [Speedo(0, 160, mph), Tach(0, 8000)],
+        radio: "amber_seek",
+    ),
+    shape: "goshawk_turbo.shape.ron",
+)

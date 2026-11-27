@@ -23,6 +23,10 @@ pub struct Section {
     pub crown: f32,
     /// How far the rocker tucks in under the side, m.
     pub tuck: f32,
+    /// How far the side curves in above and below its widest line (the first crease, or
+    /// halfway up), m, in `[0, 0.06]`: `0` is a flat slab side, the 2000s' sides bulge.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bulge: f32,
 }
 
 /// Where the glass is, as `x` ranges along the car.
@@ -67,6 +71,9 @@ pub enum HeadLights {
     Round,
     /// A slim strip behind the grille.
     Hidden,
+    /// A tall clear lens swept back round the corner, its outer end the tallest, with two
+    /// round projectors behind it: the 2000s lamp.
+    Swept,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +111,8 @@ pub enum TailLights {
     Dual,
     Triple,
     Round,
+    /// Wide lamps high on the corners that wrap round onto the quarters: the 2000s lamp.
+    Wrap,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -185,6 +194,11 @@ pub enum Rims {
     /// Aftermarket: six pairs of thin polished spokes from a small cap to a wide bright
     /// lip, on a bigger rim with a low-profile tire.
     Twin,
+    /// Five split spokes (ten thin arms in pairs) on a big rim with a low-profile tire: the
+    /// 2000s sport sedan's.
+    Split,
+    /// Seven thin straight spokes to a bright lip on a big rim: the 2000s luxury car's.
+    Spoke7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -583,6 +597,7 @@ impl ShapeSpec {
             s.greenhouse_frac,
             s.crown,
             s.tuck,
+            s.bulge,
             w.radius,
             w.width,
             w.arch_clearance,
@@ -705,6 +720,7 @@ impl ShapeSpec {
             || !within(s.greenhouse_frac, 0.4, 1.0)
             || !within(s.crown, 0.0, 0.15)
             || !within(s.tuck, 0.0, 0.15)
+            || !within(s.bulge, 0.0, 0.06)
         {
             return Err(ShapeError::SectionOutOfRange);
         }

@@ -1,0 +1,46 @@
+// Egret Hybrid: a mid-2000s front-drive hybrid hatchback with a 1.5 L four and a motor.
+//
+// Intent: the Bay's car of 2005, on every street and in every carpool lane. Slow and quiet:
+// strong low-end torque from the motor, a short rev range, a stepless-feeling automatic,
+// light numb steering, soft springs and low-drag tires. Safe and calm, never quick.
+//
+// Layout and units: docs/VEHICLES.md and crates/vehicle/src/spec.rs.
+VehicleSpec(
+    id: "egret_hybrid",
+    name: "Egret Hybrid",
+    era: Aughts,
+    year: 2004,
+    class: Sedan,
+
+    mass_kg: 1310,
+    dims_m: (4.45, 1.72, 1.49),    // length, width, height
+    wheelbase_m: 2.70,
+    track_m: 1.50,
+    cg_height_m: 0.53,
+    cg_fore_aft: 0.41,
+
+    engine: Engine(
+        idle_rpm: 1000,
+        redline_rpm: 5000,
+        torque_nm: [(1000, 200), (2000, 205), (3000, 190), (4000, 170), (5000, 150)],
+    ),
+    gears: [2.40, 1.50, 1.05, 0.78],
+    final_drive: 4.3,
+    reverse: 2.4,
+    shift_ms: 150,
+    auto: true,
+    drive: Front,
+
+    tires: Tires(grip_lat: 0.925, grip_long: 0.96, load_sens: 0.1, slip_peak_deg: 8.0),
+    suspension: Susp(spring_n_m: 24000, damper: 2300, travel_m: 0.17, antiroll: 0.26),
+    steering: Steer(max_deg: 35, speed_sens: 0.6, return_rate: 7.0),
+    brakes: Brakes(max_nm: 3000, bias_front: 0.70, abs: true, handbrake_nm: 2000),
+    aero: Aero(cd: 0.26, frontal_m2: 2.2, downforce_coef: 0.0),
+    feel: Feel(oversteer_bias: -0.2, body_roll: 0.5, engine_sound: "i4_soft", shift_jerk: 0.0),
+    interior: Interior(
+        dash: "sport_00s",
+        gauges: [Speedo(0, 110, mph), Tach(0, 6000)],
+        radio: "amber_seek",
+    ),
+    shape: "egret_hybrid.shape.ron",
+)

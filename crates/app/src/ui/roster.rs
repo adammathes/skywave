@@ -18,7 +18,7 @@ pub const MAX_PAINTS: usize = 12;
 
 /// `(id, seconds from rest to 60 mph, top speed in mph)` of every built-in car, as the sim
 /// measures them (see the module docs).
-const MEASURED: [(&str, f32, f32); 39] = [
+const MEASURED: [(&str, f32, f32); 47] = [
     ("gannet_gt", 5.60, 155.0),
     ("homestead_wagon", 12.60, 110.0),
     ("seabreeze_convertible", 12.51, 106.0),
@@ -51,6 +51,14 @@ const MEASURED: [(&str, f32, f32); 39] = [
     ("dunlin_roadster", 8.22, 128.0),
     ("palfrey_roadster", 6.73, 131.0),
     ("corvid_hatch", 6.13, 140.0),
+    ("goshawk_turbo", 7.89, 136.0),
+    ("tulwar_sedan", 8.18, 143.0),
+    ("petrel_roadster", 5.71, 140.0),
+    ("lipizzan_sedan", 5.32, 161.0),
+    ("egret_hybrid", 11.58, 111.0),
+    ("heron_sedan", 8.39, 133.0),
+    ("tern_compact", 9.90, 121.0),
+    ("ibis_crossover", 8.74, 124.0),
     ("plover_sedan", 9.83, 125.0),
     ("sorrel_utility", 10.37, 95.0),
     ("wren_minivan", 11.07, 102.0),
@@ -342,8 +350,8 @@ mod tests {
             eras[20..],
             [
                 "1990s", "1990s", "1990s", "1960s", "2000s", "1990s", "1990s", "1990s", "1990s",
-                "1990s", "1990s", "1980s", "1990s", "1990s", "1990s", "2000s", "2000s", "1990s",
-                "2000s"
+                "1990s", "1990s", "1980s", "2000s", "2000s", "2000s", "2000s", "2000s", "2000s",
+                "2000s", "2000s", "1990s", "1990s", "1990s", "2000s", "2000s", "1990s", "2000s"
             ]
         );
         // docs/VEHICLES.md: the Gannet 5.6 s and 70 m/s, the Regent 9.9 s and 55 m/s.

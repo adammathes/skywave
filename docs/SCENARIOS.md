@@ -123,9 +123,11 @@ and the foothill village, with a causeway across the bay's south end. Zone rules
 stucco row houses shoulder to shoulder over garage doors with bay windows and cornices (its own
 grammar, `bay_area_2005.ron`), its grid climbing the crests at up to 22% (`street_grade`), and the
 flats round the bay are long straight blocks of ranch and craftsman houses under oaks. Its palette is
-`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now, and
-bridge towers, its own 2005 cars and its own radio follow; every car of 1996 to 2005 drives
-there.
+`bay_2005` (painted pastels, slate water, gold hills); it borrows the basin's radio for now. Its four
+`heroes` are the 2005 Bay heroes (`docs/VEHICLES.md`): the player starts in the Goshawk Turbo, the
+Peninsula's turbo commuter, beside the Tulwar Sedan, the Petrel Roadster and the Lipizzan Sedan. The
+2005 traffic cars fill its streets and lots; every car of 2000 to 2005 drives there at full weight,
+older ones rarer.
 
 ## The Mirage Bowl's map
 The 2001 world was first a procedural place, Mirage Valley, whose roads and districts came from
