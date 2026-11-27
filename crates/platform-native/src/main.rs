@@ -1801,7 +1801,7 @@ mod tests {
     /// warmed up (queued, oncoming and crossing cars and people on the walks in view). Not
     /// `still`: the world runs, so cars and people move between frames.
     const JUNCTION: &str = "?seed=1&place=coast&car=gannet_gt&cam=chase-mid&t=12:00\
-                            &pos=747.7,493.9&yaw=-20.5";
+                            &pos=981.6,1483&yaw=0";
 
     /// Deck and Medium at [`JUNCTION`] with busy traffic and pedestrians: at most this many
     /// draws in the worst frame and in the median frame after the first, forward and shadow
@@ -2048,7 +2048,7 @@ mod tests {
             ("coast-strip-golden", "cam=chase-far&t=17:40"),
             (
                 "coast-traffic-noon",
-                "cam=chase-mid&t=12:00&pos=747.7,493.9&yaw=-20.5&traffic=busy&phase=1440",
+                "cam=chase-mid&t=12:00&pos=981.6,1483&yaw=0&traffic=busy&phase=1440",
             ),
             ("coast-night-golden", "cam=chase-near&t=22:30&lights=1"),
         ];
