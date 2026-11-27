@@ -10,7 +10,7 @@ VehicleSpec(
     name: "Ibis Crossover",
     era: Aughts,
     year: 2004,
-    class: Wagon,
+    class: Utility,
 
     mass_kg: 1700,
     dims_m: (4.60, 1.82, 1.68),    // length, width, height

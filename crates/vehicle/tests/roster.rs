@@ -72,7 +72,7 @@ const ROSTER: [Entry; 45] = [
     (car!("petrel_roadster"), (5.3, 6.2)),
     (car!("lipizzan_sedan"), (5.3, 6.0)),
     // The 2005 traffic cars: the hybrid, the family sedan, the compact and the crossover.
-    (car!("egret_hybrid"), (9.5, 11.5)),
+    (car!("egret_hybrid"), (10.5, 12.5)),
     (car!("heron_sedan"), (8.0, 9.5)),
     (car!("tern_compact"), (8.8, 10.5)),
     (car!("ibis_crossover"), (7.8, 9.5)),

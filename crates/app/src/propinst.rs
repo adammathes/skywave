@@ -81,9 +81,6 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("wren_minivan", 1),
         ("percheron_pickup", 1),
         ("heron_sedan", 3),
-        ("tern_compact", 3),
-        ("egret_hybrid", 2),
-        ("ibis_crossover", 1),
     ], // Sedan
     &[
         ("homestead_wagon", 3),
@@ -94,13 +91,14 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("wren_minivan", 3),
         ("plover_sedan", 1),
         ("percheron_pickup", 1),
-        ("ibis_crossover", 3),
     ], // Wagon
     &[
         ("seabreeze_convertible", 3),
         ("halcyon_turbo", 2),
         ("burro_4x4", 2),
         ("plover_sedan", 2),
+        ("tern_compact", 3),
+        ("egret_hybrid", 3),
     ], // Coupe
     &[("buckboard_pickup", 1), ("percheron_pickup", 1)], // Pickup
     &[
@@ -108,7 +106,7 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("drayman_van", 1),
         ("wren_minivan", 1),
     ], // Van
-    &[("pipit_hatch", 1), ("linnet_hatch", 1), ("egret_hybrid", 1)], // Hatch
+    &[("pipit_hatch", 1), ("linnet_hatch", 1)],          // Hatch
     &[("seabreeze_convertible", 1)],                     // Convertible
     &[
         ("regent_coupe_cabrio", 1),
@@ -175,8 +173,8 @@ fn parked_pick(list: &[(&str, u32)], roll: u32, era: &[u32], zone: place::ZoneId
             .position(|(file, _)| file.strip_suffix(".shape.ron") == Some(id))
             .unwrap_or(0)
     };
-    let mut weights = [0u32; 8];
-    let weights = &mut weights[..list.len().min(8)];
+    let mut weights = [0u32; 12];
+    let weights = &mut weights[..list.len().min(12)];
     for (w, &(id, k)) in weights.iter_mut().zip(list) {
         let z = u32::from(vehicles::zone_weights(id)[zone as usize]);
         *w = k * z * era.get(index(id)).copied().unwrap_or(0);
@@ -680,7 +678,7 @@ mod tests {
     /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
     /// the 2001 hero cars, which only the player and traffic drive, and the two trucks too long for a
     /// stall, which only traffic drives.
-    const UNPARKED: [&str; 23] = [
+    const UNPARKED: [&str; 24] = [
         "basilisk_v12",
         "basilisk_roadster",
         "avocet_v8",
@@ -704,6 +702,7 @@ mod tests {
         "tulwar_sedan",
         "petrel_roadster",
         "lipizzan_sedan",
+        "ibis_crossover",
     ];
 
     #[test]
@@ -739,10 +738,15 @@ mod tests {
                 );
                 parked[k] = true;
             }
-            // Every entry is reachable in the 2001 world, which has every car.
-            let era = &crate::scenario::lineup(1).shapes;
-            let picked: Vec<usize> = (0..20_000u32)
-                .map(|r| parked_shape(class as u8, r * 7919, era, Z))
+            // Every entry is reachable in the 2001 world, which has every car up to 2001,
+            // or in the 2005 Bay, which has the newer ones.
+            let bay = crate::scenario::index_of("bay_loop_2005").unwrap();
+            let picked: Vec<usize> = [1, bay]
+                .iter()
+                .flat_map(|&w| {
+                    let era = &crate::scenario::lineup(w).shapes;
+                    (0..20_000u32).map(move |r| parked_shape(class as u8, r * 7919, era, Z))
+                })
                 .collect();
             for &(id, _) in *list {
                 assert!(picked.iter().any(|&k| shapes[k].id == id), "{id}");

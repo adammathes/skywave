@@ -31,7 +31,7 @@ VehicleSpec(
     auto: true,
     drive: Front,
 
-    tires: Tires(grip_lat: 1.01, grip_long: 0.99, load_sens: 0.1, slip_peak_deg: 7.8),
+    tires: Tires(grip_lat: 1.03, grip_long: 0.99, load_sens: 0.1, slip_peak_deg: 7.8),
     suspension: Susp(spring_n_m: 25000, damper: 2300, travel_m: 0.16, antiroll: 0.32),
     steering: Steer(max_deg: 35, speed_sens: 0.55, return_rate: 8.0),
     brakes: Brakes(max_nm: 2900, bias_front: 0.69, abs: true, handbrake_nm: 2000),
