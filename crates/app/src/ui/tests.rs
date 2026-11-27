@@ -871,17 +871,17 @@ fn hud_page_switches_the_minimap_and_its_zoom() {
     let mut h = Harness::with_store(&store);
     h.open(&[ItemId::Open(Page::Settings), ItemId::Open(Page::Hud)]);
     assert_eq!(h.page(), Page::Hud);
-    // Rotate off: north-up; zoom Auto -> 300 m.
+    // Rotate off: north-up; zoom Auto -> 500 m.
     h.focus_on(ItemId::MinimapRotate);
     h.pad(PadButton::DpadRight);
     h.focus_on(ItemId::MinimapZoom);
     h.pad(PadButton::DpadRight);
     assert!(!h.app.settings().minimap_rotate);
-    assert_eq!(h.app.settings().minimap_range_m, 300.0);
+    assert_eq!(h.app.settings().minimap_range_m, 500.0);
     h.pad(PadButton::Start);
     let saved = store.0.borrow().clone().expect("saved on close");
     let (s, _) = Settings::from_json(&saved);
-    assert!(!s.minimap_rotate && s.minimap_range_m == 300.0);
+    assert!(!s.minimap_rotate && s.minimap_range_m == 500.0);
     // North-up: the map does not turn; the arrow does (the car faces east).
     assert_eq!(first_image(&mut h, render::HudTexture::Map).rotation, 0.0);
     let arrow = first_image(&mut h, render::HudTexture::Arrow);

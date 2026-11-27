@@ -14,14 +14,14 @@ use super::MapImage;
 /// Minimap diameter, virtual units.
 pub const MINIMAP_DIAMETER: f32 = 200.0;
 /// Minimap zoom settings: meters across the circle, 0 for [`auto_range_m`].
-pub const MINIMAP_RANGES_M: [f32; 4] = [0.0, 300.0, 600.0, 1200.0];
+pub const MINIMAP_RANGES_M: [f32; 4] = [0.0, 500.0, 1000.0, 2000.0];
 /// The default zoom: automatic.
 pub const DEFAULT_MINIMAP_RANGE: usize = 0;
 /// Auto zoom: meters across the circle when stopped, the seconds of travel added per m/s
 /// of speed, and the most it shows.
-pub const AUTO_RANGE_MIN_M: f32 = 320.0;
-pub const AUTO_RANGE_S: f32 = 20.0;
-pub const AUTO_RANGE_MAX_M: f32 = 1100.0;
+pub const AUTO_RANGE_MIN_M: f32 = 500.0;
+pub const AUTO_RANGE_S: f32 = 30.0;
+pub const AUTO_RANGE_MAX_M: f32 = 1600.0;
 /// Auto zoom eases toward its target with this time constant, s.
 pub const AUTO_RANGE_EASE_S: f32 = 1.5;
 /// Heading-up, the car sits this share of the radius below the center, so more of the
