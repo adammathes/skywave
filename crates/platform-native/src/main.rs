@@ -1647,6 +1647,7 @@ mod tests {
     /// without a Vulkan device, except on CI.
     #[test]
     fn fragments_on_the_coast_at_deck() {
+        let _gpu = gpu_lock();
         let Some((device, queue, name)) = vulkan_device() else {
             assert!(std::env::var_os("CI").is_none(), "no Vulkan device on CI");
             eprintln!("skipped: no Vulkan device (install mesa-vulkan-drivers)");
@@ -1686,6 +1687,7 @@ mod tests {
     /// except on CI.
     #[test]
     fn depth_prepass_keeps_the_image() {
+        let _gpu = gpu_lock();
         let Some((device, queue, _)) = vulkan_device() else {
             assert!(std::env::var_os("CI").is_none(), "no Vulkan device on CI");
             return;
@@ -1967,6 +1969,14 @@ mod tests {
 
     /// A Vulkan device (lavapipe in a container, or a real GPU) with timestamp queries,
     /// inside passes where it has them; `None` without one.
+    /// One Vulkan device at a time: two software (lavapipe) devices alive at once in one
+    /// process now and then crash it on CI. Take this before `vulkan_device` and hold it
+    /// until the device is dropped (declare it first: locals drop in reverse).
+    fn gpu_lock() -> std::sync::MutexGuard<'static, ()> {
+        static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        GPU.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn vulkan_device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
@@ -2028,6 +2038,7 @@ mod tests {
     #[test]
     #[ignore = "benchmark; needs a Vulkan device (lavapipe: mesa-vulkan-drivers)"]
     fn gpu_passes_on_the_coast() {
+        let _gpu = gpu_lock();
         let Some((device, queue, name)) = vulkan_device() else {
             eprintln!("no Vulkan device");
             return;

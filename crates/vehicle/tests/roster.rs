@@ -1,5 +1,6 @@
 //! Performance bands for the whole roster (`docs/VEHICLES.md`, "Launch roster", the 2001
-//! hero cars and traffic cars, the 2005 Bay heroes), driven with the real specs from
+//! hero cars and traffic cars, Lake City's pony hatch, the 2005 Bay heroes and
+//! traffic cars), driven with the real specs from
 //! `assets/vehicles/`: every car's 0–60 mph time in its band, each distinct from the other
 //! cars of its class in 0–60, top speed and skidpad grip, the class orderings, the
 //! mid-engined exotics ahead of everything and the pony car
@@ -31,7 +32,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 45] = [
+const ROSTER: [Entry; 46] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -65,6 +66,8 @@ const ROSTER: [Entry; 45] = [
     // The 2001 roadsters, outside the era's hero band: a light slow one and a quick one.
     (car!("dunlin_roadster"), (7.5, 9.0)),
     (car!("palfrey_roadster"), (6.5, 7.0)),
+    // Lake City's hero: the late pony hatch, quicker than the older pony notchback.
+    (car!("corvid_hatch"), (5.8, 6.8)),
     // The 2005 Bay heroes: the turbo commuter, the luxury six, the featherweight roadster
     // and the V8 four-door.
     (car!("goshawk_turbo"), (7.0, 8.0)),

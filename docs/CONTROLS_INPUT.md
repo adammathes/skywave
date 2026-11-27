@@ -34,6 +34,10 @@ Instant, remappable, works with keyboard and gamepad everywhere. Input is sample
 | Controls card (`Controls`) | button | H, F1 | Start / Options held 1 s (also pause menu › Show controls) |
 | Fullscreen (`Fullscreen`) | button | F | — (pause menu › Fullscreen) |
 
+Brake/Reverse: a brake pressed while the car moves stops it and holds it there, on the flat or a hill,
+for as long as it is held. Lift and press it again at a standstill, and after 0.5 s the automatic selects
+reverse, where the brake drives and the throttle brakes; the throttle at a standstill selects drive.
+
 F3 cycles the performance overlay Off → FPS → Full → Off. FPS is the frame rate alone (one decimal, the
 same average the full overlay shows) in the top left corner, which the driving HUD leaves empty; Full is
 every counter and the frame graph. The mode is saved (`hud.overlay`: `"off"`, `"fps"` or `"full"`; default

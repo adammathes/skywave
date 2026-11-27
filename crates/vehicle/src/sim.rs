@@ -102,8 +102,8 @@ const SHIFT_HOLD_S: f32 = 0.6;
 const DOWNSHIFT_MARGIN: f32 = 0.8;
 /// Below this forward speed the auto box may switch between drive and reverse, m/s.
 const DIRECTION_SWITCH_SPEED: f32 = 0.8;
-/// Brake held this long at a stop before the auto box selects reverse, s, so waiting at a
-/// light with the brake down keeps the car still.
+/// Brake pressed at a stop and held this long before the auto box selects reverse, s, so a
+/// tap never reverses.
 const REVERSE_DWELL_S: f32 = 0.5;
 /// Steering lock reaches `max_deg * (1 - speed_sens)` at this speed, m/s.
 const STEER_SENS_SPEED: f32 = 60.0;
@@ -118,6 +118,8 @@ const STEER_LIMIT_SPEED: [f32; 2] = [8.0, 11.0];
 /// `REVERSE_FADE_MPS` below it (reverse used to run up to first gear's ~20 m/s).
 pub const REVERSE_MAX_MPS: f32 = 8.0;
 const REVERSE_FADE_MPS: f32 = 1.5;
+/// The hill assist fades out between a standstill and this forward speed, m/s.
+const HILL_FADE_MPS: f32 = 10.0;
 /// Traction control: proportional cut per unit of excess normalized slip, and its smoothing.
 const TRACTION_GAIN: f32 = 2.0;
 const TRACTION_RATE: f32 = 30.0;
@@ -171,7 +173,8 @@ const DEG_TO_RAD: f32 = crate::math::PI / 180.0;
 pub struct VehicleInput {
     /// `[0, 1]`.
     pub throttle: f32,
-    /// `[0, 1]`. Held at a standstill it selects reverse, where it becomes the throttle.
+    /// `[0, 1]`. Pressed and held at a standstill it selects reverse, where it becomes the
+    /// throttle; held through a stop it only holds the car.
     pub brake: f32,
     /// `[-1, 1]`, positive steers right.
     pub steer: f32,
@@ -205,6 +208,12 @@ pub struct Assists {
     /// Engine torque multiplier in the forward gears (1 = the spec's engine; the game's
     /// nitrous raises it for a few seconds).
     pub power_boost: f32,
+    /// Hill help, `[0, 1]`: in a forward gear on the throttle, extra drive at the wheels
+    /// that cancels this share of the grade's pull back on the car, fading out by
+    /// `HILL_FADE_MPS` (traction control does not cut it: one wheel spinning on a lip
+    /// would otherwise take it away while the car rolls back). Every car pulls away up a steep street as on the flat; on the flat
+    /// it adds nothing.
+    pub hill: f32,
 }
 
 impl Assists {
@@ -216,6 +225,7 @@ impl Assists {
         grip_boost: 1.0,
         brake_boost: 1.0,
         power_boost: 1.0,
+        hill: 0.0,
     };
     pub const LIGHT: Assists = Assists {
         stability: 0.3,
@@ -225,6 +235,7 @@ impl Assists {
         grip_boost: 1.0,
         brake_boost: 1.0,
         power_boost: 1.0,
+        hill: 0.5,
     };
     /// After the first play on real hardware ("too slippy, braking too slow"): firm
     /// stability, strong traction control, ABS, grip-limited steering, a fifth more grip
@@ -237,6 +248,7 @@ impl Assists {
         grip_boost: 1.2,
         brake_boost: 1.4,
         power_boost: 1.0,
+        hill: 1.0,
     };
 }
 
@@ -366,7 +378,8 @@ pub struct VehicleState {
     /// box holds the gear until it reaches 0.
     pub shift_timer: f32,
     /// How long the brake has been held at a stop in a forward gear, s; reverse engages at
-    /// `REVERSE_DWELL_S`. Zero whenever the car moves or the brake is released.
+    /// `REVERSE_DWELL_S`. Zero once the brake is released; -1 while a brake pressed on the
+    /// move holds the car it stopped (reverse takes a fresh press).
     pub reverse_hold_s: f32,
     /// Smoothed pedals in `[0, 1]` and the clamped steer input in `[-1, 1]`.
     pub throttle: f32,
@@ -665,7 +678,8 @@ pub fn step(
     state.steer_angle_rad += (target - state.steer_angle_rad) * chase;
 
     // 2. Gearbox and engine (automatic; `spec.auto == false` shifts the same until manual
-    // mode exists). Stopped + brake held `REVERSE_DWELL_S` selects reverse; stopped + throttle
+    // mode exists). Stopped + brake pressed at the stop and held `REVERSE_DWELL_S` selects
+    // reverse (a brake that brought the car to the stop only holds it); stopped + throttle
     // selects drive.
     let shift_s = spec.shift_ms * 0.001 + SHIFT_HOLD_S;
     let n_gears = spec.gears.len() as i8;
@@ -676,8 +690,13 @@ pub fn step(
         }
     }
     let stopped = abs(fwd_speed) < DIRECTION_SWITCH_SPEED;
-    if stopped && state.gear >= 0 && state.brake > 0.2 && state.throttle < 0.05 {
-        state.reverse_hold_s += DT;
+    if state.gear >= 0 && state.brake > 0.2 {
+        if !stopped {
+            // A brake that stops the car holds it (at a light, on a hill) until let go.
+            state.reverse_hold_s = -1.0;
+        } else if state.reverse_hold_s >= 0.0 && state.throttle < 0.05 {
+            state.reverse_hold_s += DT;
+        }
     } else {
         state.reverse_hold_s = 0.0;
     }
@@ -775,11 +794,27 @@ pub fn step(
         let wheel_drag = (lo + (hi - lo) * rev) * mass * GRAVITY * radius;
         engine_torque -= wheel_drag / (abs(ratio) * DRIVELINE_EFFICIENCY) * (1.0 - drive_pedal);
     }
-    let axle_torque = if declutched {
+    let mut axle_torque = if declutched {
         0.0
     } else {
         engine_torque * ratio * DRIVELINE_EFFICIENCY
     };
+    if state.gear > 0 && !declutched && assists.hill > 0.0 {
+        // Hill help: the grade's pull back along the car (gravity along the ground the
+        // wheels last stood on, so the body's squat adds nothing), cancelled at the wheels.
+        let mut n = ZERO;
+        for i in 0..4 {
+            if state.wheels[i].grounded {
+                n = add(n, state.wheels[i].normal);
+            }
+        }
+        let grade = fwd[1] - n[1] * dot(n, fwd) / dot(n, n).max(1e-6);
+        if grade > 1e-3 {
+            let fade = unit(1.0 - fwd_speed / HILL_FADE_MPS);
+            let pull = mass * GRAVITY * grade * radius;
+            axle_torque += unit(assists.hill) * drive_pedal * fade * pull;
+        }
+    }
     let reflected_inertia = if coupled {
         ENGINE_INERTIA * ratio * ratio
     } else {

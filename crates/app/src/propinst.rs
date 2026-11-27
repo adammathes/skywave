@@ -676,9 +676,9 @@ mod tests {
     const Z: place::ZoneId = place::ZoneId::Residential;
 
     /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
-    /// the 2001 hero cars, which only the player and traffic drive, and the two trucks too long for a
-    /// stall, which only traffic drives.
-    const UNPARKED: [&str; 24] = [
+    /// the 2001 hero cars and Lake City's pony hatch and the 2005 Bay heroes and crossover, which only the player and traffic drive,
+    /// and the two trucks too long for a stall, which only traffic drives.
+    const UNPARKED: [&str; 25] = [
         "basilisk_v12",
         "basilisk_roadster",
         "avocet_v8",
@@ -698,6 +698,7 @@ mod tests {
         "courser_v8",
         "dunlin_roadster",
         "palfrey_roadster",
+        "corvid_hatch",
         "goshawk_turbo",
         "tulwar_sedan",
         "petrel_roadster",

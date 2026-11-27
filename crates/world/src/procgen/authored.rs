@@ -66,6 +66,8 @@ const OVERPASS_FLAT_M: f32 = 9.0;
 const APPROACH_GRADE: f32 = 0.04;
 /// Steepest highway grade unless the road says otherwise.
 const HIGHWAY_GRADE: f32 = 0.05;
+/// Passes that ease junction heights on steep ground toward their streets' grades.
+const JUNCTION_PASSES: usize = 64;
 /// A ramp meets its crossing road where the approach has come down this far from the deck.
 const RAMP_FOOT_DROP_M: f32 = 1.0;
 /// A ramp stays level with the highway this far from where it leaves it.
@@ -110,7 +112,13 @@ fn build_detailed(
     grammar: &Grammar,
 ) -> (Place, ChunkPlan) {
     let (m, roads, start) = skeleton(seed, layout);
-    super::build::fill(seed, template, grammar, &m, &roads, start)
+    let (mut place, plan) = super::build::fill(seed, template, grammar, &m, &roads, start);
+    let towers = towers(layout, &m);
+    if !towers.is_empty() {
+        place.props.items.extend(towers);
+        place.sort_by_chunk();
+    }
+    (place, plan)
 }
 
 /// Everything the layout says: its macro map with the roads laid and the channels cut,
@@ -120,6 +128,80 @@ pub fn skeleton(seed: Seed, layout: &Layout) -> (MacroMap, RoadGraph, Option<Spa
     let (roads, start) = arterials(layout, &mut m);
     channels(layout, &mut m);
     (m, roads, start)
+}
+
+/// A suspension bridge's towers stand this share of its crossing in from each shore.
+const TOWER_IN: f32 = 0.12;
+/// Their height over the deck as a share of the span between them, and the least.
+const TOWER_RISE: f32 = 0.36;
+const TOWER_RISE_MIN_M: f32 = 40.0;
+/// How far outside the deck's edge their legs stand, m.
+const TOWER_CLEAR_M: f32 = 4.0;
+
+/// The towers of each `suspension` road's bridge: over its longest run across the water
+/// (ground under the water level, sampled every 2 m along its line), [`TOWER_IN`] in from
+/// either shore, facing each other on the deck.
+fn towers(layout: &Layout, m: &MacroMap) -> Vec<place::Prop> {
+    let wl = m.water_level;
+    let mut out = Vec::new();
+    for r in layout.roads.iter().filter(|r| r.suspension) {
+        let Some(line) = layout.road_line(r) else {
+            continue;
+        };
+        let mut pts: Vec<V2> = Vec::new();
+        for seg in line.windows(2) {
+            let n = ((seg[1] - seg[0]).length() * 0.5) as usize + 1;
+            for k in 0..n {
+                pts.push(seg[0].lerp(seg[1], k as f32 / n as f32));
+            }
+        }
+        pts.extend(line.last());
+        let wet: Vec<bool> = pts
+            .iter()
+            .map(|p| m.height_at(p.x, p.y) < wl + 0.3)
+            .collect();
+        let (mut best, mut run) = ((0, 0), None);
+        for (i, &w) in wet.iter().enumerate() {
+            match (w, run) {
+                (true, None) => run = Some(i),
+                (false, Some(a)) => {
+                    if i - a > best.1 - best.0 {
+                        best = (a, i);
+                    }
+                    run = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(a) = run {
+            if pts.len() - a > best.1 - best.0 {
+                best = (a, pts.len());
+            }
+        }
+        let (a, b) = best;
+        if b - a < 8 {
+            continue;
+        }
+        let k = ((b - a) as f32 * TOWER_IN) as usize;
+        let (p, q) = (pts[a + k], pts[b - 1 - k]);
+        let span = (q - p).length();
+        let rise = (span * TOWER_RISE).clamp(TOWER_RISE_MIN_M, 250.0);
+        let (_, half_w) = road_width(r);
+        let width = (2.0 * (half_w + TOWER_CLEAR_M)).min(250.0);
+        let y = wl + r.deck_m;
+        for (at, to) in [(p, q), (q, p)] {
+            out.push(place::Prop {
+                pos: [at.x, y, at.y],
+                yaw: crate::props::yaw_of_dir((to - at).normalize()),
+                kind: place::PropKind::BridgeTower {
+                    span_m: span.min(65_535.0) as u16,
+                    rise_m: rise as u8,
+                    width_m: width as u8,
+                },
+            });
+        }
+    }
+    out
 }
 
 /// A ridge ready to sample: its line, a height per point, falloff, relief and bounding box.
@@ -178,7 +260,8 @@ pub fn macro_map(seed: Seed, layout: &Layout) -> MacroMap {
                 let t = 1.0 - smoothstep(0.0, pk.falloff_m, d);
                 lift = lift.max(pk.height_m * t);
             }
-            let mut y = layout.ground_m + lift + 1.5 * roll.at(p.x, p.y);
+            let grid = layout.terrain.as_ref().map_or(0.0, |t| t.at(p.x, p.y));
+            let mut y = layout.ground_m + grid + lift + 1.5 * roll.at(p.x, p.y);
             for (poly, depth, bb) in &waters {
                 if !in_box(p, bb) {
                     continue;
@@ -615,6 +698,45 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
             }
         }
     }
+    // Junctions on steep ground: the ground under two ends of a street can differ by more
+    // than its grade allows over its length, and the street would then ramp straight
+    // between them, as steep as the hill. Ease such ends toward each other (the ground is
+    // cut and filled to meet them), leaving the highways' and overpasses' heights be.
+    let fixed: Vec<bool> = (0..nodes.len())
+        .map(|nd| on_highway[nd] || node_y[nd] > elev[nd].unwrap_or(0.0) + 0.01)
+        .collect();
+    let spans: Vec<(usize, usize, f32)> = pieces
+        .iter()
+        .filter(|pc| kind[pc.line] == Kind::Road)
+        .map(|pc| {
+            let len = arcs(&pc.pts).last().copied().unwrap_or(0.0);
+            let g = layout.roads[road[pc.line]].max_grade.unwrap_or(MAX_GRADE);
+            (pc.a, pc.b, g * len)
+        })
+        .collect();
+    for _ in 0..JUNCTION_PASSES {
+        let mut moved = false;
+        for &(a, b, reach) in &spans {
+            let d = node_y[b] - node_y[a];
+            let excess = abs(d) - reach;
+            if excess <= 0.01 || fixed[a] && fixed[b] {
+                continue;
+            }
+            let step = if d > 0.0 { excess } else { -excess };
+            if fixed[a] {
+                node_y[b] -= step;
+            } else if fixed[b] {
+                node_y[a] += step;
+            } else {
+                node_y[a] += 0.5 * step;
+                node_y[b] -= 0.5 * step;
+            }
+            moved = true;
+        }
+        if !moved {
+            break;
+        }
+    }
 
     let mut bridged: Vec<Vec<bool>> = Vec::new();
     let edges: Vec<Edge> = pieces
@@ -668,13 +790,8 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
                     )
                 }
             };
-            let (width_m, speed) = match (r.class, r.lanes) {
-                (RoadClass::Highway, l) => (2.0 * highway_half(l), 100),
-                (RoadClass::Rural, _) => (8.0, 70),
-                (_, 1) => (12.0, 50),
-                (_, 2) => (14.0, 60),
-                (_, l) => (f32::from(l) * 6.8 + 1.8, 60),
-            };
+            let (speed, half_w) = road_width(r);
+            let width_m = 2.0 * half_w;
             let profile = pc
                 .pts
                 .iter()
@@ -725,6 +842,18 @@ pub fn arterials(layout: &Layout, m: &mut MacroMap) -> (RoadGraph, Option<Spawn>
     };
     let start = start(layout, &lines, &graph);
     (graph, start)
+}
+
+/// A layout road's default speed (km/h) and half its width (m), by class and lanes.
+fn road_width(r: &layout::Road) -> (u8, f32) {
+    let (w, speed) = match (r.class, r.lanes) {
+        (RoadClass::Highway, l) => (2.0 * highway_half(l), 100),
+        (RoadClass::Rural, _) => (8.0, 70),
+        (_, 1) => (12.0, 50),
+        (_, 2) => (14.0, 60),
+        (_, l) => (f32::from(l) * 6.8 + 1.8, 60),
+    };
+    (speed, 0.5 * w)
 }
 
 /// Cuts and fills the ground to meet the roads: under a road and its shoulders the ground
