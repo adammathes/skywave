@@ -213,7 +213,7 @@ fn no_bay_loop_street_is_steeper_than_a_real_one() {
 }
 
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
-const BOWL_GOLDEN: u64 = 0x985a50fc532b99af;
+const BOWL_GOLDEN: u64 = 0xbcaf6d60b7f06597;
 
 /// The Mirage Bowl: a valid, deterministic place, its main roads one network, the start on
 /// the summit avenue, and the rim above the floor on its mountain sides.

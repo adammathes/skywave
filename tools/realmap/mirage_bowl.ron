@@ -1,0 +1,21 @@
+// Mirage Bowl's ground from real data (`cargo run -p realmap -- tools/realmap/mirage_bowl.ron`):
+// a valley floor under a straight mountain front, its side hills and its rail-yard south end,
+// squeezed into the 3 km frame (about 1:6). Only the terrain is generated: the bowl's grid,
+// rail, airfield, wash and peaks stay as drawn in the layout.
+Import(
+    layout: "assets/layouts/mirage_bowl.ron",
+    state: "06",
+    x_warp: [(-117.786, 0), (-117.566, 3072)],
+    z_warp: [(34.30, 0), (34.15, 600), (34.03, 3072)],
+    // The floor's low south end is the layout's ground.
+    datum_m: 270,
+    slope: 6,
+    // The floor rises gently to the mountain front; the mountains keep their height.
+    foothill_m: 2500,
+    smooth: 2,
+    max_height_m: 260,
+    // No sea in the valley.
+    sea_below_m: -1000,
+    terrain_cell_m: 48,
+    merge_m: 16,
+)

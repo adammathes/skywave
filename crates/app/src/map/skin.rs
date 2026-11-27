@@ -7,7 +7,7 @@
 //!   grain, no buildings, white streets, yellow main roads, red-orange freeways, a pale
 //!   blue page grid, an oxblood cover for a rim.
 //! - `transit`: a fold-out city map crossed with a transit diagram. Warm off-white ground,
-//!   a bold lake, main roads as heavy red lines, freeways in blue, a black rim.
+//!   a bold lake, main roads as heavy charcoal lines, expressways in blue, a black rim.
 //! - `nav`: a mid-2000s in-dash navigation screen. Dark night-mode ground, bright roads with
 //!   the route-colored main roads, no buildings, a silver bezel, a blue-white car arrow.
 //!
@@ -137,7 +137,12 @@ pub const ATLAS: Skin = Skin {
             ATLAS_WATER,
         );
         // Downtown a shade pinker, as atlases tint the business district.
-        z[0] = [240, 222, 210];
+        // Districts read at a glance: the business district pink, the strips and shops
+        // peach, the yards grey, as atlases tint them.
+        z[0] = [240, 214, 206];
+        z[1] = [248, 222, 190];
+        z[5] = [248, 222, 190];
+        z[4] = [226, 222, 210];
         z
     },
     water: ATLAS_WATER,
@@ -164,8 +169,8 @@ const TRANSIT_WATER: Rgb = [62, 128, 196];
 fn transit_road(class: RoadClass) -> RoadStyle {
     match class {
         RoadClass::Highway => road([44, 92, 176], [250, 248, 240], 10.0),
-        RoadClass::Arterial => road([206, 54, 42], [250, 248, 240], 7.0),
-        RoadClass::Collector | RoadClass::Beachfront => road([128, 124, 118], [238, 235, 226], 3.0),
+        RoadClass::Arterial => road([70, 68, 72], [250, 248, 240], 6.0),
+        RoadClass::Collector | RoadClass::Beachfront => road([150, 146, 140], [238, 235, 226], 3.0),
         RoadClass::Local => road([196, 190, 180], [238, 235, 226], 2.0),
         RoadClass::Rural => road([150, 140, 120], [238, 235, 226], 2.0),
         RoadClass::Alley => alley([214, 208, 198], 0.6),
@@ -182,8 +187,10 @@ pub const TRANSIT: Skin = Skin {
             [222, 214, 196],
             TRANSIT_WATER,
         );
-        z[0] = [224, 214, 204];
-        z[4] = [222, 220, 214];
+        z[0] = [226, 208, 200];
+        z[1] = [240, 222, 196];
+        z[5] = [240, 222, 196];
+        z[4] = [218, 216, 210];
         z
     },
     water: TRANSIT_WATER,
@@ -228,7 +235,10 @@ pub const NAV: Skin = Skin {
             [44, 46, 52],
             NAV_WATER,
         );
-        z[0] = [42, 46, 64];
+        z[0] = [56, 50, 74];
+        z[1] = [62, 48, 60];
+        z[5] = [62, 48, 60];
+        z[4] = [40, 44, 46];
         z
     },
     water: NAV_WATER,

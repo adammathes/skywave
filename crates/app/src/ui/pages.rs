@@ -206,8 +206,7 @@ pub const PAINT_NAMES: [&str; super::roster::MAX_PAINTS] = [
 
 pub const CLOCK_SPEED_NAMES: [&str; CLOCK_SPEEDS.len()] = ["Frozen", "Real time", "10x", "60x"];
 /// Names of [`MINIMAP_RANGES_M`].
-pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] =
-    ["Auto", "300 m", "600 m", "1.2 km"];
+pub const MINIMAP_RANGE_NAMES: [&str; MINIMAP_RANGES_M.len()] = ["Auto", "500 m", "1 km", "2 km"];
 /// The Headlights choice: index 0 is Auto, 1 Manual.
 pub const HEADLIGHT_NAMES: [&str; 2] = ["Auto", "Manual"];
 /// Names of [`Handling::ALL`].

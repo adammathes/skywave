@@ -1459,7 +1459,7 @@ impl App {
             radio_display,
         };
         self.ui.draw(&ctx);
-        self.update_preview(dt as f32);
+        self.update_preview(dt as f32, &state);
         self.audio = self.sound.params(
             &self.drive,
             &self.ground,

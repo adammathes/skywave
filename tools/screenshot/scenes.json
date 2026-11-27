@@ -60,7 +60,7 @@
     "params": { "seed": "1", "place": "coast", "car": "gannet_gt", "cam": "chase-mid", "t": "18:30", "lights": "1", "pos": "589.7,1878.6", "yaw": "90", "traffic": "busy", "still": "1", "stream": "1" }
   },
   "vehicle-select": {
-    "about": "The pause menu's Vehicle page at golden hour: the Regent on the turntable beside the panel, its paint swatches and specs.",
+    "about": "The pause menu's Vehicle page (at golden hour, which the studio does not show): the Regent on the turntable in the studio beside the panel, its paint swatches and specs.",
     "params": { "menu": "vehicle", "car": "regent_coupe_cabrio", "t": "17:40", "still": "1", "stream": "0" }
   },
   "basin-boulevard-night": {

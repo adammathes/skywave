@@ -196,8 +196,8 @@ pub struct App {
     paint_base: (&'static str, CarModel),
     /// The Vehicle page's turntable this frame: the car and its stage (virtual HUD units).
     preview: Option<(RegisteredCar, [f32; 4])>,
-    /// The turntable's disc and its turn, radians.
-    turntable: MeshId,
+    /// The studio's backdrop, and the car's turn, radians.
+    backdrop: MeshId,
     spin: f32,
     /// The instances the turntable added in the last [`App::scene_view`].
     preview_drawn: core::ops::Range<usize>,
@@ -401,8 +401,8 @@ impl App {
             meshes.push(m);
             MeshId(meshes.len() as u32 - 1)
         });
-        meshes.push(preview::turntable_mesh());
-        let turntable = MeshId(meshes.len() as u32 - 1);
+        meshes.push(preview::backdrop_mesh());
+        let backdrop = MeshId(meshes.len() as u32 - 1);
         if let Some(p) = &mut props {
             let ids = p
                 .meshes()
@@ -513,7 +513,7 @@ impl App {
             cars,
             paint_base: (vehicles::BUILTIN[vehicle_index].0, base),
             preview: None,
-            turntable,
+            backdrop,
             spin: preview::STILL_SPIN_RAD,
             preview_drawn: 0..0,
             pending_meshes: Vec::new(),
@@ -906,10 +906,11 @@ impl App {
     }
 
     /// The car and paint the Vehicle page shows, registered (see [`App::registered`]) and
-    /// put on the turntable for [`App::scene_view`]; the turntable turns `dt` seconds (not
-    /// in a still scene, which shows [`preview::STILL_SPIN_RAD`]). Nothing when the page is
-    /// not up.
-    fn update_preview(&mut self, dt: f32) {
+    /// put on the turntable for [`App::scene_view`]. It opens on
+    /// [`preview::STILL_SPIN_RAD`] and turns only by the player's look input over `dt`
+    /// seconds (the stick a rate, the mouse a distance). Nothing when the page is not up.
+    fn update_preview(&mut self, dt: f32, input: &InputState) {
+        let was_up = self.preview.is_some();
         self.preview = match self.ui.preview() {
             Some((index, paint, stage)) => {
                 let car = self.registered(index, paint_of(index, paint));
@@ -918,14 +919,19 @@ impl App {
             }
             None => None,
         };
-        if self.preview.is_some() && !self.still {
-            self.spin =
-                (self.spin + dt * preview::SPIN_RAD_PER_S).rem_euclid(core::f32::consts::TAU);
+        if self.preview.is_none() {
+            return;
         }
+        if !was_up || self.still {
+            self.spin = preview::STILL_SPIN_RAD;
+            return;
+        }
+        let turn = input.axis(Action::LookX) * dt + input.motion(Action::LookX);
+        self.spin = (self.spin + turn * preview::TURN_RAD_PER_S).rem_euclid(core::f32::consts::TAU);
     }
 
-    /// Instances of the turntable in the last [`App::scene_view`] (empty when the Vehicle
-    /// page is not up).
+    /// Instances of the turntable in the last [`App::scene_view`]'s instances (empty when the
+    /// Vehicle page is not up).
     pub fn preview_instances(&self) -> core::ops::Range<usize> {
         self.preview_drawn.clone()
     }
@@ -1240,12 +1246,68 @@ impl App {
         ]
     }
 
+    /// The Vehicle page's studio ([`preview`]): the backdrop and the car, in
+    /// front of a level camera at the eye under a fixed noon sun; none of the world.
+    fn studio_view(&mut self, alpha: f32, aspect: f32) -> SceneView<'_> {
+        let eye = if self.fly {
+            self.prev.lerp(&self.curr, alpha).pos
+        } else {
+            self.camera.pose(&self.drive, alpha).eye
+        };
+        let view = glam::camera::rh::view::look_to_mat4(eye, Vec3::NEG_Z, Vec3::Y);
+        let fov = preview::STUDIO_FOV_DEG.to_radians();
+        let proj = directx::perspective(fov, aspect, 0.05, 2.0 * preview::BACKDROP_M);
+        let noon = daylight::Daylight::compute(self.time.latitude_deg, 172, 12.0 * 3600.0);
+        let mut sun = lighting::sun(&noon);
+        sun.direction = Vec3::from(preview::STUDIO_SUN).normalize().to_array();
+        let sky = render::Sky {
+            fog_density: 0.0,
+            star_brightness: 0.0,
+            moon_luminance: 0.0,
+            ..lighting::sky(&noon)
+        };
+        self.instances.truncate(self.world_instances);
+        let start = self.instances.len();
+        let glow = preview::BACKDROP_EXPOSED / (sky.exposure * sky.emissive_boost);
+        preview::push_backdrop(self.backdrop, eye, glow, &mut self.instances);
+        let car_at = self.instances.len();
+        if let Some((car, stage)) = &self.preview {
+            let stage = self.stage_ndc(*stage, aspect);
+            if let Some(table) = preview::table_to_world(view, proj, stage, &car.layout, self.spin)
+            {
+                let model = preview::Model {
+                    car: &car.meshes,
+                    layout: &car.layout,
+                    driver: self.drivers.get(self.ui.driver()),
+                };
+                let glow = lighting::car_glow(&noon);
+                preview::push(table, &model, glow, 0.0, &mut self.instances);
+            }
+        }
+        self.preview_drawn = car_at - start..self.instances.len() - start;
+        SceneView {
+            camera: Camera {
+                view: view.to_cols_array_2d(),
+                proj: proj.to_cols_array_2d(),
+            },
+            sun,
+            sky: self.ui.video_sky(sky),
+            instances: &self.instances[start..],
+            lights: &[],
+            hud: self.ui.hud(),
+            quality: self.ui.render_quality(),
+        }
+    }
+
     /// The scene interpolated `alpha` of the way from the previous to the current step.
     /// Refills the car's instances in place (no allocation after the first frame).
     pub fn scene_view(&mut self, alpha: f32, aspect: f32) -> SceneView<'_> {
         let alpha = alpha.clamp(0.0, 1.0);
         let aspect = aspect.max(1e-3);
         self.aspect = aspect;
+        if self.preview.is_some() {
+            return self.studio_view(alpha, aspect);
+        }
         let (view, proj) = if self.fly {
             let cam = self.prev.lerp(&self.curr, alpha);
             let proj = directx::perspective(FLY_FOV_DEG.to_radians(), aspect, 0.25, 6000.0);
@@ -1273,50 +1335,45 @@ impl App {
         } else {
             drive::Cabin::Frame
         };
-        // Under the Vehicle page the turntable shows the car (and stands where the cabin
-        // would be round a first-person eye): no car of our own.
-        if self.preview.is_none() {
-            self.drive.push_instances(
-                alpha,
-                &self.car_meshes,
-                cabin,
-                drive::CarGlow {
-                    speedo: self.wave.speedo_glow(),
-                    ..lighting::car_glow(&daylight)
-                },
-                &mut self.instances,
-            );
-            // The cockpit draws the driver unless the player hid it; the outside cameras
-            // always do.
-            let shown = cabin != drive::Cabin::Full || self.ui.settings().cockpit_driver;
-            if let Some(d) = self.drivers.get(self.ui.driver()).filter(|_| shown) {
-                let look = self.camera.look_yaw(alpha);
-                // In the cockpit the driver moves with the seat adjustment, as the eye does.
-                let p = &self.camera.prefs;
-                let shift = if cabin == drive::Cabin::Full {
-                    Vec3::new(0.0, p.seat_up_m, -p.seat_forward_m)
-                } else {
-                    Vec3::ZERO
-                };
-                self.drive
-                    .push_driver(alpha, d, cabin, look, shift, &mut self.instances);
-            }
-            if let Some(d) = &self.drivethru {
-                let body = self.drive.pose(alpha).matrix();
-                let seat = drivethru::seat_point(self.drive.layout.seating.hip);
-                let inside = if cabin == drive::Cabin::Full {
-                    1.0
-                } else {
-                    0.0
-                };
-                d.push_seat(body, seat, inside, &mut self.instances);
-            }
+        self.drive.push_instances(
+            alpha,
+            &self.car_meshes,
+            cabin,
+            drive::CarGlow {
+                speedo: self.wave.speedo_glow(),
+                ..lighting::car_glow(&daylight)
+            },
+            &mut self.instances,
+        );
+        // The cockpit draws the driver unless the player hid it; the outside cameras
+        // always do.
+        let shown = cabin != drive::Cabin::Full || self.ui.settings().cockpit_driver;
+        if let Some(d) = self.drivers.get(self.ui.driver()).filter(|_| shown) {
+            let look = self.camera.look_yaw(alpha);
+            // In the cockpit the driver moves with the seat adjustment, as the eye does.
+            let p = &self.camera.prefs;
+            let shift = if cabin == drive::Cabin::Full {
+                Vec3::new(0.0, p.seat_up_m, -p.seat_forward_m)
+            } else {
+                Vec3::ZERO
+            };
+            self.drive
+                .push_driver(alpha, d, cabin, look, shift, &mut self.instances);
+        }
+        if let Some(d) = &self.drivethru {
+            let body = self.drive.pose(alpha).matrix();
+            let seat = drivethru::seat_point(self.drive.layout.seating.hip);
+            let inside = if cabin == drive::Cabin::Full {
+                1.0
+            } else {
+                0.0
+            };
+            d.push_seat(body, seat, inside, &mut self.instances);
         }
         // The car's lamps, the nearest NPC cars' low beams, then every static light the
         // photocell has on; each instance gets the nearest that reach it, the car's
         // instances those round the car.
         let (car_lights, n) = self.drive.lights(alpha);
-        let n = if self.preview.is_some() { 0 } else { n };
         let eye = view.inverse().w_axis.truncate();
         let mut dynamic = [PointLight::omni([0.0; 3], [0.0; 3], 0.0); DYNAMIC_LIGHTS];
         dynamic[..n].copy_from_slice(&car_lights[..n]);
@@ -1370,12 +1427,6 @@ impl App {
             npc_glow,
             &mut self.instances,
         );
-        // Whole people only: none near the vehicle preview (below), none cut in half there.
-        let clear = if self.preview.is_some() {
-            preview::CLEAR_M + peds::REACH_M
-        } else {
-            0.0
-        };
         let seated = if self.npcs.active() {
             &self.npcs.seated[..]
         } else {
@@ -1383,37 +1434,8 @@ impl App {
         };
         self.npcs
             .crowd
-            .push(alpha, eye, clear, &self.lights, seated, &mut self.instances);
-        if self.preview.is_some() {
-            // Nothing that moves or stands by the eye cuts into the turntable: drop the
-            // traffic, people and props near it (in place, keeping their order).
-            let mut keep = self.world_instances;
-            for k in self.world_instances..self.instances.len() {
-                let at = Vec3::from_slice(&self.instances[k].transform[3][..3]);
-                if at.distance_squared(eye) > preview::CLEAR_M * preview::CLEAR_M {
-                    self.instances.swap(keep, k);
-                    keep += 1;
-                }
-            }
-            self.instances.truncate(keep);
-        }
-        let start = self.instances.len();
-        if let Some((car, stage)) = &self.preview {
-            let stage = self.stage_ndc(*stage, aspect);
-            if let Some(table) = preview::table_to_world(view, proj, stage, &car.layout, self.spin)
-            {
-                let model = preview::Model {
-                    car: &car.meshes,
-                    layout: &car.layout,
-                    turntable: self.turntable,
-                    driver: self.drivers.get(self.ui.driver()),
-                };
-                let glow = lighting::car_glow(&daylight);
-                let fill = daylight.window_emissive_scale;
-                preview::push(table, &model, glow, fill, &mut self.instances);
-            }
-        }
-        self.preview_drawn = start..self.instances.len();
+            .push(alpha, eye, &self.lights, seated, &mut self.instances);
+        self.preview_drawn = self.instances.len()..self.instances.len();
         let mut sky = lighting::sky(&daylight);
         sky.fog_density *= scenario::get(self.scenario()).haze;
         SceneView {
@@ -2277,19 +2299,19 @@ mod tests {
         let world = app.world_instances;
         let meshes = app.meshes().len();
         let ids = app.car_meshes;
-        let turntable = app.turntable;
+        let backdrop = app.backdrop;
         let view = app.scene_view(steps.alpha, 16.0 / 9.0);
         // The world, then the car: body, glass, unlit lamps and four wheels (no cabin in
         // the chase view).
         assert_eq!(MeshId(world as u32), ids.lods[0].body[0]);
-        // ...then the turntable's disc.
+        // ...then the studio's backdrop.
         let drivers = DRIVER_MESHES as u32;
         assert_eq!(ids.dial_ticks, MeshId(meshes as u32 - 4 - drivers));
         assert_eq!(
             ids.telltales,
             [3, 2].map(|k| MeshId(meshes as u32 - k - drivers))
         );
-        assert_eq!(turntable, MeshId(meshes as u32 - 1));
+        assert_eq!(backdrop, MeshId(meshes as u32 - 1));
         // Body, glass, lamps, four wheels, the cabin and steering wheel, the driver.
         assert_eq!(view.instances.len(), world + 9 + traffic::figure::PARTS);
         for (i, inst) in view.instances[..world].iter().enumerate() {
