@@ -126,9 +126,14 @@ layout's generated sections, each between `// realmap:<name> begin` and `// real
 
 A city's main streets are mostly not state routes, so an import may name a `county`: its
 all-roads file is read instead, and the streets whose TIGER names are in `names` come in as
-arterials (the names stay in the import file; the game's are invented). Highways are traced
-apart from the streets, so they pass over them; a highway's loose end is cut back to the
-first street junction it passes and meets the streets there. `skip` boxes cut highways out where they run too close to streets or a river for their
+arterials (the names stay in the import file; the game's are invented). With
+`separate_highways: true` (a dense grid) highways are traced apart from the streets, so they
+pass over them; a highway's loose end is cut back to the first street junction it passes and
+meets the streets there. Otherwise (a sparse net of main roads, whose streets meet each other
+only through the freeways) everything traces as one network and a highway piece under 300 m
+stays a street. Streets mostly over a `hilly` district may climb 0.22, others 0.16. Bends
+are eased to 12° or less, road ends join exactly on the road they meet, and roads run
+straight for 25 m into every junction, which traffic's lanes and stop lines need. `skip` boxes cut highways out where they run too close to streets or a river for their
 overpasses at the squeeze.
 
 Everything else in the layout (extra hand-drawn roads, channels, edges) stays as written.
