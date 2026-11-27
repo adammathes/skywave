@@ -34,6 +34,15 @@ pub struct Import {
     pub x_warp: Vec<(f64, f32)>,
     /// Latitude to z, the same way, from the north edge (z = 0) down.
     pub z_warp: Vec<(f64, f32)>,
+    /// A county's FIPS code: read its all-roads file, and take the `names` too.
+    #[serde(default)]
+    pub county: Option<String>,
+    /// TIGER `FULLNAME`s of main streets to import as arterials (with `county`).
+    #[serde(default)]
+    pub names: Vec<String>,
+    /// The real height that maps to the layout's ground (a lake city's shore).
+    #[serde(default)]
+    pub datum_m: f32,
     /// Slopes are this many times steeper than the real ones at the local squeeze.
     pub slope: f32,
     /// Low ground is flattened: a real height `h` counts as `h * h / (h + foothill_m)`, so
@@ -51,6 +60,9 @@ pub struct Import {
     pub max_height_m: f32,
     /// Land at or under this real height that the sea reaches is water.
     pub sea_below_m: f32,
+    /// `Sea` (the default) or `Lake`.
+    #[serde(default = "sea")]
+    pub water_kind: String,
     /// Spacing of the height grid.
     pub terrain_cell_m: f32,
     /// Road rasterization cell: roads closer than this merge (divided highways become one).
@@ -59,7 +71,7 @@ pub struct Import {
     /// S1200 secondary (as arterials).
     #[serde(default = "classes")]
     pub classes: Vec<String>,
-    /// Real-world boxes (west, south, east, north) whose roads are left out.
+    /// Real-world boxes (west, south, east, north) whose roads are cut out.
     #[serde(default)]
     pub skip: Vec<(f64, f64, f64, f64)>,
     /// Invented links, (lon, lat) polylines imported like secondary roads: a stand-in for a
@@ -72,8 +84,26 @@ pub struct Import {
     pub suspension: Vec<(f64, f64)>,
     /// Districts, in degrees.
     pub districts: Vec<District>,
-    /// The player starts on the road nearest this point, driving away from its first point.
+    /// The player starts on the road nearest this point...
     pub start: (f64, f64),
+    /// ...driving toward this one (the road's points are turned round to suit).
+    #[serde(default)]
+    pub start_toward: Option<(f64, f64)>,
+    /// Channels, in degrees.
+    #[serde(default)]
+    pub channels: Vec<Channel>,
+}
+
+/// A channel or river (`docs/LAYOUTS.md`), its line in degrees.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Channel {
+    pub name: String,
+    pub line: Vec<(f64, f64)>,
+    pub width_m: f32,
+    pub depth_m: f32,
+    #[serde(default)]
+    pub wet: bool,
 }
 
 /// A district: a polygon, or a band along a line `band_m` either side.
@@ -90,6 +120,10 @@ pub struct District {
     pub band: Vec<(f64, f64)>,
     #[serde(default)]
     pub band_m: f32,
+}
+
+fn sea() -> String {
+    "Sea".into()
 }
 
 fn max_height() -> f32 {
@@ -268,7 +302,14 @@ fn run(path: &str) -> Result<(), String> {
 
     let cache = std::path::Path::new("target/realmap");
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
-    let roads = sources::tiger_roads(cache, &cfg.state, &warp, &cfg.classes)?;
+    let roads = sources::tiger_roads(
+        cache,
+        &cfg.state,
+        cfg.county.as_deref(),
+        &cfg.names,
+        &warp,
+        &cfg.classes,
+    )?;
     let dem = sources::dem(cache, &warp, 1024)?;
     eprintln!("realmap: {} TIGER lines in the box", roads.len());
 
@@ -287,7 +328,7 @@ fn run(path: &str) -> Result<(), String> {
         for c in 0..cols {
             let (x, z) = (c as f32 * cell, r as f32 * cell);
             let (lon, lat) = warp.inv(x, z);
-            let h = dem.at(lon, lat).max(0.0);
+            let h = (dem.at(lon, lat) - cfg.datum_m).max(0.0);
             let hilly = hilly.iter().any(|p| point_in(lon, lat, p));
             let h = if cfg.foothill_m > 0.0 && !hilly {
                 h * h / (h + cfg.foothill_m)
@@ -332,7 +373,12 @@ fn run(path: &str) -> Result<(), String> {
     let polys = water::sea(&dem, &warp, ext, cfg.sea_below_m);
     let mut w = String::new();
     for p in &polys {
-        w.push_str("        Water(kind: Sea, depth_m: 4.2, polygon: [\n");
+        writeln!(
+            w,
+            "        Water(kind: {}, depth_m: 4.2, polygon: [",
+            cfg.water_kind
+        )
+        .unwrap();
         for chunk in p.chunks(8) {
             w.push_str("            ");
             for &(x, z) in chunk {
@@ -345,16 +391,32 @@ fn run(path: &str) -> Result<(), String> {
 
     // Roads.
     let skip: Vec<[f64; 4]> = cfg.skip.iter().map(|&(a, b, c, d)| [a, b, c, d]).collect();
-    let lines: Vec<sources::Line> = roads
-        .into_iter()
-        .filter(|l| {
-            !l.lonlat.iter().any(|&(lon, lat)| {
-                skip.iter()
-                    .any(|s| lon >= s[0] && lat >= s[1] && lon <= s[2] && lat <= s[3])
-            })
-        })
-        .collect();
-    let mut lines = lines;
+    // Cut out the parts of lines inside a skip box, splitting them there.
+    let skipped = |(lon, lat): (f64, f64)| {
+        skip.iter()
+            .any(|s| lon >= s[0] && lat >= s[1] && lon <= s[2] && lat <= s[3])
+    };
+    let mut lines: Vec<sources::Line> = Vec::new();
+    for l in roads {
+        let mut part: Vec<(f64, f64)> = Vec::new();
+        for &p in l
+            .lonlat
+            .iter()
+            .chain(core::iter::once(&(f64::NAN, f64::NAN)))
+        {
+            if p.0.is_nan() || skipped(p) {
+                if part.len() >= 2 {
+                    lines.push(sources::Line {
+                        mtfcc: l.mtfcc.clone(),
+                        lonlat: core::mem::take(&mut part),
+                    });
+                }
+                part.clear();
+            } else {
+                part.push(p);
+            }
+        }
+    }
     lines.extend(cfg.links.iter().map(|l| sources::Line {
         mtfcc: "S1200".into(),
         lonlat: l.clone(),
@@ -364,7 +426,50 @@ fn run(path: &str) -> Result<(), String> {
         .iter()
         .map(|&(a, b)| warp.fwd(a, b))
         .collect();
-    let net = net::network(&lines, &warp, ext, cfg.merge_m, &susp);
+    let mut net = net::network(&lines, &warp, ext, cfg.merge_m, &susp);
+    // Start: the nearest point on any road.
+    let sp = warp.fwd(cfg.start.0, cfg.start.1);
+    let mut best = (f32::INFINITY, 0usize, 0.0f32, (0.0f32, 0.0f32));
+    for (ri, road) in net.iter().enumerate() {
+        let mut s = 0.0;
+        for w in road.points.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let len = (b.0 - a.0).hypot(b.1 - a.1);
+            let t = if len > 0.0 {
+                (((sp.0 - a.0) * (b.0 - a.0) + (sp.1 - a.1) * (b.1 - a.1)) / (len * len))
+                    .clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let q = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            let dd = (q.0 - sp.0).hypot(q.1 - sp.1);
+            if dd < best.0 {
+                best = (dd, ri, s + t * len, (b.0 - a.0, b.1 - a.1));
+            }
+            s += len;
+        }
+    }
+    // Facing away from `start_toward`: turn the road round.
+    let (ri, mut along) = (best.1, best.2);
+    if let Some((lon, lat)) = cfg.start_toward {
+        let to = warp.fwd(lon, lat);
+        let dir = best.3;
+        if dir.0 * (to.0 - sp.0) + dir.1 * (to.1 - sp.1) < 0.0 {
+            let pts = &mut net[ri].points;
+            let len: f32 = pts
+                .windows(2)
+                .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
+                .sum();
+            pts.reverse();
+            along = len - along;
+        }
+    }
+    let start = format!(
+        "    start: Start(road: \"{}\", along_m: {}),\n",
+        net[ri].name,
+        along.floor()
+    );
+
     let mut r = String::new();
     for road in &net {
         let pts: Vec<String> = road
@@ -426,34 +531,31 @@ fn run(path: &str) -> Result<(), String> {
         .unwrap();
     }
 
-    // Start: the nearest point on any road.
-    let sp = warp.fwd(cfg.start.0, cfg.start.1);
-    let mut best = (f32::INFINITY, String::new(), 0.0);
-    for road in &net {
-        let mut s = 0.0;
-        for w in road.points.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            let len = (b.0 - a.0).hypot(b.1 - a.1);
-            let t = if len > 0.0 {
-                (((sp.0 - a.0) * (b.0 - a.0) + (sp.1 - a.1) * (b.1 - a.1)) / (len * len))
-                    .clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            let q = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-            let dd = (q.0 - sp.0).hypot(q.1 - sp.1);
-            if dd < best.0 {
-                best = (dd, road.name.clone(), (s + t * len).floor());
-            }
-            s += len;
-        }
+    // Channels.
+    let mut ch = String::new();
+    for c in &cfg.channels {
+        let pts: Vec<String> = c
+            .line
+            .iter()
+            .map(|&(a, b)| clamp(warp.fwd(a, b)))
+            .map(|(x, z)| format!("({x}, {z})"))
+            .collect();
+        let wet = if c.wet { ", wet: true" } else { "" };
+        writeln!(
+            ch,
+            "        Channel(name: \"{}\", line: [{}], width_m: {}, depth_m: {}{wet}),",
+            c.name,
+            pts.join(", "),
+            c.width_m,
+            c.depth_m
+        )
+        .unwrap();
     }
-    let start = format!(
-        "    start: Start(road: \"{}\", along_m: {}),\n",
-        best.1, best.2
-    );
 
     let mut text = layout_text.clone();
+    if !cfg.channels.is_empty() {
+        text = splice(&text, "channels", &ch)?;
+    }
     text = splice(&text, "districts", &d)?;
     text = splice(&text, "start", &start)?;
     text = splice(&text, "terrain", &t)?;

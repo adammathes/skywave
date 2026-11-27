@@ -109,13 +109,11 @@ fn seg_dist(p: P, a: P, b: P) -> f32 {
     dist(p, (a.0 + dx * t, a.1 + dz * t))
 }
 
-/// The skeleton grid: which cells hold a road, and how many of their marks were highway.
+/// The skeleton grid: which cells hold a road.
 struct Grid {
     w: usize,
     h: usize,
     on: Vec<bool>,
-    hwy: Vec<u16>,
-    all: Vec<u16>,
 }
 
 impl Grid {
@@ -219,18 +217,84 @@ pub fn network(
     cell: f32,
     suspension: &[P],
 ) -> Vec<Road> {
+    // Highways on a skeleton of their own, so where one crosses a street there is no
+    // junction (it passes over) and a street corner never drags it off its line.
+    let art: Vec<&Line> = lines.iter().filter(|l| l.mtfcc != "S1100").collect();
+    let hwy: Vec<&Line> = lines.iter().filter(|l| l.mtfcc == "S1100").collect();
+    let (mut nodes, mut chains) = skeleton(&art, warp, ext, cell, false, suspension);
+    let (hn, hc) = skeleton(&hwy, warp, ext, cell, true, suspension);
+    let off = nodes.len();
+    nodes.extend(hn);
+    chains.extend(hc.into_iter().map(|mut c| {
+        c.a += off;
+        c.b += off;
+        c
+    }));
+    // A highway's loose end (off the frame, or short of the streets) is cut back to where
+    // it first passes a street junction, and meets the streets there.
+    let street: Vec<usize> = (0..off).filter(|&m| degree(&chains, m) > 0).collect();
+    for n in off..nodes.len() {
+        if degree(&chains, n) != 1 {
+            continue;
+        }
+        let Some(ci) = chains.iter().position(|c| c.a == n || c.b == n) else {
+            continue;
+        };
+        if chains[ci].b == n {
+            chains[ci].pts.reverse();
+            let c = &mut chains[ci];
+            core::mem::swap(&mut c.a, &mut c.b);
+        }
+        // Walk in from the loose end to the first point near a street junction.
+        let hit = chains[ci].pts.iter().enumerate().find_map(|(k, &p)| {
+            street
+                .iter()
+                .map(|&m| (dist(p, nodes[m]), m))
+                .filter(|&(d, _)| d < ATTACH_M)
+                .min_by(|x, y| x.0.total_cmp(&y.0))
+                .map(|(_, m)| (k, m))
+        });
+        let Some((k, m)) = hit else { continue };
+        let c = &mut chains[ci];
+        c.pts.drain(..k);
+        c.pts[0] = nodes[m];
+        c.a = m;
+        // No hook where the end jumped onto the junction: drop points that double back.
+        while c.pts.len() > 2 {
+            let (p0, p1, p2) = (c.pts[0], c.pts[1], c.pts[2]);
+            let u = (p1.0 - p0.0, p1.1 - p0.1);
+            let v = (p2.0 - p1.0, p2.1 - p1.1);
+            if u.0 * v.0 + u.1 * v.1 >= 0.0 {
+                break;
+            }
+            c.pts.remove(1);
+        }
+    }
+    cleanup(&mut nodes, &mut chains);
+    join(&nodes, &chains)
+}
+
+/// A highway end this close to a street junction meets it.
+const ATTACH_M: f32 = 90.0;
+
+/// The skeleton of `lines`: its junctions and the chains between them.
+fn skeleton(
+    lines: &[&Line],
+    warp: &Warp,
+    ext: [f32; 2],
+    cell: f32,
+    highways: bool,
+    suspension: &[P],
+) -> (Vec<P>, Vec<Chain>) {
     let w = (ext[0] / cell).ceil() as usize;
     let h = (ext[1] / cell).ceil() as usize;
     let mut g = Grid {
         w,
         h,
         on: vec![false; w * h],
-        hwy: vec![0; w * h],
-        all: vec![0; w * h],
     };
     // Rasterize: step a quarter cell along each segment; 4-connect diagonal steps.
     for l in lines {
-        let hw = l.mtfcc == "S1100";
         let pts: Vec<P> = l.lonlat.iter().map(|&(a, b)| warp.fwd(a, b)).collect();
         for s in pts.windows(2) {
             let n = (dist(s[0], s[1]) / (cell * 0.25)).ceil().max(1.0) as usize;
@@ -250,10 +314,6 @@ pub fn network(
                 let mut mark = |c: (i32, i32)| {
                     let i = c.1 as usize * w + c.0 as usize;
                     g.on[i] = true;
-                    g.all[i] += 1;
-                    if hw {
-                        g.hwy[i] += 1;
-                    }
                 };
                 if let Some(q) = last {
                     if q.0 != c.0 && q.1 != c.1 {
@@ -276,13 +336,6 @@ pub fn network(
             let (n, s, e, wst) = (before[i - w], before[i + w], before[i + 1], before[i - 1]);
             if (n && s) || (e && wst) {
                 g.on[i] = true;
-                let k = if n && s {
-                    [i - w, i + w]
-                } else {
-                    [i - 1, i + 1]
-                };
-                g.hwy[i] = g.hwy[k[0]].min(g.hwy[k[1]]);
-                g.all[i] = 1;
             }
         }
     }
@@ -341,7 +394,6 @@ pub fn network(
                 }
                 let (mut prev, mut cur) = ((x, z), start);
                 let mut pts = vec![nodes[a]];
-                let (mut hw, mut all) = (0u32, 0u32);
                 let b = loop {
                     let k = cur.1 as usize * w + cur.0 as usize;
                     if node_of[k] != usize::MAX {
@@ -349,8 +401,6 @@ pub fn network(
                     }
                     walked[k] = true;
                     pts.push(center(cur.0, cur.1));
-                    hw += u32::from(g.hwy[k]);
-                    all += u32::from(g.all[k]);
                     let nb = neighbours(&g, cur.0, cur.1);
                     let Some(&nx) = nb.iter().find(|&&q| q != prev) else {
                         break usize::MAX;
@@ -373,7 +423,7 @@ pub fn network(
                     a,
                     b,
                     pts,
-                    highway: all > 0 && hw * 2 >= all,
+                    highway: highways,
                     suspension: suspended,
                     alive: true,
                 });
@@ -381,8 +431,7 @@ pub fn network(
         }
     }
 
-    cleanup(&mut nodes, &mut chains);
-    join(&nodes, &chains)
+    (nodes, chains)
 }
 
 fn degree(chains: &[Chain], n: usize) -> usize {
@@ -582,10 +631,13 @@ fn join(nodes: &[P], chains: &[Chain]) -> Vec<Road> {
             i = j;
             forward = at_a;
         }
-        let pts: Vec<P> = simplify(&chaikin(&chaikin(&average(&pts))), TOLERANCE_M)
-            .into_iter()
-            .map(|(x, z)| (x.round(), z.round()))
-            .collect();
+        let pts: Vec<P> = simplify(
+            &chaikin(&chaikin(&average(&average(&average(&pts))))),
+            TOLERANCE_M,
+        )
+        .into_iter()
+        .map(|(x, z)| (x.round(), z.round()))
+        .collect();
         lines.push((chains[i0].highway, chains[i0].suspension, pts));
     }
     lines.sort_by(|a, b| length(&b.2).total_cmp(&length(&a.2)));

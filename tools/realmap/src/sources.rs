@@ -43,16 +43,28 @@ fn f64le(b: &[u8], o: usize) -> f64 {
 }
 
 /// The state's primary and secondary roads of the classes asked for that touch the warp's box.
+///
+/// With a `county` (its five-digit FIPS code), the county's all-roads file is read instead,
+/// and a line is also taken when its `FULLNAME` is one of `names` (as an arterial): in a
+/// city most main streets are not state routes, so their class alone does not find them.
 pub fn tiger_roads(
     cache: &Path,
     state: &str,
+    county: Option<&str>,
+    names: &[String],
     warp: &Warp,
     classes: &[String],
 ) -> Result<Vec<Line>, String> {
-    let base = format!("tl_{TIGER_YEAR}_{state}_prisecroads");
+    let (base, dir) = match county {
+        Some(c) => (format!("tl_{TIGER_YEAR}_{c}_roads"), "ROADS"),
+        None => (
+            format!("tl_{TIGER_YEAR}_{state}_prisecroads"),
+            "PRISECROADS",
+        ),
+    };
     let zip = cache.join(format!("{base}.zip"));
     fetch(
-        &format!("https://www2.census.gov/geo/tiger/TIGER{TIGER_YEAR}/PRISECROADS/{base}.zip"),
+        &format!("https://www2.census.gov/geo/tiger/TIGER{TIGER_YEAR}/{dir}/{base}.zip"),
         &zip,
     )?;
     let shp = cache.join(format!("{base}.shp"));
@@ -93,9 +105,13 @@ pub fn tiger_roads(
         .iter()
         .find(|f| f.0 == "MTFCC")
         .ok_or("TIGER file has no MTFCC field")?;
-    let class_of = |i: usize| {
+    let fullname = fields
+        .iter()
+        .find(|f| f.0 == "FULLNAME")
+        .ok_or("TIGER file has no FULLNAME field")?;
+    let field = |i: usize, f: &(String, usize, usize)| {
         let r = header + i * rec;
-        String::from_utf8_lossy(&dbf[r + mtfcc.1..r + mtfcc.1 + mtfcc.2])
+        String::from_utf8_lossy(&dbf[r + f.1..r + f.1 + f.2])
             .trim()
             .to_string()
     };
@@ -118,9 +134,12 @@ pub fn tiger_roads(
         if x1 < w || x0 > e || y1 < s || y0 > nn {
             continue;
         }
-        let class = class_of(idx);
+        let mut class = field(idx, mtfcc);
         if !classes.contains(&class) {
-            continue;
+            if !names.contains(&field(idx, fullname)) {
+                continue;
+            }
+            class = "S1200".into();
         }
         let parts = u32le(c, 36) as usize;
         let points = u32le(c, 40) as usize;
