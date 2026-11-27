@@ -575,7 +575,7 @@ mod tests {
             ("(1979, 1987)", "(1987, 1979)"),
             ("year: 1984", "year: 1990"),
             ("(17, 40)", "(24, 0)"),
-            ("\"california_coast\"", "\"atlantis\""),
+            ("region: \"pacific_shore\"", "region: \"atlantis\""),
             ("\"california_coast_80s.ron\"", "\"atlantis.ron\""),
             ("\"socal_1985\"", "\"atlantis\""),
             ("\"1984_socal\"", "\"atlantis\""),

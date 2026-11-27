@@ -22,7 +22,7 @@ Layout(
     ],
     peaks: [
         Peak(name: "north head", at: (345, 120), height_m: 34, falloff_m: 170),
-        Peak(name: "lookout point", at: (1690, 990), height_m: 110, falloff_m: 240),
+        Peak(name: "lookout point", at: (1560, 1000), height_m: 30, falloff_m: 150),
     ],
 
     water: [
@@ -74,7 +74,7 @@ Layout(
 
         // Up to the lookouts.
         Road(name: "ridge road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
-            (1400, 1040), (1500, 1040), (1580, 1060), (1640, 1030), (1690, 990),
+            (1400, 1040), (1470, 1040), (1520, 1075), (1575, 1050), (1560, 1000),
         ]),
         Road(name: "head road", class: Rural, lanes: 1, sidewalk: false, dead_end: true, max_grade: Some(0.14), points: [
             (375, 260), (372, 190), (345, 125),
