@@ -1431,7 +1431,8 @@ fn prop_solids(props: &[Prop], kits: &[crate::landmarks::Kit]) -> (Vec<Post>, Ve
             | PropKind::ChainLink { .. }
             | PropKind::CrewGarage { .. }
             | PropKind::TacoStand { .. }
-            | PropKind::PicnicTable => {
+            | PropKind::PicnicTable
+            | PropKind::BridgeTower { .. } => {
                 let mut slabs = Vec::new();
                 crate::setpieces::slabs(p, &mut slabs);
                 boxes.extend(slabs.iter().map(|s| BoxSolid {

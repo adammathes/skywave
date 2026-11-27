@@ -11,7 +11,8 @@ use world::layout::{Layout, LayoutError};
 use world::procgen::authored;
 use world::template::RegionTemplate;
 
-const GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
+const GRAMMAR: &str = include_str!("../../../assets/grammar/bay_area_2005.ron");
+const BASIN_GRAMMAR: &str = include_str!("../../../assets/grammar/socal_basin_2001.ron");
 const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_2001.ron");
 const BAY_AREA: &str = include_str!("../../../assets/regions/bay_area.ron");
 const BAY_LOOP: &str = include_str!("../../../assets/layouts/bay_loop.ron");
@@ -19,7 +20,11 @@ const SOCAL_BOWL: &str = include_str!("../../../assets/regions/socal_bowl.ron");
 const MIRAGE_BOWL: &str = include_str!("../../../assets/layouts/mirage_bowl.ron");
 
 fn grammar() -> world::Grammar {
-    let mut g: world::Grammar = ron::from_str(GRAMMAR).expect("parse grammar");
+    grammar_from(GRAMMAR)
+}
+
+fn grammar_from(text: &str) -> world::Grammar {
+    let mut g: world::Grammar = ron::from_str(text).expect("parse grammar");
     g.lexicon = ron::from_str(LEXICON).expect("parse lexicon");
     g.validate().expect("validate grammar");
     g.landmarks = world::landmarks::BUILTIN
@@ -44,7 +49,7 @@ fn layout() -> Layout {
 /// Pinned `Place::content_hash` of the Bay Loop for seed 1. It moves whenever the layout,
 /// the zone rules or any shared stage changes: regenerate with `--nocapture` and commit it
 /// on its own with the reason.
-const GOLDEN: u64 = 0x0b16667d58f79b12;
+const GOLDEN: u64 = 0x102783fa76397c06;
 
 #[test]
 fn the_bay_loop_validates_and_is_deterministic() {
@@ -141,7 +146,12 @@ fn main_roads_are_one_network_with_bridges_over_water() {
         on + deck > all * 97 / 100,
         "roads sit on the ground ({on} of {all})"
     );
-    assert!(g.edges.iter().all(|e| e.class != RoadClass::Highway));
+    // The freeways round the bay, and the bayshore's two interchanges' ramps.
+    assert!(g.edges.iter().any(|e| e.class == RoadClass::Highway));
+    assert!(
+        g.edges.iter().filter(|e| e.oneway).count() >= 8,
+        "two diamonds of four ramps"
+    );
 }
 
 #[test]
@@ -159,6 +169,48 @@ fn a_road_to_nowhere_is_refused() {
     );
 }
 
+/// Steepest grade a Bay Loop street may have over any 2.5 m or more (about a wheelbase):
+/// about the steepest real city streets, so every car can climb it.
+const MAX_GRADE: f32 = 0.30;
+
+#[test]
+fn no_bay_loop_street_is_steeper_than_a_real_one() {
+    let (l, t, g) = (layout(), template(), grammar());
+    let p = authored::build_place(Seed(1), &l, &t, &g);
+    let mut worst = (0.0f32, RoadClass::Local, [0.0f32; 2]);
+    for e in &p.roads.edges {
+        // Grade over runs of at least a wheelbase, so a profile's tiny steps do not count alone.
+        let pts = &e.profile;
+        for i in 0..pts.len() {
+            let mut run = 0.0;
+            for j in i + 1..pts.len() {
+                let (a, b) = (pts[j - 1], pts[j]);
+                run += ((b[0] - a[0]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+                if run >= 2.5 {
+                    let grade = (pts[j][1] - pts[i][1]).abs() / run;
+                    if grade > worst.0 {
+                        worst = (grade, e.class, [pts[i][0], pts[i][2]]);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    println!(
+        "steepest street: {:.1}% ({:?} at {:?})",
+        worst.0 * 100.0,
+        worst.1,
+        worst.2
+    );
+    assert!(
+        worst.0 <= MAX_GRADE,
+        "{:.1}% {:?} at {:?}",
+        worst.0 * 100.0,
+        worst.1,
+        worst.2
+    );
+}
+
 /// Pinned `Place::content_hash` of the Mirage Bowl for seed 1; the same rule as [`GOLDEN`].
 const BOWL_GOLDEN: u64 = 0x6254bbb7eb264d7a;
 
@@ -170,7 +222,7 @@ fn the_mirage_bowl_validates_and_is_deterministic() {
     l.validate().expect("validate layout");
     let t: RegionTemplate = ron::from_str(SOCAL_BOWL).expect("parse template");
     t.validate().expect("validate template");
-    let g = grammar();
+    let g = grammar_from(BASIN_GRAMMAR);
     let t0 = Instant::now();
     let p = authored::build_place(Seed(1), &l, &t, &g);
     println!(

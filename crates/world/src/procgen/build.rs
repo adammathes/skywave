@@ -38,6 +38,7 @@ pub fn region_of(template: &RegionTemplate) -> RegionId {
         "great_lakes_city" => RegionId::GreatLakesCity,
         "north_shore_suburb" => RegionId::NorthShoreSuburb,
         "socal_basin" => RegionId::SocalBasin,
+        "bay_area" => RegionId::BayArea,
         _ => RegionId::CaliforniaCoast,
     }
 }
