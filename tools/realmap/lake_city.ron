@@ -83,4 +83,6 @@ Import(
     // On the plank road a block past the six-way corner, heading north-west to the drive-in.
     start: (-87.7625, 41.9697),
     start_toward: Some((-87.7876, 41.9975)),
+    // A dense grid: the freeways pass over it.
+    separate_highways: true,
 )
