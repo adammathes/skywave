@@ -1,11 +1,11 @@
-// The 1980s lake city (`great_lakes_city`, Eighties; Lake City): the numbers and weights the
-// building planner reads. Format: crates/world/src/grammar.rs and docs/WORLD_GENERATION.md
+// The 1990s lake city (`great_lakes_city`, Nineties; Lake City, 1994): the numbers and
+// weights the building planner reads. Format: crates/world/src/grammar.rs and docs/WORLD_GENERATION.md
 // ("Facade grammars"). It starts as the coast's grammar (its notes on units, entry order and
 // provenance hold here); the brick and limestone come from the scenario's palette, and the
 // lake city's own building kinds (bungalows, three-flats, party walls) come in their own
 // changes, each fitting the values it touches.
 Grammar(
-    era: Eighties,
+    era: Nineties,
     template: "great_lakes_city",
 
     styles: [
@@ -924,39 +924,43 @@ Grammar(
         lit_box_256: 70,
         shop_lit_256: 115,
 
-        // Shop signs (the blade signs on storefronts): a pictogram and a wordmark from the
-        // lexicon. `descriptors_out` skips a descriptor whose pair with the trade would name
-        // a well-known business. Starting values for a 1985 beach strip, not yet fitted (B3): food,
-        // drink, the motel and the surf trade lead.
-        lexicon: "us_roadside",
+        // Shop signs (the blade signs on storefronts): a pictogram and a wordmark from Lake
+        // City's own lexicon (`lexicon_1994.ron`). `descriptors_out` skips a descriptor whose
+        // pair with the trade would name a well-known business. A 1994 North Side: hot dog
+        // and beef stands, pizza, corner taverns and liquor stores lead; video stores, pagers
+        // and car phones are the decade's.
+        lexicon: "us_lake",
         trades: [
-            TradeRule(trade: "DONUTS", weight: 3, pictograms: [(Donut, 3), (CoffeeCup, 1)], lines: [(Word("OPEN"), 2), (Since, 1)], descriptors_out: ["ROYAL"]),
-            TradeRule(trade: "CAFE", weight: 2, pictograms: [(CoffeeCup, 3), (Sun, 1)], lines: [(Word("OPEN"), 1)]),
+            TradeRule(trade: "HOT DOGS", weight: 4, pictograms: [(HotDog, 3), (Star, 1)], lines: [(Word("OPEN"), 2), (Since, 1)]),
+            TradeRule(trade: "BEEF", weight: 3, pictograms: [(HotDog, 1), (Burger, 1)], lines: [(Word("OPEN"), 1), (Since, 1)]),
+            TradeRule(trade: "PIZZA", weight: 4, pictograms: [(PizzaSlice, 1)], lines: [(Since, 1), (Word("OPEN"), 1)]),
+            TradeRule(trade: "DONUTS", weight: 2, pictograms: [(Donut, 3), (CoffeeCup, 1)], lines: [(Word("OPEN"), 2)], descriptors_out: ["ROYAL"]),
             TradeRule(trade: "DINER", weight: 2, pictograms: [(CoffeeCup, 2), (Burger, 1), (Star, 1)], lines: [(Word("OPEN"), 2), (Since, 1)]),
-            TradeRule(trade: "BURGERS", weight: 3, pictograms: [(Burger, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "TACOS", weight: 3, pictograms: [(Taco, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "PIZZA", weight: 2, pictograms: [(PizzaSlice, 1)], lines: [(Since, 1)]),
-            TradeRule(trade: "ICE CREAM", weight: 2, pictograms: [(IceCreamCone, 1)], lines: []),
-            TradeRule(trade: "HOT DOGS", weight: 1, pictograms: [(HotDog, 1)], lines: []),
-            TradeRule(trade: "SEAFOOD", weight: 1, pictograms: [(Fish, 2), (Wave, 1)], lines: [(Since, 1)]),
-            TradeRule(trade: "COCKTAILS", weight: 2, pictograms: [(MartiniGlass, 2), (Star, 1)], lines: [(Word("OPEN"), 1)]),
+            TradeRule(trade: "CAFE", weight: 1, pictograms: [(CoffeeCup, 3)], lines: [(Word("OPEN"), 1)]),
+            TradeRule(trade: "BURGERS", weight: 2, pictograms: [(Burger, 1)], lines: [(Word("OPEN"), 1)]),
+            TradeRule(trade: "ICE CREAM", weight: 1, pictograms: [(IceCreamCone, 1)], lines: []),
+            TradeRule(trade: "BAKERY", weight: 2, pictograms: [(Donut, 1), (CoffeeCup, 1)], lines: [(Since, 2)], descriptors_out: ["CORNER"]),
+            TradeRule(trade: "TAVERN", weight: 3, pictograms: [(BeerMug, 1)], lines: [(Word("COCKTAILS"), 1)]),
             TradeRule(trade: "LOUNGE", weight: 2, pictograms: [(MartiniGlass, 2), (Star, 1)], lines: [(Word("COCKTAILS"), 1)]),
-            TradeRule(trade: "TAVERN", weight: 1, pictograms: [(BeerMug, 1)], lines: [(Word("COCKTAILS"), 1)]),
+            TradeRule(trade: "COCKTAILS", weight: 1, pictograms: [(MartiniGlass, 2), (Star, 1)], lines: [(Word("OPEN"), 1)]),
             TradeRule(trade: "LIQUOR", weight: 3, pictograms: [(BeerMug, 1), (MartiniGlass, 1)], lines: [(Word("OPEN"), 1)]),
-            TradeRule(trade: "SURFBOARDS", weight: 2, pictograms: [(Surfboard, 3), (Wave, 2), (Palm, 1)], lines: []),
-            TradeRule(trade: "MOTEL", weight: 3, pictograms: [(Arrow, 3), (Palm, 1), (Star, 1), (Sun, 1), (Wave, 1)], lines: [(Word("VACANCY"), 1)]),
-            TradeRule(trade: "RECORDS", weight: 2, pictograms: [(Record, 1)], lines: [], descriptors_out: ["LAKESHORE"]),
+            TradeRule(trade: "VIDEO", weight: 3, pictograms: [(FilmReel, 2), (TvSet, 1), (Star, 1)], lines: [(Word("OPEN"), 1)], descriptors_out: ["FAMILY"]),
+            TradeRule(trade: "RECORDS", weight: 1, pictograms: [(Record, 1)], lines: [], descriptors_out: ["LAKESHORE"]),
+            TradeRule(trade: "CDS", weight: 1, pictograms: [(Record, 2), (Star, 1)], lines: [(Word("SALE"), 1)]),
+            TradeRule(trade: "PAGERS", weight: 2, pictograms: [(Star, 1), (Arrow, 1)], lines: [(Word("SALE"), 1)]),
+            TradeRule(trade: "CAR PHONES", weight: 1, pictograms: [(Star, 1), (Arrow, 1)], lines: [(Word("SALE"), 1)]),
             TradeRule(trade: "TV REPAIR", weight: 1, pictograms: [(TvSet, 1)], lines: [(Since, 1)]),
             TradeRule(trade: "PHOTO", weight: 1, pictograms: [(Camera, 1)], lines: []),
-            TradeRule(trade: "VIDEO", weight: 2, pictograms: [(FilmReel, 2), (TvSet, 1), (Star, 1)], lines: []),
-            TradeRule(trade: "BARBER", weight: 1, pictograms: [(ScissorsComb, 1)], lines: [(Since, 1)]),
+            TradeRule(trade: "BARBER", weight: 2, pictograms: [(ScissorsComb, 1)], lines: [(Since, 1)]),
             TradeRule(trade: "SHOES", weight: 1, pictograms: [(Shoe, 1)], lines: [(Since, 1)]),
             TradeRule(trade: "KEYS", weight: 1, pictograms: [(Key, 1)], lines: []),
             TradeRule(trade: "GARAGE", weight: 1, pictograms: [(Wrench, 2), (Tire, 1)], lines: []),
-            TradeRule(trade: "TIRES", weight: 2, pictograms: [(Tire, 2), (Wrench, 1)], lines: []),
-            TradeRule(trade: "DENTAL", weight: 1, pictograms: [(Tooth, 1)], lines: []),
-            TradeRule(trade: "DRUGS", weight: 2, pictograms: [(MortarPestle, 1)], lines: [(Word("OPEN"), 1)]),
+            TradeRule(trade: "TIRES", weight: 1, pictograms: [(Tire, 2), (Wrench, 1)], lines: []),
+            TradeRule(trade: "MUFFLERS", weight: 1, pictograms: [(Wrench, 1), (Tire, 1)], lines: []),
+            TradeRule(trade: "DENTAL", weight: 1, pictograms: [(Tooth, 1)], lines: [], descriptors_out: ["FAMILY"]),
+            TradeRule(trade: "DRUGS", weight: 2, pictograms: [(MortarPestle, 1)], lines: [(Word("OPEN"), 1)], descriptors_out: ["FAMILY"]),
             TradeRule(trade: "CLEANERS", weight: 2, pictograms: [(ShirtHanger, 1)], lines: [(Word("OPEN"), 1)]),
+            TradeRule(trade: "LAUNDRY", weight: 1, pictograms: [(ShirtHanger, 1)], lines: [(Word("WELCOME"), 1)]),
             TradeRule(trade: "BOOKS", weight: 1, pictograms: [(Book, 1)], lines: [], descriptors_out: ["GOLDEN"]),
             TradeRule(trade: "BIKES", weight: 1, pictograms: [(Bicycle, 1)], lines: []),
             TradeRule(trade: "BOWL", weight: 1, pictograms: [(BowlingPin, 1), (Star, 1)], lines: [(Word("OPEN"), 1)]),

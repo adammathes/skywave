@@ -14,7 +14,7 @@ Station(
 )
 // later: Youtube(playlist: "...") (web only), shuffle_seed for files ("already playing")
 ```
-A station's name is what the dash shows: in the 1977, 1984 and 1986 presets the real service's own channel name (a fact); in `2001_basin` an invented name for the world, with the real service named in its `ad-free:` note, its `homepage` and the table below. There is no DJ or ident audio: station idents are visual only. A `RadioPreset` file (`assets/radio/<era>_<scenario>.ron`) lists the stations of one era and scenario (`crates/audio/src/station.rs` has the format and its validation). The user's settings switch stations off, add streams by URL and pick a preset per scenario. The dash shows the station name and the toast its format; the current track title (ICY metadata from streams, tags from files) comes later.
+A station's name is what the dash shows: in the 1977, 1984, 1986 and 1994 presets the real service's own channel name (a fact); in `2001_basin` an invented name for the world, with the real service named in its `ad-free:` note, its `homepage` and the table below. There is no DJ or ident audio: station idents are visual only. A `RadioPreset` file (`assets/radio/<era>_<scenario>.ron`) lists the stations of one era and scenario (`crates/audio/src/station.rs` has the format and its validation). The user's settings switch stations off, add streams by URL and pick a preset per scenario. The dash shows the station name and the toast its format; the current track title (ICY metadata from streams, tags from files) comes later.
 
 ### Sources
 1. **Files** (native + web). The player's own music is not on the dial: it is the **deck**, a second source beside the radio (a tape deck, CD player or MP3 player by the world's era; "The deck" below). Web: built. Native: built: the music folder (`--music DIR`, else a `music` folder beside the executable, else `~/Music`) and the folders picked from Audio › Music library (the platform's folder dialog) or dropped on the window, remembered, scanned into the same `audio::deck::Folder`s ("Native music folders" below), MP3 decoded with the native radio's `nanomp3-core`. No `symphonia` (MPL-2.0 is out).
@@ -84,6 +84,12 @@ Checked on 2026-10-27, each twice from a cold start for a minute: every station 
 | | Radio Paradise Main Mix | eclectic album rock | as above | |
 | | Radio Paradise Rock Mix | classic and album rock | as above | |
 | | WFMU 91.1 FM | freeform | `https://stream0.wfmu.org/freeform-128k` (MP3 128) | WFMU's `wfmu.pls` |
+| `1994_chicago` | WNUR 89.3 FM | Evanston student freeform, jazz and rock | as above | |
+| | WHPK 88.5 FM | Hyde Park college radio | as above | |
+| | WDCB 90.9 FM | Chicago jazz and blues | as above | |
+| | WMXM 88.9 FM | Lake Forest college radio: indie and freeform | as above | |
+| | Radio Paradise Rock Mix | classic and album rock | as above | |
+| | WFMU Give the Drummer Radio | soul, funk, jazz and world grooves | as above | |
 | `2001_basin` | Dusk Signal (dublab) | beats, hip hop and electronic | `https://dublab.out.airtime.pro/dublab_a` (MP3 192) | dublab.com's own player |
 | | Mirage Breaks (DNBRadio) | drum and bass DJ mixes | `https://azrelay.drmnbss.org/listen/dnbradio/radio.aac` (AAC 128), then `radio.mp3` (MP3 320) | its how-to-listen `.pls` |
 | | Quad Radio (KXSC) | college radio: indie and alternative | `https://broadcast.shoutcheap.com/proxy/kxsckxsc/stream` (MP3 128) | kxsc.org's own player |

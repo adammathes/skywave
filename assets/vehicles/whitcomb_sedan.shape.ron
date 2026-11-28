@@ -1,0 +1,60 @@
+// Whitcomb Sedan body: the early-90s full-size sedan, rounded off.
+//
+// Intent: a big soft bar of soap. A wide low face with a small grille between slim
+// rectangular lamps, a long rounded hood, a fairly upright windshield, a tall rounded roof
+// with thin pillars, a long trunk falling away to a rounded tail with wide lamps. The rear
+// wheel sits deep in its arch. Smooth body-colored bumpers with a bright rub strip, a
+// bright belt molding, plain wheel covers. Yellow ones are the city's cabs. Generic period
+// cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "whitcomb_sedan",
+    side: [
+        (0.00, 0.62), (0.05, 0.74), (0.22, 0.82), (0.80, 0.88), (1.40, 0.92), (1.50, 0.94),
+        (2.02, 1.34), (2.20, 1.42), (2.40, 1.43), (3.40, 1.42), (3.62, 1.34), (4.00, 1.04),
+        (4.10, 1.02), (5.10, 0.99), (5.30, 0.94), (5.42, 0.84),
+        (5.42, 0.34), (5.26, 0.24), (4.60, 0.20), (1.00, 0.19), (0.16, 0.23), (0.00, 0.34),
+    ],
+    plan: [
+        (0.00, 0.84), (0.08, 0.93), (0.30, 0.97), (0.80, 0.98), (4.80, 0.98), (5.20, 0.96),
+        (5.36, 0.92), (5.42, 0.86),
+    ],
+    belt: [(1.50, 0.93), (3.00, 0.96), (4.00, 1.00)],
+    section: Section(shoulder: 0.92, tumblehome_deg: 16, greenhouse_frac: 0.82, crown: 0.05, tuck: 0.06),
+    glass: Glass(
+        windshield: (1.52, 2.18),
+        backlight: (3.62, 4.00),
+        side: [(1.70, 2.78), (2.88, 3.56)],
+    ),
+    wheels: Wheels(radius: 0.34, width: 0.215, arch_clearance: 0.04, front_x: 1.04, rear_x: 3.99, track: 1.58),
+    front: Front(lights: Rect, grille: Wide, bumper: Body, bumper_y: (0.28, 0.46)),
+    rear: Rear(lights: FullWidth, spoiler: None, bumper: Body, bumper_y: (0.30, 0.48)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.84, creases: [(0.10, 0.56, 5.38, 0.58)]),
+    parts: Parts(mirrors: Door, handles: Pull, wipers: 2, exhaust: Single, antenna: Mast, rims: Steel, hubcaps: true),
+    details: [ChromeTrim, Badge(Circle)],
+    // Cab yellow (twice: the city's cabs), black, white, navy, maroon, dark green, light
+    // blue metallic.
+    palette: ["#ecb816", "#ecb816", "#18191c", "#eeede8", "#1c2a4a", "#5a1a24", "#1f3d30", "#8ea4bc"],
+    accent: "#b9bcc0",
+    interior: InteriorShape(
+        dash_height: 0.90,
+        dash_x: 1.80,
+        wheel_pos: (2.26, 0.74),
+        wheel_radius: 0.20,
+        column_angle_deg: 24,
+        mirror_pos: (2.10, 1.30),
+        seat: (2.80, 0.46),
+        driver_offset: 0.40,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: gray-blue plastic, a gray velour
+        // bench, a blue carpet, a gray headliner, amber-lit dials.
+        colors: ["#3a4150", "#6a7080", "#36405a", "#bebdb8", "#4c5464", "#9aa0aa"],
+        display: "#ffae3b",
+        insert: "#5c6272",
+        piping: "#4c5464",
+        dash_top: "#30364a",
+    ),
+)

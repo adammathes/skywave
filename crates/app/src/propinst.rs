@@ -81,6 +81,8 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("wren_minivan", 1),
         ("percheron_pickup", 1),
         ("heron_sedan", 3),
+        ("kestrel_sedan", 3),
+        ("whitcomb_sedan", 2),
     ], // Sedan
     &[
         ("homestead_wagon", 3),
@@ -91,6 +93,7 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("wren_minivan", 3),
         ("plover_sedan", 1),
         ("percheron_pickup", 1),
+        ("roan_utility", 3),
     ], // Wagon
     &[
         ("seabreeze_convertible", 3),
@@ -99,6 +102,7 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("plover_sedan", 2),
         ("tern_compact", 3),
         ("egret_hybrid", 3),
+        ("oriole_sedan", 3),
     ], // Coupe
     &[("buckboard_pickup", 1), ("percheron_pickup", 1)], // Pickup
     &[
@@ -113,6 +117,7 @@ const PARKED: [&[(&str, u32)]; 10] = [
         ("bancroft_sedan", 1),
         ("plover_sedan", 1),
         ("heron_sedan", 1),
+        ("whitcomb_sedan", 1),
     ], // Luxury
     &[("gannet_gt", 1), ("halcyon_turbo", 1), ("appaloosa_gt", 1)], // Muscle
 ];
@@ -678,7 +683,7 @@ mod tests {
     /// The built-in shapes no place parks: the exotics, the sports cars' open versions and
     /// the 2001 hero cars and Lake City's pony hatch and the 2005 Bay heroes and crossover, which only the player and traffic drive,
     /// and the two trucks too long for a stall, which only traffic drives.
-    const UNPARKED: [&str; 25] = [
+    const UNPARKED: [&str; 27] = [
         "basilisk_v12",
         "basilisk_roadster",
         "avocet_v8",
@@ -704,6 +709,8 @@ mod tests {
         "petrel_roadster",
         "lipizzan_sedan",
         "ibis_crossover",
+        "longbow_targa",
+        "mallet_bus",
     ];
 
     #[test]
@@ -740,9 +747,10 @@ mod tests {
                 parked[k] = true;
             }
             // Every entry is reachable in the 2001 world, which has every car up to 2001,
-            // or in the 2005 Bay, which has the newer ones.
+            // in the 2005 Bay, which has the newer ones, or in Lake City, which has its own.
             let bay = crate::scenario::index_of("bay_loop_2005").unwrap();
-            let picked: Vec<usize> = [1, bay]
+            let lake = crate::scenario::index_of("lake_city_1994").unwrap();
+            let picked: Vec<usize> = [1, bay, lake]
                 .iter()
                 .flat_map(|&w| {
                     let era = &crate::scenario::lineup(w).shapes;

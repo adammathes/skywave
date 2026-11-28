@@ -67,8 +67,8 @@ when they light). Night is a clock away: sodium-orange street lamps, neon underg
 lit race start line with a crowd that steps aside.
 
 The deck (the player's own music, `docs/AUDIO_RADIO.md`) is named by the scenario's year:
-**TAPE** for worlds up to 1989 (Pacific Shore 1984, Lake City 1977, the 1986 suburb), **CD** for
-1990–2009 (Mirage Bowl 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
+**TAPE** for worlds up to 1989 (Pacific Shore 1984, the 1986 suburb), **CD** for
+1990–2009 (Lake City 1994, Mirage Bowl 2001), **MP3** from 2010, by the scenario's `year` (`Kind::for_year`); switching
 worlds renames it and keeps the library.
 
 Era rules: the roster is filtered by year. A scenario has `years: (min, max)`; a car has a
@@ -90,8 +90,16 @@ shows it) and the tuner the Siskin Coupe (body kit, tall wing, aftermarket rims,
 Part 2 (M8 #5): the rotary coupe is the Shrike Coupe, the rally sedan the Glaive Turbo (hood scoop, tall
 wing, mud flaps), the compact sedan the Falchion Sedan (body kit) and the V8 sports car the Courser V8 (T-top).
 The two late-90s roadsters, the Dunlin Roadster and the Palfrey Roadster (AWD), joined them after.
-Lake City's heroes are its North Side summer-night cars, kept on the road past their age: the Corvid
-Hatch (a 1988 pony car in top trim: T-tops, ground effects, stripes) and the Longbow Coupe.
+Lake City (`lake_city_1994`, years 1988–1994) is set in 1994. Its heroes are its North Side
+summer-night cars: the Corvid Hatch (a 1994 pony car of its line's fourth generation: rounded,
+T-tops, a strong small V8) and the Longbow Targa (the plastic-bodied V8 sports car late in its run,
+roof panel out). Its traffic is its own early-90s cars, listed in the scenario's `locals` so no other
+world shows them: the Kestrel Sedan (the aero family sedan, the car it starts in), the Whitcomb
+Sedan (the full-size sedan; yellow ones are the city's cabs), the Roan Utility (the four-door sport
+utility), the Oriole Sedan (the imported midsize) and the Mallet Bus (the forty-foot transit bus, on
+downtown and strip main streets, traffic only), with the older 1980s cars by their age. Its shop
+signs are its own (`lexicon_1994.ron`: hot dogs, beef, pizza, taverns, video, pagers); its radio
+the `1994_chicago` preset.
 The traffic cars (M8 #6) are the Plover Sedan, Sorrel Utility, Wren Minivan, Percheron Crew Cab, Linnet
 Hatch, Sledge Box Truck and the Anvil Semi, which only traffic drives, on the freeway.
 

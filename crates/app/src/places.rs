@@ -293,7 +293,7 @@ mod tests {
         ("socal_beach_1984", 0),
         ("bay_loop_2005", 0),
         ("mirage_bowl_2001", 0),
-        ("lake_city_1986", 0),
+        ("lake_city_1994", 0),
     ];
 
     /// The map audit over every built-in world: no road you cannot reach, no loop back to
@@ -581,7 +581,7 @@ mod bay_hills {
         (back, v2, s.speed_mps)
     }
 
-    /// Every car the player can pick (the traffic-only semi aside), braked to a stop on
+    /// Every car the player can pick (the traffic-only semi and bus aside), braked to a stop on
     /// each of the Bay Loop's three steepest 30 m stretches, on the real collider: it stays
     /// in drive, pulls away at once and climbs; after half a second off both pedals it
     /// rolls back well under a car length. Prints the table.
@@ -602,12 +602,12 @@ mod bay_hills {
                 a[2]
             );
         }
-        for (id, text) in crate::vehicles::BUILTIN
-            .iter()
-            .filter(|c| c.0 != "anvil_semi")
-        {
+        for (id, text) in crate::vehicles::BUILTIN.iter() {
             let (id, text) = (*id, *text);
             let spec = crate::vehicles::load_spec(text).unwrap();
+            if spec.traffic_only {
+                continue;
+            }
             let mut line = format!("{id:22}");
             for (a, b, _) in &cs {
                 for gap in [0.0, 0.5] {
@@ -723,7 +723,7 @@ mod ledges {
             ("socal_beach_1984", 0),
             ("mirage_bowl_2001", 10),
             ("bay_loop_2005", 10),
-            ("lake_city_1986", 3),
+            ("lake_city_1994", 3),
         ];
         let mut over = Vec::new();
         for (id, pin) in pins {

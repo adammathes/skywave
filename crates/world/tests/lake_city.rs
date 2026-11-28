@@ -11,8 +11,8 @@ use world::math::{point_in_polygon, V2};
 use world::procgen::authored::build_place;
 use world::template::RegionTemplate;
 
-const GRAMMAR: &str = include_str!("../../../assets/grammar/great_lakes_80s.ron");
-const LEXICON: &str = include_str!("../../../assets/grammar/lexicon.ron");
+const GRAMMAR: &str = include_str!("../../../assets/grammar/great_lakes_90s.ron");
+const LEXICON: &str = include_str!("../../../assets/grammar/lexicon_1994.ron");
 const LAKE_CITY: &str = include_str!("../../../assets/regions/great_lakes_city.ron");
 const LAYOUT: &str = include_str!("../../../assets/layouts/lake_city.ron");
 

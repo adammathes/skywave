@@ -1,0 +1,57 @@
+// Oriole Sedan body: the mid-90s imported midsize sedan.
+//
+// Intent: clean, low and quietly rounded. A low hood between slim flush lamps with a thin
+// slot grille, a raked windshield, a light greenhouse with thin pillars, a smooth arched
+// roof, a short high deck with wide tail lamps across it, smooth body-colored bumpers, a
+// fine body-side molding and plain alloys. Generic period cues only.
+//
+// Units are meters; x runs rearward from the nose, y up from the ground. Layout:
+// docs/VEHICLES.md and crates/vehicle/src/shape/params.rs.
+ShapeSpec(
+    id: "oriole_sedan",
+    side: [
+        (0.00, 0.52), (0.04, 0.62), (0.16, 0.69), (0.50, 0.75), (1.00, 0.83), (1.18, 0.86),
+        (1.26, 0.88), (1.72, 1.22), (2.02, 1.36), (2.20, 1.39), (2.86, 1.39), (3.24, 1.33),
+        (3.56, 1.16), (3.84, 1.03), (3.94, 1.01), (4.48, 1.00), (4.62, 0.96), (4.68, 0.88),
+        (4.68, 0.34), (4.56, 0.24), (4.06, 0.19), (0.80, 0.18), (0.16, 0.22), (0.00, 0.32),
+    ],
+    plan: [
+        (0.00, 0.70), (0.06, 0.80), (0.20, 0.86), (0.50, 0.885), (1.00, 0.89), (4.10, 0.89),
+        (4.50, 0.875), (4.62, 0.85), (4.68, 0.80),
+    ],
+    belt: [(1.26, 0.87), (2.40, 0.91), (3.80, 0.98)],
+    section: Section(shoulder: 0.90, tumblehome_deg: 20, greenhouse_frac: 0.78, crown: 0.05, tuck: 0.06),
+    glass: Glass(
+        windshield: (1.28, 2.06),
+        backlight: (3.26, 3.82),
+        side: [(1.58, 2.66), (2.76, 3.40)],
+    ),
+    wheels: Wheels(radius: 0.31, width: 0.195, arch_clearance: 0.04, front_x: 0.94, rear_x: 3.66, track: 1.53),
+    front: Front(lights: Rect, grille: Slot, bumper: Body, bumper_y: (0.26, 0.42)),
+    rear: Rear(lights: FullWidth, spoiler: None, bumper: Body, bumper_y: (0.30, 0.46)),
+    seams: Seams(hood: true, trunk: true, doors: 4, hood_width: 0.78, creases: [(0.30, 0.56, 4.62, 0.60)]),
+    parts: Parts(mirrors: Door, handles: Flush, wipers: 2, exhaust: Single, antenna: None, rims: Alloy5, hubcaps: false),
+    details: [BlackTrim, Badge(Bar)],
+    // Dark green metallic, white, silver, black, burgundy, champagne, light blue metallic.
+    palette: ["#1f4636", "#eeede8", "#bcc0c4", "#18191c", "#5c1a26", "#cfc2a2", "#7c94ae"],
+    accent: "#2a2b2e",
+    interior: InteriorShape(
+        dash_height: 0.86,
+        dash_x: 1.58,
+        wheel_pos: (2.02, 0.72),
+        wheel_radius: 0.19,
+        column_angle_deg: 25,
+        mirror_pos: (1.88, 1.28),
+        seat: (2.52, 0.45),
+        driver_offset: 0.38,
+        rear_seat: true,
+        dials: 2,
+        // Dash, seats, carpet, headliner, trim, accent: charcoal plastic, gray cloth with a
+        // flecked insert, a gray carpet, a light headliner, green-lit dials.
+        colors: ["#2c2e32", "#6a6c72", "#3e4044", "#cac8c2", "#46484c", "#9c9ea4"],
+        display: "#58e090",
+        insert: "#7e8088",
+        piping: "#4e5054",
+        dash_top: "#2a2c30",
+    ),
+)

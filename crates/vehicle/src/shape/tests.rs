@@ -34,7 +34,7 @@ macro_rules! car {
         )
     };
 }
-const ROSTER: [(&str, &str); 43] = [
+const ROSTER: [(&str, &str); 49] = [
     car!("pipit_hatch"),
     car!("halcyon_turbo"),
     car!("bancroft_sedan"),
@@ -78,6 +78,12 @@ const ROSTER: [(&str, &str); 43] = [
     car!("heron_sedan"),
     car!("tern_compact"),
     car!("ibis_crossover"),
+    car!("longbow_targa"),
+    car!("kestrel_sedan"),
+    car!("whitcomb_sedan"),
+    car!("roan_utility"),
+    car!("oriole_sedan"),
+    car!("mallet_bus"),
 ];
 const PICKUP: &str = ROSTER[5].0;
 const UTILITY: &str = ROSTER[7].0;
@@ -542,7 +548,7 @@ fn shapes_match_their_vehicle_specs() {
 fn builds_are_deterministic() {
     // Pinned on purpose: a change here means every built car changed. Update in its own
     // commit with the reason.
-    let expected: [u64; 47] = [
+    let expected: [u64; 53] = [
         0x423b_5062_5fd3_cf8a,
         0x3029_8378_2176_2c55,
         0xc45e_2768_5549_171f,
@@ -581,7 +587,7 @@ fn builds_are_deterministic() {
         0xebbe_b1b8_7826_cd46,
         0xd114_d3e5_6950_98e7,
         0xbf73_75be_c260_c310,
-        0x5476_b566_4779_e087,
+        0x3726_ac31_9864_8634,
         0x07ad_1f3e_8829_c0a4,
         0x044a_5cf7_ae88_a0ee,
         0x62a7_6e5d_04a3_fa88,
@@ -590,8 +596,14 @@ fn builds_are_deterministic() {
         0x375e_7ee2_8f7a_a608,
         0xbf8f_9066_fced_b52f,
         0x7f6d_4d69_750c_e0c8,
+        0x2025_d047_7293_fff0,
+        0x3c1d_bc1d_ea64_0694,
+        0xd22f_e99a_d7ea_c46f,
+        0x4d5e_1ce7_8c08_01b0,
+        0x1f78_452b_b425_8f83,
+        0x0310_a383_9449_8e33,
     ];
-    let mut got = [0u64; 47];
+    let mut got = [0u64; 53];
     for (k, spec) in shapes().iter().enumerate() {
         let a = build(spec, 1).unwrap();
         let b = build(spec, 1).unwrap();

@@ -57,9 +57,14 @@ or golden.
 | Sledge Box Truck | 1996 | Plover Sedan | 1997 | Sorrel Utility | 1998 |
 | Wren Minivan | 1999 | Percheron Crew Cab | 2000 | Anvil Semi | 2000 |
 | Linnet Hatch | 2001 | Dunlin Roadster | 1997 | Palfrey Roadster | 1999 |
-| Corvid Hatch | 1988 | | | | |
+| Corvid Hatch | 1994 | Longbow Targa | 1993 | Kestrel Sedan | 1992 |
+| Whitcomb Sedan | 1992 | Roan Utility | 1991 | Oriole Sedan | 1994 |
+| Mallet Bus | 1990 | | | | |
 | Goshawk Turbo | 2004 | Tulwar Sedan | 2005 | Petrel Roadster | 2002 |
 | Lipizzan Sedan | 2004 | | | | |
+
+Lake City's seven 1990s cars (from the Corvid Hatch to the Mallet Bus) are its `locals`
+(`docs/SCENARIOS.md`): no other world shows them.
 
 **`built`** (optional) dates an old car carrying later parts: the Destrier Coupe is a 1969 car with a
 2001 blower and wheels, so it weighs by its 1969 age in the 2001 world (0.105, above the hero floor) and

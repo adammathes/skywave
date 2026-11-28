@@ -32,7 +32,7 @@ macro_rules! car {
 type Entry = ((&'static str, &'static str), (f32, f32));
 
 /// Every built-in car.
-const ROSTER: [Entry; 46] = [
+const ROSTER: [Entry; 51] = [
     (car!("gannet_gt"), (5.0, 8.0)),
     (car!("halcyon_turbo"), (6.0, 8.0)),
     (car!("pipit_hatch"), (8.0, 10.0)),
@@ -66,8 +66,16 @@ const ROSTER: [Entry; 46] = [
     // The 2001 roadsters, outside the era's hero band: a light slow one and a quick one.
     (car!("dunlin_roadster"), (7.5, 9.0)),
     (car!("palfrey_roadster"), (6.5, 7.0)),
-    // Lake City's hero: the late pony hatch, quicker than the older pony notchback.
-    (car!("corvid_hatch"), (5.8, 6.8)),
+    // Lake City's heroes: the 1994 pony hatch, quicker than the older pony notchback, and
+    // the late V8 sports car, quicker than the older one.
+    (car!("corvid_hatch"), (5.6, 6.6)),
+    (car!("longbow_targa"), (5.0, 6.2)),
+    // Lake City's everyday 1990s cars: the aero family sedan, the full-size sedan, the sport
+    // utility and the imported midsize.
+    (car!("kestrel_sedan"), (9.0, 12.0)),
+    (car!("whitcomb_sedan"), (8.0, 11.0)),
+    (car!("roan_utility"), (10.0, 13.0)),
+    (car!("oriole_sedan"), (9.0, 12.0)),
     // The 2005 Bay heroes: the turbo commuter, the luxury six, the featherweight roadster
     // and the V8 four-door.
     (car!("goshawk_turbo"), (7.0, 8.0)),
