@@ -319,6 +319,78 @@ impl TerrainGrid {
         (g, roads)
     }
 
+    /// What grading changed, for a build to keep beside the place it was made for so a
+    /// load need not grade again ([`TerrainGrid::unbake`]): the runs of samples whose
+    /// height is no longer the place's, as `start, count` (u32) and that many heights
+    /// (f32), closed by a `start` of `u32::MAX`, then a bit per cell of
+    /// [`TerrainGrid::flip`]. Everything little-endian.
+    pub fn bake(&self, place: &Place) -> Vec<u8> {
+        let natural = TerrainGrid::natural(place);
+        let same = |i: usize| self.heights[i].to_bits() == natural.heights[i].to_bits();
+        let mut out = Vec::new();
+        let n = self.heights.len();
+        let mut i = 0;
+        while i < n {
+            if same(i) {
+                i += 1;
+                continue;
+            }
+            // A run carries on over a gap of one sample: cheaper than a new header.
+            let mut end = i + 1;
+            while end < n && !(same(end) && (end + 1 >= n || same(end + 1))) {
+                end += 1;
+            }
+            out.extend_from_slice(&(i as u32).to_le_bytes());
+            out.extend_from_slice(&((end - i) as u32).to_le_bytes());
+            for h in &self.heights[i..end] {
+                out.extend_from_slice(&h.to_le_bytes());
+            }
+            i = end;
+        }
+        out.extend_from_slice(&u32::MAX.to_le_bytes());
+        for cells in self.flip.chunks(8) {
+            let bits = cells
+                .iter()
+                .enumerate()
+                .fold(0u8, |b, (k, &f)| b | (f & 1) << k);
+            out.push(bits);
+        }
+        out
+    }
+
+    /// `place`'s graded terrain from what [`TerrainGrid::bake`] wrote for it; `None` if
+    /// `bytes` is not that.
+    pub fn unbake(place: &Place, bytes: &[u8]) -> Option<TerrainGrid> {
+        let mut g = TerrainGrid::natural(place);
+        let mut at = 0;
+        let word = |at: &mut usize| {
+            let b = bytes.get(*at..*at + 4)?;
+            *at += 4;
+            Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        };
+        loop {
+            let start = word(&mut at)?;
+            if start == u32::MAX {
+                break;
+            }
+            let count = word(&mut at)? as usize;
+            let run = g
+                .heights
+                .get_mut(start as usize..(start as usize).checked_add(count)?)?;
+            for h in run {
+                *h = f32::from_bits(word(&mut at)?);
+            }
+        }
+        let bits = &bytes[at..];
+        if bits.len() != g.flip.len().div_ceil(8) {
+            return None;
+        }
+        for (i, f) in g.flip.iter_mut().enumerate() {
+            *f = bits[i / 8] >> (i % 8) & 1;
+        }
+        Some(g)
+    }
+
     /// World ground point of sample `(ix, iz)`.
     pub fn pos(&self, ix: usize, iz: usize) -> V2 {
         V2::new(

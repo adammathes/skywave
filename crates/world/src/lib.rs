@@ -267,6 +267,17 @@ pub struct ChunkPlan {
 
 impl ChunkPlan {
     pub fn new(place: &Place, palette: &Palette, grammar: &Grammar) -> ChunkPlan {
+        ChunkPlan::with_grid(place, palette, grammar, None)
+    }
+
+    /// [`ChunkPlan::new`] on `graded`, the place's terrain as a build graded it
+    /// ([`TerrainGrid::unbake`]), rather than grading it again.
+    pub fn with_grid(
+        place: &Place,
+        palette: &Palette,
+        grammar: &Grammar,
+        graded: Option<TerrainGrid>,
+    ) -> ChunkPlan {
         counted(&CHUNK_PLANS);
         let seed = place.header.seed;
         let mut net = roads::Network::new(place);
@@ -309,7 +320,7 @@ impl ChunkPlan {
         // The test town lies on flat lot pads in an apron; a terrain place on its heightfield
         // with the roads graded in.
         let terrain = is_terrain_place(place).then(|| {
-            let g = TerrainGrid::new(place, &net);
+            let g = graded.unwrap_or_else(|| TerrainGrid::new(place, &net));
             let colors = mesh::terrain::CellColors::new(place, &g, palette, seed);
             (g, colors)
         });

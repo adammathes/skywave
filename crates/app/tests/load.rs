@@ -1,4 +1,4 @@
-//! A load builds each per-place structure once: the graded terrain, the parking lot plan
+//! A load builds each per-place structure at most once: the graded terrain, the parking lot plan
 //! and the chunk plan are made by the detail pass and handed on to the collider and the
 //! meshes, streamed or built whole. One test in its own binary, so nothing else moves the
 //! counts while it reads them. `cargo test -p app --test load`.
@@ -27,12 +27,18 @@ fn a_load_builds_the_grid_the_lots_and_the_plan_once() {
         lot_plans: 1,
         chunk_plans: 1,
     };
+    assert_eq!(builds("scenario=socal_beach_1984&seed=2&stream=1"), once);
+    // A release build graded the default seed's terrain itself and kept it with the place
+    // (`build.rs`): a load grades nothing.
+    let baked = BuildCounts {
+        grids: cfg!(debug_assertions).into(),
+        ..once
+    };
     for query in [
         "scenario=mirage_bowl_2001&seed=1&stream=1",
         "scenario=mirage_bowl_2001&seed=1",
-        "scenario=socal_beach_1984&seed=2&stream=1",
     ] {
-        assert_eq!(builds(query), once, "{query}");
+        assert_eq!(builds(query), baked, "{query}");
     }
     // The test town has no terrain to grade.
     let town = BuildCounts { grids: 0, ..once };

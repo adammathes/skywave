@@ -604,8 +604,12 @@ into a fixed 384-cell cache whose buffers are reused, so driving still allocates
 
 Decoding the baked place is 12 ms of the Bowl's load; the rest is the chunk plan: every
 building's facade plan (265 ms), the graded terrain grid and its colors (305 ms) and the prop
-table (175 ms). Those, the traffic graph and the map image are what is left to move off the
-start.
+table (175 ms).
+
+The build now grades the terrain too and keeps what grading moved beside the place
+(`TerrainGrid::bake`; 0.3 to 1.0 MB more per world, about a fifth), so the load column is
+75, 480, 210 and 80 ms. The facade plans, the prop table, the traffic graph and the map image
+are what is left to move off the start.
 
 ## Performance follow-ups
 

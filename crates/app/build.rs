@@ -1,8 +1,8 @@
-//! Bakes each built-in world's place for the default seed in a release build, so the game
-//! decodes it at load instead of generating it (`src/places.rs`): into the binary natively,
-//! as `OUT_DIR/<scenario id>.place` files for the web build to ship beside the page. A
-//! debug build bakes nothing (and generates at load), so `cargo check`, `clippy` and `test`
-//! stay quick.
+//! Bakes each built-in world's place and its graded terrain for the default seed in a
+//! release build, so the game decodes them at load instead of generating and grading
+//! (`src/places.rs`): into the binary natively, as `OUT_DIR/<scenario id>.place` files for
+//! the web build to ship beside the page. A debug build bakes nothing (and generates at
+//! load), so `cargo check`, `clippy` and `test` stay quick.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -34,10 +34,18 @@ fn main() {
         let s: Scenario = ron::from_str(text).unwrap_or_else(|e| panic!("scenario {id}: {e}"));
         let text = builtin::grammar_text(&s.grammar).unwrap_or_else(|| panic!("{id}: grammar"));
         let grammar = builtin::load_builtin_grammar(text).unwrap_or_else(|e| panic!("{id}: {e}"));
-        let place = builtin::generate(builtin::BAKED_SEED, &s.region, &s.layout, &grammar)
-            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        let template = builtin::template(&s.region).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let layout = builtin::layout(&s.layout).unwrap_or_else(|e| panic!("{id}: {e}"));
+        // The palette only colors the plan's ground, which is not kept.
+        let (place, plan) = world::procgen::authored::build_place_planned(
+            builtin::BAKED_SEED,
+            &layout,
+            &template,
+            &grammar,
+            &world::Palette::socal_1985(),
+        );
         let file = Path::new(&out).join(format!("{id}.place"));
-        std::fs::write(&file, place::encode(&place)).expect("write the baked place");
+        std::fs::write(&file, builtin::pack(&place, &plan)).expect("write the baked place");
         if embed {
             let file = file.display().to_string();
             writeln!(table, "    ({id:?}, include_bytes!({file:?})),").unwrap();

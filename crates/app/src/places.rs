@@ -102,8 +102,11 @@ pub fn load(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<(Place, ChunkPlan
     if key == PlaceKey::Coast && baked(seed, s).is_none() {
         return generate_planned(seed, s);
     }
-    let place = build_in(key, seed, s)?;
-    let plan = ChunkPlan::new(&place, &palette_of(s), grammar_of(s));
+    let (place, graded) = match (key, baked(seed, s)) {
+        (PlaceKey::Coast, Some(bytes)) => builtin::unbake(bytes)?,
+        _ => (build_in(key, seed, s)?, None),
+    };
+    let plan = ChunkPlan::with_grid(&place, &palette_of(s), grammar_of(s), graded);
     Ok((place, plan))
 }
 
@@ -137,7 +140,7 @@ pub fn build_in(key: PlaceKey, seed: Seed, s: &Scenario) -> Result<Place, String
             Ok(place)
         }
         PlaceKey::Coast => match baked(seed, s) {
-            Some(bytes) => place::decode(bytes).map_err(|e| format!("baked place: {e:?}")),
+            Some(bytes) => Ok(builtin::unbake(bytes)?.0),
             None => builtin::generate(seed, &s.region, &s.layout, grammar_of(s)),
         },
         PlaceKey::Gallery => {
@@ -165,8 +168,8 @@ mod tests {
     };
 
     /// A plan made afresh from the finished place (a baked load) builds as the plan its
-    /// detail pass read (a generated load), in every world, and the place survives its
-    /// encoding.
+    /// detail pass read (a generated load), in every world, and the place and its graded
+    /// terrain survive their baking.
     #[test]
     fn fresh_plans_are_the_planned_ones() {
         for s in crate::scenario::all() {
@@ -184,7 +187,9 @@ mod tests {
                 "{}",
                 s.id
             );
-            assert_eq!(place::decode(&place::encode(&p)).unwrap(), p, "{}", s.id);
+            let (baked, graded) = builtin::unbake(&builtin::pack(&p, &plan)).unwrap();
+            assert!(graded.as_ref() == fresh.grid(), "{}", s.id);
+            assert!(baked == p, "{}", s.id);
         }
     }
 
