@@ -17,6 +17,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod audit;
+mod bins;
 pub mod buildings;
 pub mod collide;
 pub mod edges;
@@ -864,6 +865,7 @@ fn side_zones(place: &Place, net: &roads::Network) -> Vec<[Option<ZoneId>; 2]> {
             (poly, bb)
         })
         .collect();
+    let bins = parcel_bins(place, &parcels);
     place
         .roads
         .edges
@@ -878,7 +880,8 @@ fn side_zones(place: &Place, net: &roads::Network) -> Vec<[Option<ZoneId>; 2]> {
             for (k, sigma) in [1.0f32, -1.0].into_iter().enumerate() {
                 for t in [0.5, 0.3, 0.7, 0.15, 0.85] {
                     let p = a.lerp(b, t) + d.left() * (sigma * (ea.hw + ea.sw + 3.0));
-                    let hit = parcels.iter().position(|(poly, (lo, hi))| {
+                    let hit = bins.holding(p).iter().map(|&j| j as usize).find(|&j| {
+                        let (poly, (lo, hi)) = &parcels[j];
                         p.x >= lo.x
                             && p.x <= hi.x
                             && p.y >= lo.y
@@ -894,6 +897,16 @@ fn side_zones(place: &Place, net: &roads::Network) -> Vec<[Option<ZoneId>; 2]> {
             zones
         })
         .collect()
+}
+
+/// `parcels` (outline and bounds, in the place's order) by grid cell: the first of
+/// [`bins::Bins::holding`] that holds a point is the first of them all that does.
+fn parcel_bins(place: &Place, parcels: &[(Vec<V2>, (V2, V2))]) -> bins::Bins {
+    let mut bins = bins::Bins::over(place, 64.0);
+    for (j, &(_, (lo, hi))) in parcels.iter().enumerate() {
+        bins.insert_box(lo, hi, j as u32);
+    }
+    bins
 }
 
 /// Cell edge of [`Lookup`]'s building grid, m.
@@ -913,11 +926,18 @@ struct Lookup<'a> {
     bin_lo: V2,
     bin_w: usize,
     parcels: Vec<(Vec<V2>, (V2, V2))>,
+    parcel_bins: bins::Bins,
     /// Road segments: ends, bounds, half width plus sidewalk, edge index. One per edge
     /// (node to node) on the test town; one per profile segment on a terrain place, whose
     /// streets curve.
     roads: Vec<RoadSeg>,
+    /// `roads` by grid cell, each wherever a facade within [`FACADE_REACH_M`] of its
+    /// bounds may be.
+    road_bins: bins::Bins,
 }
+
+/// How far from a facade's middle its road is looked for, m.
+const FACADE_REACH_M: f32 = 130.0;
 
 impl Lookup<'_> {
     fn new<'a>(place: &'a Place, net: &roads::Network) -> Lookup<'a> {
@@ -951,7 +971,7 @@ impl Lookup<'_> {
                 }
             }
         }
-        let parcels = place
+        let parcels: Vec<(Vec<V2>, (V2, V2))> = place
             .parcels
             .iter()
             .map(|p| {
@@ -960,6 +980,7 @@ impl Lookup<'_> {
                 (poly, bb)
             })
             .collect();
+        let parcel_bins = parcel_bins(place, &parcels);
         let nodes = &place.roads.nodes;
         let terrain = is_terrain_place(place);
         let mut roads = Vec::new();
@@ -978,6 +999,10 @@ impl Lookup<'_> {
                 roads.push((ra, rb, bounds(&[ra, rb]), half, k));
             }
         }
+        let mut road_bins = bins::Bins::over(place, 128.0);
+        for (j, &(ra, rb, ..)) in roads.iter().enumerate() {
+            road_bins.insert_seg(ra, rb, FACADE_REACH_M, j as u32);
+        }
         Lookup {
             place,
             footprints,
@@ -986,7 +1011,9 @@ impl Lookup<'_> {
             bin_lo,
             bin_w,
             parcels,
+            parcel_bins,
             roads,
+            road_bins,
         }
     }
 
@@ -1013,9 +1040,11 @@ impl Lookup<'_> {
         let inside =
             |p: V2, (lo, hi): (V2, V2)| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
         let frontage_edge = self
-            .parcels
+            .parcel_bins
+            .holding(c)
             .iter()
-            .position(|(poly, bb)| inside(c, *bb) && point_in_polygon(c, poly))
+            .map(|&k| k as usize)
+            .find(|&k| inside(c, self.parcels[k].1) && point_in_polygon(c, &self.parcels[k].0))
             .map(|k| self.place.parcels[k].frontage_edge as usize);
         let n = fp.len();
         (0..n)
@@ -1024,8 +1053,9 @@ impl Lookup<'_> {
                 let normal = (b - a).normalize().right();
                 let mid = (a + b) * 0.5;
                 let (mut road_dist, mut yard, mut nearest) = (f32::MAX, f32::MAX, usize::MAX);
-                let r = 130.0;
-                for &(ra, rb, (lo, hi), half, k) in &self.roads {
+                let r = FACADE_REACH_M;
+                for &j in self.road_bins.holding(mid) {
+                    let (ra, rb, (lo, hi), half, k) = self.roads[j as usize];
                     if mid.x < lo.x - r || mid.x > hi.x + r || mid.y < lo.y - r || mid.y > hi.y + r
                     {
                         continue;

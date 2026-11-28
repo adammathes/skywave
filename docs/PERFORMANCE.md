@@ -608,8 +608,13 @@ table (175 ms).
 
 The build now grades the terrain too and keeps what grading moved beside the place
 (`TerrainGrid::bake`; 0.3 to 1.0 MB more per world, about a fifth), so the load column is
-75, 480, 210 and 80 ms. The facade plans, the prop table, the traffic graph and the map image
-are what is left to move off the start.
+75, 480, 210 and 80 ms.
+
+Most of what was left of the plan was four scans of the whole place for each thing looked up:
+every road segment for each facade's nearest road (240 ms in the Bowl), for each pole sign's
+(120 ms) and each sound wall run's clearance (80 ms), and every parcel for each street side's
+zone (50 ms). Each now looks only in its own cell of a grid (`world::bins`) and finds the same
+answer, so the load column is 60, 140, 100 and 45 ms. The map image is the largest stage left.
 
 ## Performance follow-ups
 
