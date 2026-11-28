@@ -48,10 +48,11 @@ use skywave_core::{Rng, Seed};
 
 use super::macro_map::{BasinPlan, MacroMap, MacroPoiKind};
 use super::stage;
+use crate::bins::Bins;
 use crate::buildings::{self, BuildingPlan, FacadeEnv};
 use crate::grammar::{Face, Grammar, LotRules, Planting, StreetDress};
 use crate::lots::{self, ParkingLot};
-use crate::math::{floor, point_in_polygon, segment_distance, V2, V3};
+use crate::math::{point_in_polygon, segment_distance, V2, V3};
 use crate::mesh::terrain::TerrainGrid;
 use crate::mesh::{Glow, WorldMesh};
 use crate::palette::Palette;
@@ -258,58 +259,6 @@ pub fn hash_detail(place: &Place) -> u64 {
         words.push(l.kind as u64);
     }
     skywave_core::hash64(place.header.seed, &words)
-}
-
-/// Road segments, junction fans and building footprints binned on a grid, for clearance
-/// tests.
-struct Bins {
-    origin: V2,
-    cell: f32,
-    w: usize,
-    h: usize,
-    cells: Vec<Vec<u32>>,
-}
-
-impl Bins {
-    fn new(origin: V2, extent: V2, cell: f32) -> Bins {
-        let w = (extent.x / cell) as usize + 1;
-        let h = (extent.y / cell) as usize + 1;
-        Bins {
-            origin,
-            cell,
-            w,
-            h,
-            cells: (0..w * h).map(|_| Vec::new()).collect(),
-        }
-    }
-
-    fn range(&self, lo: V2, hi: V2) -> Option<[usize; 4]> {
-        let f = |v: f32, o: f32| floor((v - o) / self.cell);
-        let (x0, x1) = (f(lo.x, self.origin.x), f(hi.x, self.origin.x));
-        let (z0, z1) = (f(lo.y, self.origin.y), f(hi.y, self.origin.y));
-        if x1 < 0.0 || z1 < 0.0 || x0 >= self.w as f32 || z0 >= self.h as f32 {
-            return None;
-        }
-        let c = |v: f32, n: usize| (v.max(0.0) as usize).min(n - 1);
-        Some([c(x0, self.w), c(x1, self.w), c(z0, self.h), c(z1, self.h)])
-    }
-
-    fn insert(&mut self, lo: V2, hi: V2, item: u32) {
-        if let Some([x0, x1, z0, z1]) = self.range(lo, hi) {
-            for z in z0..=z1 {
-                for x in x0..=x1 {
-                    self.cells[z * self.w + x].push(item);
-                }
-            }
-        }
-    }
-
-    fn at(&self, p: V2) -> &[u32] {
-        match self.range(p, p) {
-            Some([x, _, z, _]) => &self.cells[z * self.w + x],
-            None => &[],
-        }
-    }
 }
 
 /// A road segment: ends, half width, the outer edge of its walk (or curb top), edge.

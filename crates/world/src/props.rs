@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 use place::{Place, RoadClass, StyleTag, ZoneId};
 use skywave_core::{mix64, Rng, Seed};
 
+use crate::bins::Bins;
 use crate::math::{atan2, point_in_polygon, sin_cos, TAU, V2, V3};
 use crate::mesh::{
     boxf, face, frustum, icosphere, lathe, polygon_cap, quad, rect, tri, Frame, Glow, Paint,
@@ -3547,6 +3548,11 @@ pub fn sound_walls(place: &Place) -> Vec<Prop> {
         .filter(|p| matches!(p.kind, place::PropKind::TunnelPiece { .. }))
         .map(|p| V2::new(p.pos[0], p.pos[2]))
         .collect();
+    // Each where a point that near it may be (and a little more, for rounding).
+    let mut near = Bins::over(place, 64.0);
+    for (j, &(a, b, hw)) in roads.iter().enumerate() {
+        near.insert_seg(a, b, hw + 0.1, j as u32);
+    }
     let ext = place.header.extent_m();
     let ground = |q: V2| place.terrain.height_at(&place.header, [q.x, q.y]);
     let clear = |q: V2| {
@@ -3554,9 +3560,10 @@ pub fn sound_walls(place: &Place) -> Vec<Prop> {
             && q.y > 1.0
             && q.x < ext[0] - 1.0
             && q.y < ext[1] - 1.0
-            && !roads
-                .iter()
-                .any(|&(a, b, hw)| crate::math::segment_distance(q, a, b).0 < hw)
+            && !near.holding(q).iter().any(|&j| {
+                let (a, b, hw) = roads[j as usize];
+                crate::math::segment_distance(q, a, b).0 < hw
+            })
             && !tunnel.iter().any(|&t| (t - q).length() < 40.0)
     };
     let mut out = Vec::new();
@@ -4041,6 +4048,8 @@ fn full_stop_sign(m: &mut WorldMesh, base: V3, facing: V2, pal: &Palette) {
 const POLE_SIGN_BACK_M: f32 = 1.6;
 /// Least forecourt (sidewalk to front wall) a shop needs for a pole sign, m.
 const POLE_SIGN_MIN_YARD_M: f32 = 7.0;
+/// Widest forecourt a pole sign stands across, m.
+const POLE_SIGN_MAX_YARD_M: f32 = 40.0;
 /// Least distance between two pole signs, m.
 const POLE_SIGN_SPACING_M: f32 = 28.0;
 /// Most triangles a pole sign spends, its lettering on both faces included
@@ -4089,11 +4098,23 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
                 .map(move |w| (V2::new(w[0][0], w[0][2]), V2::new(w[1][0], w[1][2]), hw))
         })
         .collect();
-    // The nearest road of `set` to `q`: its distance past the sidewalk and the unit
-    // direction toward it.
-    let nearest = |set: &[(V2, V2, f32)], q: V2| {
+    // Each road where a point within the widest forecourt of its sidewalk may be (and a
+    // little more, for rounding).
+    let binned = |set: &[(V2, V2, f32)]| {
+        let mut bins = Bins::over(place, 64.0);
+        for (j, &(a, b, hw)) in set.iter().enumerate() {
+            bins.insert_seg(a, b, hw + POLE_SIGN_MAX_YARD_M + 0.1, j as u32);
+        }
+        bins
+    };
+    let (road_bins, any_bins) = (binned(&roads), binned(&any_road));
+    // The nearest road of `set` to `q`, of those within the widest forecourt (a farther
+    // one is of no use to a sign): its distance past the sidewalk and the unit direction
+    // toward it.
+    let nearest = |set: &[(V2, V2, f32)], bins: &Bins, q: V2| {
         let mut best: Option<(f32, V2)> = None;
-        for &(a, b, hw) in set {
+        for &j in bins.holding(q) {
+            let (a, b, hw) = set[j as usize];
             let (d, t) = crate::math::segment_distance(q, a, b);
             let on = a + (b - a) * t;
             if d > 1e-3 && best.is_none_or(|x| d - hw < x.0) {
@@ -4119,11 +4140,13 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
                 continue;
             }
             let along = along * (1.0 / along.length());
-            for (set, rank) in [(&roads, 0.0), (&any_road, 1000.0)] {
-                let Some((yard, toward)) = nearest(set, (a + c) * 0.5) else {
+            for (set, bins, rank) in [(&roads, &road_bins, 0.0), (&any_road, &any_bins, 1000.0)] {
+                let Some((yard, toward)) = nearest(set, bins, (a + c) * 0.5) else {
                     continue;
                 };
-                if !(POLE_SIGN_MIN_YARD_M..=40.0).contains(&yard) || toward.dot(along).abs() > 0.3 {
+                if !(POLE_SIGN_MIN_YARD_M..=POLE_SIGN_MAX_YARD_M).contains(&yard)
+                    || toward.dot(along).abs() > 0.3
+                {
                     continue;
                 }
                 if front.is_none_or(|f| rank + yard < f.0) {
@@ -4138,7 +4161,7 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
         // forecourt; only where a boulevard or collector passes near.
         let h = mix64(place.header.seed ^ 0x504F_4C45 ^ ((i as u64) << 20));
         let (ea, ec) = (a + (c - a) * 0.12, a + (c - a) * 0.88);
-        let far = |q: V2| nearest(&roads, q).map_or(f32::MAX, |n| n.0);
+        let far = |q: V2| nearest(&roads, &road_bins, q).map_or(f32::MAX, |n| n.0);
         let at = match far(ea).total_cmp(&far(ec)) {
             core::cmp::Ordering::Less => ea,
             core::cmp::Ordering::Greater => ec,
@@ -4154,9 +4177,10 @@ pub fn pole_signs(place: &Place) -> Vec<Prop> {
             continue;
         }
         let q = at + toward * (yard - POLE_SIGN_BACK_M);
-        let clear = !any_road
-            .iter()
-            .any(|&(ra, rb, hw)| crate::math::segment_distance(q, ra, rb).0 < hw + 1.0);
+        let clear = !any_bins.holding(q).iter().any(|&j| {
+            let (ra, rb, hw) = any_road[j as usize];
+            crate::math::segment_distance(q, ra, rb).0 < hw + 1.0
+        });
         if !clear
             || out
                 .iter()
